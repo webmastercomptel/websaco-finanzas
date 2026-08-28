@@ -1,0 +1,74 @@
+// src/database/database.module.ts
+import { Global, Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import {
+  Copropiedad,
+  CopropiedadSchema,
+} from './schemas/copropiedades/copropiedad.schema';
+import {
+  Inmueble,
+  InmuebleSchema,
+} from './schemas/copropiedades/inmueble.schema';
+import { Tercero, TerceroSchema } from './schemas/terceros/tercero.schema';
+import {
+  EntidadAdministradora,
+  EntidadAdministradoraSchema,
+} from './schemas/entidades/entidad-administradora.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroSchema,
+} from './schemas/conceptos/concepto-cobro.schema';
+import {
+  ValorRecurrente,
+  ValorRecurrenteSchema,
+} from './schemas/conceptos/valor-recurrente.schema';
+import { Account, AccountSchema } from './schemas/cuentas/account.schema';
+import {
+  Asignacion,
+  AsignacionSchema,
+} from './schemas/cuentas/asignacion.schema';
+import {
+  ResolucionFacturacion,
+  ResolucionFacturacionSchema,
+} from './schemas/numeracion/resolucion-facturacion.schema';
+import {
+  ConsecutivoDocumento,
+  ConsecutivoDocumentoSchema,
+} from './schemas/numeracion/consecutivo-documento.schema';
+import {
+  PeriodoContable,
+  PeriodoContableSchema,
+} from './schemas/contabilidad/periodo-contable.schema';
+
+const models = [
+  { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
+  { name: Copropiedad.name, schema: CopropiedadSchema },
+  { name: Inmueble.name, schema: InmuebleSchema },
+  { name: Tercero.name, schema: TerceroSchema },
+  { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
+  { name: ValorRecurrente.name, schema: ValorRecurrenteSchema },
+  { name: Account.name, schema: AccountSchema },
+  { name: Asignacion.name, schema: AsignacionSchema },
+  { name: ResolucionFacturacion.name, schema: ResolucionFacturacionSchema },
+  { name: ConsecutivoDocumento.name, schema: ConsecutivoDocumentoSchema },
+  { name: PeriodoContable.name, schema: PeriodoContableSchema },
+];
+
+/**
+ * Registers every schema once, globally.
+ *
+ * Global so a feature module can inject any model without importing this, and
+ * so a schema is never registered twice with different options — two
+ * registrations of the same collection is the kind of divergence that surfaces
+ * as an index existing in one place and not another.
+ *
+ * Schemas live under `schemas/<area>/`, not inside the feature modules that use
+ * them: an invoice, a receipt and a report all read the same unit, and filing
+ * that unit under whichever module happened to need it first would be arbitrary.
+ */
+@Global()
+@Module({
+  imports: [MongooseModule.forFeature(models)],
+  exports: [MongooseModule],
+})
+export class DatabaseModule {}
