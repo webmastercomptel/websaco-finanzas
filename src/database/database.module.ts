@@ -44,6 +44,18 @@ import {
   PeriodoContableSchema,
 } from './schemas/contabilidad/periodo-contable.schema';
 import { Factura, FacturaSchema } from './schemas/facturacion/factura.schema';
+import {
+  LoteFacturacion,
+  LoteFacturacionSchema,
+} from './schemas/facturacion/lote-facturacion.schema';
+import {
+  SaldoCartera,
+  SaldoCarteraSchema,
+} from './schemas/facturacion/saldo-cartera.schema';
+import {
+  AsientoContable,
+  AsientoContableSchema,
+} from './schemas/facturacion/asiento-contable.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -59,6 +71,9 @@ const models = [
   { name: ConsecutivoLote.name, schema: ConsecutivoLoteSchema },
   { name: PeriodoContable.name, schema: PeriodoContableSchema },
   { name: Factura.name, schema: FacturaSchema },
+  { name: LoteFacturacion.name, schema: LoteFacturacionSchema },
+  { name: SaldoCartera.name, schema: SaldoCarteraSchema },
+  { name: AsientoContable.name, schema: AsientoContableSchema },
 ];
 
 /**
