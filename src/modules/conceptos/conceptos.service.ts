@@ -156,6 +156,7 @@ export class ConceptosService {
     set('kind', dto.tipo);
     set('taxRate', dto.tasaImpuesto);
     set('sortOrder', dto.orden);
+    set('accountingIncomeAccount', dto.cuentaContableIngreso);
     if ('activo' in dto) set('active', dto.activo);
 
     return doc;

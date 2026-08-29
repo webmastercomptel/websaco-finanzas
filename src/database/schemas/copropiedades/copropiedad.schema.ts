@@ -101,6 +101,13 @@ export class Copropiedad {
    */
   @Prop({ required: true, default: false })
   usesBuildingManagement: boolean;
+
+  /**
+   * Free-text receivables account every consolidated invoice for this
+   * building debits — same reasoning as ConceptoCobro.accountingIncomeAccount.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  receivablesAccount: string | null;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

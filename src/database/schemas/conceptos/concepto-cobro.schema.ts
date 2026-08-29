@@ -72,6 +72,16 @@ export class ConceptoCobro {
   sortOrder: number;
 
   /**
+   * Free-text accounting account this concept posts income to when a
+   * consolidated invoice generates its journal entry — see AsientoContable.
+   * Never validated against a fixed chart of accounts: Colombian propiedad
+   * horizontal has no mandated PUC, so a building adapts the general
+   * commercial one (Decreto 2650 de 1993) however it already does today.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  accountingIncomeAccount: string | null;
+
+  /**
    * Inactive stops it being charged going forward. It is never removed: past
    * documents reference it, and a line item pointing at nothing is a hole in
    * the ledger.

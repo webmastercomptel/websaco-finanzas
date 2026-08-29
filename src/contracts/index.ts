@@ -194,6 +194,7 @@ export interface Copropiedad {
   estado: 'activo' | 'inactivo';
   /** Whether this building ALSO uses the building-management system. */
   usaGestionEdificios: boolean;
+  cuentaContableCartera: string | null;
 }
 
 /* ── Conceptos de cobro ("Cargos") ─────────────────────────────────
@@ -217,6 +218,7 @@ export interface ConceptoCobro {
   tasaImpuesto: number;
   orden: number;
   activo: boolean;
+  cuentaContableIngreso: string | null;
 }
 
 /* ── Usuarios (platform config) ───────────────────────────────────

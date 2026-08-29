@@ -40,6 +40,11 @@ class CamposConceptoDto {
   @Type(() => Number)
   @IsInt()
   orden?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  cuentaContableIngreso?: string;
 }
 
 /** Creating a concept. The name is the one thing it cannot be created without. */

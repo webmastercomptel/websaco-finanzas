@@ -46,4 +46,5 @@ export const toCopropiedad = (
   nombreAdministrador: doc.administratorName,
   estado: doc.status === 'active' ? 'activo' : 'inactivo',
   usaGestionEdificios: doc.usesBuildingManagement,
+  cuentaContableCartera: doc.receivablesAccount,
 });

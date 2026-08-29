@@ -152,6 +152,7 @@ export class CopropiedadesService {
     set('phone', dto.telefono);
     set('email', dto.email);
     set('usesBuildingManagement', dto.usaGestionEdificios);
+    set('receivablesAccount', dto.cuentaContableCartera);
     if (dto.estado !== undefined) {
       doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
     }

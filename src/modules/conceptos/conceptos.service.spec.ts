@@ -144,6 +144,20 @@ describe('ConceptosService.create', () => {
       sortOrder: 50,
     });
   });
+
+  it('guarda la cuenta contable de ingreso cuando viene', async () => {
+    const modelo = modeloCon([]);
+    const service = new ConceptosService(modelo as never);
+
+    await service.create('cop-1', {
+      nombre: 'Administración',
+      cuentaContableIngreso: '413501',
+    });
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      accountingIncomeAccount: '413501',
+    });
+  });
 });
 
 describe('ConceptosService.update', () => {

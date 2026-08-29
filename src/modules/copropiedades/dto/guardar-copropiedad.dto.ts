@@ -70,6 +70,11 @@ class CamposCopropiedadDto {
   @IsOptional()
   @IsBoolean()
   usaGestionEdificios?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  cuentaContableCartera?: string;
 }
 
 export class CrearCopropiedadDto extends CamposCopropiedadDto {

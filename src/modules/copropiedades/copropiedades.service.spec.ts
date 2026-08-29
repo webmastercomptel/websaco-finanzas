@@ -187,4 +187,15 @@ describe('CopropiedadesService.update', () => {
       service.update('cop-ajena', { ciudad: 'Cali' }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('guarda la cuenta contable de cartera cuando viene', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new CopropiedadesService(modelo as never);
+
+    await service.update('cop-1', { cuentaContableCartera: '130501' });
+
+    expect(modelo.escrituras[0]).toEqual({
+      receivablesAccount: '130501',
+    });
+  });
 });

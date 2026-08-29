@@ -16,4 +16,5 @@ export const toConcepto = (doc: ConceptoCobroDocument): ConceptoContract => ({
   tasaImpuesto: doc.taxRate,
   orden: doc.sortOrder,
   activo: doc.active,
+  cuentaContableIngreso: doc.accountingIncomeAccount,
 });
