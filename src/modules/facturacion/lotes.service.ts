@@ -188,4 +188,130 @@ export class LotesFacturacionService {
 
     return { total: filas.length, cargadas: novedades.length, errores };
   }
+
+  /**
+   * Computes, but does not yet save, one invoice per active unit with a
+   * holder — combining its ValorRecurrente template, this run's novedades,
+   * and a mora-interest line derived from SaldoCartera. Nothing is written
+   * to Factura, SaldoCartera, or AsientoContable here; this only persists
+   * the preview and moves the Lote to `liquidado`. Re-running liquidar
+   * simply overwrites the previous preview.
+   */
+  async liquidar(loteId: string): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
+
+    const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
+      this.inmuebles.find({ coPropertyId, status: 'active' }).exec(),
+      this.conceptos.find({ coPropertyId }).exec(),
+      this.valoresRecurrentes.find({ coPropertyId }).exec(),
+    ]);
+    const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
+
+    const preview: Record<string, unknown>[] = [];
+
+    for (const unidad of unidades) {
+      if (!unidad.holderId) continue;
+
+      const tercero = await this.terceros.findById(unidad.holderId).exec();
+      const lines: Record<string, unknown>[] = [];
+
+      for (const valor of valoresRecurrentes) {
+        if (valor.inmuebleId.toString() !== unidad._id.toString()) continue;
+        const concepto = conceptoPorId.get(valor.conceptoId.toString());
+        if (!concepto) continue;
+        lines.push(this.aLinea(concepto, valor.amount, 'recurrente'));
+      }
+
+      for (const novedad of lote.adjustments) {
+        if (novedad.inmuebleId.toString() !== unidad._id.toString()) continue;
+        const concepto = conceptoPorId.get(novedad.conceptoId.toString());
+        if (!concepto) continue;
+        lines.push(this.aLinea(concepto, novedad.amount, 'novedad'));
+      }
+
+      const saldosUnidad = await this.saldos
+        .find({ inmuebleId: unidad._id.toString() })
+        .exec();
+      const saldoTotal = saldosUnidad.reduce((acc, s) => acc + s.balance, 0);
+      const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
+      if (interesConcepto && lote.lateInterestRate > 0 && saldoTotal > 0) {
+        const bruto = saldoTotal * (lote.lateInterestRate / 100);
+        const tope = lote.lateInterestCap;
+        const valor = Math.round(tope !== null ? Math.min(bruto, tope) : bruto);
+        if (valor > 0) {
+          lines.push(this.aLinea(interesConcepto, valor, 'interes'));
+        }
+      }
+
+      const subtotal = lines.reduce(
+        (acc, l) => acc + (l.baseAmount as number),
+        0,
+      );
+      const totalTax = lines.reduce(
+        (acc, l) => acc + (l.taxAmount as number),
+        0,
+      );
+
+      preview.push({
+        inmuebleId: unidad._id.toString(),
+        unitCode: unidad.code,
+        terceroId: tercero?._id.toString() ?? null,
+        holder: tercero
+          ? {
+              name: tercero.name,
+              identificationType: tercero.identificationType,
+              identificationNumber: tercero.identificationNumber,
+              identificationVerificationDigit:
+                tercero.identificationVerificationDigit,
+              address: tercero.address,
+              city: tercero.city,
+              email: tercero.email,
+            }
+          : null,
+        lines,
+        subtotal,
+        totalTax,
+        total: subtotal + totalTax,
+      });
+    }
+
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId },
+        { $set: { preview, status: 'liquidado' } },
+        { new: true },
+      )
+      .exec();
+
+    return toLote(actualizado!);
+  }
+
+  /** Builds one frozen invoice line from a concept and a base amount —
+   *  shared by the recurrente, novedad, and interes cases in liquidar(). */
+  private aLinea(
+    concepto: {
+      name: string;
+      kind: string;
+      taxRate: number;
+      accountingIncomeAccount: string | null;
+    },
+    baseAmount: number,
+    origen: 'recurrente' | 'novedad' | 'interes',
+  ): Record<string, unknown> {
+    const taxAmount = Math.round(baseAmount * (concepto.taxRate / 100));
+    return {
+      conceptName: concepto.name,
+      conceptKind: concepto.kind,
+      accountingIncomeAccount: concepto.accountingIncomeAccount,
+      source: origen,
+      baseAmount,
+      taxRate: concepto.taxRate,
+      taxAmount,
+      totalAmount: baseAmount + taxAmount,
+    };
+  }
 }

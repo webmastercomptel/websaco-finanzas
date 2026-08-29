@@ -281,3 +281,210 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ).rejects.toThrow('No se encontró el lote lote-inexistente');
   });
 });
+
+describe('LotesFacturacionService.liquidar', () => {
+  type ActualizacionLiquidar = {
+    $set: {
+      preview: Array<{ lines: Array<Record<string, unknown>> }>;
+      status: string;
+    };
+  };
+  const actualizacionDe = (mockFn: jest.Mock) => {
+    const calls = mockFn.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [unknown, ActualizacionLiquidar];
+    return actualizacion;
+  };
+
+  const unidad = (over: Record<string, unknown> = {}) => ({
+    _id: { toString: () => 'inm-1' },
+    code: '301',
+    coPropertyId: COP,
+    holderId: { toString: () => 'ter-1' },
+    status: 'active',
+    ...over,
+  });
+  const tercero = (over: Record<string, unknown> = {}) => ({
+    _id: { toString: () => 'ter-1' },
+    name: 'Ana Pérez',
+    identificationType: 'CC',
+    identificationNumber: '123456',
+    identificationVerificationDigit: null,
+    address: null,
+    city: null,
+    email: null,
+    ...over,
+  });
+  const concepto = (over: Record<string, unknown> = {}) => ({
+    _id: { toString: () => 'con-1' },
+    name: 'Administración',
+    kind: 'administracion',
+    taxRate: 0,
+    accountingIncomeAccount: '413501',
+    ...over,
+  });
+  const valorRecurrente = (over: Record<string, unknown> = {}) => ({
+    inmuebleId: { toString: () => 'inm-1' },
+    conceptoId: { toString: () => 'con-1' },
+    amount: 520000,
+    ...over,
+  });
+
+  const construirModelos = (opts: {
+    unidades?: unknown[];
+    terceros?: Record<string, unknown>;
+    conceptos?: unknown[];
+    valoresRecurrentes?: unknown[];
+    saldos?: unknown[];
+    lote?: Record<string, unknown>;
+  }) => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc(opts.lote ?? {})),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc(opts.lote ?? {})),
+      })),
+    };
+    const inmuebles = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.unidades ?? [unidad()]),
+      })),
+    };
+    const terceros = {
+      findById: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.terceros ?? tercero()),
+      })),
+    };
+    const conceptos = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.conceptos ?? [concepto()]),
+      })),
+    };
+    const valoresRecurrentes = {
+      find: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(opts.valoresRecurrentes ?? [valorRecurrente()]),
+      })),
+    };
+    const saldos = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.saldos ?? []),
+      })),
+    };
+    return {
+      lotes,
+      inmuebles,
+      terceros,
+      conceptos,
+      valoresRecurrentes,
+      saldos,
+    };
+  };
+
+  it('arma una línea recurrente por cada ValorRecurrente y congela nombre/tasa/cuenta del concepto', async () => {
+    const m = construirModelos({});
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const preliminar = actualizacion.$set.preview[0];
+    expect(preliminar.lines).toEqual([
+      expect.objectContaining({
+        conceptName: 'Administración',
+        conceptKind: 'administracion',
+        accountingIncomeAccount: '413501',
+        source: 'recurrente',
+        baseAmount: 520000,
+        totalAmount: 520000,
+      }),
+    ]);
+    expect(actualizacion.$set.status).toBe('liquidado');
+  });
+
+  it('salta las unidades sin titular', async () => {
+    const m = construirModelos({ unidades: [unidad({ holderId: null })] });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.preview).toEqual([]);
+  });
+
+  it('calcula el interés como % del saldo de cartera total, con tope, y lo omite si da cero', async () => {
+    const m = construirModelos({
+      conceptos: [
+        concepto(),
+        concepto({
+          _id: { toString: () => 'con-intereses' },
+          name: 'Interés por mora',
+          kind: 'intereses',
+          accountingIncomeAccount: '413595',
+        }),
+      ],
+      saldos: [
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'c1',
+          balance: 3000000,
+        },
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'c2',
+          balance: 1000000,
+        },
+      ],
+      lote: { lateInterestRate: 1.9, lateInterestCap: 50000 },
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const interes = actualizacion.$set.preview[0].lines.find(
+      (l: { source: string }) => l.source === 'interes',
+    );
+    // 1.9% of 4,000,000 = 76,000, capped at 50,000.
+    expect(interes?.totalAmount).toBe(50000);
+  });
+});
