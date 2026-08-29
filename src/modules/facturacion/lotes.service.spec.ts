@@ -412,6 +412,8 @@ describe('LotesFacturacionService.liquidar', () => {
         totalAmount: 520000,
       }),
     ]);
+    const linea = preliminar.lines[0] as { conceptoId: { toString(): string } };
+    expect(linea.conceptoId.toString()).toBe('con-1');
     expect(actualizacion.$set.status).toBe('liquidado');
   });
 

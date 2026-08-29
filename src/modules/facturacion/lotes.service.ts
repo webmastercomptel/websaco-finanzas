@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   LoteFacturacion,
   LoteFacturacionDocument,
@@ -294,6 +294,7 @@ export class LotesFacturacionService {
    *  shared by the recurrente, novedad, and interes cases in liquidar(). */
   private aLinea(
     concepto: {
+      _id: Types.ObjectId;
       name: string;
       kind: string;
       taxRate: number;
@@ -304,6 +305,7 @@ export class LotesFacturacionService {
   ): Record<string, unknown> {
     const taxAmount = Math.round(baseAmount * (concepto.taxRate / 100));
     return {
+      conceptoId: concepto._id,
       conceptName: concepto.name,
       conceptKind: concepto.kind,
       accountingIncomeAccount: concepto.accountingIncomeAccount,
