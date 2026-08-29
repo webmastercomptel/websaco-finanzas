@@ -1,5 +1,11 @@
-import type { LoteFacturacion as LoteContract } from '../../contracts';
+import type {
+  LoteFacturacion as LoteContract,
+  LoteFacturacionDetalle,
+  FacturaPreliminar as FacturaPreliminarContract,
+} from '../../contracts';
 import type { LoteFacturacionDocument } from '../../database/schemas/facturacion/lote-facturacion.schema';
+import type { FacturaPreliminar } from '../../database/schemas/facturacion/lote-facturacion.schema';
+import { titularDe, lineaDe } from './facturas.mapper';
 
 /**
  * Maps a billing-run document to the Spanish API contract.
@@ -29,4 +35,27 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
         totalInmuebles: doc.summary.totalUnits,
       }
     : null,
+});
+
+const preliminarDe = (p: FacturaPreliminar): FacturaPreliminarContract => ({
+  inmuebleId: p.inmuebleId.toString(),
+  inmuebleCodigo: p.unitCode,
+  terceroId: p.terceroId ? p.terceroId.toString() : null,
+  titular: titularDe(p.holder),
+  lineas: p.lines.map(lineaDe),
+  subtotal: p.subtotal,
+  totalImpuestos: p.totalTax,
+  total: p.total,
+});
+
+/**
+ * `toLote` plus the full previsualización array — what `findOne()` returns
+ * so the Liquidación screen can render its table. `findAll()` keeps using
+ * `toLote` — the listing must not embed every lote's full preview array.
+ */
+export const toLoteDetalle = (
+  doc: LoteFacturacionDocument,
+): LoteFacturacionDetalle => ({
+  ...toLote(doc),
+  previsualizacion: doc.preview.map(preliminarDe),
 });

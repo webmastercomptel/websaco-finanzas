@@ -1,9 +1,14 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { LotesFacturacionService } from './lotes.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { NumeracionService } from '../../common/numeracion/numeracion.service';
 import type { PeriodoService } from '../../common/contabilidad/periodo.service';
+import type { TitularFactura } from '../../contracts';
 
 type Filtro = Record<string, unknown>;
 
@@ -1221,6 +1226,108 @@ describe('LotesFacturacionService.consolidar', () => {
     // counted toward a completed summary.
     expect(actualizacion.$set.invoiceIds).toEqual(
       expect.arrayContaining(['fac-huerfana', 'fac-1']),
+    );
+  });
+});
+
+describe('LotesFacturacionService.findOne', () => {
+  it('incluye la previsualización completa, no solo el conteo', async () => {
+    const preliminar = {
+      inmuebleId: { toString: () => 'inm-1' },
+      unitCode: '301',
+      terceroId: { toString: () => 'ter-1' },
+      holder: {
+        name: 'Ana Pérez',
+        identificationType: 'CC',
+        identificationNumber: '123456',
+        identificationVerificationDigit: null,
+        address: null,
+        city: null,
+        email: null,
+      },
+      lines: [
+        {
+          conceptoId: { toString: () => 'con-1' },
+          conceptName: 'Administración',
+          conceptKind: 'administracion',
+          accountingIncomeAccount: '413501',
+          source: 'recurrente',
+          baseAmount: 520000,
+          taxRate: 0,
+          taxAmount: 0,
+          totalAmount: 520000,
+        },
+      ],
+      subtotal: 520000,
+      totalTax: 0,
+      total: 520000,
+    };
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ preview: [preliminar] })),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    const resultado = await service.findOne('lote-1');
+
+    expect(resultado.previsualizacion).toEqual([
+      expect.objectContaining({
+        inmuebleId: 'inm-1',
+        inmuebleCodigo: '301',
+        terceroId: 'ter-1',
+        titular: expect.objectContaining({
+          nombre: 'Ana Pérez',
+        }) as TitularFactura,
+        lineas: [
+          expect.objectContaining({
+            conceptoId: 'con-1',
+            nombreConcepto: 'Administración',
+            origen: 'recurrente',
+            valorTotal: 520000,
+          }),
+        ],
+        subtotal: 520000,
+        totalImpuestos: 0,
+        total: 520000,
+      }),
+    ]);
+  });
+
+  it('lanza NotFoundException si el lote no existe para esta copropiedad', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    await expect(service.findOne('lote-1')).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 });

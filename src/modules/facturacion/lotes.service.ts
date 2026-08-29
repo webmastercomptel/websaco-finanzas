@@ -47,8 +47,11 @@ import {
   NumeracionService,
   type NumeroAsignado,
 } from '../../common/numeracion/numeracion.service';
-import type { LoteFacturacion as LoteContract } from '../../contracts';
-import { toLote } from './lotes.mapper';
+import type {
+  LoteFacturacion as LoteContract,
+  LoteFacturacionDetalle,
+} from '../../contracts';
+import { toLote, toLoteDetalle } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
 import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
 import type { ResultadoCargaNovedades } from '../../contracts';
@@ -559,7 +562,7 @@ export class LotesFacturacionService {
     return documentos.map(toLote);
   }
 
-  async findOne(id: string): Promise<LoteContract> {
+  async findOne(id: string): Promise<LoteFacturacionDetalle> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const documento = await this.lotes
       .findOne({ _id: id, coPropertyId })
@@ -567,7 +570,7 @@ export class LotesFacturacionService {
     if (!documento) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
-    return toLote(documento);
+    return toLoteDetalle(documento);
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —

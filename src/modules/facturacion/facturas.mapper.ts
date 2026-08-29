@@ -7,7 +7,9 @@ import type { FacturaDocument } from '../../database/schemas/facturacion/factura
 import type { TitularCongelado } from '../../database/schemas/facturacion/factura-linea.schema';
 import type { FacturaLinea } from '../../database/schemas/facturacion/factura-linea.schema';
 
-const titularDe = (titular: TitularCongelado | null): TitularFactura | null =>
+export const titularDe = (
+  titular: TitularCongelado | null,
+): TitularFactura | null =>
   titular
     ? {
         nombre: titular.name,
@@ -20,7 +22,7 @@ const titularDe = (titular: TitularCongelado | null): TitularFactura | null =>
       }
     : null;
 
-const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
+export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
   conceptoId: linea.conceptoId.toString(),
   nombreConcepto: linea.conceptName,
   tipoConcepto: linea.conceptKind,

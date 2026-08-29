@@ -214,6 +214,28 @@ export interface LoteFacturacion {
   } | null;
 }
 
+/** One unit's computed invoice line as it stands in a Lote's previsualización. */
+export interface FacturaPreliminar {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  terceroId: string | null;
+  titular: TitularFactura | null;
+  lineas: FacturaLinea[];
+  subtotal: Monto;
+  totalImpuestos: Monto;
+  total: Monto;
+}
+
+/**
+ * `LoteFacturacion` plus the full previsualización array — what `GET
+ * /lotes/:id` returns so the Liquidación screen can render its table.
+ * `GET /lotes` (the listing) still returns lean `LoteFacturacion`, since
+ * embedding every listed lote's full preview array would be wasted payload.
+ */
+export interface LoteFacturacionDetalle extends LoteFacturacion {
+  previsualizacion: FacturaPreliminar[];
+}
+
 /** One row's outcome from consolidando a Lote that could not be numbered. */
 export interface ErrorConsolidacion {
   /** 1-based, matching the row order in the Lote's `previsualizacion`. */

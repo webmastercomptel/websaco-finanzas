@@ -10,6 +10,7 @@ import { CargarNovedadesDto } from './dto/cargar-novedades.dto';
 import type {
   ErrorConsolidacion,
   LoteFacturacion,
+  LoteFacturacionDetalle,
   ResultadoCargaNovedades,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -33,7 +34,7 @@ export class LotesController {
 
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  findOne(@Param('id') id: string): Promise<LoteFacturacion> {
+  findOne(@Param('id') id: string): Promise<LoteFacturacionDetalle> {
     return this.lotes.findOne(id);
   }
 
