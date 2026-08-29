@@ -532,6 +532,26 @@ export class LotesFacturacionService {
     };
   }
 
+  async findAll(): Promise<LoteContract[]> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documentos = await this.lotes
+      .find({ coPropertyId })
+      .sort({ number: -1 })
+      .exec();
+    return documentos.map(toLote);
+  }
+
+  async findOne(id: string): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documento = await this.lotes
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!documento) {
+      throw new NotFoundException(`No se encontró el lote ${id}`);
+    }
+    return toLote(documento);
+  }
+
   /** Builds one frozen invoice line from a concept and a base amount —
    *  shared by the recurrente, novedad, and interes cases in liquidar(). */
   private aLinea(
