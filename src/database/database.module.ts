@@ -43,6 +43,7 @@ import {
   PeriodoContable,
   PeriodoContableSchema,
 } from './schemas/contabilidad/periodo-contable.schema';
+import { Factura, FacturaSchema } from './schemas/facturacion/factura.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -57,6 +58,7 @@ const models = [
   { name: ConsecutivoDocumento.name, schema: ConsecutivoDocumentoSchema },
   { name: ConsecutivoLote.name, schema: ConsecutivoLoteSchema },
   { name: PeriodoContable.name, schema: PeriodoContableSchema },
+  { name: Factura.name, schema: FacturaSchema },
 ];
 
 /**
