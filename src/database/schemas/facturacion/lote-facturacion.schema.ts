@@ -159,11 +159,18 @@ export const LoteFacturacionSchema =
   SchemaFactory.createForClass(LoteFacturacion);
 
 // At most one run in flight per coproperty at a time — a second one would
-// make "which lote am I liquidando" ambiguous.
+// make "which lote am I liquidando" ambiguous. Explicit name required: the
+// key pattern is identical to the general-purpose `coPropertyId` index
+// implied by that field's own `index: true` (kept for unscoped lookups like
+// findAll()'s `find({coPropertyId})`, which must also match consolidado
+// rows this partial index deliberately excludes) — without distinct names,
+// Mongoose auto-names both `coPropertyId_1` and MongoDB rejects the second
+// with IndexOptionsConflict, silently leaving this uniqueness unenforced.
 LoteFacturacionSchema.index(
   { coPropertyId: 1 },
   {
     unique: true,
     partialFilterExpression: { status: { $in: ['borrador', 'liquidado'] } },
+    name: 'unico_lote_en_curso_por_copropiedad',
   },
 );

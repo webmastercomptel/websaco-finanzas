@@ -265,6 +265,11 @@ export class LotesFacturacionService {
         }
       }
 
+      // A unit can land here with nothing to charge — no ValorRecurrente, no
+      // novedad, no interest — most often because every concept that would
+      // have applied is `active: false`. Silently excluding it, like every
+      // other per-unit condition in this loop, rather than surfacing it as
+      // an error: it is not a data problem, just nothing to invoice.
       if (lines.length === 0) continue;
 
       const subtotal = lines.reduce(
