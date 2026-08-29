@@ -28,6 +28,15 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      // An underscore prefix means "this parameter exists to hold a position,
+      // and is not read". It comes up wherever a signature is dictated from
+      // outside — a callback shape, a test double that must declare every
+      // argument so the call tuple is typed. The alternative is contorting the
+      // code to avoid naming something it genuinely receives.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       '@typescript-eslint/no-misused-promises': 'warn',

@@ -49,6 +49,93 @@ export interface Paginado<T> {
   porPagina: number;
 }
 
+/* ── Inmuebles ─────────────────────────────────────────────────── */
+
+/** The party responsible for a unit, as a unit listing needs to show them. */
+export interface TitularResumen {
+  id: string;
+  nombre: string;
+  identificacion: string | null;
+}
+
+export interface Inmueble {
+  id: string;
+  codigo: string;
+  bloque: string | null;
+  zona: string | null;
+  uso: string | null;
+  /** Square metres. */
+  area: number | null;
+  /** Share of the building, as a percentage. */
+  coeficiente: number | null;
+  /**
+   * Who answers for this unit's charges today. Null while nobody has been
+   * recorded — a building is often loaded before its ownership papers are.
+   */
+  titular: TitularResumen | null;
+  tipoTitular: 'propietario' | 'arrendatario';
+  resideEnElInmueble: boolean;
+  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  estado: 'activo' | 'inactivo';
+}
+
+/** One row's outcome from a bulk import that could not be created. */
+export interface ErrorImportacionInmueble {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string | null;
+  mensaje: string;
+}
+
+/**
+ * Result of importing a batch of units — and, inline, their titulares — at
+ * once. Rows are independent: one bad row does not abort the rest, because a
+ * 400-unit file with three typos should not have to be re-uploaded whole.
+ */
+export interface ResultadoImportacionInmuebles {
+  total: number;
+  creados: number;
+  errores: ErrorImportacionInmueble[];
+}
+
+/* ── Terceros ──────────────────────────────────────────────────── */
+
+/**
+ * A person or company the system bills, collects from, or names on a
+ * document — kept apart from Inmueble so correcting a typo today never
+ * rewrites what an issued document says. See the note on the Tercero schema.
+ */
+export interface Tercero {
+  id: string;
+  tipoPersona: 'natural' | 'juridica';
+  /** Full name for a person, trade name for a company. */
+  nombre: string;
+  tipoIdentificacion: string | null;
+  numeroIdentificacion: string | null;
+  digitoVerificacion: string | null;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  /**
+   * What the tax authority requires beyond a name and a general
+   * identification. Kept separate from the fields above — see the note on
+   * the schema for why collapsing them would be wrong.
+   */
+  facturacionElectronica: {
+    tipoIdentificacion: string | null;
+    numeroIdentificacion: string | null;
+    digitoVerificacion: string | null;
+    /** Economic-activity code (CIIU). */
+    codigoCiiu: string | null;
+    regimenVentas: string | null;
+  };
+  responsabilidadesFiscales: string[];
+  retieneRenta: boolean;
+  retieneIca: boolean;
+  estado: 'activo' | 'inactivo';
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
@@ -61,6 +148,119 @@ export interface CopropiedadResumen {
   id: string;
   codigo: string;
   nombre: string;
+}
+
+/* ── Entidades administradoras y copropiedades (platform config) ── */
+
+/**
+ * Platform-operator surface: who administers what. A customer's own
+ * administrator never sees or edits these shapes — see PlatformAdminGuard on
+ * the backend. This mirrors the 'Instalación' panel of the system this
+ * replaces.
+ */
+
+/** A company that manages several coproperties. */
+export interface EntidadAdministradora {
+  id: string;
+  codigo: string;
+  nombre: string;
+  nit: string | null;
+  digitoVerificacion: string | null;
+  email: string | null;
+  telefono: string | null;
+  estado: 'activo' | 'inactivo';
+}
+
+/** The full record of a coproperty, for the platform configuration screen. */
+export interface Copropiedad {
+  id: string;
+  codigo: string;
+  nombre: string;
+  nit: string | null;
+  digitoVerificacion: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  telefono: string | null;
+  email: string | null;
+  /** Null when the building has no managing company on file. */
+  entidadAdministradora: { id: string; nombre: string } | null;
+  /**
+   * An internal label only — "Junta de copropietarios", "Portería" — never an
+   * authorization record. Who actually administers this building directly
+   * (when `entidadAdministradora` is null) is answered by Usuarios: an
+   * Account holding an assignment scoped to this coproperty.
+   */
+  nombreAdministrador: string | null;
+  estado: 'activo' | 'inactivo';
+  /** Whether this building ALSO uses the building-management system. */
+  usaGestionEdificios: boolean;
+}
+
+/* ── Conceptos de cobro ("Cargos") ─────────────────────────────────
+ *
+ * Qué se le puede cobrar a una copropiedad — cuota de administración,
+ * intereses de mora, multas, parqueadero — reemplazando los doce slots fijos
+ * ("Cargo 1".."Cargo 12") del sistema anterior con filas: una copropiedad
+ * declara tantos como necesite. Ver el schema de ConceptoCobro.
+ *
+ * Editado hoy desde la pantalla de plataforma de la copropiedad
+ * (PlatformAdminGuard), como primer paso: es un recurso de tenant (tiene
+ * `copropiedadId`) y el CASL subject `ConceptoCobro` ya está reservado en
+ * permission-map.ts para cuando el administrador de cada edificio lo
+ * gestione con su propio permiso, sin pasar por PlatformAdminGuard.
+ */
+export interface ConceptoCobro {
+  id: string;
+  copropiedadId: string;
+  nombre: string;
+  tipo: 'administracion' | 'intereses' | 'otro';
+  tasaImpuesto: number;
+  orden: number;
+  activo: boolean;
+}
+
+/* ── Usuarios (platform config) ───────────────────────────────────
+ *
+ * Who may sign in and operate this system, and where. Platform-operator
+ * surface, same as Entidades/Copropiedades — see PlatformAdminGuard.
+ */
+
+/**
+ * One grant, describing where a user may work and what they may do there.
+ *
+ * A simplification of the underlying model on purpose: `Asignacion` supports
+ * several grants per account (a company plus one extra building outside it),
+ * but this screen manages exactly one — the same shape the legacy system's
+ * user form had (one row, one role, one coproperty or entity). Nothing in the
+ * data model stops a second grant existing; there is just no screen for it
+ * yet.
+ */
+export interface AsignacionResumen {
+  alcance: 'copropiedad' | 'entidad';
+  copropiedadId: string | null;
+  copropiedadNombre: string | null;
+  entidadId: string | null;
+  entidadNombre: string | null;
+  permisos: string[];
+}
+
+/**
+ * A person who signs in to operate Finanzas — always staff. Unit owners and
+ * tenants are `Tercero` records and never reach this screen; see Tercero and
+ * Account for why.
+ *
+ * `asignacion` is null for a platform administrator (they need none — see
+ * `rulesFromPermissionKeys`) and for a person nobody has assigned anywhere
+ * yet, which is a real, unremarkable state: "authenticated but powerless" is
+ * the correct default the whole authorization layer is built around.
+ */
+export interface Usuario {
+  id: string;
+  nombre: string;
+  email: string;
+  esAdministradorPlataforma: boolean;
+  estado: 'activo' | 'inactivo';
+  asignacion: AsignacionResumen | null;
 }
 
 /**

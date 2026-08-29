@@ -122,8 +122,13 @@ return this.model.find(query).exec();
 
 - `TenantContextService.resolveCoPropertyId()` reads the active coproperty from
   CLS, where it is written per request *after* the caller's assignment has been
-  checked. It returns a plain `string` today; whether the stored field becomes
-  an ObjectId reference is settled with the schemas.
+  checked. **It returns an `ObjectId`, and that is load-bearing**: the driver
+  does not coerce a string when matching this field, so a filter built from the
+  string form matches nothing and returns an empty list rather than an error.
+  That is the worst available failure — the screen reads "this building has no
+  units" for a building with sixty, and nobody suspects the query. Never
+  hand-build the filter from `activeCoPropertyIdOrNull()`, which is the string
+  and exists only for callers that must branch on absence.
 - A client-supplied id (`?coPropertyId=`) may be passed as the argument, and it
   is only ever accepted when it matches the active tenant exactly. It can
   confirm the tenant; it can never set it.
@@ -245,6 +250,36 @@ Permission keys are Spanish `modulo.accion` strings (`facturas.anular`) mapped
 to CASL rules in exactly one place, `src/modules/casl/permission-map.ts`. Adding
 a subject means adding it to `SUBJECTS` *and* to `MODULE_TO_SUBJECT`. Unknown
 keys are skipped, and skipping means deny.
+
+**Catalog is not the same permission surface as reports.** `Inmueble`,
+`Tercero` and `ConceptoCobro` are distinct CASL subjects from `Consulta` on
+purpose — somebody who reads the arrears report is not thereby entitled to
+rewrite who owns a unit. Granting both through one key is exactly how that
+happens without anyone deciding it.
+
+### The platform-admin layer
+
+`EntidadAdministradora` and `Copropiedad` sit **above** CASL and the tenancy
+law entirely, and that is deliberate, not an oversight. A coproperty IS the
+unit of tenancy — there is no "active coproperty" to scope its own catalog
+by, and no per-building permission a customer's administrator could hold to
+edit the definition of their own building or anyone else's. This is the
+platform vendor's configuration surface, mirroring the "Instalación" panel
+(visible only to a rol 4 / "Administrador Comptel" account) in the system
+this replaces.
+
+The gate is `PlatformAdminGuard`
+(`src/common/guards/platform-admin.guard.ts`), not `PoliciesGuard`:
+`@UseGuards(FirebaseAuthGuard, PlatformAdminGuard)`, no `@CheckAbility`. Routing
+this through CASL instead would imply a customer's administrator could be
+granted the permission — none ever should be. Their respective services
+(`EntidadesService`, `CopropiedadesService`) never touch
+`TenantContextService` either, for the same reason: they manage catalogs that
+sit above any single tenant, not data scoped to one.
+
+Same audit law as everywhere else: no delete. `estado: 'inactivo'` retires an
+entity or a coproperty without touching what it once administered or removing
+any document ever issued against it.
 
 ## The contract law
 

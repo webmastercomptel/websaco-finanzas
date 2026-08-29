@@ -49,10 +49,11 @@ export class Copropiedad {
   email: string | null;
 
   /**
-   * The company that administers this building, when one does.
-   *
-   * Null for a self-administered property — a resident or an employee of the
-   * building itself — which is why this is nullable rather than required.
+   * The company that administers this building, when one does. Null when it
+   * is administered directly — which is why this is nullable rather than
+   * required — but "directly" never means unattended: a real person still
+   * runs it, just without a company between them and the building. See
+   * `administratorName` below for what that null case actually looks like.
    *
    * Assignments made at the company level reach every building pointing here,
    * so moving a building between companies changes who can operate it without
@@ -67,8 +68,16 @@ export class Copropiedad {
   managingEntityId: Types.ObjectId | null;
 
   /**
-   * Name of the administrator when there is no managing company on file — the
-   * self-administered case. Plain text, and only a label: it grants nothing.
+   * An internal note for when there is no managing company on file — e.g.
+   * "Junta de copropietarios", "Portería". Plain text, and only a label: it
+   * grants nothing and names no one in particular.
+   *
+   * This is NOT how a directly-administered building gets a real
+   * administrator. That is a person — an `Account`, provisioned through
+   * Usuarios — holding an `Asignacion` with `scope: 'copropiedad'` pointing
+   * here. There is always somebody running a building; without a managing
+   * company it is simply a named individual instead of one reached through a
+   * company's portfolio, never nobody.
    */
   @Prop({ type: String, default: null, trim: true })
   administratorName: string | null;

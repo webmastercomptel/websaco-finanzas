@@ -12,7 +12,9 @@ import { redisProvider } from './redis/redis.provider';
 import { REDIS_CLIENT } from './redis/redis.constants';
 import { firebaseAuthProvider } from './firebase/firebase.provider';
 import { FIREBASE_AUTH } from './firebase/firebase.constants';
+import { FirebaseUsuariosService } from './firebase/firebase-usuarios.service';
 import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
+import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { TenantContextService } from './tenant/tenant-context.service';
 import { AccesoService } from './acceso/acceso.service';
 import { CuentaService } from './cuentas/cuenta.service';
@@ -34,6 +36,8 @@ import { PeriodoService } from './contabilidad/periodo.service';
     redisProvider,
     firebaseAuthProvider,
     FirebaseAuthGuard,
+    PlatformAdminGuard,
+    FirebaseUsuariosService,
     TenantContextService,
     AccesoService,
     CuentaService,
@@ -44,6 +48,8 @@ import { PeriodoService } from './contabilidad/periodo.service';
     REDIS_CLIENT,
     FIREBASE_AUTH,
     FirebaseAuthGuard,
+    PlatformAdminGuard,
+    FirebaseUsuariosService,
     TenantContextService,
     AccesoService,
     CuentaService,

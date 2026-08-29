@@ -72,6 +72,45 @@ export class Tercero {
   @Prop({ type: String, default: null, trim: true })
   city: string | null;
 
+  /* ── Electronic invoicing ─────────────────────────────────────
+   *
+   * What the tax authority requires on an issued invoice, beyond a name and a
+   * number. All optional: a building is routinely loaded long before anybody
+   * has collected this, and refusing to record a unit until then would stop the
+   * work for a field only needed at the moment of issuing.
+   *
+   * The identification here is separate from the general one above, and stays
+   * separate on purpose: they usually match, and when they do not it is because
+   * somebody was invoiced under a different document than the one on file.
+   * Collapsing them would quietly rewrite one with the other. Empty means "use
+   * the general identification".
+   */
+
+  @Prop({ type: String, default: null, trim: true })
+  einvoiceIdentificationType: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  einvoiceIdentificationNumber: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  einvoiceVerificationDigit: string | null;
+
+  /** Economic-activity code (CIIU). */
+  @Prop({ type: String, default: null, trim: true })
+  ciiuCode: string | null;
+
+  /** Sales-tax regime as the authority names it. */
+  @Prop({ type: String, default: null, trim: true })
+  salesRegime: string | null;
+
+  /**
+   * Fiscal responsibilities, as codes. A party can carry several at once, so
+   * this is a list — squeezing them into one string is how the second one gets
+   * lost.
+   */
+  @Prop({ type: [String], required: true, default: [] })
+  fiscalResponsibilities: string[];
+
   /** Subject to withholding at source. */
   @Prop({ required: true, default: false })
   withholdsIncomeTax: boolean;

@@ -13,6 +13,9 @@ import type {
 
 /** `modulo` segment of a permission key -> CASL subject. */
 export const MODULE_TO_SUBJECT = {
+  inmuebles: 'Inmueble',
+  terceros: 'Tercero',
+  conceptos: 'ConceptoCobro',
   facturas: 'Factura',
   recibos: 'Recibo',
   'notas-credito': 'NotaCredito',

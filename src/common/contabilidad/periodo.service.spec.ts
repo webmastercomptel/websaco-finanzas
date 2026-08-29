@@ -4,8 +4,12 @@ import { PeriodoService, periodoDe } from './periodo.service';
 
 const COP = new Types.ObjectId().toString();
 
+type Filtro = Record<string, unknown>;
+
 const periodosCon = (fila: Record<string, unknown> | null) => ({
-  findOne: jest.fn(() => ({
+  // The filter parameter is declared so jest infers it into the call tuple —
+  // one test asserts which period was looked up.
+  findOne: jest.fn((_filtro: Filtro) => ({
     lean: () => ({ exec: () => Promise.resolve(fila) }),
   })),
 });
@@ -27,7 +31,10 @@ describe('periodoDe', () => {
   });
 
   it('numera los meses de 1 a 12, no desde cero', () => {
-    expect(periodoDe(new Date(2026, 11, 31))).toEqual({ year: 2026, month: 12 });
+    expect(periodoDe(new Date(2026, 11, 31))).toEqual({
+      year: 2026,
+      month: 12,
+    });
   });
 });
 
@@ -59,7 +66,9 @@ describe('PeriodoService', () => {
   it('el error nombra el periodo cerrado', async () => {
     const service = servicio({ year: 2026, month: 3, status: 'cerrado' });
 
-    await expect(service.exigirAbierto(COP, enMarzo)).rejects.toThrow('03/2026');
+    await expect(service.exigirAbierto(COP, enMarzo)).rejects.toThrow(
+      '03/2026',
+    );
   });
 
   it('el error dice qué hacer en su lugar', async () => {
@@ -80,9 +89,7 @@ describe('PeriodoService', () => {
 
     await service.estaAbierto(COP, new Date(2026, 0, 31));
 
-    const [filtro] = periodos.findOne.mock.calls[0] as [
-      Record<string, unknown>,
-    ];
+    const [filtro] = periodos.findOne.mock.calls[0];
     expect(filtro).toMatchObject({ year: 2026, month: 1 });
   });
 });

@@ -98,6 +98,22 @@ export class Inmueble {
   })
   collectionStatus: 'al_dia' | 'juridico' | 'dificil_recaudo';
 
+  /**
+   * Who to call about this unit, when that is not the holder — a caretaker, a
+   * relative, the tenant of an absent owner. Free text because it is a note to
+   * a human, not a record to join on.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  contactName: string | null;
+
+  /**
+   * Free notes. Every real property register grows one, and without a field for
+   * it the information ends up appended to a name — where it then prints on an
+   * invoice.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  notes: string | null;
+
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
   status: 'active' | 'inactive';
 }

@@ -15,7 +15,10 @@ const resolucionesCon = (fila: Record<string, unknown> | null) => {
   const estado = fila ? { ...fila } : null;
 
   return {
-    findOneAndUpdate: jest.fn((filtro: Filtro) => ({
+    // Declares both parameters even though only the filter is read: the test
+    // below asserts on the update document, and jest infers the call tuple
+    // from this signature.
+    findOneAndUpdate: jest.fn((filtro: Filtro, _update?: Filtro) => ({
       exec: () => {
         if (!estado) return Promise.resolve(null);
         if (filtro.status === 'active' && estado.status !== 'active') {
@@ -165,10 +168,7 @@ describe('NumeracionService.siguienteFactura', () => {
     await service.siguienteFactura(COP);
 
     expect(resoluciones.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    const [, actualizacion] = resoluciones.findOneAndUpdate.mock.calls[0] as [
-      Filtro,
-      Record<string, unknown>,
-    ];
+    const [, actualizacion] = resoluciones.findOneAndUpdate.mock.calls[0];
     expect(actualizacion).toEqual({ $inc: { nextNumber: 1 } });
   });
 });

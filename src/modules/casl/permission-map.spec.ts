@@ -90,13 +90,26 @@ describe('vocabulario de autorización', () => {
   });
 
   it('cubre los seis módulos financieros del backlog', () => {
-    expect(Object.keys(MODULE_TO_SUBJECT)).toEqual([
+    for (const modulo of [
       'facturas',
       'recibos',
       'notas-credito',
       'otras-notas',
       'anulaciones',
       'consultas',
-    ]);
+    ]) {
+      expect(Object.keys(MODULE_TO_SUBJECT)).toContain(modulo);
+    }
+  });
+
+  it('el catálogo tiene permisos propios, separados de las consultas', () => {
+    // Quien lee el reporte de cartera no queda por eso habilitado a reescribir
+    // quién es dueño de un inmueble. Otorgar las dos cosas con una sola llave
+    // es exactamente cómo eso pasa sin que nadie lo decida.
+    for (const modulo of ['inmuebles', 'terceros', 'conceptos']) {
+      expect(Object.keys(MODULE_TO_SUBJECT)).toContain(modulo);
+    }
+
+    expect(MODULE_TO_SUBJECT.inmuebles).not.toBe(MODULE_TO_SUBJECT.consultas);
   });
 });

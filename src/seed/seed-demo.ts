@@ -19,6 +19,14 @@ import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../database/schemas/terceros/tercero.schema';
 
 /**
  * Loads a plausible set of buildings to work against.
@@ -59,6 +67,30 @@ const EDIFICIOS_ADMINISTRADOS = [
 
 const EDIFICIOS_INDEPENDIENTES = ['Conjunto El Nogal', 'Edificio Palma Verde'];
 
+const NOMBRES = [
+  'Carlos Mendoza',
+  'Lucía Fernández',
+  'Roberto Salazar',
+  'Ana María Gutiérrez',
+  'Jorge Iván Restrepo',
+  'Claudia Patricia Ríos',
+  'Grupo Inversor S.A.',
+  'Miguel Ángel Torres',
+  'Sandra Milena Ochoa',
+  'Boutique Bella Ltda.',
+  'Fernando Arboleda',
+  'Beatriz Elena Cardona',
+];
+
+/**
+ * How many units each building gets.
+ *
+ * The first one gets more than a page-worth on purpose: pagination that is only
+ * ever exercised against twelve rows is pagination nobody has tested.
+ */
+const UNIDADES_PRIMER_EDIFICIO = 60;
+const UNIDADES_RESTO = 10;
+
 async function seedDemo(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
@@ -73,6 +105,12 @@ async function seedDemo(): Promise<void> {
     );
     const conceptos = app.get<Model<ConceptoCobroDocument>>(
       getModelToken(ConceptoCobro.name),
+    );
+    const inmuebles = app.get<Model<InmuebleDocument>>(
+      getModelToken(Inmueble.name),
+    );
+    const terceros = app.get<Model<TerceroDocument>>(
+      getModelToken(Tercero.name),
     );
 
     // 1. The managing company.
@@ -138,6 +176,70 @@ async function seedDemo(): Promise<void> {
       `${definiciones.length} copropiedades listas (${creadas} nuevas), ` +
         `cada una con ${CONCEPTOS_BASE.length} conceptos de cobro.`,
     );
+
+    // 4. Units, each with the party responsible for it. Without these there is
+    // nothing to bill and every screen downstream is empty.
+    const todas = await copropiedades.find().select('_id code').lean().exec();
+    let unidades = 0;
+
+    for (const [indice, cop] of todas.entries()) {
+      const cuantas = indice === 0 ? UNIDADES_PRIMER_EDIFICIO : UNIDADES_RESTO;
+
+      for (let i = 1; i <= cuantas; i += 1) {
+        // 101..1xx style codes: floor and door, the way residents say them.
+        const piso = Math.floor((i - 1) / 4) + 1;
+        const puerta = ((i - 1) % 4) + 1;
+        const code = `${piso}0${puerta}`;
+        const nombre = NOMBRES[(indice + i) % NOMBRES.length];
+        const esEmpresa = nombre.includes('S.A.') || nombre.includes('Ltda.');
+
+        const tercero = await terceros.findOneAndUpdate(
+          { coPropertyId: cop._id, identificationNumber: `${cop.code}-${i}` },
+          {
+            $setOnInsert: {
+              coPropertyId: cop._id,
+              personType: esEmpresa ? 'juridica' : 'natural',
+              name: nombre,
+              identificationType: esEmpresa ? 'NIT' : 'CC',
+              identificationNumber: `${cop.code}-${i}`,
+              status: 'active',
+            },
+          },
+          { upsert: true, new: true },
+        );
+
+        await inmuebles.updateOne(
+          { coPropertyId: cop._id, code },
+          {
+            $setOnInsert: {
+              coPropertyId: cop._id,
+              code,
+              block: piso <= 8 ? 'Torre A' : 'Torre B',
+              area: 60 + ((i * 7) % 45),
+              // Shares that vary per unit, as they really do — a building where
+              // every unit has the same coefficient is not a building.
+              participationFactor:
+                Math.round((100 / cuantas + ((i % 5) - 2) * 0.05) * 10000) /
+                10000,
+              holderId: tercero._id,
+              holderKind: i % 7 === 0 ? 'arrendatario' : 'propietario',
+              holderResides: i % 9 !== 0,
+              collectionStatus:
+                i % 13 === 0
+                  ? 'juridico'
+                  : i % 11 === 0
+                    ? 'dificil_recaudo'
+                    : 'al_dia',
+              status: i % 17 === 0 ? 'inactive' : 'active',
+            },
+          },
+          { upsert: true },
+        );
+        unidades += 1;
+      }
+    }
+
+    console.log(`${unidades} inmuebles listos, cada uno con su titular.`);
     console.log(
       'Entrá con la cuenta de administrador de plataforma: las ve todas.',
     );

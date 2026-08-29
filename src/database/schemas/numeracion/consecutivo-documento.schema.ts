@@ -46,9 +46,8 @@ export class ConsecutivoDocumento {
   nextNumber: number;
 }
 
-export const ConsecutivoDocumentoSchema = SchemaFactory.createForClass(
-  ConsecutivoDocumento,
-);
+export const ConsecutivoDocumentoSchema =
+  SchemaFactory.createForClass(ConsecutivoDocumento);
 
 // One counter per type per building. A second row would silently split the
 // sequence in two, and both halves would look correct on their own.

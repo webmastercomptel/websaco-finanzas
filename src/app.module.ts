@@ -12,6 +12,12 @@ import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
 import { CaslModule } from './modules/casl/casl.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { InmueblesModule } from './modules/inmuebles/inmuebles.module';
+import { TercerosModule } from './modules/terceros/terceros.module';
+import { EntidadesModule } from './modules/entidades/entidades.module';
+import { CopropiedadesModule } from './modules/copropiedades/copropiedades.module';
+import { ConceptosModule } from './modules/conceptos/conceptos.module';
+import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -42,6 +48,12 @@ import { HealthModule } from './modules/health/health.module';
     CommonModule,
     CaslModule,
     AuthModule,
+    InmueblesModule,
+    TercerosModule,
+    EntidadesModule,
+    CopropiedadesModule,
+    ConceptosModule,
+    UsuariosModule,
     HealthModule,
   ],
 })

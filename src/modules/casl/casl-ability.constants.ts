@@ -31,6 +31,13 @@ export const ACTIONS = [
 export type Action = (typeof ACTIONS)[number];
 
 export const SUBJECTS = [
+  // Catalog: who maintains the register the financial documents point at.
+  // Distinct from reading reports on purpose — the person who reads the
+  // arrears report is usually not the one who may rewrite a unit's ownership.
+  'Inmueble',
+  'Tercero',
+  'ConceptoCobro',
+  // Financial documents.
   'Factura',
   'Recibo',
   'NotaCredito',
