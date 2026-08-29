@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -23,6 +24,7 @@ export class NovedadFilaDto {
 
   @Type(() => Number)
   @IsNumber()
+  @IsInt()
   monto: number;
 
   @IsOptional()

@@ -146,6 +146,15 @@ export class LotesFacturacionService {
     filas: NovedadFilaDto[],
   ): Promise<ResultadoCargaNovedades> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${loteId} ya está consolidado y no se le pueden cargar novedades`,
+      );
+    }
     const errores: ResultadoCargaNovedades['errores'] = [];
     const novedades: Record<string, unknown>[] = [];
 
@@ -162,7 +171,7 @@ export class LotesFacturacionService {
       }
 
       const concepto = await this.conceptos
-        .findOne({ coPropertyId, name: fila.nombreConcepto })
+        .findOne({ coPropertyId, name: fila.nombreConcepto, active: true })
         .exec();
       if (!concepto) {
         errores.push({
@@ -180,16 +189,13 @@ export class LotesFacturacionService {
       });
     }
 
-    const actualizado = await this.lotes
+    await this.lotes
       .findOneAndUpdate(
         { _id: loteId, coPropertyId },
         { $set: { adjustments: novedades } },
         { new: true },
       )
       .exec();
-    if (!actualizado) {
-      throw new NotFoundException(`No se encontró el lote ${loteId}`);
-    }
 
     return { total: filas.length, cargadas: novedades.length, errores };
   }
@@ -208,10 +214,15 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${loteId} ya está consolidado y no puede volver a liquidarse`,
+      );
+    }
 
     const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
       this.inmuebles.find({ coPropertyId, status: 'active' }).exec(),
-      this.conceptos.find({ coPropertyId }).exec(),
+      this.conceptos.find({ coPropertyId, active: true }).exec(),
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
@@ -253,6 +264,8 @@ export class LotesFacturacionService {
           lines.push(this.aLinea(interesConcepto, valor, 'interes'));
         }
       }
+
+      if (lines.length === 0) continue;
 
       const subtotal = lines.reduce(
         (acc, l) => acc + (l.baseAmount as number),

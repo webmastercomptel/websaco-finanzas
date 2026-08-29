@@ -24,7 +24,8 @@ export class ConsecutivoLote {
   })
   coPropertyId: Types.ObjectId;
 
-  /** The next number to hand out. Moves forward only. */
+  /** The last number handed out (post-increment value, via {new: true}).
+   *  Moves forward only. */
   @Prop({ required: true, default: 1 })
   nextNumber: number;
 }

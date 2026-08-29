@@ -29,7 +29,7 @@ export class FacturasService {
     const [documentos, total] = await Promise.all([
       this.facturas
         .find(filtro)
-        .sort({ issueDate: -1 })
+        .sort({ issueDate: -1, _id: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),

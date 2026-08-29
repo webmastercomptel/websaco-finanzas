@@ -4,6 +4,7 @@ import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
 import { Account } from '../cuentas/account.schema';
+import { Tercero } from '../terceros/tercero.schema';
 import {
   FacturaLinea,
   FacturaLineaSchema,
@@ -45,7 +46,7 @@ export class FacturaPreliminar {
   @Prop({ required: true, trim: true })
   unitCode: string;
 
-  @Prop({ type: Types.ObjectId, default: null })
+  @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
@@ -107,6 +108,9 @@ export class LoteFacturacion {
   @Prop({ required: true })
   periodEnd: Date;
 
+  // Captured and returned as-is; not yet applied anywhere — applying a
+  // discount belongs to the future Recibo (payment application) work, out
+  // of this plan's scope.
   @Prop({ required: true, default: 0 })
   earlyPaymentDiscount: number;
 
@@ -157,7 +161,7 @@ export const LoteFacturacionSchema =
 // At most one run in flight per coproperty at a time — a second one would
 // make "which lote am I liquidando" ambiguous.
 LoteFacturacionSchema.index(
-  { coPropertyId: 1, status: 1 },
+  { coPropertyId: 1 },
   {
     unique: true,
     partialFilterExpression: { status: { $in: ['borrador', 'liquidado'] } },

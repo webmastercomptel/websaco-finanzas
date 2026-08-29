@@ -57,3 +57,7 @@ export class AsientoContable {
 
 export const AsientoContableSchema =
   SchemaFactory.createForClass(AsientoContable);
+
+// One AsientoContable per Factura — cheap structural insurance against a
+// double-post, given this method runs without a database transaction.
+AsientoContableSchema.index({ facturaId: 1 }, { unique: true });

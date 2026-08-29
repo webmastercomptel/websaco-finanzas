@@ -131,11 +131,12 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   const conceptoCon = (id: string, nombre: string) => ({
     _id: id,
     name: nombre,
+    active: true,
   });
 
   it('resuelve inmueble por código y concepto por nombre, y reemplaza las novedades anteriores', async () => {
     const lotes = {
-      findById: jest.fn(() => ({
+      findOne: jest.fn(() => ({
         exec: () =>
           Promise.resolve(loteDoc({ adjustments: [{ vieja: true }] })),
       })),
@@ -191,7 +192,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
 
   it('reporta por fila cuando el inmueble o el concepto no existen, sin abortar el resto', async () => {
     const lotes = {
-      findById: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
       })),
@@ -245,6 +246,9 @@ describe('LotesFacturacionService.cargarNovedades', () => {
 
   it('rechaza con NotFoundException si el lote no existe o pertenece a otra copropiedad', async () => {
     const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(null),
+      })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(null),
       })),
@@ -280,6 +284,94 @@ describe('LotesFacturacionService.cargarNovedades', () => {
         { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
       ]),
     ).rejects.toThrow('No se encontró el lote lote-inexistente');
+  });
+
+  it('rechaza cargar novedades en un lote que ya está consolidado', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(unidadCon('inm-1', '301')),
+      })),
+    };
+    const conceptos = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(conceptoCon('con-1', 'Multas')),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      conceptos as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await expect(
+      service.cargarNovedades('lote-1', [
+        { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
+      ]),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(lotes.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('no encuentra un concepto inactivo (filtra por active: true)', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(unidadCon('inm-1', '301')),
+      })),
+    };
+    const conceptos = {
+      // Simulates a concept that exists but is inactive: the query filters
+      // by active: true, so a filtered lookup finds nothing.
+      findOne: jest.fn(({ active }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(
+            active === true ? null : conceptoCon('con-1', 'Multas'),
+          ),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      conceptos as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    const resultado = await service.cargarNovedades('lote-1', [
+      { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
+    ]);
+
+    expect(resultado.errores).toEqual([
+      { fila: 1, mensaje: 'No se encontró el cargo "Multas"' },
+    ]);
   });
 });
 
@@ -325,6 +417,7 @@ describe('LotesFacturacionService.liquidar', () => {
     kind: 'administracion',
     taxRate: 0,
     accountingIncomeAccount: '413501',
+    active: true,
     ...over,
   });
   const valorRecurrente = (over: Record<string, unknown> = {}) => ({
@@ -566,6 +659,52 @@ describe('LotesFacturacionService.liquidar', () => {
     const preliminar = actualizacion.$set.preview[0];
     expect(preliminar.holder).toBeNull();
     expect(preliminar.terceroId).toBeNull();
+  });
+
+  it('rechaza liquidar un lote que ya está consolidado', async () => {
+    const m = construirModelos({ lote: { status: 'consolidado' } });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await expect(service.liquidar('lote-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(m.lotes.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('omite el preview de una unidad sin cargos recurrentes, sin novedades y sin interés', async () => {
+    const m = construirModelos({ valoresRecurrentes: [] });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.preview).toEqual([]);
   });
 });
 
