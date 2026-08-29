@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -164,20 +168,23 @@ export class LotesFacturacionService {
       }
 
       novedades.push({
-        inmuebleId: inmueble._id.toString(),
-        conceptoId: concepto._id.toString(),
+        inmuebleId: inmueble._id,
+        conceptoId: concepto._id,
         amount: fila.monto,
-        note: fila.observacion ?? null,
+        note: fila.observacion?.trim() ? fila.observacion : null,
       });
     }
 
-    await this.lotes
-      .findByIdAndUpdate(
-        loteId,
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId },
         { $set: { adjustments: novedades } },
         { new: true },
       )
       .exec();
+    if (!actualizado) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
 
     return { total: filas.length, cargadas: novedades.length, errores };
   }

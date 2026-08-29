@@ -124,11 +124,11 @@ describe('LotesFacturacionService.crear', () => {
 
 describe('LotesFacturacionService.cargarNovedades', () => {
   const unidadCon = (id: string, codigo: string) => ({
-    _id: { toString: () => id },
+    _id: id,
     code: codigo,
   });
   const conceptoCon = (id: string, nombre: string) => ({
-    _id: { toString: () => id },
+    _id: id,
     name: nombre,
   });
 
@@ -138,7 +138,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
         exec: () =>
           Promise.resolve(loteDoc({ adjustments: [{ vieja: true }] })),
       })),
-      findByIdAndUpdate: jest.fn(() => ({
+      findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
       })),
     };
@@ -176,8 +176,11 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ]);
 
     expect(resultado).toEqual({ total: 1, cargadas: 1, errores: [] });
-    const calls = lotes.findByIdAndUpdate.mock.calls as unknown[][];
-    const [, actualizacion] = calls[0] as [string, Record<string, unknown>];
+    const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
     expect(actualizacion.$set as Record<string, unknown>).toEqual({
       adjustments: [
         { inmuebleId: 'inm-1', conceptoId: 'con-1', amount: 50000, note: null },
@@ -188,7 +191,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   it('reporta por fila cuando el inmueble o el concepto no existen, sin abortar el resto', async () => {
     const lotes = {
       findById: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
-      findByIdAndUpdate: jest.fn(() => ({
+      findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
       })),
     };
@@ -227,5 +230,54 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     expect(resultado.errores).toEqual([
       { fila: 1, mensaje: 'No se encontró el inmueble con código "999"' },
     ]);
+    const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(actualizacion.$set as Record<string, unknown>).toEqual({
+      adjustments: [
+        { inmuebleId: 'inm-1', conceptoId: 'con-1', amount: 20000, note: null },
+      ],
+    });
+  });
+
+  it('rechaza con NotFoundException si el lote no existe o pertenece a otra copropiedad', async () => {
+    const lotes = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(null),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(({ code }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+      })),
+    };
+    const conceptos = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(conceptoCon('con-1', 'Multas')),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      conceptos as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await expect(
+      service.cargarNovedades('lote-inexistente', [
+        { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
+      ]),
+    ).rejects.toThrow('No se encontró el lote lote-inexistente');
   });
 });
