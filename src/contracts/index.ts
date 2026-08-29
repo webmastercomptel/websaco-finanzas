@@ -185,6 +185,35 @@ export interface Factura {
   estado: 'emitida' | 'anulada';
 }
 
+/**
+ * One billing run. `previsualizacion` and `novedades` are intentionally NOT
+ * sent in full here — only counts. The full `FacturaPreliminar` list is what
+ * the (future) Liquidación screen needs and is out of scope for this
+ * backend-only plan; exposing counts now avoids a large, unused payload
+ * shape that would need revisiting anyway once that screen's real needs are
+ * known (see spec §8).
+ */
+export interface LoteFacturacion {
+  id: string;
+  numero: number;
+  estado: 'borrador' | 'liquidado' | 'consolidado';
+  fechaFacturacion: IsoDate;
+  fechaVencimiento: IsoDate;
+  periodoDesde: IsoDate;
+  periodoHasta: IsoDate;
+  descuentoProntoPago: number;
+  diasGraciaDescuento: number;
+  interesMora: number;
+  topeInteresMora: number | null;
+  totalNovedades: number;
+  totalPrevisualizacion: number;
+  resumen: {
+    montoTotal: Monto;
+    totalFacturas: number;
+    totalInmuebles: number;
+  } | null;
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
