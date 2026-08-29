@@ -43,6 +43,8 @@ import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import type { LoteFacturacion as LoteContract } from '../../contracts';
 import { toLote } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
+import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
+import type { ResultadoCargaNovedades } from '../../contracts';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -119,5 +121,64 @@ export class LotesFacturacionService {
     });
 
     return toLote(creado);
+  }
+
+  /**
+   * Uploads one-off charges for THIS run only — never written into
+   * ValorRecurrente, the standing monthly template. Each row is resolved
+   * independently by human-readable identifiers (unit código, concept
+   * nombre), the same shape as the Inmuebles bulk import: a row that cannot
+   * be resolved is reported and skipped, the rest of the file still loads.
+   * A fresh upload REPLACES the Lote's previous novedades, since re-uploading
+   * a corrected file is the expected flow, not accumulating duplicates.
+   */
+  async cargarNovedades(
+    loteId: string,
+    filas: NovedadFilaDto[],
+  ): Promise<ResultadoCargaNovedades> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const errores: ResultadoCargaNovedades['errores'] = [];
+    const novedades: Record<string, unknown>[] = [];
+
+    for (const [indice, fila] of filas.entries()) {
+      const inmueble = await this.inmuebles
+        .findOne({ coPropertyId, code: fila.inmuebleCodigo })
+        .exec();
+      if (!inmueble) {
+        errores.push({
+          fila: indice + 1,
+          mensaje: `No se encontró el inmueble con código "${fila.inmuebleCodigo}"`,
+        });
+        continue;
+      }
+
+      const concepto = await this.conceptos
+        .findOne({ coPropertyId, name: fila.nombreConcepto })
+        .exec();
+      if (!concepto) {
+        errores.push({
+          fila: indice + 1,
+          mensaje: `No se encontró el cargo "${fila.nombreConcepto}"`,
+        });
+        continue;
+      }
+
+      novedades.push({
+        inmuebleId: inmueble._id.toString(),
+        conceptoId: concepto._id.toString(),
+        amount: fila.monto,
+        note: fila.observacion ?? null,
+      });
+    }
+
+    await this.lotes
+      .findByIdAndUpdate(
+        loteId,
+        { $set: { adjustments: novedades } },
+        { new: true },
+      )
+      .exec();
+
+    return { total: filas.length, cargadas: novedades.length, errores };
   }
 }

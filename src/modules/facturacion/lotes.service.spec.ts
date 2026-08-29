@@ -4,6 +4,8 @@ import { LotesFacturacionService } from './lotes.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { NumeracionService } from '../../common/numeracion/numeracion.service';
 
+type Filtro = Record<string, unknown>;
+
 const COP = new Types.ObjectId();
 const CUENTA = new Types.ObjectId().toString();
 
@@ -117,5 +119,113 @@ describe('LotesFacturacionService.crear', () => {
       lateInterestRate: 1.9,
       generatedBy: CUENTA,
     });
+  });
+});
+
+describe('LotesFacturacionService.cargarNovedades', () => {
+  const unidadCon = (id: string, codigo: string) => ({
+    _id: { toString: () => id },
+    code: codigo,
+  });
+  const conceptoCon = (id: string, nombre: string) => ({
+    _id: { toString: () => id },
+    name: nombre,
+  });
+
+  it('resuelve inmueble por código y concepto por nombre, y reemplaza las novedades anteriores', async () => {
+    const lotes = {
+      findById: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(loteDoc({ adjustments: [{ vieja: true }] })),
+      })),
+      findByIdAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(({ code }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+      })),
+    };
+    const conceptos = {
+      findOne: jest.fn(({ name }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(
+            name === 'Multas' ? conceptoCon('con-1', 'Multas') : null,
+          ),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      conceptos as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    const resultado = await service.cargarNovedades('lote-1', [
+      { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
+    ]);
+
+    expect(resultado).toEqual({ total: 1, cargadas: 1, errores: [] });
+    const calls = lotes.findByIdAndUpdate.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [string, Record<string, unknown>];
+    expect(actualizacion.$set as Record<string, unknown>).toEqual({
+      adjustments: [
+        { inmuebleId: 'inm-1', conceptoId: 'con-1', amount: 50000, note: null },
+      ],
+    });
+  });
+
+  it('reporta por fila cuando el inmueble o el concepto no existen, sin abortar el resto', async () => {
+    const lotes = {
+      findById: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
+      findByIdAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(({ code }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+      })),
+    };
+    const conceptos = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(conceptoCon('con-1', 'Multas')),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      conceptos as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    const resultado = await service.cargarNovedades('lote-1', [
+      { inmuebleCodigo: '999', nombreConcepto: 'Multas', monto: 50000 },
+      { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 20000 },
+    ]);
+
+    expect(resultado.cargadas).toBe(1);
+    expect(resultado.errores).toEqual([
+      { fila: 1, mensaje: 'No se encontró el inmueble con código "999"' },
+    ]);
   });
 });

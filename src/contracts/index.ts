@@ -228,6 +228,24 @@ export interface CopropiedadResumen {
   nombre: string;
 }
 
+/** One row's outcome from a bulk upload of one-off charges that could not be processed. */
+export interface ErrorCargaNovedades {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  mensaje: string;
+}
+
+/**
+ * Result of uploading one-off charges for a billing run. Rows are independent:
+ * one bad row does not abort the rest, because a file with a few typos should
+ * not have to be re-uploaded whole.
+ */
+export interface ResultadoCargaNovedades {
+  total: number;
+  cargadas: number;
+  errores: ErrorCargaNovedades[];
+}
+
 /* ── Entidades administradoras y copropiedades (platform config) ── */
 
 /**
