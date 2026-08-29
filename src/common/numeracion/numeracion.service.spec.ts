@@ -76,12 +76,13 @@ const consecutivosLoteCon = (fila: Record<string, unknown> | null) => {
     findOneAndUpdate: jest.fn(() => ({
       exec: () => {
         if (!estado) {
-          estado = { nextNumber: 2 };
-          return Promise.resolve(null);
+          // On upsert, $inc creates nextNumber at 1, new: true returns post-image
+          estado = { nextNumber: 1 };
+          return Promise.resolve(estado);
         }
-        const previa = { ...estado };
+        // On normal update, increment first, then return post-image
         estado.nextNumber = (estado.nextNumber as number) + 1;
-        return Promise.resolve(previa);
+        return Promise.resolve({ ...estado });
       },
     })),
   };
@@ -230,13 +231,13 @@ describe('NumeracionService.siguienteLote', () => {
   });
 
   it('continúa desde el contador existente', async () => {
-    const service = servicio(null, null, { nextNumber: 15 });
+    const service = servicio(null, null, { nextNumber: 14 });
 
     await expect(service.siguienteLote(COP)).resolves.toBe(15);
   });
 
   it('avanza uno por lote y nunca repite', async () => {
-    const service = servicio(null, null, { nextNumber: 1 });
+    const service = servicio(null, null, { nextNumber: 0 });
 
     const numeros = [
       await service.siguienteLote(COP),

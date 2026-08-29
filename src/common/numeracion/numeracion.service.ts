@@ -150,15 +150,14 @@ export class NumeracionService {
    * prefix and no external range, just a running integer per building.
    */
   async siguienteLote(coPropertyId: string): Promise<number> {
-    const previa = await this.consecutivosLote
+    const actualizado = await this.consecutivosLote
       .findOneAndUpdate(
         { coPropertyId: new Types.ObjectId(coPropertyId) },
         { $inc: { nextNumber: 1 } },
-        { new: false, upsert: true },
+        { new: true, upsert: true },
       )
       .exec();
 
-    if (!previa) return 1;
-    return previa.nextNumber;
+    return actualizado.nextNumber;
   }
 }
