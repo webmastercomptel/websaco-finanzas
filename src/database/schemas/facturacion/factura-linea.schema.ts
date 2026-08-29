@@ -50,16 +50,16 @@ export class FacturaLinea {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  nombreConcepto: string;
+  conceptName: string;
 
   @Prop({
     required: true,
     enum: ['administracion', 'intereses', 'otro'],
   })
-  tipoConcepto: 'administracion' | 'intereses' | 'otro';
+  conceptKind: 'administracion' | 'intereses' | 'otro';
 
   @Prop({ type: String, default: null, trim: true })
-  cuentaContableIngreso: string | null;
+  accountingIncomeAccount: string | null;
 
   /** Whether this line came from the unit's standing monthly template, a
    *  one-off novedad for this run, or the computed mora interest line. */
@@ -67,19 +67,19 @@ export class FacturaLinea {
     required: true,
     enum: ['recurrente', 'novedad', 'interes'],
   })
-  origen: 'recurrente' | 'novedad' | 'interes';
+  source: 'recurrente' | 'novedad' | 'interes';
 
   @Prop({ required: true })
-  valorBase: number;
+  baseAmount: number;
 
   @Prop({ required: true, default: 0 })
-  tasaImpuesto: number;
+  taxRate: number;
 
   @Prop({ required: true, default: 0 })
-  valorImpuesto: number;
+  taxAmount: number;
 
   @Prop({ required: true })
-  valorTotal: number;
+  totalAmount: number;
 }
 
 export const FacturaLineaSchema = SchemaFactory.createForClass(FacturaLinea);

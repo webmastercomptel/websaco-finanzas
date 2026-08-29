@@ -50,13 +50,13 @@ export class Factura {
   /** Frozen — see the note on Tercero's schema for why a unit's code
    *  changing later must not alter an already-issued document. */
   @Prop({ required: true, trim: true })
-  inmuebleCodigo: string;
+  unitCode: string;
 
   @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
-  titular: TitularCongelado | null;
+  holder: TitularCongelado | null;
 
   @Prop({
     type: Types.ObjectId,
@@ -66,34 +66,34 @@ export class Factura {
   resolucionId: Types.ObjectId;
 
   @Prop({ required: true, trim: true, default: '' })
-  prefijo: string;
+  prefix: string;
 
   @Prop({ required: true })
-  numero: number;
+  number: number;
 
   @Prop({ required: true, trim: true })
-  numeroCompleto: string;
+  fullNumber: string;
 
   @Prop({ required: true })
-  fechaEmision: Date;
+  issueDate: Date;
 
   @Prop({ required: true })
-  fechaVencimiento: Date;
+  dueDate: Date;
 
   @Prop({ required: true })
-  periodoDesde: Date;
+  periodStart: Date;
 
   @Prop({ required: true })
-  periodoHasta: Date;
+  periodEnd: Date;
 
   @Prop({ type: [FacturaLineaSchema], required: true, default: [] })
-  lineas: FacturaLinea[];
+  lines: FacturaLinea[];
 
   @Prop({ required: true })
   subtotal: number;
 
   @Prop({ required: true, default: 0 })
-  totalImpuestos: number;
+  totalTax: number;
 
   @Prop({ required: true })
   total: number;
@@ -101,15 +101,15 @@ export class Factura {
   /** The one mutable field on an otherwise immutable document. Starts equal
    *  to `total`; a future Recibo decreases it. */
   @Prop({ required: true })
-  saldoPendiente: number;
+  outstandingBalance: number;
 
   @Prop({ required: true, enum: ['emitida', 'anulada'], default: 'emitida' })
-  estado: 'emitida' | 'anulada';
+  status: 'emitida' | 'anulada';
 
   /** Exists now so voiding, once NotaCredito is designed, fills this field
    *  instead of migrating the schema. */
   @Prop({ type: Types.ObjectId, default: null })
-  anuladaPorNotaCreditoId: Types.ObjectId | null;
+  voidedByCreditNoteId: Types.ObjectId | null;
 }
 
 export const FacturaSchema = SchemaFactory.createForClass(Factura);
@@ -118,4 +118,4 @@ export const FacturaSchema = SchemaFactory.createForClass(Factura);
 // (NumeracionService's atomic reservation), but a compound index here makes
 // that guarantee visible to the database too, not just to the code path
 // that happens to be the only writer today.
-FacturaSchema.index({ coPropertyId: 1, numeroCompleto: 1 }, { unique: true });
+FacturaSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
