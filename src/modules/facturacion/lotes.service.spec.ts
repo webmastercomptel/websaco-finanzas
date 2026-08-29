@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { LotesFacturacionService } from './lotes.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { NumeracionService } from '../../common/numeracion/numeracion.service';
+import type { PeriodoService } from '../../common/contabilidad/periodo.service';
 
 type Filtro = Record<string, unknown>;
 
@@ -565,5 +566,270 @@ describe('LotesFacturacionService.liquidar', () => {
     const preliminar = actualizacion.$set.preview[0];
     expect(preliminar.holder).toBeNull();
     expect(preliminar.terceroId).toBeNull();
+  });
+});
+
+describe('LotesFacturacionService.consolidar', () => {
+  const preliminar = (over: Record<string, unknown> = {}) => ({
+    inmuebleId: 'inm-1',
+    unitCode: '301',
+    terceroId: 'ter-1',
+    holder: { name: 'Ana Pérez', identificationNumber: '123456' },
+    lines: [
+      {
+        conceptoId: 'con-1',
+        conceptName: 'Administración',
+        conceptKind: 'administracion',
+        accountingIncomeAccount: '413501',
+        source: 'recurrente',
+        baseAmount: 520000,
+        taxRate: 0,
+        taxAmount: 0,
+        totalAmount: 520000,
+      },
+    ],
+    subtotal: 520000,
+    totalTax: 0,
+    total: 520000,
+    ...over,
+  });
+
+  const construirModelos = (opts: {
+    preview?: unknown[];
+    copropiedad?: Record<string, unknown>;
+  }) => {
+    const facturasCreadas: Record<string, unknown>[] = [];
+    const saldosActualizados: Filtro[] = [];
+    const asientosCreados: Record<string, unknown>[] = [];
+
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(
+            loteDoc({
+              status: 'liquidado',
+              preview: opts.preview ?? [preliminar()],
+            }),
+          ),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+      })),
+    };
+    const facturas = {
+      create: jest.fn((doc: Record<string, unknown>) => {
+        facturasCreadas.push(doc);
+        return Promise.resolve({
+          _id: { toString: () => `fac-${facturasCreadas.length}` },
+        });
+      }),
+    };
+    const saldos = {
+      findOneAndUpdate: jest.fn((filtro: Filtro) => {
+        saldosActualizados.push(filtro);
+        return { exec: () => Promise.resolve({}) };
+      }),
+    };
+    const asientos = {
+      create: jest.fn((doc: Record<string, unknown>) => {
+        asientosCreados.push(doc);
+        return Promise.resolve(doc);
+      }),
+    };
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(opts.copropiedad ?? { receivablesAccount: '130501' }),
+      })),
+    };
+    return {
+      lotes,
+      facturas,
+      saldos,
+      asientos,
+      copropiedades,
+      facturasCreadas,
+      saldosActualizados,
+      asientosCreados,
+    };
+  };
+
+  const periodoAbierto = (): PeriodoService =>
+    ({
+      exigirAbierto: jest.fn().mockResolvedValue(undefined),
+    }) as unknown as PeriodoService;
+
+  it('numera, crea la factura, incrementa el saldo de cartera y postea el asiento, por cada fila', async () => {
+    const m = construirModelos({});
+
+    // NumeracionService.siguienteFactura is a distinct method from
+    // siguienteLote — this describe block's stub needs both.
+    const numeracion = {
+      siguienteLote: jest.fn().mockResolvedValue(1),
+      siguienteFactura: jest.fn().mockResolvedValue({
+        prefijo: 'CONJ-2026',
+        numero: 1041,
+        completo: 'CONJ-2026-1041',
+        resolucionId: new Types.ObjectId(),
+      }),
+    } as unknown as NumeracionService;
+
+    // See the canonical constructor order pinned in Task 6, Step 5 — every
+    // test in Tasks 7, 9, and 10 passes all twelve arguments in that exact
+    // order, not just the ones a given test cares about.
+    const servicio2 = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos — unused by consolidar()
+      {} as never, // valoresRecurrentes — unused by consolidar()
+      {} as never, // inmuebles — unused by consolidar()
+      {} as never, // terceros — unused by consolidar()
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    const resultado = await servicio2.consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      fullNumber: 'CONJ-2026-1041',
+      unitCode: '301',
+      total: 520000,
+      outstandingBalance: 520000,
+      status: 'emitida',
+    });
+    expect(m.saldosActualizados[0]).toMatchObject({
+      inmuebleId: 'inm-1',
+      conceptoId: 'con-1',
+    });
+    expect(m.asientosCreados[0].entries).toHaveLength(2);
+    expect(resultado.errores).toEqual([]);
+  });
+
+  it('exige el periodo abierto ANTES de numerar nada', async () => {
+    const m = construirModelos({});
+    const periodo = {
+      exigirAbierto: jest
+        .fn()
+        .mockRejectedValue(new ConflictException('cerrado')),
+    } as unknown as PeriodoService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodo,
+      numeracionCon(),
+    );
+
+    await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(m.facturas.create).not.toHaveBeenCalled();
+  });
+
+  it('detiene todo el lote si la resolución se agota a mitad de camino, sin reintentar fila por fila', async () => {
+    const m = construirModelos({
+      preview: [preliminar(), preliminar({ unitCode: '302' })],
+    });
+    // Kept as a separate reference and asserted on directly below — reading
+    // it back off `numeracion` (typed as the real NumeracionService) is what
+    // @typescript-eslint/unbound-method warns about; see the same pattern in
+    // firebase-usuarios.service.spec.ts.
+    const siguienteFactura = jest
+      .fn()
+      .mockResolvedValueOnce({
+        prefijo: '',
+        numero: 1,
+        completo: '1',
+        resolucionId: new Types.ObjectId(),
+      })
+      .mockRejectedValueOnce(new ConflictException('rango agotado'));
+    const numeracion = {
+      siguienteLote: jest.fn(),
+      siguienteFactura,
+    } as unknown as NumeracionService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    const resultado = await service.consolidar('lote-1');
+
+    expect(m.facturasCreadas).toHaveLength(1);
+    expect(siguienteFactura).toHaveBeenCalledTimes(2);
+    expect(resultado.lote.estado).not.toBe('consolidado');
+  });
+
+  it('rechaza consolidar un lote que ya está consolidado', async () => {
+    const m = construirModelos({});
+    m.lotes.findOne = jest.fn(() => ({
+      exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+    }));
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracionCon(),
+    );
+
+    await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(m.facturas.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza (sin guardar) un asiento desbalanceado en vez de posearlo', async () => {
+    // A preliminar whose declared `total` does not match the sum of its
+    // lines' totalAmount — the only way to get construirMovimientos to
+    // produce an unbalanced entry, since it derives credits from the lines
+    // but the debit from `total` directly.
+    const m = construirModelos({
+      preview: [preliminar({ total: 999999 })],
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracionCon(),
+    );
+
+    await expect(service.consolidar('lote-1')).rejects.toThrow(/desbalanceado/);
+    expect(m.asientos.create).not.toHaveBeenCalled();
   });
 });

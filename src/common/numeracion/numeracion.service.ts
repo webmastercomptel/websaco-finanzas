@@ -26,6 +26,9 @@ export interface NumeroAsignado {
   numero: number;
   /** How it is printed and searched for: "CONJ-2026-1041". */
   completo: string;
+  /** Only set by siguienteFactura — siguienteDocumento's internal documents
+   *  (RC/NC/ND/NT) draw from ConsecutivoDocumento, not a tax resolution. */
+  resolucionId?: Types.ObjectId;
 }
 
 const componer = (prefijo: string, numero: number): NumeroAsignado => ({
@@ -79,7 +82,11 @@ export class NumeracionService {
       )
       .exec();
 
-    if (previa) return componer(previa.prefix, previa.nextNumber);
+    if (previa)
+      return {
+        ...componer(previa.prefix, previa.nextNumber),
+        resolucionId: previa._id,
+      };
 
     // Nothing matched. Two very different situations, and telling them apart is
     // the difference between "ask an administrator to load the resolution" and

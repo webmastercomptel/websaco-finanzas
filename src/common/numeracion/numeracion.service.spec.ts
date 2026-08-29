@@ -100,6 +100,7 @@ const servicio = (
   );
 
 const resolucionActiva = (over: Record<string, unknown> = {}) => ({
+  _id: new Types.ObjectId(),
   resolutionNumber: '18764000001',
   prefix: 'CONJ-2026',
   rangeFrom: 1,
@@ -110,13 +111,15 @@ const resolucionActiva = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('NumeracionService.siguienteFactura', () => {
-  it('entrega el número con su prefijo', async () => {
-    const service = servicio(resolucionActiva({ nextNumber: 1041 }));
+  it('entrega el número con su prefijo y el id de la resolución', async () => {
+    const resolucion = resolucionActiva({ nextNumber: 1041 });
+    const service = servicio(resolucion);
 
     await expect(service.siguienteFactura(COP)).resolves.toEqual({
       prefijo: 'CONJ-2026',
       numero: 1041,
       completo: 'CONJ-2026-1041',
+      resolucionId: resolucion._id,
     });
   });
 

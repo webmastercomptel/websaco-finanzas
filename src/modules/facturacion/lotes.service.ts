@@ -43,12 +43,17 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
-import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import {
+  NumeracionService,
+  type NumeroAsignado,
+} from '../../common/numeracion/numeracion.service';
 import type { LoteFacturacion as LoteContract } from '../../contracts';
 import { toLote } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
 import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
 import type { ResultadoCargaNovedades } from '../../contracts';
+import type { ErrorConsolidacion } from '../../contracts';
+import { construirMovimientos, CUENTA_SIN_ASIGNAR } from './asiento.builder';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -290,6 +295,166 @@ export class LotesFacturacionService {
       .exec();
 
     return toLote(actualizado!);
+  }
+
+  /**
+   * Commits a liquidado Lote: reserves a real number per row, creates the
+   * Factura, updates SaldoCartera, and posts the AsientoContable — all for
+   * one row, before moving to the next.
+   *
+   * The period is checked ONCE, up front: every row shares the same
+   * `fechaFacturacion`, so one check covers the whole batch. Rows fail
+   * independently EXCEPT resolution exhaustion or absence, which is a
+   * global blocker — every remaining row would fail identically, so the
+   * loop stops there instead of repeating the same failure for each one.
+   * The Lote stays `liquidado`, not `consolidado`, until every previewed
+   * row has a number.
+   */
+  async consolidar(
+    loteId: string,
+  ): Promise<{ lote: LoteContract; errores: ErrorConsolidacion[] }> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
+    // Spec §3.1.1: "Once consolidado, it is historical and immutable; a new
+    // run starts a new Lote." Without this guard, a retried request or a
+    // double click would re-create every Factura, re-increment every
+    // SaldoCartera, and re-post every AsientoContable for the same batch.
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(`El lote ${loteId} ya fue consolidado`);
+    }
+
+    await this.periodo.exigirAbierto(coPropertyId.toString(), lote.billingDate);
+
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+
+    const errores: ErrorConsolidacion[] = [];
+    const facturaIds: string[] = [];
+    let montoTotal = 0;
+
+    for (const [indice, preliminar] of lote.preview.entries()) {
+      // Spec §6, "Unbalanced AsientoContable": refused before it would be
+      // saved — and before a real DIAN number or any document is created
+      // for this row. This checks a bug in the posting logic itself, not a
+      // data problem a re-run fixes, so it is thrown (uncaught by the
+      // per-row error handling below), not recorded as a row error.
+      const entries = construirMovimientos(preliminar, cuentaCartera);
+      const sumaDebitos = entries
+        .filter((m) => m.type === 'debito')
+        .reduce((acc, m) => acc + m.amount, 0);
+      const sumaCreditos = entries
+        .filter((m) => m.type === 'credito')
+        .reduce((acc, m) => acc + m.amount, 0);
+      if (sumaDebitos !== sumaCreditos) {
+        throw new Error(
+          `Asiento contable desbalanceado para la unidad ${preliminar.unitCode}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
+        );
+      }
+
+      let numero: NumeroAsignado;
+      try {
+        numero = await this.numeracion.siguienteFactura(
+          coPropertyId.toString(),
+        );
+      } catch (err) {
+        // Global blocker: every remaining row would fail the same way.
+        errores.push({
+          fila: indice + 1,
+          inmuebleCodigo: preliminar.unitCode,
+          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+        });
+        break;
+      }
+
+      const factura = await this.facturas.create({
+        coPropertyId,
+        loteId,
+        inmuebleId: preliminar.inmuebleId,
+        unitCode: preliminar.unitCode,
+        terceroId: preliminar.terceroId,
+        holder: preliminar.holder,
+        // Always set on this path — only siguienteDocumento's internal
+        // documents (RC/NC/ND/NT) omit it. See NumeroAsignado's own comment.
+        resolucionId: numero.resolucionId!,
+        prefix: numero.prefijo,
+        number: numero.numero,
+        fullNumber: numero.completo,
+        issueDate: lote.billingDate,
+        dueDate: lote.dueDate,
+        periodStart: lote.periodStart,
+        periodEnd: lote.periodEnd,
+        lines: preliminar.lines,
+        subtotal: preliminar.subtotal,
+        totalTax: preliminar.totalTax,
+        total: preliminar.total,
+        outstandingBalance: preliminar.total,
+        status: 'emitida',
+      });
+      facturaIds.push(factura._id.toString());
+      montoTotal += preliminar.total;
+
+      for (const linea of preliminar.lines) {
+        await this.saldos
+          .findOneAndUpdate(
+            {
+              coPropertyId,
+              inmuebleId: preliminar.inmuebleId,
+              conceptoId: linea.conceptoId,
+            },
+            {
+              $inc: { balance: linea.totalAmount },
+              $setOnInsert: {
+                coPropertyId,
+                inmuebleId: preliminar.inmuebleId,
+                conceptoId: linea.conceptoId,
+              },
+            },
+            { upsert: true },
+          )
+          .exec();
+      }
+
+      await this.asientos.create({
+        coPropertyId,
+        loteId,
+        facturaId: factura._id.toString(),
+        date: lote.billingDate,
+        entries,
+      });
+    }
+
+    const consolidadoDelTodo = errores.length === 0;
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId },
+        {
+          $set: {
+            status: consolidadoDelTodo ? 'consolidado' : 'liquidado',
+            invoiceIds: facturaIds,
+            summary: consolidadoDelTodo
+              ? {
+                  totalAmount: montoTotal,
+                  totalInvoices: facturaIds.length,
+                  totalUnits: facturaIds.length,
+                }
+              : null,
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    // On a partial failure, the persisted status is `liquidado` (see the
+    // $set above), which is exactly what the pre-update `lote` already
+    // holds — using it here means the returned contract never depends on
+    // the round-trip echoing back the write we just issued.
+    return {
+      lote: consolidadoDelTodo ? toLote(actualizado!) : toLote(lote),
+      errores,
+    };
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —

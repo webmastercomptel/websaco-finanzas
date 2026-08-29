@@ -214,6 +214,14 @@ export interface LoteFacturacion {
   } | null;
 }
 
+/** One row's outcome from consolidando a Lote that could not be numbered. */
+export interface ErrorConsolidacion {
+  /** 1-based, matching the row order in the Lote's `previsualizacion`. */
+  fila: number;
+  inmuebleCodigo: string;
+  mensaje: string;
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
