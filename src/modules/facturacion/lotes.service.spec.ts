@@ -594,9 +594,23 @@ describe('LotesFacturacionService.consolidar', () => {
     ...over,
   });
 
+  type ActualizacionConsolidar = {
+    $set: {
+      status: string;
+      invoiceIds: string[];
+      summary: Record<string, unknown> | null;
+    };
+  };
+  const actualizacionDe = (mockFn: jest.Mock) => {
+    const calls = mockFn.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [unknown, ActualizacionConsolidar];
+    return actualizacion;
+  };
+
   const construirModelos = (opts: {
     preview?: unknown[];
     copropiedad?: Record<string, unknown>;
+    facturasExistentes?: Record<string, unknown>[];
   }) => {
     const facturasCreadas: Record<string, unknown>[] = [];
     const saldosActualizados: Filtro[] = [];
@@ -617,6 +631,12 @@ describe('LotesFacturacionService.consolidar', () => {
       })),
     };
     const facturas = {
+      // Resume support: an already-existing Factura for this Lote (from an
+      // earlier partial attempt) must be visible before the loop starts, so
+      // consolidar() can skip re-invoicing its unit.
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.facturasExistentes ?? []),
+      })),
       create: jest.fn((doc: Record<string, unknown>) => {
         facturasCreadas.push(doc);
         return Promise.resolve({
@@ -778,12 +798,47 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(m.facturasCreadas).toHaveLength(1);
     expect(siguienteFactura).toHaveBeenCalledTimes(2);
     expect(resultado.lote.estado).not.toBe('consolidado');
+    expect(resultado.errores).toEqual([
+      { fila: 2, inmuebleCodigo: '302', mensaje: 'rango agotado' },
+    ]);
+    // The RETURNED contract matching 'liquidado' isn't enough on its own —
+    // pin what was actually persisted too, since the mocked
+    // findOneAndUpdate's resolved value is unrelated to its own $set.
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.status).toBe('liquidado');
+    expect(actualizacion.$set.summary).toBeNull();
   });
 
   it('rechaza consolidar un lote que ya está consolidado', async () => {
     const m = construirModelos({});
     m.lotes.findOne = jest.fn(() => ({
       exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+    }));
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracionCon(),
+    );
+
+    await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(m.facturas.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza consolidar un lote que nunca fue liquidado (borrador)', async () => {
+    const m = construirModelos({});
+    m.lotes.findOne = jest.fn(() => ({
+      exec: () => Promise.resolve(loteDoc({ status: 'borrador', preview: [] })),
     }));
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -830,6 +885,69 @@ describe('LotesFacturacionService.consolidar', () => {
     );
 
     await expect(service.consolidar('lote-1')).rejects.toThrow(/desbalanceado/);
+    expect(m.facturas.create).not.toHaveBeenCalled();
     expect(m.asientos.create).not.toHaveBeenCalled();
+  });
+
+  it('en un reintento, no vuelve a facturar una unidad que ya tiene Factura en este lote', async () => {
+    // Simulates the second call after a first attempt stopped partway:
+    // inm-1 already has a real Factura from that first attempt; inm-2 does
+    // not yet.
+    const m = construirModelos({
+      preview: [
+        preliminar(),
+        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+      ],
+      facturasExistentes: [
+        {
+          _id: { toString: () => 'fac-previo' },
+          inmuebleId: { toString: () => 'inm-1' },
+          total: 520000,
+        },
+      ],
+    });
+    // Kept as a separate reference and asserted on directly below — see the
+    // same @typescript-eslint/unbound-method note above.
+    const siguienteFactura = jest.fn().mockResolvedValue({
+      prefijo: 'CONJ-2026',
+      numero: 1042,
+      completo: 'CONJ-2026-1042',
+      resolucionId: new Types.ObjectId(),
+    });
+    const numeracion = {
+      siguienteLote: jest.fn(),
+      siguienteFactura,
+    } as unknown as NumeracionService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    const resultado = await service.consolidar('lote-1');
+
+    // Only the not-yet-invoiced unit gets a NEW Factura.
+    expect(m.facturasCreadas).toHaveLength(1);
+    expect(m.facturasCreadas[0]).toMatchObject({ unitCode: '302' });
+    expect(siguienteFactura).toHaveBeenCalledTimes(1);
+    // The pre-existing invoice is carried forward, not dropped.
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.invoiceIds).toEqual(
+      expect.arrayContaining(['fac-previo', 'fac-1']),
+    );
+    expect(actualizacion.$set.status).toBe('consolidado');
+    expect(
+      (actualizacion.$set.summary as { totalAmount: number }).totalAmount,
+    ).toBe(1040000);
+    expect(resultado.errores).toEqual([]);
   });
 });

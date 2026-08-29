@@ -318,12 +318,17 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    // Spec §3.1.1: "Once consolidado, it is historical and immutable; a new
-    // run starts a new Lote." Without this guard, a retried request or a
-    // double click would re-create every Factura, re-increment every
-    // SaldoCartera, and re-post every AsientoContable for the same batch.
-    if (lote.status === 'consolidado') {
-      throw new ConflictException(`El lote ${loteId} ya fue consolidado`);
+    // Spec §3.1.1: only a liquidado Lote may be consolidated. Rejects an
+    // already-consolidado lote (historical and immutable — a retried
+    // request/double-click must not re-create every Factura, re-increment
+    // every SaldoCartera, and re-post every AsientoContable) AND a borrador
+    // one (never liquidado, so `preview` is empty — consolidating it would
+    // burn the coproperty's one active-lote slot on a batch that produced
+    // nothing and can never be corrected).
+    if (lote.status !== 'liquidado') {
+      throw new ConflictException(
+        `El lote ${loteId} debe estar liquidado antes de consolidar (estado actual: ${lote.status})`,
+      );
     }
 
     await this.periodo.exigirAbierto(coPropertyId.toString(), lote.billingDate);
@@ -331,16 +336,35 @@ export class LotesFacturacionService {
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
 
+    // Resume support: if an earlier attempt at this same Lote already
+    // created some Facturas before a resolution-exhaustion blocker stopped
+    // it, a retry must not re-invoice those units — nothing else in this
+    // method (not the {coPropertyId, fullNumber} index, which only stops
+    // number reuse) would catch that, and a fresh number would just create
+    // a second, duplicate invoice while double-incrementing SaldoCartera.
+    const facturasExistentes = await this.facturas
+      .find({ coPropertyId, loteId })
+      .exec();
+    const unidadesYaFacturadas = new Set(
+      facturasExistentes.map((f) => f.inmuebleId.toString()),
+    );
+    const facturaIds: string[] = facturasExistentes.map((f) =>
+      f._id.toString(),
+    );
+    let montoTotal = facturasExistentes.reduce((acc, f) => acc + f.total, 0);
+
     const errores: ErrorConsolidacion[] = [];
-    const facturaIds: string[] = [];
-    let montoTotal = 0;
 
     for (const [indice, preliminar] of lote.preview.entries()) {
+      if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {
+        continue;
+      }
+
       // Spec §6, "Unbalanced AsientoContable": refused before it would be
       // saved — and before a real DIAN number or any document is created
       // for this row. This checks a bug in the posting logic itself, not a
-      // data problem a re-run fixes, so it is thrown (uncaught by the
-      // per-row error handling below), not recorded as a row error.
+      // data problem a re-run fixes, so it is thrown (uncaught, propagates
+      // out of consolidar entirely), not recorded as a row error.
       const entries = construirMovimientos(preliminar, cuentaCartera);
       const sumaDebitos = entries
         .filter((m) => m.type === 'debito')
@@ -369,61 +393,74 @@ export class LotesFacturacionService {
         break;
       }
 
-      const factura = await this.facturas.create({
-        coPropertyId,
-        loteId,
-        inmuebleId: preliminar.inmuebleId,
-        unitCode: preliminar.unitCode,
-        terceroId: preliminar.terceroId,
-        holder: preliminar.holder,
-        // Always set on this path — only siguienteDocumento's internal
-        // documents (RC/NC/ND/NT) omit it. See NumeroAsignado's own comment.
-        resolucionId: numero.resolucionId!,
-        prefix: numero.prefijo,
-        number: numero.numero,
-        fullNumber: numero.completo,
-        issueDate: lote.billingDate,
-        dueDate: lote.dueDate,
-        periodStart: lote.periodStart,
-        periodEnd: lote.periodEnd,
-        lines: preliminar.lines,
-        subtotal: preliminar.subtotal,
-        totalTax: preliminar.totalTax,
-        total: preliminar.total,
-        outstandingBalance: preliminar.total,
-        status: 'emitida',
-      });
-      facturaIds.push(factura._id.toString());
-      montoTotal += preliminar.total;
+      // A real number is already consumed at this point — per the
+      // numbering law ("a document that fails to save leaves a gap, and a
+      // gap is the honest outcome"), any failure from here on is THIS
+      // row's own data problem, not a global blocker: record it and move
+      // to the next row instead of aborting the whole batch.
+      try {
+        const factura = await this.facturas.create({
+          coPropertyId,
+          loteId,
+          inmuebleId: preliminar.inmuebleId,
+          unitCode: preliminar.unitCode,
+          terceroId: preliminar.terceroId,
+          holder: preliminar.holder,
+          // Always set on this path — only siguienteDocumento's internal
+          // documents (RC/NC/ND/NT) omit it. See NumeroAsignado's own comment.
+          resolucionId: numero.resolucionId!,
+          prefix: numero.prefijo,
+          number: numero.numero,
+          fullNumber: numero.completo,
+          issueDate: lote.billingDate,
+          dueDate: lote.dueDate,
+          periodStart: lote.periodStart,
+          periodEnd: lote.periodEnd,
+          lines: preliminar.lines,
+          subtotal: preliminar.subtotal,
+          totalTax: preliminar.totalTax,
+          total: preliminar.total,
+          outstandingBalance: preliminar.total,
+          status: 'emitida',
+        });
+        facturaIds.push(factura._id.toString());
+        montoTotal += preliminar.total;
 
-      for (const linea of preliminar.lines) {
-        await this.saldos
-          .findOneAndUpdate(
-            {
-              coPropertyId,
-              inmuebleId: preliminar.inmuebleId,
-              conceptoId: linea.conceptoId,
-            },
-            {
-              $inc: { balance: linea.totalAmount },
-              $setOnInsert: {
+        for (const linea of preliminar.lines) {
+          await this.saldos
+            .findOneAndUpdate(
+              {
                 coPropertyId,
                 inmuebleId: preliminar.inmuebleId,
                 conceptoId: linea.conceptoId,
               },
-            },
-            { upsert: true },
-          )
-          .exec();
-      }
+              {
+                $inc: { balance: linea.totalAmount },
+                $setOnInsert: {
+                  coPropertyId,
+                  inmuebleId: preliminar.inmuebleId,
+                  conceptoId: linea.conceptoId,
+                },
+              },
+              { upsert: true },
+            )
+            .exec();
+        }
 
-      await this.asientos.create({
-        coPropertyId,
-        loteId,
-        facturaId: factura._id.toString(),
-        date: lote.billingDate,
-        entries,
-      });
+        await this.asientos.create({
+          coPropertyId,
+          loteId,
+          facturaId: factura._id.toString(),
+          date: lote.billingDate,
+          entries,
+        });
+      } catch (err) {
+        errores.push({
+          fila: indice + 1,
+          inmuebleCodigo: preliminar.unitCode,
+          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
     }
 
     const consolidadoDelTodo = errores.length === 0;
