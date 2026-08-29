@@ -4,7 +4,6 @@ import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
 import { Account } from '../cuentas/account.schema';
-import { Factura } from './factura.schema';
 import {
   FacturaLinea,
   FacturaLineaSchema,
@@ -128,7 +127,7 @@ export class LoteFacturacion {
 
   @Prop({
     type: [Types.ObjectId],
-    ref: Factura.name,
+    ref: 'Factura',
     required: true,
     default: [],
   })

@@ -3,7 +3,6 @@ import { HydratedDocument, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
-import { LoteFacturacion } from './lote-facturacion.schema';
 import { ResolucionFacturacion } from '../numeracion/resolucion-facturacion.schema';
 import {
   FacturaLinea,
@@ -33,7 +32,7 @@ export class Factura {
 
   @Prop({
     type: Types.ObjectId,
-    ref: LoteFacturacion.name,
+    ref: 'LoteFacturacion',
     required: true,
     index: true,
   })
