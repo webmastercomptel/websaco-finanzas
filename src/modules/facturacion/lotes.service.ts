@@ -307,8 +307,14 @@ export class LotesFacturacionService {
    * independently EXCEPT resolution exhaustion or absence, which is a
    * global blocker — every remaining row would fail identically, so the
    * loop stops there instead of repeating the same failure for each one.
-   * The Lote stays `liquidado`, not `consolidado`, until every previewed
-   * row has a number.
+   * A row whose Factura was created but whose SaldoCartera/AsientoContable
+   * write then failed is recorded as its own per-row error, not retried
+   * automatically on the next call (that would mean either duplicating a
+   * real DIAN number or re-running a non-idempotent `$inc`) — it surfaces
+   * as a standing error until a human reconciles it.
+   * The Lote reaches `consolidado` only when every previewed row has both
+   * a number AND a fully posted Factura/SaldoCartera/AsientoContable —
+   * never while any row, past or present, is still incomplete.
    */
   async consolidar(
     loteId: string,
@@ -337,23 +343,55 @@ export class LotesFacturacionService {
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
 
     // Resume support: if an earlier attempt at this same Lote already
-    // created some Facturas before a resolution-exhaustion blocker stopped
-    // it, a retry must not re-invoice those units — nothing else in this
-    // method (not the {coPropertyId, fullNumber} index, which only stops
-    // number reuse) would catch that, and a fresh number would just create
-    // a second, duplicate invoice while double-incrementing SaldoCartera.
+    // created some Facturas before a resolution-exhaustion blocker (or a
+    // per-row write failure below) stopped it, a retry must never re-invoice
+    // those units — nothing else in this method (not the
+    // {coPropertyId, fullNumber} index, which only stops number reuse) would
+    // catch that, and a fresh number would just create a second, duplicate
+    // invoice while double-incrementing SaldoCartera.
+    //
+    // A Factura existing is not by itself proof the row finished: the
+    // per-row catch below can leave one behind with no matching
+    // SaldoCartera increment or AsientoContable. Re-running that increment
+    // isn't safe (it isn't idempotent — that's the same reason this whole
+    // method has no transaction), and re-invoicing the unit would mint a
+    // second real DIAN number for it, so an incomplete row is surfaced as a
+    // standing error on every retry instead — never silently completed and
+    // never silently retried.
     const facturasExistentes = await this.facturas
-      .find({ coPropertyId, loteId })
+      .find({ coPropertyId, loteId, status: 'emitida' })
       .exec();
+    const idsExistentes = facturasExistentes.map((f) => f._id.toString());
+    const asientosExistentes = await this.asientos
+      .find({ coPropertyId, loteId, facturaId: { $in: idsExistentes } })
+      .exec();
+    const idsConAsiento = new Set(
+      asientosExistentes.map((a) => a.facturaId.toString()),
+    );
+
     const unidadesYaFacturadas = new Set(
       facturasExistentes.map((f) => f.inmuebleId.toString()),
     );
-    const facturaIds: string[] = facturasExistentes.map((f) =>
-      f._id.toString(),
-    );
-    let montoTotal = facturasExistentes.reduce((acc, f) => acc + f.total, 0);
-
+    const facturaIds: string[] = [];
+    let montoTotal = 0;
     const errores: ErrorConsolidacion[] = [];
+
+    for (const factura of facturasExistentes) {
+      const facturaId = factura._id.toString();
+      facturaIds.push(facturaId);
+      if (idsConAsiento.has(facturaId)) {
+        montoTotal += factura.total;
+        continue;
+      }
+      const filaEnPreview = lote.preview.findIndex(
+        (p) => p.inmuebleId.toString() === factura.inmuebleId.toString(),
+      );
+      errores.push({
+        fila: filaEnPreview >= 0 ? filaEnPreview + 1 : 0,
+        inmuebleCodigo: factura.unitCode,
+        mensaje: `La factura ${factura.fullNumber} quedó incompleta en un intento anterior (falta su asiento contable) y requiere reconciliación manual`,
+      });
+    }
 
     for (const [indice, preliminar] of lote.preview.entries()) {
       if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {

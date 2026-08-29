@@ -611,6 +611,7 @@ describe('LotesFacturacionService.consolidar', () => {
     preview?: unknown[];
     copropiedad?: Record<string, unknown>;
     facturasExistentes?: Record<string, unknown>[];
+    asientosExistentes?: Record<string, unknown>[];
   }) => {
     const facturasCreadas: Record<string, unknown>[] = [];
     const saldosActualizados: Filtro[] = [];
@@ -651,6 +652,11 @@ describe('LotesFacturacionService.consolidar', () => {
       }),
     };
     const asientos = {
+      // Resume support: which of the (possibly pre-existing) Facturas for
+      // this Lote already have their AsientoContable posted.
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.asientosExistentes ?? []),
+      })),
       create: jest.fn((doc: Record<string, unknown>) => {
         asientosCreados.push(doc);
         return Promise.resolve(doc);
@@ -905,6 +911,9 @@ describe('LotesFacturacionService.consolidar', () => {
           total: 520000,
         },
       ],
+      // fac-previo's AsientoContable was already posted — this row is
+      // genuinely done, not orphaned.
+      asientosExistentes: [{ facturaId: { toString: () => 'fac-previo' } }],
     });
     // Kept as a separate reference and asserted on directly below — see the
     // same @typescript-eslint/unbound-method note above.
@@ -949,5 +958,130 @@ describe('LotesFacturacionService.consolidar', () => {
       (actualizacion.$set.summary as { totalAmount: number }).totalAmount,
     ).toBe(1040000);
     expect(resultado.errores).toEqual([]);
+  });
+
+  it('registra un error por fila (y sigue con las demás) si falla la escritura después de numerar', async () => {
+    // Row 1's AsientoContable write fails after its Factura was already
+    // created; row 2 is unrelated and must still complete normally — this
+    // is a per-row data problem, not the global resolution-exhaustion
+    // blocker, so the loop must continue, not break.
+    const m = construirModelos({
+      preview: [
+        preliminar(),
+        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+      ],
+    });
+    m.asientos.create = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('Mongo se cayó'))
+      .mockResolvedValueOnce({}) as typeof m.asientos.create;
+    // Kept as a separate reference and asserted on directly below — see the
+    // same @typescript-eslint/unbound-method note above.
+    const siguienteFactura = jest.fn().mockResolvedValue({
+      prefijo: 'CONJ-2026',
+      numero: 1042,
+      completo: 'CONJ-2026-1042',
+      resolucionId: new Types.ObjectId(),
+    });
+    const numeracion = {
+      siguienteLote: jest.fn(),
+      siguienteFactura,
+    } as unknown as NumeracionService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    const resultado = await service.consolidar('lote-1');
+
+    // Both rows got a real number, both Facturas were created — the failure
+    // happened only on row 1's journal posting.
+    expect(siguienteFactura).toHaveBeenCalledTimes(2);
+    expect(m.facturasCreadas).toHaveLength(2);
+    expect(resultado.errores).toEqual([
+      expect.objectContaining({ fila: 1, inmuebleCodigo: '301' }),
+    ]);
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.status).toBe('liquidado');
+    expect(actualizacion.$set.summary).toBeNull();
+  });
+
+  it('nunca marca consolidado un lote con una factura previa incompleta (sin asiento)', async () => {
+    // inm-1's Factura from an earlier attempt exists, but its
+    // AsientoContable was never created — a prior per-row write failure
+    // between facturas.create() and asientos.create(). inm-2 is fine.
+    const m = construirModelos({
+      preview: [
+        preliminar(),
+        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+      ],
+      facturasExistentes: [
+        {
+          _id: { toString: () => 'fac-huerfana' },
+          inmuebleId: { toString: () => 'inm-1' },
+          unitCode: '301',
+          fullNumber: 'CONJ-2026-1040',
+          total: 520000,
+        },
+      ],
+      asientosExistentes: [], // no asiento for fac-huerfana
+    });
+    const numeracion = {
+      siguienteLote: jest.fn(),
+      siguienteFactura: jest.fn().mockResolvedValue({
+        prefijo: 'CONJ-2026',
+        numero: 1042,
+        completo: 'CONJ-2026-1042',
+        resolucionId: new Types.ObjectId(),
+      }),
+    } as unknown as NumeracionService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    const resultado = await service.consolidar('lote-1');
+
+    // inm-1 is NEVER re-invoiced (that would duplicate a real DIAN number)…
+    expect(m.facturasCreadas).toHaveLength(1);
+    expect(m.facturasCreadas[0]).toMatchObject({ unitCode: '302' });
+    // …but the batch can never silently complete while it's unposted.
+    expect(resultado.errores).toEqual([
+      expect.objectContaining({
+        inmuebleCodigo: '301',
+        // expect.stringContaining()'s declared return type is `any` — cast
+        // to keep the surrounding object literal's inferred type honest for
+        // @typescript-eslint/no-unsafe-assignment.
+        mensaje: expect.stringContaining('CONJ-2026-1040') as string,
+      }),
+    ]);
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacion.$set.status).toBe('liquidado');
+    expect(actualizacion.$set.summary).toBeNull();
+    // The orphaned invoice is still referenced — it exists, it just isn't
+    // counted toward a completed summary.
+    expect(actualizacion.$set.invoiceIds).toEqual(
+      expect.arrayContaining(['fac-huerfana', 'fac-1']),
+    );
   });
 });
