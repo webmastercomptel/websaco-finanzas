@@ -69,13 +69,33 @@ const consecutivosCon = (fila: Record<string, unknown> | null) => {
   };
 };
 
+const consecutivosLoteCon = (fila: Record<string, unknown> | null) => {
+  let estado = fila ? { ...fila } : null;
+
+  return {
+    findOneAndUpdate: jest.fn(() => ({
+      exec: () => {
+        if (!estado) {
+          estado = { nextNumber: 2 };
+          return Promise.resolve(null);
+        }
+        const previa = { ...estado };
+        estado.nextNumber = (estado.nextNumber as number) + 1;
+        return Promise.resolve(previa);
+      },
+    })),
+  };
+};
+
 const servicio = (
   resolucion: Record<string, unknown> | null,
   consecutivo: Record<string, unknown> | null = null,
+  consecutivoLote: Record<string, unknown> | null = null,
 ) =>
   new NumeracionService(
     resolucionesCon(resolucion) as never,
     consecutivosCon(consecutivo) as never,
+    consecutivosLoteCon(consecutivoLote) as never,
   );
 
 const resolucionActiva = (over: Record<string, unknown> = {}) => ({
@@ -163,6 +183,7 @@ describe('NumeracionService.siguienteFactura', () => {
     const service = new NumeracionService(
       resoluciones as never,
       consecutivosCon(null) as never,
+      consecutivosLoteCon(null) as never,
     );
 
     await service.siguienteFactura(COP);
@@ -198,5 +219,31 @@ describe('NumeracionService.siguienteDocumento', () => {
     await expect(service.siguienteDocumento(COP, 'NC')).resolves.toMatchObject({
       numero: 999999,
     });
+  });
+});
+
+describe('NumeracionService.siguienteLote', () => {
+  it('arranca en 1 la primera vez, creando el contador', async () => {
+    const service = servicio(null, null, null);
+
+    await expect(service.siguienteLote(COP)).resolves.toBe(1);
+  });
+
+  it('continúa desde el contador existente', async () => {
+    const service = servicio(null, null, { nextNumber: 15 });
+
+    await expect(service.siguienteLote(COP)).resolves.toBe(15);
+  });
+
+  it('avanza uno por lote y nunca repite', async () => {
+    const service = servicio(null, null, { nextNumber: 1 });
+
+    const numeros = [
+      await service.siguienteLote(COP),
+      await service.siguienteLote(COP),
+      await service.siguienteLote(COP),
+    ];
+
+    expect(numeros).toEqual([1, 2, 3]);
   });
 });

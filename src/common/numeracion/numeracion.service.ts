@@ -15,6 +15,10 @@ import {
   ConsecutivoDocumentoDocument,
   type TipoDocumento,
 } from '../../database/schemas/numeracion/consecutivo-documento.schema';
+import {
+  ConsecutivoLote,
+  ConsecutivoLoteDocument,
+} from '../../database/schemas/facturacion/consecutivo-lote.schema';
 
 /** A number handed out, ready to stamp on a document. */
 export interface NumeroAsignado {
@@ -37,6 +41,8 @@ export class NumeracionService {
     private readonly resoluciones: Model<ResolucionFacturacionDocument>,
     @InjectModel(ConsecutivoDocumento.name)
     private readonly consecutivos: Model<ConsecutivoDocumentoDocument>,
+    @InjectModel(ConsecutivoLote.name)
+    private readonly consecutivosLote: Model<ConsecutivoLoteDocument>,
   ) {}
 
   /**
@@ -135,5 +141,24 @@ export class NumeracionService {
     if (!previa) return componer(tipo, 1);
 
     return componer(previa.prefix, previa.nextNumber);
+  }
+
+  /**
+   * Reserves the next batch number for a coproperty's billing cycle.
+   *
+   * Same atomicity as siguienteDocumento, simpler shape: a Lote carries no
+   * prefix and no external range, just a running integer per building.
+   */
+  async siguienteLote(coPropertyId: string): Promise<number> {
+    const previa = await this.consecutivosLote
+      .findOneAndUpdate(
+        { coPropertyId: new Types.ObjectId(coPropertyId) },
+        { $inc: { nextNumber: 1 } },
+        { new: false, upsert: true },
+      )
+      .exec();
+
+    if (!previa) return 1;
+    return previa.nextNumber;
   }
 }

@@ -36,6 +36,10 @@ import {
   ConsecutivoDocumentoSchema,
 } from './schemas/numeracion/consecutivo-documento.schema';
 import {
+  ConsecutivoLote,
+  ConsecutivoLoteSchema,
+} from './schemas/facturacion/consecutivo-lote.schema';
+import {
   PeriodoContable,
   PeriodoContableSchema,
 } from './schemas/contabilidad/periodo-contable.schema';
@@ -51,6 +55,7 @@ const models = [
   { name: Asignacion.name, schema: AsignacionSchema },
   { name: ResolucionFacturacion.name, schema: ResolucionFacturacionSchema },
   { name: ConsecutivoDocumento.name, schema: ConsecutivoDocumentoSchema },
+  { name: ConsecutivoLote.name, schema: ConsecutivoLoteSchema },
   { name: PeriodoContable.name, schema: PeriodoContableSchema },
 ];
 
