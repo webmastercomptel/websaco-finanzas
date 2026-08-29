@@ -124,7 +124,7 @@ export class NumeracionService {
     coPropertyId: string,
     tipo: Exclude<TipoDocumento, 'FV'>,
   ): Promise<NumeroAsignado> {
-    const previa = await this.consecutivos
+    const actualizado = await this.consecutivos
       .findOneAndUpdate(
         {
           coPropertyId: new Types.ObjectId(coPropertyId),
@@ -138,16 +138,18 @@ export class NumeracionService {
             prefix: tipo,
           },
         },
-        { new: false, upsert: true },
+        // The post-increment document: its nextNumber is the one to use.
+        // {new: false} was the bug here — on an upsert it returns null for
+        // the very first call (forcing a hardcoded "1" fallback), and on
+        // every call after that it returns the PRE-increment value, which
+        // the previous call already handed out. Reading the post-image
+        // directly, like siguienteLote() already does, needs no fallback
+        // and never repeats a number.
+        { new: true, upsert: true },
       )
       .exec();
 
-    // On the very first call the document did not exist, so the pre-image is
-    // null and the upsert wrote nextNumber as 1 (the $inc applied to a missing
-    // field). The number that call owns is therefore 1.
-    if (!previa) return componer(tipo, 1);
-
-    return componer(previa.prefix, previa.nextNumber);
+    return componer(actualizado.prefix, actualizado.nextNumber);
   }
 
   /**

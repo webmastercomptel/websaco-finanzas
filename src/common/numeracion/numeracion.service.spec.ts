@@ -54,16 +54,16 @@ const consecutivosCon = (fila: Record<string, unknown> | null) => {
   let estado = fila ? { ...fila } : null;
 
   return {
-    findOneAndUpdate: jest.fn(() => ({
+    findOneAndUpdate: jest.fn((filtro: { documentType?: string }) => ({
       exec: () => {
         if (!estado) {
-          // Upsert: the pre-image is null and the row starts at 1.
-          estado = { prefix: 'RC', nextNumber: 2 };
-          return Promise.resolve(null);
+          // On upsert, $inc creates nextNumber at 1, new: true returns post-image
+          estado = { prefix: filtro?.documentType ?? 'RC', nextNumber: 1 };
+          return Promise.resolve({ ...estado });
         }
-        const previa = { ...estado };
+        // On normal update, increment first, then return post-image
         estado.nextNumber = (estado.nextNumber as number) + 1;
-        return Promise.resolve(previa);
+        return Promise.resolve({ ...estado });
       },
     })),
   };
@@ -213,7 +213,7 @@ describe('NumeracionService.siguienteDocumento', () => {
     const service = servicio(null, { prefix: 'RC', nextNumber: 84 });
 
     await expect(service.siguienteDocumento(COP, 'RC')).resolves.toMatchObject({
-      numero: 84,
+      numero: 85,
     });
   });
 
@@ -221,8 +221,36 @@ describe('NumeracionService.siguienteDocumento', () => {
     const service = servicio(null, { prefix: 'NC', nextNumber: 999999 });
 
     await expect(service.siguienteDocumento(COP, 'NC')).resolves.toMatchObject({
-      numero: 999999,
+      numero: 1000000,
     });
+  });
+
+  it('avanza uno por documento y nunca repite, arrancando desde un contador existente', async () => {
+    // El bug real que esto reemplaza: con {new: false}, la SEGUNDA llamada
+    // repetía el número que ya había entregado la primera.
+    const service = servicio(null, { prefix: 'RC', nextNumber: 0 });
+
+    const numeros = [
+      await service.siguienteDocumento(COP, 'RC'),
+      await service.siguienteDocumento(COP, 'RC'),
+      await service.siguienteDocumento(COP, 'RC'),
+    ].map((n) => n.numero);
+
+    expect(numeros).toEqual([1, 2, 3]);
+    expect(new Set(numeros).size).toBe(3);
+  });
+
+  it('avanza uno por documento y nunca repite, arrancando en frío (contador recién creado)', async () => {
+    const service = servicio(null, null);
+
+    const numeros = [
+      await service.siguienteDocumento(COP, 'RC'),
+      await service.siguienteDocumento(COP, 'RC'),
+      await service.siguienteDocumento(COP, 'RC'),
+    ].map((n) => n.numero);
+
+    expect(numeros).toEqual([1, 2, 3]);
+    expect(new Set(numeros).size).toBe(3);
   });
 });
 
