@@ -21,10 +21,11 @@
  *  - References to things this system does not own (coproperties, units) are
  *    flat id strings, because there is no local collection to populate.
  *
- * The financial document shapes (Factura, Recibo, NotaCredito, OtraNota) are
- * NOT here yet: they are designed together with their Mongo schemas, once the
- * domain questions behind them have been answered. Adding a speculative
- * `Factura` here before that would freeze guesses into the contract.
+ * The financial document shapes are added one at a time, together with their
+ * Mongo schema, once the domain questions behind each has been answered.
+ * `Factura` is here now; `Recibo`, `NotaCredito` and `OtraNota` are not yet —
+ * adding any of them speculatively, ahead of its schema, would freeze guesses
+ * into the contract.
  */
 
 /** An ISO 8601 timestamp, e.g. "2026-08-27T14:32:00.000Z". */
@@ -134,6 +135,54 @@ export interface Tercero {
   retieneRenta: boolean;
   retieneIca: boolean;
   estado: 'activo' | 'inactivo';
+}
+
+/* ── Facturación ───────────────────────────────────────────────── */
+
+/** The party a Factura was issued to, frozen at the moment of emission. */
+export interface TitularFactura {
+  nombre: string;
+  tipoIdentificacion: string | null;
+  numeroIdentificacion: string | null;
+  digitoVerificacion: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  email: string | null;
+}
+
+/** One invoice line, everything about its concept frozen at emission. */
+export interface FacturaLinea {
+  conceptoId: string;
+  nombreConcepto: string;
+  tipoConcepto: 'administracion' | 'intereses' | 'otro';
+  origen: 'recurrente' | 'novedad' | 'interes';
+  valorBase: Monto;
+  tasaImpuesto: number;
+  valorImpuesto: Monto;
+  valorTotal: Monto;
+}
+
+/** A sales invoice ("FV"), only ever created already numbered. */
+export interface Factura {
+  id: string;
+  loteId: string;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  terceroId: string | null;
+  titular: TitularFactura | null;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  fechaEmision: IsoDate;
+  fechaVencimiento: IsoDate;
+  periodoDesde: IsoDate;
+  periodoHasta: IsoDate;
+  lineas: FacturaLinea[];
+  subtotal: Monto;
+  totalImpuestos: Monto;
+  total: Monto;
+  saldoPendiente: Monto;
+  estado: 'emitida' | 'anulada';
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */

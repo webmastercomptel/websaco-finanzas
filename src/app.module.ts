@@ -14,6 +14,7 @@ import { CaslModule } from './modules/casl/casl.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { InmueblesModule } from './modules/inmuebles/inmuebles.module';
 import { TercerosModule } from './modules/terceros/terceros.module';
+import { FacturacionModule } from './modules/facturacion/facturacion.module';
 import { EntidadesModule } from './modules/entidades/entidades.module';
 import { CopropiedadesModule } from './modules/copropiedades/copropiedades.module';
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
@@ -50,6 +51,7 @@ import { HealthModule } from './modules/health/health.module';
     AuthModule,
     InmueblesModule,
     TercerosModule,
+    FacturacionModule,
     EntidadesModule,
     CopropiedadesModule,
     ConceptosModule,
