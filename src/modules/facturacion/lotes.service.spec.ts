@@ -285,7 +285,11 @@ describe('LotesFacturacionService.cargarNovedades', () => {
 describe('LotesFacturacionService.liquidar', () => {
   type ActualizacionLiquidar = {
     $set: {
-      preview: Array<{ lines: Array<Record<string, unknown>> }>;
+      preview: Array<{
+        lines: Array<Record<string, unknown>>;
+        holder: Record<string, unknown> | null;
+        terceroId: string | null;
+      }>;
       status: string;
     };
   };
@@ -331,7 +335,7 @@ describe('LotesFacturacionService.liquidar', () => {
 
   const construirModelos = (opts: {
     unidades?: unknown[];
-    terceros?: Record<string, unknown>;
+    terceros?: Record<string, unknown> | null;
     conceptos?: unknown[];
     valoresRecurrentes?: unknown[];
     saldos?: unknown[];
@@ -351,8 +355,11 @@ describe('LotesFacturacionService.liquidar', () => {
       })),
     };
     const terceros = {
-      findById: jest.fn(() => ({
-        exec: () => Promise.resolve(opts.terceros ?? tercero()),
+      findOne: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(
+            opts.terceros === undefined ? tercero() : opts.terceros,
+          ),
       })),
     };
     const conceptos = {
@@ -488,5 +495,75 @@ describe('LotesFacturacionService.liquidar', () => {
     );
     // 1.9% of 4,000,000 = 76,000, capped at 50,000.
     expect(interes?.totalAmount).toBe(50000);
+  });
+
+  it('omite la línea de interés si el cálculo redondea a cero', async () => {
+    const m = construirModelos({
+      conceptos: [
+        concepto(),
+        concepto({
+          _id: { toString: () => 'con-intereses' },
+          name: 'Interés por mora',
+          kind: 'intereses',
+          accountingIncomeAccount: '413595',
+        }),
+      ],
+      saldos: [
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'c1',
+          balance: 10,
+        },
+      ],
+      lote: { lateInterestRate: 1.9, lateInterestCap: 50000 },
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const lineas = actualizacion.$set.preview[0].lines;
+    // 1.9% of 10 = 0.19, rounds to 0 — no interest line should be pushed.
+    expect(
+      lineas.some((l) => (l as { source: string }).source === 'interes'),
+    ).toBe(false);
+  });
+
+  it('deja holder y terceroId en null si el titular no se encuentra', async () => {
+    const m = construirModelos({ terceros: null });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const preliminar = actualizacion.$set.preview[0];
+    expect(preliminar.holder).toBeNull();
+    expect(preliminar.terceroId).toBeNull();
   });
 });

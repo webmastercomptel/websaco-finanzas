@@ -216,7 +216,9 @@ export class LotesFacturacionService {
     for (const unidad of unidades) {
       if (!unidad.holderId) continue;
 
-      const tercero = await this.terceros.findById(unidad.holderId).exec();
+      const tercero = await this.terceros
+        .findOne({ _id: unidad.holderId, coPropertyId })
+        .exec();
       const lines: Record<string, unknown>[] = [];
 
       for (const valor of valoresRecurrentes) {
@@ -234,7 +236,7 @@ export class LotesFacturacionService {
       }
 
       const saldosUnidad = await this.saldos
-        .find({ inmuebleId: unidad._id.toString() })
+        .find({ coPropertyId, inmuebleId: unidad._id.toString() })
         .exec();
       const saldoTotal = saldosUnidad.reduce((acc, s) => acc + s.balance, 0);
       const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
