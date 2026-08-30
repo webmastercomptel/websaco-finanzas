@@ -1167,3 +1167,241 @@ describe('RecibosService.findOne', () => {
     await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('RecibosService — ciclo de vida completo', () => {
+  const BANCO = '111005';
+  const CARTERA = '130501';
+  const ANTICIPOS = '210505';
+
+  type MovimientoPlano = { account: string; type: string; amount: number };
+
+  /**
+   * Modelos con ESTADO COMPARTIDO, no stubs de una sola respuesta: `crear` →
+   * `aplicar` → `anular` tienen que ver el mismo recibo evolucionar
+   * (appliedAmount/unappliedAmount se mueven con $inc, y `anular` lee esos
+   * totales cacheados), igual que lo verían contra un Mongo real. Los stubs
+   * que usa el resto de este archivo no alcanzan para eso.
+   */
+  const construirEntorno = (facturas: Record<string, unknown>[]) => {
+    let recibo: Record<string, unknown> = {};
+    const porId = new Map(facturas.map((f) => [String(f._id), f]));
+    const aplicacionesStore: Record<string, unknown>[] = [];
+    const asientosStore: { entries: MovimientoPlano[] }[] = [];
+
+    const recibos = {
+      create: jest.fn((filas: Record<string, unknown>[]) => {
+        recibo = { _id: new Types.ObjectId(), ...filas[0] };
+        return Promise.resolve([recibo]);
+      }),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+        exec: () => Promise.resolve(recibo),
+      })),
+      findOneAndUpdate: jest.fn(
+        (
+          _filtro: unknown,
+          update: {
+            $inc?: Record<string, number>;
+            $set?: Record<string, unknown>;
+          },
+        ) => ({
+          exec: () => {
+            for (const [campo, delta] of Object.entries(update.$inc ?? {})) {
+              recibo[campo] = ((recibo[campo] as number) ?? 0) + delta;
+            }
+            if (update.$set) Object.assign(recibo, update.$set);
+            return Promise.resolve(recibo);
+          },
+        }),
+      ),
+    };
+
+    const facturasConEstado = {
+      findOneAndUpdate: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          update: { $inc: { outstandingBalance: number } },
+        ) => ({
+          exec: () => {
+            const doc = porId.get(String(filtro._id));
+            if (!doc) return Promise.resolve(null);
+            const delta = update.$inc.outstandingBalance;
+            // Réplica del piso en cero que `decrementarSaldoFactura` impone
+            // con su $expr; una restitución (delta > 0) nunca lo necesita.
+            if (delta < 0 && (doc.outstandingBalance as number) < -delta) {
+              return Promise.resolve(null);
+            }
+            doc.outstandingBalance = (doc.outstandingBalance as number) + delta;
+            return Promise.resolve({ ...doc });
+          },
+        }),
+      ),
+    };
+
+    const aplicaciones = {
+      create: jest.fn((filas: Record<string, unknown>[]) => {
+        const creadas = filas.map((f) => ({ _id: new Types.ObjectId(), ...f }));
+        aplicacionesStore.push(...creadas);
+        return Promise.resolve(creadas);
+      }),
+      find: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              aplicacionesStore.filter((a) => a.status === 'activa'),
+            ),
+        }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          update: { $set: Record<string, unknown> },
+        ) => ({
+          exec: () => {
+            const fila = aplicacionesStore.find(
+              (a) => String(a._id) === String(filtro._id),
+            );
+            if (fila) Object.assign(fila, update.$set);
+            return Promise.resolve(fila ?? null);
+          },
+        }),
+      ),
+    };
+
+    const asientos = {
+      create: jest.fn((filas: { entries: MovimientoPlano[] }[]) => {
+        asientosStore.push(...filas);
+        return Promise.resolve(filas);
+      }),
+    };
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturasConEstado as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+      periodoAbierto(),
+    );
+
+    /** Débitos menos créditos, por cuenta, sobre TODOS los asientos posteados. */
+    const netoPorCuenta = () => {
+      const neto = new Map<string, number>();
+      for (const asiento of asientosStore) {
+        for (const movimiento of asiento.entries) {
+          const signo = movimiento.type === 'debito' ? 1 : -1;
+          neto.set(
+            movimiento.account,
+            (neto.get(movimiento.account) ?? 0) + signo * movimiento.amount,
+          );
+        }
+      }
+      return neto;
+    };
+
+    return { service, netoPorCuenta, asientosStore, leerRecibo: () => recibo };
+  };
+
+  it('crear (parcial) → aplicar (diferido) → anular deja cada cuenta contable en cero', async () => {
+    // LA INVARIANTE CENTRAL DEL DISEÑO: un recibo anulado no puede dejar
+    // rastro contable neto en NINGUNA de las tres cuentas del esquema
+    // (destinationAccount / cartera / anticipos), sin importar por cuántas
+    // aplicaciones haya pasado antes. Los tres asientos se arman en lugares
+    // distintos — `construirAsientoRecibo` al crear,
+    // `construirMovimientosAplicacionAnticipo` al aplicar en diferido, y
+    // `construirContraAsientoRecibo` al anular usando los totales cacheados
+    // del propio recibo — así que sólo un test que recorra el ciclo entero
+    // los ata entre sí.
+    const facturaA = facturaDoc({
+      _id: new Types.ObjectId(),
+      outstandingBalance: 200000,
+      total: 200000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+    });
+    const facturaB = facturaDoc({
+      _id: new Types.ObjectId(),
+      outstandingBalance: 100000,
+      total: 100000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+    });
+
+    const { service, netoPorCuenta, asientosStore, leerRecibo } =
+      construirEntorno([facturaA, facturaB]);
+
+    // 1. Crear por 500000 aplicando 200000 a la factura A → quedan 300000 de
+    //    anticipo.
+    const creado = await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      montoRecibido: 500000,
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: String(facturaA._id),
+          montoAplicado: 200000,
+        },
+      ],
+    });
+    expect(creado.montoAplicado).toBe(200000);
+    expect(creado.montoSinAplicar).toBe(300000);
+    expect(facturaA.outstandingBalance).toBe(0);
+
+    // 2. Aplicar en diferido 100000 de ese anticipo contra la factura B →
+    //    quedan 200000 sin aplicar.
+    const aplicado = await service.aplicar(
+      String(leerRecibo()._id),
+      {
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: String(facturaB._id),
+            montoAplicado: 100000,
+          },
+        ],
+      },
+      CUENTA.toString(),
+    );
+    expect(aplicado.aplicadas).toHaveLength(1);
+    expect(aplicado.montoSinAplicar).toBe(200000);
+    expect(facturaB.outstandingBalance).toBe(0);
+
+    // 3. Anular todo: cascada sobre las dos aplicaciones y contra-asiento
+    //    consolidado.
+    const anulado = await service.anular(
+      String(leerRecibo()._id),
+      {
+        motivo: 'error_digitacion',
+        detalle: 'El cajero cargó el comprobante con el monto equivocado',
+      },
+      CUENTA.toString(),
+    );
+    expect(anulado.estado).toBe('anulado');
+    // La cascada restituyó el saldo de las dos facturas.
+    expect(facturaA.outstandingBalance).toBe(200000);
+    expect(facturaB.outstandingBalance).toBe(100000);
+
+    // LA ASERCIÓN: tres asientos posteados, y neto CERO en cada cuenta.
+    expect(asientosStore).toHaveLength(3);
+    const neto = netoPorCuenta();
+    // Anti-vacuidad: si un refactor dejara de tocar alguna de las tres
+    // cuentas, su neto sería cero y el test pasaría sin haber probado nada.
+    expect([...neto.keys()].sort()).toEqual([BANCO, CARTERA, ANTICIPOS].sort());
+    expect(neto.get(BANCO)).toBe(0);
+    expect(neto.get(CARTERA)).toBe(0);
+    expect(neto.get(ANTICIPOS)).toBe(0);
+
+    // Y cada asiento, por separado, cuadra débitos contra créditos.
+    for (const asiento of asientosStore) {
+      const debitos = asiento.entries
+        .filter((m) => m.type === 'debito')
+        .reduce((acc, m) => acc + m.amount, 0);
+      const creditos = asiento.entries
+        .filter((m) => m.type === 'credito')
+        .reduce((acc, m) => acc + m.amount, 0);
+      expect(debitos).toBe(creditos);
+    }
+  });
+});
