@@ -69,10 +69,38 @@ export class AsientoContable {
 export const AsientoContableSchema =
   SchemaFactory.createForClass(AsientoContable);
 
+// ⚠️ REQUIRES A ONE-TIME MANUAL MIGRATION BEFORE DEPLOYING THIS BRANCH ⚠️
+//
 // One AsientoContable per Factura — cheap structural insurance against a
 // double-post, given this method runs without a database transaction.
 // Partial: a Recibo-driven entry has facturaId: null, and many of those must
 // coexist without tripping this uniqueness.
+//
+// WHAT CHANGED IN THIS BRANCH: this index used to be a plain
+// `{ unique: true }` on the same key, with no `partialFilterExpression`. Only
+// the OPTIONS changed — the key is identical, so MongoDB still auto-names it
+// `facturaId_1`, exactly as the pre-existing strict index is named.
+//
+// WHY THAT IS A PROBLEM: this repo has no `autoIndex: false` and calls
+// `syncIndexes()` nowhere (grep for both — there are zero hits), so Mongoose
+// runs its default `createIndexes` on boot. `createIndexes` does NOT update an
+// existing index whose name matches but whose options differ: MongoDB rejects
+// that with `IndexOptionsConflict` (code 85), Mongoose swallows it into the
+// connection's error channel, and THE OLD STRICT UNIQUE INDEX SURVIVES
+// UNTOUCHED. Under the old index `null` is a real, duplicate-checkable value,
+// and every Recibo-driven entry writes `facturaId: null` — so the SECOND
+// Recibo ever created (or applied, or voided) in that environment fails
+// forever with a duplicate-key error (E11000).
+//
+// THE ONE-TIME STEP: before deploying this branch to ANY environment where the
+// `asientos_contables` collection already exists (i.e. anywhere Facturación
+// has run), drop the old index so Mongoose can create the corrected partial
+// one on next boot:
+//
+//   db.asientos_contables.dropIndex('facturaId_1')
+//
+// `scripts/migrate-asiento-contable-facturaid-index.js` does exactly this,
+// idempotently, and is a no-op against a fresh/empty database.
 AsientoContableSchema.index(
   { facturaId: 1 },
   { unique: true, partialFilterExpression: { facturaId: { $type: 'objectId' } } },
