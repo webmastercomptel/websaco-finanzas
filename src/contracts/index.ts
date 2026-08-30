@@ -321,6 +321,9 @@ export interface Copropiedad {
   /** Whether this building ALSO uses the building-management system. */
   usaGestionEdificios: boolean;
   cuentaContableCartera: string | null;
+  /** Cuenta de pasivo para dinero recibido pero aún no aplicado a ningún
+   *  documento — el anticipo de un Recibo de Caja. */
+  cuentaAnticipos: string | null;
 }
 
 /* ── Conceptos de cobro ("Cargos") ─────────────────────────────────

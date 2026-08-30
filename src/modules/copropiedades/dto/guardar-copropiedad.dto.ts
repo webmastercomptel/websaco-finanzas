@@ -75,6 +75,11 @@ class CamposCopropiedadDto {
   @IsString()
   @MaxLength(20)
   cuentaContableCartera?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  cuentaAnticipos?: string;
 }
 
 export class CrearCopropiedadDto extends CamposCopropiedadDto {

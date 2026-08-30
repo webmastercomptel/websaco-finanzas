@@ -153,6 +153,7 @@ export class CopropiedadesService {
     set('email', dto.email);
     set('usesBuildingManagement', dto.usaGestionEdificios);
     set('receivablesAccount', dto.cuentaContableCartera);
+    set('advancesAccount', dto.cuentaAnticipos);
     if (dto.estado !== undefined) {
       doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
     }

@@ -108,6 +108,15 @@ export class Copropiedad {
    */
   @Prop({ type: String, default: null, trim: true })
   receivablesAccount: string | null;
+
+  /**
+   * Free-text liability account for money received but not yet applied to
+   * any document — a Recibo's anticipo. Same reasoning and shape as
+   * `receivablesAccount`; `construirAsientoRecibo` (asiento.builder.ts)
+   * credits this account for a Recibo's `unappliedAmount`.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  advancesAccount: string | null;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

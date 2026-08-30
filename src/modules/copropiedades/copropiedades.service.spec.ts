@@ -198,4 +198,15 @@ describe('CopropiedadesService.update', () => {
       receivablesAccount: '130501',
     });
   });
+
+  it('guarda la cuenta de anticipos cuando viene', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new CopropiedadesService(modelo as never);
+
+    await service.update('cop-1', { cuentaAnticipos: '210505' });
+
+    expect(modelo.escrituras[0]).toEqual({
+      advancesAccount: '210505',
+    });
+  });
 });
