@@ -384,6 +384,45 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('rechaza — todo o nada — aplicar contra una factura de OTRO inmueble', async () => {
+    // FIFO filtra sus candidatas por inmuebleId; el modo manual acepta el
+    // documentoId que le manden, y `decrementarSaldoFactura` sólo mira
+    // {_id, coPropertyId, status, saldo}. Sin este chequeo, un recibo de una
+    // unidad se podía cruzar contra la factura de OTRA unidad de la misma
+    // copropiedad, y las dos vistas de saldo por inmueble quedaban corruptas.
+    const OTRO_INMUEBLE = new Types.ObjectId();
+    const facturaId = new Types.ObjectId();
+    const factura = facturaDoc({ _id: facturaId, inmuebleId: OTRO_INMUEBLE });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      fullNumber: 'RC-1',
+      unappliedAmount: 500000,
+    };
+    const { service, aplicaciones } = construirServicio({
+      reciboCreado,
+      factura,
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: facturaId.toString(),
+            montoAplicado: 200000,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    // Todo o nada: no queda ninguna AplicacionRecibo creada. (El decremento
+    // de la factura sí se intentó, pero vive dentro de la transacción que
+    // este throw aborta.)
+    expect(aplicaciones.create).not.toHaveBeenCalled();
+  });
+
   it('rechaza pedir aplicación manual Y automática a la vez', async () => {
     const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
     const { service } = construirServicio({ reciboCreado });

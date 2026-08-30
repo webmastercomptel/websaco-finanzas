@@ -560,6 +560,26 @@ export class RecibosService {
         facturaId,
         solicitada.montoAplicado,
       );
+
+      // FIFO filters its candidates by `inmuebleId` when it builds the list;
+      // manual mode takes whatever `documentoId` the caller sent, and
+      // `decrementarSaldoFactura` only guards {_id, coPropertyId, status,
+      // saldo} — so without this a receipt issued for one unit could be
+      // applied against ANOTHER unit's invoice inside the same coproperty,
+      // corrupting both units' per-unit balance views.
+      //
+      // Checked after the decrement rather than before, because
+      // `decrementarSaldoFactura` already returns the document — no second
+      // read needed — and manual mode is all-or-nothing: throwing here aborts
+      // the whole transaction, so the decrement above is rolled back with it.
+      if (!factura.inmuebleId.equals(recibo.inmuebleId)) {
+        throw new ConflictException(
+          `La factura ${facturaId.toString()} pertenece a otro inmueble ` +
+            `(${factura.inmuebleId.toString()}) que el recibo ` +
+            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+        );
+      }
+
       await ajustarSaldosCartera(
         this.saldos,
         session,
