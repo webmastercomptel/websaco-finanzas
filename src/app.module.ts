@@ -17,6 +17,7 @@ import { TercerosModule } from './modules/terceros/terceros.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
 import { EntidadesModule } from './modules/entidades/entidades.module';
 import { CopropiedadesModule } from './modules/copropiedades/copropiedades.module';
+import { RecibosModule } from './modules/recibos/recibos.module';
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { HealthModule } from './modules/health/health.module';
@@ -52,6 +53,7 @@ import { HealthModule } from './modules/health/health.module';
     InmueblesModule,
     TercerosModule,
     FacturacionModule,
+    RecibosModule,
     EntidadesModule,
     CopropiedadesModule,
     ConceptosModule,

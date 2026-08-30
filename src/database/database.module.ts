@@ -56,6 +56,11 @@ import {
   AsientoContable,
   AsientoContableSchema,
 } from './schemas/facturacion/asiento-contable.schema';
+import { Recibo, ReciboSchema } from './schemas/recibos/recibo.schema';
+import {
+  AplicacionRecibo,
+  AplicacionReciboSchema,
+} from './schemas/recibos/aplicacion-recibo.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -74,6 +79,8 @@ const models = [
   { name: LoteFacturacion.name, schema: LoteFacturacionSchema },
   { name: SaldoCartera.name, schema: SaldoCarteraSchema },
   { name: AsientoContable.name, schema: AsientoContableSchema },
+  { name: Recibo.name, schema: ReciboSchema },
+  { name: AplicacionRecibo.name, schema: AplicacionReciboSchema },
 ];
 
 /**
