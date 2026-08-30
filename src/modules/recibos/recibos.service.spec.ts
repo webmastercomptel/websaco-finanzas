@@ -7,6 +7,7 @@ import { Types } from 'mongoose';
 import { RecibosService } from './recibos.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { NumeracionService } from '../../common/numeracion/numeracion.service';
+import type { PeriodoService } from '../../common/contabilidad/periodo.service';
 
 const COP = new Types.ObjectId();
 const INMUEBLE = new Types.ObjectId();
@@ -32,6 +33,21 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
       Promise.resolve({ prefijo: 'RC', numero: 1, completo }),
     ),
   }) as unknown as NumeracionService;
+
+/** Periodo abierto: `exigirAbierto` no lanza. Es el default de TODOS los
+ *  tests de acá — el periodo cerrado es el caso excepcional, y tiene su
+ *  propio test más abajo. */
+const periodoAbierto = (): PeriodoService =>
+  ({
+    exigirAbierto: jest.fn(async () => undefined),
+  }) as unknown as PeriodoService;
+
+const periodoCerrado = (): PeriodoService =>
+  ({
+    exigirAbierto: jest.fn(() => {
+      throw new ConflictException('El periodo 08/2026 está cerrado.');
+    }),
+  }) as unknown as PeriodoService;
 
 const modeloRecibos = (creado: Record<string, unknown>) => ({
   create: jest.fn(() => Promise.resolve([creado])),
@@ -91,14 +107,18 @@ const modeloCopropiedades = () => ({
 const construirServicio = (opts: {
   reciboCreado: Record<string, unknown>;
   factura?: Record<string, unknown>;
+  /** Default: periodo abierto. Sólo el test del periodo cerrado lo pisa. */
+  periodo?: PeriodoService;
+  saldos?: { findOneAndUpdate: jest.Mock };
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
   const facturas = modeloFacturas(opts.factura ?? facturaDoc());
-  const saldos = modeloSaldos();
+  const saldos = opts.saldos ?? modeloSaldos();
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
   const copropiedades = modeloCopropiedades();
+  const periodo = opts.periodo ?? periodoAbierto();
 
   const service = new RecibosService(
     recibos as never,
@@ -110,9 +130,10 @@ const construirServicio = (opts: {
     tenantQueDevuelve(COP),
     numeracionQueEntrega('RC-1'),
     conexionCon(session),
+    periodo,
   );
 
-  return { service, recibos, facturas, saldos, aplicaciones, asientos };
+  return { service, recibos, facturas, saldos, aplicaciones, asientos, periodo };
 };
 
 const dtoBase = () => ({
@@ -178,6 +199,76 @@ describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
         description: expect.any(String),
       },
     ]);
+  });
+});
+
+describe('RecibosService.crear — candado de periodo contable', () => {
+  const reciboCreado = () => ({
+    _id: new Types.ObjectId(),
+    inmuebleId: INMUEBLE,
+    terceroId: TERCERO,
+    prefix: 'RC',
+    number: 1,
+    fullNumber: 'RC-1',
+    receivedAmount: 500000,
+    receivedDate: new Date('2026-08-27'),
+    paymentMethod: 'transferencia',
+    destinationAccount: '111005',
+    reference: null,
+    notes: null,
+    appliedAmount: 0,
+    unappliedAmount: 500000,
+    status: 'activo',
+    voidedReason: null,
+    voidedDetail: null,
+    voidedAt: null,
+  });
+
+  it('rechaza crear un recibo fechado en un periodo ya cerrado', async () => {
+    // La ley de todo el codebase (ver el docblock de
+    // `PeriodoService.exigirAbierto`): un documento con fecha NO se guarda sin
+    // pasar por acá. Sin esto, un recibo retroactivo aterriza en un mes que el
+    // consejo ya cerró y reportó, y su asiento mueve el saldo inicial de todos
+    // los meses siguientes.
+    const { service, recibos, asientos } = construirServicio({
+      reciboCreado: reciboCreado(),
+      periodo: periodoCerrado(),
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), dtoBase()),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    // Y rechaza ANTES de escribir nada: ni el recibo, ni su asiento.
+    expect(recibos.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
+  });
+
+  it('valida la fecha DEL DOCUMENTO (fechaRecibo), no el instante de la request', async () => {
+    const { service, periodo } = construirServicio({
+      reciboCreado: reciboCreado(),
+    });
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      fechaRecibo: '2026-03-15',
+    });
+
+    expect(periodo.exigirAbierto).toHaveBeenCalledWith(
+      COP.toString(),
+      new Date('2026-03-15'),
+    );
+  });
+
+  it('deja pasar la creación cuando el periodo está abierto', async () => {
+    const { service, asientos } = construirServicio({
+      reciboCreado: reciboCreado(),
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), dtoBase()),
+    ).resolves.toBeDefined();
+    expect(asientos.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -389,6 +480,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     await service.crear(CUENTA.toString(), {
@@ -461,6 +553,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     // aplicarFifo is private — exercised indirectly through crear(), and its
@@ -515,6 +608,7 @@ describe('RecibosService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     const resultado = await service.aplicar(
@@ -557,6 +651,7 @@ describe('RecibosService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     await expect(
@@ -592,6 +687,7 @@ describe('RecibosService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     await expect(
@@ -675,6 +771,7 @@ describe('RecibosService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     const resultado = await service.anular(recibo._id.toString(), {
@@ -761,6 +858,7 @@ describe('RecibosService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     await expect(
@@ -791,6 +889,7 @@ describe('RecibosService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
+      periodoAbierto(),
     );
 
     await expect(
@@ -832,6 +931,7 @@ describe('RecibosService.findAll', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
+      periodoAbierto(),
     );
 
   function modeloAplicacionesGenerico() {
@@ -907,6 +1007,7 @@ describe('RecibosService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
+      periodoAbierto(),
     );
 
     const detalle = await service.findOne(reciboId.toString());
@@ -927,6 +1028,7 @@ describe('RecibosService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
+      periodoAbierto(),
     );
 
     await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(NotFoundException);

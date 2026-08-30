@@ -32,6 +32,7 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { ajustarSaldosCartera, decrementarSaldoFactura } from './cruce.util';
 import {
   construirAsientoRecibo,
@@ -54,16 +55,22 @@ import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
 
 /**
- * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
- * this plan (same discipline `LotesFacturacionService` documents on its own
- * constructor). `asientos` and `copropiedades` are used on EVERY `crear()`
- * call, unconditionally — not only when `aplicaciones`/`aplicacionAutomatica`
- * is present — because the full `receivedAmount` must always be booked
- * (debited to `destinationAccount`) the moment a Recibo is created, whether
- * or not any of it has been applied yet (design decision, Task 2); `numeracion`
- * and `connection` are what make RC numbering and every balance write live
- * inside one Mongo transaction (design §6). Every test in Tasks 6–10
- * constructs this class with all nine arguments, in this exact order.
+ * CANONICAL CONSTRUCTOR — pinned while the ten tasks of this plan were being
+ * built, so no task could reorder it out from under another (same discipline
+ * `LotesFacturacionService` documents on its own constructor). `asientos` and
+ * `copropiedades` are used on EVERY `crear()` call, unconditionally — not
+ * only when `aplicaciones`/`aplicacionAutomatica` is present — because the
+ * full `receivedAmount` must always be booked (debited to
+ * `destinationAccount`) the moment a Recibo is created, whether or not any of
+ * it has been applied yet (design decision, Task 2); `numeracion` and
+ * `connection` are what make RC numbering and every balance write live inside
+ * one Mongo transaction (design §6).
+ *
+ * `periodo` was APPENDED as a tenth argument after the plan closed: `crear()`
+ * must honor the accounting-period lock like every other dated document does
+ * (see `PeriodoService.exigirAbierto`'s own docblock, and
+ * `LotesFacturacionService.consolidar()`). It is last precisely so the nine
+ * positions above kept their meaning.
  */
 @Injectable()
 export class RecibosService {
@@ -83,6 +90,7 @@ export class RecibosService {
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly periodo: PeriodoService,
   ) {}
 
   /**
@@ -130,6 +138,23 @@ export class RecibosService {
     }
 
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // Every document that carries a date passes through here before being
+    // saved (see `PeriodoService.exigirAbierto`'s docblock) — otherwise a
+    // backdated Recibo lands in a month the council already closed and
+    // reported on, and its asiento moves the opening balance of every month
+    // after it. Checked against `fechaRecibo`, the date the DOCUMENT claims,
+    // never `new Date()`: backdating is exactly what this guards.
+    //
+    // Placed before `transaccion()` opens, mirroring
+    // `LotesFacturacionService.consolidar()` — a refusal costs no session.
+    // `aplicar()` and `anular()` need no equivalent: their asientos are dated
+    // `new Date()`, the instant the operation actually happened, never a
+    // caller-supplied date.
+    await this.periodo.exigirAbierto(
+      coPropertyId.toString(),
+      new Date(dto.fechaRecibo),
+    );
 
     return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
