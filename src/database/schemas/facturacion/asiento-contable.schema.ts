@@ -3,6 +3,7 @@ import { HydratedDocument, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { LoteFacturacion } from './lote-facturacion.schema';
 import { Factura } from './factura.schema';
+import { Recibo } from '../recibos/recibo.schema';
 
 export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 
@@ -25,12 +26,19 @@ export class Movimiento {
 export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);
 
 /**
- * The double-entry journal entry a consolidated Factura produces. Generated
- * at the same moment the invoice is created — never before (nothing is
- * posted for a preview that might be discarded) and never separately.
+ * The double-entry journal entry a consolidated Factura, OR a Recibo
+ * application/void, produces.
  *
- * Invariant this schema does not itself enforce (LotesFacturacionService
- * does, before ever calling `.create()`): sum(debito) === sum(credito).
+ * Two anchors, used mutually exclusively depending on origin — same pattern
+ * as Asignacion's `scope`/`coPropertyId`/`entidadId` (see that schema):
+ *  - A facturación entry sets `loteId` + `facturaId`, `reciboId: null`.
+ *  - A Recibo entry sets `reciboId`, `loteId: null`, `facturaId: null` — a
+ *    FIFO application can post one entry that touches several Facturas, and
+ *    a pure anticipo receipt (nothing applied yet) posts none at all, so
+ *    there is no single Factura to anchor it to.
+ *
+ * Invariant this schema does not itself enforce (the caller does, before
+ * ever calling `.create()`): sum(debito) === sum(credito).
  */
 @Schema({ timestamps: true, collection: 'asientos_contables' })
 export class AsientoContable {
@@ -42,11 +50,14 @@ export class AsientoContable {
   })
   coPropertyId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: LoteFacturacion.name, required: true })
-  loteId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: LoteFacturacion.name, default: null })
+  loteId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: Factura.name, required: true })
-  facturaId: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: Factura.name, default: null })
+  facturaId: Types.ObjectId | null;
+
+  @Prop({ type: Types.ObjectId, ref: Recibo.name, default: null })
+  reciboId: Types.ObjectId | null;
 
   @Prop({ required: true })
   date: Date;
@@ -60,4 +71,14 @@ export const AsientoContableSchema =
 
 // One AsientoContable per Factura — cheap structural insurance against a
 // double-post, given this method runs without a database transaction.
-AsientoContableSchema.index({ facturaId: 1 }, { unique: true });
+// Partial: a Recibo-driven entry has facturaId: null, and many of those must
+// coexist without tripping this uniqueness.
+AsientoContableSchema.index(
+  { facturaId: 1 },
+  { unique: true, partialFilterExpression: { facturaId: { $type: 'objectId' } } },
+);
+
+// Every entry a given Recibo ever produced (its forward applications AND its
+// void's reversal) — not unique: a Recibo can post across several calls
+// (create, one or more /aplicar, and /anular).
+AsientoContableSchema.index({ reciboId: 1 });

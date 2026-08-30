@@ -386,8 +386,12 @@ export class LotesFacturacionService {
     const asientosExistentes = await this.asientos
       .find({ coPropertyId, loteId, facturaId: { $in: idsExistentes } })
       .exec();
+    // facturaId is typed nullable now (AsientoContable also anchors to a
+    // Recibo, with facturaId: null), but this query's own filter —
+    // `facturaId: { $in: idsExistentes } }` — guarantees every row returned
+    // here has one of those real Factura ids.
     const idsConAsiento = new Set(
-      asientosExistentes.map((a) => a.facturaId.toString()),
+      asientosExistentes.map((a) => a.facturaId!.toString()),
     );
 
     const unidadesYaFacturadas = new Set(
