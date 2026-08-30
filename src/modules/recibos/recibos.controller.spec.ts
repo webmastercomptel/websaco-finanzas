@@ -54,3 +54,15 @@ describe('RecibosController.aplicar', () => {
     );
   });
 });
+
+describe('RecibosController.anular', () => {
+  it('delega en el servicio con el id de ruta y el dto de anulación', async () => {
+    const recibos = { anular: jest.fn(() => Promise.resolve({ id: 'rec-1', estado: 'anulado' })) };
+    const controller = new RecibosController(recibos as unknown as RecibosService);
+    const dto = { motivo: 'otro' as const, detalle: 'Un detalle de más de veinte caracteres' };
+
+    await controller.anular('rec-1', dto);
+
+    expect(recibos.anular).toHaveBeenCalledWith('rec-1', dto);
+  });
+});

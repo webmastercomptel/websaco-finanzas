@@ -599,3 +599,168 @@ describe('RecibosService.aplicar', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
+
+describe('RecibosService.anular', () => {
+  const reciboActivo = (over: Record<string, unknown> = {}) => ({
+    _id: new Types.ObjectId(),
+    coPropertyId: COP,
+    inmuebleId: INMUEBLE,
+    terceroId: TERCERO,
+    prefix: 'RC',
+    number: 1,
+    fullNumber: 'RC-1',
+    receivedDate: new Date('2026-08-20'),
+    paymentMethod: 'transferencia',
+    destinationAccount: '111005',
+    reference: null,
+    notes: null,
+    status: 'activo',
+    unappliedAmount: 100000,
+    appliedAmount: 200000,
+    receivedAmount: 300000,
+    voidedReason: null,
+    voidedDetail: null,
+    voidedAt: null,
+    ...over,
+  });
+
+  const modeloAplicacionesActivas = (filas: Record<string, unknown>[]) => ({
+    find: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(filas) }),
+    })),
+    findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  });
+
+  it('revierte cada AplicacionRecibo activa y restaura el outstandingBalance de cada factura afectada', async () => {
+    const facturaId = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 200000,
+      status: 'activa',
+    };
+
+    const facturaRestaurada = { _id: facturaId, inmuebleId: INMUEBLE, total: 500000, lines: [] };
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(facturaRestaurada) })),
+    };
+    const recibos = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
+    const asientos = modeloAsientos();
+    const session = sesionFalsa();
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await service.anular(recibo._id.toString(), {
+      motivo: 'duplicado',
+      detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
+    });
+
+    expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: facturaId, coPropertyId: COP },
+      { $inc: { outstandingBalance: 200000 } },
+      expect.objectContaining({ new: true }),
+    );
+    expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: aplicacionActiva._id, coPropertyId: COP },
+      { $set: { status: 'revertida' } },
+      expect.objectContaining({ session: expect.anything() }),
+    );
+    expect(asientos.create).toHaveBeenCalledTimes(1);
+    // Usa los totales CACHEADOS del recibo (appliedAmount/unappliedAmount/
+    // receivedAmount), no una suma recalculada del loop de arriba — no hace
+    // falta "reproducir" la historia para saber cuánto revertir.
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{ account: string; type: string; amount: number }>;
+    expect(entries).toEqual([
+      { account: '130501', type: 'debito', amount: 200000, description: expect.any(String) },
+      { account: '210505', type: 'debito', amount: 100000, description: expect.any(String) },
+      { account: '111005', type: 'credito', amount: 300000, description: expect.any(String) },
+    ]);
+  });
+
+  it('restaura el saldo aunque la factura afectada ya esté anulada por otra vía (no rompe, es contabilidad inofensiva)', async () => {
+    const facturaId = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 100000,
+      status: 'activa',
+    };
+
+    // La factura ya no existe bajo esas condiciones (voidedByCreditNoteId,
+    // u otra vía) — el findOneAndUpdate devuelve null, y el cascade sigue
+    // sin lanzar.
+    const facturas = { findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const recibos = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
+    const session = sesionFalsa();
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await expect(
+      service.anular(recibo._id.toString(), {
+        motivo: 'otro',
+        detalle: 'La factura fue anulada por otra vía antes de esta anulación',
+      }),
+    ).resolves.toBeDefined();
+
+    // La AplicacionRecibo se marca revertida de todos modos — la reversión
+    // del cruce es incondicional (design §6).
+    expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza anular un recibo ya anulado', async () => {
+    const recibo = reciboActivo({ status: 'anulado' });
+    const recibos = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+    };
+    const session = sesionFalsa();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicacionesActivas([]) as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await expect(
+      service.anular(recibo._id.toString(), {
+        motivo: 'otro',
+        detalle: 'Un detalle de más de veinte caracteres',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});

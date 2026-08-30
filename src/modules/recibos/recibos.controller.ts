@@ -6,6 +6,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RecibosService } from './recibos.service';
 import { CrearReciboDto } from './dto/crear-recibo.dto';
 import { AplicarReciboDto } from './dto/aplicar-recibo.dto';
+import { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { Recibo, ResultadoAplicacion } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
@@ -40,5 +41,14 @@ export class RecibosController {
     @Body() dto: AplicarReciboDto,
   ): Promise<ResultadoAplicacion> {
     return this.recibos.aplicar(id, dto, user.accountId!);
+  }
+
+  @Post(':id/anular')
+  @CheckAbility({ action: 'annul', subject: 'Recibo' })
+  anular(
+    @Param('id') id: string,
+    @Body() dto: AnularReciboDto,
+  ): Promise<Recibo> {
+    return this.recibos.anular(id, dto);
   }
 }

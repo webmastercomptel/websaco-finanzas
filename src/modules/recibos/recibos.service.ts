@@ -35,6 +35,7 @@ import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { ajustarSaldosCartera, decrementarSaldoFactura } from './cruce.util';
 import {
   construirAsientoRecibo,
+  construirContraAsientoRecibo,
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
@@ -47,6 +48,7 @@ import type {
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AplicarReciboDto } from './dto/aplicar-recibo.dto';
+import type { AnularReciboDto } from './dto/anular-recibo.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -302,6 +304,137 @@ export class RecibosService {
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };
+    });
+  }
+
+  /**
+   * Voids a Recibo, cascading unconditionally: every `activa`
+   * AplicacionRecibo it made is reversed, its Factura's
+   * `outstandingBalance` is restored — even one already voided through
+   * another path, which is harmless bookkeeping and never "reopens" that
+   * document (design §6) — and ONE consolidated reversing journal entry is
+   * always posted, using the Recibo's OWN cached totals
+   * (`appliedAmount`/`unappliedAmount`/`receivedAmount`) rather than
+   * replaying every prior call's history (Task 2's corrected accounting
+   * design). It is unconditional, unlike the old (buggy) version of this
+   * method: `receivedAmount` is always > 0 (DTO validation), so there is
+   * always something to reverse — at minimum the original cash entry.
+   */
+  async anular(id: string, dto: AnularReciboDto): Promise<ReciboContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    return this.transaccion(async (session) => {
+      const recibo = await this.recibos
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      if (!recibo) {
+        throw new NotFoundException(`No se encontró el recibo ${id}`);
+      }
+      if (recibo.status === 'anulado') {
+        throw new ConflictException(`El recibo ${recibo.fullNumber} ya está anulado`);
+      }
+
+      const aplicacionesActivas = await this.aplicaciones
+        .find({ coPropertyId, reciboId: recibo._id, status: 'activa' })
+        .session(session)
+        .exec();
+
+      for (const aplicacion of aplicacionesActivas) {
+        // Unconditional, plain $inc — never guarded by
+        // decrementarSaldoFactura's floor (that guard exists to stop
+        // OVER-application, not to gate a reversal). `factura` is null when
+        // the document was removed/voided through another path; the
+        // reversal proceeds regardless (design §6).
+        const factura = await this.facturas
+          .findOneAndUpdate(
+            { _id: aplicacion.documentId, coPropertyId },
+            { $inc: { outstandingBalance: aplicacion.amountApplied } },
+            { new: true, session },
+          )
+          .exec();
+
+        if (factura) {
+          await ajustarSaldosCartera(
+            this.saldos,
+            session,
+            coPropertyId,
+            factura,
+            aplicacion.amountApplied,
+            1,
+          );
+        }
+
+        await this.aplicaciones
+          .findOneAndUpdate(
+            { _id: aplicacion._id, coPropertyId },
+            { $set: { status: 'revertida' } },
+            { session },
+          )
+          .exec();
+      }
+
+      // ALWAYS posted (no `if (totalRevertido > 0)` gate — that gate was
+      // part of the bug this task corrects): uses the Recibo's own cached
+      // totals, captured BEFORE the $set below zeroes them, not a sum
+      // replayed from the loop above.
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+      const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const entries = construirContraAsientoRecibo(
+        recibo.destinationAccount,
+        cuentaCartera,
+        cuentaAnticipos,
+        recibo.appliedAmount,
+        recibo.unappliedAmount,
+        recibo.receivedAmount,
+      );
+      await this.asientos.create(
+        [
+          {
+            coPropertyId,
+            loteId: null,
+            facturaId: null,
+            reciboId: recibo._id,
+            date: new Date(),
+            entries,
+          },
+        ],
+        { session },
+      );
+
+      // Once voided, a Recibo offers no anticipo and shows no applied
+      // amount — every AplicacionRecibo it made is now `revertida`, so
+      // appliedAmount is legitimately 0; unappliedAmount is set to 0 too
+      // (not receivedAmount) so a stale `unappliedAmount > 0` query can
+      // never surface a voided receipt as available anticipo without also
+      // checking `estado` (design §6 does not specify this; documented
+      // here as the deliberate choice).
+      await this.recibos
+        .findOneAndUpdate(
+          { _id: id, coPropertyId },
+          {
+            $set: {
+              status: 'anulado',
+              voidedReason: dto.motivo,
+              voidedDetail: dto.detalle,
+              voidedAt: new Date(),
+              appliedAmount: 0,
+              unappliedAmount: 0,
+            },
+          },
+          { session },
+        )
+        .exec();
+
+      const final = await this.recibos
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      return toRecibo(final!);
     });
   }
 
