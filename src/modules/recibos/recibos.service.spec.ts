@@ -567,6 +567,83 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       }),
     ).resolves.toBeDefined();
   });
+
+  it('PROPAGA un error que no sea AplicacionInvalidaError en vez de tragárselo en errores', async () => {
+    // El catch del loop FIFO sólo puede significar "este documento resultó
+    // inválido, saltalo" — y eso es exactamente `AplicacionInvalidaError`, lo
+    // que lanza `decrementarSaldoFactura` (la PRIMERA sentencia del try).
+    // Cualquier otra cosa viene de `ajustarSaldosCartera` o de
+    // `aplicaciones.create`, que corren DESPUÉS de que el saldo de la factura
+    // ya se decrementó: tragárselo dejaría commitear la transacción con la
+    // factura descontada, sin fila de auditoría y sin appliedAmount — plata
+    // desaparecida de la factura sin rastro.
+    const factura = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-06-30'),
+      outstandingBalance: 100000,
+      total: 100000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      destinationAccount: '111005',
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      reference: null,
+      notes: null,
+      unappliedAmount: 100000,
+      appliedAmount: 0,
+      receivedAmount: 100000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+
+    const facturas = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve([factura]) }),
+        }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve({ ...factura, outstandingBalance: 0 }),
+      })),
+    };
+    // El decremento pasó; el cache de cartera revienta con un error cualquiera
+    // (una ValidationError de Mongoose, un fallo de red — da igual).
+    const saldosQueRevientan = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.reject(new Error('fallo inesperado en SaldoCartera')),
+      })),
+    };
+
+    const service = new RecibosService(
+      modeloRecibos(reciboCreado) as never,
+      modeloAplicaciones() as never,
+      facturas as never,
+      saldosQueRevientan as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+      periodoAbierto(),
+    );
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        montoRecibido: 100000,
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toThrow('fallo inesperado en SaldoCartera');
+  });
 });
 
 describe('RecibosService.aplicar', () => {

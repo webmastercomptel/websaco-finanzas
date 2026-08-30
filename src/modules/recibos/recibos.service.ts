@@ -33,7 +33,11 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
-import { ajustarSaldosCartera, decrementarSaldoFactura } from './cruce.util';
+import {
+  ajustarSaldosCartera,
+  AplicacionInvalidaError,
+  decrementarSaldoFactura,
+} from './cruce.util';
 import {
   construirAsientoRecibo,
   construirContraAsientoRecibo,
@@ -676,9 +680,22 @@ export class RecibosService {
         restante -= monto;
         totalAplicado += monto;
       } catch (err) {
+        // ONLY `AplicacionInvalidaError` means "this document turned out
+        // invalid, skip it and say why" — it is what `decrementarSaldoFactura`
+        // throws when its floor-at-zero guard refuses, the first statement in
+        // the try. Anything else came from `ajustarSaldosCartera` or
+        // `aplicaciones.create`, which run AFTER a decrement already
+        // succeeded: swallowing one of those into `errores` would let the
+        // transaction COMMIT with the Factura's balance reduced but no
+        // AplicacionRecibo audit row and no `appliedAmount` increment — money
+        // gone from the invoice with no trace. A real bug must abort the whole
+        // transaction loudly, not be filed as a skipped document.
+        if (!(err instanceof AplicacionInvalidaError)) {
+          throw err;
+        }
         errores.push({
           documentoId: factura._id.toString(),
-          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+          mensaje: err.message,
         });
       }
     }
