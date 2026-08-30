@@ -471,3 +471,131 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     ).resolves.toBeDefined();
   });
 });
+
+describe('RecibosService.aplicar', () => {
+  const reciboExistente = (over: Record<string, unknown> = {}) => ({
+    _id: new Types.ObjectId(),
+    coPropertyId: COP,
+    inmuebleId: INMUEBLE,
+    destinationAccount: '111005',
+    receivedDate: new Date('2026-08-20'),
+    fullNumber: 'RC-1',
+    status: 'activo',
+    unappliedAmount: 300000,
+    appliedAmount: 200000,
+    receivedAmount: 500000,
+    ...over,
+  });
+
+  it('aplica el anticipo disponible de un recibo existente contra un documento nuevo', async () => {
+    const facturaId = new Types.ObjectId();
+    const factura = facturaDoc({ _id: facturaId });
+    const recibo = reciboExistente();
+
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(recibo) })),
+    };
+    const facturas = modeloFacturas(factura);
+    const session = sesionFalsa();
+    const asientos = modeloAsientos();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    const resultado = await service.aplicar(
+      recibo._id.toString(),
+      {
+        aplicaciones: [
+          { tipoDocumento: 'FV', documentoId: facturaId.toString(), montoAplicado: 200000 },
+        ],
+      },
+      CUENTA.toString(),
+    );
+
+    expect(resultado.aplicadas).toHaveLength(1);
+    expect(resultado.errores).toEqual([]);
+    // Solo mueve el pasivo hacia la cartera — el efectivo ya se había
+    // contabilizado en destinationAccount al momento de crear el recibo, así
+    // que esta posterior aplicación NUNCA vuelve a tocar esa cuenta.
+    expect(asientos.create).toHaveBeenCalledTimes(1);
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{ account: string; type: string; amount: number }>;
+    expect(entries).toEqual([
+      { account: '210505', type: 'debito', amount: 200000, description: expect.any(String) },
+      { account: '130501', type: 'credito', amount: 200000, description: expect.any(String) },
+    ]);
+  });
+
+  it('rechaza cuando lo solicitado excede el saldo sin aplicar del recibo', async () => {
+    const recibo = reciboExistente({ unappliedAmount: 50000 });
+    const recibos = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+    };
+    const session = sesionFalsa();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await expect(
+      service.aplicar(
+        recibo._id.toString(),
+        {
+          aplicaciones: [
+            {
+              tipoDocumento: 'FV',
+              documentoId: new Types.ObjectId().toString(),
+              montoAplicado: 200000,
+            },
+          ],
+        },
+        CUENTA.toString(),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza aplicar sobre un recibo ya anulado', async () => {
+    const recibo = reciboExistente({ status: 'anulado' });
+    const recibos = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+    };
+    const session = sesionFalsa();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await expect(
+      service.aplicar(
+        recibo._id.toString(),
+        { aplicacionAutomatica: true },
+        CUENTA.toString(),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});

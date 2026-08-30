@@ -1,11 +1,12 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RecibosService } from './recibos.service';
 import { CrearReciboDto } from './dto/crear-recibo.dto';
-import type { Recibo } from '../../contracts';
+import { AplicarReciboDto } from './dto/aplicar-recibo.dto';
+import type { Recibo, ResultadoAplicacion } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**
@@ -29,5 +30,15 @@ export class RecibosController {
     // an account with an active assignment can hold — accountId is
     // guaranteed set here, same reasoning as LotesController.crear().
     return this.recibos.crear(user.accountId!, dto);
+  }
+
+  @Post(':id/aplicar')
+  @CheckAbility({ action: 'update', subject: 'Recibo' })
+  aplicar(
+    @CurrentUser() user: IRequestUser,
+    @Param('id') id: string,
+    @Body() dto: AplicarReciboDto,
+  ): Promise<ResultadoAplicacion> {
+    return this.recibos.aplicar(id, dto, user.accountId!);
   }
 }

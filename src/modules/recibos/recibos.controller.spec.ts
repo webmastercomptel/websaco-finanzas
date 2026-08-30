@@ -30,3 +30,27 @@ describe('RecibosController.crear', () => {
     );
   });
 });
+
+describe('RecibosController.aplicar', () => {
+  it('delega en el servicio con el id de ruta y el accountId del caller', async () => {
+    const recibos = {
+      aplicar: jest.fn(() =>
+        Promise.resolve({ aplicadas: [], montoSinAplicar: 0, errores: [] }),
+      ),
+    };
+    const controller = new RecibosController(recibos as unknown as RecibosService);
+    const user: IRequestUser = {
+      uid: 'uid-1',
+      email: 'a@b.com',
+      accountId: new Types.ObjectId().toString(),
+    };
+
+    await controller.aplicar(user, 'rec-1', { aplicacionAutomatica: true });
+
+    expect(recibos.aplicar).toHaveBeenCalledWith(
+      'rec-1',
+      { aplicacionAutomatica: true },
+      user.accountId,
+    );
+  });
+});

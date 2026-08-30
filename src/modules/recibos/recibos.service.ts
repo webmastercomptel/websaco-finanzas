@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
@@ -34,15 +35,18 @@ import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { ajustarSaldosCartera, decrementarSaldoFactura } from './cruce.util';
 import {
   construirAsientoRecibo,
+  construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
-import { toRecibo } from './recibos.mapper';
+import { toAplicacionRecibo, toRecibo } from './recibos.mapper';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
+  ResultadoAplicacion,
 } from '../../contracts';
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
+import type { AplicarReciboDto } from './dto/aplicar-recibo.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -202,6 +206,102 @@ export class RecibosService {
         .session(session)
         .exec();
       return toRecibo(final!);
+    });
+  }
+
+  /**
+   * Applies an existing receipt's `unappliedAmount` against new documents —
+   * the deferred-cruce case (design §5). Manual and FIFO share the exact
+   * same private helpers `crear()` uses, so the two entry points never
+   * drift apart. Posts via `postearAsientoAplicacionAnticipo`, NOT
+   * `postearAsientoRecibo` — the cash was already booked at creation time,
+   * so this only ever moves the liability into the receivable, never
+   * `destinationAccount` again.
+   */
+  async aplicar(
+    id: string,
+    dto: AplicarReciboDto,
+    accountId: string,
+  ): Promise<ResultadoAplicacion> {
+    if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
+      throw new BadRequestException(
+        'No se puede pedir aplicación manual y automática a la vez',
+      );
+    }
+    if (!dto.aplicaciones?.length && !dto.aplicacionAutomatica) {
+      throw new BadRequestException(
+        'Debe indicar aplicaciones manuales o aplicación automática',
+      );
+    }
+
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    return this.transaccion(async (session) => {
+      const recibo = await this.recibos
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      if (!recibo) {
+        throw new NotFoundException(`No se encontró el recibo ${id}`);
+      }
+      if (recibo.status !== 'activo') {
+        throw new ConflictException(
+          `El recibo ${recibo.fullNumber} está anulado y no admite nuevas aplicaciones`,
+        );
+      }
+
+      if (dto.aplicaciones?.length) {
+        const creadas = await this.aplicarManual(
+          session,
+          coPropertyId,
+          recibo,
+          dto.aplicaciones,
+          accountId,
+        );
+        const totalAplicado = creadas.reduce((acc, a) => acc + a.amountApplied, 0);
+        if (totalAplicado > 0) {
+          await this.postearAsientoAplicacionAnticipo(
+            session,
+            coPropertyId,
+            recibo,
+            totalAplicado,
+          );
+        }
+        const reciboFinal = await this.recibos
+          .findOne({ _id: id, coPropertyId })
+          .session(session)
+          .exec();
+        return {
+          aplicadas: creadas.map(toAplicacionRecibo),
+          montoSinAplicar: reciboFinal!.unappliedAmount,
+          errores: [],
+        };
+      }
+
+      const resultado = await this.aplicarFifo(
+        session,
+        coPropertyId,
+        recibo,
+        recibo.unappliedAmount,
+        accountId,
+      );
+      const totalAplicado = resultado.aplicadas.reduce(
+        (acc, a) => acc + a.amountApplied,
+        0,
+      );
+      if (totalAplicado > 0) {
+        await this.postearAsientoAplicacionAnticipo(
+          session,
+          coPropertyId,
+          recibo,
+          totalAplicado,
+        );
+      }
+      return {
+        aplicadas: resultado.aplicadas.map(toAplicacionRecibo),
+        montoSinAplicar: resultado.montoSinAplicar,
+        errores: resultado.errores,
+      };
     });
   }
 
@@ -423,6 +523,48 @@ export class RecibosService {
           facturaId: null,
           reciboId: recibo._id,
           date: recibo.receivedDate,
+          entries,
+        },
+      ],
+      { session },
+    );
+  }
+
+  /**
+   * Posts a LATER application's journal entry: debit `cuentaAnticipos`,
+   * credit `cuentaCartera`, both for `montoAplicado` — never touches
+   * `destinationAccount` (see the corrected accounting design, Task 2:
+   * the cash was already debited there at creation time, by
+   * `postearAsientoRecibo`). Only called when `montoAplicado > 0` — a call
+   * to `aplicar()` that applied nothing (every FIFO candidate was invalid)
+   * posts no entry.
+   */
+  private async postearAsientoAplicacionAnticipo(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    recibo: ReciboDocument,
+    montoAplicado: number,
+  ): Promise<void> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
+    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const entries = construirMovimientosAplicacionAnticipo(
+      cuentaAnticipos,
+      cuentaCartera,
+      montoAplicado,
+    );
+
+    await this.asientos.create(
+      [
+        {
+          coPropertyId,
+          loteId: null,
+          facturaId: null,
+          reciboId: recibo._id,
+          date: new Date(),
           entries,
         },
       ],
