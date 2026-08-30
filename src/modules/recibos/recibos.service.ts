@@ -44,11 +44,14 @@ import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
  * this plan (same discipline `LotesFacturacionService` documents on its own
- * constructor). `asientos` and `copropiedades` are exercised by this task
- * only on the "with applications" path; `numeracion` and `connection` are
- * what make RC numbering and every balance write live inside one Mongo
- * transaction (design §6). Every test in Tasks 6–10 constructs this class
- * with all nine arguments, in this exact order.
+ * constructor). `asientos` and `copropiedades` are used on EVERY `crear()`
+ * call, unconditionally — not only when `aplicaciones`/`aplicacionAutomatica`
+ * is present — because the full `receivedAmount` must always be booked
+ * (debited to `destinationAccount`) the moment a Recibo is created, whether
+ * or not any of it has been applied yet (design decision, Task 2); `numeracion`
+ * and `connection` are what make RC numbering and every balance write live
+ * inside one Mongo transaction (design §6). Every test in Tasks 6–10
+ * constructs this class with all nine arguments, in this exact order.
  */
 @Injectable()
 export class RecibosService {
