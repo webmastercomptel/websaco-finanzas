@@ -308,3 +308,166 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
+  it('aplica en orden de vencimiento más antiguo primero, y se detiene al agotar el monto', async () => {
+    const vieja = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-06-30'),
+      outstandingBalance: 200000,
+      total: 200000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+    });
+    const nueva = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-07-31'),
+      outstandingBalance: 200000,
+      total: 200000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      destinationAccount: '111005',
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      reference: null,
+      notes: null,
+      unappliedAmount: 300000,
+      appliedAmount: 0,
+      receivedAmount: 300000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+
+    const ordenAplicado: string[] = [];
+    const facturas = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({
+            exec: () => Promise.resolve([vieja, nueva]),
+          }),
+        }),
+      })),
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const id = (filtro._id as Types.ObjectId).toString();
+          const factura = id === vieja._id.toString() ? vieja : nueva;
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if (factura.outstandingBalance < monto) return Promise.resolve(null);
+          factura.outstandingBalance -= monto;
+          ordenAplicado.push(id);
+          return Promise.resolve({ ...factura });
+        },
+      })),
+    };
+
+    const session = sesionFalsa();
+    const recibos = modeloRecibos(reciboCreado);
+    const saldos = modeloSaldos();
+    const aplicaciones = modeloAplicaciones();
+    const asientos = modeloAsientos();
+    const copropiedades = modeloCopropiedades();
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      saldos as never,
+      asientos as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      montoRecibido: 300000,
+      aplicacionAutomatica: true,
+    });
+
+    expect(ordenAplicado).toEqual([vieja._id.toString(), nueva._id.toString()]);
+  });
+
+  it('salta un documento inválido y lo reporta en errores, sin abortar el resto (best-effort)', async () => {
+    const invalida = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-06-01'),
+    });
+    const valida = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-07-01'),
+      outstandingBalance: 100000,
+      total: 100000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      destinationAccount: '111005',
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      reference: null,
+      notes: null,
+      unappliedAmount: 100000,
+      appliedAmount: 0,
+      receivedAmount: 100000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+
+    const facturas = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve([invalida, valida]) }),
+        }),
+      })),
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const id = (filtro._id as Types.ObjectId).toString();
+          if (id === invalida._id.toString()) return Promise.resolve(null); // voided since listed
+          valida.outstandingBalance = 0;
+          return Promise.resolve({ ...valida });
+        },
+      })),
+    };
+
+    const session = sesionFalsa();
+    const recibos = modeloRecibos(reciboCreado);
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+    );
+
+    // aplicarFifo is private — exercised indirectly through crear(), and its
+    // errores/montoSinAplicar surface through aplicar() in Task 8. This test
+    // only asserts the operation as a whole does not throw (best-effort).
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        montoRecibido: 100000,
+        aplicacionAutomatica: true,
+      }),
+    ).resolves.toBeDefined();
+  });
+});

@@ -37,7 +37,10 @@ import {
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { toRecibo } from './recibos.mapper';
-import type { Recibo as ReciboContract } from '../../contracts';
+import type {
+  Recibo as ReciboContract,
+  ErrorAplicacion,
+} from '../../contracts';
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 
@@ -163,8 +166,19 @@ export class RecibosService {
           (acc, a) => acc + a.amountApplied,
           0,
         );
+      } else if (dto.aplicacionAutomatica) {
+        const resultado = await this.aplicarFifo(
+          session,
+          coPropertyId,
+          creado,
+          dto.montoRecibido,
+          accountId,
+        );
+        totalAplicadoAhora = resultado.aplicadas.reduce(
+          (acc, a) => acc + a.amountApplied,
+          0,
+        );
       }
-      // `aplicacionAutomatica` branch: added in Task 7.
 
       // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
       // hit `destinationAccount` for the FULL `montoRecibido` the instant
@@ -267,6 +281,108 @@ export class RecibosService {
       .exec();
 
     return creadas;
+  }
+
+  /**
+   * Walks the inmueble's open Facturas oldest-due-date-first, applying
+   * until `montoDisponible` is exhausted or there is nothing left open —
+   * stopping partway through is the expected outcome (design §6, "FIFO
+   * automatic mode is best-effort"), not an error. A document that turns
+   * out invalid since the list was built (voided, or someone else just
+   * exhausted its balance in this same transaction) is skipped and
+   * reported in `errores`, never a hard failure of the whole call.
+   */
+  private async aplicarFifo(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    recibo: ReciboDocument,
+    montoDisponible: number,
+    accountId: string,
+  ): Promise<{
+    aplicadas: AplicacionReciboDocument[];
+    errores: ErrorAplicacion[];
+    montoSinAplicar: number;
+  }> {
+    const abiertas = await this.facturas
+      .find({
+        coPropertyId,
+        inmuebleId: recibo.inmuebleId,
+        status: 'emitida',
+        outstandingBalance: { $gt: 0 },
+      })
+      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+      .session(session)
+      .exec();
+
+    const aplicadas: AplicacionReciboDocument[] = [];
+    const errores: ErrorAplicacion[] = [];
+    let restante = montoDisponible;
+    let totalAplicado = 0;
+
+    for (const factura of abiertas) {
+      if (restante <= 0) break;
+      const monto = Math.min(restante, factura.outstandingBalance);
+
+      try {
+        const facturaActualizada = await decrementarSaldoFactura(
+          this.facturas,
+          session,
+          coPropertyId,
+          factura._id,
+          monto,
+        );
+        await ajustarSaldosCartera(
+          this.saldos,
+          session,
+          coPropertyId,
+          facturaActualizada,
+          monto,
+          -1,
+        );
+
+        const [creada] = await this.aplicaciones.create(
+          [
+            {
+              coPropertyId,
+              reciboId: recibo._id,
+              documentType: 'FV',
+              documentId: factura._id,
+              amountApplied: monto,
+              status: 'activa',
+              appliedAt: new Date(),
+              appliedBy: accountId,
+            },
+          ],
+          { session },
+        );
+
+        aplicadas.push(creada);
+        restante -= monto;
+        totalAplicado += monto;
+      } catch (err) {
+        errores.push({
+          documentoId: factura._id.toString(),
+          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
+    }
+
+    if (totalAplicado > 0) {
+      await this.recibos
+        .findOneAndUpdate(
+          { _id: recibo._id, coPropertyId },
+          {
+            $inc: {
+              appliedAmount: totalAplicado,
+              unappliedAmount: -totalAplicado,
+            },
+          },
+          { session },
+        )
+        .exec();
+    }
+
+    return { aplicadas, errores, montoSinAplicar: restante };
   }
 
   /**
