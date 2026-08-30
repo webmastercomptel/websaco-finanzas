@@ -22,7 +22,10 @@ export class FacturasService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.conSaldoPendiente) filtro.outstandingBalance = { $gt: 0 };
+    if (query.conSaldoPendiente) {
+      filtro.outstandingBalance = { $gt: 0 };
+      filtro.status = 'emitida';
+    }
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;

@@ -138,7 +138,10 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
 
     await service.findAll({ conSaldoPendiente: true });
 
-    expect(modelo.filtros[0]).toMatchObject({ outstandingBalance: { $gt: 0 } });
+    expect(modelo.filtros[0]).toMatchObject({
+      outstandingBalance: { $gt: 0 },
+      status: 'emitida',
+    });
   });
 
   it('no aplica el filtro cuando conSaldoPendiente es false o ausente', async () => {
@@ -148,5 +151,6 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
     await service.findAll({});
 
     expect(modelo.filtros[0].outstandingBalance).toBeUndefined();
+    expect(modelo.filtros[0].status).toBeUndefined();
   });
 });
