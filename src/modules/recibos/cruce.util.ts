@@ -36,6 +36,13 @@ export class AplicacionInvalidaError extends ConflictException {
  * `ajustarSaldosCartera` below this never clamps — a guard failure always
  * means the caller's premise (the document had enough balance) was stale,
  * and the whole transaction must abort, not retry with a smaller amount.
+ *
+ * `amount` itself is validated before it ever reaches the query: the $expr
+ * guard only constrains the balance, not the input. A negative amount would
+ * make `$gte` pass trivially and turn `$inc: -amount` into an unguarded
+ * credit; a NaN amount sorts below every number in BSON comparison order, so
+ * the guard would pass and `$inc` would permanently poison the authoritative
+ * balance with NaN. Both must be rejected before touching the database.
  */
 export async function decrementarSaldoFactura(
   facturas: Model<FacturaDocument>,
@@ -44,6 +51,10 @@ export async function decrementarSaldoFactura(
   facturaId: Types.ObjectId,
   amount: number,
 ): Promise<FacturaDocument> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AplicacionInvalidaError(facturaId.toString(), amount);
+  }
+
   const actualizada = await facturas
     .findOneAndUpdate(
       {

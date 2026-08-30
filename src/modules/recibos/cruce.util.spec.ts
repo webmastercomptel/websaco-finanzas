@@ -55,7 +55,11 @@ describe('decrementarSaldoFactura', () => {
   it('la condición de descuento es una sola operación atómica ($expr + $inc en el mismo findOneAndUpdate)', async () => {
     const facturas = {
       findOneAndUpdate: jest.fn(
-        (_filtro: Record<string, unknown>, _actualizacion?: unknown) => ({
+        (
+          _filtro: Record<string, unknown>,
+          _actualizacion?: unknown,
+          _opciones?: unknown,
+        ) => ({
           exec: () =>
             Promise.resolve({ _id: facturaId, outstandingBalance: 100 }),
         }),
@@ -71,7 +75,8 @@ describe('decrementarSaldoFactura', () => {
     );
 
     expect(facturas.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    const [filtro, actualizacion] = facturas.findOneAndUpdate.mock.calls[0];
+    const [filtro, actualizacion, opciones] =
+      facturas.findOneAndUpdate.mock.calls[0];
     expect(filtro).toMatchObject({
       _id: facturaId,
       coPropertyId: COP,
@@ -79,6 +84,43 @@ describe('decrementarSaldoFactura', () => {
       $expr: { $gte: ['$outstandingBalance', 50] },
     });
     expect(actualizacion).toEqual({ $inc: { outstandingBalance: -50 } });
+    expect(opciones).toMatchObject({ session: SESSION });
+  });
+
+  it('rechaza un monto negativo sin tocar la base de datos — jamás un crédito disfrazado de descuento', async () => {
+    const facturas = { findOneAndUpdate: jest.fn() };
+
+    await expect(
+      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, -50),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un monto cero sin tocar la base de datos', async () => {
+    const facturas = { findOneAndUpdate: jest.fn() };
+
+    await expect(
+      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, 0),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rechaza NaN e Infinity sin tocar la base de datos — nunca envenenar el saldo autoritativo', async () => {
+    const facturas = { findOneAndUpdate: jest.fn() };
+
+    await expect(
+      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, NaN),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      decrementarSaldoFactura(
+        facturas as never,
+        SESSION,
+        COP,
+        facturaId,
+        Infinity,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('concurrencia: dos aplicaciones simultáneas contra la misma factura nunca la descuentan doble', async () => {
@@ -132,7 +174,11 @@ describe('ajustarSaldosCartera', () => {
     const llamadas: Array<[Record<string, unknown>, unknown]> = [];
     const saldos = {
       findOneAndUpdate: jest.fn(
-        (filtro: Record<string, unknown>, pipeline: unknown) => {
+        (
+          filtro: Record<string, unknown>,
+          pipeline: unknown,
+          _opciones?: unknown,
+        ) => {
           llamadas.push([filtro, pipeline]);
           return { exec: () => Promise.resolve(null) };
         },
@@ -165,6 +211,8 @@ describe('ajustarSaldosCartera', () => {
     expect(llamadas[1][1]).toEqual([
       { $set: { balance: { $max: [0, { $add: ['$balance', -20000] }] } } },
     ]);
+    const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
+    expect(opciones).toMatchObject({ session: SESSION });
   });
 
   it('la última línea absorbe el resto del redondeo, para que la suma cierre exacto', async () => {
