@@ -1,11 +1,9 @@
 import { Module } from '@nestjs/common';
+import { RecibosController } from './recibos.controller';
+import { RecibosService } from './recibos.service';
 
-/**
- * Scaffold — controllers and providers are added incrementally as each
- * endpoint lands (Tasks 6, 8, 9, 10), never restructured.
- */
 @Module({
-  controllers: [],
-  providers: [],
+  controllers: [RecibosController],
+  providers: [RecibosService],
 })
 export class RecibosModule {}
