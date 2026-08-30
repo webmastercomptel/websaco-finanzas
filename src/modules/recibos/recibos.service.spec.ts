@@ -647,7 +647,15 @@ describe('RecibosService.anular', () => {
     };
     const recibos = {
       findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      // Muta el mismo objeto `recibo` que `findOne` sigue devolviendo — así
+      // el refetch final ve el $set aplicado, igual que lo vería un Mongo
+      // real, sin necesitar un modelo con estado más elaborado.
+      findOneAndUpdate: jest.fn((_filtro: unknown, update: { $set?: Record<string, unknown> }) => ({
+        exec: () => {
+          if (update?.$set) Object.assign(recibo, update.$set);
+          return Promise.resolve(null);
+        },
+      })),
     };
     const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
     const asientos = modeloAsientos();
@@ -665,7 +673,7 @@ describe('RecibosService.anular', () => {
       conexionCon(session),
     );
 
-    await service.anular(recibo._id.toString(), {
+    const resultado = await service.anular(recibo._id.toString(), {
       motivo: 'duplicado',
       detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
     });
@@ -681,6 +689,31 @@ describe('RecibosService.anular', () => {
       expect.objectContaining({ session: expect.anything() }),
     );
     expect(asientos.create).toHaveBeenCalledTimes(1);
+    // El propio Recibo transiciona de estado — este endpoint responde con el
+    // Recibo actualizado, y motivo/detalle/fecha de anulación son exactamente
+    // los campos que un caller lee (recibos.mapper.ts). Un refactor que
+    // dejara de escribir voidedDetail, o que lo confundiera con voidedReason,
+    // pasaría inadvertido sin esta aserción.
+    expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: recibo._id.toString(), coPropertyId: COP },
+      {
+        $set: {
+          status: 'anulado',
+          voidedReason: 'duplicado',
+          voidedDetail: 'Se cargó el mismo comprobante dos veces por error del cajero',
+          voidedAt: expect.any(Date),
+          appliedAmount: 0,
+          unappliedAmount: 0,
+        },
+      },
+      expect.objectContaining({ session: expect.anything() }),
+    );
+    expect(resultado.estado).toBe('anulado');
+    expect(resultado.motivoAnulacion).toBe('duplicado');
+    expect(resultado.detalleAnulacion).toBe(
+      'Se cargó el mismo comprobante dos veces por error del cajero',
+    );
+    expect(resultado.fechaAnulacion).toEqual(expect.any(String));
     // Usa los totales CACHEADOS del recibo (appliedAmount/unappliedAmount/
     // receivedAmount), no una suma recalculada del loop de arriba — no hace
     // falta "reproducir" la historia para saber cuánto revertir.
