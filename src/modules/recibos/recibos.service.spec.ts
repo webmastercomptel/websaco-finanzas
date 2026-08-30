@@ -34,13 +34,20 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
-/** Periodo abierto: `exigirAbierto` no lanza. Es el default de TODOS los
- *  tests de acá — el periodo cerrado es el caso excepcional, y tiene su
- *  propio test más abajo. */
-const periodoAbierto = (): PeriodoService =>
-  ({
-    exigirAbierto: jest.fn(async () => undefined),
-  }) as unknown as PeriodoService;
+/**
+ * Periodo abierto: `exigirAbierto` no lanza. Es el default de TODOS los tests
+ * de acá — el periodo cerrado es el caso excepcional, y tiene el suyo propio
+ * más abajo. Devuelve también el spy suelto porque asertar sobre
+ * `periodo.exigirAbierto` directamente sería un método desligado de su
+ * instancia (`@typescript-eslint/unbound-method`).
+ */
+const periodoEspiado = () => {
+  const exigirAbierto = jest.fn(() => Promise.resolve());
+  const periodo = { exigirAbierto } as unknown as PeriodoService;
+  return { periodo, exigirAbierto };
+};
+
+const periodoAbierto = (): PeriodoService => periodoEspiado().periodo;
 
 const periodoCerrado = (): PeriodoService =>
   ({
@@ -118,7 +125,9 @@ const construirServicio = (opts: {
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
   const copropiedades = modeloCopropiedades();
-  const periodo = opts.periodo ?? periodoAbierto();
+  const espia = periodoEspiado();
+  const periodo = opts.periodo ?? espia.periodo;
+  const exigirAbierto = espia.exigirAbierto;
 
   const service = new RecibosService(
     recibos as never,
@@ -133,7 +142,16 @@ const construirServicio = (opts: {
     periodo,
   );
 
-  return { service, recibos, facturas, saldos, aplicaciones, asientos, periodo };
+  return {
+    service,
+    recibos,
+    facturas,
+    saldos,
+    aplicaciones,
+    asientos,
+    periodo,
+    exigirAbierto,
+  };
 };
 
 const dtoBase = () => ({
@@ -245,7 +263,7 @@ describe('RecibosService.crear — candado de periodo contable', () => {
   });
 
   it('valida la fecha DEL DOCUMENTO (fechaRecibo), no el instante de la request', async () => {
-    const { service, periodo } = construirServicio({
+    const { service, exigirAbierto } = construirServicio({
       reciboCreado: reciboCreado(),
     });
 
@@ -254,7 +272,7 @@ describe('RecibosService.crear — candado de periodo contable', () => {
       fechaRecibo: '2026-03-15',
     });
 
-    expect(periodo.exigirAbierto).toHaveBeenCalledWith(
+    expect(exigirAbierto).toHaveBeenCalledWith(
       COP.toString(),
       new Date('2026-03-15'),
     );
@@ -658,7 +676,8 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // (una ValidationError de Mongoose, un fallo de red — da igual).
     const saldosQueRevientan = {
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.reject(new Error('fallo inesperado en SaldoCartera')),
+        exec: () =>
+          Promise.reject(new Error('fallo inesperado en SaldoCartera')),
       })),
     };
 
@@ -991,7 +1010,7 @@ describe('RecibosService.anular', () => {
         recibo._id.toString(),
         {
           motivo: 'otro',
-          detalle: 'La factura fue anulada por otra vía antes de esta anulación',
+          detalle: 'La factura ya fue anulada por otra vía',
         },
         CUENTA.toString(),
       ),
