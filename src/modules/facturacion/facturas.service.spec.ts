@@ -130,3 +130,23 @@ describe('FacturasService.findOne', () => {
     );
   });
 });
+
+describe('FacturasService.findAll — conSaldoPendiente', () => {
+  it('filtra por outstandingBalance > 0 cuando conSaldoPendiente es true', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(modelo as never, tenantQueDevuelve(COP));
+
+    await service.findAll({ conSaldoPendiente: true });
+
+    expect(modelo.filtros[0]).toMatchObject({ outstandingBalance: { $gt: 0 } });
+  });
+
+  it('no aplica el filtro cuando conSaldoPendiente es false o ausente', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(modelo as never, tenantQueDevuelve(COP));
+
+    await service.findAll({});
+
+    expect(modelo.filtros[0].outstandingBalance).toBeUndefined();
+  });
+});

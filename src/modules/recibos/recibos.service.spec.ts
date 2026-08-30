@@ -1,4 +1,8 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { RecibosService } from './recibos.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -795,5 +799,136 @@ describe('RecibosService.anular', () => {
         detalle: 'Un detalle de más de veinte caracteres',
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('RecibosService.findAll', () => {
+  const modeloListado = (filas: Record<string, unknown>[], total = filas.length) => {
+    const filtros: Record<string, unknown>[] = [];
+    const cadena = {
+      sort: () => cadena,
+      skip: () => cadena,
+      limit: () => cadena,
+      exec: () => Promise.resolve(filas),
+    };
+    return {
+      filtros,
+      find: jest.fn((f: Record<string, unknown>) => {
+        filtros.push(f);
+        return cadena;
+      }),
+      countDocuments: jest.fn(() => ({ exec: () => Promise.resolve(total) })),
+    };
+  };
+
+  const construirParaListado = (recibos: ReturnType<typeof modeloListado>) =>
+    new RecibosService(
+      recibos as never,
+      modeloAplicacionesGenerico() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+  function modeloAplicacionesGenerico() {
+    return { create: jest.fn(), find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) };
+  }
+
+  it('filtra SIEMPRE por la copropiedad activa', async () => {
+    const recibos = modeloListado([]);
+    const service = construirParaListado(recibos);
+
+    await service.findAll({});
+
+    expect(recibos.filtros[0]).toMatchObject({ coPropertyId: COP });
+  });
+
+  it('aplica conAnticipoDisponible como unappliedAmount > 0', async () => {
+    const recibos = modeloListado([]);
+    const service = construirParaListado(recibos);
+
+    await service.findAll({ conAnticipoDisponible: true });
+
+    expect(recibos.filtros[0]).toMatchObject({ unappliedAmount: { $gt: 0 } });
+  });
+
+  it('aplica el filtro de estado', async () => {
+    const recibos = modeloListado([]);
+    const service = construirParaListado(recibos);
+
+    await service.findAll({ estado: 'anulado' });
+
+    expect(recibos.filtros[0]).toMatchObject({ status: 'anulado' });
+  });
+});
+
+describe('RecibosService.findOne', () => {
+  it('devuelve ReciboDetalle con el arreglo de aplicaciones', async () => {
+    const reciboId = new Types.ObjectId();
+    const reciboDoc = {
+      _id: reciboId,
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 500000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 0,
+      unappliedAmount: 500000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const recibos = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(reciboDoc) })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        sort: () => ({ exec: () => Promise.resolve([]) }),
+      })),
+    };
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    const detalle = await service.findOne(reciboId.toString());
+
+    expect(detalle.id).toBe(reciboId.toString());
+    expect(detalle.aplicaciones).toEqual([]);
+  });
+
+  it('responde "no existe" para un recibo de otra copropiedad', async () => {
+    const recibos = { findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const service = new RecibosService(
+      recibos as never,
+      { find: jest.fn() } as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(NotFoundException);
   });
 });

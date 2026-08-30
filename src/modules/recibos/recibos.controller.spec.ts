@@ -66,3 +66,23 @@ describe('RecibosController.anular', () => {
     expect(recibos.anular).toHaveBeenCalledWith('rec-1', dto);
   });
 });
+
+describe('RecibosController.findAll / findOne', () => {
+  it('findAll delega la query en el servicio', async () => {
+    const recibos = { findAll: jest.fn(() => Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 })) };
+    const controller = new RecibosController(recibos as unknown as RecibosService);
+
+    await controller.findAll({ estado: 'activo' });
+
+    expect(recibos.findAll).toHaveBeenCalledWith({ estado: 'activo' });
+  });
+
+  it('findOne delega el id en el servicio', async () => {
+    const recibos = { findOne: jest.fn(() => Promise.resolve({ id: 'rec-1' })) };
+    const controller = new RecibosController(recibos as unknown as RecibosService);
+
+    await controller.findOne('rec-1');
+
+    expect(recibos.findOne).toHaveBeenCalledWith('rec-1');
+  });
+});

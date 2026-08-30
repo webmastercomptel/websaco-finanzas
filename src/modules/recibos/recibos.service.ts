@@ -39,16 +39,19 @@ import {
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
-import { toAplicacionRecibo, toRecibo } from './recibos.mapper';
+import { toAplicacionRecibo, toRecibo, toReciboDetalle } from './recibos.mapper';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
+  Paginado,
+  ReciboDetalle,
   ResultadoAplicacion,
 } from '../../contracts';
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AplicarReciboDto } from './dto/aplicar-recibo.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
+import type { ListarRecibosDto } from './dto/listar-recibos.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -436,6 +439,61 @@ export class RecibosService {
         .exec();
       return toRecibo(final!);
     });
+  }
+
+  /**
+   * Lean listing (design §5, `GET /recibos`) — always scoped to the active
+   * copropiedad, honoring `ListarRecibosDto`'s filters (`inmuebleId`,
+   * `estado`, date range, and `conAnticipoDisponible` as
+   * `unappliedAmount > 0`, Task 5). Uses `toRecibo`, never
+   * `toReciboDetalle` — no per-row `AplicacionRecibo` lookup here, unlike
+   * `findOne` below.
+   */
+  async findAll(query: ListarRecibosDto): Promise<Paginado<ReciboContract>> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { coPropertyId };
+    if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
+    if (query.estado) filtro.status = query.estado;
+    if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
+    if (query.desde || query.hasta) {
+      filtro.receivedDate = {
+        ...(query.desde ? { $gte: new Date(query.desde) } : {}),
+        ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
+      };
+    }
+
+    const pagina = query.pagina ?? 1;
+    const porPagina = query.porPagina ?? 50;
+
+    const [documentos, total] = await Promise.all([
+      this.recibos
+        .find(filtro)
+        .sort({ receivedDate: -1, _id: -1 })
+        .skip((pagina - 1) * porPagina)
+        .limit(porPagina)
+        .exec(),
+      this.recibos.countDocuments(filtro).exec(),
+    ]);
+
+    return { items: documentos.map(toRecibo), total, pagina, porPagina };
+  }
+
+  /**
+   * Full detail (design §5, `GET /recibos/:id`) — includes the
+   * `aplicaciones` array via a separate query against `AplicacionRecibo`,
+   * assembled through `toReciboDetalle` (Task 3).
+   */
+  async findOne(id: string): Promise<ReciboDetalle> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const recibo = await this.recibos.findOne({ _id: id, coPropertyId }).exec();
+    if (!recibo) {
+      throw new NotFoundException(`No se encontró el recibo ${id}`);
+    }
+    const aplicaciones = await this.aplicaciones
+      .find({ coPropertyId, reciboId: recibo._id })
+      .sort({ appliedAt: 1 })
+      .exec();
+    return toReciboDetalle(recibo, aplicaciones);
   }
 
   /**
