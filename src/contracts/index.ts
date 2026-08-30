@@ -23,9 +23,9 @@
  *
  * The financial document shapes are added one at a time, together with their
  * Mongo schema, once the domain questions behind each has been answered.
- * `Factura` is here now; `Recibo`, `NotaCredito` and `OtraNota` are not yet —
- * adding any of them speculatively, ahead of its schema, would freeze guesses
- * into the contract.
+ * `Factura` and `Recibo` are here now; `NotaCredito` and `OtraNota` are not
+ * yet — adding either speculatively, ahead of its schema, would freeze
+ * guesses into the contract.
  */
 
 /** An ISO 8601 timestamp, e.g. "2026-08-27T14:32:00.000Z". */
@@ -242,6 +242,94 @@ export interface ErrorConsolidacion {
   fila: number;
   inmuebleCodigo: string;
   mensaje: string;
+}
+
+/* ── Recibos de Caja ───────────────────────────────────────────── */
+
+/** How a receipt's money arrived. */
+export type MedioPago = 'transferencia' | 'cheque' | 'pse' | 'efectivo';
+
+/** Why a Recibo was voided — a fixed list, matching the mockup's
+ *  voiding-reason options (design §4). */
+export type MotivoAnulacionRecibo =
+  | 'error_digitacion'
+  | 'error_facturacion'
+  | 'duplicado'
+  | 'ajuste_contrato'
+  | 'otro';
+
+/**
+ * A cash receipt ("RC"). `montoAplicado`/`montoSinAplicar` are the only
+ * fields that move after creation — see the note on the Recibo schema.
+ */
+export interface Recibo {
+  id: string;
+  inmuebleId: string;
+  terceroId: string;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  montoRecibido: Monto;
+  fechaRecibo: IsoDate;
+  medioPago: MedioPago;
+  cuentaDestino: string;
+  referencia: string | null;
+  observaciones: string | null;
+  montoAplicado: Monto;
+  montoSinAplicar: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionRecibo | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * One cruce: one application of a Recibo against a document. Only `'FV'`
+ * (Factura) is implemented today — `'ND'` is reserved for Notas Débito
+ * (design §2, out of scope).
+ */
+export interface AplicacionRecibo {
+  id: string;
+  tipoDocumento: 'FV' | 'ND';
+  documentoId: string;
+  montoAplicado: Monto;
+  estado: 'activa' | 'revertida';
+  fecha: IsoDate;
+}
+
+/**
+ * `Recibo` plus the full list of applications it has made — what
+ * `GET /recibos/:id` returns. `GET /recibos` (the listing) keeps using lean
+ * `Recibo`, same pattern as `LoteFacturacionDetalle`.
+ */
+export interface ReciboDetalle extends Recibo {
+  aplicaciones: AplicacionRecibo[];
+}
+
+/** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
+ *  caller's requested cruce against one document. */
+export interface AplicacionSolicitada {
+  tipoDocumento: 'FV';
+  documentoId: string;
+  montoAplicado: Monto;
+}
+
+/** One document FIFO auto-application could not apply, and why (design §6,
+ *  "FIFO automatic mode is best-effort"). */
+export interface ErrorAplicacion {
+  documentoId: string;
+  mensaje: string;
+}
+
+/**
+ * Result of an application call — manual or FIFO. `errores` is only ever
+ * populated in FIFO mode: manual mode either succeeds completely or the
+ * whole request is rejected (design §6).
+ */
+export interface ResultadoAplicacion {
+  aplicadas: AplicacionRecibo[];
+  montoSinAplicar: Monto;
+  errores: ErrorAplicacion[];
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */
