@@ -56,14 +56,22 @@ describe('RecibosController.aplicar', () => {
 });
 
 describe('RecibosController.anular', () => {
-  it('delega en el servicio con el id de ruta y el dto de anulación', async () => {
+  it('delega en el servicio con el id de ruta, el dto y el accountId del caller', async () => {
     const recibos = { anular: jest.fn(() => Promise.resolve({ id: 'rec-1', estado: 'anulado' })) };
     const controller = new RecibosController(recibos as unknown as RecibosService);
     const dto = { motivo: 'otro' as const, detalle: 'Un detalle de más de veinte caracteres' };
+    const user: IRequestUser = {
+      uid: 'uid-1',
+      email: 'a@b.com',
+      accountId: new Types.ObjectId().toString(),
+    };
 
-    await controller.anular('rec-1', dto);
+    await controller.anular(user, 'rec-1', dto);
 
-    expect(recibos.anular).toHaveBeenCalledWith('rec-1', dto);
+    // Anular es la operación más sensible del módulo (motivo obligatorio +
+    // justificación de 20 caracteres, y cascada sobre cada aplicación): el
+    // actor sale del caller autenticado, nunca del body.
+    expect(recibos.anular).toHaveBeenCalledWith('rec-1', dto, user.accountId);
   });
 });
 

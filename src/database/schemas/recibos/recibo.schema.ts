@@ -102,6 +102,21 @@ export class Recibo {
 
   @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
+
+  /**
+   * Who voided it — the counterpart of `generatedBy` (and of
+   * `AplicacionRecibo.appliedBy`) for the one operation that had no actor
+   * recorded at all. Voiding is this module's most audit-sensitive action:
+   * it is gated behind a mandatory reason plus a 20-character justification,
+   * and it cascades through every application the receipt made. `null` until
+   * then, and on every receipt that was never voided.
+   *
+   * Persisted only, never mapped into the API contract — same as
+   * `generatedBy` and `appliedBy`, which no `Recibo`/`AplicacionRecibo`
+   * response exposes either.
+   */
+  @Prop({ type: Types.ObjectId, ref: Account.name, default: null })
+  voidedBy: Types.ObjectId | null;
 }
 
 export const ReciboSchema = SchemaFactory.createForClass(Recibo);

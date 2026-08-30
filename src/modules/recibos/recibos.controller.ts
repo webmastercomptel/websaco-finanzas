@@ -59,9 +59,13 @@ export class RecibosController {
   @Post(':id/anular')
   @CheckAbility({ action: 'annul', subject: 'Recibo' })
   anular(
+    @CurrentUser() user: IRequestUser,
     @Param('id') id: string,
     @Body() dto: AnularReciboDto,
   ): Promise<Recibo> {
-    return this.recibos.anular(id, dto);
+    // Same reasoning as crear()/aplicar() above for the non-null assertion:
+    // PoliciesGuard already required a Recibo/annul permission, which only an
+    // account with an active assignment can hold.
+    return this.recibos.anular(id, dto, user.accountId!);
   }
 }

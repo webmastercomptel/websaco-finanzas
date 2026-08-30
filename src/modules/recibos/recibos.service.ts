@@ -352,7 +352,11 @@ export class RecibosService {
    * method: `receivedAmount` is always > 0 (DTO validation), so there is
    * always something to reverse — at minimum the original cash entry.
    */
-  async anular(id: string, dto: AnularReciboDto): Promise<ReciboContract> {
+  async anular(
+    id: string,
+    dto: AnularReciboDto,
+    accountId: string,
+  ): Promise<ReciboContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     return this.transaccion(async (session) => {
@@ -454,6 +458,9 @@ export class RecibosService {
               voidedReason: dto.motivo,
               voidedDetail: dto.detalle,
               voidedAt: new Date(),
+              // Same $set as the rest of the void so the actor can never be
+              // written without the state transition, or the other way round.
+              voidedBy: accountId,
               appliedAmount: 0,
               unappliedAmount: 0,
             },

@@ -890,10 +890,14 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
     );
 
-    const resultado = await service.anular(recibo._id.toString(), {
-      motivo: 'duplicado',
-      detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
-    });
+    const resultado = await service.anular(
+      recibo._id.toString(),
+      {
+        motivo: 'duplicado',
+        detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
+      },
+      CUENTA.toString(),
+    );
 
     expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: facturaId, coPropertyId: COP },
@@ -919,6 +923,11 @@ describe('RecibosService.anular', () => {
           voidedReason: 'duplicado',
           voidedDetail: 'Se cargó el mismo comprobante dos veces por error del cajero',
           voidedAt: expect.any(Date),
+          // El actor de la anulación sale del caller autenticado y se escribe
+          // en el MISMO $set que la transición de estado — nunca uno sin el
+          // otro. Es la operación más auditada del módulo y era la única
+          // mutación del módulo que no registraba quién la hizo.
+          voidedBy: CUENTA.toString(),
           appliedAmount: 0,
           unappliedAmount: 0,
         },
@@ -978,10 +987,14 @@ describe('RecibosService.anular', () => {
     );
 
     await expect(
-      service.anular(recibo._id.toString(), {
-        motivo: 'otro',
-        detalle: 'La factura fue anulada por otra vía antes de esta anulación',
-      }),
+      service.anular(
+        recibo._id.toString(),
+        {
+          motivo: 'otro',
+          detalle: 'La factura fue anulada por otra vía antes de esta anulación',
+        },
+        CUENTA.toString(),
+      ),
     ).resolves.toBeDefined();
 
     // La AplicacionRecibo se marca revertida de todos modos — la reversión
@@ -1009,10 +1022,14 @@ describe('RecibosService.anular', () => {
     );
 
     await expect(
-      service.anular(recibo._id.toString(), {
-        motivo: 'otro',
-        detalle: 'Un detalle de más de veinte caracteres',
-      }),
+      service.anular(
+        recibo._id.toString(),
+        {
+          motivo: 'otro',
+          detalle: 'Un detalle de más de veinte caracteres',
+        },
+        CUENTA.toString(),
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
