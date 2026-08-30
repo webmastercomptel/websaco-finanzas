@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model, Types, type ClientSession } from 'mongoose';
 import {
   ResolucionFacturacion,
   ResolucionFacturacionDocument,
@@ -119,10 +119,17 @@ export class NumeracionService {
    * there is no external range to stay inside. The counter is created on first
    * use — a building that has never issued a receipt should not need somebody
    * to have prepared a row for it.
+   *
+   * `session` is optional so every existing caller keeps compiling unchanged.
+   * RecibosService passes one (see design §6, "RC numbering happens inside
+   * the transaction") — without it, a failed Recibo creation would still
+   * consume a number, which is exactly the gap `siguienteFactura` accepts by
+   * design but a Recibo's single-transaction shape does not need to.
    */
   async siguienteDocumento(
     coPropertyId: string,
     tipo: Exclude<TipoDocumento, 'FV'>,
+    session?: ClientSession,
   ): Promise<NumeroAsignado> {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
@@ -145,7 +152,7 @@ export class NumeracionService {
         // the previous call already handed out. Reading the post-image
         // directly, like siguienteLote() already does, needs no fallback
         // and never repeats a number.
-        { new: true, upsert: true },
+        { new: true, upsert: true, session },
       )
       .exec();
 

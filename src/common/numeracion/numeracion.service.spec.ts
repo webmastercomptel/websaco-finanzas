@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
+import type { ClientSession } from 'mongoose';
 import { NumeracionService } from './numeracion.service';
 
 const COP = new Types.ObjectId().toString();
@@ -54,18 +55,24 @@ const consecutivosCon = (fila: Record<string, unknown> | null) => {
   let estado = fila ? { ...fila } : null;
 
   return {
-    findOneAndUpdate: jest.fn((filtro: { documentType?: string }) => ({
-      exec: () => {
-        if (!estado) {
-          // On upsert, $inc creates nextNumber at 1, new: true returns post-image
-          estado = { prefix: filtro?.documentType ?? 'RC', nextNumber: 1 };
+    findOneAndUpdate: jest.fn(
+      (
+        filtro: { documentType?: string },
+        _update?: unknown,
+        _opciones?: unknown,
+      ) => ({
+        exec: () => {
+          if (!estado) {
+            // On upsert, $inc creates nextNumber at 1, new: true returns post-image
+            estado = { prefix: filtro?.documentType ?? 'RC', nextNumber: 1 };
+            return Promise.resolve({ ...estado });
+          }
+          // On normal update, increment first, then return post-image
+          estado.nextNumber = (estado.nextNumber as number) + 1;
           return Promise.resolve({ ...estado });
-        }
-        // On normal update, increment first, then return post-image
-        estado.nextNumber = (estado.nextNumber as number) + 1;
-        return Promise.resolve({ ...estado });
-      },
-    })),
+        },
+      }),
+    ),
   };
 };
 
@@ -277,5 +284,30 @@ describe('NumeracionService.siguienteLote', () => {
     ];
 
     expect(numeros).toEqual([1, 2, 3]);
+  });
+});
+
+describe('NumeracionService.siguienteDocumento — dentro de una transacción', () => {
+  it('reenvía la sesión al findOneAndUpdate, para que un rollback deshaga también el número', async () => {
+    const consecutivos = consecutivosCon({ prefix: 'RC', nextNumber: 5 });
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+    const sesionFalsa = { id: 'fake-session' } as unknown as ClientSession;
+
+    await service.siguienteDocumento(COP, 'RC', sesionFalsa);
+
+    const [, , opciones] = consecutivos.findOneAndUpdate.mock.calls[0];
+    expect(opciones).toMatchObject({ session: sesionFalsa });
+  });
+
+  it('sigue funcionando sin sesión (todo llamador existente)', async () => {
+    const service = servicio(null, { prefix: 'RC', nextNumber: 5 });
+
+    await expect(service.siguienteDocumento(COP, 'RC')).resolves.toMatchObject({
+      numero: 6,
+    });
   });
 });
