@@ -65,11 +65,15 @@ describe('NotaCreditoSchema — forma', () => {
   });
 
   it('rechaza un motivo fuera del catálogo', async () => {
-    await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(Error);
+    await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(
+      Error,
+    );
   });
 
   it('rechaza un estado fuera de activo/anulado', async () => {
-    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(Error);
+    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(
+      Error,
+    );
   });
 });
 

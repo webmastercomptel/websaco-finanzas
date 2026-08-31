@@ -61,10 +61,16 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
   });
 
   it('el índice {sourceType, sourceId} aísla la aplicación del Recibo de la de la Nota Crédito', () => {
-    const soloRecibo = filtrar(coleccion, { sourceType: 'RC', sourceId: recibo });
+    const soloRecibo = filtrar(coleccion, {
+      sourceType: 'RC',
+      sourceId: recibo,
+    });
     expect(soloRecibo).toEqual([filaDeRecibo]);
 
-    const soloNotaCredito = filtrar(coleccion, { sourceType: 'NC', sourceId: notaCredito });
+    const soloNotaCredito = filtrar(coleccion, {
+      sourceType: 'NC',
+      sourceId: notaCredito,
+    });
     expect(soloNotaCredito).toEqual([filaDeNotaCredito]);
   });
 

@@ -111,7 +111,10 @@ export const AsientoContableSchema =
 // idempotently, and is a no-op against a fresh/empty database.
 AsientoContableSchema.index(
   { facturaId: 1 },
-  { unique: true, partialFilterExpression: { facturaId: { $type: 'objectId' } } },
+  {
+    unique: true,
+    partialFilterExpression: { facturaId: { $type: 'objectId' } },
+  },
 );
 
 // Every entry a given Recibo ever produced (its forward applications AND its

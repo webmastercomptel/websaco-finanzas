@@ -57,7 +57,9 @@ describe('toNotaCredito', () => {
   });
 
   it('mapea terceroId null cuando la factura ancla no tiene Tercero vinculado', () => {
-    expect(toNotaCredito(notaDoc({ terceroId: null }) as never).terceroId).toBeNull();
+    expect(
+      toNotaCredito(notaDoc({ terceroId: null }) as never).terceroId,
+    ).toBeNull();
   });
 
   it('expone la fecha de anulación solo cuando existe', () => {

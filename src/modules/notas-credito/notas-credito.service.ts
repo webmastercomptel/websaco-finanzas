@@ -119,7 +119,9 @@ export class NotasCreditoService {
         .session(session)
         .exec();
       if (!factura) {
-        throw new NotFoundException(`No se encontró la factura ${dto.facturaId}`);
+        throw new NotFoundException(
+          `No se encontró la factura ${dto.facturaId}`,
+        );
       }
       // A voided invoice no longer represents active debt — crediting it
       // has no meaning (design §6).
@@ -132,7 +134,10 @@ export class NotasCreditoService {
       // BadRequestException before ANY write — distribution shape is
       // checked against the anchor invoice's OWN lines, never the database.
       validarDistribucionNotaCredito(
-        dto.distribucion.map((l) => ({ conceptoId: l.conceptoId, monto: l.monto })),
+        dto.distribucion.map((l) => ({
+          conceptoId: l.conceptoId,
+          monto: l.monto,
+        })),
         dto.montoTotal,
         factura.lines,
       );
@@ -171,7 +176,10 @@ export class NotasCreditoService {
 
       // Always exactly one target: the anchor invoice itself — never a
       // manual/FIFO choice like Recibos' crear() (design §5).
-      const montoAAplicar = Math.min(dto.montoTotal, factura.outstandingBalance);
+      const montoAAplicar = Math.min(
+        dto.montoTotal,
+        factura.outstandingBalance,
+      );
       let totalAplicadoAhora = 0;
       if (montoAAplicar > 0) {
         const facturaActualizada = await decrementarSaldoFactura(
@@ -288,9 +296,17 @@ export class NotasCreditoService {
           dto.aplicaciones,
           accountId,
         );
-        const totalAplicado = creadas.reduce((acc, a) => acc + a.amountApplied, 0);
+        const totalAplicado = creadas.reduce(
+          (acc, a) => acc + a.amountApplied,
+          0,
+        );
         if (totalAplicado > 0) {
-          await this.postearAsientoAplicacion(session, coPropertyId, nota, totalAplicado);
+          await this.postearAsientoAplicacion(
+            session,
+            coPropertyId,
+            nota,
+            totalAplicado,
+          );
         }
         const notaFinal = await this.notasCredito
           .findOne({ _id: id, coPropertyId })
@@ -315,7 +331,12 @@ export class NotasCreditoService {
         0,
       );
       if (totalAplicado > 0) {
-        await this.postearAsientoAplicacion(session, coPropertyId, nota, totalAplicado);
+        await this.postearAsientoAplicacion(
+          session,
+          coPropertyId,
+          nota,
+          totalAplicado,
+        );
       }
       return {
         aplicadas: resultado.aplicadas.map(toAplicacionCartera),
@@ -336,7 +357,10 @@ export class NotasCreditoService {
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
   ): Promise<AplicacionCarteraDocument[]> {
-    const sumaSolicitada = solicitadas.reduce((acc, a) => acc + a.montoAplicado, 0);
+    const sumaSolicitada = solicitadas.reduce(
+      (acc, a) => acc + a.montoAplicado,
+      0,
+    );
     if (sumaSolicitada > nota.unappliedAmount) {
       throw new ConflictException(
         `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
@@ -394,7 +418,12 @@ export class NotasCreditoService {
     await this.notasCredito
       .findOneAndUpdate(
         { _id: nota._id, coPropertyId },
-        { $inc: { appliedAmount: sumaSolicitada, unappliedAmount: -sumaSolicitada } },
+        {
+          $inc: {
+            appliedAmount: sumaSolicitada,
+            unappliedAmount: -sumaSolicitada,
+          },
+        },
         { session },
       )
       .exec();
@@ -479,7 +508,10 @@ export class NotasCreditoService {
         if (!(err instanceof AplicacionInvalidaError)) {
           throw err;
         }
-        errores.push({ documentoId: factura._id.toString(), mensaje: err.message });
+        errores.push({
+          documentoId: factura._id.toString(),
+          mensaje: err.message,
+        });
       }
     }
 
@@ -487,7 +519,12 @@ export class NotasCreditoService {
       await this.notasCredito
         .findOneAndUpdate(
           { _id: nota._id, coPropertyId },
-          { $inc: { appliedAmount: totalAplicado, unappliedAmount: -totalAplicado } },
+          {
+            $inc: {
+              appliedAmount: totalAplicado,
+              unappliedAmount: -totalAplicado,
+            },
+          },
           { session },
         )
         .exec();
@@ -521,11 +558,18 @@ export class NotasCreditoService {
         throw new NotFoundException(`No se encontró la nota crédito ${id}`);
       }
       if (nota.status === 'anulado') {
-        throw new ConflictException(`La nota crédito ${nota.fullNumber} ya está anulada`);
+        throw new ConflictException(
+          `La nota crédito ${nota.fullNumber} ya está anulada`,
+        );
       }
 
       const aplicacionesActivas = await this.aplicaciones
-        .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id, status: 'activa' })
+        .find({
+          coPropertyId,
+          sourceType: 'NC',
+          sourceId: nota._id,
+          status: 'activa',
+        })
         .session(session)
         .exec();
 
@@ -562,9 +606,12 @@ export class NotasCreditoService {
         .findById(coPropertyId)
         .session(session)
         .exec();
-      const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-      const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-      const cuentaDevoluciones = copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaCartera =
+        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaAnticipos =
+        copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaDevoluciones =
+        copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
       const entries = construirContraAsientoCruce(
         cuentaDevoluciones,
         cuentaCartera,
@@ -624,7 +671,9 @@ export class NotasCreditoService {
    * never `toNotaCreditoDetalle` — no per-row `AplicacionCartera` lookup
    * here, unlike `findOne` below. Mirrors `RecibosService.findAll`.
    */
-  async findAll(query: ListarNotasCreditoDto): Promise<Paginado<NotaCreditoContract>> {
+  async findAll(
+    query: ListarNotasCreditoDto,
+  ): Promise<Paginado<NotaCreditoContract>> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
@@ -659,7 +708,9 @@ export class NotasCreditoService {
    */
   async findOne(id: string): Promise<NotaCreditoDetalle> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    const nota = await this.notasCredito.findOne({ _id: id, coPropertyId }).exec();
+    const nota = await this.notasCredito
+      .findOne({ _id: id, coPropertyId })
+      .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota crédito ${id}`);
     }
@@ -729,7 +780,8 @@ export class NotasCreditoService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaDevoluciones = copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaDevoluciones =
+      copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
     const entries = construirAsientoCruce(
       cuentaDevoluciones,
       cuentaCartera,

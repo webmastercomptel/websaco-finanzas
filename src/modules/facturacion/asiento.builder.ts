@@ -101,10 +101,12 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     creacionCreditoCartera: 'Cartera por cobrar — aplicación de nota crédito',
     creacionCreditoAnticipo: 'Anticipo de cliente — nota crédito sin aplicar',
     aplicacionDebitoAnticipo: 'Anticipo aplicado a cartera — nota crédito',
-    aplicacionCreditoCartera: 'Cartera por cobrar — aplicación de anticipo de nota crédito',
+    aplicacionCreditoCartera:
+      'Cartera por cobrar — aplicación de anticipo de nota crédito',
     contraDebitoCartera: 'Reversión de cartera — anulación de nota crédito',
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de nota crédito',
-    contraCredito: 'Reversión de corrección de ingreso — anulación de nota crédito',
+    contraCredito:
+      'Reversión de corrección de ingreso — anulación de nota crédito',
   },
 };
 

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -8,7 +16,12 @@ import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
-import type { NotaCredito, NotaCreditoDetalle, Paginado, ResultadoAplicacion } from '../../contracts';
+import type {
+  NotaCredito,
+  NotaCreditoDetalle,
+  Paginado,
+  ResultadoAplicacion,
+} from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**
@@ -25,7 +38,9 @@ export class NotasCreditoController {
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'NotaCredito' })
-  findAll(@Query() query: ListarNotasCreditoDto): Promise<Paginado<NotaCredito>> {
+  findAll(
+    @Query() query: ListarNotasCreditoDto,
+  ): Promise<Paginado<NotaCredito>> {
     return this.notasCredito.findAll(query);
   }
 

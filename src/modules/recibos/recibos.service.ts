@@ -44,7 +44,11 @@ import {
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
-import { toAplicacionCartera, toRecibo, toReciboDetalle } from './recibos.mapper';
+import {
+  toAplicacionCartera,
+  toRecibo,
+  toReciboDetalle,
+} from './recibos.mapper';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
@@ -292,7 +296,10 @@ export class RecibosService {
           dto.aplicaciones,
           accountId,
         );
-        const totalAplicado = creadas.reduce((acc, a) => acc + a.amountApplied, 0);
+        const totalAplicado = creadas.reduce(
+          (acc, a) => acc + a.amountApplied,
+          0,
+        );
         if (totalAplicado > 0) {
           await this.postearAsientoAplicacionAnticipo(
             session,
@@ -368,11 +375,18 @@ export class RecibosService {
         throw new NotFoundException(`No se encontró el recibo ${id}`);
       }
       if (recibo.status === 'anulado') {
-        throw new ConflictException(`El recibo ${recibo.fullNumber} ya está anulado`);
+        throw new ConflictException(
+          `El recibo ${recibo.fullNumber} ya está anulado`,
+        );
       }
 
       const aplicacionesActivas = await this.aplicaciones
-        .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id, status: 'activa' })
+        .find({
+          coPropertyId,
+          sourceType: 'RC',
+          sourceId: recibo._id,
+          status: 'activa',
+        })
         .session(session)
         .exec();
 
@@ -418,8 +432,10 @@ export class RecibosService {
         .findById(coPropertyId)
         .session(session)
         .exec();
-      const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-      const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaCartera =
+        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaAnticipos =
+        copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
       const entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,

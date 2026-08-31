@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsBoolean, IsOptional, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
 import { AplicacionSolicitadaDto } from '../../recibos/dto/aplicacion-solicitada.dto';
 
 /** Reuses `AplicacionSolicitadaDto` from the Recibos module directly — same

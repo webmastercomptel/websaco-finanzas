@@ -125,7 +125,15 @@ const construirServicio = (opts: {
     conexionCon(session),
   );
 
-  return { service, notasCredito, facturas, saldos, aplicaciones, asientos, copropiedades };
+  return {
+    service,
+    notasCredito,
+    facturas,
+    saldos,
+    aplicaciones,
+    asientos,
+    copropiedades,
+  };
 };
 
 /**
@@ -168,7 +176,9 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
 describe('NotasCreditoService.crear', () => {
   it('contra una factura con saldo suficiente, aplica en su totalidad y no deja anticipo', async () => {
     const notaCreada = notaCreditoCreada();
-    const { service, aplicaciones, notasCredito } = construirServicio({ notaCreada });
+    const { service, aplicaciones, notasCredito } = construirServicio({
+      notaCreada,
+    });
 
     await service.crear('acc-1', dtoBase());
 
@@ -187,15 +197,28 @@ describe('NotasCreditoService.crear', () => {
   });
 
   it('cuando montoTotal excede el saldo de la factura ancla, aplica lo que cabe y el resto queda como anticipo', async () => {
-    const factura = facturaDoc({ outstandingBalance: 120000, total: 300000, lines: [{ conceptoId: CONCEPTO, totalAmount: 300000 }] });
+    const factura = facturaDoc({
+      outstandingBalance: 120000,
+      total: 300000,
+      lines: [{ conceptoId: CONCEPTO, totalAmount: 300000 }],
+    });
     const notaCreada = notaCreditoCreada({
       totalAmount: 300000,
       unappliedAmount: 300000,
       distribution: [{ conceptoId: CONCEPTO, amount: 300000 }],
     });
-    const { service, aplicaciones } = construirServicio({ notaCreada, factura });
+    const { service, aplicaciones } = construirServicio({
+      notaCreada,
+      factura,
+    });
 
-    await service.crear('acc-1', dtoBase({ montoTotal: 300000, distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 300000 }] }));
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        montoTotal: 300000,
+        distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 300000 }],
+      }),
+    );
 
     const [[filas]] = aplicaciones.create.mock.calls;
     expect(filas[0].amountApplied).toBe(120000);
@@ -204,7 +227,10 @@ describe('NotasCreditoService.crear', () => {
   it('no aplica nada, y no crea AplicacionCartera, cuando la factura ancla ya tiene saldo cero', async () => {
     const factura = facturaDoc({ outstandingBalance: 0 });
     const notaCreada = notaCreditoCreada();
-    const { service, aplicaciones } = construirServicio({ notaCreada, factura });
+    const { service, aplicaciones } = construirServicio({
+      notaCreada,
+      factura,
+    });
 
     await service.crear('acc-1', dtoBase());
 
@@ -231,7 +257,9 @@ describe('NotasCreditoService.crear', () => {
     await expect(
       servicioEspiado.crear(
         'acc-1',
-        dtoBase({ distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 100000 }] }),
+        dtoBase({
+          distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 100000 }],
+        }),
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(numeracion.siguienteDocumento).not.toHaveBeenCalled();
@@ -241,14 +269,20 @@ describe('NotasCreditoService.crear', () => {
     const factura = facturaDoc({ status: 'anulada' });
     const { service } = construirServicio({ notaCreada: {}, factura });
 
-    await expect(service.crear('acc-1', dtoBase())).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.crear('acc-1', dtoBase())).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('rechaza cuando la factura ancla no existe bajo este tenant', async () => {
     const { service, facturas } = construirServicio({ notaCreada: {} });
-    facturas.findOne = jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(null) }) })) as never;
+    facturas.findOne = jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(null) }),
+    })) as never;
 
-    await expect(service.crear('acc-1', dtoBase())).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.crear('acc-1', dtoBase())).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('postea el asiento de creación debitando cuentaDevoluciones', async () => {
@@ -260,7 +294,10 @@ describe('NotasCreditoService.crear', () => {
     const [[creado]] = (asientos.create as jest.Mock).mock.calls;
     const [entrada] = creado;
     expect(entrada.notaCreditoId).toEqual(notaCreada._id);
-    expect(entrada.entries[0]).toMatchObject({ account: '413595', type: 'debito' });
+    expect(entrada.entries[0]).toMatchObject({
+      account: '413595',
+      type: 'debito',
+    });
   });
 });
 
@@ -289,18 +326,25 @@ describe('NotasCreditoService.aplicar', () => {
   it('aplica manualmente contra otra factura del mismo inmueble y descuenta unappliedAmount', async () => {
     const nota = notaActivaDoc();
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
-      findOneAndUpdate: jest.fn((_f: unknown, update: { $inc?: Record<string, number> }) => ({
-        exec: () => {
-          if (update?.$inc) {
-            nota.appliedAmount += update.$inc.appliedAmount ?? 0;
-            nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
-          }
-          return Promise.resolve(null);
-        },
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
       })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $inc?: Record<string, number> }) => ({
+          exec: () => {
+            if (update?.$inc) {
+              nota.appliedAmount += update.$inc.appliedAmount ?? 0;
+              nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
+            }
+            return Promise.resolve(null);
+          },
+        }),
+      ),
     };
-    const otraFactura = facturaDoc({ outstandingBalance: 80000, inmuebleId: INMUEBLE });
+    const otraFactura = facturaDoc({
+      outstandingBalance: 80000,
+      inmuebleId: INMUEBLE,
+    });
     const facturas = modeloFacturas(otraFactura);
     const aplicaciones = modeloAplicaciones();
     const service = new NotasCreditoService(
@@ -317,7 +361,15 @@ describe('NotasCreditoService.aplicar', () => {
 
     const resultado = await service.aplicar(
       nota._id.toString(),
-      { aplicaciones: [{ tipoDocumento: 'FV', documentoId: (otraFactura._id as Types.ObjectId).toString(), montoAplicado: 80000 }] },
+      {
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: otraFactura._id.toString(),
+            montoAplicado: 80000,
+          },
+        ],
+      },
       'acc-1',
     );
 
@@ -346,7 +398,11 @@ describe('NotasCreditoService.aplicar', () => {
         'nc-1',
         {
           aplicaciones: [
-            { tipoDocumento: 'FV', documentoId: new Types.ObjectId().toString(), montoAplicado: 1000 },
+            {
+              tipoDocumento: 'FV',
+              documentoId: new Types.ObjectId().toString(),
+              montoAplicado: 1000,
+            },
           ],
           aplicacionAutomatica: true,
         },
@@ -358,13 +414,17 @@ describe('NotasCreditoService.aplicar', () => {
   it('rechaza cuando no se pide ni manual ni automático', async () => {
     const { service } = construirServicio({ notaCreada: notaActivaDoc() });
 
-    await expect(service.aplicar('nc-1', {}, 'acc-1')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.aplicar('nc-1', {}, 'acc-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('rechaza aplicar sobre una nota crédito anulada', async () => {
     const nota = notaActivaDoc({ status: 'anulado' });
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
     };
     const service = new NotasCreditoService(
       notasCredito as never,
@@ -379,13 +439,19 @@ describe('NotasCreditoService.aplicar', () => {
     );
 
     await expect(
-      service.aplicar(nota._id.toString(), { aplicacionAutomatica: true }, 'acc-1'),
+      service.aplicar(
+        nota._id.toString(),
+        { aplicacionAutomatica: true },
+        'acc-1',
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('rechaza cuando la nota crédito no existe bajo este tenant', async () => {
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(null) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(null) }),
+      })),
     };
     const service = new NotasCreditoService(
       notasCredito as never,
@@ -408,28 +474,45 @@ describe('NotasCreditoService.aplicar', () => {
 describe('NotasCreditoService.anular', () => {
   it('revierte cada AplicacionCartera activa (sourceType NC) y restaura el outstandingBalance de cada factura afectada', async () => {
     const facturaId = new Types.ObjectId();
-    const nota = notaActivaDoc({ appliedAmount: 120000, unappliedAmount: 80000, totalAmount: 200000 });
+    const nota = notaActivaDoc({
+      appliedAmount: 120000,
+      unappliedAmount: 80000,
+      totalAmount: 200000,
+    });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
       amountApplied: 120000,
       status: 'activa',
     };
-    const facturaRestaurada = { _id: facturaId, inmuebleId: INMUEBLE, total: 200000, lines: [] };
-    const facturas = {
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(facturaRestaurada) })),
+    const facturaRestaurada = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 200000,
+      lines: [],
     };
-    const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
-      findOneAndUpdate: jest.fn((_f: unknown, update: { $set?: Record<string, unknown> }) => ({
-        exec: () => {
-          if (update?.$set) Object.assign(nota, update.$set);
-          return Promise.resolve(null);
-        },
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaRestaurada),
       })),
     };
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
     const aplicaciones = {
-      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }) })),
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const asientos = modeloAsientos();
@@ -447,7 +530,10 @@ describe('NotasCreditoService.anular', () => {
 
     const resultado = await service.anular(
       nota._id.toString(),
-      { motivo: 'error_facturacion', detalle: 'Nota crédito emitida por error, se anula' },
+      {
+        motivo: 'error_facturacion',
+        detalle: 'Nota crédito emitida por error, se anula',
+      },
       'acc-1',
     );
 
@@ -467,7 +553,11 @@ describe('NotasCreditoService.anular', () => {
   // only; `anular()`'s `if (factura)` guard already handles this correctly).
   it('revierte la aplicación aunque la factura afectada ya esté anulada por otra vía (no rompe, es contabilidad inofensiva)', async () => {
     const facturaId = new Types.ObjectId();
-    const nota = notaActivaDoc({ appliedAmount: 120000, unappliedAmount: 80000, totalAmount: 200000 });
+    const nota = notaActivaDoc({
+      appliedAmount: 120000,
+      unappliedAmount: 80000,
+      totalAmount: 200000,
+    });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
@@ -481,16 +571,22 @@ describe('NotasCreditoService.anular', () => {
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
-      findOneAndUpdate: jest.fn((_f: unknown, update: { $set?: Record<string, unknown> }) => ({
-        exec: () => {
-          if (update?.$set) Object.assign(nota, update.$set);
-          return Promise.resolve(null);
-        },
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
       })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
     };
     const aplicaciones = {
-      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }) })),
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const service = new NotasCreditoService(
@@ -519,13 +615,21 @@ describe('NotasCreditoService.anular', () => {
   });
 
   it('postea SIEMPRE el contra-asiento, acreditando cuentaDevoluciones por el montoTotal completo', async () => {
-    const nota = notaActivaDoc({ appliedAmount: 200000, unappliedAmount: 0, totalAmount: 200000 });
+    const nota = notaActivaDoc({
+      appliedAmount: 200000,
+      unappliedAmount: 0,
+      totalAmount: 200000,
+    });
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const aplicaciones = {
-      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([]) }) })),
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([]) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const asientos = modeloAsientos();
@@ -541,7 +645,11 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
     );
 
-    await service.anular(nota._id.toString(), { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' }, 'acc-1');
+    await service.anular(
+      nota._id.toString(),
+      { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+      'acc-1',
+    );
 
     // Cast to `jest.Mock` — same fix the `crear` tests above already needed
     // (line ~260): `modeloAsientos()`'s `create: jest.fn(() => ...)` has no
@@ -552,7 +660,9 @@ describe('NotasCreditoService.anular', () => {
     // itself is unchanged.
     const [[creado]] = (asientos.create as jest.Mock).mock.calls;
     const [entrada] = creado;
-    expect(entrada.entries.find((m: { type: string }) => m.type === 'credito')).toMatchObject({
+    expect(
+      entrada.entries.find((m: { type: string }) => m.type === 'credito'),
+    ).toMatchObject({
       account: '413595',
       amount: 200000,
     });
@@ -561,7 +671,9 @@ describe('NotasCreditoService.anular', () => {
   it('rechaza anular una nota crédito ya anulada', async () => {
     const nota = notaActivaDoc({ status: 'anulado' });
     const notasCredito = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
     };
     const service = new NotasCreditoService(
       notasCredito as never,
@@ -576,7 +688,11 @@ describe('NotasCreditoService.anular', () => {
     );
 
     await expect(
-      service.anular(nota._id.toString(), { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' }, 'acc-1'),
+      service.anular(
+        nota._id.toString(),
+        { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+        'acc-1',
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
@@ -586,9 +702,14 @@ describe('NotasCreditoService.findAll', () => {
     const documentos: unknown[] = [];
     const notasCredito = {
       find: jest.fn((filtro: Record<string, unknown>) => {
-        (notasCredito as unknown as { filtroUsado: unknown }).filtroUsado = filtro;
+        (notasCredito as unknown as { filtroUsado: unknown }).filtroUsado =
+          filtro;
         return {
-          sort: () => ({ skip: () => ({ limit: () => ({ exec: () => Promise.resolve(documentos) }) }) }),
+          sort: () => ({
+            skip: () => ({
+              limit: () => ({ exec: () => Promise.resolve(documentos) }),
+            }),
+          }),
         };
       }),
       countDocuments: jest.fn(() => ({ exec: () => Promise.resolve(0) })),
@@ -605,9 +726,17 @@ describe('NotasCreditoService.findAll', () => {
       conexionCon(sesionFalsa()),
     );
 
-    await service.findAll({ inmuebleId: INMUEBLE.toString(), estado: 'activo', desde: '2026-08-01', hasta: '2026-08-31' });
+    await service.findAll({
+      inmuebleId: INMUEBLE.toString(),
+      estado: 'activo',
+      desde: '2026-08-01',
+      hasta: '2026-08-31',
+    });
 
-    expect((notasCredito as unknown as { filtroUsado: Record<string, unknown> }).filtroUsado).toEqual({
+    expect(
+      (notasCredito as unknown as { filtroUsado: Record<string, unknown> })
+        .filtroUsado,
+    ).toEqual({
       coPropertyId: COP,
       inmuebleId: INMUEBLE.toString(),
       status: 'activo',
@@ -623,7 +752,9 @@ describe('NotasCreditoService.findOne', () => {
       findOne: jest.fn(() => ({ exec: () => Promise.resolve(nota) })),
     };
     const aplicaciones = {
-      find: jest.fn(() => ({ sort: () => ({ exec: () => Promise.resolve([]) }) })),
+      find: jest.fn(() => ({
+        sort: () => ({ exec: () => Promise.resolve([]) }),
+      })),
     };
     const service = new NotasCreditoService(
       notasCredito as never,
@@ -644,7 +775,9 @@ describe('NotasCreditoService.findOne', () => {
   });
 
   it('lanza NotFoundException cuando la nota crédito no existe bajo este tenant', async () => {
-    const notasCredito = { findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const notasCredito = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
     const service = new NotasCreditoService(
       notasCredito as never,
       modeloAplicaciones() as never,
@@ -657,6 +790,8 @@ describe('NotasCreditoService.findOne', () => {
       conexionCon(sesionFalsa()),
     );
 
-    await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
