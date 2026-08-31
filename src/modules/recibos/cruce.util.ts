@@ -138,3 +138,85 @@ export async function ajustarSaldosCartera(
       .exec();
   }
 }
+
+/**
+ * Sibling to `ajustarSaldosCartera` above, for Notas Crédito ONLY. Adjusts
+ * each concepto's `SaldoCartera` by that concepto's share of the Nota
+ * Crédito's own user-chosen `distribucion` — never a proportional-by-invoice-
+ * line split.
+ *
+ * WHY THIS EXISTS AS A SEPARATE FUNCTION, NOT A CALL SITE VARIANT OF
+ * `ajustarSaldosCartera`: a Recibo settles a Factura's total, so the
+ * invoice's own line proportions are the only breakdown that exists — hence
+ * `ajustarSaldosCartera`'s proportional split. A Nota Crédito is different:
+ * its creation form asks the user to pick exactly which conceptos this
+ * credit corrects and by how much, captured verbatim in
+ * `NotaCredito.distribution`. That breakdown has no required relationship to
+ * the anchor invoice's own line proportions (e.g. a discount aimed entirely
+ * at one concepto on a multi-line invoice) — reusing the proportional split
+ * would silently discard the user's explicit choice. Same clamp-at-zero
+ * reasoning as `ajustarSaldosCartera`'s own docblock: `SaldoCartera` is a
+ * RECONCILABLE CACHE, so this never refuses, only clamps.
+ *
+ * Rounding, mirrored from `ajustarSaldosCartera`: when `montoAplicado` covers
+ * the distribution's full sum, each line moves by EXACTLY its own `monto` —
+ * no rounding needed. When `montoAplicado` is smaller (the anticipo-
+ * generating case, where the anchor invoice couldn't absorb the NC's whole
+ * `montoTotal` right now), every line but the last is scaled by
+ * `montoAplicado / sum(distribucion)` and `Math.round()`-ed; the last line
+ * absorbs whatever remainder keeps the parts summing exactly to
+ * `montoAplicado`. `montoAplicado` can never exceed `sum(distribucion)` —
+ * already enforced upstream (`crear()`'s
+ * `Math.min(montoTotal, factura.outstandingBalance)` plus
+ * `validarDistribucionNotaCredito`'s own sum-to-`montoTotal` check) — so this
+ * never guards that direction.
+ */
+export async function ajustarSaldosCarteraPorDistribucion(
+  saldos: Model<SaldoCarteraDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  inmuebleId: Types.ObjectId,
+  distribucion: { conceptoId: Types.ObjectId; monto: number }[],
+  montoAplicado: number,
+  signo: 1 | -1,
+): Promise<void> {
+  if (distribucion.length === 0 || montoAplicado === 0) {
+    return;
+  }
+
+  const sumaDistribucion = distribucion.reduce(
+    (acc, linea) => acc + linea.monto,
+    0,
+  );
+  const esAplicacionCompleta = montoAplicado === sumaDistribucion;
+
+  let repartido = 0;
+  for (const [indice, linea] of distribucion.entries()) {
+    const esUltima = indice === distribucion.length - 1;
+    const parte = esAplicacionCompleta
+      ? linea.monto
+      : esUltima
+        ? montoAplicado - repartido
+        : Math.round(montoAplicado * (linea.monto / sumaDistribucion));
+    repartido += parte;
+    if (parte === 0) continue;
+
+    await saldos
+      .findOneAndUpdate(
+        {
+          coPropertyId,
+          inmuebleId,
+          conceptoId: linea.conceptoId,
+        },
+        [
+          {
+            $set: {
+              balance: { $max: [0, { $add: ['$balance', signo * parte] }] },
+            },
+          },
+        ],
+        { session },
+      )
+      .exec();
+  }
+}

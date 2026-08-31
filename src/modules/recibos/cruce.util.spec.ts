@@ -1,6 +1,10 @@
 import { ConflictException } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { ajustarSaldosCartera, decrementarSaldoFactura } from './cruce.util';
+import {
+  ajustarSaldosCartera,
+  ajustarSaldosCarteraPorDistribucion,
+  decrementarSaldoFactura,
+} from './cruce.util';
 
 const SESSION = { id: 'fake-session' } as never;
 const COP = new Types.ObjectId();
@@ -290,6 +294,147 @@ describe('ajustarSaldosCartera', () => {
       SESSION,
       COP,
       { inmuebleId, total: 0, lines: [] },
+      0,
+      -1,
+    );
+
+    expect(saldos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('ajustarSaldosCarteraPorDistribucion', () => {
+  const inmuebleId = new Types.ObjectId();
+  const conceptoA = new Types.ObjectId();
+  const conceptoB = new Types.ObjectId();
+
+  it('aplicación completa: descuenta cada concepto por exactamente su propia línea de distribución, no por un split proporcional de factura', async () => {
+    const llamadas: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          pipeline: unknown,
+          _opciones?: unknown,
+        ) => {
+          llamadas.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+
+    // Nótese: la distribución NO es proporcional a ninguna línea de factura
+    // (60/40 aquí) — si esta función delegara en el split de
+    // `ajustarSaldosCartera` daría otro resultado. Debe respetar EXACTAMENTE
+    // los montos que el usuario eligió.
+    await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [
+        { conceptoId: conceptoA, monto: 60000 },
+        { conceptoId: conceptoB, monto: 40000 },
+      ],
+      100000,
+      -1,
+    );
+
+    expect(llamadas).toHaveLength(2);
+    expect(llamadas[0][0]).toMatchObject({ inmuebleId, conceptoId: conceptoA });
+    expect(llamadas[0][1]).toEqual([
+      { $set: { balance: { $max: [0, { $add: ['$balance', -60000] }] } } },
+    ]);
+    expect(llamadas[1][0]).toMatchObject({ inmuebleId, conceptoId: conceptoB });
+    expect(llamadas[1][1]).toEqual([
+      { $set: { balance: { $max: [0, { $add: ['$balance', -40000] }] } } },
+    ]);
+    const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
+    expect(opciones).toMatchObject({ session: SESSION });
+  });
+
+  it('aplicación parcial (anticipo): escala cada línea proporcionalmente, y la última absorbe el resto del redondeo para cerrar exacto en montoAplicado', async () => {
+    const llamadas: unknown[][] = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn((filtro: unknown, pipeline: unknown) => {
+        llamadas.push([filtro, pipeline]);
+        return { exec: () => Promise.resolve(null) };
+      }),
+    };
+    const conceptoC = new Types.ObjectId();
+
+    // Distribución total: 300000. Solo se aplican 10000 ahora (la factura
+    // ancla no tenía saldo suficiente) — igual que el test de redondeo de
+    // `ajustarSaldosCartera` de arriba, mismos números, mismo assert style.
+    await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [
+        { conceptoId: conceptoA, monto: 100000 },
+        { conceptoId: conceptoB, monto: 100000 },
+        { conceptoId: conceptoC, monto: 100000 },
+      ],
+      10000,
+      -1,
+    );
+
+    const montos = llamadas.map(
+      ([, pipeline]) =>
+        -(
+          pipeline as [
+            {
+              $set: { balance: { $max: [number, { $add: [string, number] }] } };
+            },
+          ]
+        )[0].$set.balance.$max[1].$add[1],
+    );
+    expect(montos.reduce((a, b) => a + b, 0)).toBe(10000);
+  });
+
+  it('con signo +1, restaura (nunca descuenta) — el reverso de una anulación', async () => {
+    const llamadas: unknown[][] = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn((filtro: unknown, pipeline: unknown) => {
+        llamadas.push([filtro, pipeline]);
+        return { exec: () => Promise.resolve(null) };
+      }),
+    };
+
+    await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [{ conceptoId: conceptoA, monto: 60000 }],
+      60000,
+      1,
+    );
+
+    const pipeline = llamadas[0][1] as [
+      { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+    ];
+    expect(pipeline[0].$set.balance.$max[1].$add[1]).toBe(60000);
+  });
+
+  it('no hace nada si la distribución está vacía o el monto es cero', async () => {
+    const saldos = { findOneAndUpdate: jest.fn() };
+
+    await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [],
+      0,
+      -1,
+    );
+    await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [{ conceptoId: conceptoA, monto: 60000 }],
       0,
       -1,
     );

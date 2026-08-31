@@ -295,6 +295,70 @@ describe('NotasCreditoService.crear', () => {
     );
   });
 
+  it('descuenta SaldoCartera según la distribución elegida por el usuario, NO el split proporcional de las líneas de la factura ancla', async () => {
+    const conceptoP = new Types.ObjectId();
+    const conceptoQ = new Types.ObjectId();
+    // Las líneas de la factura son 50%/50% (300000/300000 sobre un total de
+    // 600000) — si el reparto fuera proporcional al aplicar 400000, tocaría
+    // 200000/200000. La distribución elegida por el usuario es 250000/150000
+    // (dentro del tope de cada concepto, validarDistribucionNotaCredito lo
+    // permite). Si `crear()` usara `ajustarSaldosCartera` (proporcional) en
+    // lugar de `ajustarSaldosCarteraPorDistribucion`, este test detectaría
+    // la regresión.
+    const factura = facturaDoc({
+      outstandingBalance: 400000,
+      total: 600000,
+      lines: [
+        { conceptoId: conceptoP, totalAmount: 300000 },
+        { conceptoId: conceptoQ, totalAmount: 300000 },
+      ],
+    });
+    const notaCreada = notaCreditoCreada({
+      totalAmount: 400000,
+      unappliedAmount: 0,
+      appliedAmount: 400000,
+      distribution: [
+        { conceptoId: conceptoP, amount: 250000 },
+        { conceptoId: conceptoQ, amount: 150000 },
+      ],
+    });
+    const llamadasSaldos: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn(
+        (filtro: Record<string, unknown>, pipeline: unknown) => {
+          llamadasSaldos.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+    const { service } = construirServicio({ notaCreada, factura, saldos });
+
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        montoTotal: 400000,
+        distribucion: [
+          { conceptoId: conceptoP.toString(), monto: 250000 },
+          { conceptoId: conceptoQ.toString(), monto: 150000 },
+        ],
+      }),
+    );
+
+    expect(llamadasSaldos).toHaveLength(2);
+    const extraerMonto = (conceptoId: Types.ObjectId) => {
+      const llamada = llamadasSaldos.find(([f]) =>
+        (f.conceptoId as Types.ObjectId).equals(conceptoId),
+      );
+      const pipeline = llamada![1] as [
+        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      ];
+      return pipeline[0].$set.balance.$max[1].$add[1];
+    };
+
+    expect(extraerMonto(conceptoP)).toBe(-250000);
+    expect(extraerMonto(conceptoQ)).toBe(-150000);
+  });
+
   it('postea el asiento de creación debitando cuentaDevoluciones', async () => {
     const notaCreada = notaCreditoCreada();
     const { service, asientos } = construirServicio({ notaCreada });
@@ -388,6 +452,96 @@ describe('NotasCreditoService.aplicar', () => {
     expect(aplicaciones.create).toHaveBeenCalledTimes(1);
     const [[filas]] = aplicaciones.create.mock.calls;
     expect(filas[0]).toMatchObject({ sourceType: 'NC', sourceId: nota._id });
+  });
+
+  it('al aplicar contra OTRA factura, sigue usando el split proporcional de esa factura (ajustarSaldosCartera, sin cambios) — nunca la distribución original de la NC', async () => {
+    // `distribution` de la nota es deliberadamente irrelevante para esta
+    // aplicación — pertenece únicamente a la factura ancla de `crear()`
+    // (design §5/§6). Si `aplicar()` empezara a usar
+    // `ajustarSaldosCarteraPorDistribucion` por error, este test lo
+    // detectaría: el monto no calzaría con el split 75/25 de la OTRA
+    // factura.
+    const nota = notaActivaDoc({
+      distribution: [{ conceptoId: CONCEPTO, amount: 999999 }],
+    });
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $inc?: Record<string, number> }) => ({
+          exec: () => {
+            if (update?.$inc) {
+              nota.appliedAmount += update.$inc.appliedAmount ?? 0;
+              nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
+            }
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const conceptoR = new Types.ObjectId();
+    const conceptoS = new Types.ObjectId();
+    const otraFactura = facturaDoc({
+      outstandingBalance: 80000,
+      inmuebleId: INMUEBLE,
+      total: 80000,
+      lines: [
+        { conceptoId: conceptoR, totalAmount: 60000 },
+        { conceptoId: conceptoS, totalAmount: 20000 },
+      ],
+    });
+    const facturas = modeloFacturas(otraFactura);
+    const aplicaciones = modeloAplicaciones();
+    const llamadasSaldos: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn(
+        (filtro: Record<string, unknown>, pipeline: unknown) => {
+          llamadasSaldos.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      saldos as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.aplicar(
+      nota._id.toString(),
+      {
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: otraFactura._id.toString(),
+            montoAplicado: 80000,
+          },
+        ],
+      },
+      'acc-1',
+    );
+
+    expect(llamadasSaldos).toHaveLength(2);
+    const extraerMonto = (conceptoId: Types.ObjectId) => {
+      const llamada = llamadasSaldos.find(([f]) =>
+        (f.conceptoId as Types.ObjectId).equals(conceptoId),
+      );
+      const pipeline = llamada![1] as [
+        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      ];
+      return pipeline[0].$set.balance.$max[1].$add[1];
+    };
+
+    // 75%/25% de 80000 según las líneas de la OTRA factura.
+    expect(extraerMonto(conceptoR)).toBe(-60000);
+    expect(extraerMonto(conceptoS)).toBe(-20000);
   });
 
   it('rechaza aplicar manual y automático a la vez', async () => {
@@ -622,6 +776,138 @@ describe('NotasCreditoService.anular', () => {
     // La AplicacionCartera se marca revertida de todos modos — la reversión
     // del cruce es incondicional (design §6).
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('con una aplicación ANCLA (de crear()) y una NO ancla (de un aplicar() previo contra otra factura), reversa cada una con la matemática que la originó — nunca al revés', async () => {
+    const facturaAncla = new Types.ObjectId();
+    const facturaOtra = new Types.ObjectId();
+    const conceptoX = new Types.ObjectId();
+    const conceptoY = new Types.ObjectId();
+    const conceptoZ = new Types.ObjectId();
+
+    const nota = notaActivaDoc({
+      facturaId: facturaAncla,
+      distribution: [
+        { conceptoId: conceptoX, amount: 150000 },
+        { conceptoId: conceptoY, amount: 50000 },
+      ],
+      appliedAmount: 280000,
+      unappliedAmount: 0,
+      totalAmount: 280000,
+    });
+
+    // La ancla: creada en crear() contra `facturaAncla`, aplicando el total
+    // de la distribución (200000 = 150000 + 50000).
+    const aplicacionAncla = {
+      _id: new Types.ObjectId(),
+      documentId: facturaAncla,
+      amountApplied: 200000,
+      status: 'activa',
+    };
+    // La NO ancla: creada más tarde vía aplicar() contra OTRA factura, sin
+    // relación con `nota.distribution`.
+    const aplicacionOtra = {
+      _id: new Types.ObjectId(),
+      documentId: facturaOtra,
+      amountApplied: 80000,
+      status: 'activa',
+    };
+
+    const facturaAnclaRestaurada = {
+      _id: facturaAncla,
+      inmuebleId: INMUEBLE,
+      total: 200000,
+      lines: [{ conceptoId: conceptoX, totalAmount: 200000 }],
+    };
+    const facturaOtraRestaurada = {
+      _id: facturaOtra,
+      inmuebleId: INMUEBLE,
+      total: 80000,
+      lines: [{ conceptoId: conceptoZ, totalAmount: 80000 }],
+    };
+
+    const facturas = {
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const id = filtro._id as Types.ObjectId;
+          if (id.equals(facturaAncla)) {
+            return Promise.resolve(facturaAnclaRestaurada);
+          }
+          if (id.equals(facturaOtra)) {
+            return Promise.resolve(facturaOtraRestaurada);
+          }
+          return Promise.resolve(null);
+        },
+      })),
+    };
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        session: () => ({
+          exec: () => Promise.resolve([aplicacionAncla, aplicacionOtra]),
+        }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const llamadasSaldos: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos = {
+      findOneAndUpdate: jest.fn(
+        (filtro: Record<string, unknown>, pipeline: unknown) => {
+          llamadasSaldos.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      saldos as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.anular(
+      nota._id.toString(),
+      { motivo: 'otro', detalle: 'Anula ambas aplicaciones, ancla y no-ancla' },
+      'acc-1',
+    );
+
+    const extraerMonto = (conceptoId: Types.ObjectId) => {
+      const llamada = llamadasSaldos.find(([f]) =>
+        (f.conceptoId as Types.ObjectId).equals(conceptoId),
+      );
+      const pipeline = llamada![1] as [
+        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      ];
+      return pipeline[0].$set.balance.$max[1].$add[1];
+    };
+
+    // La ANCLA reversa por DISTRIBUCIÓN: una llamada por cada línea de
+    // `nota.distribution`, cada una restaurando exactamente su propio monto.
+    expect(llamadasSaldos.filter(([f]) => f.inmuebleId === INMUEBLE)).toHaveLength(3);
+    expect(extraerMonto(conceptoX)).toBe(150000);
+    expect(extraerMonto(conceptoY)).toBe(50000);
+
+    // La NO-ANCLA reversa por el split PROPORCIONAL de SU PROPIA factura —
+    // una sola línea (conceptoZ), por el amountApplied completo (80000) —
+    // ajustarSaldosCartera sin cambios.
+    expect(extraerMonto(conceptoZ)).toBe(80000);
   });
 
   it('postea SIEMPRE el contra-asiento, acreditando cuentaDevoluciones por el montoTotal completo', async () => {

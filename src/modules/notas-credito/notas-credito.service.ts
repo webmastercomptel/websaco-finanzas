@@ -35,6 +35,7 @@ import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import {
   AplicacionInvalidaError,
   ajustarSaldosCartera,
+  ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoFactura,
 } from '../recibos/cruce.util';
 import {
@@ -191,18 +192,30 @@ export class NotasCreditoService {
       );
       let totalAplicadoAhora = 0;
       if (montoAAplicar > 0) {
-        const facturaActualizada = await decrementarSaldoFactura(
+        // The returned Factura isn't needed here (unlike Recibos'
+        // `ajustarSaldosCartera` call sites) — `ajustarSaldosCarteraPorDistribucion`
+        // below takes `inmuebleId` and `dto.distribucion` directly, not the
+        // Factura's own lines.
+        await decrementarSaldoFactura(
           this.facturas,
           session,
           coPropertyId,
           facturaId,
           montoAAplicar,
         );
-        await ajustarSaldosCartera(
+        // Distribution-based, NOT the proportional-by-invoice-line split
+        // `ajustarSaldosCartera` uses — this application is against the
+        // anchor invoice, whose concepto breakdown the user explicitly chose
+        // via `dto.distribucion` (Task 11 / review Finding 3).
+        await ajustarSaldosCarteraPorDistribucion(
           this.saldos,
           session,
           coPropertyId,
-          facturaActualizada,
+          inmuebleId,
+          dto.distribucion.map((l) => ({
+            conceptoId: new Types.ObjectId(l.conceptoId),
+            monto: l.monto,
+          })),
           montoAAplicar,
           -1,
         );
@@ -592,14 +605,36 @@ export class NotasCreditoService {
           .exec();
 
         if (factura) {
-          await ajustarSaldosCartera(
-            this.saldos,
-            session,
-            coPropertyId,
-            factura,
-            aplicacion.amountApplied,
-            1,
-          );
+          // The ANCHOR application — the one `crear()` made against
+          // `nota.facturaId` using distribution math — must be reversed with
+          // the SAME distribution math, or `SaldoCartera` drifts permanently
+          // on every void (Task 11 / review Finding 3). Every OTHER
+          // application (made later via `aplicar()` against a different
+          // invoice) was created with the proportional split and must keep
+          // being reversed that way, unchanged.
+          if (aplicacion.documentId.equals(nota.facturaId)) {
+            await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              session,
+              coPropertyId,
+              nota.inmuebleId,
+              nota.distribution.map((l) => ({
+                conceptoId: l.conceptoId,
+                monto: l.amount,
+              })),
+              aplicacion.amountApplied,
+              1,
+            );
+          } else {
+            await ajustarSaldosCartera(
+              this.saldos,
+              session,
+              coPropertyId,
+              factura,
+              aplicacion.amountApplied,
+              1,
+            );
+          }
         }
 
         await this.aplicaciones
