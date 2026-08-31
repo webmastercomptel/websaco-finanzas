@@ -11,9 +11,9 @@ import {
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
 import {
-  AplicacionRecibo,
-  AplicacionReciboDocument,
-} from '../../database/schemas/recibos/aplicacion-recibo.schema';
+  AplicacionCartera,
+  AplicacionCarteraDocument,
+} from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import {
   Factura,
   FacturaDocument,
@@ -44,7 +44,7 @@ import {
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
-import { toAplicacionRecibo, toRecibo, toReciboDetalle } from './recibos.mapper';
+import { toAplicacionCartera, toRecibo, toReciboDetalle } from './recibos.mapper';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
@@ -81,8 +81,8 @@ export class RecibosService {
   constructor(
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
-    @InjectModel(AplicacionRecibo.name)
-    private readonly aplicaciones: Model<AplicacionReciboDocument>,
+    @InjectModel(AplicacionCartera.name)
+    private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(Factura.name)
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
@@ -306,7 +306,7 @@ export class RecibosService {
           .session(session)
           .exec();
         return {
-          aplicadas: creadas.map(toAplicacionRecibo),
+          aplicadas: creadas.map(toAplicacionCartera),
           montoSinAplicar: reciboFinal!.unappliedAmount,
           errores: [],
         };
@@ -332,7 +332,7 @@ export class RecibosService {
         );
       }
       return {
-        aplicadas: resultado.aplicadas.map(toAplicacionRecibo),
+        aplicadas: resultado.aplicadas.map(toAplicacionCartera),
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };
@@ -372,7 +372,7 @@ export class RecibosService {
       }
 
       const aplicacionesActivas = await this.aplicaciones
-        .find({ coPropertyId, reciboId: recibo._id, status: 'activa' })
+        .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id, status: 'activa' })
         .session(session)
         .exec();
 
@@ -526,7 +526,7 @@ export class RecibosService {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
     const aplicaciones = await this.aplicaciones
-      .find({ coPropertyId, reciboId: recibo._id })
+      .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
       .exec();
     return toReciboDetalle(recibo, aplicaciones);
@@ -545,7 +545,7 @@ export class RecibosService {
     recibo: ReciboDocument,
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
-  ): Promise<AplicacionReciboDocument[]> {
+  ): Promise<AplicacionCarteraDocument[]> {
     const sumaSolicitada = solicitadas.reduce(
       (acc, a) => acc + a.montoAplicado,
       0,
@@ -557,7 +557,7 @@ export class RecibosService {
       );
     }
 
-    const creadas: AplicacionReciboDocument[] = [];
+    const creadas: AplicacionCarteraDocument[] = [];
     for (const solicitada of solicitadas) {
       const facturaId = new Types.ObjectId(solicitada.documentoId);
       const factura = await decrementarSaldoFactura(
@@ -600,7 +600,8 @@ export class RecibosService {
         [
           {
             coPropertyId,
-            reciboId: recibo._id,
+            sourceType: 'RC',
+            sourceId: recibo._id,
             documentType: 'FV',
             documentId: facturaId,
             amountApplied: solicitada.montoAplicado,
@@ -646,7 +647,7 @@ export class RecibosService {
     montoDisponible: number,
     accountId: string,
   ): Promise<{
-    aplicadas: AplicacionReciboDocument[];
+    aplicadas: AplicacionCarteraDocument[];
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
   }> {
@@ -661,7 +662,7 @@ export class RecibosService {
       .session(session)
       .exec();
 
-    const aplicadas: AplicacionReciboDocument[] = [];
+    const aplicadas: AplicacionCarteraDocument[] = [];
     const errores: ErrorAplicacion[] = [];
     let restante = montoDisponible;
     let totalAplicado = 0;
@@ -691,7 +692,8 @@ export class RecibosService {
           [
             {
               coPropertyId,
-              reciboId: recibo._id,
+              sourceType: 'RC',
+              sourceId: recibo._id,
               documentType: 'FV',
               documentId: factura._id,
               amountApplied: monto,

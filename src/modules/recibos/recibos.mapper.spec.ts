@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { toAplicacionRecibo, toRecibo, toReciboDetalle } from './recibos.mapper';
+import { toAplicacionCartera, toRecibo, toReciboDetalle } from './recibos.mapper';
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'rec-1' },
@@ -25,6 +25,8 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
 
 const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'apl-1' },
+  sourceType: 'RC',
+  sourceId: { toString: () => 'rec-1' },
   documentType: 'FV',
   documentId: { toString: () => 'fac-1' },
   amountApplied: 200000,
@@ -62,10 +64,12 @@ describe('toRecibo', () => {
   });
 });
 
-describe('toAplicacionRecibo', () => {
-  it('mapea una aplicación', () => {
-    expect(toAplicacionRecibo(aplicacionDoc() as never)).toEqual({
+describe('toAplicacionCartera', () => {
+  it('mapea una aplicación, con su sourceType/sourceId', () => {
+    expect(toAplicacionCartera(aplicacionDoc() as never)).toEqual({
       id: 'apl-1',
+      sourceType: 'RC',
+      sourceId: 'rec-1',
       tipoDocumento: 'FV',
       documentoId: 'fac-1',
       montoAplicado: 200000,

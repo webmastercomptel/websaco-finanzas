@@ -1,10 +1,9 @@
 import type {
-  AplicacionRecibo as AplicacionReciboContract,
   Recibo as ReciboContract,
   ReciboDetalle,
 } from '../../contracts';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
-import type { AplicacionReciboDocument } from '../../database/schemas/recibos/aplicacion-recibo.schema';
+import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 
 /**
  * Maps a receipt document to the Spanish API contract.
@@ -34,10 +33,29 @@ export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
 });
 
-export const toAplicacionRecibo = (
-  doc: AplicacionReciboDocument,
-): AplicacionReciboContract => ({
+/**
+ * Maps a cruce row to its Spanish contract shape. GENERALIZED (Task 1): the
+ * result type is written structurally here (not yet imported from
+ * `../../contracts`, which does not declare `AplicacionCartera` until Task
+ * 4) so this task's tests are green in isolation; Task 4 tightens the return
+ * type to `import type { AplicacionCartera } from '../../contracts'` once
+ * that contract exists — the object shape itself does not change.
+ */
+export const toAplicacionCartera = (
+  doc: AplicacionCarteraDocument,
+): {
+  id: string;
+  sourceType: 'RC' | 'NC';
+  sourceId: string;
+  tipoDocumento: 'FV' | 'ND';
+  documentoId: string;
+  montoAplicado: number;
+  estado: 'activa' | 'revertida';
+  fecha: string;
+} => ({
   id: doc._id.toString(),
+  sourceType: doc.sourceType,
+  sourceId: doc.sourceId.toString(),
   tipoDocumento: doc.documentType,
   documentoId: doc.documentId.toString(),
   montoAplicado: doc.amountApplied,
@@ -52,8 +70,8 @@ export const toAplicacionRecibo = (
  */
 export const toReciboDetalle = (
   doc: ReciboDocument,
-  aplicaciones: AplicacionReciboDocument[],
+  aplicaciones: AplicacionCarteraDocument[],
 ): ReciboDetalle => ({
   ...toRecibo(doc),
-  aplicaciones: aplicaciones.map(toAplicacionRecibo),
+  aplicaciones: aplicaciones.map(toAplicacionCartera),
 });
