@@ -55,3 +55,23 @@ describe('NotasCreditoController.anular', () => {
     expect(notasCredito.anular).toHaveBeenCalledWith('nc-1', dto, user.accountId);
   });
 });
+
+describe('NotasCreditoController.findAll / findOne', () => {
+  it('findAll delega la query en el servicio', async () => {
+    const notasCredito = { findAll: jest.fn(() => Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 })) };
+    const controller = new NotasCreditoController(notasCredito as unknown as NotasCreditoService);
+
+    await controller.findAll({ estado: 'activo' });
+
+    expect(notasCredito.findAll).toHaveBeenCalledWith({ estado: 'activo' });
+  });
+
+  it('findOne delega el id en el servicio', async () => {
+    const notasCredito = { findOne: jest.fn(() => Promise.resolve({ id: 'nc-1' })) };
+    const controller = new NotasCreditoController(notasCredito as unknown as NotasCreditoService);
+
+    await controller.findOne('nc-1');
+
+    expect(notasCredito.findOne).toHaveBeenCalledWith('nc-1');
+  });
+});

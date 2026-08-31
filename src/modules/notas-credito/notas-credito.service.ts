@@ -44,17 +44,20 @@ import {
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
-import { toNotaCredito } from './notas-credito.mapper';
+import { toNotaCredito, toNotaCreditoDetalle } from './notas-credito.mapper';
 import { toAplicacionCartera } from '../recibos/recibos.mapper';
-import type { NotaCredito as NotaCreditoContract } from '../../contracts';
 import type {
-  ErrorAplicacion,
+  NotaCredito as NotaCreditoContract,
+  NotaCreditoDetalle,
+  Paginado,
   ResultadoAplicacion,
+  ErrorAplicacion,
 } from '../../contracts';
 import type { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import type { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import type { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
+import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned in Task 3, unchanged here. NO
@@ -612,6 +615,59 @@ export class NotasCreditoService {
         .exec();
       return toNotaCredito(final!);
     });
+  }
+
+  /**
+   * Lean listing (design §5, `GET /notas-credito`) — always scoped to the
+   * active copropiedad, honoring `ListarNotasCreditoDto`'s filters
+   * (`inmuebleId`, `estado`, date range on `createdAt`). Uses `toNotaCredito`,
+   * never `toNotaCreditoDetalle` — no per-row `AplicacionCartera` lookup
+   * here, unlike `findOne` below. Mirrors `RecibosService.findAll`.
+   */
+  async findAll(query: ListarNotasCreditoDto): Promise<Paginado<NotaCreditoContract>> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { coPropertyId };
+    if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
+    if (query.estado) filtro.status = query.estado;
+    if (query.desde || query.hasta) {
+      filtro.createdAt = {
+        ...(query.desde ? { $gte: new Date(query.desde) } : {}),
+        ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
+      };
+    }
+
+    const pagina = query.pagina ?? 1;
+    const porPagina = query.porPagina ?? 50;
+
+    const [documentos, total] = await Promise.all([
+      this.notasCredito
+        .find(filtro)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((pagina - 1) * porPagina)
+        .limit(porPagina)
+        .exec(),
+      this.notasCredito.countDocuments(filtro).exec(),
+    ]);
+
+    return { items: documentos.map(toNotaCredito), total, pagina, porPagina };
+  }
+
+  /**
+   * Full detail (design §5, `GET /notas-credito/:id`) — includes the
+   * `aplicaciones` array via a separate query against `AplicacionCartera`,
+   * assembled through `toNotaCreditoDetalle`. Mirrors `RecibosService.findOne`.
+   */
+  async findOne(id: string): Promise<NotaCreditoDetalle> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.notasCredito.findOne({ _id: id, coPropertyId }).exec();
+    if (!nota) {
+      throw new NotFoundException(`No se encontró la nota crédito ${id}`);
+    }
+    const aplicaciones = await this.aplicaciones
+      .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
+      .sort({ appliedAt: 1 })
+      .exec();
+    return toNotaCreditoDetalle(nota, aplicaciones);
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,

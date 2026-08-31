@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -7,7 +7,8 @@ import { NotasCreditoService } from './notas-credito.service';
 import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
-import type { NotaCredito, ResultadoAplicacion } from '../../contracts';
+import { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
+import type { NotaCredito, NotaCreditoDetalle, Paginado, ResultadoAplicacion } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**
@@ -21,6 +22,18 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class NotasCreditoController {
   constructor(private readonly notasCredito: NotasCreditoService) {}
+
+  @Get()
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  findAll(@Query() query: ListarNotasCreditoDto): Promise<Paginado<NotaCredito>> {
+    return this.notasCredito.findAll(query);
+  }
+
+  @Get(':id')
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  findOne(@Param('id') id: string): Promise<NotaCreditoDetalle> {
+    return this.notasCredito.findOne(id);
+  }
 
   @Post()
   @CheckAbility({ action: 'create', subject: 'NotaCredito' })

@@ -580,3 +580,83 @@ describe('NotasCreditoService.anular', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
+
+describe('NotasCreditoService.findAll', () => {
+  it('filtra por copropiedad activa, inmueble, estado y rango de fecha (createdAt)', async () => {
+    const documentos: unknown[] = [];
+    const notasCredito = {
+      find: jest.fn((filtro: Record<string, unknown>) => {
+        (notasCredito as unknown as { filtroUsado: unknown }).filtroUsado = filtro;
+        return {
+          sort: () => ({ skip: () => ({ limit: () => ({ exec: () => Promise.resolve(documentos) }) }) }),
+        };
+      }),
+      countDocuments: jest.fn(() => ({ exec: () => Promise.resolve(0) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.findAll({ inmuebleId: INMUEBLE.toString(), estado: 'activo', desde: '2026-08-01', hasta: '2026-08-31' });
+
+    expect((notasCredito as unknown as { filtroUsado: Record<string, unknown> }).filtroUsado).toEqual({
+      coPropertyId: COP,
+      inmuebleId: INMUEBLE.toString(),
+      status: 'activo',
+      createdAt: { $gte: new Date('2026-08-01'), $lte: new Date('2026-08-31') },
+    });
+  });
+});
+
+describe('NotasCreditoService.findOne', () => {
+  it('devuelve NotaCreditoDetalle con el arreglo de aplicaciones', async () => {
+    const nota = notaActivaDoc();
+    const notasCredito = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(nota) })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({ sort: () => ({ exec: () => Promise.resolve([]) }) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    const detalle = await service.findOne(nota._id.toString());
+
+    expect(detalle.id).toBe(nota._id.toString());
+    expect(detalle.aplicaciones).toEqual([]);
+  });
+
+  it('lanza NotFoundException cuando la nota crédito no existe bajo este tenant', async () => {
+    const notasCredito = { findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
