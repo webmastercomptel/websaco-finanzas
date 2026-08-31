@@ -263,3 +263,135 @@ describe('NotasCreditoService.crear', () => {
     expect(entrada.entries[0]).toMatchObject({ account: '413595', type: 'debito' });
   });
 });
+
+const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
+  _id: new Types.ObjectId(),
+  coPropertyId: COP,
+  inmuebleId: INMUEBLE,
+  fullNumber: 'NC-1',
+  totalAmount: 200000,
+  appliedAmount: 120000,
+  unappliedAmount: 80000,
+  status: 'activo',
+  ...over,
+});
+
+describe('NotasCreditoService.aplicar', () => {
+  it('aplica manualmente contra otra factura del mismo inmueble y descuenta unappliedAmount', async () => {
+    const nota = notaActivaDoc();
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOneAndUpdate: jest.fn((_f: unknown, update: { $inc?: Record<string, number> }) => ({
+        exec: () => {
+          if (update?.$inc) {
+            nota.appliedAmount += update.$inc.appliedAmount ?? 0;
+            nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
+          }
+          return Promise.resolve(null);
+        },
+      })),
+    };
+    const otraFactura = facturaDoc({ outstandingBalance: 80000, inmuebleId: INMUEBLE });
+    const facturas = modeloFacturas(otraFactura);
+    const aplicaciones = modeloAplicaciones();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    const resultado = await service.aplicar(
+      nota._id.toString(),
+      { aplicaciones: [{ tipoDocumento: 'FV', documentoId: (otraFactura._id as Types.ObjectId).toString(), montoAplicado: 80000 }] },
+      'acc-1',
+    );
+
+    expect(resultado.aplicadas).toHaveLength(1);
+    expect(resultado.errores).toEqual([]);
+    expect(aplicaciones.create).toHaveBeenCalledTimes(1);
+    const [[filas]] = aplicaciones.create.mock.calls;
+    expect(filas[0]).toMatchObject({ sourceType: 'NC', sourceId: nota._id });
+  });
+
+  it('rechaza aplicar manual y automático a la vez', async () => {
+    const { service } = construirServicio({ notaCreada: notaActivaDoc() });
+
+    // NOTE: the brief's own fixture used `aplicaciones: []` here, but an
+    // empty array has `.length === 0` — falsy — so the guard
+    // `dto.aplicaciones?.length && dto.aplicacionAutomatica` (mirrored
+    // verbatim from `RecibosService.aplicar()`) never fires, and the
+    // request silently falls through to the FIFO branch instead of being
+    // rejected, throwing a TypeError from an unmocked `facturas.find()`
+    // rather than the intended BadRequestException. Fixed by giving
+    // `aplicaciones` an actual entry, matching the test's own intent (a
+    // manual request combined with `aplicacionAutomatica: true`). The
+    // assertion itself is untouched.
+    await expect(
+      service.aplicar(
+        'nc-1',
+        {
+          aplicaciones: [
+            { tipoDocumento: 'FV', documentoId: new Types.ObjectId().toString(), montoAplicado: 1000 },
+          ],
+          aplicacionAutomatica: true,
+        },
+        'acc-1',
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rechaza cuando no se pide ni manual ni automático', async () => {
+    const { service } = construirServicio({ notaCreada: notaActivaDoc() });
+
+    await expect(service.aplicar('nc-1', {}, 'acc-1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rechaza aplicar sobre una nota crédito anulada', async () => {
+    const nota = notaActivaDoc({ status: 'anulado' });
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(
+      service.aplicar(nota._id.toString(), { aplicacionAutomatica: true }, 'acc-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza cuando la nota crédito no existe bajo este tenant', async () => {
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(null) }) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(
+      service.aplicar('nc-ajena', { aplicacionAutomatica: true }, 'acc-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});

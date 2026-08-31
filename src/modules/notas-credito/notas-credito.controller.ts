@@ -1,11 +1,12 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasCreditoService } from './notas-credito.service';
 import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
-import type { NotaCredito } from '../../contracts';
+import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
+import type { NotaCredito, ResultadoAplicacion } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**
@@ -30,5 +31,15 @@ export class NotasCreditoController {
     // only an account with an active assignment can hold — accountId is
     // guaranteed set here, same reasoning as RecibosController.crear().
     return this.notasCredito.crear(user.accountId!, dto);
+  }
+
+  @Post(':id/aplicar')
+  @CheckAbility({ action: 'update', subject: 'NotaCredito' })
+  aplicar(
+    @CurrentUser() user: IRequestUser,
+    @Param('id') id: string,
+    @Body() dto: AplicarNotaCreditoDto,
+  ): Promise<ResultadoAplicacion> {
+    return this.notasCredito.aplicar(id, dto, user.accountId!);
   }
 }

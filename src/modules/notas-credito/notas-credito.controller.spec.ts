@@ -26,3 +26,17 @@ describe('NotasCreditoController.crear', () => {
     expect(notasCredito.crear).toHaveBeenCalledWith(user.accountId, expect.any(Object));
   });
 });
+
+describe('NotasCreditoController.aplicar', () => {
+  it('delega en el servicio con el id de ruta y el accountId del caller', async () => {
+    const notasCredito = {
+      aplicar: jest.fn(() => Promise.resolve({ aplicadas: [], montoSinAplicar: 0, errores: [] })),
+    };
+    const controller = new NotasCreditoController(notasCredito as unknown as NotasCreditoService);
+    const user: IRequestUser = { uid: 'uid-1', email: 'a@b.com', accountId: new Types.ObjectId().toString() };
+
+    await controller.aplicar(user, 'nc-1', { aplicacionAutomatica: true });
+
+    expect(notasCredito.aplicar).toHaveBeenCalledWith('nc-1', { aplicacionAutomatica: true }, user.accountId);
+  });
+});

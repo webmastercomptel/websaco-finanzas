@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -32,17 +33,26 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import {
+  AplicacionInvalidaError,
   ajustarSaldosCartera,
   decrementarSaldoFactura,
 } from '../recibos/cruce.util';
 import {
   construirAsientoCruce,
+  construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
 import { toNotaCredito } from './notas-credito.mapper';
+import { toAplicacionCartera } from '../recibos/recibos.mapper';
 import type { NotaCredito as NotaCreditoContract } from '../../contracts';
+import type {
+  ErrorAplicacion,
+  ResultadoAplicacion,
+} from '../../contracts';
 import type { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
+import type { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
+import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned in Task 3, unchanged here. NO
@@ -223,6 +233,301 @@ export class NotasCreditoService {
         .exec();
       return toNotaCredito(final!);
     });
+  }
+
+  /**
+   * Applies an existing Nota Crédito's `unappliedAmount` against new
+   * documents — the deferred-cruce case (design §5). Manual and FIFO share
+   * the exact same private helpers below, so the two entry points never
+   * drift apart — same structure as `RecibosService.aplicar()`. Posts via
+   * `postearAsientoAplicacion`, never `postearAsientoCreacion` — the
+   * `montoTotal` was already booked at creation time.
+   */
+  async aplicar(
+    id: string,
+    dto: AplicarNotaCreditoDto,
+    accountId: string,
+  ): Promise<ResultadoAplicacion> {
+    if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
+      throw new BadRequestException(
+        'No se puede pedir aplicación manual y automática a la vez',
+      );
+    }
+    if (!dto.aplicaciones?.length && !dto.aplicacionAutomatica) {
+      throw new BadRequestException(
+        'Debe indicar aplicaciones manuales o aplicación automática',
+      );
+    }
+
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    return this.transaccion(async (session) => {
+      const nota = await this.notasCredito
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      if (!nota) {
+        throw new NotFoundException(`No se encontró la nota crédito ${id}`);
+      }
+      if (nota.status !== 'activo') {
+        throw new ConflictException(
+          `La nota crédito ${nota.fullNumber} está anulada y no admite nuevas aplicaciones`,
+        );
+      }
+
+      if (dto.aplicaciones?.length) {
+        const creadas = await this.aplicarManual(
+          session,
+          coPropertyId,
+          nota,
+          dto.aplicaciones,
+          accountId,
+        );
+        const totalAplicado = creadas.reduce((acc, a) => acc + a.amountApplied, 0);
+        if (totalAplicado > 0) {
+          await this.postearAsientoAplicacion(session, coPropertyId, nota, totalAplicado);
+        }
+        const notaFinal = await this.notasCredito
+          .findOne({ _id: id, coPropertyId })
+          .session(session)
+          .exec();
+        return {
+          aplicadas: creadas.map(toAplicacionCartera),
+          montoSinAplicar: notaFinal!.unappliedAmount,
+          errores: [],
+        };
+      }
+
+      const resultado = await this.aplicarFifo(
+        session,
+        coPropertyId,
+        nota,
+        nota.unappliedAmount,
+        accountId,
+      );
+      const totalAplicado = resultado.aplicadas.reduce(
+        (acc, a) => acc + a.amountApplied,
+        0,
+      );
+      if (totalAplicado > 0) {
+        await this.postearAsientoAplicacion(session, coPropertyId, nota, totalAplicado);
+      }
+      return {
+        aplicadas: resultado.aplicadas.map(toAplicacionCartera),
+        montoSinAplicar: resultado.montoSinAplicar,
+        errores: resultado.errores,
+      };
+    });
+  }
+
+  /** Mirrors `RecibosService.aplicarManual` exactly — `sourceType: 'NC'` in
+   *  place of `'RC'`, `nota` in place of `recibo`. All-or-nothing: if the
+   *  sum exceeds `nota.unappliedAmount`, or any line's cross-unit guard or
+   *  `decrementarSaldoFactura` call throws, the whole transaction aborts. */
+  private async aplicarManual(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    nota: NotaCreditoDocument,
+    solicitadas: AplicacionSolicitadaDto[],
+    accountId: string,
+  ): Promise<AplicacionCarteraDocument[]> {
+    const sumaSolicitada = solicitadas.reduce((acc, a) => acc + a.montoAplicado, 0);
+    if (sumaSolicitada > nota.unappliedAmount) {
+      throw new ConflictException(
+        `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
+          `de la nota crédito ${nota.fullNumber} (${nota.unappliedAmount})`,
+      );
+    }
+
+    const creadas: AplicacionCarteraDocument[] = [];
+    for (const solicitada of solicitadas) {
+      const facturaId = new Types.ObjectId(solicitada.documentoId);
+      const factura = await decrementarSaldoFactura(
+        this.facturas,
+        session,
+        coPropertyId,
+        facturaId,
+        solicitada.montoAplicado,
+      );
+
+      if (!factura.inmuebleId.equals(nota.inmuebleId)) {
+        throw new ConflictException(
+          `La factura ${facturaId.toString()} pertenece a otro inmueble ` +
+            `(${factura.inmuebleId.toString()}) que la nota crédito ` +
+            `${nota.fullNumber} (${nota.inmuebleId.toString()})`,
+        );
+      }
+
+      await ajustarSaldosCartera(
+        this.saldos,
+        session,
+        coPropertyId,
+        factura,
+        solicitada.montoAplicado,
+        -1,
+      );
+
+      const [creada] = await this.aplicaciones.create(
+        [
+          {
+            coPropertyId,
+            sourceType: 'NC',
+            sourceId: nota._id,
+            documentType: 'FV',
+            documentId: facturaId,
+            amountApplied: solicitada.montoAplicado,
+            status: 'activa',
+            appliedAt: new Date(),
+            appliedBy: accountId,
+          },
+        ],
+        { session },
+      );
+      creadas.push(creada);
+    }
+
+    await this.notasCredito
+      .findOneAndUpdate(
+        { _id: nota._id, coPropertyId },
+        { $inc: { appliedAmount: sumaSolicitada, unappliedAmount: -sumaSolicitada } },
+        { session },
+      )
+      .exec();
+
+    return creadas;
+  }
+
+  /** Mirrors `RecibosService.aplicarFifo` exactly — `sourceType: 'NC'` in
+   *  place of `'RC'`. Best-effort: stopping partway is the expected outcome,
+   *  never a hard failure, except when a real bug (anything other than
+   *  `AplicacionInvalidaError`) surfaces after a decrement already
+   *  succeeded — that always aborts the whole transaction. */
+  private async aplicarFifo(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    nota: NotaCreditoDocument,
+    montoDisponible: number,
+    accountId: string,
+  ): Promise<{
+    aplicadas: AplicacionCarteraDocument[];
+    errores: ErrorAplicacion[];
+    montoSinAplicar: number;
+  }> {
+    const abiertas = await this.facturas
+      .find({
+        coPropertyId,
+        inmuebleId: nota.inmuebleId,
+        status: 'emitida',
+        outstandingBalance: { $gt: 0 },
+      })
+      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+      .session(session)
+      .exec();
+
+    const aplicadas: AplicacionCarteraDocument[] = [];
+    const errores: ErrorAplicacion[] = [];
+    let restante = montoDisponible;
+    let totalAplicado = 0;
+
+    for (const factura of abiertas) {
+      if (restante <= 0) break;
+      const monto = Math.min(restante, factura.outstandingBalance);
+
+      try {
+        const facturaActualizada = await decrementarSaldoFactura(
+          this.facturas,
+          session,
+          coPropertyId,
+          factura._id,
+          monto,
+        );
+        await ajustarSaldosCartera(
+          this.saldos,
+          session,
+          coPropertyId,
+          facturaActualizada,
+          monto,
+          -1,
+        );
+
+        const [creada] = await this.aplicaciones.create(
+          [
+            {
+              coPropertyId,
+              sourceType: 'NC',
+              sourceId: nota._id,
+              documentType: 'FV',
+              documentId: factura._id,
+              amountApplied: monto,
+              status: 'activa',
+              appliedAt: new Date(),
+              appliedBy: accountId,
+            },
+          ],
+          { session },
+        );
+
+        aplicadas.push(creada);
+        restante -= monto;
+        totalAplicado += monto;
+      } catch (err) {
+        if (!(err instanceof AplicacionInvalidaError)) {
+          throw err;
+        }
+        errores.push({ documentoId: factura._id.toString(), mensaje: err.message });
+      }
+    }
+
+    if (totalAplicado > 0) {
+      await this.notasCredito
+        .findOneAndUpdate(
+          { _id: nota._id, coPropertyId },
+          { $inc: { appliedAmount: totalAplicado, unappliedAmount: -totalAplicado } },
+          { session },
+        )
+        .exec();
+    }
+
+    return { aplicadas, errores, montoSinAplicar: restante };
+  }
+
+  /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,
+   *  credit `cuentaCartera`, both for `montoAplicado` — never touches
+   *  `cuentaDevoluciones` again (the correction was already booked at
+   *  creation time). Only called when `montoAplicado > 0`. */
+  private async postearAsientoAplicacion(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    nota: NotaCreditoDocument,
+    montoAplicado: number,
+  ): Promise<void> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
+    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const entries = construirMovimientosAplicacionAnticipo(
+      cuentaAnticipos,
+      cuentaCartera,
+      montoAplicado,
+      'NC',
+    );
+
+    await this.asientos.create(
+      [
+        {
+          coPropertyId,
+          loteId: null,
+          facturaId: null,
+          reciboId: null,
+          notaCreditoId: nota._id,
+          date: new Date(),
+          entries,
+        },
+      ],
+      { session },
+    );
   }
 
   /**
