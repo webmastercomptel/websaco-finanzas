@@ -1,8 +1,8 @@
 import {
   construirMovimientos,
-  construirAsientoRecibo,
+  construirAsientoCruce,
   construirMovimientosAplicacionAnticipo,
-  construirContraAsientoRecibo,
+  construirContraAsientoCruce,
 } from './asiento.builder';
 
 describe('construirMovimientos', () => {
@@ -103,14 +103,10 @@ describe('construirMovimientos', () => {
   });
 });
 
-describe('construirAsientoRecibo', () => {
-  it('debita SIEMPRE la cuenta destino por el monto recibido completo, aplicado o no', () => {
-    const movimientos = construirAsientoRecibo(
-      '111005',
-      '130501',
-      '210505',
-      200000,
-      100000,
+describe('construirAsientoCruce', () => {
+  it('debita SIEMPRE la cuenta de origen por el monto recibido completo, aplicado o no', () => {
+    const movimientos = construirAsientoCruce(
+      '111005', '130501', '210505', 200000, 100000, 'RC',
     );
 
     const debito = movimientos.find((m) => m.account === '111005');
@@ -118,12 +114,8 @@ describe('construirAsientoRecibo', () => {
   });
 
   it('acredita cartera por lo aplicado y anticipos por lo que queda sin aplicar', () => {
-    const movimientos = construirAsientoRecibo(
-      '111005',
-      '130501',
-      '210505',
-      200000,
-      100000,
+    const movimientos = construirAsientoCruce(
+      '111005', '130501', '210505', 200000, 100000, 'RC',
     );
 
     expect(movimientos).toEqual([
@@ -134,7 +126,7 @@ describe('construirAsientoRecibo', () => {
   });
 
   it('un anticipo puro (nada aplicado) no acredita cartera, solo anticipos', () => {
-    const movimientos = construirAsientoRecibo('111005', '130501', '210505', 0, 500000);
+    const movimientos = construirAsientoCruce('111005', '130501', '210505', 0, 500000, 'RC');
 
     expect(movimientos).toEqual([
       { account: '111005', type: 'debito', amount: 500000, description: expect.any(String) },
@@ -143,7 +135,7 @@ describe('construirAsientoRecibo', () => {
   });
 
   it('una aplicación total (nada de anticipo) no acredita anticipos, solo cartera', () => {
-    const movimientos = construirAsientoRecibo('111005', '130501', '210505', 500000, 0);
+    const movimientos = construirAsientoCruce('111005', '130501', '210505', 500000, 0, 'RC');
 
     expect(movimientos).toEqual([
       { account: '111005', type: 'debito', amount: 500000, description: expect.any(String) },
@@ -152,35 +144,50 @@ describe('construirAsientoRecibo', () => {
   });
 
   it('siempre balanceado: el débito iguala la suma de los créditos', () => {
-    const movimientos = construirAsientoRecibo('111005', '130501', '210505', 120000, 380000);
+    const movimientos = construirAsientoCruce('111005', '130501', '210505', 120000, 380000, 'RC');
     const suma = (t: 'debito' | 'credito') =>
       movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
 
     expect(suma('debito')).toBe(suma('credito'));
     expect(suma('debito')).toBe(500000);
   });
+
+  it('generaliza: con origen NC produce el mismo movimiento, distinta descripción', () => {
+    const rc = construirAsientoCruce('111005', '130501', '210505', 200000, 100000, 'RC');
+    const nc = construirAsientoCruce('413595', '130501', '210505', 200000, 100000, 'NC');
+
+    expect(nc.map((m) => ({ ...m, description: undefined }))).toEqual(
+      rc.map((m) => ({ ...m, account: m.account === '111005' ? '413595' : m.account, description: undefined })),
+    );
+    expect(nc[0].description).not.toBe(rc[0].description);
+  });
 });
 
 describe('construirMovimientosAplicacionAnticipo', () => {
-  it('debita anticipos y acredita cartera por lo aplicado en esta llamada — nunca mueve la cuenta destino', () => {
-    const movimientos = construirMovimientosAplicacionAnticipo('210505', '130501', 150000);
+  it('debita anticipos y acredita cartera por lo aplicado en esta llamada — nunca mueve la cuenta de origen', () => {
+    const movimientos = construirMovimientosAplicacionAnticipo('210505', '130501', 150000, 'RC');
 
     expect(movimientos).toEqual([
       { account: '210505', type: 'debito', amount: 150000, description: expect.any(String) },
       { account: '130501', type: 'credito', amount: 150000, description: expect.any(String) },
     ]);
   });
+
+  it('generaliza a NC con una descripción distinta, mismo movimiento', () => {
+    const rc = construirMovimientosAplicacionAnticipo('210505', '130501', 150000, 'RC');
+    const nc = construirMovimientosAplicacionAnticipo('210505', '130501', 150000, 'NC');
+
+    expect(nc.map((m) => ({ ...m, description: undefined }))).toEqual(
+      rc.map((m) => ({ ...m, description: undefined })),
+    );
+    expect(nc[0].description).not.toBe(rc[0].description);
+  });
 });
 
-describe('construirContraAsientoRecibo', () => {
-  it('con aplicado y anticipo remanente, revierte ambas patas y devuelve el recaudo completo', () => {
-    const movimientos = construirContraAsientoRecibo(
-      '111005',
-      '130501',
-      '210505',
-      200000,
-      100000,
-      300000,
+describe('construirContraAsientoCruce', () => {
+  it('con aplicado y anticipo remanente, revierte ambas patas y devuelve el monto de origen completo', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005', '130501', '210505', 200000, 100000, 300000, 'RC',
     );
 
     expect(movimientos).toEqual([
@@ -190,14 +197,9 @@ describe('construirContraAsientoRecibo', () => {
     ]);
   });
 
-  it('un recibo que era 100% anticipo revierte solo la pata de anticipos', () => {
-    const movimientos = construirContraAsientoRecibo(
-      '111005',
-      '130501',
-      '210505',
-      0,
-      500000,
-      500000,
+  it('un documento que era 100% anticipo revierte solo la pata de anticipos', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005', '130501', '210505', 0, 500000, 500000, 'RC',
     );
 
     expect(movimientos).toEqual([
@@ -206,14 +208,9 @@ describe('construirContraAsientoRecibo', () => {
     ]);
   });
 
-  it('un recibo totalmente aplicado revierte solo la pata de cartera', () => {
-    const movimientos = construirContraAsientoRecibo(
-      '111005',
-      '130501',
-      '210505',
-      500000,
-      0,
-      500000,
+  it('un documento totalmente aplicado revierte solo la pata de cartera', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005', '130501', '210505', 500000, 0, 500000, 'RC',
     );
 
     expect(movimientos).toEqual([
@@ -222,13 +219,23 @@ describe('construirContraAsientoRecibo', () => {
     ]);
   });
 
-  it('siempre balanceado: los débitos igualan el crédito, porque montoAplicado + montoSinAplicar === montoRecibido', () => {
-    const movimientos = construirContraAsientoRecibo(
-      '111005', '130501', '210505', 120000, 380000, 500000,
+  it('siempre balanceado: los débitos igualan el crédito', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005', '130501', '210505', 120000, 380000, 500000, 'RC',
     );
     const suma = (t: 'debito' | 'credito') =>
       movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
 
     expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('generaliza a NC con una descripción distinta, mismo movimiento', () => {
+    const rc = construirContraAsientoCruce('111005', '130501', '210505', 200000, 100000, 300000, 'RC');
+    const nc = construirContraAsientoCruce('413595', '130501', '210505', 200000, 100000, 300000, 'NC');
+
+    expect(nc.map((m) => ({ ...m, description: undefined }))).toEqual(
+      rc.map((m) => ({ ...m, account: m.account === '111005' ? '413595' : m.account, description: undefined })),
+    );
+    expect(nc[2].description).not.toBe(rc[2].description);
   });
 });

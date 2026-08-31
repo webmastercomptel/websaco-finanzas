@@ -154,6 +154,7 @@ export class CopropiedadesService {
     set('usesBuildingManagement', dto.usaGestionEdificios);
     set('receivablesAccount', dto.cuentaContableCartera);
     set('advancesAccount', dto.cuentaAnticipos);
+    set('creditNotesAccount', dto.cuentaDevoluciones);
     if (dto.estado !== undefined) {
       doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
     }

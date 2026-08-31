@@ -48,4 +48,5 @@ export const toCopropiedad = (
   usaGestionEdificios: doc.usesBuildingManagement,
   cuentaContableCartera: doc.receivablesAccount,
   cuentaAnticipos: doc.advancesAccount,
+  cuentaDevoluciones: doc.creditNotesAccount,
 });

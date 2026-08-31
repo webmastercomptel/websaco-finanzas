@@ -209,4 +209,15 @@ describe('CopropiedadesService.update', () => {
       advancesAccount: '210505',
     });
   });
+
+  it('guarda la cuenta de devoluciones cuando viene', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new CopropiedadesService(modelo as never);
+
+    await service.update('cop-1', { cuentaDevoluciones: '413595' });
+
+    expect(modelo.escrituras[0]).toEqual({
+      creditNotesAccount: '413595',
+    });
+  });
 });

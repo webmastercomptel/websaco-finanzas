@@ -412,6 +412,9 @@ export interface Copropiedad {
   /** Cuenta de pasivo para dinero recibido pero aún no aplicado a ningún
    *  documento — el anticipo de un Recibo de Caja. */
   cuentaAnticipos: string | null;
+  /** Cuenta de gasto/contra-ingreso que se debita al emitir una nota
+   *  crédito — igual razonamiento y forma que cuentaAnticipos. */
+  cuentaDevoluciones: string | null;
 }
 
 /* ── Conceptos de cobro ("Cargos") ─────────────────────────────────

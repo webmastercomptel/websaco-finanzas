@@ -39,8 +39,8 @@ import {
   decrementarSaldoFactura,
 } from './cruce.util';
 import {
-  construirAsientoRecibo,
-  construirContraAsientoRecibo,
+  construirAsientoCruce,
+  construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
@@ -420,13 +420,14 @@ export class RecibosService {
         .exec();
       const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-      const entries = construirContraAsientoRecibo(
+      const entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,
         cuentaAnticipos,
         recibo.appliedAmount,
         recibo.unappliedAmount,
         recibo.receivedAmount,
+        'RC',
       );
       await this.asientos.create(
         [
@@ -769,12 +770,13 @@ export class RecibosService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const entries = construirAsientoRecibo(
+    const entries = construirAsientoCruce(
       recibo.destinationAccount,
       cuentaCartera,
       cuentaAnticipos,
       montoAplicado,
       montoSinAplicar,
+      'RC',
     );
 
     await this.asientos.create(
@@ -817,6 +819,7 @@ export class RecibosService {
       cuentaAnticipos,
       cuentaCartera,
       montoAplicado,
+      'RC',
     );
 
     await this.asientos.create(
