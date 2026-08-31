@@ -461,6 +461,63 @@ describe('NotasCreditoService.anular', () => {
     expect(resultado.montoSinAplicar).toBe(0);
   });
 
+  // Mirrors `recibos.service.spec.ts`'s
+  // 'restaura el saldo aunque la factura afectada ya esté anulada por otra
+  // vía' — added per code-review finding on this task (test-coverage gap
+  // only; `anular()`'s `if (factura)` guard already handles this correctly).
+  it('revierte la aplicación aunque la factura afectada ya esté anulada por otra vía (no rompe, es contabilidad inofensiva)', async () => {
+    const facturaId = new Types.ObjectId();
+    const nota = notaActivaDoc({ appliedAmount: 120000, unappliedAmount: 80000, totalAmount: 200000 });
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 120000,
+      status: 'activa',
+    };
+
+    // La factura ya no existe bajo esas condiciones (anulada por otra vía) —
+    // el findOneAndUpdate devuelve null, y el cascade sigue sin lanzar.
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOneAndUpdate: jest.fn((_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+        exec: () => {
+          if (update?.$set) Object.assign(nota, update.$set);
+          return Promise.resolve(null);
+        },
+      })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(
+      service.anular(
+        nota._id.toString(),
+        { motivo: 'otro', detalle: 'La factura ya fue anulada por otra vía' },
+        'acc-1',
+      ),
+    ).resolves.toBeDefined();
+
+    // La AplicacionCartera se marca revertida de todos modos — la reversión
+    // del cruce es incondicional (design §6).
+    expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it('postea SIEMPRE el contra-asiento, acreditando cuentaDevoluciones por el montoTotal completo', async () => {
     const nota = notaActivaDoc({ appliedAmount: 200000, unappliedAmount: 0, totalAmount: 200000 });
     const notasCredito = {
