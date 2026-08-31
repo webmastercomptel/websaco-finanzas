@@ -23,9 +23,9 @@
  *
  * The financial document shapes are added one at a time, together with their
  * Mongo schema, once the domain questions behind each has been answered.
- * `Factura` and `Recibo` are here now; `NotaCredito` and `OtraNota` are not
- * yet — adding either speculatively, ahead of its schema, would freeze
- * guesses into the contract.
+ * `Factura`, `Recibo` and `NotaCredito` are here now; `OtraNota` is not yet
+ * — adding it speculatively, ahead of its schema, would freeze guesses into
+ * the contract.
  */
 
 /** An ISO 8601 timestamp, e.g. "2026-08-27T14:32:00.000Z". */
@@ -284,12 +284,17 @@ export interface Recibo {
 }
 
 /**
- * One cruce: one application of a Recibo against a document. Only `'FV'`
- * (Factura) is implemented today — `'ND'` is reserved for Notas Débito
- * (design §2, out of scope).
+ * One cruce: one application of a Recibo OR a Nota Crédito against a
+ * document. `sourceType` discriminates which kind of document made the
+ * application — the same row shape serves both, which is what lets the
+ * (future) Confirmación y Cruce screen list them side by side (design §3.1).
+ * Only `'FV'` (Factura) is implemented today as a target — `'ND'` is
+ * reserved for Notas Débito (design §2, out of scope).
  */
-export interface AplicacionRecibo {
+export interface AplicacionCartera {
   id: string;
+  sourceType: 'RC' | 'NC';
+  sourceId: string;
   tipoDocumento: 'FV' | 'ND';
   documentoId: string;
   montoAplicado: Monto;
@@ -303,7 +308,7 @@ export interface AplicacionRecibo {
  * `Recibo`, same pattern as `LoteFacturacionDetalle`.
  */
 export interface ReciboDetalle extends Recibo {
-  aplicaciones: AplicacionRecibo[];
+  aplicaciones: AplicacionCartera[];
 }
 
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
@@ -327,9 +332,69 @@ export interface ErrorAplicacion {
  * whole request is rejected (design §6).
  */
 export interface ResultadoAplicacion {
-  aplicadas: AplicacionRecibo[];
+  aplicadas: AplicacionCartera[];
   montoSinAplicar: Monto;
   errores: ErrorAplicacion[];
+}
+
+/* ── Notas Crédito ─────────────────────────────────────────────── */
+
+/** Why a Nota Crédito was issued — a fixed list, matching the mockup's
+ *  reason options (design §3.2). */
+export type MotivoNotaCredito =
+  | 'error_facturacion'
+  | 'descuento_comercial'
+  | 'anulacion_documento'
+  | 'otro';
+
+/** Why a Nota Crédito was voided — same catalog as a Recibo's void (design
+ *  §5/§8; no domain-specific list was requested for this document). */
+export type MotivoAnulacionNotaCredito =
+  | 'error_digitacion'
+  | 'error_facturacion'
+  | 'duplicado'
+  | 'ajuste_contrato'
+  | 'otro';
+
+/** One line of `distribucion` — how much of `montoTotal` corrects a given
+ *  concepto on the anchor invoice (design §3.2/§6, "per-concepto cap"). */
+export interface DistribucionNotaCredito {
+  conceptoId: string;
+  monto: Monto;
+}
+
+/**
+ * A credit note ("NC"), always issued against exactly one anchor invoice —
+ * unlike `Recibo` (design §3.2). `montoAplicado`/`montoSinAplicar` are the
+ * only fields that move after creation, same pattern as `Recibo`.
+ */
+export interface NotaCredito {
+  id: string;
+  inmuebleId: string;
+  terceroId: string | null;
+  facturaId: string;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  motivo: MotivoNotaCredito;
+  montoTotal: Monto;
+  distribucion: DistribucionNotaCredito[];
+  montoAplicado: Monto;
+  montoSinAplicar: Monto;
+  observaciones: string | null;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionNotaCredito | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * `NotaCredito` plus the full list of applications it has made — what
+ * `GET /notas-credito/:id` returns. `GET /notas-credito` (the listing) keeps
+ * using lean `NotaCredito`, same pattern as `ReciboDetalle`.
+ */
+export interface NotaCreditoDetalle extends NotaCredito {
+  aplicaciones: AplicacionCartera[];
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */

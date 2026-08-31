@@ -1,4 +1,5 @@
 import type {
+  AplicacionCartera as AplicacionCarteraContract,
   Recibo as ReciboContract,
   ReciboDetalle,
 } from '../../contracts';
@@ -35,24 +36,13 @@ export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
 
 /**
  * Maps a cruce row to its Spanish contract shape. GENERALIZED (Task 1): the
- * result type is written structurally here (not yet imported from
- * `../../contracts`, which does not declare `AplicacionCartera` until Task
- * 4) so this task's tests are green in isolation; Task 4 tightens the return
- * type to `import type { AplicacionCartera } from '../../contracts'` once
- * that contract exists — the object shape itself does not change.
+ * source and target document may be a Recibo or a Nota Crédito, discriminated
+ * by `sourceType` — the Notas Crédito mapper reuses this function directly
+ * (design §4).
  */
 export const toAplicacionCartera = (
   doc: AplicacionCarteraDocument,
-): {
-  id: string;
-  sourceType: 'RC' | 'NC';
-  sourceId: string;
-  tipoDocumento: 'FV' | 'ND';
-  documentoId: string;
-  montoAplicado: number;
-  estado: 'activa' | 'revertida';
-  fecha: string;
-} => ({
+): AplicacionCarteraContract => ({
   id: doc._id.toString(),
   sourceType: doc.sourceType,
   sourceId: doc.sourceId.toString(),
