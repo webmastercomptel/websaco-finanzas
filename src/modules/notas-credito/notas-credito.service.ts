@@ -612,6 +612,16 @@ export class NotasCreditoService {
           // application (made later via `aplicar()` against a different
           // invoice) was created with the proportional split and must keep
           // being reversed that way, unchanged.
+          //
+          // INVARIANT this branch relies on: at most one ACTIVE application
+          // can ever target `nota.facturaId`. Holds today because
+          // `decrementarSaldoFactura`'s $expr guard refuses a second
+          // application once the anchor invoice's outstandingBalance hits 0
+          // (which is exactly when `crear()` stops applying against it) — so
+          // no code path in this module can create a second anchor-targeting
+          // row. If a future feature (e.g. a recargo) re-inflates a
+          // Factura's outstandingBalance after it reaches 0, re-check this
+          // invariant before trusting it again.
           if (aplicacion.documentId.equals(nota.facturaId)) {
             await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
