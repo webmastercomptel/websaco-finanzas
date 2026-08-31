@@ -6,6 +6,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasCreditoService } from './notas-credito.service';
 import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
+import { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import type { NotaCredito, ResultadoAplicacion } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
@@ -41,5 +42,15 @@ export class NotasCreditoController {
     @Body() dto: AplicarNotaCreditoDto,
   ): Promise<ResultadoAplicacion> {
     return this.notasCredito.aplicar(id, dto, user.accountId!);
+  }
+
+  @Post(':id/anular')
+  @CheckAbility({ action: 'annul', subject: 'NotaCredito' })
+  anular(
+    @CurrentUser() user: IRequestUser,
+    @Param('id') id: string,
+    @Body() dto: AnularNotaCreditoDto,
+  ): Promise<NotaCredito> {
+    return this.notasCredito.anular(id, dto, user.accountId!);
   }
 }

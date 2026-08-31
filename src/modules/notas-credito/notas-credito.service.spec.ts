@@ -268,6 +268,15 @@ const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   coPropertyId: COP,
   inmuebleId: INMUEBLE,
+  // `facturaId`/`distribution` were missing from the brief's own fixture —
+  // harmless for the pre-existing `aplicar()` tests below (they never touch
+  // `toNotaCredito`), but `anular()` (Task 8) always maps its final document
+  // through `toNotaCredito`, which does `doc.facturaId.toString()` and
+  // `doc.distribution.map(...)` unconditionally. Without these two fields
+  // that throws a TypeError instead of returning the mapped contract. Added
+  // additively — no existing assertion touches either field.
+  facturaId: new Types.ObjectId(),
+  distribution: [],
   fullNumber: 'NC-1',
   totalAmount: 200000,
   appliedAmount: 120000,
@@ -393,5 +402,124 @@ describe('NotasCreditoService.aplicar', () => {
     await expect(
       service.aplicar('nc-ajena', { aplicacionAutomatica: true }, 'acc-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('NotasCreditoService.anular', () => {
+  it('revierte cada AplicacionCartera activa (sourceType NC) y restaura el outstandingBalance de cada factura afectada', async () => {
+    const facturaId = new Types.ObjectId();
+    const nota = notaActivaDoc({ appliedAmount: 120000, unappliedAmount: 80000, totalAmount: 200000 });
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 120000,
+      status: 'activa',
+    };
+    const facturaRestaurada = { _id: facturaId, inmuebleId: INMUEBLE, total: 200000, lines: [] };
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(facturaRestaurada) })),
+    };
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOneAndUpdate: jest.fn((_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+        exec: () => {
+          if (update?.$set) Object.assign(nota, update.$set);
+          return Promise.resolve(null);
+        },
+      })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    const resultado = await service.anular(
+      nota._id.toString(),
+      { motivo: 'error_facturacion', detalle: 'Nota crédito emitida por error, se anula' },
+      'acc-1',
+    );
+
+    expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: facturaId, coPropertyId: COP },
+      { $inc: { outstandingBalance: 120000 } },
+      { new: true, session: expect.anything() },
+    );
+    expect(resultado.estado).toBe('anulado');
+    expect(resultado.montoAplicado).toBe(0);
+    expect(resultado.montoSinAplicar).toBe(0);
+  });
+
+  it('postea SIEMPRE el contra-asiento, acreditando cuentaDevoluciones por el montoTotal completo', async () => {
+    const nota = notaActivaDoc({ appliedAmount: 200000, unappliedAmount: 0, totalAmount: 200000 });
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve([]) }) })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.anular(nota._id.toString(), { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' }, 'acc-1');
+
+    // Cast to `jest.Mock` — same fix the `crear` tests above already needed
+    // (line ~260): `modeloAsientos()`'s `create: jest.fn(() => ...)` has no
+    // declared parameters, so TS infers `mock.calls` as `[][]`, and
+    // destructuring a call's args as `[entrada]` fails to compile
+    // (`Tuple type '[]' of length '0' has no element at index '0'`) even
+    // though it runs fine under ts-jest. Fixed additively — the assertion
+    // itself is unchanged.
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
+    const [entrada] = creado;
+    expect(entrada.entries.find((m: { type: string }) => m.type === 'credito')).toMatchObject({
+      account: '413595',
+      amount: 200000,
+    });
+  });
+
+  it('rechaza anular una nota crédito ya anulada', async () => {
+    const nota = notaActivaDoc({ status: 'anulado' });
+    const notasCredito = {
+      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(nota) }) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(
+      service.anular(nota._id.toString(), { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' }, 'acc-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });

@@ -39,6 +39,7 @@ import {
 } from '../recibos/cruce.util';
 import {
   construirAsientoCruce,
+  construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
@@ -52,6 +53,7 @@ import type {
 } from '../../contracts';
 import type { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import type { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
+import type { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
 
 /**
@@ -489,6 +491,127 @@ export class NotasCreditoService {
     }
 
     return { aplicadas, errores, montoSinAplicar: restante };
+  }
+
+  /**
+   * Voids a Nota Crédito, cascading unconditionally: every `activa`
+   * `AplicacionCartera` it made (`sourceType: 'NC'`) is reversed, its
+   * `Factura`'s `outstandingBalance` is restored — even one already voided
+   * through another path, harmless bookkeeping, never "reopens" that
+   * document — and ONE consolidated reversing journal entry is always
+   * posted, using the Nota Crédito's OWN cached totals. Mirrors
+   * `RecibosService.anular()` exactly.
+   */
+  async anular(
+    id: string,
+    dto: AnularNotaCreditoDto,
+    accountId: string,
+  ): Promise<NotaCreditoContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    return this.transaccion(async (session) => {
+      const nota = await this.notasCredito
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      if (!nota) {
+        throw new NotFoundException(`No se encontró la nota crédito ${id}`);
+      }
+      if (nota.status === 'anulado') {
+        throw new ConflictException(`La nota crédito ${nota.fullNumber} ya está anulada`);
+      }
+
+      const aplicacionesActivas = await this.aplicaciones
+        .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id, status: 'activa' })
+        .session(session)
+        .exec();
+
+      for (const aplicacion of aplicacionesActivas) {
+        const factura = await this.facturas
+          .findOneAndUpdate(
+            { _id: aplicacion.documentId, coPropertyId },
+            { $inc: { outstandingBalance: aplicacion.amountApplied } },
+            { new: true, session },
+          )
+          .exec();
+
+        if (factura) {
+          await ajustarSaldosCartera(
+            this.saldos,
+            session,
+            coPropertyId,
+            factura,
+            aplicacion.amountApplied,
+            1,
+          );
+        }
+
+        await this.aplicaciones
+          .findOneAndUpdate(
+            { _id: aplicacion._id, coPropertyId },
+            { $set: { status: 'revertida' } },
+            { session },
+          )
+          .exec();
+      }
+
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+      const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaDevoluciones = copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+      const entries = construirContraAsientoCruce(
+        cuentaDevoluciones,
+        cuentaCartera,
+        cuentaAnticipos,
+        nota.appliedAmount,
+        nota.unappliedAmount,
+        nota.totalAmount,
+        'NC',
+      );
+      await this.asientos.create(
+        [
+          {
+            coPropertyId,
+            loteId: null,
+            facturaId: null,
+            reciboId: null,
+            notaCreditoId: nota._id,
+            date: new Date(),
+            entries,
+          },
+        ],
+        { session },
+      );
+
+      // Once voided, a Nota Crédito offers no anticipo and shows no applied
+      // amount — same deliberate zeroing choice as RecibosService.anular().
+      await this.notasCredito
+        .findOneAndUpdate(
+          { _id: id, coPropertyId },
+          {
+            $set: {
+              status: 'anulado',
+              voidedReason: dto.motivo,
+              voidedDetail: dto.detalle,
+              voidedAt: new Date(),
+              voidedBy: accountId,
+              appliedAmount: 0,
+              unappliedAmount: 0,
+            },
+          },
+          { session },
+        )
+        .exec();
+
+      const final = await this.notasCredito
+        .findOne({ _id: id, coPropertyId })
+        .session(session)
+        .exec();
+      return toNotaCredito(final!);
+    });
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,
