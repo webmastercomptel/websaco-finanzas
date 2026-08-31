@@ -12,6 +12,7 @@ const copropiedad = new Types.ObjectId();
 const lote = new Types.ObjectId();
 const factura = new Types.ObjectId();
 const recibo = new Types.ObjectId();
+const notaCredito = new Types.ObjectId();
 
 const entradasBalanceadas = [
   { account: '111005', type: 'debito', amount: 100000, description: 'x' },
@@ -56,6 +57,10 @@ describe('AsientoContableSchema — anclaje Factura/Lote (existente) vs Recibo (
     expect(doc.loteId).toBeNull();
     expect(doc.facturaId).toBeNull();
   });
+
+  it('acepta un asiento de nota crédito, SIN loteId, facturaId ni reciboId', async () => {
+    await expect(validar({ notaCreditoId: notaCredito })).resolves.toBeNull();
+  });
 });
 
 describe('AsientoContableSchema — índices', () => {
@@ -73,6 +78,11 @@ describe('AsientoContableSchema — índices', () => {
 
   it('indexa por recibo, para encontrar todos los asientos que produjo', () => {
     const indice = indices().find(([campos]) => campos.reciboId === 1);
+    expect(indice).toBeDefined();
+  });
+
+  it('indexa por nota crédito, para encontrar todos los asientos que produjo', () => {
+    const indice = indices().find(([campos]) => campos.notaCreditoId === 1);
     expect(indice).toBeDefined();
   });
 });
