@@ -39,11 +39,19 @@ export function validarDistribucionNotaCredito(
     topePorConcepto.set(id, (topePorConcepto.get(id) ?? 0) + linea.totalAmount);
   }
 
+  const solicitadoPorConcepto = new Map<string, number>();
   for (const linea of distribucion) {
-    const tope = topePorConcepto.get(linea.conceptoId) ?? 0;
-    if (linea.monto > tope) {
+    solicitadoPorConcepto.set(
+      linea.conceptoId,
+      (solicitadoPorConcepto.get(linea.conceptoId) ?? 0) + linea.monto,
+    );
+  }
+
+  for (const [conceptoId, montoSolicitado] of solicitadoPorConcepto) {
+    const tope = topePorConcepto.get(conceptoId) ?? 0;
+    if (montoSolicitado > tope) {
       throw new BadRequestException(
-        `El concepto ${linea.conceptoId} no admite acreditar ${linea.monto}: ` +
+        `El concepto ${conceptoId} no admite acreditar ${montoSolicitado}: ` +
           `la factura ancla solo lo cobra por ${tope}`,
       );
     }

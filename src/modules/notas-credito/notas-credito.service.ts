@@ -131,6 +131,15 @@ export class NotasCreditoService {
         );
       }
 
+      const inmuebleId = new Types.ObjectId(dto.inmuebleId);
+      if (!factura.inmuebleId.equals(inmuebleId)) {
+        throw new ConflictException(
+          `La factura ${factura.fullNumber} pertenece a otro inmueble ` +
+            `(${factura.inmuebleId.toString()}) que el solicitado ` +
+            `(${inmuebleId.toString()})`,
+        );
+      }
+
       // BadRequestException before ANY write — distribution shape is
       // checked against the anchor invoice's OWN lines, never the database.
       validarDistribucionNotaCredito(
@@ -152,7 +161,7 @@ export class NotasCreditoService {
         [
           {
             coPropertyId,
-            inmuebleId: new Types.ObjectId(dto.inmuebleId),
+            inmuebleId,
             terceroId: factura.terceroId,
             facturaId,
             prefix: numero.prefijo,

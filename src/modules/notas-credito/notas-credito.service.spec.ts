@@ -265,6 +265,16 @@ describe('NotasCreditoService.crear', () => {
     expect(numeracion.siguienteDocumento).not.toHaveBeenCalled();
   });
 
+  it('rechaza cuando dto.inmuebleId no coincide con factura.inmuebleId — no debe permitir emparejar una unidad con la factura de otra', async () => {
+    const otroInmueble = new Types.ObjectId();
+    const factura = facturaDoc({ inmuebleId: otroInmueble });
+    const { service } = construirServicio({ notaCreada: {}, factura });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ inmuebleId: INMUEBLE.toString() })),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('rechaza una nota crédito contra una factura ya anulada', async () => {
     const factura = facturaDoc({ status: 'anulada' });
     const { service } = construirServicio({ notaCreada: {}, factura });

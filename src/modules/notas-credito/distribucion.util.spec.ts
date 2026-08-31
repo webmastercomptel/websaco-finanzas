@@ -72,4 +72,25 @@ describe('validarDistribucionNotaCredito', () => {
       ),
     ).not.toThrow();
   });
+
+  it('rechaza líneas duplicadas del mismo concepto en la solicitud cuya suma excede el tope, aunque cada línea individualmente esté por debajo', () => {
+    // La factura ancla cobra 300000 por CONCEPTO_A. Cada línea solicitada
+    // (300000 y 300000... o, más sutil, 150000 y 150000) queda por debajo
+    // del tope si se mira aisladamente, y el total (600000 o 300000) puede
+    // incluso no coincidir o coincidir con montoTotal — el bug real es que
+    // dos líneas de 300000 cada una (600000 en total, igual a montoTotal)
+    // pasan la validación de suma Y cada línea individual pasa el chequeo
+    // de tope (300000 <= 300000), pero el concepto A nunca tuvo más de
+    // 300000 para acreditar.
+    expect(() =>
+      validarDistribucionNotaCredito(
+        [
+          { conceptoId: CONCEPTO_A, monto: 300000 },
+          { conceptoId: CONCEPTO_A, monto: 300000 },
+        ],
+        600000,
+        lineasFactura,
+      ),
+    ).toThrow(BadRequestException);
+  });
 });
