@@ -35,9 +35,7 @@ describe('NotasDebitoController.crear', () => {
 describe('NotasDebitoController.anular', () => {
   it('delega en el servicio con el id de ruta, el dto y el accountId del caller', async () => {
     const notasDebito = {
-      anular: jest.fn(() =>
-        Promise.resolve({ id: 'nd-1', estado: 'anulada' }),
-      ),
+      anular: jest.fn(() => Promise.resolve({ id: 'nd-1', estado: 'anulada' })),
     };
     const controller = new NotasDebitoController(
       notasDebito as unknown as NotasDebitoService,

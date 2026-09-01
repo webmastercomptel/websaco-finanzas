@@ -422,6 +422,29 @@ export interface NotaDebitoDetalle extends NotaDebito {
   aplicaciones: AplicacionCartera[];
 }
 
+/* ── Notas Contables ──────────────────────────────────────────── */
+
+/**
+ * An accounting reclassification note ("NT") — moves an amount between two
+ * ConceptoCobro balances within one inmueble's cartera. One-shot event: no
+ * outstandingBalance, no application lifecycle (design §3).
+ */
+export interface NotaContable {
+  id: string;
+  inmuebleId: string;
+  conceptoOrigenId: string;
+  conceptoDestinoId: string;
+  monto: Monto;
+  descripcion: string;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionNotaCredito | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**

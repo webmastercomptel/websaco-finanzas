@@ -41,6 +41,7 @@ export const SUBJECTS = [
   'Factura',
   'Recibo',
   'NotaCredito',
+  'NotaContable',
   'OtraNota',
   'Anulacion',
   'Consulta',

@@ -6,6 +6,7 @@ import { Factura } from './factura.schema';
 import { Recibo } from '../recibos/recibo.schema';
 import { NotaCredito } from '../notas-credito/nota-credito.schema';
 import { NotaDebito } from '../notas-debito/nota-debito.schema';
+import { NotaContable } from '../notas-contables/nota-contable.schema';
 
 export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 
@@ -71,6 +72,9 @@ export class AsientoContable {
   @Prop({ type: Types.ObjectId, ref: NotaDebito.name, default: null })
   notaDebitoId: Types.ObjectId | null;
 
+  @Prop({ type: Types.ObjectId, ref: NotaContable.name, default: null })
+  notaContableId: Types.ObjectId | null;
+
   @Prop({ required: true })
   date: Date;
 
@@ -133,3 +137,7 @@ AsientoContableSchema.index({ notaCreditoId: 1 });
 // Every entry a given Nota Débito ever produced (creation and /anular) —
 // not unique, same reasoning as the reciboId index.
 AsientoContableSchema.index({ notaDebitoId: 1 });
+
+// Every entry a given Nota Contable ever produced (creation and /anular) —
+// not unique, same reasoning as the reciboId index.
+AsientoContableSchema.index({ notaContableId: 1 });

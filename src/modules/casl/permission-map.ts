@@ -19,6 +19,7 @@ export const MODULE_TO_SUBJECT = {
   facturas: 'Factura',
   recibos: 'Recibo',
   'notas-credito': 'NotaCredito',
+  'notas-contables': 'NotaContable',
   'otras-notas': 'OtraNota',
   anulaciones: 'Anulacion',
   consultas: 'Consulta',

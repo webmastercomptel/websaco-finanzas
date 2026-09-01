@@ -263,6 +263,36 @@ export function construirContraAsientoCruce(
 }
 
 /**
+ * Builds the double-entry posting for a reclassification between two
+ * conceptos' income accounts — a Nota Contable. Debit `cuentaOrigen`,
+ * credit `cuentaDestino`, both for `monto`.
+ *
+ * Pure and synchronous, same discipline as every other builder function
+ * here: the double-entry invariant (debits equal credits) must be
+ * verifiable before anything touches the database.
+ */
+export function construirMovimientosReclasificacion(
+  cuentaOrigen: string,
+  cuentaDestino: string,
+  monto: number,
+): Movimiento[] {
+  return [
+    {
+      account: cuentaOrigen,
+      type: 'debito',
+      amount: monto,
+      description: 'Reclasificación de ingreso — nota contable',
+    },
+    {
+      account: cuentaDestino,
+      type: 'credito',
+      amount: monto,
+      description: 'Reclasificación de ingreso — nota contable',
+    },
+  ];
+}
+
+/**
  * Builds the ONE consolidated reversing entry a Nota Débito's void posts.
  * Credits `cuentaCartera` (undoes the AR increase), debits `cuentaIngreso`
  * (undoes the recognized revenue) — a 2-leg reversal, simpler than Recibos'/

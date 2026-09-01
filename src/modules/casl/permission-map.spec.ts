@@ -89,11 +89,12 @@ describe('vocabulario de autorización', () => {
     }
   });
 
-  it('cubre los seis módulos financieros del backlog', () => {
+  it('cubre los siete módulos financieros del backlog', () => {
     for (const modulo of [
       'facturas',
       'recibos',
       'notas-credito',
+      'notas-contables',
       'otras-notas',
       'anulaciones',
       'consultas',
@@ -165,5 +166,62 @@ describe('permisos de OtraNota (Notas Débito)', () => {
     expect(ability.can('read', 'OtraNota')).toBe(false);
     expect(ability.can('create', 'OtraNota')).toBe(false);
     expect(ability.can('annul', 'OtraNota')).toBe(false);
+  });
+});
+
+describe('permisos de NotaContable', () => {
+  it('notas-contables.ver concede lectura sobre NotaContable', () => {
+    const ability = abilityFor(['notas-contables.ver']);
+
+    expect(ability.can('read', 'NotaContable')).toBe(true);
+    expect(ability.can('create', 'NotaContable')).toBe(false);
+    expect(ability.can('annul', 'NotaContable')).toBe(false);
+  });
+
+  it('notas-contables.crear concede creación sobre NotaContable', () => {
+    const ability = abilityFor(['notas-contables.crear']);
+
+    expect(ability.can('create', 'NotaContable')).toBe(true);
+    expect(ability.can('read', 'NotaContable')).toBe(false);
+    expect(ability.can('annul', 'NotaContable')).toBe(false);
+  });
+
+  it('notas-contables.anular concede anulación sobre NotaContable', () => {
+    const ability = abilityFor(['notas-contables.anular']);
+
+    expect(ability.can('annul', 'NotaContable')).toBe(true);
+    expect(ability.can('create', 'NotaContable')).toBe(false);
+    expect(ability.can('read', 'NotaContable')).toBe(false);
+  });
+
+  it('permisos de NotaContable no cruzan con otros documentos financieros', () => {
+    const ability = abilityFor([
+      'notas-contables.ver',
+      'notas-contables.crear',
+      'notas-contables.anular',
+    ]);
+
+    expect(ability.can('read', 'NotaContable')).toBe(true);
+    expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('read', 'Recibo')).toBe(false);
+    expect(ability.can('read', 'NotaCredito')).toBe(false);
+    expect(ability.can('read', 'OtraNota')).toBe(false);
+  });
+
+  it('permisos de otros documentos no conceden acceso a NotaContable', () => {
+    const ability = abilityFor([
+      'facturas.ver',
+      'facturas.crear',
+      'recibos.ver',
+      'recibos.crear',
+      'notas-credito.ver',
+      'notas-credito.crear',
+      'otras-notas.ver',
+      'otras-notas.crear',
+    ]);
+
+    expect(ability.can('read', 'NotaContable')).toBe(false);
+    expect(ability.can('create', 'NotaContable')).toBe(false);
+    expect(ability.can('annul', 'NotaContable')).toBe(false);
   });
 });
