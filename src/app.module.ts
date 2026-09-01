@@ -23,6 +23,7 @@ import { NotasDebitoModule } from './modules/notas-debito/notas-debito.module';
 import { NotasContablesModule } from './modules/notas-contables/notas-contables.module';
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
+import { ConsultasModule } from './modules/consultas/consultas.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -64,6 +65,7 @@ import { HealthModule } from './modules/health/health.module';
     CopropiedadesModule,
     ConceptosModule,
     UsuariosModule,
+    ConsultasModule,
     HealthModule,
   ],
 })

@@ -445,6 +445,31 @@ export interface NotaContable {
   fechaAnulacion: IsoDate | null;
 }
 
+/* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
+
+export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+
+/** One row in the chronological ledger for an inmueble. */
+export interface MovimientoKardex {
+  fecha: string;
+  tipo: TipoDocumentoKardex;
+  numeroCompleto: string;
+  concepto: string;
+  refCruce: string | null;
+  debito: number | null;
+  credito: number | null;
+  saldo: number;
+}
+
+/** Response shape for GET /consultas/auxiliar-cartera. */
+export interface RespuestaAuxiliarCartera {
+  saldoInicial: number;
+  movimientos: MovimientoKardex[];
+  totalDebitos: number;
+  totalCreditos: number;
+  saldoFinal: number;
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
