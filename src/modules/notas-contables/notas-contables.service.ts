@@ -94,6 +94,19 @@ export class NotasContablesService {
       );
     }
 
+    // `@IsPositive()` on `CrearNotaContableDto` already rejects this at the
+    // HTTP boundary (this repo's global `ValidationPipe`, `app-setup.ts`) —
+    // but this docblock has always claimed the SERVICE validates `monto > 0`,
+    // and every sibling service (RecibosService.aplicarManual, etc.) owns
+    // its own business invariants instead of relying solely on the DTO pipe.
+    // Without this, `monto <= 0` sails straight through the balance check
+    // below (`0 > balanceDisponible` and `-N > balanceDisponible` are both
+    // false for any non-negative balance) and reaches
+    // `ajustarSaldosCarteraPorDistribucion` with a sign-flipping amount.
+    if (dto.monto <= 0) {
+      throw new ConflictException('El monto debe ser mayor que cero');
+    }
+
     return this.transaccion(async (session) => {
       // Read origin concepto's current balance — the ONLY authoritative
       // signal for a reclassification (design §4).

@@ -126,7 +126,7 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
 describe('NotasContablesService.crear', () => {
   it('mueve el monto exacto entre los SaldoCartera de los dos conceptos', async () => {
     const notaCreada = notaContableCreada();
-    const { service, notasContables, asientos } = construirServicio({
+    const { service, notasContables, asientos, saldos } = construirServicio({
       notaCreada,
     });
 
@@ -135,6 +135,45 @@ describe('NotasContablesService.crear', () => {
     expect(resultado.numeroCompleto).toBe('NT-1');
     expect(notasContables.create).toHaveBeenCalledTimes(1);
     expect(asientos.create).toHaveBeenCalledTimes(1);
+
+    // El bug real que esto habría cazado: la versión anterior de este test
+    // solo miraba que `create()` se llamara, nunca los argumentos reales de
+    // `saldos.findOneAndUpdate` — un signo invertido o un conceptoId
+    // equivocado habría pasado igual.
+    expect(saldos.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    const llamadasSaldos = saldos.findOneAndUpdate.mock.calls as Array<
+      [Record<string, unknown>, unknown]
+    >;
+    const extraerMonto = (conceptoId: Types.ObjectId): number => {
+      const llamada = llamadasSaldos.find(([filtro]) =>
+        (filtro.conceptoId as Types.ObjectId).equals(conceptoId),
+      );
+      if (!llamada)
+        throw new Error(`No hubo llamada para ${conceptoId.toString()}`);
+      const pipeline = llamada[1] as [
+        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      ];
+      return pipeline[0].$set.balance.$max[1].$add[1];
+    };
+
+    expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(-100000);
+    expect(extraerMonto(CONCEPTO_DESTINO)).toBe(100000);
+  });
+
+  it('rechaza un monto no positivo antes de tocar ningún saldo', async () => {
+    const { service, saldos, notasContables } = construirServicio({
+      notaCreada: {},
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ monto: 0 })),
+    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(
+      service.crear('acc-1', dtoBase({ monto: -50000 })),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(saldos.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(notasContables.create).not.toHaveBeenCalled();
   });
 
   it('rechaza cuando conceptoOrigenId === conceptoDestinoId', async () => {
