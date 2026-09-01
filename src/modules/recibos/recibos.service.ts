@@ -19,6 +19,10 @@ import {
   FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
 import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
   SaldoCartera,
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
@@ -35,8 +39,10 @@ import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import {
   ajustarSaldosCartera,
+  ajustarSaldosCarteraPorDistribucion,
   AplicacionInvalidaError,
   decrementarSaldoFactura,
+  decrementarSaldoNotaDebito,
 } from './cruce.util';
 import {
   construirAsientoCruce,
@@ -79,6 +85,14 @@ import type { ListarRecibosDto } from './dto/listar-recibos.dto';
  * (see `PeriodoService.exigirAbierto`'s own docblock, and
  * `LotesFacturacionService.consolidar()`). It is last precisely so the nine
  * positions above kept their meaning.
+ *
+ * `notasDebito` was APPENDED as an eleventh argument when Notas Débito
+ * shipped: `aplicarManual`/`aplicarFifo` must be able to decrement a Nota
+ * Débito's own `outstandingBalance` (via `decrementarSaldoNotaDebito`),
+ * since `AplicacionCartera.documentType` admits `'ND'` as a target and a
+ * Recibo can pay one exactly like it pays a Factura (Notas Débito design
+ * §5/§6). Same append-only discipline as `periodo` — last, so every
+ * position above keeps its meaning.
  */
 @Injectable()
 export class RecibosService {
@@ -99,6 +113,8 @@ export class RecibosService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly periodo: PeriodoService,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
   ) {}
 
   /**
@@ -576,29 +592,79 @@ export class RecibosService {
 
     const creadas: AplicacionCarteraDocument[] = [];
     for (const solicitada of solicitadas) {
-      const facturaId = new Types.ObjectId(solicitada.documentoId);
+      const documentoId = new Types.ObjectId(solicitada.documentoId);
+
+      // FIFO filters its candidates by `inmuebleId` when it builds the list;
+      // manual mode takes whatever `documentoId` the caller sent, and
+      // `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` only guard
+      // {_id, coPropertyId, status, saldo} — so without this a receipt
+      // issued for one unit could be applied against ANOTHER unit's
+      // document inside the same coproperty, corrupting both units'
+      // per-unit balance views.
+      //
+      // Checked after the decrement rather than before, because both
+      // decrement functions already return the document — no second read
+      // needed — and manual mode is all-or-nothing: throwing here aborts
+      // the whole transaction, so the decrement above is rolled back with
+      // it.
+      if (solicitada.tipoDocumento === 'ND') {
+        const notaDebito = await decrementarSaldoNotaDebito(
+          this.notasDebito,
+          session,
+          coPropertyId,
+          documentoId,
+          solicitada.montoAplicado,
+        );
+
+        if (!notaDebito.inmuebleId.equals(recibo.inmuebleId)) {
+          throw new ConflictException(
+            `La nota débito ${documentoId.toString()} pertenece a otro ` +
+              `inmueble (${notaDebito.inmuebleId.toString()}) que el recibo ` +
+              `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+          );
+        }
+
+        await ajustarSaldosCarteraPorDistribucion(
+          this.saldos,
+          session,
+          coPropertyId,
+          notaDebito.inmuebleId,
+          [{ conceptoId: notaDebito.conceptoId, monto: notaDebito.total }],
+          solicitada.montoAplicado,
+          -1,
+        );
+
+        const [creada] = await this.aplicaciones.create(
+          [
+            {
+              coPropertyId,
+              sourceType: 'RC',
+              sourceId: recibo._id,
+              documentType: 'ND',
+              documentId: documentoId,
+              amountApplied: solicitada.montoAplicado,
+              status: 'activa',
+              appliedAt: new Date(),
+              appliedBy: accountId,
+            },
+          ],
+          { session },
+        );
+        creadas.push(creada);
+        continue;
+      }
+
       const factura = await decrementarSaldoFactura(
         this.facturas,
         session,
         coPropertyId,
-        facturaId,
+        documentoId,
         solicitada.montoAplicado,
       );
 
-      // FIFO filters its candidates by `inmuebleId` when it builds the list;
-      // manual mode takes whatever `documentoId` the caller sent, and
-      // `decrementarSaldoFactura` only guards {_id, coPropertyId, status,
-      // saldo} — so without this a receipt issued for one unit could be
-      // applied against ANOTHER unit's invoice inside the same coproperty,
-      // corrupting both units' per-unit balance views.
-      //
-      // Checked after the decrement rather than before, because
-      // `decrementarSaldoFactura` already returns the document — no second
-      // read needed — and manual mode is all-or-nothing: throwing here aborts
-      // the whole transaction, so the decrement above is rolled back with it.
       if (!factura.inmuebleId.equals(recibo.inmuebleId)) {
         throw new ConflictException(
-          `La factura ${facturaId.toString()} pertenece a otro inmueble ` +
+          `La factura ${documentoId.toString()} pertenece a otro inmueble ` +
             `(${factura.inmuebleId.toString()}) que el recibo ` +
             `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
         );
@@ -620,7 +686,7 @@ export class RecibosService {
             sourceType: 'RC',
             sourceId: recibo._id,
             documentType: 'FV',
-            documentId: facturaId,
+            documentId: documentoId,
             amountApplied: solicitada.montoAplicado,
             status: 'activa',
             appliedAt: new Date(),
@@ -649,13 +715,19 @@ export class RecibosService {
   }
 
   /**
-   * Walks the inmueble's open Facturas oldest-due-date-first, applying
-   * until `montoDisponible` is exhausted or there is nothing left open —
-   * stopping partway through is the expected outcome (design §6, "FIFO
-   * automatic mode is best-effort"), not an error. A document that turns
-   * out invalid since the list was built (voided, or someone else just
-   * exhausted its balance in this same transaction) is skipped and
-   * reported in `errores`, never a hard failure of the whole call.
+   * Walks the inmueble's open Facturas AND open Notas Débito, merged into
+   * one oldest-first queue, applying until `montoDisponible` is exhausted or
+   * there is nothing left open — stopping partway through is the expected
+   * outcome (design §6, "FIFO automatic mode is best-effort"), not an error.
+   * A document that turns out invalid since the list was built (voided, or
+   * someone else just exhausted its balance in this same transaction) is
+   * skipped and reported in `errores`, never a hard failure of the whole
+   * call.
+   *
+   * Notas Débito (Notas Débito design §5) carry no `dueDate` of their own —
+   * only `issueDate` — so the merge key is each item's own due date when it
+   * has one, its issue date otherwise; ties break on `_id`, matching the
+   * pre-merge per-collection sort.
    */
   private async aplicarFifo(
     session: ClientSession,
@@ -668,32 +740,112 @@ export class RecibosService {
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
   }> {
-    const abiertas = await this.facturas
-      .find({
-        coPropertyId,
-        inmuebleId: recibo.inmuebleId,
-        status: 'emitida',
-        outstandingBalance: { $gt: 0 },
-      })
-      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
-      .session(session)
-      .exec();
+    const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
+      this.facturas
+        .find({
+          coPropertyId,
+          inmuebleId: recibo.inmuebleId,
+          status: 'emitida',
+          outstandingBalance: { $gt: 0 },
+        })
+        .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+        .session(session)
+        .exec(),
+      this.notasDebito
+        .find({
+          coPropertyId,
+          inmuebleId: recibo.inmuebleId,
+          status: 'emitida',
+          outstandingBalance: { $gt: 0 },
+        })
+        .sort({ issueDate: 1, _id: 1 })
+        .session(session)
+        .exec(),
+    ]);
+
+    type Candidato =
+      | { tipo: 'FV'; doc: FacturaDocument; prioridad: Date }
+      | { tipo: 'ND'; doc: NotaDebitoDocument; prioridad: Date };
+
+    const abiertas: Candidato[] = [
+      ...facturasAbiertas.map((factura): Candidato => ({
+        tipo: 'FV',
+        doc: factura,
+        prioridad: factura.dueDate ?? factura.issueDate,
+      })),
+      ...notasDebitoAbiertas.map((nota): Candidato => ({
+        tipo: 'ND',
+        doc: nota,
+        prioridad: nota.issueDate,
+      })),
+    ].sort((a, b) => {
+      const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
+      if (porFecha !== 0) return porFecha;
+      return a.doc._id.toString().localeCompare(b.doc._id.toString());
+    });
 
     const aplicadas: AplicacionCarteraDocument[] = [];
     const errores: ErrorAplicacion[] = [];
     let restante = montoDisponible;
     let totalAplicado = 0;
 
-    for (const factura of abiertas) {
+    for (const candidato of abiertas) {
       if (restante <= 0) break;
-      const monto = Math.min(restante, factura.outstandingBalance);
+      const monto = Math.min(restante, candidato.doc.outstandingBalance);
 
       try {
+        if (candidato.tipo === 'ND') {
+          const notaActualizada = await decrementarSaldoNotaDebito(
+            this.notasDebito,
+            session,
+            coPropertyId,
+            candidato.doc._id,
+            monto,
+          );
+
+          await ajustarSaldosCarteraPorDistribucion(
+            this.saldos,
+            session,
+            coPropertyId,
+            notaActualizada.inmuebleId,
+            [
+              {
+                conceptoId: notaActualizada.conceptoId,
+                monto: notaActualizada.total,
+              },
+            ],
+            monto,
+            -1,
+          );
+
+          const [creada] = await this.aplicaciones.create(
+            [
+              {
+                coPropertyId,
+                sourceType: 'RC',
+                sourceId: recibo._id,
+                documentType: 'ND',
+                documentId: candidato.doc._id,
+                amountApplied: monto,
+                status: 'activa',
+                appliedAt: new Date(),
+                appliedBy: accountId,
+              },
+            ],
+            { session },
+          );
+
+          aplicadas.push(creada);
+          restante -= monto;
+          totalAplicado += monto;
+          continue;
+        }
+
         const facturaActualizada = await decrementarSaldoFactura(
           this.facturas,
           session,
           coPropertyId,
-          factura._id,
+          candidato.doc._id,
           monto,
         );
         await ajustarSaldosCartera(
@@ -712,7 +864,7 @@ export class RecibosService {
               sourceType: 'RC',
               sourceId: recibo._id,
               documentType: 'FV',
-              documentId: factura._id,
+              documentId: candidato.doc._id,
               amountApplied: monto,
               status: 'activa',
               appliedAt: new Date(),
@@ -727,20 +879,22 @@ export class RecibosService {
         totalAplicado += monto;
       } catch (err) {
         // ONLY `AplicacionInvalidaError` means "this document turned out
-        // invalid, skip it and say why" — it is what `decrementarSaldoFactura`
-        // throws when its floor-at-zero guard refuses, the first statement in
-        // the try. Anything else came from `ajustarSaldosCartera` or
-        // `aplicaciones.create`, which run AFTER a decrement already
-        // succeeded: swallowing one of those into `errores` would let the
-        // transaction COMMIT with the Factura's balance reduced but no
-        // AplicacionRecibo audit row and no `appliedAmount` increment — money
-        // gone from the invoice with no trace. A real bug must abort the whole
-        // transaction loudly, not be filed as a skipped document.
+        // invalid, skip it and say why" — it is what
+        // `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` throws when
+        // its floor-at-zero guard refuses, the first statement in the try.
+        // Anything else came from `ajustarSaldosCartera`/
+        // `ajustarSaldosCarteraPorDistribucion` or `aplicaciones.create`,
+        // which run AFTER a decrement already succeeded: swallowing one of
+        // those into `errores` would let the transaction COMMIT with the
+        // document's balance reduced but no AplicacionCartera audit row and
+        // no `appliedAmount` increment — money gone with no trace. A real bug
+        // must abort the whole transaction loudly, not be filed as a skipped
+        // document.
         if (!(err instanceof AplicacionInvalidaError)) {
           throw err;
         }
         errores.push({
-          documentoId: factura._id.toString(),
+          documentoId: candidato.doc._id.toString(),
           mensaje: err.message,
         });
       }

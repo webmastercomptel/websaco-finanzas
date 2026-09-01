@@ -75,6 +75,18 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
+  _id: new Types.ObjectId(),
+  coPropertyId: COP,
+  inmuebleId: INMUEBLE,
+  conceptoId: new Types.ObjectId(),
+  status: 'emitida',
+  outstandingBalance: 150000,
+  total: 150000,
+  issueDate: new Date('2026-08-01'),
+  ...over,
+});
+
 const modeloFacturas = (factura: Record<string, unknown>) => ({
   findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
     exec: () => {
@@ -98,6 +110,29 @@ const modeloAplicaciones = () => ({
   ),
 });
 
+/** Empty by default — most tests here never touch a Nota Débito. The
+ *  `aplicarFifo`/`aplicarManual` tests that DO cover ND pass their own. */
+const modeloNotasDebito = (notas: Record<string, unknown>[] = []) => ({
+  find: jest.fn(() => ({
+    sort: () => ({
+      session: () => ({ exec: () => Promise.resolve(notas) }),
+    }),
+  })),
+  findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+    exec: () => {
+      const nota = notas.find((n) =>
+        (n._id as { equals: (o: unknown) => boolean }).equals(filtro._id),
+      );
+      if (!nota) return Promise.resolve(null);
+      const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+      if ((nota.outstandingBalance as number) < monto)
+        return Promise.resolve(null);
+      nota.outstandingBalance = (nota.outstandingBalance as number) - monto;
+      return Promise.resolve({ ...nota });
+    },
+  })),
+});
+
 const modeloAsientos = () => ({ create: jest.fn(() => Promise.resolve([{}])) });
 const modeloCopropiedades = () => ({
   findById: jest.fn(() => ({
@@ -117,6 +152,7 @@ const construirServicio = (opts: {
   /** Default: periodo abierto. Sólo el test del periodo cerrado lo pisa. */
   periodo?: PeriodoService;
   saldos?: { findOneAndUpdate: jest.Mock };
+  notasDebito?: Record<string, unknown>[];
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
@@ -128,6 +164,7 @@ const construirServicio = (opts: {
   const espia = periodoEspiado();
   const periodo = opts.periodo ?? espia.periodo;
   const exigirAbierto = espia.exigirAbierto;
+  const notasDebito = modeloNotasDebito(opts.notasDebito ?? []);
 
   const service = new RecibosService(
     recibos as never,
@@ -140,6 +177,7 @@ const construirServicio = (opts: {
     numeracionQueEntrega('RC-1'),
     conexionCon(session),
     periodo,
+    notasDebito as never,
   );
 
   return {
@@ -149,6 +187,7 @@ const construirServicio = (opts: {
     saldos,
     aplicaciones,
     asientos,
+    notasDebito,
     periodo,
     exigirAbierto,
   };
@@ -441,6 +480,94 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     expect(aplicaciones.create).not.toHaveBeenCalled();
   });
 
+  it("descuenta outstandingBalance de una Nota Débito cuando tipoDocumento es 'ND'", async () => {
+    // El bug real que esto reemplaza: `AplicacionSolicitadaDto.tipoDocumento`
+    // ya aceptaba 'ND', pero `aplicarManual` nunca lo leía — siempre llamaba
+    // `decrementarSaldoFactura` y hardcodeaba `documentType: 'FV'`, así que
+    // pedir una aplicación manual contra una Nota Débito real explotaba con
+    // AplicacionInvalidaError (buscaba el id como si fuera una Factura).
+    const notaDebitoId = new Types.ObjectId();
+    const nota = notaDebitoDoc({ _id: notaDebitoId });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 500000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 100000,
+      unappliedAmount: 400000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const { service, notasDebito, aplicaciones } = construirServicio({
+      reciboCreado,
+      notasDebito: [nota],
+    });
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      aplicaciones: [
+        {
+          tipoDocumento: 'ND',
+          documentoId: notaDebitoId.toString(),
+          montoAplicado: 100000,
+        },
+      ],
+    });
+
+    expect(resultado.montoAplicado).toBe(100000);
+    expect(notasDebito.findOneAndUpdate).toHaveBeenCalled();
+    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls;
+    expect(fila[0]).toMatchObject({
+      documentType: 'ND',
+      documentId: notaDebitoId,
+      amountApplied: 100000,
+    });
+  });
+
+  it('rechaza — todo o nada — aplicar contra una Nota Débito de OTRO inmueble', async () => {
+    const OTRO_INMUEBLE = new Types.ObjectId();
+    const notaDebitoId = new Types.ObjectId();
+    const nota = notaDebitoDoc({
+      _id: notaDebitoId,
+      inmuebleId: OTRO_INMUEBLE,
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      fullNumber: 'RC-1',
+      unappliedAmount: 500000,
+    };
+    const { service, aplicaciones } = construirServicio({
+      reciboCreado,
+      notasDebito: [nota],
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        aplicaciones: [
+          {
+            tipoDocumento: 'ND',
+            documentoId: notaDebitoId.toString(),
+            montoAplicado: 100000,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(aplicaciones.create).not.toHaveBeenCalled();
+  });
+
   it('rechaza pedir aplicación manual Y automática a la vez', async () => {
     const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
     const { service } = construirServicio({ reciboCreado });
@@ -538,6 +665,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await service.crear(CUENTA.toString(), {
@@ -547,6 +675,120 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     });
 
     expect(ordenAplicado).toEqual([vieja._id.toString(), nueva._id.toString()]);
+  });
+
+  it('mezcla Facturas y Notas Débito en un solo FIFO, la más vieja de cualquiera de los dos tipos primero', async () => {
+    // El bug real que esto reemplaza: aplicarFifo solo consultaba this.facturas
+    // — una Nota Débito abierta, sin importar cuán vieja fuera, nunca entraba
+    // al FIFO en absoluto.
+    const facturaVieja = facturaDoc({
+      _id: new Types.ObjectId(),
+      dueDate: new Date('2026-07-31'),
+      outstandingBalance: 100000,
+      total: 100000,
+      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+    });
+    const notaMasVieja = notaDebitoDoc({
+      _id: new Types.ObjectId(),
+      issueDate: new Date('2026-06-01'),
+      outstandingBalance: 100000,
+      total: 100000,
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      destinationAccount: '111005',
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      reference: null,
+      notes: null,
+      unappliedAmount: 100000,
+      appliedAmount: 0,
+      receivedAmount: 100000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+
+    const ordenAplicado: string[] = [];
+    const facturas = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve([facturaVieja]) }),
+        }),
+      })),
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if (facturaVieja.outstandingBalance < monto)
+            return Promise.resolve(null);
+          facturaVieja.outstandingBalance -= monto;
+          ordenAplicado.push(facturaVieja._id.toString());
+          return Promise.resolve({ ...facturaVieja });
+        },
+      })),
+    };
+    const notasDebito = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve([notaMasVieja]) }),
+        }),
+      })),
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if (notaMasVieja.outstandingBalance < monto)
+            return Promise.resolve(null);
+          notaMasVieja.outstandingBalance -= monto;
+          ordenAplicado.push(notaMasVieja._id.toString());
+          return Promise.resolve({ ...notaMasVieja });
+        },
+      })),
+    };
+
+    const session = sesionFalsa();
+    const recibos = modeloRecibos(reciboCreado);
+    const saldos = modeloSaldos();
+    const aplicaciones = modeloAplicaciones();
+    const asientos = modeloAsientos();
+    const copropiedades = modeloCopropiedades();
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      saldos as never,
+      asientos as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      notasDebito as never,
+    );
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      montoRecibido: 100000,
+      aplicacionAutomatica: true,
+    });
+
+    // La Nota Débito (issueDate 2026-06-01) es más vieja que la Factura
+    // (dueDate 2026-07-31) — tiene que pagarse primero, agotando el monto,
+    // sin tocar la Factura.
+    expect(ordenAplicado).toEqual([notaMasVieja._id.toString()]);
+    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls;
+    expect(fila[0]).toMatchObject({
+      documentType: 'ND',
+      documentId: notaMasVieja._id,
+      amountApplied: 100000,
+    });
   });
 
   it('salta un documento inválido y lo reporta en errores, sin abortar el resto (best-effort)', async () => {
@@ -611,6 +853,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     // aplicarFifo is private — exercised indirectly through crear(), and its
@@ -692,6 +935,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(
@@ -746,6 +990,7 @@ describe('RecibosService.aplicar', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     const resultado = await service.aplicar(
@@ -809,6 +1054,7 @@ describe('RecibosService.aplicar', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(
@@ -847,6 +1093,7 @@ describe('RecibosService.aplicar', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(
@@ -942,6 +1189,7 @@ describe('RecibosService.anular', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     const resultado = await service.anular(
@@ -1062,6 +1310,7 @@ describe('RecibosService.anular', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(
@@ -1099,6 +1348,7 @@ describe('RecibosService.anular', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(session),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(
@@ -1148,6 +1398,7 @@ describe('RecibosService.findAll', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
   function modeloAplicacionesGenerico() {
@@ -1227,6 +1478,7 @@ describe('RecibosService.findOne', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     const detalle = await service.findOne(reciboId.toString());
@@ -1250,6 +1502,7 @@ describe('RecibosService.findOne', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(
@@ -1376,6 +1629,7 @@ describe('RecibosService — ciclo de vida completo', () => {
       numeracionQueEntrega('RC-1'),
       conexionCon(sesionFalsa()),
       periodoAbierto(),
+      modeloNotasDebito() as never,
     );
 
     /** Débitos menos créditos, por cuenta, sobre TODOS los asientos posteados. */

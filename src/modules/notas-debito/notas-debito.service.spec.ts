@@ -197,6 +197,10 @@ describe('NotasDebitoService', () => {
         amountApplied: 20000,
         status: 'activa',
       };
+      const recibosFindOneAndUpdate = jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({ _id: aplicacion.sourceId })),
+      }));
       const svc = servicio({
         aplicaciones: {
           create: jest.fn(() => Promise.resolve([])),
@@ -210,6 +214,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() => Promise.resolve({})),
           })),
         },
+        recibos: { findOneAndUpdate: recibosFindOneAndUpdate },
       });
 
       const resultado = await svc.anular(
@@ -222,6 +227,17 @@ describe('NotasDebitoService', () => {
       );
 
       expect(resultado.estado).toBe('anulada');
+      // El monto restaurado tiene que ser EXACTAMENTE el que la aplicación
+      // había descontado (20000) — no un valor cualquiera, ni el campo
+      // equivocado. Un bug en el monto/signo no lo habría detectado el test
+      // anterior, que solo miraba `estado`.
+      expect(recibosFindOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: aplicacion.sourceId }),
+        expect.objectContaining({
+          $inc: { unappliedAmount: 20000, appliedAmount: -20000 },
+        }),
+        expect.anything(),
+      );
     });
 
     it('anula nota débito con aplicaciones activas, restaurando fuentes NC', async () => {
@@ -234,6 +250,10 @@ describe('NotasDebitoService', () => {
         amountApplied: 30000,
         status: 'activa',
       };
+      const notasCreditoFindOneAndUpdate = jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({ _id: aplicacion.sourceId })),
+      }));
       const svc = servicio({
         aplicaciones: {
           create: jest.fn(() => Promise.resolve([])),
@@ -247,6 +267,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() => Promise.resolve({})),
           })),
         },
+        notasCredito: { findOneAndUpdate: notasCreditoFindOneAndUpdate },
       });
 
       const resultado = await svc.anular(
@@ -259,6 +280,13 @@ describe('NotasDebitoService', () => {
       );
 
       expect(resultado.estado).toBe('anulada');
+      expect(notasCreditoFindOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: aplicacion.sourceId }),
+        expect.objectContaining({
+          $inc: { unappliedAmount: 30000, appliedAmount: -30000 },
+        }),
+        expect.anything(),
+      );
     });
 
     it('no restaura fuentes cuya aplicación ya fue revertida (edge case)', async () => {
