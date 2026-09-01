@@ -25,14 +25,6 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const ncDoc = (over: Record<string, unknown> = {}) => ({
-  _id: id(),
-  coPropertyId: COP,
-  inmuebleId: INMUEBLE,
-  fullNumber: 'NC-001',
-  ...over,
-});
-
 const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
@@ -248,6 +240,29 @@ describe('AuxiliarCarteraService', () => {
 
       expect(resultAll.saldoFinal).toBe(resultFC.saldoFinal);
       expect(resultAll.saldoInicial).toBe(resultFC.saldoInicial);
+
+      // El chequeo que el spec pide explícitamente y que la versión anterior
+      // de este test no hacía: no solo los totales agregados, sino el
+      // `saldo` de la MISMA fila (la factura FC) tiene que ser idéntico en
+      // ambas respuestas — si la implementación filtrara por `tipos` ANTES
+      // de acumular el saldo corriente en vez de después, esta fila
+      // mostraría un número distinto según qué tipos estén tildados, que es
+      // exactamente el bug que esta regla evita.
+      const facturaEnAll = resultAll.movimientos.find((m) => m.tipo === 'FC');
+      const facturaEnFC = resultFC.movimientos.find((m) => m.tipo === 'FC');
+      expect(facturaEnAll).toBeDefined();
+      expect(facturaEnFC).toBeDefined();
+      expect(facturaEnAll!.saldo).toBe(facturaEnFC!.saldo);
+
+      // Y con solo [RC] tildado, la fila RC que SÍ se devuelve también debe
+      // reportar el mismo `saldo` corriente — la fila oculta (FC) igual
+      // participó del cálculo.
+      const resultRC = await svc.findAll({ ...base, tipos: ['RC'] });
+      const rcEnAll = resultAll.movimientos.find((m) => m.tipo === 'RC');
+      const rcEnRC = resultRC.movimientos.find((m) => m.tipo === 'RC');
+      expect(rcEnAll).toBeDefined();
+      expect(rcEnRC).toBeDefined();
+      expect(rcEnAll!.saldo).toBe(rcEnRC!.saldo);
     });
   });
 
