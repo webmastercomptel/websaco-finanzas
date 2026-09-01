@@ -113,3 +113,57 @@ describe('vocabulario de autorización', () => {
     expect(MODULE_TO_SUBJECT.inmuebles).not.toBe(MODULE_TO_SUBJECT.consultas);
   });
 });
+
+describe('permisos de OtraNota (Notas Débito)', () => {
+  it('otras-notas.ver concede lectura sobre OtraNota', () => {
+    const ability = abilityFor(['otras-notas.ver']);
+
+    expect(ability.can('read', 'OtraNota')).toBe(true);
+    expect(ability.can('create', 'OtraNota')).toBe(false);
+    expect(ability.can('annul', 'OtraNota')).toBe(false);
+  });
+
+  it('otras-notas.crear concede creación sobre OtraNota', () => {
+    const ability = abilityFor(['otras-notas.crear']);
+
+    expect(ability.can('create', 'OtraNota')).toBe(true);
+    expect(ability.can('read', 'OtraNota')).toBe(false);
+    expect(ability.can('annul', 'OtraNota')).toBe(false);
+  });
+
+  it('otras-notas.anular concede anulación sobre OtraNota', () => {
+    const ability = abilityFor(['otras-notas.anular']);
+
+    expect(ability.can('annul', 'OtraNota')).toBe(true);
+    expect(ability.can('create', 'OtraNota')).toBe(false);
+    expect(ability.can('read', 'OtraNota')).toBe(false);
+  });
+
+  it('permisos de OtraNota no cruzan con otros documentos financieros', () => {
+    const ability = abilityFor([
+      'otras-notas.ver',
+      'otras-notas.crear',
+      'otras-notas.anular',
+    ]);
+
+    expect(ability.can('read', 'OtraNota')).toBe(true);
+    expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('read', 'Recibo')).toBe(false);
+    expect(ability.can('read', 'NotaCredito')).toBe(false);
+  });
+
+  it('permisos de otros documentos no conceden acceso a OtraNota', () => {
+    const ability = abilityFor([
+      'facturas.ver',
+      'facturas.crear',
+      'recibos.ver',
+      'recibos.crear',
+      'notas-credito.ver',
+      'notas-credito.crear',
+    ]);
+
+    expect(ability.can('read', 'OtraNota')).toBe(false);
+    expect(ability.can('create', 'OtraNota')).toBe(false);
+    expect(ability.can('annul', 'OtraNota')).toBe(false);
+  });
+});

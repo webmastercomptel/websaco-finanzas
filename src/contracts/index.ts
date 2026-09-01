@@ -23,9 +23,7 @@
  *
  * The financial document shapes are added one at a time, together with their
  * Mongo schema, once the domain questions behind each has been answered.
- * `Factura`, `Recibo` and `NotaCredito` are here now; `OtraNota` is not yet
- * — adding it speculatively, ahead of its schema, would freeze guesses into
- * the contract.
+ * `Factura`, `Recibo`, `NotaCredito` and `NotaDebito` are here now.
  */
 
 /** An ISO 8601 timestamp, e.g. "2026-08-27T14:32:00.000Z". */
@@ -288,8 +286,7 @@ export interface Recibo {
  * document. `sourceType` discriminates which kind of document made the
  * application — the same row shape serves both, which is what lets the
  * (future) Confirmación y Cruce screen list them side by side (design §3.1).
- * Only `'FV'` (Factura) is implemented today as a target — `'ND'` is
- * reserved for Notas Débito (design §2, out of scope).
+ * Only `'FV'` (Factura) and `'ND'` (Nota Débito) are implemented as targets.
  */
 export interface AplicacionCartera {
   id: string;
@@ -314,7 +311,7 @@ export interface ReciboDetalle extends Recibo {
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
  *  caller's requested cruce against one document. */
 export interface AplicacionSolicitada {
-  tipoDocumento: 'FV';
+  tipoDocumento: 'FV' | 'ND';
   documentoId: string;
   montoAplicado: Monto;
 }
@@ -342,10 +339,7 @@ export interface ResultadoAplicacion {
 /** Why a Nota Crédito was issued — a fixed list, matching the mockup's
  *  reason options (design §3.2). */
 export type MotivoNotaCredito =
-  | 'error_facturacion'
-  | 'descuento_comercial'
-  | 'anulacion_documento'
-  | 'otro';
+  'error_facturacion' | 'descuento_comercial' | 'anulacion_documento' | 'otro';
 
 /** Why a Nota Crédito was voided — same catalog as a Recibo's void (design
  *  §5/§8; no domain-specific list was requested for this document). */
@@ -394,6 +388,37 @@ export interface NotaCredito {
  * using lean `NotaCredito`, same pattern as `ReciboDetalle`.
  */
 export interface NotaCreditoDetalle extends NotaCredito {
+  aplicaciones: AplicacionCartera[];
+}
+
+/* ── Notas Débito ─────────────────────────────────────────────── */
+
+/** A debit note ("ND"), always issued against a concepto for an inmueble —
+ *  used to charge amounts that are not part of a regular invoice (design §2). */
+export interface NotaDebito {
+  id: string;
+  inmuebleId: string;
+  terceroId: string | null;
+  conceptoId: string;
+  descripcion: string | null;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  fechaEmision: IsoDate;
+  total: Monto;
+  saldoPendiente: Monto;
+  estado: 'emitida' | 'anulada';
+  motivoAnulacion: MotivoAnulacionNotaCredito | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * `NotaDebito` plus the full list of applications it has received — what
+ * `GET /notas-debito/:id` returns. `GET /notas-debito` (the listing) keeps
+ * using lean `NotaDebito`, same pattern as `ReciboDetalle`.
+ */
+export interface NotaDebitoDetalle extends NotaDebito {
   aplicaciones: AplicacionCartera[];
 }
 
@@ -480,6 +505,9 @@ export interface Copropiedad {
   /** Cuenta de gasto/contra-ingreso que se debita al emitir una nota
    *  crédito — igual razonamiento y forma que cuentaAnticipos. */
   cuentaDevoluciones: string | null;
+  /** Cuenta de activo para el saldo de notas débito emitidas — contraparte
+   *  de cuentaContableCartera pero específico para ND. */
+  cuentaNotasDebito: string | null;
 }
 
 /* ── Conceptos de cobro ("Cargos") ─────────────────────────────────

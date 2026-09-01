@@ -72,7 +72,7 @@ export function construirMovimientos(
  * identically regardless of `origen` (design §7: "the arithmetic and shape
  * are identical, only the account and description text differ").
  */
-export type OrigenAsiento = 'RC' | 'NC';
+export type OrigenAsiento = 'RC' | 'NC' | 'ND';
 
 interface DescripcionesAsiento {
   creacionDebito: string;
@@ -107,6 +107,16 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de nota crédito',
     contraCredito:
       'Reversión de corrección de ingreso — anulación de nota crédito',
+  },
+  ND: {
+    creacionDebito: 'Cartera por cobrar — nota débito',
+    creacionCreditoCartera: 'Ingreso por nota débito',
+    creacionCreditoAnticipo: '',
+    aplicacionDebitoAnticipo: '',
+    aplicacionCreditoCartera: '',
+    contraDebitoCartera: 'Reversión de ingreso — anulación de nota débito',
+    contraDebitoAnticipo: '',
+    contraCredito: 'Reversión de cartera — anulación de nota débito',
   },
 };
 
@@ -250,4 +260,32 @@ export function construirContraAsientoCruce(
   });
 
   return movimientos;
+}
+
+/**
+ * Builds the ONE consolidated reversing entry a Nota Débito's void posts.
+ * Credits `cuentaCartera` (undoes the AR increase), debits `cuentaIngreso`
+ * (undoes the recognized revenue) — a 2-leg reversal, simpler than Recibos'/
+ * Notas Crédito's 3-leg version, since a Nota Débito has no anticipo/cash
+ * concept.
+ */
+export function construirContraAsientoNotaDebito(
+  cuentaCartera: string,
+  cuentaIngreso: string,
+  monto: number,
+): Movimiento[] {
+  return [
+    {
+      account: cuentaIngreso,
+      type: 'debito',
+      amount: monto,
+      description: 'Reversión de ingreso — anulación de nota débito',
+    },
+    {
+      account: cuentaCartera,
+      type: 'credito',
+      amount: monto,
+      description: 'Reversión de cartera — anulación de nota débito',
+    },
+  ];
 }

@@ -38,7 +38,9 @@ describe('RecibosController.aplicar', () => {
         Promise.resolve({ aplicadas: [], montoSinAplicar: 0, errores: [] }),
       ),
     };
-    const controller = new RecibosController(recibos as unknown as RecibosService);
+    const controller = new RecibosController(
+      recibos as unknown as RecibosService,
+    );
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -57,9 +59,18 @@ describe('RecibosController.aplicar', () => {
 
 describe('RecibosController.anular', () => {
   it('delega en el servicio con el id de ruta, el dto y el accountId del caller', async () => {
-    const recibos = { anular: jest.fn(() => Promise.resolve({ id: 'rec-1', estado: 'anulado' })) };
-    const controller = new RecibosController(recibos as unknown as RecibosService);
-    const dto = { motivo: 'otro' as const, detalle: 'Un detalle de más de veinte caracteres' };
+    const recibos = {
+      anular: jest.fn(() =>
+        Promise.resolve({ id: 'rec-1', estado: 'anulado' }),
+      ),
+    };
+    const controller = new RecibosController(
+      recibos as unknown as RecibosService,
+    );
+    const dto = {
+      motivo: 'otro' as const,
+      detalle: 'Un detalle de más de veinte caracteres',
+    };
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -77,8 +88,14 @@ describe('RecibosController.anular', () => {
 
 describe('RecibosController.findAll / findOne', () => {
   it('findAll delega la query en el servicio', async () => {
-    const recibos = { findAll: jest.fn(() => Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 })) };
-    const controller = new RecibosController(recibos as unknown as RecibosService);
+    const recibos = {
+      findAll: jest.fn(() =>
+        Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 }),
+      ),
+    };
+    const controller = new RecibosController(
+      recibos as unknown as RecibosService,
+    );
 
     await controller.findAll({ estado: 'activo' });
 
@@ -86,8 +103,12 @@ describe('RecibosController.findAll / findOne', () => {
   });
 
   it('findOne delega el id en el servicio', async () => {
-    const recibos = { findOne: jest.fn(() => Promise.resolve({ id: 'rec-1' })) };
-    const controller = new RecibosController(recibos as unknown as RecibosService);
+    const recibos = {
+      findOne: jest.fn(() => Promise.resolve({ id: 'rec-1' })),
+    };
+    const controller = new RecibosController(
+      recibos as unknown as RecibosService,
+    );
 
     await controller.findOne('rec-1');
 

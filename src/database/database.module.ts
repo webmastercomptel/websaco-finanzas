@@ -65,6 +65,10 @@ import {
   NotaCredito,
   NotaCreditoSchema,
 } from './schemas/notas-credito/nota-credito.schema';
+import {
+  NotaDebito,
+  NotaDebitoSchema,
+} from './schemas/notas-debito/nota-debito.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -86,6 +90,7 @@ const models = [
   { name: Recibo.name, schema: ReciboSchema },
   { name: AplicacionCartera.name, schema: AplicacionCarteraSchema },
   { name: NotaCredito.name, schema: NotaCreditoSchema },
+  { name: NotaDebito.name, schema: NotaDebitoSchema },
 ];
 
 /**

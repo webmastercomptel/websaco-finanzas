@@ -6,7 +6,10 @@ type IndiceDeclarado = [Record<string, number>, Record<string, unknown>];
 const indices = (): IndiceDeclarado[] =>
   AsientoContableSchema.indexes() as unknown as IndiceDeclarado[];
 
-const AsientoModel = mongoose.model('AsientoContableSpec', AsientoContableSchema);
+const AsientoModel = mongoose.model(
+  'AsientoContableSpec',
+  AsientoContableSchema,
+);
 
 const copropiedad = new Types.ObjectId();
 const lote = new Types.ObjectId();

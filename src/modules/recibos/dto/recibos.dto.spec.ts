@@ -25,14 +25,21 @@ describe('CrearReciboDto', () => {
     const dto = plainToInstance(CrearReciboDto, {
       ...validoCrear(),
       aplicaciones: [
-        { tipoDocumento: 'FV', documentoId: '507f1f77bcf86cd799439013', montoAplicado: 200000 },
+        {
+          tipoDocumento: 'FV',
+          documentoId: '507f1f77bcf86cd799439013',
+          montoAplicado: 200000,
+        },
       ],
     });
     expect(await validate(dto)).toHaveLength(0);
   });
 
   it('rechaza un medioPago fuera del catálogo', async () => {
-    const dto = plainToInstance(CrearReciboDto, { ...validoCrear(), medioPago: 'bitcoin' });
+    const dto = plainToInstance(CrearReciboDto, {
+      ...validoCrear(),
+      medioPago: 'bitcoin',
+    });
     expect(await validate(dto)).not.toHaveLength(0);
   });
 
@@ -40,7 +47,11 @@ describe('CrearReciboDto', () => {
     const dto = plainToInstance(CrearReciboDto, {
       ...validoCrear(),
       aplicaciones: [
-        { tipoDocumento: 'FV', documentoId: '507f1f77bcf86cd799439013', montoAplicado: -1 },
+        {
+          tipoDocumento: 'FV',
+          documentoId: '507f1f77bcf86cd799439013',
+          montoAplicado: -1,
+        },
       ],
     });
     expect(await validate(dto)).not.toHaveLength(0);
@@ -49,7 +60,9 @@ describe('CrearReciboDto', () => {
   it('rechaza un documentoId que no es un ObjectId', async () => {
     const dto = plainToInstance(CrearReciboDto, {
       ...validoCrear(),
-      aplicaciones: [{ tipoDocumento: 'FV', documentoId: 'no-es-un-id', montoAplicado: 100 }],
+      aplicaciones: [
+        { tipoDocumento: 'FV', documentoId: 'no-es-un-id', montoAplicado: 100 },
+      ],
     });
     expect(await validate(dto)).not.toHaveLength(0);
   });
@@ -57,14 +70,20 @@ describe('CrearReciboDto', () => {
 
 describe('AplicarReciboDto', () => {
   it('acepta aplicacionAutomatica sola', async () => {
-    const dto = plainToInstance(AplicarReciboDto, { aplicacionAutomatica: true });
+    const dto = plainToInstance(AplicarReciboDto, {
+      aplicacionAutomatica: true,
+    });
     expect(await validate(dto)).toHaveLength(0);
   });
 
   it('acepta aplicaciones manuales solas', async () => {
     const dto = plainToInstance(AplicarReciboDto, {
       aplicaciones: [
-        { tipoDocumento: 'FV', documentoId: '507f1f77bcf86cd799439013', montoAplicado: 100000 },
+        {
+          tipoDocumento: 'FV',
+          documentoId: '507f1f77bcf86cd799439013',
+          montoAplicado: 100000,
+        },
       ],
     });
     expect(await validate(dto)).toHaveLength(0);
@@ -89,7 +108,10 @@ describe('AnularReciboDto', () => {
   });
 
   it('rechaza un detalle demasiado corto — el mismo umbral que el botón deshabilitado del mockup', async () => {
-    const dto = plainToInstance(AnularReciboDto, { motivo: 'otro', detalle: 'muy corto' });
+    const dto = plainToInstance(AnularReciboDto, {
+      motivo: 'otro',
+      detalle: 'muy corto',
+    });
     expect(await validate(dto)).not.toHaveLength(0);
   });
 });
@@ -101,12 +123,16 @@ describe('ListarRecibosDto', () => {
   });
 
   it('transforma conAnticipoDisponible=true (string de query) a boolean', () => {
-    const dto = plainToInstance(ListarRecibosDto, { conAnticipoDisponible: 'true' });
+    const dto = plainToInstance(ListarRecibosDto, {
+      conAnticipoDisponible: 'true',
+    });
     expect(dto.conAnticipoDisponible).toBe(true);
   });
 
   it('transforma conAnticipoDisponible=false (string de query) a boolean, no truthy por default de JS', () => {
-    const dto = plainToInstance(ListarRecibosDto, { conAnticipoDisponible: 'false' });
+    const dto = plainToInstance(ListarRecibosDto, {
+      conAnticipoDisponible: 'false',
+    });
     expect(dto.conAnticipoDisponible).toBe(false);
   });
 });

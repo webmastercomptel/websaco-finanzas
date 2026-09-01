@@ -1,6 +1,8 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
+  IsIn,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -13,13 +15,23 @@ const aBooleano = ({ value }: { value: unknown }): boolean | undefined => {
   return value === true || value === 'true';
 };
 
-export class ListarFacturasDto {
+export class ListarNotaDebitoDto {
   @IsOptional()
   @IsMongoId()
   inmuebleId?: string;
 
-  // What a Recibo can be applied against (design §5, "Cartera pendiente" —
-  // no new endpoint, this filter on the existing listing instead).
+  @IsOptional()
+  @IsIn(['emitida', 'anulada'])
+  estado?: 'emitida' | 'anulada';
+
+  @IsOptional()
+  @IsDateString()
+  fechaDesde?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fechaHasta?: string;
+
   @IsOptional()
   @Transform(aBooleano)
   @IsBoolean()

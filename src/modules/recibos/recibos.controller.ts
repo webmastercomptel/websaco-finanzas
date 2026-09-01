@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -8,7 +16,12 @@ import { CrearReciboDto } from './dto/crear-recibo.dto';
 import { AplicarReciboDto } from './dto/aplicar-recibo.dto';
 import { AnularReciboDto } from './dto/anular-recibo.dto';
 import { ListarRecibosDto } from './dto/listar-recibos.dto';
-import type { Paginado, Recibo, ReciboDetalle, ResultadoAplicacion } from '../../contracts';
+import type {
+  Paginado,
+  Recibo,
+  ReciboDetalle,
+  ResultadoAplicacion,
+} from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**

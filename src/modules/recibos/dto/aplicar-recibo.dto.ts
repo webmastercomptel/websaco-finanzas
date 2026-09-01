@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsBoolean, IsOptional, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  ValidateNested,
+} from 'class-validator';
 import { AplicacionSolicitadaDto } from './aplicacion-solicitada.dto';
 
 export class AplicarReciboDto {

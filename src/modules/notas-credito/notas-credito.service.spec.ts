@@ -900,7 +900,9 @@ describe('NotasCreditoService.anular', () => {
 
     // La ANCLA reversa por DISTRIBUCIÓN: una llamada por cada línea de
     // `nota.distribution`, cada una restaurando exactamente su propio monto.
-    expect(llamadasSaldos.filter(([f]) => f.inmuebleId === INMUEBLE)).toHaveLength(3);
+    expect(
+      llamadasSaldos.filter(([f]) => f.inmuebleId === INMUEBLE),
+    ).toHaveLength(3);
     expect(extraerMonto(conceptoX)).toBe(150000);
     expect(extraerMonto(conceptoY)).toBe(50000);
 

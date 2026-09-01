@@ -728,7 +728,9 @@ describe('RecibosService.aplicar', () => {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
       })),
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(recibo) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(recibo),
+      })),
     };
     const facturas = modeloFacturas(factura);
     const session = sesionFalsa();
@@ -750,7 +752,11 @@ describe('RecibosService.aplicar', () => {
       recibo._id.toString(),
       {
         aplicaciones: [
-          { tipoDocumento: 'FV', documentoId: facturaId.toString(), montoAplicado: 200000 },
+          {
+            tipoDocumento: 'FV',
+            documentoId: facturaId.toString(),
+            montoAplicado: 200000,
+          },
         ],
       },
       CUENTA.toString(),
@@ -763,17 +769,33 @@ describe('RecibosService.aplicar', () => {
     // que esta posterior aplicación NUNCA vuelve a tocar esa cuenta.
     expect(asientos.create).toHaveBeenCalledTimes(1);
     const [[fila]] = (asientos.create as jest.Mock).mock.calls;
-    const entries = fila[0].entries as Array<{ account: string; type: string; amount: number }>;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
     expect(entries).toEqual([
-      { account: '210505', type: 'debito', amount: 200000, description: expect.any(String) },
-      { account: '130501', type: 'credito', amount: 200000, description: expect.any(String) },
+      {
+        account: '210505',
+        type: 'debito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+      {
+        account: '130501',
+        type: 'credito',
+        amount: 200000,
+        description: expect.any(String),
+      },
     ]);
   });
 
   it('rechaza cuando lo solicitado excede el saldo sin aplicar del recibo', async () => {
     const recibo = reciboExistente({ unappliedAmount: 50000 });
     const recibos = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
     };
     const session = sesionFalsa();
     const service = new RecibosService(
@@ -809,7 +831,9 @@ describe('RecibosService.aplicar', () => {
   it('rechaza aplicar sobre un recibo ya anulado', async () => {
     const recibo = reciboExistente({ status: 'anulado' });
     const recibos = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
     };
     const session = sesionFalsa();
     const service = new RecibosService(
@@ -876,21 +900,32 @@ describe('RecibosService.anular', () => {
       status: 'activa',
     };
 
-    const facturaRestaurada = { _id: facturaId, inmuebleId: INMUEBLE, total: 500000, lines: [] };
+    const facturaRestaurada = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 500000,
+      lines: [],
+    };
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(facturaRestaurada) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaRestaurada),
+      })),
     };
     const recibos = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
       // Muta el mismo objeto `recibo` que `findOne` sigue devolviendo — así
       // el refetch final ve el $set aplicado, igual que lo vería un Mongo
       // real, sin necesitar un modelo con estado más elaborado.
-      findOneAndUpdate: jest.fn((_filtro: unknown, update: { $set?: Record<string, unknown> }) => ({
-        exec: () => {
-          if (update?.$set) Object.assign(recibo, update.$set);
-          return Promise.resolve(null);
-        },
-      })),
+      findOneAndUpdate: jest.fn(
+        (_filtro: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(recibo, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
     };
     const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
     const asientos = modeloAsientos();
@@ -940,7 +975,8 @@ describe('RecibosService.anular', () => {
         $set: {
           status: 'anulado',
           voidedReason: 'duplicado',
-          voidedDetail: 'Se cargó el mismo comprobante dos veces por error del cajero',
+          voidedDetail:
+            'Se cargó el mismo comprobante dos veces por error del cajero',
           voidedAt: expect.any(Date),
           // El actor de la anulación sale del caller autenticado y se escribe
           // en el MISMO $set que la transición de estado — nunca uno sin el
@@ -963,11 +999,30 @@ describe('RecibosService.anular', () => {
     // receivedAmount), no una suma recalculada del loop de arriba — no hace
     // falta "reproducir" la historia para saber cuánto revertir.
     const [[fila]] = (asientos.create as jest.Mock).mock.calls;
-    const entries = fila[0].entries as Array<{ account: string; type: string; amount: number }>;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
     expect(entries).toEqual([
-      { account: '130501', type: 'debito', amount: 200000, description: expect.any(String) },
-      { account: '210505', type: 'debito', amount: 100000, description: expect.any(String) },
-      { account: '111005', type: 'credito', amount: 300000, description: expect.any(String) },
+      {
+        account: '130501',
+        type: 'debito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+      {
+        account: '210505',
+        type: 'debito',
+        amount: 100000,
+        description: expect.any(String),
+      },
+      {
+        account: '111005',
+        type: 'credito',
+        amount: 300000,
+        description: expect.any(String),
+      },
     ]);
   });
 
@@ -984,9 +1039,13 @@ describe('RecibosService.anular', () => {
     // La factura ya no existe bajo esas condiciones (voidedByCreditNoteId,
     // u otra vía) — el findOneAndUpdate devuelve null, y el cascade sigue
     // sin lanzar.
-    const facturas = { findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
     const recibos = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
@@ -1024,7 +1083,9 @@ describe('RecibosService.anular', () => {
   it('rechaza anular un recibo ya anulado', async () => {
     const recibo = reciboActivo({ status: 'anulado' });
     const recibos = {
-      findOne: jest.fn(() => ({ session: () => ({ exec: () => Promise.resolve(recibo) }) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
     };
     const session = sesionFalsa();
     const service = new RecibosService(
@@ -1054,7 +1115,10 @@ describe('RecibosService.anular', () => {
 });
 
 describe('RecibosService.findAll', () => {
-  const modeloListado = (filas: Record<string, unknown>[], total = filas.length) => {
+  const modeloListado = (
+    filas: Record<string, unknown>[],
+    total = filas.length,
+  ) => {
     const filtros: Record<string, unknown>[] = [];
     const cadena = {
       sort: () => cadena,
@@ -1087,7 +1151,10 @@ describe('RecibosService.findAll', () => {
     );
 
   function modeloAplicacionesGenerico() {
-    return { create: jest.fn(), find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) };
+    return {
+      create: jest.fn(),
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+    };
   }
 
   it('filtra SIEMPRE por la copropiedad activa', async () => {
@@ -1169,7 +1236,9 @@ describe('RecibosService.findOne', () => {
   });
 
   it('responde "no existe" para un recibo de otra copropiedad', async () => {
-    const recibos = { findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })) };
+    const recibos = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
     const service = new RecibosService(
       recibos as never,
       { find: jest.fn() } as never,
@@ -1183,7 +1252,9 @@ describe('RecibosService.findOne', () => {
       periodoAbierto(),
     );
 
-    await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
 

@@ -134,7 +134,10 @@ describe('FacturasService.findOne', () => {
 describe('FacturasService.findAll — conSaldoPendiente', () => {
   it('filtra por outstandingBalance > 0 cuando conSaldoPendiente es true', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new FacturasService(modelo as never, tenantQueDevuelve(COP));
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
 
     await service.findAll({ conSaldoPendiente: true });
 
@@ -146,7 +149,10 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
 
   it('no aplica el filtro cuando conSaldoPendiente es false o ausente', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new FacturasService(modelo as never, tenantQueDevuelve(COP));
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
 
     await service.findAll({});
 

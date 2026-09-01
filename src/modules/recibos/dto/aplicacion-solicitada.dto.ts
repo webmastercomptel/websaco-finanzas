@@ -5,8 +5,8 @@ import { IsIn, IsMongoId, IsNumber, IsPositive } from 'class-validator';
  *  immediate application at creation) and AplicarReciboDto (a deferred
  *  cruce), so both stay identical instead of drifting. */
 export class AplicacionSolicitadaDto {
-  @IsIn(['FV'])
-  tipoDocumento: 'FV';
+  @IsIn(['FV', 'ND'])
+  tipoDocumento: 'FV' | 'ND';
 
   @IsMongoId()
   documentoId: string;

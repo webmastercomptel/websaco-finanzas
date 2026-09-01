@@ -49,4 +49,5 @@ export const toCopropiedad = (
   cuentaContableCartera: doc.receivablesAccount,
   cuentaAnticipos: doc.advancesAccount,
   cuentaDevoluciones: doc.creditNotesAccount,
+  cuentaNotasDebito: doc.debitNotesAccount,
 });

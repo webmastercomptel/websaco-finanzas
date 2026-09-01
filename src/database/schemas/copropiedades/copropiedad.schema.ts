@@ -126,6 +126,14 @@ export class Copropiedad {
    */
   @Prop({ type: String, default: null, trim: true })
   creditNotesAccount: string | null;
+
+  /**
+   * Free-text revenue account credited when a Nota Débito is issued —
+   * `construirMovimientos` (asiento.builder.ts) credits this account for
+   * the Nota Débito's `total`. Same reasoning as the other account fields.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  debitNotesAccount: string | null;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

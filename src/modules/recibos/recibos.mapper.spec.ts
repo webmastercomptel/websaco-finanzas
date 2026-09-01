@@ -1,5 +1,9 @@
 import { Types } from 'mongoose';
-import { toAplicacionCartera, toRecibo, toReciboDetalle } from './recibos.mapper';
+import {
+  toAplicacionCartera,
+  toRecibo,
+  toReciboDetalle,
+} from './recibos.mapper';
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'rec-1' },

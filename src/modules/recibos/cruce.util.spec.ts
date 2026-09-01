@@ -4,6 +4,7 @@ import {
   ajustarSaldosCartera,
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoFactura,
+  decrementarSaldoNotaDebito,
 } from './cruce.util';
 
 const SESSION = { id: 'fake-session' } as never;
@@ -440,5 +441,117 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     );
 
     expect(saldos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('decrementarSaldoNotaDebito', () => {
+  const notaDebitoId = new Types.ObjectId();
+
+  it('descuenta el monto cuando el saldo alcanza', async () => {
+    const notasDebito = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve({
+            _id: notaDebitoId,
+            outstandingBalance: 30000,
+            total: 50000,
+          }),
+      })),
+    };
+
+    const resultado = await decrementarSaldoNotaDebito(
+      notasDebito as never,
+      SESSION,
+      COP,
+      notaDebitoId,
+      20000,
+    );
+
+    expect(resultado.outstandingBalance).toBe(30000);
+  });
+
+  it('rechaza cuando el monto excede el saldo pendiente', async () => {
+    const notasDebito = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+
+    await expect(
+      decrementarSaldoNotaDebito(
+        notasDebito as never,
+        SESSION,
+        COP,
+        notaDebitoId,
+        999999,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza un monto negativo sin tocar la base de datos', async () => {
+    const notasDebito = { findOneAndUpdate: jest.fn() };
+
+    await expect(
+      decrementarSaldoNotaDebito(
+        notasDebito as never,
+        SESSION,
+        COP,
+        notaDebitoId,
+        -50,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(notasDebito.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un monto cero sin tocar la base de datos', async () => {
+    const notasDebito = { findOneAndUpdate: jest.fn() };
+
+    await expect(
+      decrementarSaldoNotaDebito(
+        notasDebito as never,
+        SESSION,
+        COP,
+        notaDebitoId,
+        0,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(notasDebito.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('concurrencia: dos aplicaciones simultáneas contra la misma nota débito nunca la descuentan doble', async () => {
+    let saldo = 30000;
+    const notasDebito = {
+      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+        exec: () => {
+          const expr = filtro.$expr as { $gte: [string, number] };
+          const monto = expr.$gte[1];
+          if (saldo < monto) return Promise.resolve(null);
+          saldo -= monto;
+          return Promise.resolve({
+            _id: notaDebitoId,
+            outstandingBalance: saldo,
+          });
+        },
+      })),
+    };
+
+    const resultados = await Promise.allSettled([
+      decrementarSaldoNotaDebito(
+        notasDebito as never,
+        SESSION,
+        COP,
+        notaDebitoId,
+        20000,
+      ),
+      decrementarSaldoNotaDebito(
+        notasDebito as never,
+        SESSION,
+        COP,
+        notaDebitoId,
+        20000,
+      ),
+    ]);
+
+    const cumplidas = resultados.filter((r) => r.status === 'fulfilled');
+    expect(cumplidas).toHaveLength(1);
+    expect(saldo).toBe(10000);
   });
 });

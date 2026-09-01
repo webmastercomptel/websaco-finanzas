@@ -2,6 +2,7 @@
 import { ConflictException } from '@nestjs/common';
 import type { ClientSession, Model, Types } from 'mongoose';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
+import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { SaldoCarteraDocument } from '../../database/schemas/facturacion/saldo-cartera.schema';
 
 /**
@@ -72,6 +73,47 @@ export async function decrementarSaldoFactura(
 
   if (!actualizada) {
     throw new AplicacionInvalidaError(facturaId.toString(), amount);
+  }
+
+  return actualizada;
+}
+
+/**
+ * Atomically decrements one NotaDebito's `outstandingBalance` by `amount`,
+ * inside `session`, refusing (throwing) if that would push it below zero —
+ * sibling to `decrementarSaldoFactura`, same discipline, same $expr guard.
+ *
+ * A NotaDebito has a single concepto (no line array), so the
+ * SaldoCartera adjustment is a single-line call — the same shape
+ * `ajustarSaldosCarteraPorDistribucion` already takes with a one-element
+ * `distribucion`.
+ */
+export async function decrementarSaldoNotaDebito(
+  notasDebito: Model<NotaDebitoDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  notaDebitoId: Types.ObjectId,
+  amount: number,
+): Promise<NotaDebitoDocument> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AplicacionInvalidaError(notaDebitoId.toString(), amount);
+  }
+
+  const actualizada = await notasDebito
+    .findOneAndUpdate(
+      {
+        _id: notaDebitoId,
+        coPropertyId,
+        status: 'emitida',
+        $expr: { $gte: ['$outstandingBalance', amount] },
+      },
+      { $inc: { outstandingBalance: -amount } },
+      { new: true, session },
+    )
+    .exec();
+
+  if (!actualizada) {
+    throw new AplicacionInvalidaError(notaDebitoId.toString(), amount);
   }
 
   return actualizada;

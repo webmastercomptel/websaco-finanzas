@@ -15,7 +15,12 @@ import {
 } from 'class-validator';
 import { AplicacionSolicitadaDto } from './aplicacion-solicitada.dto';
 
-export const MEDIOS_PAGO = ['transferencia', 'cheque', 'pse', 'efectivo'] as const;
+export const MEDIOS_PAGO = [
+  'transferencia',
+  'cheque',
+  'pse',
+  'efectivo',
+] as const;
 
 export class CrearReciboDto {
   @IsMongoId()
