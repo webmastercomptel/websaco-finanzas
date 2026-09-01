@@ -470,6 +470,27 @@ export interface RespuestaAuxiliarCartera {
   saldoFinal: number;
 }
 
+/* ── Vencimientos de Cartera (snapshot report) ────────────────── */
+
+/** One row in the vencimientos report: current state of one inmueble's debt. */
+export interface FilaVencimientos {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  propietario: string | null;
+  saldoPendiente: number;
+  diasMora: number;
+  estado: 'pendiente' | 'vencido';
+}
+
+/** Response shape for GET /consultas/vencimientos-cartera. */
+export interface RespuestaVencimientosCartera {
+  filas: FilaVencimientos[];
+  totalCartera: number;
+  totalVencido: number;
+  totalPendiente: number;
+  porcentajeVencido: number;
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
