@@ -1,5 +1,6 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsIn,
   IsInt,
@@ -8,6 +9,14 @@ import {
   Max,
   Min,
 } from 'class-validator';
+
+/** A query-string boolean arrives as the literal string "true"/"false" —
+ *  `Boolean("false")` is `true` in JS, so this cannot use `@Type(() =>
+ *  Boolean)` like the numeric fields below use `@Type(() => Number)`. */
+const aBooleano = ({ value }: { value: unknown }): boolean | undefined => {
+  if (value === undefined) return undefined;
+  return value === true || value === 'true';
+};
 
 export class ListarNotasCreditoDto {
   @IsOptional()
@@ -25,6 +34,11 @@ export class ListarNotasCreditoDto {
   @IsOptional()
   @IsDateString()
   hasta?: string;
+
+  @IsOptional()
+  @Transform(aBooleano)
+  @IsBoolean()
+  conAnticipoDisponible?: boolean;
 
   @IsOptional()
   @Type(() => Number)

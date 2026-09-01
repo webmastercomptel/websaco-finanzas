@@ -1039,6 +1039,42 @@ describe('NotasCreditoService.findAll', () => {
       createdAt: { $gte: new Date('2026-08-01'), $lte: new Date('2026-08-31') },
     });
   });
+
+  it('aplica conAnticipoDisponible como unappliedAmount > 0', async () => {
+    const documentos: unknown[] = [];
+    const notasCredito = {
+      find: jest.fn((filtro: Record<string, unknown>) => {
+        (notasCredito as unknown as { filtroUsado: unknown }).filtroUsado =
+          filtro;
+        return {
+          sort: () => ({
+            skip: () => ({
+              limit: () => ({ exec: () => Promise.resolve(documentos) }),
+            }),
+          }),
+        };
+      }),
+      countDocuments: jest.fn(() => ({ exec: () => Promise.resolve(0) })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.findAll({ conAnticipoDisponible: true });
+
+    expect(
+      (notasCredito as unknown as { filtroUsado: Record<string, unknown> })
+        .filtroUsado,
+    ).toMatchObject({ unappliedAmount: { $gt: 0 } });
+  });
 });
 
 describe('NotasCreditoService.findOne', () => {

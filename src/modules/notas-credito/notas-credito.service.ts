@@ -732,6 +732,7 @@ export class NotasCreditoService {
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
+    if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
     if (query.desde || query.hasta) {
       filtro.createdAt = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
