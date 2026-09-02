@@ -5,8 +5,12 @@ import {
   Param,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -23,6 +27,13 @@ import type {
   ResultadoAplicacion,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { generarPdfNotaCredito } from '../../common/pdf/nota-credito-pdf';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { RecibosService } from '../recibos/recibos.service';
 
 /**
  * `subject: 'NotaCredito'` throughout, `create`/`read`/`update`/`annul` per
@@ -34,7 +45,13 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 @Controller('notas-credito')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class NotasCreditoController {
-  constructor(private readonly notasCredito: NotasCreditoService) {}
+  constructor(
+    private readonly notasCredito: NotasCreditoService,
+    private readonly recibos: RecibosService,
+    private readonly tenant: TenantContextService,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'NotaCredito' })
@@ -80,5 +97,40 @@ export class NotasCreditoController {
     @Body() dto: AnularNotaCreditoDto,
   ): Promise<NotaCredito> {
     return this.notasCredito.anular(id, dto, user.accountId!);
+  }
+
+  @Get(':id/pdf')
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  async generarPdf(
+    @Param('id') id: string,
+    @Query('duplicado') duplicado: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    const nota = await this.notasCredito.findOneRaw(id);
+    const [aplicaciones, copropiedad] = await Promise.all([
+      this.recibos.findAplicacionesForSource('NC', nota._id),
+      this.copropiedades.findById(coPropertyId).exec(),
+    ]);
+
+    if (!copropiedad) {
+      throw new Error(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfNotaCredito(
+      nota,
+      aplicaciones,
+      copropiedad,
+      { duplicado: duplicado === 'true' },
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${nota.fullNumber}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }

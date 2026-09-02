@@ -226,6 +226,20 @@ export class NotasDebitoService {
   }
 
   /**
+   * Returns the raw Mongoose document — used by PDF generation.
+   */
+  async findOneRaw(id: string): Promise<NotaDebitoDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.notasDebito
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!nota) {
+      throw new NotFoundException(`No se encontró la nota débito ${id}`);
+    }
+    return nota;
+  }
+
+  /**
    * Voids a Nota Débito. Unlike Recibos/NotasCrédito's anular() which
    * reverses applications *they made*, a NotaDébito's anular() restores
    * the SOURCE documents (Recibos or NotasCrédito) that applied money

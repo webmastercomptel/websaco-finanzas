@@ -1,16 +1,23 @@
 import { Types } from 'mongoose';
 import { NotasDebitoController } from './notas-debito.controller';
 import type { NotasDebitoService } from './notas-debito.service';
+import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+
+function makeController(notasDebito: Record<string, unknown>) {
+  return new NotasDebitoController(
+    notasDebito as never,
+    {} as TenantContextService,
+    { findById: jest.fn() } as never,
+  );
+}
 
 describe('NotasDebitoController.crear', () => {
   it('pasa el accountId del caller autenticado, nunca uno del body', async () => {
     const notasDebito = {
       crear: jest.fn(() => Promise.resolve({ id: 'nd-1' })),
     };
-    const controller = new NotasDebitoController(
-      notasDebito as unknown as NotasDebitoService,
-    );
+    const controller = makeController(notasDebito);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -37,9 +44,7 @@ describe('NotasDebitoController.anular', () => {
     const notasDebito = {
       anular: jest.fn(() => Promise.resolve({ id: 'nd-1', estado: 'anulada' })),
     };
-    const controller = new NotasDebitoController(
-      notasDebito as unknown as NotasDebitoService,
-    );
+    const controller = makeController(notasDebito);
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres para la anulación',
@@ -69,9 +74,7 @@ describe('NotasDebitoController.findAll / findOne', () => {
         Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 }),
       ),
     };
-    const controller = new NotasDebitoController(
-      notasDebito as unknown as NotasDebitoService,
-    );
+    const controller = makeController(notasDebito);
 
     await controller.findAll({ estado: 'emitida' });
 
@@ -82,9 +85,7 @@ describe('NotasDebitoController.findAll / findOne', () => {
     const notasDebito = {
       findOne: jest.fn(() => Promise.resolve({ id: 'nd-1' })),
     };
-    const controller = new NotasDebitoController(
-      notasDebito as unknown as NotasDebitoService,
-    );
+    const controller = makeController(notasDebito);
 
     await controller.findOne('nd-1');
 

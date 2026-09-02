@@ -247,6 +247,20 @@ export class NotasContablesService {
   }
 
   /**
+   * Returns the raw Mongoose document — used by PDF generation.
+   */
+  async findOneRaw(id: string): Promise<NotaContableDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.notasContables
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!nota) {
+      throw new NotFoundException(`No se encontró la nota contable ${id}`);
+    }
+    return nota;
+  }
+
+  /**
    * Voids a Nota Contable — reverses the reclassification (destino→origen)
    * and posts the mirrored accounting entry (accounts swapped).
    */

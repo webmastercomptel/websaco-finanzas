@@ -776,6 +776,20 @@ export class NotasCreditoService {
     return toNotaCreditoDetalle(nota, aplicaciones);
   }
 
+  /**
+   * Returns the raw Mongoose document — used by PDF generation.
+   */
+  async findOneRaw(id: string): Promise<NotaCreditoDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.notasCredito
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!nota) {
+      throw new NotFoundException(`No se encontró la nota crédito ${id}`);
+    }
+    return nota;
+  }
+
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,
    *  credit `cuentaCartera`, both for `montoAplicado` — never touches
    *  `cuentaDevoluciones` again (the correction was already booked at

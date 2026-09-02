@@ -1,14 +1,21 @@
 import { Types } from 'mongoose';
 import { RecibosController } from './recibos.controller';
 import type { RecibosService } from './recibos.service';
+import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+
+function makeController(recibos: Record<string, unknown>) {
+  return new RecibosController(
+    recibos as never,
+    {} as TenantContextService,
+    { findById: jest.fn() } as never,
+  );
+}
 
 describe('RecibosController.crear', () => {
   it('pasa el accountId del caller autenticado, nunca uno del body', async () => {
     const recibos = { crear: jest.fn(() => Promise.resolve({ id: 'rec-1' })) };
-    const controller = new RecibosController(
-      recibos as unknown as RecibosService,
-    );
+    const controller = makeController(recibos);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -38,9 +45,7 @@ describe('RecibosController.aplicar', () => {
         Promise.resolve({ aplicadas: [], montoSinAplicar: 0, errores: [] }),
       ),
     };
-    const controller = new RecibosController(
-      recibos as unknown as RecibosService,
-    );
+    const controller = makeController(recibos);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -64,9 +69,7 @@ describe('RecibosController.anular', () => {
         Promise.resolve({ id: 'rec-1', estado: 'anulado' }),
       ),
     };
-    const controller = new RecibosController(
-      recibos as unknown as RecibosService,
-    );
+    const controller = makeController(recibos);
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
@@ -93,9 +96,7 @@ describe('RecibosController.findAll / findOne', () => {
         Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 }),
       ),
     };
-    const controller = new RecibosController(
-      recibos as unknown as RecibosService,
-    );
+    const controller = makeController(recibos);
 
     await controller.findAll({ estado: 'activo' });
 
@@ -106,9 +107,7 @@ describe('RecibosController.findAll / findOne', () => {
     const recibos = {
       findOne: jest.fn(() => Promise.resolve({ id: 'rec-1' })),
     };
-    const controller = new RecibosController(
-      recibos as unknown as RecibosService,
-    );
+    const controller = makeController(recibos);
 
     await controller.findOne('rec-1');
 

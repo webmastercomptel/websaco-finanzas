@@ -1,16 +1,23 @@
 import { Types } from 'mongoose';
 import { NotasContablesController } from './notas-contables.controller';
 import type { NotasContablesService } from './notas-contables.service';
+import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+
+function makeController(notasContables: Record<string, unknown>) {
+  return new NotasContablesController(
+    notasContables as never,
+    {} as TenantContextService,
+    { findById: jest.fn() } as never,
+  );
+}
 
 describe('NotasContablesController.crear', () => {
   it('pasa el accountId del caller autenticado, nunca uno del body', async () => {
     const notasContables = {
       crear: jest.fn(() => Promise.resolve({ id: 'nt-1' })),
     };
-    const controller = new NotasContablesController(
-      notasContables as unknown as NotasContablesService,
-    );
+    const controller = makeController(notasContables);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -37,9 +44,7 @@ describe('NotasContablesController.anular', () => {
     const notasContables = {
       anular: jest.fn(() => Promise.resolve({ id: 'nt-1', estado: 'anulado' })),
     };
-    const controller = new NotasContablesController(
-      notasContables as unknown as NotasContablesService,
-    );
+    const controller = makeController(notasContables);
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
@@ -67,9 +72,7 @@ describe('NotasContablesController.findAll / findOne', () => {
         Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 }),
       ),
     };
-    const controller = new NotasContablesController(
-      notasContables as unknown as NotasContablesService,
-    );
+    const controller = makeController(notasContables);
 
     await controller.findAll({ estado: 'activo' });
 
@@ -80,9 +83,7 @@ describe('NotasContablesController.findAll / findOne', () => {
     const notasContables = {
       findOne: jest.fn(() => Promise.resolve({ id: 'nt-1' })),
     };
-    const controller = new NotasContablesController(
-      notasContables as unknown as NotasContablesService,
-    );
+    const controller = makeController(notasContables);
 
     await controller.findOne('nt-1');
 

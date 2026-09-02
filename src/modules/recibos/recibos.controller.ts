@@ -5,8 +5,12 @@ import {
   Param,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -23,6 +27,12 @@ import type {
   ResultadoAplicacion,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
  * `subject: 'Recibo'` throughout, `create`/`read`/`update`/`annul` per
@@ -33,7 +43,12 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 @Controller('recibos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class RecibosController {
-  constructor(private readonly recibos: RecibosService) {}
+  constructor(
+    private readonly recibos: RecibosService,
+    private readonly tenant: TenantContextService,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Recibo' })
@@ -80,5 +95,37 @@ export class RecibosController {
     // PoliciesGuard already required a Recibo/annul permission, which only an
     // account with an active assignment can hold.
     return this.recibos.anular(id, dto, user.accountId!);
+  }
+
+  @Get(':id/pdf')
+  @CheckAbility({ action: 'read', subject: 'Recibo' })
+  async generarPdf(
+    @Param('id') id: string,
+    @Query('duplicado') duplicado: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    const recibo = await this.recibos.findOneRaw(id);
+    const [aplicaciones, copropiedad] = await Promise.all([
+      this.recibos.findAplicacionesForSource('RC', recibo._id),
+      this.copropiedades.findById(coPropertyId).exec(),
+    ]);
+
+    if (!copropiedad) {
+      throw new Error(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfRecibo(recibo, aplicaciones, copropiedad, {
+      duplicado: duplicado === 'true',
+    });
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${recibo.fullNumber}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }

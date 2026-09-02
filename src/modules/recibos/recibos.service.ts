@@ -566,6 +566,33 @@ export class RecibosService {
   }
 
   /**
+   * Returns the raw Mongoose document — used by PDF generation.
+   */
+  async findOneRaw(id: string): Promise<ReciboDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const recibo = await this.recibos.findOne({ _id: id, coPropertyId }).exec();
+    if (!recibo) {
+      throw new NotFoundException(`No se encontró el recibo ${id}`);
+    }
+    return recibo;
+  }
+
+  /**
+   * Returns active applications for a source document (RC or NC).
+   * Used by PDF generation to show application lines.
+   */
+  async findAplicacionesForSource(
+    sourceType: 'RC' | 'NC',
+    sourceId: Types.ObjectId,
+  ): Promise<AplicacionCarteraDocument[]> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    return this.aplicaciones
+      .find({ coPropertyId, sourceType, sourceId, status: 'activa' })
+      .sort({ appliedAt: 1 })
+      .exec();
+  }
+
+  /**
    * Applies `solicitadas` against their documents — ALL of them, or none:
    * if the sum exceeds `recibo.unappliedAmount`, or any single line's
    * `decrementarSaldoFactura` call throws, the whole transaction aborts

@@ -1,16 +1,25 @@
 import { Types } from 'mongoose';
 import { NotasCreditoController } from './notas-credito.controller';
 import type { NotasCreditoService } from './notas-credito.service';
+import type { RecibosService } from '../recibos/recibos.service';
+import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+
+function makeController(notasCredito: Record<string, unknown>) {
+  return new NotasCreditoController(
+    notasCredito as never,
+    {} as RecibosService,
+    {} as TenantContextService,
+    { findById: jest.fn() } as never,
+  );
+}
 
 describe('NotasCreditoController.crear', () => {
   it('pasa el accountId del caller autenticado, nunca uno del body', async () => {
     const notasCredito = {
       crear: jest.fn(() => Promise.resolve({ id: 'nc-1' })),
     };
-    const controller = new NotasCreditoController(
-      notasCredito as unknown as NotasCreditoService,
-    );
+    const controller = makeController(notasCredito);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -41,9 +50,7 @@ describe('NotasCreditoController.aplicar', () => {
         Promise.resolve({ aplicadas: [], montoSinAplicar: 0, errores: [] }),
       ),
     };
-    const controller = new NotasCreditoController(
-      notasCredito as unknown as NotasCreditoService,
-    );
+    const controller = makeController(notasCredito);
     const user: IRequestUser = {
       uid: 'uid-1',
       email: 'a@b.com',
@@ -65,9 +72,7 @@ describe('NotasCreditoController.anular', () => {
     const notasCredito = {
       anular: jest.fn(() => Promise.resolve({ id: 'nc-1', estado: 'anulado' })),
     };
-    const controller = new NotasCreditoController(
-      notasCredito as unknown as NotasCreditoService,
-    );
+    const controller = makeController(notasCredito);
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
@@ -97,9 +102,7 @@ describe('NotasCreditoController.findAll / findOne', () => {
         Promise.resolve({ items: [], total: 0, pagina: 1, porPagina: 50 }),
       ),
     };
-    const controller = new NotasCreditoController(
-      notasCredito as unknown as NotasCreditoService,
-    );
+    const controller = makeController(notasCredito);
 
     await controller.findAll({ estado: 'activo' });
 
@@ -110,9 +113,7 @@ describe('NotasCreditoController.findAll / findOne', () => {
     const notasCredito = {
       findOne: jest.fn(() => Promise.resolve({ id: 'nc-1' })),
     };
-    const controller = new NotasCreditoController(
-      notasCredito as unknown as NotasCreditoService,
-    );
+    const controller = makeController(notasCredito);
 
     await controller.findOne('nc-1');
 
