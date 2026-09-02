@@ -44,6 +44,7 @@ export function corsOptionsFor(
       if (!origin) return callback(null, true);
 
       const limpio = origin.replace(/\/$/, '');
+      if (permitidos.includes('*')) return callback(null, true);
       if (permitidos.includes(limpio)) return callback(null, true);
       if (!esProduccion && isLocalhost(limpio)) return callback(null, true);
 
