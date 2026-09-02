@@ -730,3 +730,35 @@ export interface AuthMe {
   esAdministradorPlataforma: boolean;
   copropiedades: CopropiedadResumen[];
 }
+
+/* ── Consulta de Movimiento Contable (§12) ────────────────────── */
+
+/** One debit or credit line within a journal entry card. */
+export interface LineaMovimientoContable {
+  cuenta: string;
+  tipo: 'debito' | 'credito';
+  monto: number;
+  descripcion: string;
+}
+
+/** One journal entry card in the accounting journal view. */
+export interface MovimientoContable {
+  id: string;
+  fecha: string;
+  tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+  /** The anchor document's own _id — links to its detail page. */
+  documentoId: string;
+  numeroDocumento: string;
+  inmuebleCodigo: string | null;
+  propietario: string | null;
+  nit: string | null;
+  lineas: LineaMovimientoContable[];
+  totalDebito: number;
+  totalCredito: number;
+  cuadra: boolean;
+}
+
+/** Response shape for both GET /consultas/movimiento-contable endpoints. */
+export interface RespuestaMovimientoContable {
+  movimientos: MovimientoContable[];
+}
