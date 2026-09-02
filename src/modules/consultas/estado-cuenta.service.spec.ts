@@ -72,6 +72,12 @@ const mockFindById = (data: unknown = null) => ({
   exec: jest.fn().mockResolvedValue(data),
 });
 
+/** For `inmuebles`/`terceros` — both now resolved via `findOne({_id, coPropertyId})`. */
+const mockFindOne = (data: unknown = null) => ({
+  findOne: jest.fn().mockReturnThis(),
+  exec: jest.fn().mockResolvedValue(data),
+});
+
 const servicio = (overrides: Record<string, unknown> = {}) =>
   new EstadoCuentaService(
     (overrides.facturas ?? mockFind()) as never,
@@ -80,15 +86,15 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
     (overrides.notasDebito ?? mockFind()) as never,
     (overrides.notasContables ?? mockFind()) as never,
     (overrides.aplicaciones ?? mockFind()) as never,
-    (overrides.inmuebles ?? mockFindById()) as never,
-    (overrides.terceros ?? mockFindById()) as never,
+    (overrides.inmuebles ?? mockFindOne()) as never,
+    (overrides.terceros ?? mockFindOne()) as never,
     (overrides.copropiedades ?? mockFindById()) as never,
     { resolveCoPropertyId: () => COP } as never,
   );
 
 const svcDefaults = (overrides: Record<string, unknown> = {}) => ({
-  inmuebles: mockFindById({ code: '301', holderId: null }),
-  terceros: mockFindById(null),
+  inmuebles: mockFindOne({ code: '301', holderId: null }),
+  terceros: mockFindOne(null),
   copropiedades: mockFindById({ phone: null, email: null }),
   ...overrides,
 });
@@ -114,6 +120,18 @@ describe('EstadoCuentaService', () => {
       expect(result).toHaveLength(2);
       expect(result[0].periodStart).toBe('2026-01-01T00:00:00.000Z');
       expect(result[1].periodStart).toBe('2025-12-01T00:00:00.000Z');
+    });
+
+    it("sorts by the real periodStart field, not a typo'd name", async () => {
+      const facturas = mockFind([facturaDoc()]);
+      const svc = servicio({ facturas });
+
+      await svc.findPeriodos(id().toString());
+
+      // Mongo would silently ignore a sort key that doesn't exist on the
+      // document (returning insertion order instead) — this asserts the
+      // actual field name passed to .sort(), not just the mocked result.
+      expect(facturas.sort).toHaveBeenCalledWith({ periodStart: -1 });
     });
 
     it('returns empty array when inmueble has no facturas', async () => {
@@ -239,10 +257,19 @@ describe('EstadoCuentaService', () => {
         periodEnd: '2026-01-31T23:59:59.999Z',
       });
 
-      const ntRows = result.movimientos.filter((m) => m.categoria === null && m.concepto === 'Reclasificación');
+      const ntRows = result.movimientos.filter(
+        (m) => m.categoria === null && m.concepto === 'Reclasificación',
+      );
       expect(ntRows).toHaveLength(2);
       expect(result.pagosRecibidos).toBe(0);
       expect(result.descuentosAjustes).toBe(0);
+      // Direct assertion, not derived from the same formula saldoActual
+      // uses — cargosDelMes must reflect ONLY the Factura (100k), never
+      // the Nota Contable's débito row (50k), even though that row's
+      // `cargo` field is non-null. Without this, a bug that lets the NT
+      // row leak into cargosDelMes is invisible: the formula below would
+      // still balance internally (both sides shift by the same amount).
+      expect(result.cargosDelMes).toBe(100000);
       expect(
         result.saldoAnterior +
           result.cargosDelMes -
@@ -365,6 +392,84 @@ describe('EstadoCuentaService', () => {
 
       expect(result.copropiedadTelefono).toBe('601-555-1234');
       expect(result.copropiedadEmail).toBe('admin@cop.com');
+    });
+
+    it("fechaEmision and vencimiento come from the period's own Factura", async () => {
+      const inmId = id();
+      const f = facturaDoc({
+        inmuebleId: inmId,
+        total: 100000,
+        periodStart: new Date('2026-01-01T00:00:00.000Z'),
+        periodEnd: new Date('2026-01-31T23:59:59.999Z'),
+        issueDate: new Date('2026-01-15'),
+        dueDate: new Date('2026-02-01'),
+      });
+
+      // `find()` (the general fetch, step 1) must return the array; `findOne()`
+      // (the period's own Factura lookup) must return the single document —
+      // a shared mock returning the same shape for both would hide a real
+      // bug here, since `facturaPeriodo?.issueDate` on an array is `undefined`.
+      const facturasMock = {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValueOnce(f) // findOne().exec() — awaited first in the service
+          .mockResolvedValueOnce([f]), // find().exec() — step 1, awaited second
+      };
+
+      const svc = servicio({
+        facturas: facturasMock,
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      // Must be the Factura's real issueDate/dueDate — NOT periodStart/
+      // periodEnd echoed back (the bug a typo'd query field would produce,
+      // since findOne would never match and fall through to that fallback).
+      expect(result.fechaEmision).toBe('2026-01-15T00:00:00.000Z');
+      expect(result.vencimiento).toBe('2026-02-01T00:00:00.000Z');
+    });
+
+    it('filtra la consulta a Inmueble y Tercero por coPropertyId (tenancy law)', async () => {
+      const inmId = id();
+      const holderId = id();
+      const f = facturaDoc({ inmuebleId: inmId, total: 0 });
+
+      const inmueblesFindOne = jest.fn().mockReturnThis();
+      const tercerosFindOne = jest.fn().mockReturnThis();
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        inmuebles: {
+          findOne: inmueblesFindOne,
+          exec: jest.fn().mockResolvedValue({ code: '301', holderId }),
+        },
+        terceros: {
+          findOne: tercerosFindOne,
+          exec: jest.fn().mockResolvedValue({ name: 'Juan Perez' }),
+        },
+        copropiedades: mockFindById({ phone: null, email: null }),
+      });
+
+      await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(inmueblesFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ coPropertyId: COP }),
+      );
+      expect(tercerosFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ coPropertyId: COP }),
+      );
     });
   });
 });

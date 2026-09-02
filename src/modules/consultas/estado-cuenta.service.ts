@@ -95,7 +95,7 @@ export class EstadoCuentaService {
 
     const facturas = await this.facturas
       .find({ coPropertyId, inmuebleId: oid, status: 'emitida' })
-      .sort({ periodoDesde: -1 })
+      .sort({ periodStart: -1 })
       .exec();
 
     // Deduplicate by (periodStart, periodEnd) — at most one per lote run
@@ -117,28 +117,32 @@ export class EstadoCuentaService {
   /**
    * Full owner's statement for one inmueble and one billing period.
    */
-  async findAll(query: ConsultarEstadoCuentaDto): Promise<RespuestaEstadoCuenta> {
+  async findAll(
+    query: ConsultarEstadoCuentaDto,
+  ): Promise<RespuestaEstadoCuenta> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.periodStart);
     const hasta = new Date(query.periodEnd);
 
     // Fetch inmueble for code + holderId
-    const inmueble = await this.inmuebles.findById(inmuebleId).exec();
+    const inmueble = await this.inmuebles
+      .findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
     const inmuebleCodigo = inmueble?.code ?? '';
     const holderId = inmueble?.holderId ?? null;
 
     // Resolve propietario name
     let propietario: string | null = null;
     if (holderId) {
-      const tercero = await this.terceros.findById(holderId).exec();
+      const tercero = await this.terceros
+        .findOne({ _id: holderId, coPropertyId })
+        .exec();
       propietario = tercero?.name ?? null;
     }
 
     // Fetch copropiedad for contact info
-    const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
-      .exec();
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     const copropiedadTelefono = copropiedad?.phone ?? null;
     const copropiedadEmail = copropiedad?.email ?? null;
 
@@ -148,13 +152,15 @@ export class EstadoCuentaService {
         coPropertyId,
         inmuebleId,
         status: 'emitida',
-        periodoDesde: desde,
-        periodoHasta: hasta,
+        periodStart: desde,
+        periodEnd: hasta,
       })
       .exec();
 
-    const fechaEmision = facturaPeriodo?.issueDate?.toISOString() ?? desde.toISOString();
-    const vencimiento = facturaPeriodo?.dueDate?.toISOString() ?? hasta.toISOString();
+    const fechaEmision =
+      facturaPeriodo?.issueDate?.toISOString() ?? desde.toISOString();
+    const vencimiento =
+      facturaPeriodo?.dueDate?.toISOString() ?? hasta.toISOString();
 
     // Step 1: fetch all documents for this inmueble (no date filter — see spec §5)
     const [facturas, notasDebito, recibos, notasCredito, notasContables] =
@@ -279,11 +285,13 @@ export class EstadoCuentaService {
       (r) => r.fecha >= desde && r.fecha <= hasta,
     );
 
-    // Step 8: bucket into summary numbers
-    const cargosDelMes = movimientosEnPeriodo.reduce(
-      (sum, r) => sum + (r.cargo ?? 0),
-      0,
-    );
+    // Step 8: bucket into summary numbers. Nota Contable rows (tipo 'NT')
+    // are excluded here even though one of their two paired rows carries a
+    // `cargo` — they net to zero and never change what the inmueble owes,
+    // so they must stay purely informational (spec §2/§5).
+    const cargosDelMes = movimientosEnPeriodo
+      .filter((r) => r.tipo !== 'NT')
+      .reduce((sum, r) => sum + (r.cargo ?? 0), 0);
     const pagosRecibidos = movimientosEnPeriodo
       .filter((r) => r.categoria === 'pago')
       .reduce((sum, r) => sum + (r.abono ?? 0), 0);
