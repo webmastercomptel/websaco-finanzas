@@ -3,7 +3,9 @@ import { EntidadesService } from './entidades.service';
 
 type Filtro = Record<string, unknown>;
 
-const mockAuditoria = () => ({ registrar: jest.fn().mockResolvedValue(undefined) });
+const mockAuditoria = () => ({
+  registrar: jest.fn().mockResolvedValue(undefined),
+});
 
 const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
@@ -68,7 +70,10 @@ describe('EntidadesService.findAll', () => {
     // A diferencia de Inmuebles, acá NO hay ley de tenancy que aplicar — la
     // entidad administradora no pertenece a ninguna copropiedad puntual.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     return service.findAll({}).then(() => {
       expect(modelo.filtros[0]).not.toHaveProperty('coPropertyId');
@@ -77,7 +82,10 @@ describe('EntidadesService.findAll', () => {
 
   it('busca por código o por nombre', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.findAll({ buscar: 'Calad' });
 
@@ -89,7 +97,10 @@ describe('EntidadesService.findAll', () => {
 
   it('muestra solo las activas por defecto', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.findAll({});
 
@@ -98,7 +109,10 @@ describe('EntidadesService.findAll', () => {
 
   it('devuelve el contrato en español', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     const { items } = await service.findAll({});
 
@@ -113,7 +127,10 @@ describe('EntidadesService.findAll', () => {
 describe('EntidadesService.findOne', () => {
   it('responde "no existe" cuando no hay fila', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(service.findOne('ent-ajena')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -124,7 +141,10 @@ describe('EntidadesService.findOne', () => {
 describe('EntidadesService.create', () => {
   it('rechaza un código repetido con un mensaje entendible', async () => {
     const modelo = modeloCon([], { duplicado: true });
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(
       service.create({ codigo: 'ENT-001', nombre: 'Otra' }, ACTOR),
@@ -133,7 +153,10 @@ describe('EntidadesService.create', () => {
 
   it('crea con los campos traducidos al inglés', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR);
 
@@ -142,6 +165,35 @@ describe('EntidadesService.create', () => {
       name: 'Nueva Entidad',
     });
   });
+
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    const modelo = modeloCon([]);
+    const auditoria = mockAuditoria();
+    const service = new EntidadesService(modelo as never, auditoria as never);
+
+    await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'crear',
+      entidadTipo: 'entidad-administradora',
+      entidadId: 'ent-1',
+      entidadEtiqueta: 'Nueva Entidad',
+    });
+  });
+
+  it('si falla la auditoría, la creación entera falla — nada queda sin rastro', async () => {
+    const modelo = modeloCon([]);
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new EntidadesService(modelo as never, auditoria as never);
+
+    await expect(
+      service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR),
+    ).rejects.toThrow('audit down');
+  });
 });
 
 describe('EntidadesService.update', () => {
@@ -149,7 +201,10 @@ describe('EntidadesService.update', () => {
     // Esparcir el DTO entero escribiría `undefined` sobre campos que nadie
     // quiso borrar.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR);
 
@@ -160,9 +215,16 @@ describe('EntidadesService.update', () => {
     // No hay endpoint de borrado: cada copropiedad que esta entidad
     // administró todavía tiene que poder resolver quién lo hizo.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
-    const resultado = await service.update('ent-1', { estado: 'inactivo' }, ACTOR);
+    const resultado = await service.update(
+      'ent-1',
+      { estado: 'inactivo' },
+      ACTOR,
+    );
 
     expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
     expect(resultado.estado).toBe('activo'); // el doc devuelto por el stub
@@ -170,7 +232,10 @@ describe('EntidadesService.update', () => {
 
   it('no choca consigo misma al guardar sin cambiar el código', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('ent-1', { codigo: 'ENT-001' }, ACTOR);
 
@@ -185,10 +250,42 @@ describe('EntidadesService.update', () => {
     modelo.findByIdAndUpdate = jest.fn(() => ({
       exec: () => Promise.resolve(null),
     })) as never;
-    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(
       service.update('ent-ajena', { email: 'x@x.com' }, ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    const modelo = modeloCon([documento()]);
+    const auditoria = mockAuditoria();
+    const service = new EntidadesService(modelo as never, auditoria as never);
+
+    await service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'entidad-administradora',
+      entidadId: 'ent-1',
+      entidadEtiqueta: 'Administraciones Calad',
+    });
+  });
+
+  it('si falla la auditoría, la actualización entera falla — nada queda sin rastro', async () => {
+    const modelo = modeloCon([documento()]);
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new EntidadesService(modelo as never, auditoria as never);
+
+    await expect(
+      service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR),
+    ).rejects.toThrow('audit down');
   });
 });

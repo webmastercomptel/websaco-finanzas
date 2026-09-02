@@ -1,7 +1,9 @@
 import { PanelControlService } from './panel-control.service';
 
 const createCountMock = (count: number) => ({
-  countDocuments: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(count) }),
+  countDocuments: jest
+    .fn()
+    .mockReturnValue({ exec: jest.fn().mockResolvedValue(count) }),
 });
 
 describe('PanelControlService', () => {

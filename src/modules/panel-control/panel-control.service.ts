@@ -37,9 +37,7 @@ export class PanelControlService {
     const [totalEntidades, totalCopropiedadesActivas, totalUsuariosActivos] =
       await Promise.all([
         this.entidades.countDocuments({}).exec(),
-        this.copropiedades
-          .countDocuments({ status: 'active' })
-          .exec(),
+        this.copropiedades.countDocuments({ status: 'active' }).exec(),
         this.accounts.countDocuments({ status: 'active' }).exec(),
       ]);
 

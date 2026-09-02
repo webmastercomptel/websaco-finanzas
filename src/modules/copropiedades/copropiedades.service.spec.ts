@@ -3,7 +3,9 @@ import { CopropiedadesService } from './copropiedades.service';
 
 type Filtro = Record<string, unknown>;
 
-const mockAuditoria = () => ({ registrar: jest.fn().mockResolvedValue(undefined) });
+const mockAuditoria = () => ({
+  registrar: jest.fn().mockResolvedValue(undefined),
+});
 
 const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
@@ -74,7 +76,10 @@ describe('CopropiedadesService.findAll', () => {
     // TenantContextService en absoluto — hay que poder listar todas las
     // copropiedades sin haber elegido ninguna.
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(service.findAll({})).resolves.toBeDefined();
   });
@@ -85,7 +90,10 @@ describe('CopropiedadesService.findAll', () => {
         managingEntityId: { _id: { toString: () => 'ent-1' }, name: 'Calad' },
       }),
     ]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     const { items } = await service.findAll({});
 
@@ -99,7 +107,10 @@ describe('CopropiedadesService.findAll', () => {
     const modelo = modeloCon([
       documento({ managingEntityId: null, administratorName: 'Portería' }),
     ]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     const { items } = await service.findAll({});
 
@@ -111,18 +122,61 @@ describe('CopropiedadesService.findAll', () => {
 describe('CopropiedadesService.create', () => {
   it('rechaza un código repetido', async () => {
     const modelo = modeloCon([], { duplicado: true });
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(
       service.create({ codigo: 'COP-001', nombre: 'Otra' }, ACTOR),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    // findById(0)-tras-create necesita una fila para el re-lectura poblada
+    // que create() hace al final; el nombre viene de ahí, no de `escrituras`.
+    const modelo = modeloCon([documento({ name: 'Nueva Copro' })]);
+    const auditoria = mockAuditoria();
+    const service = new CopropiedadesService(
+      modelo as never,
+      auditoria as never,
+    );
+
+    await service.create({ codigo: 'COP-002', nombre: 'Nueva Copro' }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'crear',
+      entidadTipo: 'copropiedad',
+      entidadId: 'cop-1',
+      entidadEtiqueta: 'Nueva Copro',
+    });
+  });
+
+  it('si falla la auditoría, la creación entera falla — nada queda sin rastro', async () => {
+    const modelo = modeloCon([documento()]);
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new CopropiedadesService(
+      modelo as never,
+      auditoria as never,
+    );
+
+    await expect(
+      service.create({ codigo: 'COP-002', nombre: 'Nueva Copro' }, ACTOR),
+    ).rejects.toThrow('audit down');
   });
 });
 
 describe('CopropiedadesService.update', () => {
   it('solo escribe los campos que vinieron en el patch', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
 
@@ -135,7 +189,10 @@ describe('CopropiedadesService.update', () => {
     // Ninguna de las dos dice quién administra en la práctica: eso es
     // siempre una persona, asignada en Usuarios.
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { entidadAdministradoraId: 'ent-9' }, ACTOR);
 
@@ -147,7 +204,10 @@ describe('CopropiedadesService.update', () => {
 
   it('escribir la nota interna desvincula la entidad', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { nombreAdministrador: 'Portería' }, ACTOR);
 
@@ -161,7 +221,10 @@ describe('CopropiedadesService.update', () => {
     // Nada elimina una copropiedad: sus facturas y recibos tienen que seguir
     // siendo legibles para siempre.
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { estado: 'inactivo' }, ACTOR);
 
@@ -170,7 +233,10 @@ describe('CopropiedadesService.update', () => {
 
   it('no choca consigo misma al guardar sin cambiar el código', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { codigo: 'COP-001' }, ACTOR);
 
@@ -185,16 +251,57 @@ describe('CopropiedadesService.update', () => {
     modelo.findByIdAndUpdate = jest.fn(() => ({
       exec: () => Promise.resolve(null),
     })) as never;
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await expect(
       service.update('cop-ajena', { ciudad: 'Cali' }, ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    const modelo = modeloCon([documento()]);
+    const auditoria = mockAuditoria();
+    const service = new CopropiedadesService(
+      modelo as never,
+      auditoria as never,
+    );
+
+    await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'copropiedad',
+      entidadId: 'cop-1',
+      entidadEtiqueta: 'Terrazas de Granada',
+    });
+  });
+
+  it('si falla la auditoría, la actualización entera falla — nada queda sin rastro', async () => {
+    const modelo = modeloCon([documento()]);
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new CopropiedadesService(
+      modelo as never,
+      auditoria as never,
+    );
+
+    await expect(
+      service.update('cop-1', { ciudad: 'Medellín' }, ACTOR),
+    ).rejects.toThrow('audit down');
+  });
+
   it('guarda la cuenta contable de cartera cuando viene', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { cuentaContableCartera: '130501' }, ACTOR);
 
@@ -205,7 +312,10 @@ describe('CopropiedadesService.update', () => {
 
   it('guarda la cuenta de anticipos cuando viene', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { cuentaAnticipos: '210505' }, ACTOR);
 
@@ -216,7 +326,10 @@ describe('CopropiedadesService.update', () => {
 
   it('guarda la cuenta de devoluciones cuando viene', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new CopropiedadesService(modelo as never, mockAuditoria() as never);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockAuditoria() as never,
+    );
 
     await service.update('cop-1', { cuentaDevoluciones: '413595' }, ACTOR);
 

@@ -138,6 +138,14 @@ describe('AuditoriaService', () => {
       });
     });
 
+    it('filters by hasta only', async () => {
+      await service.findAll({ hasta: '2026-08-31' });
+
+      expect(registros.find).toHaveBeenCalledWith({
+        createdAt: { $lte: new Date('2026-08-31') },
+      });
+    });
+
     it('applies custom pagination', async () => {
       await service.findAll({ pagina: 2, porPagina: 10 });
 

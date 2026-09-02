@@ -5,7 +5,9 @@ import type { FirebaseUsuariosService } from '../../common/firebase/firebase-usu
 
 type Filtro = Record<string, unknown>;
 
-const mockAuditoria = () => ({ registrar: jest.fn().mockResolvedValue(undefined) });
+const mockAuditoria = () => ({
+  registrar: jest.fn().mockResolvedValue(undefined),
+});
 
 const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
@@ -155,11 +157,14 @@ describe('UsuariosService.create', () => {
     );
 
     await expect(
-      service.create({
-        nombre: 'Ana',
-        email: 'ana@ejemplo.com',
-        password: 'clave123',
-      }, ACTOR),
+      service.create(
+        {
+          nombre: 'Ana',
+          email: 'ana@ejemplo.com',
+          password: 'clave123',
+        },
+        ACTOR,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(crear).not.toHaveBeenCalled();
   });
@@ -174,11 +179,14 @@ describe('UsuariosService.create', () => {
       mockAuditoria() as never,
     );
 
-    await service.create({
-      nombre: 'Ana Pérez',
-      email: 'Ana@Ejemplo.com',
-      password: 'clave123',
-    }, ACTOR);
+    await service.create(
+      {
+        nombre: 'Ana Pérez',
+        email: 'Ana@Ejemplo.com',
+        password: 'clave123',
+      },
+      ACTOR,
+    );
 
     expect(crear).toHaveBeenCalledWith({
       email: 'ana@ejemplo.com',
@@ -202,15 +210,18 @@ describe('UsuariosService.create', () => {
       mockAuditoria() as never,
     );
 
-    await service.create({
-      nombre: 'Root',
-      email: 'root@ejemplo.com',
-      password: 'clave123',
-      esAdministradorPlataforma: true,
-      // Aunque vinieran, un administrador de plataforma no necesita una.
-      alcance: 'copropiedad',
-      copropiedadId: new Types.ObjectId().toString(),
-    }, ACTOR);
+    await service.create(
+      {
+        nombre: 'Root',
+        email: 'root@ejemplo.com',
+        password: 'clave123',
+        esAdministradorPlataforma: true,
+        // Aunque vinieran, un administrador de plataforma no necesita una.
+        alcance: 'copropiedad',
+        copropiedadId: new Types.ObjectId().toString(),
+      },
+      ACTOR,
+    );
 
     expect(asignacionesModel.create).not.toHaveBeenCalled();
   });
@@ -226,14 +237,17 @@ describe('UsuariosService.create', () => {
     );
     const copId = new Types.ObjectId().toString();
 
-    await service.create({
-      nombre: 'Ana',
-      email: 'ana@ejemplo.com',
-      password: 'clave123',
-      alcance: 'copropiedad',
-      copropiedadId: copId,
-      permisos: ['inmuebles.gestionar'],
-    }, ACTOR);
+    await service.create(
+      {
+        nombre: 'Ana',
+        email: 'ana@ejemplo.com',
+        password: 'clave123',
+        alcance: 'copropiedad',
+        copropiedadId: copId,
+        permisos: ['inmuebles.gestionar'],
+      },
+      ACTOR,
+    );
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -242,6 +256,70 @@ describe('UsuariosService.create', () => {
         permissions: ['inmuebles.gestionar'],
       }),
     );
+  });
+
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    const { accounts, asignacionesModel } = construirModelos();
+    const { firebase } = firebaseUsuariosCon();
+    const auditoria = mockAuditoria();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      auditoria as never,
+    );
+
+    await service.create(
+      {
+        nombre: 'Ana Pérez',
+        email: 'ana@ejemplo.com',
+        password: 'clave123',
+      },
+      ACTOR,
+    );
+
+    // `create`'s own resolved value is the wrapped Account (with a real
+    // `_id`) — `cuentasCreadas` only holds the raw pre-wrap doc, which has
+    // none, so the id under test has to come from here.
+    const cuentaCreada = await (
+      accounts.create.mock.results[0] as {
+        value: Promise<{ _id: { toString(): string } }>;
+      }
+    ).value;
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'crear',
+      entidadTipo: 'usuario',
+      entidadId: cuentaCreada._id.toString(),
+      entidadEtiqueta: 'Ana Pérez',
+    });
+  });
+
+  it('si falla la auditoría, la creación entera falla — nada queda sin rastro', async () => {
+    const { accounts, asignacionesModel } = construirModelos();
+    const { firebase } = firebaseUsuariosCon();
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      auditoria as never,
+    );
+
+    await expect(
+      service.create(
+        {
+          nombre: 'Ana',
+          email: 'ana@ejemplo.com',
+          password: 'clave123',
+        },
+        ACTOR,
+      ),
+    ).rejects.toThrow('audit down');
   });
 });
 
@@ -304,7 +382,11 @@ describe('UsuariosService.update', () => {
     await service.update(cuenta._id.toString(), {}, ACTOR);
     expect(actualizarPassword).not.toHaveBeenCalled();
 
-    await service.update(cuenta._id.toString(), { nuevaPassword: 'otra123' }, ACTOR);
+    await service.update(
+      cuenta._id.toString(),
+      { nuevaPassword: 'otra123' },
+      ACTOR,
+    );
     expect(actualizarPassword).toHaveBeenCalledWith('uid-real-1', 'otra123');
   });
 
@@ -319,7 +401,11 @@ describe('UsuariosService.update', () => {
     );
 
     await expect(
-      service.update(new Types.ObjectId().toString(), { estado: 'activo' }, ACTOR),
+      service.update(
+        new Types.ObjectId().toString(),
+        { estado: 'activo' },
+        ACTOR,
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -339,10 +425,14 @@ describe('UsuariosService.update', () => {
     );
     const nuevaCopId = new Types.ObjectId().toString();
 
-    await service.update(cuenta._id.toString(), {
-      alcance: 'copropiedad',
-      copropiedadId: nuevaCopId,
-    }, ACTOR);
+    await service.update(
+      cuenta._id.toString(),
+      {
+        alcance: 'copropiedad',
+        copropiedadId: nuevaCopId,
+      },
+      ACTOR,
+    );
 
     expect(anterior.status).toBe('inactive');
     expect(anterior.save).toHaveBeenCalled();
@@ -372,14 +462,65 @@ describe('UsuariosService.update', () => {
       mockAuditoria() as never,
     );
 
-    await service.update(cuenta._id.toString(), {
-      alcance: 'copropiedad',
-      copropiedadId: copId.toString(),
-      permisos: ['facturas.ver'],
-    }, ACTOR);
+    await service.update(
+      cuenta._id.toString(),
+      {
+        alcance: 'copropiedad',
+        copropiedadId: copId.toString(),
+        permisos: ['facturas.ver'],
+      },
+      ACTOR,
+    );
 
     expect(asignacionesModel.create).not.toHaveBeenCalled();
     expect(actual.permissions).toEqual(['facturas.ver']);
     expect(actual.status).toBe('active');
+  });
+
+  it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
+    const cuenta = cuentaDoc();
+    const { accounts, asignacionesModel } = construirModelos({
+      cuentas: [cuenta],
+    });
+    const { firebase } = firebaseUsuariosCon();
+    const auditoria = mockAuditoria();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      auditoria as never,
+    );
+
+    await service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'usuario',
+      entidadId: cuenta._id.toString(),
+      entidadEtiqueta: cuenta.fullName,
+    });
+  });
+
+  it('si falla la auditoría, la actualización entera falla — nada queda sin rastro', async () => {
+    const cuenta = cuentaDoc();
+    const { accounts, asignacionesModel } = construirModelos({
+      cuentas: [cuenta],
+    });
+    const { firebase } = firebaseUsuariosCon();
+    const auditoria = {
+      registrar: jest.fn().mockRejectedValue(new Error('audit down')),
+    };
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      auditoria as never,
+    );
+
+    await expect(
+      service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR),
+    ).rejects.toThrow('audit down');
   });
 });
