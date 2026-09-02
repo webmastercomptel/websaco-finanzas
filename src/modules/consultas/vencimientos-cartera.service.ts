@@ -14,6 +14,10 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  AplicacionCartera,
+  AplicacionCarteraDocument,
+} from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -28,20 +32,28 @@ import type {
 } from '../../contracts';
 import type { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 
-/** Compute days overdue: max(0, floor((today - referenceDate) / day)). */
-const calcularDiasMora = (fechaReferencia: Date): number => {
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
+/**
+ * Compute days overdue: max(0, floor((corte - referenceDate) / day)).
+ * When `corte` is omitted, defaults to "now".
+ */
+const calcularDiasMora = (
+  fechaReferencia: Date,
+  corte?: Date,
+): number => {
+  const c = corte ?? new Date();
+  c.setHours(0, 0, 0, 0);
   const ref = new Date(fechaReferencia);
   ref.setHours(0, 0, 0, 0);
-  const diff = hoy.getTime() - ref.getTime();
+  const diff = c.getTime() - ref.getTime();
   return Math.max(0, Math.floor(diff / 86_400_000));
 };
 
 /**
  * Read-only snapshot report: current outstanding balance and days overdue
- * across ALL inmuebles in a coproperty, as of right now. No persisted
- * entity of its own — only reads.
+ * across ALL inmuebles in a coproperty. Supports two modes:
+ *  - "as of now" (fecha omitted): reads `outstandingBalance` directly
+ *  - "historical" (fecha present): replays applications to reconstruct
+ *    balances as of the given date
  */
 @Injectable()
 export class VencimientosCarteraService {
@@ -52,6 +64,8 @@ export class VencimientosCarteraService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldosCartera: Model<SaldoCarteraDocument>,
+    @InjectModel(AplicacionCartera.name)
+    private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -64,11 +78,17 @@ export class VencimientosCarteraService {
   ): Promise<RespuestaVencimientosCartera> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    if (query.fecha) {
+      return this.findByFecha(coPropertyId, query.fecha, query.conceptoId);
+    }
+
     if (query.conceptoId) {
       return this.findByConcepto(coPropertyId, query.conceptoId);
     }
     return this.findByAllConcepts(coPropertyId);
   }
+
+  /* ── "As of now" path (unchanged from §3/§4/§5) ─────────────── */
 
   /** No concept filter: read outstandingBalance directly from Factura + ND. */
   private async findByAllConcepts(
@@ -91,7 +111,6 @@ export class VencimientosCarteraService {
         .exec(),
     ]);
 
-    // Group by inmuebleId: saldo = sum of outstandingBalance, diasMora = worst
     const saldoMap = new Map<string, number>();
     const diasMoraMap = new Map<string, number>();
 
@@ -152,13 +171,11 @@ export class VencimientosCarteraService {
         .exec(),
     ]);
 
-    // saldoPendiente from SaldoCartera (exact per-concept balance)
     const saldoMap = new Map<string, number>();
     for (const sc of saldos) {
       saldoMap.set(sc.inmuebleId.toString(), sc.balance);
     }
 
-    // diasMora from matching documents (worst per inmueble)
     const diasMoraMap = new Map<string, number>();
     for (const f of facturas) {
       const key = f.inmuebleId.toString();
@@ -181,10 +198,151 @@ export class VencimientosCarteraService {
     return this.buildResult(saldoMap, diasMoraMap, inmuebleData);
   }
 
+  /* ── Historical path (§8 — fecha present) ────────────────────── */
+
   /**
-   * Batch-fetch inmueble codes and tercero names for the units that have
-   * debt. Returns a map of inmuebleId → { codigo, propietario }.
+   * Reconstruct balances as of `fechaCorte` by replaying applications.
+   *
+   * For each document: saldoAtCorte = total − (currentOutstanding
+   *   + activeAppsAppliedAfterCorte − revertedAfterCorte)
+   *
+   * When conceptoId is present, filters Factura by line matching and
+   * NotaDebito by direct conceptoId match — does NOT use SaldoCartera
+   * (a live-only cache with no historical dimension).
    */
+  private async findByFecha(
+    coPropertyId: Types.ObjectId,
+    fechaCorte: string,
+    conceptoId?: string,
+  ): Promise<RespuestaVencimientosCartera> {
+    const fecha = new Date(fechaCorte);
+    const conceptoObjectId = conceptoId
+      ? new Types.ObjectId(conceptoId)
+      : null;
+
+    // Fetch all documents with outstanding balance
+    const [facturas, notasDebito] = await Promise.all([
+      this.facturas
+        .find({
+          coPropertyId,
+          status: 'emitida',
+          outstandingBalance: { $gt: 0 },
+          ...(conceptoObjectId
+            ? { 'lines.conceptoId': conceptoObjectId }
+            : {}),
+        })
+        .exec(),
+      this.notasDebito
+        .find({
+          coPropertyId,
+          status: 'emitida',
+          outstandingBalance: { $gt: 0 },
+          ...(conceptoObjectId ? { conceptoId: conceptoObjectId } : {}),
+        })
+        .exec(),
+    ]);
+
+    // Collect document IDs to find their applications
+    const facturaIds = facturas.map((f) => f._id);
+    const ndIds = notasDebito.map((nd) => nd._id);
+    const docIds = [...facturaIds, ...ndIds];
+
+    // Fetch ALL applications for these documents (both active and reverted)
+    const aplicaciones = docIds.length
+      ? await this.aplicaciones
+          .find({
+            coPropertyId,
+            documentId: { $in: docIds },
+          })
+          .exec()
+      : [];
+
+    // Index applications by documentId
+    const appsByDoc = new Map<string, typeof aplicaciones>();
+    for (const app of aplicaciones) {
+      const key = app.documentId.toString();
+      const list = appsByDoc.get(key) ?? [];
+      list.push(app);
+      appsByDoc.set(key, list);
+    }
+
+    // Compute balance as of fecha for each document
+    const saldoMap = new Map<string, number>();
+    const diasMoraMap = new Map<string, number>();
+
+    for (const f of facturas) {
+      const docId = f._id.toString();
+      const key = f.inmuebleId.toString();
+      const docApps = appsByDoc.get(docId) ?? [];
+      const saldo = this.saldoDocumentoAFecha(f.total, f.outstandingBalance, docApps, fecha);
+      if (saldo > 0) {
+        saldoMap.set(key, (saldoMap.get(key) ?? 0) + saldo);
+        const dm = calcularDiasMora(f.dueDate, fecha);
+        diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
+      }
+    }
+
+    for (const nd of notasDebito) {
+      const docId = nd._id.toString();
+      const key = nd.inmuebleId.toString();
+      const docApps = appsByDoc.get(docId) ?? [];
+      const saldo = this.saldoDocumentoAFecha(nd.total, nd.outstandingBalance, docApps, fecha);
+      if (saldo > 0) {
+        saldoMap.set(key, (saldoMap.get(key) ?? 0) + saldo);
+        const dm = calcularDiasMora(nd.issueDate, fecha);
+        diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
+      }
+    }
+
+    if (saldoMap.size === 0) return empty();
+
+    const inmuebleIds = [...saldoMap.keys()].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const inmuebleData = await this.resolveInmuebles(coPropertyId, inmuebleIds);
+
+    return this.buildResult(saldoMap, diasMoraMap, inmuebleData);
+  }
+
+  /* ── Shared helpers ──────────────────────────────────────────── */
+
+  /**
+   * Compute what a document's balance was as of `fechaCorte`.
+   *
+   * currentOutstanding = saldoAtCorte − activeAppsAppliedAfterCorte + revertedAfterCorte
+   * ⟹ saldoAtCorte = currentOutstanding + activeAppsAppliedAfterCorte − revertedAfterCorte
+   *
+   * where:
+   *  - activeAppsAppliedAfterCorte = active apps applied AFTER corte
+   *  - revertedAfterCorte = apps reverted AFTER corte (regardless of when applied)
+   *    — these increased balance back after corte, so we subtract to undo that
+   */
+  private saldoDocumentoAFecha(
+    _total: number,
+    currentOutstanding: number,
+    apps: Array<{ amountApplied: number; appliedAt: Date; status: string; revertedAt: Date | null }>,
+    fechaCorte: Date,
+  ): number {
+    let activeAppsAppliedAfterCorte = 0;
+    let revertedAfterCorte = 0;
+    for (const app of apps) {
+      if (app.status === 'activa' && app.appliedAt > fechaCorte) {
+        activeAppsAppliedAfterCorte += app.amountApplied;
+      } else if (
+        app.status === 'revertida' &&
+        app.revertedAt &&
+        app.revertedAt > fechaCorte
+      ) {
+        revertedAfterCorte += app.amountApplied;
+      }
+    }
+    return Math.max(
+      0,
+      currentOutstanding + activeAppsAppliedAfterCorte - revertedAfterCorte,
+    );
+  }
+
+  /** Batch-fetch inmueble codes and tercero names for the units that have debt. */
   private async resolveInmuebles(
     coPropertyId: Types.ObjectId,
     inmuebleIds: Types.ObjectId[],
@@ -204,7 +362,6 @@ export class VencimientosCarteraService {
       ];
       const terceros = await this.terceros
         .find({
-          coPropertyId,
           _id: {
             $in: uniqueHolderIds.map((id) => new Types.ObjectId(id)),
           },
@@ -251,7 +408,6 @@ export class VencimientosCarteraService {
       },
     );
 
-    // Sort by diasMora descending (most overdue first)
     filas.sort((a, b) => b.diasMora - a.diasMora);
 
     const totalCartera = filas.reduce((s, f) => s + f.saldoPendiente, 0);

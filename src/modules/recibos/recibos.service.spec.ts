@@ -1208,7 +1208,7 @@ describe('RecibosService.anular', () => {
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: aplicacionActiva._id, coPropertyId: COP },
-      { $set: { status: 'revertida' } },
+      { $set: { status: 'revertida', revertedAt: expect.any(Date) } },
       expect.objectContaining({ session: expect.anything() }),
     );
     expect(asientos.create).toHaveBeenCalledTimes(1);

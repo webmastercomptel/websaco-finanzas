@@ -69,6 +69,12 @@ export class AplicacionCartera {
   @Prop({ required: true })
   appliedAt: Date;
 
+  /** Set at the same moment `status` flips to 'revertida' — closes the
+   *  "was this application active on date X?" gap for historical cartera
+   *  queries (Vencimientos §8, Cartera General §2). */
+  @Prop({ type: Date, default: null })
+  revertedAt: Date | null;
+
   @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
   appliedBy: Types.ObjectId;
 }

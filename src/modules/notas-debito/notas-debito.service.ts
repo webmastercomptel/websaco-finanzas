@@ -275,7 +275,7 @@ export class NotasDebitoService {
         await this.aplicaciones
           .findOneAndUpdate(
             { _id: aplicacion._id, coPropertyId },
-            { $set: { status: 'revertida' } },
+            { $set: { status: 'revertida', revertedAt: new Date() } },
             { session },
           )
           .exec();

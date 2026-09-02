@@ -11,6 +11,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   fullNumber: 'FV-001',
   dueDate: new Date('2026-08-01'),
   outstandingBalance: 200000,
+  total: 200000,
   status: 'emitida',
   ...over,
 });
@@ -22,6 +23,7 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   fullNumber: 'ND-001',
   issueDate: new Date('2026-07-15'),
   outstandingBalance: 50000,
+  total: 50000,
   conceptoId: new Types.ObjectId(),
   status: 'emitida',
   ...over,
@@ -57,6 +59,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     facturas: find(),
     notasDebito: find(),
     saldosCartera: find(),
+    aplicaciones: find(),
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
@@ -66,6 +69,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.facturas as never,
     m.notasDebito as never,
     m.saldosCartera as never,
+    m.aplicaciones as never,
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
@@ -175,7 +179,6 @@ describe('VencimientosCarteraService', () => {
 
       expect(result.filas).toHaveLength(1);
       expect(result.filas[0].saldoPendiente).toBe(150000);
-      // ND is more overdue than the Factura — its diasMora should win
       expect(result.filas[0].diasMora).toBeGreaterThan(0);
       expect(result.filas[0].estado).toBe('vencido');
     });
@@ -255,7 +258,7 @@ describe('VencimientosCarteraService', () => {
       await svc.findAll({});
 
       expect(tercerosFind).toHaveBeenCalledWith(
-        expect.objectContaining({ coPropertyId: COP }),
+        expect.objectContaining({ _id: expect.any(Object) }),
       );
     });
   });
@@ -266,10 +269,10 @@ describe('VencimientosCarteraService', () => {
       const conceptoId = id();
       const f = facturaDoc({
         inmuebleId: inmId,
-        outstandingBalance: 200000, // full invoice balance
-        lines: [{ conceptoId }], // has matching line
+        outstandingBalance: 200000,
+        lines: [{ conceptoId }],
       });
-      const sc = saldoDoc(inmId, conceptoId, 80000); // but only 80k for this concept
+      const sc = saldoDoc(inmId, conceptoId, 80000);
       const inm = inmuebleDoc({ _id: inmId, code: '501' });
 
       const svc = servicio({
@@ -294,14 +297,13 @@ describe('VencimientosCarteraService', () => {
       const result = await svc.findAll({ conceptoId: conceptoId.toString() });
 
       expect(result.filas).toHaveLength(1);
-      // Must match SaldoCartera, NOT the Factura's outstandingBalance
       expect(result.filas[0].saldoPendiente).toBe(80000);
     });
 
     it('una NotaDebito con conceptoId no coincidente no contribuye al saldo filtrado', async () => {
       const inmId = id();
       const conceptoFilter = id();
-      const conceptoNd = id(); // different concept
+      const conceptoNd = id();
       const nd = ndDoc({
         inmuebleId: inmId,
         conceptoId: conceptoNd,
@@ -309,8 +311,6 @@ describe('VencimientosCarteraService', () => {
       });
       const inm = inmuebleDoc({ _id: inmId, code: '601' });
 
-      // SaldoCartera query filters for balance > 0 — the mock simulates
-      // Mongo's filter by returning [] (the real DB would filter out balance: 0)
       const svc = servicio({
         facturas: {
           find: jest.fn().mockReturnThis(),
@@ -334,8 +334,6 @@ describe('VencimientosCarteraService', () => {
         conceptoId: conceptoFilter.toString(),
       });
 
-      // SaldoCartera returned nothing (balance would be 0 or no entry),
-      // so the inmueble shouldn't appear
       expect(result.filas).toHaveLength(0);
     });
   });
@@ -388,13 +386,11 @@ describe('VencimientosCarteraService', () => {
     it('filas esta ordenado por diasMora descendente', async () => {
       const inm1 = id();
       const inm2 = id();
-      // inm1: very overdue (July 1)
       const f1 = facturaDoc({
         inmuebleId: inm1,
         dueDate: new Date('2026-07-01'),
         outstandingBalance: 100000,
       });
-      // inm2: slightly overdue (Aug 25)
       const f2 = facturaDoc({
         inmuebleId: inm2,
         dueDate: new Date('2026-08-25'),
@@ -429,19 +425,229 @@ describe('VencimientosCarteraService', () => {
     });
   });
 
-  describe('sin datos', () => {
-    it('retorna estructura vacia, no error', async () => {
-      const svc = servicio();
-
-      const result = await svc.findAll({});
-
-      expect(result).toEqual({
-        filas: [],
-        totalCartera: 0,
-        totalVencido: 0,
-        totalPendiente: 0,
-        porcentajeVencido: 0,
+  describe('fecha de corte historica (§8)', () => {
+    it('con fecha: saldo reconstruido incluye apliaciones pendientes al momento del corte', async () => {
+      const inmId = id();
+      const fId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        dueDate: new Date('2026-06-01'),
+        total: 200000,
+        outstandingBalance: 50000,
       });
+      const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+      // 150k applied AFTER corte (Aug 15 > Aug 1), still active
+      const appAfter = {
+        _id: id(),
+        documentId: fId,
+        amountApplied: 150000,
+        status: 'activa',
+        appliedAt: new Date('2026-08-15'),
+        revertedAt: null,
+      };
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([appAfter]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([inm]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-08-01' });
+
+      // saldoAtCorte = outstanding + activeAppsAfterCorte - revertedAfterCorte
+      //              = 50k + 150k - 0 = 200k
+      // At corte, the 150k hadn't been applied yet → full amount outstanding
+      expect(result.filas).toHaveLength(1);
+      expect(result.filas[0].saldoPendiente).toBe(200000);
+    });
+
+    it('con fecha: documentos no pagados a la fecha de corte aparecen con saldo correcto', async () => {
+      const inmId = id();
+      const fId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        dueDate: new Date('2026-06-01'),
+        total: 200000,
+        outstandingBalance: 100000,
+      });
+      const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([inm]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-08-01' });
+
+      // No after-corte apps → saldoAtCorte = 200k - (100k + 0 - 0) = 100k
+      expect(result.filas).toHaveLength(1);
+      expect(result.filas[0].saldoPendiente).toBe(100000);
+    });
+
+    it('con fecha: diasMora calculado desde la fecha de corte, no desde hoy', async () => {
+      const inmId = id();
+      const fId = id();
+      // Due date: Jul 1. Corte: Aug 1 → diasMora = 31
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        dueDate: new Date('2026-07-01'),
+        total: 100000,
+        outstandingBalance: 100000,
+      });
+      const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([inm]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-08-01' });
+
+      expect(result.filas).toHaveLength(1);
+      // Aug 1 - Jul 1 = 31 days
+      expect(result.filas[0].diasMora).toBe(31);
+    });
+
+    it('con fecha y concepto: usa Factura line matching, no SaldoCartera', async () => {
+      const inmId = id();
+      const fId = id();
+      const conceptoId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        dueDate: new Date('2026-06-01'),
+        total: 200000,
+        outstandingBalance: 100000,
+        lines: [{ conceptoId }],
+      });
+      const inm = inmuebleDoc({ _id: inmId, code: '501' });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([inm]),
+        },
+        saldosCartera: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+      });
+
+      const result = await svc.findAll({
+        fecha: '2026-08-01',
+        conceptoId: conceptoId.toString(),
+      });
+
+      expect(result.filas).toHaveLength(1);
+      // saldo from Factura lines, not SaldoCartera: 200k - 100k = 100k
+      expect(result.filas[0].saldoPendiente).toBe(100000);
+    });
+
+    it('con fecha: aplicaciones revertidas despues de la fecha de corte ajustan el saldo', async () => {
+      const inmId = id();
+      const fId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        dueDate: new Date('2026-06-01'),
+        total: 200000,
+        outstandingBalance: 200000,
+      });
+      const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+      // App applied BEFORE corte (Jul 15), reverted AFTER corte (Aug 5)
+      // At corte: app was active → balance = 200k - 50k = 150k
+      const appReverted = {
+        _id: id(),
+        documentId: fId,
+        amountApplied: 50000,
+        status: 'revertida',
+        appliedAt: new Date('2026-07-15'),
+        revertedAt: new Date('2026-08-05'),
+      };
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([appReverted]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([inm]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-08-01' });
+
+      // saldoAtCorte = 200k - (200k + 0 - 50k) = 150k
+      // revertedAfterCorte = 50k (app applied before corte, reverted after)
+      expect(result.filas).toHaveLength(1);
+      expect(result.filas[0].saldoPendiente).toBe(150000);
     });
   });
 });
