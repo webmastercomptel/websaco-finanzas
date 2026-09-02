@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ConsultasController } from './consultas.controller';
 import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
+import { CarteraGeneralService } from './cartera-general.service';
 import {
   Factura,
   FacturaSchema,
@@ -32,6 +33,10 @@ import {
   SaldoCarteraSchema,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  ConceptoCobro,
+  ConceptoCobroSchema,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
   Inmueble,
   InmuebleSchema,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -50,11 +55,16 @@ import {
       { name: NotaContable.name, schema: NotaContableSchema },
       { name: AplicacionCartera.name, schema: AplicacionCarteraSchema },
       { name: SaldoCartera.name, schema: SaldoCarteraSchema },
+      { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
       { name: Inmueble.name, schema: InmuebleSchema },
       { name: Tercero.name, schema: TerceroSchema },
     ]),
   ],
   controllers: [ConsultasController],
-  providers: [AuxiliarCarteraService, VencimientosCarteraService],
+  providers: [
+    AuxiliarCarteraService,
+    VencimientosCarteraService,
+    CarteraGeneralService,
+  ],
 })
 export class ConsultasModule {}

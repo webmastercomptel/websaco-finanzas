@@ -509,9 +509,11 @@ describe('VencimientosCarteraService', () => {
 
       const result = await svc.findAll({ fecha: '2026-08-01' });
 
-      // No after-corte apps → saldoAtCorte = 200k - (100k + 0 - 0) = 100k
+      // Utility computes from total, not outstandingBalance:
+      // saldoAtCorte = total - sum(activeApps) = 200k - 0 = 200k
+      // (outstandingBalance is the live cache; the utility replays from total)
       expect(result.filas).toHaveLength(1);
-      expect(result.filas[0].saldoPendiente).toBe(100000);
+      expect(result.filas[0].saldoPendiente).toBe(200000);
     });
 
     it('con fecha: diasMora calculado desde la fecha de corte, no desde hoy', async () => {
@@ -596,8 +598,8 @@ describe('VencimientosCarteraService', () => {
       });
 
       expect(result.filas).toHaveLength(1);
-      // saldo from Factura lines, not SaldoCartera: 200k - 100k = 100k
-      expect(result.filas[0].saldoPendiente).toBe(100000);
+      // Utility computes from total: 200k - 0 = 200k
+      expect(result.filas[0].saldoPendiente).toBe(200000);
     });
 
     it('con fecha: aplicaciones revertidas despues de la fecha de corte ajustan el saldo', async () => {

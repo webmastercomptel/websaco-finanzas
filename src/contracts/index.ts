@@ -491,6 +491,34 @@ export interface RespuestaVencimientosCartera {
   porcentajeVencido: number;
 }
 
+/* ── Cartera General (§3) ──────────────────────────────────────── */
+
+/** Balance per charge concept, always "as of now". */
+export interface CarteraPorConcepto {
+  conceptoId: string;
+  nombre: string;
+  saldo: number;
+}
+
+/** Monthly collections flow (active applications only). */
+export interface RecaudoMensual {
+  anio: number;
+  mes: number;
+  monto: number;
+}
+
+/** Response shape for GET /consultas/cartera-general. */
+export interface RespuestaCarteraGeneral {
+  totalCartera: number;
+  totalVencido: number;
+  totalPendiente: number;
+  porcentajeVencido: number;
+  totalCarteraMesAnterior: number | null;
+  diasPromedioMora: number;
+  carteraPorConcepto: CarteraPorConcepto[];
+  tendenciaRecaudo: RecaudoMensual[];
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**
