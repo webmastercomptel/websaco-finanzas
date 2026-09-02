@@ -13,8 +13,18 @@ const asientoBase = (overrides: Record<string, unknown> = {}) =>
     _id: id(),
     date: new Date('2026-08-15'),
     entries: [
-      { account: '1355-01', type: 'debito', amount: 100000, description: 'Administración agosto' },
-      { account: '4135-01', type: 'credito', amount: 100000, description: 'Ingresos por administración' },
+      {
+        account: '1355-01',
+        type: 'debito',
+        amount: 100000,
+        description: 'Administración agosto',
+      },
+      {
+        account: '4135-01',
+        type: 'credito',
+        amount: 100000,
+        description: 'Ingresos por administración',
+      },
     ],
     facturaId: null,
     reciboId: null,
@@ -66,7 +76,9 @@ describe('resolveAnchorId', () => {
 
   it('throws when no anchor is set', () => {
     const a = asientoBase();
-    expect(() => resolveAnchorId(a)).toThrow('AsientoContable has no anchor document');
+    expect(() => resolveAnchorId(a)).toThrow(
+      'AsientoContable has no anchor document',
+    );
   });
 });
 
@@ -75,9 +87,24 @@ describe('resolverMovimientoContable', () => {
     const asiento = asientoBase({
       facturaId: id(),
       entries: [
-        { account: '1355-01', type: 'debito', amount: 200000, description: 'Línea 1' },
-        { account: '4135-01', type: 'credito', amount: 150000, description: 'Línea 2' },
-        { account: '4135-02', type: 'credito', amount: 50000, description: 'Línea 3' },
+        {
+          account: '1355-01',
+          type: 'debito',
+          amount: 200000,
+          description: 'Línea 1',
+        },
+        {
+          account: '4135-01',
+          type: 'credito',
+          amount: 150000,
+          description: 'Línea 2',
+        },
+        {
+          account: '4135-02',
+          type: 'credito',
+          amount: 50000,
+          description: 'Línea 3',
+        },
       ],
     });
 
@@ -103,8 +130,18 @@ describe('resolverMovimientoContable', () => {
     const asiento = asientoBase({
       reciboId: id(),
       entries: [
-        { account: '1105-01', type: 'debito', amount: 100000, description: 'Efectivo' },
-        { account: '1355-01', type: 'credito', amount: 80000, description: 'Parcial' },
+        {
+          account: '1105-01',
+          type: 'debito',
+          amount: 100000,
+          description: 'Efectivo',
+        },
+        {
+          account: '1355-01',
+          type: 'credito',
+          amount: 80000,
+          description: 'Parcial',
+        },
       ],
     });
 

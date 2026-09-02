@@ -2,19 +2,53 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { AsientoContable, AsientoContableDocument } from '../../database/schemas/facturacion/asiento-contable.schema';
-import { Factura, FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
-import { Recibo, ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
-import { NotaCredito, NotaCreditoDocument } from '../../database/schemas/notas-credito/nota-credito.schema';
-import { NotaDebito, NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
-import { NotaContable, NotaContableDocument } from '../../database/schemas/notas-contables/nota-contable.schema';
-import { Inmueble, InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
-import { Tercero, TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
+import {
+  AsientoContable,
+  AsientoContableDocument,
+} from '../../database/schemas/facturacion/asiento-contable.schema';
+import {
+  Factura,
+  FacturaDocument,
+} from '../../database/schemas/facturacion/factura.schema';
+import {
+  Recibo,
+  ReciboDocument,
+} from '../../database/schemas/recibos/recibo.schema';
+import {
+  NotaCredito,
+  NotaCreditoDocument,
+} from '../../database/schemas/notas-credito/nota-credito.schema';
+import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  NotaContable,
+  NotaContableDocument,
+} from '../../database/schemas/notas-contables/nota-contable.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
 import { resolverMovimientoContable } from './movimiento-contable.util';
-import type { RespuestaMovimientoContable, MovimientoContable } from '../../contracts';
+import type { RespuestaMovimientoContable } from '../../contracts';
 
 /** Map from tipoDocumento to the corresponding anchor field name on AsientoContable. */
-const ANCHOR_FIELD: Record<string, keyof Pick<AsientoContableDocument, 'facturaId' | 'reciboId' | 'notaCreditoId' | 'notaDebitoId' | 'notaContableId'>> = {
+const ANCHOR_FIELD: Record<
+  string,
+  keyof Pick<
+    AsientoContableDocument,
+    | 'facturaId'
+    | 'reciboId'
+    | 'notaCreditoId'
+    | 'notaDebitoId'
+    | 'notaContableId'
+  >
+> = {
   FC: 'facturaId',
   RC: 'reciboId',
   NC: 'notaCreditoId',
@@ -25,14 +59,21 @@ const ANCHOR_FIELD: Record<string, keyof Pick<AsientoContableDocument, 'facturaI
 @Injectable()
 export class MovimientoContableService {
   constructor(
-    @InjectModel(AsientoContable.name) private readonly asientos: Model<AsientoContableDocument>,
-    @InjectModel(Factura.name) private readonly facturas: Model<FacturaDocument>,
+    @InjectModel(AsientoContable.name)
+    private readonly asientos: Model<AsientoContableDocument>,
+    @InjectModel(Factura.name)
+    private readonly facturas: Model<FacturaDocument>,
     @InjectModel(Recibo.name) private readonly recibos: Model<ReciboDocument>,
-    @InjectModel(NotaCredito.name) private readonly notasCredito: Model<NotaCreditoDocument>,
-    @InjectModel(NotaDebito.name) private readonly notasDebito: Model<NotaDebitoDocument>,
-    @InjectModel(NotaContable.name) private readonly notasContables: Model<NotaContableDocument>,
-    @InjectModel(Inmueble.name) private readonly inmuebles: Model<InmuebleDocument>,
-    @InjectModel(Tercero.name) private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(NotaCredito.name)
+    private readonly notasCredito: Model<NotaCreditoDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(NotaContable.name)
+    private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -49,11 +90,16 @@ export class MovimientoContableService {
 
     // 1. Resolve the source document
     const anchorModel = this.getAnchorModel(params.tipoDocumento);
-    const anchor = await anchorModel.findOne({ coPropertyId, fullNumber: params.numeroCompleto }).exec();
+    const anchor = await anchorModel
+      .findOne({ coPropertyId, fullNumber: params.numeroCompleto })
+      .exec();
     if (!anchor) return { movimientos: [] };
 
     // 2. Query AsientoContable by the matching anchor field
-    const filter: Record<string, unknown> = { coPropertyId, [anchorField]: anchor._id };
+    const filter: Record<string, unknown> = {
+      coPropertyId,
+      [anchorField]: anchor._id,
+    };
     const asientos = await this.asientos.find(filter).sort({ date: 1 }).exec();
     if (asientos.length === 0) return { movimientos: [] };
 
@@ -62,7 +108,10 @@ export class MovimientoContableService {
 
     // 4. Map each asiento
     const movimientos = asientos.map((a) =>
-      resolverMovimientoContable(a, { ...meta, numeroDocumento: anchor.fullNumber }),
+      resolverMovimientoContable(a, {
+        ...meta,
+        numeroDocumento: anchor.fullNumber,
+      }),
     );
 
     return { movimientos };
@@ -82,13 +131,24 @@ export class MovimientoContableService {
     const hasta = new Date(params.hasta);
 
     // 1. Fetch all document IDs for this inmueble (unfiltered by date — only IDs needed)
-    const [facturas, recibos, notasCredito, notasDebito, notasContables] = await Promise.all([
-      this.facturas.find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 }).exec(),
-      this.recibos.find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 }).exec(),
-      this.notasCredito.find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 }).exec(),
-      this.notasDebito.find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 }).exec(),
-      this.notasContables.find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 }).exec(),
-    ]);
+    const [facturas, recibos, notasCredito, notasDebito, notasContables] =
+      await Promise.all([
+        this.facturas
+          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
+          .exec(),
+        this.recibos
+          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
+          .exec(),
+        this.notasCredito
+          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
+          .exec(),
+        this.notasDebito
+          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
+          .exec(),
+        this.notasContables
+          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
+          .exec(),
+      ]);
 
     const facturaIds = facturas.map((f) => f._id);
     const reciboIds = recibos.map((r) => r._id);
@@ -98,7 +158,8 @@ export class MovimientoContableService {
 
     // 2. Build $or filter — only include non-empty arrays
     const orConditions: Record<string, unknown>[] = [];
-    if (facturaIds.length) orConditions.push({ facturaId: { $in: facturaIds } });
+    if (facturaIds.length)
+      orConditions.push({ facturaId: { $in: facturaIds } });
     if (reciboIds.length) orConditions.push({ reciboId: { $in: reciboIds } });
     if (ncIds.length) orConditions.push({ notaCreditoId: { $in: ncIds } });
     if (ndIds.length) orConditions.push({ notaDebitoId: { $in: ndIds } });
@@ -134,14 +195,28 @@ export class MovimientoContableService {
   }
 
   /** Get the Mongoose model for a given document type. */
-  private getAnchorModel(tipo: string): Model<FacturaDocument | ReciboDocument | NotaCreditoDocument | NotaDebitoDocument | NotaContableDocument> {
+  private getAnchorModel(
+    tipo: string,
+  ): Model<
+    | FacturaDocument
+    | ReciboDocument
+    | NotaCreditoDocument
+    | NotaDebitoDocument
+    | NotaContableDocument
+  > {
     switch (tipo) {
-      case 'FC': return this.facturas;
-      case 'RC': return this.recibos;
-      case 'NC': return this.notasCredito;
-      case 'ND': return this.notasDebito;
-      case 'NT': return this.notasContables;
-      default: throw new Error(`Unknown tipoDocumento: ${tipo}`);
+      case 'FC':
+        return this.facturas;
+      case 'RC':
+        return this.recibos;
+      case 'NC':
+        return this.notasCredito;
+      case 'ND':
+        return this.notasDebito;
+      case 'NT':
+        return this.notasContables;
+      default:
+        throw new Error(`Unknown tipoDocumento: ${tipo}`);
     }
   }
 
@@ -149,15 +224,24 @@ export class MovimientoContableService {
   private async resolveMeta(
     inmuebleId: Types.ObjectId,
     coPropertyId: Types.ObjectId,
-  ): Promise<{ inmuebleCodigo: string | null; propietario: string | null; nit: string | null }> {
-    const inmueble = await this.inmuebles.findOne({ _id: inmuebleId, coPropertyId }).exec();
-    if (!inmueble) return { inmuebleCodigo: null, propietario: null, nit: null };
+  ): Promise<{
+    inmuebleCodigo: string | null;
+    propietario: string | null;
+    nit: string | null;
+  }> {
+    const inmueble = await this.inmuebles
+      .findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    if (!inmueble)
+      return { inmuebleCodigo: null, propietario: null, nit: null };
 
     if (!inmueble.holderId) {
       return { inmuebleCodigo: inmueble.code, propietario: null, nit: null };
     }
 
-    const tercero = await this.terceros.findOne({ _id: inmueble.holderId, coPropertyId }).exec();
+    const tercero = await this.terceros
+      .findOne({ _id: inmueble.holderId, coPropertyId })
+      .exec();
     if (!tercero) {
       return { inmuebleCodigo: inmueble.code, propietario: null, nit: null };
     }
@@ -233,7 +317,9 @@ export class MovimientoContableService {
     for (const [tipo, model] of fetchers) {
       const ids = idsByType.get(tipo);
       if (!ids || ids.length === 0) continue;
-      const docs = await (model as Model<{ _id: Types.ObjectId; fullNumber: string }>)
+      const docs = await (
+        model as Model<{ _id: Types.ObjectId; fullNumber: string }>
+      )
         .find({ _id: { $in: ids }, coPropertyId }, { fullNumber: 1 })
         .exec();
       for (const doc of docs) {

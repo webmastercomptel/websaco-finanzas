@@ -8,7 +8,14 @@ import type { MovimientoContable } from '../../contracts';
  * are single-field discriminators.
  */
 export function deriveTipoDocumento(
-  asiento: Pick<AsientoContableDocument, 'facturaId' | 'reciboId' | 'notaCreditoId' | 'notaDebitoId' | 'notaContableId'>,
+  asiento: Pick<
+    AsientoContableDocument,
+    | 'facturaId'
+    | 'reciboId'
+    | 'notaCreditoId'
+    | 'notaDebitoId'
+    | 'notaContableId'
+  >,
 ): 'FC' | 'RC' | 'NC' | 'ND' | 'NT' {
   if (asiento.facturaId) return 'FC';
   if (asiento.reciboId) return 'RC';
@@ -23,7 +30,14 @@ export function deriveTipoDocumento(
  * Resolve the anchor document's `_id` from whichever anchor field is set.
  */
 export function resolveAnchorId(
-  asiento: Pick<AsientoContableDocument, 'facturaId' | 'reciboId' | 'notaCreditoId' | 'notaDebitoId' | 'notaContableId'>,
+  asiento: Pick<
+    AsientoContableDocument,
+    | 'facturaId'
+    | 'reciboId'
+    | 'notaCreditoId'
+    | 'notaDebitoId'
+    | 'notaContableId'
+  >,
 ): Types.ObjectId {
   if (asiento.facturaId) return asiento.facturaId;
   if (asiento.reciboId) return asiento.reciboId;

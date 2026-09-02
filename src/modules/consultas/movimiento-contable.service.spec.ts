@@ -6,13 +6,27 @@ const INMUEBLE = new Types.ObjectId();
 const HOLDER = new Types.ObjectId();
 const id = () => new Types.ObjectId();
 
-const asientoDoc = (anchorField: string, anchorId: Types.ObjectId, over: Record<string, unknown> = {}) => ({
+const asientoDoc = (
+  anchorField: string,
+  anchorId: Types.ObjectId,
+  over: Record<string, unknown> = {},
+) => ({
   _id: id(),
   coPropertyId: COP,
   date: new Date('2026-08-15'),
   entries: [
-    { account: '1355-01', type: 'debito', amount: 100000, description: 'Administración' },
-    { account: '4135-01', type: 'credito', amount: 100000, description: 'Ingresos' },
+    {
+      account: '1355-01',
+      type: 'debito',
+      amount: 100000,
+      description: 'Administración',
+    },
+    {
+      account: '4135-01',
+      type: 'credito',
+      amount: 100000,
+      description: 'Ingresos',
+    },
   ],
   loteId: null,
   [anchorField]: anchorId,
@@ -109,7 +123,10 @@ describe('MovimientoContableService', () => {
         },
       });
 
-      const result = await svc.buscar({ tipoDocumento: 'FC', numeroCompleto: 'FV-001' });
+      const result = await svc.buscar({
+        tipoDocumento: 'FC',
+        numeroCompleto: 'FV-001',
+      });
 
       expect(result.movimientos).toHaveLength(1);
       expect(result.movimientos[0].tipoDocumento).toBe('FC');
@@ -118,8 +135,12 @@ describe('MovimientoContableService', () => {
 
     it('returns both AsientoContable entries when a Recibo posted twice', async () => {
       const rec = reciboDoc();
-      const a1 = asientoDoc('reciboId', rec._id, { date: new Date('2026-08-10') });
-      const a2 = asientoDoc('reciboId', rec._id, { date: new Date('2026-08-15') });
+      const a1 = asientoDoc('reciboId', rec._id, {
+        date: new Date('2026-08-10'),
+      });
+      const a2 = asientoDoc('reciboId', rec._id, {
+        date: new Date('2026-08-15'),
+      });
 
       const svc = servicio({
         recibos: {
@@ -133,11 +154,18 @@ describe('MovimientoContableService', () => {
         },
       });
 
-      const result = await svc.buscar({ tipoDocumento: 'RC', numeroCompleto: 'RC-001' });
+      const result = await svc.buscar({
+        tipoDocumento: 'RC',
+        numeroCompleto: 'RC-001',
+      });
 
       expect(result.movimientos).toHaveLength(2);
-      expect(result.movimientos[0].fecha).toBe(new Date('2026-08-10').toISOString());
-      expect(result.movimientos[1].fecha).toBe(new Date('2026-08-15').toISOString());
+      expect(result.movimientos[0].fecha).toBe(
+        new Date('2026-08-10').toISOString(),
+      );
+      expect(result.movimientos[1].fecha).toBe(
+        new Date('2026-08-15').toISOString(),
+      );
     });
 
     it('returns empty movimientos for a non-existent document number', async () => {
@@ -148,7 +176,10 @@ describe('MovimientoContableService', () => {
         },
       });
 
-      const result = await svc.buscar({ tipoDocumento: 'FC', numeroCompleto: 'FV-999' });
+      const result = await svc.buscar({
+        tipoDocumento: 'FC',
+        numeroCompleto: 'FV-999',
+      });
 
       expect(result.movimientos).toEqual([]);
     });
@@ -169,11 +200,55 @@ describe('MovimientoContableService', () => {
         },
       });
 
-      const result = await svc.buscar({ tipoDocumento: 'FC', numeroCompleto: 'FV-001' });
+      const result = await svc.buscar({
+        tipoDocumento: 'FC',
+        numeroCompleto: 'FV-001',
+      });
 
       expect(result.movimientos[0].inmuebleCodigo).toBe('301');
       expect(result.movimientos[0].propietario).toBe('Juan Perez');
       expect(result.movimientos[0].nit).toBe('900123456-7');
+    });
+
+    it('resolves Inmueble and Tercero scoped to coPropertyId, never by bare _id', async () => {
+      // Regression guard named in AGENTS.md: a prior test in this codebase kept
+      // its name and shape while its assertion was quietly weakened from
+      // checking `coPropertyId` to checking `_id` alone, silently accepting a
+      // `findOne({_id})`-without-tenant-filter regression. Asserting on the
+      // exact call args (not just the resolved value) is what actually catches it.
+      const f = facturaDoc();
+      const asiento = asientoDoc('facturaId', f._id);
+      const inmueblesFindOne = jest.fn().mockReturnThis();
+      const tercerosFindOne = jest.fn().mockReturnThis();
+
+      const svc = servicio({
+        facturas: {
+          findOne: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(f),
+        },
+        asientos: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asiento]),
+        },
+        inmuebles: {
+          findOne: inmueblesFindOne,
+          exec: jest.fn().mockResolvedValue(inmuebleDoc()),
+        },
+        terceros: {
+          findOne: tercerosFindOne,
+          exec: jest.fn().mockResolvedValue(terceroDoc()),
+        },
+      });
+
+      await svc.buscar({ tipoDocumento: 'FC', numeroCompleto: 'FV-001' });
+
+      expect(inmueblesFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: INMUEBLE, coPropertyId: COP }),
+      );
+      expect(tercerosFindOne).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: HOLDER, coPropertyId: COP }),
+      );
     });
 
     it('null propietario when inmueble has no holder', async () => {
@@ -196,7 +271,10 @@ describe('MovimientoContableService', () => {
         },
       });
 
-      const result = await svc.buscar({ tipoDocumento: 'FC', numeroCompleto: 'FV-001' });
+      const result = await svc.buscar({
+        tipoDocumento: 'FC',
+        numeroCompleto: 'FV-001',
+      });
 
       expect(result.movimientos[0].propietario).toBeNull();
       expect(result.movimientos[0].nit).toBeNull();
@@ -231,10 +309,9 @@ describe('MovimientoContableService', () => {
       expect(result.movimientos[0].tipoDocumento).toBe('FC');
     });
 
-    it('excludes asientos dated outside the range', async () => {
+    it('passes a date range filter to AsientoContable.find (excludes out-of-range entries)', async () => {
       const f = facturaDoc();
-      // asiento dated outside [desde, hasta]
-      const asiento = asientoDoc('facturaId', f._id, { date: new Date('2025-06-01') });
+      const asientosFind = jest.fn().mockReturnThis();
 
       const svc = servicio({
         facturas: {
@@ -243,9 +320,14 @@ describe('MovimientoContableService', () => {
           exec: jest.fn().mockResolvedValue([f]),
         },
         asientos: {
-          find: jest.fn().mockReturnThis(),
+          find: asientosFind,
           sort: jest.fn().mockReturnThis(),
-          exec: jest.fn().mockResolvedValue([]), // date filter excludes it
+          // the real Mongo query applies the date filter server-side; here we
+          // simulate that by resolving [] and instead assert the filter
+          // actually SENT to find() carries the date clause — a mock that
+          // just resolves [] regardless of the filter would pass even if
+          // this clause were deleted from the service.
+          exec: jest.fn().mockResolvedValue([]),
         },
       });
 
@@ -255,7 +337,74 @@ describe('MovimientoContableService', () => {
         hasta: '2026-12-31',
       });
 
+      expect(asientosFind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          date: { $gte: new Date('2026-01-01'), $lte: new Date('2026-12-31') },
+        }),
+      );
       expect(result.movimientos).toEqual([]);
+    });
+
+    it('includes entries anchored to different document types for the same inmueble ($or across anchor fields)', async () => {
+      const f = facturaDoc();
+      const nc = {
+        _id: id(),
+        coPropertyId: COP,
+        inmuebleId: INMUEBLE,
+        fullNumber: 'NC-001',
+      };
+      const asientoFactura = asientoDoc('facturaId', f._id, {
+        date: new Date('2026-08-05'),
+      });
+      const asientoNC = asientoDoc('notaCreditoId', nc._id, {
+        date: new Date('2026-08-10'),
+      });
+      const asientosFind = jest.fn().mockReturnThis();
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasCredito: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([nc]),
+        },
+        asientos: {
+          find: asientosFind,
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asientoFactura, asientoNC]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      // Both anchor types must actually reach the $or filter, not just the mapped result —
+      // a bug that dropped the NC branch of orConditions would still pass a
+      // result-only assertion since the mock ignores its filter argument.
+      const llamadas = asientosFind.mock.calls as unknown[][];
+      const filtroEnviado = llamadas[0][0] as { $or: unknown[] };
+      expect(filtroEnviado.$or).toEqual(
+        expect.arrayContaining([
+          { facturaId: { $in: [f._id] } },
+          { notaCreditoId: { $in: [nc._id] } },
+        ]),
+      );
+      expect(result.movimientos).toHaveLength(2);
+      expect(result.movimientos.map((m) => m.tipoDocumento).sort()).toEqual([
+        'FC',
+        'NC',
+      ]);
+      expect(
+        result.movimientos.find((m) => m.tipoDocumento === 'NC')
+          ?.numeroDocumento,
+      ).toBe('NC-001');
     });
 
     it('returns empty when no documents exist for the inmueble', async () => {
@@ -273,8 +422,12 @@ describe('MovimientoContableService', () => {
     it('a voided Recibo reversal appears in the listing', async () => {
       const rec = reciboDoc();
       // Two asientos for the same Recibo: create + void reversal
-      const a1 = asientoDoc('reciboId', rec._id, { date: new Date('2026-08-10') });
-      const a2 = asientoDoc('reciboId', rec._id, { date: new Date('2026-08-20') });
+      const a1 = asientoDoc('reciboId', rec._id, {
+        date: new Date('2026-08-10'),
+      });
+      const a2 = asientoDoc('reciboId', rec._id, {
+        date: new Date('2026-08-20'),
+      });
 
       const svc = servicio({
         recibos: {
@@ -296,8 +449,12 @@ describe('MovimientoContableService', () => {
       });
 
       expect(result.movimientos).toHaveLength(2);
-      expect(result.movimientos[0].fecha).toBe(new Date('2026-08-10').toISOString());
-      expect(result.movimientos[1].fecha).toBe(new Date('2026-08-20').toISOString());
+      expect(result.movimientos[0].fecha).toBe(
+        new Date('2026-08-10').toISOString(),
+      );
+      expect(result.movimientos[1].fecha).toBe(
+        new Date('2026-08-20').toISOString(),
+      );
     });
   });
 });
