@@ -138,6 +138,22 @@ return this.model.find(query).exec();
   should have failed into one that quietly returns someone else's money.
 - A `find` / `findOne` / `updateOne` on a financial collection without
   `coPropertyId` in the filter is a bug, even when it looks like it works.
+- **`findById(x)` is the recurring blind spot — confirmed three times across
+  the `consultas` module's own audit history** (`vencimientos-cartera.service.ts`'s
+  `Tercero` lookup, twice — once as the original bug, once as a regression when
+  the same function was edited again for an unrelated feature — and
+  `estado-cuenta.service.ts`'s `Inmueble`/`Tercero` lookups, written fresh with
+  the same gap). `findById` filters ONLY by `_id`, so it is correct exclusively
+  when that `_id` IS the tenant id itself (e.g. `copropiedades.findById(coPropertyId)`).
+  For anything else tenant-owned — `Inmueble`, `Tercero`, and every other
+  per-tenant collection — resolving "this specific document by its own id"
+  MUST be `findOne({ _id: x, coPropertyId })`, never `findById(x)`. Before
+  writing (or reviewing) any new lookup shaped like "fetch this Inmueble/
+  Tercero/etc. by an id I already have", check this specifically — it is the
+  single most-repeated tenancy mistake in this codebase's own history, and a
+  passing test suite has twice failed to catch it (once because no test
+  existed, once because an existing regression test's assertion was quietly
+  weakened while keeping its name).
 
 `FirebaseAuthGuard` is what writes the tenant into CLS, and only after checking
 the requested `X-CoProperty-Id` against the caller's live assignments through
