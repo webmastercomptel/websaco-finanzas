@@ -24,6 +24,8 @@ import { NotasContablesModule } from './modules/notas-contables/notas-contables.
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { ConsultasModule } from './modules/consultas/consultas.module';
+import { AuditoriaModule } from './modules/auditoria/auditoria.module';
+import { PanelControlModule } from './modules/panel-control/panel-control.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -66,6 +68,8 @@ import { HealthModule } from './modules/health/health.module';
     ConceptosModule,
     UsuariosModule,
     ConsultasModule,
+    AuditoriaModule,
+    PanelControlModule,
     HealthModule,
   ],
 })

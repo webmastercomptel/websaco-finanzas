@@ -5,6 +5,10 @@ import type { FirebaseUsuariosService } from '../../common/firebase/firebase-usu
 
 type Filtro = Record<string, unknown>;
 
+const mockAuditoria = () => ({ registrar: jest.fn().mockResolvedValue(undefined) });
+
+const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
+
 const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   firebaseUid: 'uid-real-1',
@@ -147,6 +151,7 @@ describe('UsuariosService.create', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
     await expect(
@@ -154,7 +159,7 @@ describe('UsuariosService.create', () => {
         nombre: 'Ana',
         email: 'ana@ejemplo.com',
         password: 'clave123',
-      }),
+      }, ACTOR),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(crear).not.toHaveBeenCalled();
   });
@@ -166,13 +171,14 @@ describe('UsuariosService.create', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
     await service.create({
       nombre: 'Ana Pérez',
       email: 'Ana@Ejemplo.com',
       password: 'clave123',
-    });
+    }, ACTOR);
 
     expect(crear).toHaveBeenCalledWith({
       email: 'ana@ejemplo.com',
@@ -193,6 +199,7 @@ describe('UsuariosService.create', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
     await service.create({
@@ -203,7 +210,7 @@ describe('UsuariosService.create', () => {
       // Aunque vinieran, un administrador de plataforma no necesita una.
       alcance: 'copropiedad',
       copropiedadId: new Types.ObjectId().toString(),
-    });
+    }, ACTOR);
 
     expect(asignacionesModel.create).not.toHaveBeenCalled();
   });
@@ -215,6 +222,7 @@ describe('UsuariosService.create', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
     const copId = new Types.ObjectId().toString();
 
@@ -225,7 +233,7 @@ describe('UsuariosService.create', () => {
       alcance: 'copropiedad',
       copropiedadId: copId,
       permisos: ['inmuebles.gestionar'],
-    });
+    }, ACTOR);
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -250,9 +258,10 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
-    await service.update(cuenta._id.toString(), { estado: 'inactivo' });
+    await service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR);
 
     expect(establecerHabilitado).toHaveBeenCalledWith('uid-real-1', false);
     expect(cuenta.status).toBe('inactive');
@@ -270,9 +279,10 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
-    await service.update(cuenta._id.toString(), { estado: 'inactivo' });
+    await service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR);
 
     expect(establecerHabilitado).not.toHaveBeenCalled();
     expect(cuenta.status).toBe('inactive');
@@ -288,12 +298,13 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
-    await service.update(cuenta._id.toString(), {});
+    await service.update(cuenta._id.toString(), {}, ACTOR);
     expect(actualizarPassword).not.toHaveBeenCalled();
 
-    await service.update(cuenta._id.toString(), { nuevaPassword: 'otra123' });
+    await service.update(cuenta._id.toString(), { nuevaPassword: 'otra123' }, ACTOR);
     expect(actualizarPassword).toHaveBeenCalledWith('uid-real-1', 'otra123');
   });
 
@@ -304,10 +315,11 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
     await expect(
-      service.update(new Types.ObjectId().toString(), { estado: 'activo' }),
+      service.update(new Types.ObjectId().toString(), { estado: 'activo' }, ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -323,13 +335,14 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
     const nuevaCopId = new Types.ObjectId().toString();
 
     await service.update(cuenta._id.toString(), {
       alcance: 'copropiedad',
       copropiedadId: nuevaCopId,
-    });
+    }, ACTOR);
 
     expect(anterior.status).toBe('inactive');
     expect(anterior.save).toHaveBeenCalled();
@@ -356,13 +369,14 @@ describe('UsuariosService.update', () => {
       accounts as never,
       asignacionesModel as never,
       firebase,
+      mockAuditoria() as never,
     );
 
     await service.update(cuenta._id.toString(), {
       alcance: 'copropiedad',
       copropiedadId: copId.toString(),
       permisos: ['facturas.ver'],
-    });
+    }, ACTOR);
 
     expect(asignacionesModel.create).not.toHaveBeenCalled();
     expect(actual.permissions).toEqual(['facturas.ver']);

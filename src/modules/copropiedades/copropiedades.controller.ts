@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PlatformAdminGuard } from '../../common/guards/platform-admin.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { CopropiedadesService } from './copropiedades.service';
 import { ListarCopropiedadesDto } from './dto/listar-copropiedades.dto';
 import {
@@ -49,15 +51,25 @@ export class CopropiedadesController {
   }
 
   @Post()
-  create(@Body() dto: CrearCopropiedadDto): Promise<Copropiedad> {
-    return this.copropiedades.create(dto);
+  create(
+    @Body() dto: CrearCopropiedadDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Copropiedad> {
+    return this.copropiedades.create(dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 
   @Patch(':id')
   update(
     @Param('id') id: string,
     @Body() dto: ActualizarCopropiedadDto,
+    @CurrentUser() user: IRequestUser,
   ): Promise<Copropiedad> {
-    return this.copropiedades.update(id, dto);
+    return this.copropiedades.update(id, dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 }

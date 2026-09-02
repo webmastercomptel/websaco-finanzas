@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PlatformAdminGuard } from '../../common/guards/platform-admin.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { EntidadesService } from './entidades.service';
 import { ListarEntidadesDto } from './dto/listar-entidades.dto';
 import {
@@ -50,15 +52,25 @@ export class EntidadesController {
   }
 
   @Post()
-  create(@Body() dto: CrearEntidadDto): Promise<EntidadAdministradora> {
-    return this.entidades.create(dto);
+  create(
+    @Body() dto: CrearEntidadDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<EntidadAdministradora> {
+    return this.entidades.create(dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 
   @Patch(':id')
   update(
     @Param('id') id: string,
     @Body() dto: ActualizarEntidadDto,
+    @CurrentUser() user: IRequestUser,
   ): Promise<EntidadAdministradora> {
-    return this.entidades.update(id, dto);
+    return this.entidades.update(id, dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 }

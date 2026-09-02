@@ -21,6 +21,7 @@ import type {
   CrearCopropiedadDto,
 } from './dto/guardar-copropiedad.dto';
 import { escapeRegex } from '../../common/utils/query.utils';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 
 /**
  * Manages the platform's catalogue of coproperties.
@@ -35,6 +36,7 @@ export class CopropiedadesService {
   constructor(
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
   async findAll(
@@ -78,7 +80,10 @@ export class CopropiedadesService {
     return toCopropiedad(documento);
   }
 
-  async create(dto: CrearCopropiedadDto): Promise<CopropiedadContract> {
+  async create(
+    dto: CrearCopropiedadDto,
+    actor: { accountId: string; nombre: string },
+  ): Promise<CopropiedadContract> {
     const yaExiste = await this.copropiedades
       .exists({ code: dto.codigo })
       .exec();
@@ -89,6 +94,16 @@ export class CopropiedadesService {
     }
 
     const creada = await this.copropiedades.create(this.aDocumento(dto));
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'crear',
+      entidadTipo: 'copropiedad',
+      entidadId: creada._id.toString(),
+      entidadEtiqueta: creada.name,
+    });
+
     // Re-read populated: the created document holds a raw id for the managing
     // entity, and the contract promises its name.
     return this.findOne(creada._id.toString());
@@ -103,6 +118,7 @@ export class CopropiedadesService {
   async update(
     id: string,
     dto: ActualizarCopropiedadDto,
+    actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
     if (dto.codigo) {
       const chocaConOtra = await this.copropiedades
@@ -122,6 +138,16 @@ export class CopropiedadesService {
     if (!actualizada) {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
     }
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'copropiedad',
+      entidadId: actualizada._id.toString(),
+      entidadEtiqueta: actualizada.name,
+    });
+
     return this.findOne(actualizada._id.toString());
   }
 

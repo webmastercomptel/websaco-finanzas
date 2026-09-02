@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PlatformAdminGuard } from '../../common/guards/platform-admin.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { UsuariosService } from './usuarios.service';
 import { ListarUsuariosDto } from './dto/listar-usuarios.dto';
 import {
@@ -49,15 +51,25 @@ export class UsuariosController {
   }
 
   @Post()
-  create(@Body() dto: CrearUsuarioDto): Promise<Usuario> {
-    return this.usuarios.create(dto);
+  create(
+    @Body() dto: CrearUsuarioDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Usuario> {
+    return this.usuarios.create(dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 
   @Patch(':id')
   update(
     @Param('id') id: string,
     @Body() dto: ActualizarUsuarioDto,
+    @CurrentUser() user: IRequestUser,
   ): Promise<Usuario> {
-    return this.usuarios.update(id, dto);
+    return this.usuarios.update(id, dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 }

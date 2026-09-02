@@ -21,6 +21,7 @@ import type {
   CrearEntidadDto,
 } from './dto/guardar-entidad.dto';
 import { escapeRegex } from '../../common/utils/query.utils';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 
 /**
  * Manages the platform's catalogue of managing entities.
@@ -34,6 +35,7 @@ export class EntidadesService {
   constructor(
     @InjectModel(EntidadAdministradora.name)
     private readonly entidades: Model<EntidadAdministradoraDocument>,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
   async findAll(query: ListarEntidadesDto): Promise<Paginado<EntidadContract>> {
@@ -71,7 +73,10 @@ export class EntidadesService {
     return toEntidad(documento);
   }
 
-  async create(dto: CrearEntidadDto): Promise<EntidadContract> {
+  async create(
+    dto: CrearEntidadDto,
+    actor: { accountId: string; nombre: string },
+  ): Promise<EntidadContract> {
     const yaExiste = await this.entidades.exists({ code: dto.codigo }).exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -80,6 +85,16 @@ export class EntidadesService {
     }
 
     const creada = await this.entidades.create(this.aDocumento(dto));
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'crear',
+      entidadTipo: 'entidad-administradora',
+      entidadId: creada._id.toString(),
+      entidadEtiqueta: creada.name,
+    });
+
     return toEntidad(creada);
   }
 
@@ -91,6 +106,7 @@ export class EntidadesService {
   async update(
     id: string,
     dto: ActualizarEntidadDto,
+    actor: { accountId: string; nombre: string },
   ): Promise<EntidadContract> {
     if (dto.codigo) {
       const chocaConOtra = await this.entidades
@@ -110,6 +126,16 @@ export class EntidadesService {
     if (!actualizada) {
       throw new NotFoundException(`No se encontró la entidad ${id}`);
     }
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'entidad-administradora',
+      entidadId: actualizada._id.toString(),
+      entidadEtiqueta: actualizada.name,
+    });
+
     return toEntidad(actualizada);
   }
 

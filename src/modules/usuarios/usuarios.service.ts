@@ -23,6 +23,7 @@ import type {
   ActualizarUsuarioDto,
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 
 /** A Firebase uid an administrator has not yet claimed — see seed-admin.ts. */
 const esIdentidadReal = (firebaseUid: string): boolean =>
@@ -36,6 +37,7 @@ export class UsuariosService {
     @InjectModel(Asignacion.name)
     private readonly asignaciones: Model<AsignacionDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
+    private readonly auditoria: AuditoriaService,
   ) {}
 
   /**
@@ -107,7 +109,10 @@ export class UsuariosService {
    * treats as safe and ordinary. There is no saga to roll it back, and none is
    * needed: the failure mode this ordering produces is inert by construction.
    */
-  async create(dto: CrearUsuarioDto): Promise<UsuarioContract> {
+  async create(
+    dto: CrearUsuarioDto,
+    actor: { accountId: string; nombre: string },
+  ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
 
     const yaExiste = await this.accounts.exists({ email: correo }).exec();
@@ -142,6 +147,15 @@ export class UsuariosService {
       });
     }
 
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'crear',
+      entidadTipo: 'usuario',
+      entidadId: cuenta._id.toString(),
+      entidadEtiqueta: dto.nombre,
+    });
+
     return this.findOne(cuenta._id.toString());
   }
 
@@ -155,6 +169,7 @@ export class UsuariosService {
   async update(
     id: string,
     dto: ActualizarUsuarioDto,
+    actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
     const cuenta = await this.accounts.findById(id).exec();
     if (!cuenta) {
@@ -192,6 +207,15 @@ export class UsuariosService {
     if (dto.alcance !== undefined) {
       await this.actualizarAsignacionPrimaria(cuenta._id, dto);
     }
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'usuario',
+      entidadId: cuenta._id.toString(),
+      entidadEtiqueta: cuenta.fullName,
+    });
 
     return this.findOne(id);
   }

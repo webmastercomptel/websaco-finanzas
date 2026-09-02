@@ -3,6 +3,10 @@ import { EntidadesService } from './entidades.service';
 
 type Filtro = Record<string, unknown>;
 
+const mockAuditoria = () => ({ registrar: jest.fn().mockResolvedValue(undefined) });
+
+const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
+
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'ent-1' },
   code: 'ENT-001',
@@ -64,7 +68,7 @@ describe('EntidadesService.findAll', () => {
     // A diferencia de Inmuebles, acá NO hay ley de tenancy que aplicar — la
     // entidad administradora no pertenece a ninguna copropiedad puntual.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     return service.findAll({}).then(() => {
       expect(modelo.filtros[0]).not.toHaveProperty('coPropertyId');
@@ -73,7 +77,7 @@ describe('EntidadesService.findAll', () => {
 
   it('busca por código o por nombre', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     await service.findAll({ buscar: 'Calad' });
 
@@ -85,7 +89,7 @@ describe('EntidadesService.findAll', () => {
 
   it('muestra solo las activas por defecto', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     await service.findAll({});
 
@@ -94,7 +98,7 @@ describe('EntidadesService.findAll', () => {
 
   it('devuelve el contrato en español', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     const { items } = await service.findAll({});
 
@@ -109,7 +113,7 @@ describe('EntidadesService.findAll', () => {
 describe('EntidadesService.findOne', () => {
   it('responde "no existe" cuando no hay fila', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     await expect(service.findOne('ent-ajena')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -120,18 +124,18 @@ describe('EntidadesService.findOne', () => {
 describe('EntidadesService.create', () => {
   it('rechaza un código repetido con un mensaje entendible', async () => {
     const modelo = modeloCon([], { duplicado: true });
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     await expect(
-      service.create({ codigo: 'ENT-001', nombre: 'Otra' }),
+      service.create({ codigo: 'ENT-001', nombre: 'Otra' }, ACTOR),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('crea con los campos traducidos al inglés', async () => {
     const modelo = modeloCon([]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
-    await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' });
+    await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
       code: 'ENT-002',
@@ -145,9 +149,9 @@ describe('EntidadesService.update', () => {
     // Esparcir el DTO entero escribiría `undefined` sobre campos que nadie
     // quiso borrar.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
-    await service.update('ent-1', { email: 'nuevo@ejemplo.com' });
+    await service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({ email: 'nuevo@ejemplo.com' });
   });
@@ -156,9 +160,9 @@ describe('EntidadesService.update', () => {
     // No hay endpoint de borrado: cada copropiedad que esta entidad
     // administró todavía tiene que poder resolver quién lo hizo.
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
-    const resultado = await service.update('ent-1', { estado: 'inactivo' });
+    const resultado = await service.update('ent-1', { estado: 'inactivo' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
     expect(resultado.estado).toBe('activo'); // el doc devuelto por el stub
@@ -166,9 +170,9 @@ describe('EntidadesService.update', () => {
 
   it('no choca consigo misma al guardar sin cambiar el código', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
-    await service.update('ent-1', { codigo: 'ENT-001' });
+    await service.update('ent-1', { codigo: 'ENT-001' }, ACTOR);
 
     expect(modelo.filtros[0]).toEqual({
       code: 'ENT-001',
@@ -181,10 +185,10 @@ describe('EntidadesService.update', () => {
     modelo.findByIdAndUpdate = jest.fn(() => ({
       exec: () => Promise.resolve(null),
     })) as never;
-    const service = new EntidadesService(modelo as never);
+    const service = new EntidadesService(modelo as never, mockAuditoria() as never);
 
     await expect(
-      service.update('ent-ajena', { email: 'x@x.com' }),
+      service.update('ent-ajena', { email: 'x@x.com' }, ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
