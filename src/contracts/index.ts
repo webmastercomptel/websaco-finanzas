@@ -519,6 +519,44 @@ export interface RespuestaCarteraGeneral {
   tendenciaRecaudo: RecaudoMensual[];
 }
 
+/* ── Estado de Cuenta (§4) ──────────────────────────────────────── */
+
+/** One billed period available for an inmueble. */
+export interface PeriodoFacturado {
+  periodStart: string;
+  periodEnd: string;
+}
+
+/** One movement line in an owner's statement. */
+export interface MovimientoEstadoCuenta {
+  fecha: string;
+  concepto: string;
+  cargo: number | null;
+  abono: number | null;
+  /** `'pago'` for Recibo applications, `'descuento'` for NC, `null` for
+   *  Nota Contable rows (informational only, never summed). */
+  categoria: 'pago' | 'descuento' | null;
+}
+
+/** Response shape for GET /consultas/estado-cuenta. */
+export interface RespuestaEstadoCuenta {
+  inmuebleCodigo: string;
+  propietario: string | null;
+  copropiedadTelefono: string | null;
+  copropiedadEmail: string | null;
+  periodStart: string;
+  periodEnd: string;
+  fechaEmision: string;
+  vencimiento: string;
+  saldoAnterior: number;
+  cargosDelMes: number;
+  pagosRecibidos: number;
+  descuentosAjustes: number;
+  saldoActual: number;
+  estado: 'al_dia' | 'pendiente' | 'vencido';
+  movimientos: MovimientoEstadoCuenta[];
+}
+
 /* ── Identidad ─────────────────────────────────────────────────── */
 
 /**

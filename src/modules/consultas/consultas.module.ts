@@ -4,6 +4,7 @@ import { ConsultasController } from './consultas.controller';
 import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
+import { EstadoCuentaService } from './estado-cuenta.service';
 import {
   Factura,
   FacturaSchema,
@@ -44,6 +45,10 @@ import {
   Tercero,
   TerceroSchema,
 } from '../../database/schemas/terceros/tercero.schema';
+import {
+  Copropiedad,
+  CopropiedadSchema,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
 
 @Module({
   imports: [
@@ -58,6 +63,7 @@ import {
       { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
       { name: Inmueble.name, schema: InmuebleSchema },
       { name: Tercero.name, schema: TerceroSchema },
+      { name: Copropiedad.name, schema: CopropiedadSchema },
     ]),
   ],
   controllers: [ConsultasController],
@@ -65,6 +71,7 @@ import {
     AuxiliarCarteraService,
     VencimientosCarteraService,
     CarteraGeneralService,
+    EstadoCuentaService,
   ],
 })
 export class ConsultasModule {}

@@ -5,13 +5,18 @@ import { CheckAbility } from '../casl/check-ability.decorator';
 import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
+import { EstadoCuentaService } from './estado-cuenta.service';
 import { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto';
 import { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 import { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
+import { ConsultarPeriodosEstadoCuentaDto } from './dto/consultar-periodos-estado-cuenta.dto';
+import { ConsultarEstadoCuentaDto } from './dto/consultar-estado-cuenta.dto';
 import type {
   RespuestaAuxiliarCartera,
   RespuestaVencimientosCartera,
   RespuestaCarteraGeneral,
+  PeriodoFacturado,
+  RespuestaEstadoCuenta,
 } from '../../contracts';
 
 /**
@@ -25,6 +30,7 @@ export class ConsultasController {
     private readonly auxiliarCartera: AuxiliarCarteraService,
     private readonly vencimientosCartera: VencimientosCarteraService,
     private readonly carteraGeneral: CarteraGeneralService,
+    private readonly estadoCuenta: EstadoCuentaService,
   ) {}
 
   @Get('auxiliar-cartera')
@@ -49,5 +55,21 @@ export class ConsultasController {
     @Query() query: ConsultarCarteraGeneralDto,
   ): Promise<RespuestaCarteraGeneral> {
     return this.carteraGeneral.findAll(query);
+  }
+
+  @Get('estado-cuenta/periodos')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findPeriodosEstadoCuenta(
+    @Query() query: ConsultarPeriodosEstadoCuentaDto,
+  ): Promise<PeriodoFacturado[]> {
+    return this.estadoCuenta.findPeriodos(query.inmuebleId);
+  }
+
+  @Get('estado-cuenta')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findEstadoCuenta(
+    @Query() query: ConsultarEstadoCuentaDto,
+  ): Promise<RespuestaEstadoCuenta> {
+    return this.estadoCuenta.findAll(query);
   }
 }
