@@ -128,7 +128,10 @@ describe('generarPdfFactura', () => {
   });
 });
 
-function noLanzaCuando(descripcion: string, overrides: Partial<FacturaDocument>) {
+function noLanzaCuando(
+  descripcion: string,
+  overrides: Partial<FacturaDocument>,
+) {
   it(`no lanza cuando ${descripcion}`, async () => {
     const bytes = await generarPdfFactura(
       makeFactura(overrides),

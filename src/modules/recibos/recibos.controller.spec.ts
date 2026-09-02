@@ -1,14 +1,22 @@
 import { Types } from 'mongoose';
 import { RecibosController } from './recibos.controller';
-import type { RecibosService } from './recibos.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(recibos: Record<string, unknown>) {
+const COP = new Types.ObjectId();
+
+function makeController(
+  recibos: Record<string, unknown>,
+  copropiedades: Record<string, unknown> = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
+    })),
+  },
+) {
   return new RecibosController(
     recibos as never,
-    {} as TenantContextService,
-    { findById: jest.fn() } as never,
+    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+    copropiedades as never,
   );
 }
 
@@ -112,5 +120,77 @@ describe('RecibosController.findAll / findOne', () => {
     await controller.findOne('rec-1');
 
     expect(recibos.findOne).toHaveBeenCalledWith('rec-1');
+  });
+});
+
+describe('RecibosController.generarPdf', () => {
+  it('responde con Content-Type application/pdf y bytes reales', async () => {
+    const recibos = {
+      findOneRaw: jest.fn(() =>
+        Promise.resolve({
+          _id: new Types.ObjectId(),
+          fullNumber: 'RC-001-0001',
+          receivedDate: new Date('2026-08-05'),
+          receivedAmount: 100000,
+          paymentMethod: 'efectivo',
+          destinationAccount: 'caja-1',
+          reference: null,
+          notes: null,
+          appliedAmount: 100000,
+          unappliedAmount: 0,
+        }),
+      ),
+      findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
+    };
+    const controller = makeController(recibos);
+    const set = jest.fn();
+    const send = jest.fn();
+    const res = { set, send } as never;
+
+    await controller.generarPdf('rec-1', undefined, res);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
+    );
+    const bytes = (send.mock.calls[0] as [Buffer])[0];
+    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
+  });
+
+  it('propaga duplicado=true al generador de PDF', async () => {
+    const recibos = {
+      findOneRaw: jest.fn(() =>
+        Promise.resolve({
+          _id: new Types.ObjectId(),
+          fullNumber: 'RC-001-0001',
+          receivedDate: new Date('2026-08-05'),
+          receivedAmount: 100000,
+          paymentMethod: 'efectivo',
+          destinationAccount: 'caja-1',
+          reference: null,
+          notes: null,
+          appliedAmount: 100000,
+          unappliedAmount: 0,
+        }),
+      ),
+      findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
+    };
+    const controller = makeController(recibos);
+    const sinDuplicado = { set: jest.fn(), send: jest.fn() } as never;
+    const conDuplicado = { set: jest.fn(), send: jest.fn() } as never;
+
+    await controller.generarPdf('rec-1', undefined, sinDuplicado);
+    await controller.generarPdf('rec-1', 'true', conDuplicado);
+
+    const bytesSin = (
+      (sinDuplicado as unknown as { send: jest.Mock }).send.mock.calls[0] as [
+        Buffer,
+      ]
+    )[0];
+    const bytesCon = (
+      (conDuplicado as unknown as { send: jest.Mock }).send.mock.calls[0] as [
+        Buffer,
+      ]
+    )[0];
+    expect(bytesCon.length).toBeGreaterThan(bytesSin.length);
   });
 });

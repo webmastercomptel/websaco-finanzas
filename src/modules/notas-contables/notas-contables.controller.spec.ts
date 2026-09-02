@@ -1,14 +1,22 @@
 import { Types } from 'mongoose';
 import { NotasContablesController } from './notas-contables.controller';
-import type { NotasContablesService } from './notas-contables.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(notasContables: Record<string, unknown>) {
+const COP = new Types.ObjectId();
+
+function makeController(
+  notasContables: Record<string, unknown>,
+  copropiedades: Record<string, unknown> = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
+    })),
+  },
+) {
   return new NotasContablesController(
     notasContables as never,
-    {} as TenantContextService,
-    { findById: jest.fn() } as never,
+    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+    copropiedades as never,
   );
 }
 
@@ -88,5 +96,33 @@ describe('NotasContablesController.findAll / findOne', () => {
     await controller.findOne('nt-1');
 
     expect(notasContables.findOne).toHaveBeenCalledWith('nt-1');
+  });
+});
+
+describe('NotasContablesController.generarPdf', () => {
+  it('responde con Content-Type application/pdf y bytes reales', async () => {
+    const notasContables = {
+      findOneRaw: jest.fn(() =>
+        Promise.resolve({
+          fullNumber: 'NT-001-0001',
+          createdAt: new Date('2026-08-20'),
+          monto: 30000,
+          description: 'Reclasificación',
+          conceptoOrigenId: new Types.ObjectId(),
+          conceptoDestinoId: new Types.ObjectId(),
+        }),
+      ),
+    };
+    const controller = makeController(notasContables);
+    const set = jest.fn();
+    const send = jest.fn();
+
+    await controller.generarPdf('nt-1', undefined, { set, send } as never);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
+    );
+    const bytes = (send.mock.calls[0] as [Buffer])[0];
+    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
   });
 });

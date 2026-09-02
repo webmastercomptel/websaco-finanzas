@@ -354,8 +354,14 @@ export class NotasContablesService {
     cuentaDestinoConceptoId: Types.ObjectId,
   ): Promise<void> {
     const [cuentaOrigenDoc, cuentaDestinoDoc] = await Promise.all([
-      this.conceptos.findById(cuentaOrigenConceptoId).session(session).exec(),
-      this.conceptos.findById(cuentaDestinoConceptoId).session(session).exec(),
+      this.conceptos
+        .findOne({ _id: cuentaOrigenConceptoId, coPropertyId })
+        .session(session)
+        .exec(),
+      this.conceptos
+        .findOne({ _id: cuentaDestinoConceptoId, coPropertyId })
+        .session(session)
+        .exec(),
     ]);
 
     const cuentaOrigen =

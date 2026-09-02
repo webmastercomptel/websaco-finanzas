@@ -60,7 +60,7 @@ const modeloSaldos = () => ({
 const modeloAsientos = () => ({ create: jest.fn(() => Promise.resolve([{}])) });
 
 const modeloConceptos = (cuenta: string | null = '413501') => ({
-  findById: jest.fn(() => ({
+  findOne: jest.fn(() => ({
     session: () => ({
       exec: () => Promise.resolve({ accountingIncomeAccount: cuenta }),
     }),
@@ -248,13 +248,13 @@ describe('NotasContablesService.crear', () => {
   it('usa la cuentaContableIngreso de cada concepto para el asiento', async () => {
     const notaCreada = notaContableCreada();
     const conceptos = {
-      findById: jest.fn((id: Types.ObjectId) => ({
+      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => ({
         session: () => ({
           exec: () => {
-            if (id.equals(CONCEPTO_ORIGEN)) {
+            if (filtro._id.equals(CONCEPTO_ORIGEN)) {
               return Promise.resolve({ accountingIncomeAccount: '413501' });
             }
-            if (id.equals(CONCEPTO_DESTINO)) {
+            if (filtro._id.equals(CONCEPTO_DESTINO)) {
               return Promise.resolve({ accountingIncomeAccount: '413502' });
             }
             return Promise.resolve(null);
@@ -279,8 +279,12 @@ describe('NotasContablesService.crear', () => {
 
     await service.crear('acc-1', dtoBase());
 
-    expect(conceptos.findById).toHaveBeenCalledWith(CONCEPTO_ORIGEN);
-    expect(conceptos.findById).toHaveBeenCalledWith(CONCEPTO_DESTINO);
+    expect(conceptos.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: CONCEPTO_ORIGEN, coPropertyId: COP }),
+    );
+    expect(conceptos.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: CONCEPTO_DESTINO, coPropertyId: COP }),
+    );
     const calls = (asientos.create as jest.Mock).mock.calls as unknown[][][];
     const creado = calls[0][0][0] as {
       entries: { type: string; account: string }[];
@@ -387,13 +391,13 @@ describe('NotasContablesService.anular', () => {
       monto: 75000,
     });
     const conceptos = {
-      findById: jest.fn((id: Types.ObjectId) => ({
+      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => ({
         session: () => ({
           exec: () => {
-            if (id.equals(conceptoOrigen)) {
+            if (filtro._id.equals(conceptoOrigen)) {
               return Promise.resolve({ accountingIncomeAccount: '413501' });
             }
-            if (id.equals(conceptoDestino)) {
+            if (filtro._id.equals(conceptoDestino)) {
               return Promise.resolve({ accountingIncomeAccount: '413502' });
             }
             return Promise.resolve(null);

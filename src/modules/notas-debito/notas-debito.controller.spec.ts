@@ -1,14 +1,22 @@
 import { Types } from 'mongoose';
 import { NotasDebitoController } from './notas-debito.controller';
-import type { NotasDebitoService } from './notas-debito.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(notasDebito: Record<string, unknown>) {
+const COP = new Types.ObjectId();
+
+function makeController(
+  notasDebito: Record<string, unknown>,
+  copropiedades: Record<string, unknown> = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
+    })),
+  },
+) {
   return new NotasDebitoController(
     notasDebito as never,
-    {} as TenantContextService,
-    { findById: jest.fn() } as never,
+    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+    copropiedades as never,
   );
 }
 
@@ -90,5 +98,32 @@ describe('NotasDebitoController.findAll / findOne', () => {
     await controller.findOne('nd-1');
 
     expect(notasDebito.findOne).toHaveBeenCalledWith('nd-1');
+  });
+});
+
+describe('NotasDebitoController.generarPdf', () => {
+  it('responde con Content-Type application/pdf y bytes reales', async () => {
+    const notasDebito = {
+      findOneRaw: jest.fn(() =>
+        Promise.resolve({
+          fullNumber: 'ND-001-0001',
+          issueDate: new Date('2026-08-12'),
+          total: 50000,
+          description: null,
+          outstandingBalance: 50000,
+        }),
+      ),
+    };
+    const controller = makeController(notasDebito);
+    const set = jest.fn();
+    const send = jest.fn();
+
+    await controller.generarPdf('nd-1', undefined, { set, send } as never);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
+    );
+    const bytes = (send.mock.calls[0] as [Buffer])[0];
+    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
   });
 });

@@ -44,11 +44,7 @@ export async function generarPdfNotaCredito(
   if (fechaCreacion) {
     escribirLabelValor(ctx, 'Fecha:', formatoFecha(fechaCreacion));
   }
-  escribirLabelValor(
-    ctx,
-    'Monto total:',
-    formatoPeso(nota.totalAmount),
-  );
+  escribirLabelValor(ctx, 'Monto total:', formatoPeso(nota.totalAmount));
   escribirLabelValor(
     ctx,
     'Motivo:',

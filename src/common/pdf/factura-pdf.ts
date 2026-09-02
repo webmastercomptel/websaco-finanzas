@@ -1,5 +1,4 @@
 import {
-  PdfContext,
   crearContexto,
   escribirLinea,
   escribirLabelValor,
@@ -36,7 +35,11 @@ export async function generarPdfFactura(
 
   // ── Document info ──
   escribirLabelValor(ctx, 'Fecha de emisión:', formatoFecha(factura.issueDate));
-  escribirLabelValor(ctx, 'Fecha de vencimiento:', formatoFecha(factura.dueDate));
+  escribirLabelValor(
+    ctx,
+    'Fecha de vencimiento:',
+    formatoFecha(factura.dueDate),
+  );
   escribirLabelValor(ctx, 'Unidad:', factura.unitCode);
   escribirLabelValor(
     ctx,

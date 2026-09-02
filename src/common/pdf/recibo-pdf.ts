@@ -58,7 +58,11 @@ export async function generarPdfRecibo(
     escribirLabelValor(ctx, 'Notas:', recibo.notes);
   }
   if (recibo.appliedAmount > 0) {
-    escribirLabelValor(ctx, 'Monto aplicado:', formatoPeso(recibo.appliedAmount));
+    escribirLabelValor(
+      ctx,
+      'Monto aplicado:',
+      formatoPeso(recibo.appliedAmount),
+    );
   }
   if (recibo.unappliedAmount > 0) {
     escribirLabelValor(

@@ -40,14 +40,8 @@ export async function generarPdfNotaContable(
   ctx.y -= 6;
   const columnas = ['Concepto', 'Tipo'];
   const filas = [
-    [
-      nota.conceptoOrigenId.toString(),
-      'Origen (débito)',
-    ],
-    [
-      nota.conceptoDestinoId.toString(),
-      'Destino (crédito)',
-    ],
+    [nota.conceptoOrigenId.toString(), 'Origen (débito)'],
+    [nota.conceptoDestinoId.toString(), 'Destino (crédito)'],
   ];
   escribirTabla(ctx, columnas, filas);
 

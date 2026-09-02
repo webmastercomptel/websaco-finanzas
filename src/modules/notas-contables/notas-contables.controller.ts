@@ -81,9 +81,7 @@ export class NotasContablesController {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     const nota = await this.notasContables.findOneRaw(id);
-    const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
-      .exec();
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
 
     if (!copropiedad) {
       throw new Error(

@@ -120,12 +120,9 @@ export class NotasCreditoController {
       );
     }
 
-    const bytes = await generarPdfNotaCredito(
-      nota,
-      aplicaciones,
-      copropiedad,
-      { duplicado: duplicado === 'true' },
-    );
+    const bytes = await generarPdfNotaCredito(nota, aplicaciones, copropiedad, {
+      duplicado: duplicado === 'true',
+    });
 
     res.set({
       'Content-Type': 'application/pdf',

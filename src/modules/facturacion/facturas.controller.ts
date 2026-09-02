@@ -1,12 +1,5 @@
 // src/modules/facturacion/facturas.controller.ts
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';

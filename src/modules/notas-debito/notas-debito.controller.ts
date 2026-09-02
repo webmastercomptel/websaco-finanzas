@@ -85,9 +85,7 @@ export class NotasDebitoController {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     const nota = await this.notasDebito.findOneRaw(id);
-    const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
-      .exec();
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
 
     if (!copropiedad) {
       throw new Error(

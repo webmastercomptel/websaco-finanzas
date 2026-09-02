@@ -1,16 +1,24 @@
 import { Types } from 'mongoose';
 import { NotasCreditoController } from './notas-credito.controller';
-import type { NotasCreditoService } from './notas-credito.service';
-import type { RecibosService } from '../recibos/recibos.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(notasCredito: Record<string, unknown>) {
+const COP = new Types.ObjectId();
+
+function makeController(
+  notasCredito: Record<string, unknown>,
+  recibos: Record<string, unknown> = {},
+  copropiedades: Record<string, unknown> = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
+    })),
+  },
+) {
   return new NotasCreditoController(
     notasCredito as never,
-    {} as RecibosService,
-    {} as TenantContextService,
-    { findById: jest.fn() } as never,
+    recibos as never,
+    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+    copropiedades as never,
   );
 }
 
@@ -118,5 +126,39 @@ describe('NotasCreditoController.findAll / findOne', () => {
     await controller.findOne('nc-1');
 
     expect(notasCredito.findOne).toHaveBeenCalledWith('nc-1');
+  });
+});
+
+describe('NotasCreditoController.generarPdf', () => {
+  const notaFixture = () => ({
+    _id: new Types.ObjectId(),
+    fullNumber: 'NC-001-0001',
+    createdAt: new Date('2026-08-10'),
+    totalAmount: 100000,
+    reason: 'error_facturacion',
+    notes: null,
+    appliedAmount: 100000,
+    unappliedAmount: 0,
+    distribution: [],
+  });
+
+  it('responde con Content-Type application/pdf y bytes reales', async () => {
+    const notasCredito = {
+      findOneRaw: jest.fn(() => Promise.resolve(notaFixture())),
+    };
+    const recibos = {
+      findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
+    };
+    const controller = makeController(notasCredito, recibos);
+    const set = jest.fn();
+    const send = jest.fn();
+
+    await controller.generarPdf('nc-1', undefined, { set, send } as never);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
+    );
+    const bytes = (send.mock.calls[0] as [Buffer])[0];
+    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
   });
 });

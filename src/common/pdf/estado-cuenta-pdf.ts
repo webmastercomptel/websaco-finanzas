@@ -49,7 +49,11 @@ export async function generarPdfEstadoCuenta(
     `${formatoFecha(estado.periodStart)} al ${formatoFecha(estado.periodEnd)}`,
   );
   if (estado.fechaEmision) {
-    escribirLabelValor(ctx, 'Fecha de emisión:', formatoFecha(estado.fechaEmision));
+    escribirLabelValor(
+      ctx,
+      'Fecha de emisión:',
+      formatoFecha(estado.fechaEmision),
+    );
   }
   if (estado.vencimiento) {
     escribirLabelValor(ctx, 'Vencimiento:', formatoFecha(estado.vencimiento));
@@ -60,7 +64,11 @@ export async function generarPdfEstadoCuenta(
   escribirLinea(ctx, 'Resumen de Saldos', { bold: true });
   escribirLabelValor(ctx, 'Saldo anterior:', formatoPeso(estado.saldoAnterior));
   escribirLabelValor(ctx, 'Cargos del mes:', formatoPeso(estado.cargosDelMes));
-  escribirLabelValor(ctx, 'Pagos recibidos:', formatoPeso(estado.pagosRecibidos));
+  escribirLabelValor(
+    ctx,
+    'Pagos recibidos:',
+    formatoPeso(estado.pagosRecibidos),
+  );
   escribirLabelValor(
     ctx,
     'Descuentos y ajustes:',
@@ -98,7 +106,7 @@ export async function generarPdfEstadoCuenta(
   }
 
   if (opciones?.duplicado) {
-    escribirMarcaDuplicado(ctx, null);
+    escribirMarcaDuplicado(ctx, estado.fechaEmision);
   }
 
   return ctx.doc.save();
