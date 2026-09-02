@@ -34,10 +34,7 @@ import type {
 import type { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 
 /** Compute days overdue: max(0, floor((corte - referenceDate) / day)). */
-const calcularDiasMora = (
-  fechaReferencia: Date,
-  corte?: Date,
-): number => {
+const calcularDiasMora = (fechaReferencia: Date, corte?: Date): number => {
   const c = corte ?? new Date();
   c.setHours(0, 0, 0, 0);
   const ref = new Date(fechaReferencia);
@@ -263,6 +260,7 @@ export class VencimientosCarteraService {
       ];
       const terceros = await this.terceros
         .find({
+          coPropertyId,
           _id: {
             $in: uniqueHolderIds.map((id) => new Types.ObjectId(id)),
           },

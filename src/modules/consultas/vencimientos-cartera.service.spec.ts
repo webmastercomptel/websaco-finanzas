@@ -258,7 +258,7 @@ describe('VencimientosCarteraService', () => {
       await svc.findAll({});
 
       expect(tercerosFind).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: expect.any(Object) }),
+        expect.objectContaining({ coPropertyId: COP }),
       );
     });
   });
@@ -569,6 +569,7 @@ describe('VencimientosCarteraService', () => {
       });
       const inm = inmuebleDoc({ _id: inmId, code: '501' });
 
+      const saldosCarteraFind = jest.fn().mockReturnThis();
       const svc = servicio({
         facturas: {
           find: jest.fn().mockReturnThis(),
@@ -587,7 +588,7 @@ describe('VencimientosCarteraService', () => {
           exec: jest.fn().mockResolvedValue([inm]),
         },
         saldosCartera: {
-          find: jest.fn().mockReturnThis(),
+          find: saldosCarteraFind,
           exec: jest.fn().mockResolvedValue([]),
         },
       });
@@ -600,6 +601,9 @@ describe('VencimientosCarteraService', () => {
       expect(result.filas).toHaveLength(1);
       // Utility computes from total: 200k - 0 = 200k
       expect(result.filas[0].saldoPendiente).toBe(200000);
+      // SaldoCartera has no historical dimension — must never be queried
+      // when `fecha` is present, per spec §8.
+      expect(saldosCarteraFind).not.toHaveBeenCalled();
     });
 
     it('con fecha: aplicaciones revertidas despues de la fecha de corte ajustan el saldo', async () => {

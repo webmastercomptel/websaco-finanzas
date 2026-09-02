@@ -117,10 +117,12 @@ export class CarteraGeneralService {
     );
 
     // §4: cartera por concepto (always "as of now")
-    const carteraPorConcepto = await this.calcularCarteraPorConcepto(coPropertyId);
+    const carteraPorConcepto =
+      await this.calcularCarteraPorConcepto(coPropertyId);
 
-    // §4: tendencia recaudo (last 6 calendar months)
-    const tendenciaRecaudo = await this.calcularTendenciaRecaudo(coPropertyId, fecha);
+    // §4: tendencia recaudo (last 6 calendar months up to today — always
+    // "as of now", ignores `fecha` entirely, same as carteraPorConcepto)
+    const tendenciaRecaudo = await this.calcularTendenciaRecaudo(coPropertyId);
 
     return {
       totalCartera,
@@ -199,17 +201,20 @@ export class CarteraGeneralService {
 
   /**
    * Sum active AplicacionCartera.amountApplied by month for the last
-   * 6 calendar months up to and including `fecha`'s month.
+   * 6 calendar months up to and including the CURRENT one — always "as of
+   * now", regardless of the endpoint's `fecha` param (this is a FLOW
+   * metric, not a point-in-time balance; see spec §4).
    *
    * A reverted application contributes to NO month's recaudo — only
    * currently active applications count.
    */
   private async calcularTendenciaRecaudo(
     coPropertyId: Types.ObjectId,
-    fecha: Date,
   ): Promise<RecaudoMensual[]> {
+    const hoy = new Date();
+
     // Start of the window: first day of 6 months ago
-    const startMonth = new Date(fecha);
+    const startMonth = new Date(hoy);
     startMonth.setMonth(startMonth.getMonth() - 5, 1);
     startMonth.setHours(0, 0, 0, 0);
 
@@ -217,7 +222,7 @@ export class CarteraGeneralService {
       .find({
         coPropertyId,
         status: 'activa',
-        appliedAt: { $gte: startMonth, $lte: fecha },
+        appliedAt: { $gte: startMonth, $lte: hoy },
       })
       .exec();
 
@@ -225,7 +230,7 @@ export class CarteraGeneralService {
     const buckets = new Map<string, number>();
     const monthKeys: string[] = [];
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(fecha);
+      const d = new Date(hoy);
       d.setMonth(d.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       buckets.set(key, 0);

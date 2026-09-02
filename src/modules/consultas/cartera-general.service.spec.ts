@@ -147,6 +147,72 @@ describe('CarteraGeneralService', () => {
     });
   });
 
+  describe('totalCarteraMesAnterior', () => {
+    it('usa una fecha genuinamente distinta a totalCartera', async () => {
+      // A Factura issued two months ago, paid off THIS month via an
+      // AplicacionCartera. If totalCarteraMesAnterior reused `fecha` (today)
+      // instead of the last day of the PREVIOUS month, it would also see
+      // this application and wrongly report the same reduced balance.
+      const inmId = id();
+      const now = new Date();
+      const dosAtras = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const facturaId = id();
+
+      const f = {
+        _id: facturaId,
+        coPropertyId: COP,
+        inmuebleId: inmId,
+        issueDate: dosAtras,
+        dueDate: dosAtras,
+        total: 500000,
+        outstandingBalance: 300000,
+        status: 'emitida',
+      };
+      const app = {
+        _id: id(),
+        coPropertyId: COP,
+        documentType: 'FV',
+        documentId: facturaId,
+        amountApplied: 200000,
+        status: 'activa',
+        revertedAt: null,
+        // Applied earlier today — guaranteed <= "now" regardless of which
+        // day of the month it is, but still after the previous month ended.
+        appliedAt: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+      };
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([app]),
+        },
+        saldosCartera: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        conceptosCobro: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+      });
+
+      const result = await svc.findAll({});
+
+      // Today: the application already happened, so the balance is reduced.
+      expect(result.totalCartera).toBe(300000);
+      // Last month: the application hadn't happened yet — full balance.
+      expect(result.totalCarteraMesAnterior).toBe(500000);
+    });
+  });
+
   describe('carteraPorConcepto', () => {
     it('suma SaldoCartera correctamente por concepto y usa nombre de ConceptoCobro', async () => {
       const conceptoId = id();
@@ -264,13 +330,17 @@ describe('CarteraGeneralService', () => {
           exec: jest.fn().mockResolvedValue([]),
         },
         aplicaciones: {
-          find: jest.fn().mockImplementation((filter: Record<string, unknown>) => ({
-            exec: jest.fn().mockResolvedValue(
-              apps.filter(
-                (a) => !filter.status || a.status === filter.status,
-              ),
-            ),
-          })),
+          find: jest
+            .fn()
+            .mockImplementation((filter: Record<string, unknown>) => ({
+              exec: jest
+                .fn()
+                .mockResolvedValue(
+                  apps.filter(
+                    (a) => !filter.status || a.status === filter.status,
+                  ),
+                ),
+            })),
         },
         saldosCartera: {
           find: jest.fn().mockReturnThis(),
@@ -285,8 +355,7 @@ describe('CarteraGeneralService', () => {
       const result = await svc.findAll({});
 
       const currentMonth = result.tendenciaRecaudo.find(
-        (e) =>
-          e.anio === now.getFullYear() && e.mes === now.getMonth() + 1,
+        (e) => e.anio === now.getFullYear() && e.mes === now.getMonth() + 1,
       );
       expect(currentMonth?.monto).toBe(30000);
     });

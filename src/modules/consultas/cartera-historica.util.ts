@@ -1,16 +1,7 @@
 import { Model, Types } from 'mongoose';
-import {
-  Factura,
-  FacturaDocument,
-} from '../../database/schemas/facturacion/factura.schema';
-import {
-  NotaDebito,
-  NotaDebitoDocument,
-} from '../../database/schemas/notas-debito/nota-debito.schema';
-import {
-  AplicacionCartera,
-  AplicacionCarteraDocument,
-} from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
+import { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 
 /**
  * A document (Factura or NotaDebito) with a positive outstanding balance
@@ -55,7 +46,12 @@ function activeAsOf(
  */
 function saldoDocumentoAFecha(
   total: number,
-  apps: Array<{ amountApplied: number; appliedAt: Date; status: string; revertedAt: Date | null }>,
+  apps: Array<{
+    amountApplied: number;
+    appliedAt: Date;
+    status: string;
+    revertedAt: Date | null;
+  }>,
   fecha: Date,
 ): number {
   let activeAtFecha = 0;
