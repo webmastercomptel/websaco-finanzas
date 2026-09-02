@@ -7,17 +7,21 @@ import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
+import { MovimientoContableService } from './movimiento-contable.service';
 import { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto';
 import { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 import { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
 import { ConsultarPeriodosEstadoCuentaDto } from './dto/consultar-periodos-estado-cuenta.dto';
 import { ConsultarEstadoCuentaDto } from './dto/consultar-estado-cuenta.dto';
+import { BuscarMovimientoContableDto } from './dto/buscar-movimiento-contable.dto';
+import { ConsultarMovimientoContableDto } from './dto/consultar-movimiento-contable.dto';
 import type {
   RespuestaAuxiliarCartera,
   RespuestaVencimientosCartera,
   RespuestaCarteraGeneral,
   PeriodoFacturado,
   RespuestaEstadoCuenta,
+  RespuestaMovimientoContable,
 } from '../../contracts';
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 
@@ -33,6 +37,7 @@ export class ConsultasController {
     private readonly vencimientosCartera: VencimientosCarteraService,
     private readonly carteraGeneral: CarteraGeneralService,
     private readonly estadoCuenta: EstadoCuentaService,
+    private readonly movimientoContable: MovimientoContableService,
   ) {}
 
   @Get('auxiliar-cartera')
@@ -93,5 +98,25 @@ export class ConsultasController {
       'Content-Disposition': `inline; filename="estado-cuenta-${estado.inmuebleCodigo}.pdf"`,
     });
     res.send(Buffer.from(bytes));
+  }
+
+  /* ── Consulta de Movimiento Contable (§12) ─────────────────────── */
+
+  /** Endpoint 2 — browse by inmueble + date range. */
+  @Get('movimiento-contable')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findMovimientoContable(
+    @Query() query: ConsultarMovimientoContableDto,
+  ): Promise<RespuestaMovimientoContable> {
+    return this.movimientoContable.findAll(query);
+  }
+
+  /** Endpoint 1 — lookup by tipo + document number. */
+  @Get('movimiento-contable/buscar')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  buscarMovimientoContable(
+    @Query() query: BuscarMovimientoContableDto,
+  ): Promise<RespuestaMovimientoContable> {
+    return this.movimientoContable.buscar(query);
   }
 }
