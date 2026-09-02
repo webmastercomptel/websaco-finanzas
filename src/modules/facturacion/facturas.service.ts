@@ -10,6 +10,8 @@ import type { Factura as FacturaContract, Paginado } from '../../contracts';
 import { toFactura } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
 
+export type { FacturaDocument };
+
 @Injectable()
 export class FacturasService {
   constructor(
@@ -52,5 +54,20 @@ export class FacturasService {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
     return toFactura(documento);
+  }
+
+  /**
+   * Returns the raw Mongoose document — used by PDF generation which needs
+   * fields like `resolucionId` that the mapped contract intentionally omits.
+   */
+  async findOneRaw(id: string): Promise<FacturaDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documento = await this.facturas
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!documento) {
+      throw new NotFoundException(`No se encontró la factura ${id}`);
+    }
+    return documento;
   }
 }
