@@ -762,3 +762,23 @@ export interface MovimientoContable {
 export interface RespuestaMovimientoContable {
   movimientos: MovimientoContable[];
 }
+
+/* ── Panel de Control / Auditoría (§13) ──────────────────────── */
+
+/** A single audit log entry — the API shape, not the persistence model. */
+export interface RegistroAuditoriaContract {
+  id: string;
+  actorNombre: string;
+  accion: 'crear' | 'actualizar';
+  entidadTipo: 'entidad-administradora' | 'copropiedad' | 'usuario';
+  entidadEtiqueta: string;
+  /** ISO 8601 — mirrors the document's createdAt. */
+  fecha: string;
+}
+
+/** Dashboard KPIs for the super-admin panel. */
+export interface ResumenPanelControl {
+  totalEntidades: number;
+  totalCopropiedadesActivas: number;
+  totalUsuariosActivos: number;
+}
