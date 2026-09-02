@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -18,6 +19,7 @@ import type {
   PeriodoFacturado,
   RespuestaEstadoCuenta,
 } from '../../contracts';
+import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 
 /**
  * Read-only reporting endpoint. Reuses the already-stubbed 'Consulta'
@@ -71,5 +73,25 @@ export class ConsultasController {
     @Query() query: ConsultarEstadoCuentaDto,
   ): Promise<RespuestaEstadoCuenta> {
     return this.estadoCuenta.findAll(query);
+  }
+
+  @Get('estado-cuenta/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfEstadoCuenta(
+    @Query() query: ConsultarEstadoCuentaDto,
+    @Query('duplicado') duplicado: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const estado = await this.estadoCuenta.findAll(query);
+
+    const bytes = await generarPdfEstadoCuenta(estado, {
+      duplicado: duplicado === 'true',
+    });
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="estado-cuenta-${estado.inmuebleCodigo}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }
