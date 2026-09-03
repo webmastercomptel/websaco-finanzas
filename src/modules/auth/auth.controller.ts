@@ -25,6 +25,7 @@ export class AuthController {
   @Get('me')
   @UseGuards(FirebaseAuthGuard)
   async me(@CurrentUser() user: IRequestUser): Promise<AuthMe> {
+    
     // No local account means no assignments to look up, and asking anyway
     // would be a query whose answer is known.
     const copropiedades = user.accountId

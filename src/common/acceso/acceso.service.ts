@@ -93,11 +93,14 @@ export class AccesoService {
       );
 
       if (deEntidadesActivas.length > 0) {
+        const entidadObjectIds = deEntidadesActivas
+          .map((a) => a.entidadId)
+          .filter((id): id is Types.ObjectId => id != null)
+          .map((id) => new Types.ObjectId(String(id)));
+
         const administradas = await this.copropiedades
           .find({
-            managingEntityId: {
-              $in: deEntidadesActivas.map((a) => a.entidadId),
-            },
+            managingEntityId: { $in: entidadObjectIds },
             status: 'active',
           })
           .select('_id managingEntityId')

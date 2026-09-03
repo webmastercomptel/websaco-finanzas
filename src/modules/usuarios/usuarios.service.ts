@@ -140,8 +140,14 @@ export class UsuariosService {
       await this.asignaciones.create({
         accountId: cuenta._id,
         scope: dto.alcance,
-        coPropertyId: dto.alcance === 'copropiedad' ? dto.copropiedadId : null,
-        entidadId: dto.alcance === 'entidad' ? dto.entidadId : null,
+        coPropertyId:
+          dto.alcance === 'copropiedad' && dto.copropiedadId
+            ? new Types.ObjectId(dto.copropiedadId)
+            : null,
+        entidadId:
+          dto.alcance === 'entidad' && dto.entidadId
+            ? new Types.ObjectId(dto.entidadId)
+            : null,
         permissions: dto.permisos ?? [],
         status: 'active',
       });
@@ -260,8 +266,14 @@ export class UsuariosService {
     await this.asignaciones.create({
       accountId,
       scope: dto.alcance,
-      coPropertyId: dto.alcance === 'copropiedad' ? dto.copropiedadId : null,
-      entidadId: dto.alcance === 'entidad' ? dto.entidadId : null,
+      coPropertyId:
+        dto.alcance === 'copropiedad' && dto.copropiedadId
+          ? new Types.ObjectId(dto.copropiedadId)
+          : null,
+      entidadId:
+        dto.alcance === 'entidad' && dto.entidadId
+          ? new Types.ObjectId(dto.entidadId)
+          : null,
       permissions: dto.permisos ?? [],
       status: 'active',
     });
