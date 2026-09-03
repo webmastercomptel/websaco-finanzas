@@ -40,6 +40,18 @@ export class ResolucionFacturacion {
   @Prop({ required: true, trim: true, default: '' })
   prefix: string;
 
+  /** Human-readable document name, e.g. "Cobro Expensas Comunes". */
+  @Prop({ type: String, default: null, trim: true })
+  displayName: string | null;
+
+  /** Free-text accounting voucher code, e.g. "02". */
+  @Prop({ type: String, default: null, trim: true })
+  accountingVoucherCode: string | null;
+
+  /** Reserved for future mandatory DIAN electronic invoicing consecutive. */
+  @Prop({ type: Number, default: null })
+  electronicNumber: number | null;
+
   @Prop({ required: true })
   rangeFrom: number;
 

@@ -23,6 +23,10 @@ export const MODULE_TO_SUBJECT = {
   'otras-notas': 'OtraNota',
   anulaciones: 'Anulacion',
   consultas: 'Consulta',
+  'cuentas-contables': 'Configuracion',
+  'parametros-facturacion': 'Configuracion',
+  documentos: 'Configuracion',
+  'interfaz-contable': 'Configuracion',
 } satisfies Record<string, Subject>;
 
 /**

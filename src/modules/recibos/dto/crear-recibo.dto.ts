@@ -40,9 +40,10 @@ export class CrearReciboDto {
   @IsIn(MEDIOS_PAGO)
   medioPago: (typeof MEDIOS_PAGO)[number];
 
+  @IsOptional()
   @IsString()
   @MaxLength(120)
-  cuentaDestino: string;
+  cuentaDestino?: string;
 
   @IsOptional()
   @IsString()

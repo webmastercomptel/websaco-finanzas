@@ -117,6 +117,8 @@ export class LotesFacturacionService {
 
     const numero = await this.numeracion.siguienteLote(coPropertyId.toString());
 
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+
     const creado = await this.lotes.create({
       coPropertyId,
       number: numero,
@@ -127,8 +129,11 @@ export class LotesFacturacionService {
       periodEnd: new Date(dto.periodoHasta),
       earlyPaymentDiscount: dto.descuentoProntoPago ?? 0,
       discountGraceDays: dto.diasGraciaDescuento ?? 0,
-      lateInterestRate: dto.interesMora ?? 0,
-      lateInterestCap: dto.topeInteresMora ?? null,
+      lateInterestRate:
+        dto.interesMora ??
+        (copropiedad?.lateFeeEnabled ? copropiedad.lateFeeInterestRate : 0),
+      lateInterestCap:
+        dto.topeInteresMora ?? copropiedad?.lateFeeValueLimit ?? null,
       generatedBy: accountId,
     });
 
@@ -174,12 +179,17 @@ export class LotesFacturacionService {
       }
 
       const concepto = await this.conceptos
-        .findOne({ coPropertyId, name: fila.nombreConcepto, active: true })
+        .findOne({
+          coPropertyId,
+          name: fila.nombreConcepto,
+          active: true,
+          availableAsNovedad: true,
+        })
         .exec();
       if (!concepto) {
         errores.push({
           fila: indice + 1,
-          mensaje: `No se encontró el cargo "${fila.nombreConcepto}"`,
+          mensaje: `No se encontró el cargo "${fila.nombreConcepto}" o no está habilitado para novedades`,
         });
         continue;
       }

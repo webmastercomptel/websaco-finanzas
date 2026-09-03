@@ -782,3 +782,59 @@ export interface ResumenPanelControl {
   totalCopropiedadesActivas: number;
   totalUsuariosActivos: number;
 }
+
+/* ── Configuración: Maestro de Cuentas Contables ─────────────── */
+
+export interface CuentaContableContract {
+  id: string;
+  codigo: string;
+  nombre: string;
+  requiereTercero: boolean;
+  flujoCaja: boolean;
+  centroUtilidad: string | null;
+  centroDestino: string | null;
+  requiereDocumentoCruce: boolean;
+  tipoImpuesto: string | null;
+  tasaImpuesto: number;
+  activo: boolean;
+}
+
+/* ── Configuración: Tabla de Documentos ──────────────────────── */
+
+export interface DocumentoAdmin {
+  tipo: 'FV' | 'RC' | 'NC' | 'ND' | 'NT';
+  nombreDocumento: string | null;
+  prefijo: string;
+  numero: number;
+  numeroE: number | null;
+  comprob: string | null;
+}
+
+export interface ResolucionAdmin {
+  id: string;
+  numeroResolucion: string;
+  prefijo: string;
+  rangoDesde: number;
+  rangoHasta: number;
+  numeroSiguiente: number;
+  vigenciaDesde: string;
+  vigenciaHasta: string | null;
+  estado: 'activa' | 'inactiva';
+  nombreDocumento: string | null;
+  comprob: string | null;
+  numeroE: number | null;
+}
+
+/* ── Configuración: Interfaz Contable ────────────────────────── */
+
+export interface MapeoContable {
+  id: string;
+  tipo: 'concepto' | 'especial';
+  conceptoId: string | null;
+  conceptoNombre: string | null;
+  especial: 'descuentos' | 'interesesOrdenDb' | null;
+  cuentaDebitoId: string;
+  cuentaDebitoCodigo: string | null;
+  cuentaCreditoId: string;
+  cuentaCreditoCodigo: string | null;
+}
