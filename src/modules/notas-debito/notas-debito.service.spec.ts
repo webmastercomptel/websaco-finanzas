@@ -90,11 +90,12 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     },
     conceptos: {
       findOne: jest.fn(() => ({
+        populate: jest.fn().mockReturnThis(),
         exec: jest.fn(() =>
           Promise.resolve({
             _id: CONCEPTO,
             coPropertyId: COP,
-            accountingIncomeAccount: '4105',
+            cuentaCreditoId: { code: '4105' },
           }),
         ),
       })),
@@ -156,6 +157,7 @@ describe('NotasDebitoService', () => {
       const svc = servicio({
         conceptos: {
           findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
             exec: jest.fn(() => Promise.resolve(null)),
           })),
         },

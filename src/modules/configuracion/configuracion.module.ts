@@ -74,10 +74,6 @@ import {
     ParametrosController,
     DocumentosController,
   ],
-  providers: [
-    CuentasContablesService,
-    ParametrosService,
-    DocumentosService,
-  ],
+  providers: [CuentasContablesService, ParametrosService, DocumentosService],
 })
 export class ConfiguracionModule {}

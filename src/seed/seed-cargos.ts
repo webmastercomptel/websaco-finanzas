@@ -33,18 +33,20 @@ async function run() {
 
   const cop = await copropiedades.findOne({ code: COPROPIEDAD_CODE }).exec();
   if (!cop) {
-    console.error(`No se encontró la copropiedad con código ${COPROPIEDAD_CODE}`);
+    console.error(
+      `No se encontró la copropiedad con código ${COPROPIEDAD_CODE}`,
+    );
     await app.close();
     process.exit(1);
   }
 
   console.log(`Copropiedad: ${cop.name} (${cop._id})`);
 
-  const existentes = await conceptos
-    .find({ coPropertyId: cop._id })
-    .exec();
+  const existentes = await conceptos.find({ coPropertyId: cop._id }).exec();
   console.log(`Conceptos existentes: ${existentes.length}`);
-  existentes.forEach((c) => console.log(`  - ${c.name} (isSystem: ${c.isSystem})`));
+  existentes.forEach((c) =>
+    console.log(`  - ${c.name} (isSystem: ${c.isSystem})`),
+  );
 
   const nuevos = CARGOS_SISTEMA.filter(
     (s) => !existentes.some((e) => e.kind === s.kind && e.name === s.name),
@@ -73,7 +75,9 @@ async function run() {
     .sort({ sortOrder: 1 })
     .exec();
   console.log(`Total conceptos: ${todos.length}`);
-  todos.forEach((c) => console.log(`  - ${c.name} | ${c.kind} | isSystem: ${c.isSystem}`));
+  todos.forEach((c) =>
+    console.log(`  - ${c.name} | ${c.kind} | isSystem: ${c.isSystem}`),
+  );
 
   await app.close();
 }

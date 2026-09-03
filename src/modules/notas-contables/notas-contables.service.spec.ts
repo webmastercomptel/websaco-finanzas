@@ -60,11 +60,18 @@ const modeloSaldos = () => ({
 const modeloAsientos = () => ({ create: jest.fn(() => Promise.resolve([{}])) });
 
 const modeloConceptos = (cuenta: string | null = '413501') => ({
-  findOne: jest.fn(() => ({
-    session: () => ({
-      exec: () => Promise.resolve({ accountingIncomeAccount: cuenta }),
-    }),
-  })),
+  findOne: jest.fn(() => {
+    const cadena = {
+      populate: () => cadena,
+      session: () => ({
+        exec: () =>
+          Promise.resolve({
+            cuentaCreditoId: cuenta ? { code: cuenta } : null,
+          }),
+      }),
+    };
+    return cadena;
+  }),
 });
 
 const construirServicio = (opts: {
@@ -248,19 +255,27 @@ describe('NotasContablesService.crear', () => {
   it('usa la cuentaContableIngreso de cada concepto para el asiento', async () => {
     const notaCreada = notaContableCreada();
     const conceptos = {
-      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => ({
-        session: () => ({
-          exec: () => {
-            if (filtro._id.equals(CONCEPTO_ORIGEN)) {
-              return Promise.resolve({ accountingIncomeAccount: '413501' });
-            }
-            if (filtro._id.equals(CONCEPTO_DESTINO)) {
-              return Promise.resolve({ accountingIncomeAccount: '413502' });
-            }
-            return Promise.resolve(null);
-          },
-        }),
-      })),
+      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => {
+        const cadena = {
+          populate: () => cadena,
+          session: () => ({
+            exec: () => {
+              if (filtro._id.equals(CONCEPTO_ORIGEN)) {
+                return Promise.resolve({
+                  cuentaCreditoId: { code: '413501' },
+                });
+              }
+              if (filtro._id.equals(CONCEPTO_DESTINO)) {
+                return Promise.resolve({
+                  cuentaCreditoId: { code: '413502' },
+                });
+              }
+              return Promise.resolve(null);
+            },
+          }),
+        };
+        return cadena;
+      }),
     };
     const asientos = modeloAsientos();
     const service = new NotasContablesService(
@@ -391,19 +406,27 @@ describe('NotasContablesService.anular', () => {
       monto: 75000,
     });
     const conceptos = {
-      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => ({
-        session: () => ({
-          exec: () => {
-            if (filtro._id.equals(conceptoOrigen)) {
-              return Promise.resolve({ accountingIncomeAccount: '413501' });
-            }
-            if (filtro._id.equals(conceptoDestino)) {
-              return Promise.resolve({ accountingIncomeAccount: '413502' });
-            }
-            return Promise.resolve(null);
-          },
-        }),
-      })),
+      findOne: jest.fn((filtro: { _id: Types.ObjectId }) => {
+        const cadena = {
+          populate: () => cadena,
+          session: () => ({
+            exec: () => {
+              if (filtro._id.equals(conceptoOrigen)) {
+                return Promise.resolve({
+                  cuentaCreditoId: { code: '413501' },
+                });
+              }
+              if (filtro._id.equals(conceptoDestino)) {
+                return Promise.resolve({
+                  cuentaCreditoId: { code: '413502' },
+                });
+              }
+              return Promise.resolve(null);
+            },
+          }),
+        };
+        return cadena;
+      }),
     };
     const asientos = modeloAsientos();
     const service = new NotasContablesService(

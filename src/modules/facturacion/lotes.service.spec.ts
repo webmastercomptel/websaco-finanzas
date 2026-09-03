@@ -219,7 +219,6 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   const conceptoCon = (id: string, nombre: string) => ({
     _id: id,
     name: nombre,
-    active: true,
   });
 
   it('resuelve inmueble por código y concepto por nombre, y reemplaza las novedades anteriores', async () => {
@@ -416,60 +415,12 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     expect(lotes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('no encuentra un concepto inactivo (filtra por active: true)', async () => {
-    const lotes = {
-      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc()),
-      })),
-    };
-    const inmuebles = {
-      findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(unidadCon('inm-1', '301')),
-      })),
-    };
-    const conceptos = {
-      // Simulates a concept that exists but is inactive: the query filters
-      // by active: true, so a filtered lookup finds nothing.
-      findOne: jest.fn(({ active }: Filtro) => ({
-        exec: () =>
-          Promise.resolve(
-            active === true ? null : conceptoCon('con-1', 'Multas'),
-          ),
-      })),
-    };
-    const service = new LotesFacturacionService(
-      lotes as never,
-      {} as never, // facturas
-      {} as never, // saldos
-      {} as never, // asientos
-      conceptos as never,
-      {} as never, // valoresRecurrentes
-      inmuebles as never,
-      {} as never, // terceros
-      {} as never, // copropiedades
-      tenantQueDevuelve(COP),
-      {} as never, // periodo
-      numeracionCon(),
-    );
-
-    const resultado = await service.cargarNovedades('lote-1', [
-      { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
-    ]);
-
-    expect(resultado.errores).toEqual([
-      {
-        fila: 1,
-        mensaje:
-          'No se encontró el cargo "Multas" o no está habilitado para novedades',
-      },
-    ]);
-  });
-
-  it('rechaza un concepto activo pero no habilitado para novedades', async () => {
-    // Distinto del caso "no existe": el concepto SÍ existe y está activo,
-    // solo le falta el flag — probando que availableAsNovedad realmente
-    // filtra, no solo que un concepto inexistente falla.
+  it('rechaza un concepto que no está habilitado para novedades', async () => {
+    // El concepto SÍ existe, solo le falta el flag — probando que
+    // availableAsNovedad realmente filtra, no solo que un concepto
+    // inexistente falla. No hay más un flag active/inactive separado en
+    // ConceptoCobro (design note en el schema): availableAsNovedad es todo
+    // lo que la consulta filtra además del nombre.
     const lotes = {
       findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
       findOneAndUpdate: jest.fn(() => ({
@@ -510,7 +461,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ]);
 
     expect(conceptosFindOne).toHaveBeenCalledWith(
-      expect.objectContaining({ availableAsNovedad: true, active: true }),
+      expect.objectContaining({ availableAsNovedad: true }),
     );
     expect(resultado.errores).toEqual([
       {
@@ -564,8 +515,7 @@ describe('LotesFacturacionService.liquidar', () => {
     name: 'Administración',
     kind: 'administracion',
     taxRate: 0,
-    accountingIncomeAccount: '413501',
-    active: true,
+    cuentaCreditoId: { code: '413501' },
     ...over,
   });
   const valorRecurrente = (over: Record<string, unknown> = {}) => ({
@@ -605,9 +555,13 @@ describe('LotesFacturacionService.liquidar', () => {
       })),
     };
     const conceptos = {
-      find: jest.fn(() => ({
-        exec: () => Promise.resolve(opts.conceptos ?? [concepto()]),
-      })),
+      find: jest.fn(() => {
+        const cadena = {
+          populate: () => cadena,
+          exec: () => Promise.resolve(opts.conceptos ?? [concepto()]),
+        };
+        return cadena;
+      }),
     };
     const valoresRecurrentes = {
       find: jest.fn(() => ({
@@ -697,7 +651,7 @@ describe('LotesFacturacionService.liquidar', () => {
           _id: { toString: () => 'con-intereses' },
           name: 'Interés por mora',
           kind: 'intereses',
-          accountingIncomeAccount: '413595',
+          cuentaCreditoId: { code: '413595' },
         }),
       ],
       saldos: [
@@ -747,7 +701,7 @@ describe('LotesFacturacionService.liquidar', () => {
           _id: { toString: () => 'con-intereses' },
           name: 'Interés por mora',
           kind: 'intereses',
-          accountingIncomeAccount: '413595',
+          cuentaCreditoId: { code: '413595' },
         }),
       ],
       saldos: [

@@ -43,6 +43,7 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
+import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import {
   NumeracionService,
   type NumeroAsignado,
@@ -182,7 +183,6 @@ export class LotesFacturacionService {
         .findOne({
           coPropertyId,
           name: fila.nombreConcepto,
-          active: true,
           availableAsNovedad: true,
         })
         .exec();
@@ -235,7 +235,12 @@ export class LotesFacturacionService {
 
     const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
       this.inmuebles.find({ coPropertyId, status: 'active' }).exec(),
-      this.conceptos.find({ coPropertyId, active: true }).exec(),
+      // No more active/inactive switch on a concepto (design note on the
+      // schema): every declared concept is chargeable, system ones included.
+      this.conceptos
+        .find({ coPropertyId })
+        .populate('cuentaCreditoId', 'code')
+        .exec(),
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
@@ -279,10 +284,9 @@ export class LotesFacturacionService {
       }
 
       // A unit can land here with nothing to charge — no ValorRecurrente, no
-      // novedad, no interest — most often because every concept that would
-      // have applied is `active: false`. Silently excluding it, like every
-      // other per-unit condition in this loop, rather than surfacing it as
-      // an error: it is not a data problem, just nothing to invoice.
+      // novedad, no interest. Silently excluding it, like every other
+      // per-unit condition in this loop, rather than surfacing it as an
+      // error: it is not a data problem, just nothing to invoice.
       if (lines.length === 0) continue;
 
       const subtotal = lines.reduce(
@@ -588,14 +592,17 @@ export class LotesFacturacionService {
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —
-   *  shared by the recurrente, novedad, and interes cases in liquidar(). */
+   *  shared by the recurrente, novedad, and interes cases in liquidar().
+   *  `accountingIncomeAccount` on the resulting line is the concept's
+   *  CREDIT account code — invoicing credits income, per
+   *  `construirMovimientos` in asiento.builder.ts. */
   private aLinea(
     concepto: {
       _id: Types.ObjectId;
       name: string;
       kind: string;
       taxRate: number;
-      accountingIncomeAccount: string | null;
+      cuentaCreditoId: { code: string } | Types.ObjectId | null;
     },
     baseAmount: number,
     origen: 'recurrente' | 'novedad' | 'interes',
@@ -605,7 +612,7 @@ export class LotesFacturacionService {
       conceptoId: concepto._id,
       conceptName: concepto.name,
       conceptKind: concepto.kind,
-      accountingIncomeAccount: concepto.accountingIncomeAccount,
+      accountingIncomeAccount: codigoDeCuentaContable(concepto.cuentaCreditoId),
       source: origen,
       baseAmount,
       taxRate: concepto.taxRate,

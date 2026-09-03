@@ -43,6 +43,7 @@ import {
 } from '../../database/schemas/notas-credito/nota-credito.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import {
   construirContraAsientoNotaDebito,
   construirMovimientos,
@@ -120,6 +121,7 @@ export class NotasDebitoService {
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos
       .findOne({ _id: conceptoId, coPropertyId })
+      .populate('cuentaCreditoId', 'code')
       .exec();
     if (!concepto) {
       throw new NotFoundException(
@@ -155,12 +157,13 @@ export class NotasDebitoService {
         { session },
       );
 
-      // Post creation journal entry: debit cartera, credit income.
+      // Post creation journal entry: debit cartera, credit income (the
+      // concepto's CREDIT account, per construirMovimientos).
       await this.postearAsientoCreacion(
         session,
         coPropertyId,
         creada,
-        concepto.accountingIncomeAccount,
+        codigoDeCuentaContable(concepto.cuentaCreditoId),
       );
 
       const final = await this.notasDebito
