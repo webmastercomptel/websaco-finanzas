@@ -41,6 +41,18 @@ export class ConsecutivoDocumento {
   @Prop({ required: true, trim: true, default: '' })
   prefix: string;
 
+  /** Human-readable document name, e.g. "Recibo de Caja". */
+  @Prop({ type: String, default: null, trim: true })
+  displayName: string | null;
+
+  /** Free-text accounting voucher code, e.g. "02". */
+  @Prop({ type: String, default: null, trim: true })
+  accountingVoucherCode: string | null;
+
+  /** Reserved for future mandatory DIAN electronic invoicing consecutive. */
+  @Prop({ type: Number, default: null })
+  electronicNumber: number | null;
+
   /** The next number to hand out. Moves forward only. */
   @Prop({ required: true, default: 1 })
   nextNumber: number;

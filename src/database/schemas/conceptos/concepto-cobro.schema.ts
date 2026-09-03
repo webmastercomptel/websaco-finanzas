@@ -82,6 +82,14 @@ export class ConceptoCobro {
   accountingIncomeAccount: string | null;
 
   /**
+   * Whether this concept may be uploaded as a Novedad via XLS. Default false
+   * means existing concepts are excluded until an admin opts them in —
+   * real behavior change on deploy (spec §2, §8 Risks).
+   */
+  @Prop({ required: true, default: false })
+  availableAsNovedad: boolean;
+
+  /**
    * Inactive stops it being charged going forward. It is never removed: past
    * documents reference it, and a line item pointing at nothing is a hole in
    * the ledger.

@@ -134,6 +134,38 @@ export class Copropiedad {
    */
   @Prop({ type: String, default: null, trim: true })
   debitNotesAccount: string | null;
+
+  // ── Parámetros de Facturación (§4) ──────────────────────────────
+
+  @Prop({ required: true, default: false })
+  discountEnabled: boolean;
+
+  @Prop({ required: true, default: 0 })
+  discountPercentage: number;
+
+  @Prop({ required: true, default: 0 })
+  discountFixedValue: number;
+
+  @Prop({ required: true, default: 0 })
+  discountGraceDays: number;
+
+  @Prop({ required: true, default: false })
+  discountAppliesWithLateFee: boolean;
+
+  @Prop({ required: true, default: false })
+  lateFeeEnabled: boolean;
+
+  @Prop({ required: true, default: 0 })
+  lateFeeInterestRate: number;
+
+  @Prop({ type: Number, default: null })
+  lateFeeValueLimit: number | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  defaultBankAccountCode: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  billingNotes: string | null;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

@@ -104,7 +104,11 @@ describe('LotesFacturacionService.crear', () => {
       {} as never, // valoresRecurrentes
       {} as never, // inmuebles
       {} as never, // terceros
-      {} as never, // copropiedades
+      {
+        findById: jest.fn(() => ({
+          exec: () => Promise.resolve({ lateFeeEnabled: false }),
+        })),
+      } as never, // copropiedades
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracion,
@@ -124,6 +128,85 @@ describe('LotesFacturacionService.crear', () => {
       status: 'borrador',
       lateInterestRate: 1.9,
       generatedBy: CUENTA,
+    });
+  });
+
+  it('sin interesMora en el DTO, usa la tasa de la copropiedad solo si lateFeeEnabled está activo', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {
+        findById: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              lateFeeEnabled: true,
+              lateFeeInterestRate: 2.5,
+              lateFeeValueLimit: 50000,
+            }),
+        })),
+      } as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(7),
+    );
+
+    await service.crear(CUENTA, {
+      fechaFacturacion: '2026-08-27',
+      fechaVencimiento: '2026-08-31',
+      periodoDesde: '2026-08-01',
+      periodoHasta: '2026-08-31',
+    });
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      lateInterestRate: 2.5,
+      lateInterestCap: 50000,
+    });
+  });
+
+  it('sin interesMora en el DTO y lateFeeEnabled apagado, no cobra mora aunque haya una tasa guardada', async () => {
+    // El toggle debe gatear el default de verdad — no basta con leer la
+    // tasa e ignorar si está habilitada.
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {
+        findById: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              lateFeeEnabled: false,
+              lateFeeInterestRate: 2.5,
+              lateFeeValueLimit: 50000,
+            }),
+        })),
+      } as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(7),
+    );
+
+    await service.crear(CUENTA, {
+      fechaFacturacion: '2026-08-27',
+      fechaVencimiento: '2026-08-31',
+      periodoDesde: '2026-08-01',
+      periodoHasta: '2026-08-31',
+    });
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      lateInterestRate: 0,
     });
   });
 });
@@ -375,8 +458,68 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ]);
 
     expect(resultado.errores).toEqual([
-      { fila: 1, mensaje: 'No se encontró el cargo "Multas"' },
+      {
+        fila: 1,
+        mensaje:
+          'No se encontró el cargo "Multas" o no está habilitado para novedades',
+      },
     ]);
+  });
+
+  it('rechaza un concepto activo pero no habilitado para novedades', async () => {
+    // Distinto del caso "no existe": el concepto SÍ existe y está activo,
+    // solo le falta el flag — probando que availableAsNovedad realmente
+    // filtra, no solo que un concepto inexistente falla.
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const inmuebles = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(unidadCon('inm-1', '301')),
+      })),
+    };
+    const conceptosFindOne = jest.fn((filtro: Filtro) => ({
+      exec: () =>
+        Promise.resolve(
+          filtro.availableAsNovedad === true
+            ? null // este concepto existe pero NO tiene el flag — la
+            : // consulta real (con el filtro correcto) no lo encuentra
+              conceptoCon('con-1', 'Multas'),
+        ),
+    }));
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      { findOne: conceptosFindOne } as never,
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    const resultado = await service.cargarNovedades('lote-1', [
+      { inmuebleCodigo: '301', nombreConcepto: 'Multas', monto: 50000 },
+    ]);
+
+    expect(conceptosFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ availableAsNovedad: true, active: true }),
+    );
+    expect(resultado.errores).toEqual([
+      {
+        fila: 1,
+        mensaje:
+          'No se encontró el cargo "Multas" o no está habilitado para novedades',
+      },
+    ]);
+    expect(resultado.cargadas).toBe(0);
   });
 });
 

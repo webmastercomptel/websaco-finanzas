@@ -153,6 +153,7 @@ const construirServicio = (opts: {
   periodo?: PeriodoService;
   saldos?: { findOneAndUpdate: jest.Mock };
   notasDebito?: Record<string, unknown>[];
+  copropiedades?: { findById: jest.Mock };
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
@@ -160,7 +161,7 @@ const construirServicio = (opts: {
   const saldos = opts.saldos ?? modeloSaldos();
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
-  const copropiedades = modeloCopropiedades();
+  const copropiedades = opts.copropiedades ?? modeloCopropiedades();
   const espia = periodoEspiado();
   const periodo = opts.periodo ?? espia.periodo;
   const exigirAbierto = espia.exigirAbierto;
@@ -256,6 +257,80 @@ describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
         description: expect.any(String),
       },
     ]);
+  });
+});
+
+describe('RecibosService.crear — cuentaDestino por defecto', () => {
+  /** Supports both call shapes crear() uses on this model: a direct
+   *  `.exec()` for the new cuentaDestino default, and `.session(s).exec()`
+   *  for the existing cartera/anticipos lookups inside the transaction. */
+  const modeloCopropiedadesCon = (fixture: Record<string, unknown>) => ({
+    findById: jest.fn(() => {
+      const cadena = {
+        session: () => cadena,
+        exec: () => Promise.resolve(fixture),
+      };
+      return cadena;
+    }),
+  });
+
+  it('usa defaultBankAccountCode cuando el DTO no trae cuentaDestino', async () => {
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 500000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '999000',
+      reference: null,
+      notes: null,
+      appliedAmount: 0,
+      unappliedAmount: 500000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const { service, recibos } = construirServicio({
+      reciboCreado,
+      copropiedades: modeloCopropiedadesCon({
+        receivablesAccount: '130501',
+        advancesAccount: '210505',
+        defaultBankAccountCode: '999000',
+      }),
+    });
+
+    const { cuentaDestino: _omitido, ...dtoSinCuenta } = dtoBase();
+    await service.crear(CUENTA.toString(), dtoSinCuenta);
+
+    // `recibos.create([{...}], {session})` — Mongoose's array-form transactional
+    // create — so the first call's first arg is a one-element array, not the
+    // payload itself.
+    const [[payloads]] = (recibos.create as jest.Mock).mock.calls as [
+      [Array<Record<string, unknown>>],
+    ];
+    expect(payloads[0].destinationAccount).toBe('999000');
+  });
+
+  it('rechaza crear el recibo cuando faltan cuentaDestino Y defaultBankAccountCode', async () => {
+    const { service } = construirServicio({
+      reciboCreado: {},
+      copropiedades: modeloCopropiedadesCon({
+        receivablesAccount: '130501',
+        advancesAccount: '210505',
+        defaultBankAccountCode: null,
+      }),
+    });
+
+    const { cuentaDestino: _omitido, ...dtoSinCuenta } = dtoBase();
+
+    await expect(
+      service.crear(CUENTA.toString(), dtoSinCuenta),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 

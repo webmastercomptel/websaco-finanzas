@@ -26,6 +26,7 @@ import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { PanelControlModule } from './modules/panel-control/panel-control.module';
+import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -70,6 +71,7 @@ import { HealthModule } from './modules/health/health.module';
     ConsultasModule,
     AuditoriaModule,
     PanelControlModule,
+    ConfiguracionModule,
     HealthModule,
   ],
 })

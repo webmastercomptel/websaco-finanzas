@@ -180,6 +180,16 @@ export class RecibosService {
       new Date(dto.fechaRecibo),
     );
 
+    const destinationAccount =
+      dto.cuentaDestino ??
+      (await this.copropiedades.findById(coPropertyId).exec())
+        ?.defaultBankAccountCode;
+    if (!destinationAccount) {
+      throw new BadRequestException(
+        'La cuenta destino es requerida cuando no hay cuenta predeterminada en la copropiedad.',
+      );
+    }
+
     return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
@@ -199,7 +209,7 @@ export class RecibosService {
             receivedAmount: dto.montoRecibido,
             receivedDate: new Date(dto.fechaRecibo),
             paymentMethod: dto.medioPago,
-            destinationAccount: dto.cuentaDestino,
+            destinationAccount,
             reference: dto.referencia ?? null,
             notes: dto.observaciones ?? null,
             appliedAmount: 0,

@@ -45,6 +45,7 @@ export const SUBJECTS = [
   'OtraNota',
   'Anulacion',
   'Consulta',
+  'Configuracion',
   'all', // CASL alias: every subject
 ] as const;
 export type Subject = (typeof SUBJECTS)[number];
