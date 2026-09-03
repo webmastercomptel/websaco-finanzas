@@ -106,17 +106,18 @@ export class CopropiedadesService {
       entidadEtiqueta: creada.name,
     });
 
+    // Created in this order so their auto-assigned sortOrder lands 1, 2, 3 —
+    // ConceptosService.create() numbers each one past whatever came before.
     const copropiedadId = creada._id.toString();
     const cargosSistema = [
-      { nombre: 'Administración', tipo: 'administracion' as const, orden: 1 },
-      { nombre: 'Intereses por Mora', tipo: 'intereses' as const, orden: 2 },
-      { nombre: 'Multas', tipo: 'otro' as const, orden: 3 },
+      { nombre: 'Administración', tipo: 'administracion' as const },
+      { nombre: 'Intereses por Mora', tipo: 'intereses' as const },
+      { nombre: 'Multas', tipo: 'otro' as const },
     ];
     for (const cargo of cargosSistema) {
       await this.conceptos.create(copropiedadId, {
         nombre: cargo.nombre,
         tipo: cargo.tipo,
-        orden: cargo.orden,
         sistema: true,
       });
     }
@@ -169,12 +170,18 @@ export class CopropiedadesService {
    * building day to day — that is always a real person, tracked in
    * Usuarios/Asignacion, present whether or not a company is on file here.
    */
-  private aDocumento(dto: ActualizarCopropiedadDto): Record<string, unknown> {
+  private aDocumento(
+    dto: CrearCopropiedadDto | ActualizarCopropiedadDto,
+  ): Record<string, unknown> {
     const doc: Record<string, unknown> = {};
     const set = (clave: string, valor: unknown): void => {
       if (valor !== undefined) doc[clave] = valor;
     };
 
+    // `codigo` only exists on `CrearCopropiedadDto` — immutable after
+    // creation, so `ActualizarCopropiedadDto` never carries it — hence the
+    // `in` check rather than a plain `set()`.
+    if ('codigo' in dto) set('code', dto.codigo);
     set('name', dto.nombre);
     set('taxId', dto.nit);
     set('taxIdVerificationDigit', dto.digitoVerificacion);
@@ -186,7 +193,7 @@ export class CopropiedadesService {
     set('receivablesAccount', dto.cuentaContableCartera);
     set('advancesAccount', dto.cuentaAnticipos);
     set('creditNotesAccount', dto.cuentaDevoluciones);
-    if (dto.estado !== undefined) {
+    if ('estado' in dto && dto.estado !== undefined) {
       doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
     }
 
