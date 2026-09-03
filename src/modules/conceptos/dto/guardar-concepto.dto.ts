@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -37,11 +36,6 @@ class CamposConceptoDto {
   tasaImpuesto?: number;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  orden?: number;
-
-  @IsOptional()
   @IsString()
   @MaxLength(24)
   cuentaDebitoId?: string;
@@ -54,6 +48,10 @@ class CamposConceptoDto {
   @IsOptional()
   @IsBoolean()
   liquidaMora?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  cargaXls?: boolean;
 
   @IsOptional()
   @IsBoolean()

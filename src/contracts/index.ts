@@ -665,9 +665,12 @@ export interface ConceptoCobro {
   tipo: 'administracion' | 'intereses' | 'otro';
   tasaImpuesto: number;
   orden: number;
+  cuentaDebitoId: string | null;
   cuentaDebitoCodigo: string | null;
+  cuentaCreditoId: string | null;
   cuentaCreditoCodigo: string | null;
   liquidaMora: boolean;
+  cargaXls: boolean;
   sistema: boolean;
 }
 

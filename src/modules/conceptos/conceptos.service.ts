@@ -69,9 +69,24 @@ export class ConceptosService {
 
     const creado = await this.conceptos.create({
       coPropertyId: oid,
+      sortOrder: await this.siguienteOrden(oid),
       ...this.aDocumento(dto),
     });
     return toConcepto(creado);
+  }
+
+  /**
+   * `orden` is never client-supplied — it is display order, not a business
+   * fact anyone types in, so the UI does not show a field for it at all.
+   * Each new concept lands one past whatever the building already has.
+   */
+  private async siguienteOrden(coPropertyId: Types.ObjectId): Promise<number> {
+    const [ultimo] = await this.conceptos
+      .find({ coPropertyId })
+      .sort({ sortOrder: -1 })
+      .limit(1)
+      .exec();
+    return (ultimo?.sortOrder ?? 0) + 1;
   }
 
   /**
@@ -91,9 +106,7 @@ export class ConceptosService {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
     }
     if (existente.isSystem) {
-      throw new ConflictException(
-        'Los cargos de sistema no pueden editarse',
-      );
+      throw new ConflictException('Los cargos de sistema no pueden editarse');
     }
 
     if (dto.nombre) {
@@ -171,10 +184,23 @@ export class ConceptosService {
     set('name', dto.nombre);
     set('kind', dto.tipo);
     set('taxRate', dto.tasaImpuesto);
-    set('sortOrder', dto.orden);
-    set('cuentaDebitoId', dto.cuentaDebitoId ? new Types.ObjectId(dto.cuentaDebitoId) : null);
-    set('cuentaCreditoId', dto.cuentaCreditoId ? new Types.ObjectId(dto.cuentaCreditoId) : null);
+    // `?? null` would run even when the caller never sent the field —
+    // guarded by `in` so clearing an account is a deliberate empty string,
+    // not an accidental wipe from an unrelated patch.
+    if ('cuentaDebitoId' in dto) {
+      set(
+        'cuentaDebitoId',
+        dto.cuentaDebitoId ? new Types.ObjectId(dto.cuentaDebitoId) : null,
+      );
+    }
+    if ('cuentaCreditoId' in dto) {
+      set(
+        'cuentaCreditoId',
+        dto.cuentaCreditoId ? new Types.ObjectId(dto.cuentaCreditoId) : null,
+      );
+    }
     set('liquidaMora', dto.liquidaMora);
+    set('availableAsNovedad', dto.cargaXls);
     if ('sistema' in dto) set('isSystem', dto.sistema);
 
     return doc;

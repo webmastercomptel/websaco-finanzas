@@ -1,16 +1,26 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Types } from 'mongoose';
 import { ConceptosService } from './conceptos.service';
 
 type Filtro = Record<string, unknown>;
 
+const COP_ID = '507f1f77bcf86cd799439011';
+const CON_ID = '507f1f77bcf86cd799439022';
+const CUENTA_DEBITO_ID = '507f1f77bcf86cd799439033';
+const CUENTA_CREDITO_ID = '507f1f77bcf86cd799439044';
+
 const documento = (over: Record<string, unknown> = {}) => ({
-  _id: { toString: () => 'con-1' },
-  coPropertyId: { toString: () => 'cop-1' },
+  _id: { toString: () => CON_ID },
+  coPropertyId: { toString: () => COP_ID },
   name: 'Administración',
   kind: 'administracion',
   taxRate: 0,
   sortOrder: 100,
-  active: true,
+  cuentaDebitoId: null,
+  cuentaCreditoId: null,
+  liquidaMora: false,
+  availableAsNovedad: false,
+  isSystem: false,
   ...over,
 });
 
@@ -21,9 +31,14 @@ const modeloCon = (
 ) => {
   const filtros: Filtro[] = [];
   const escrituras: Record<string, unknown>[] = [];
-  const cadena = {
-    sort: () => cadena,
+  const cadenaFind = {
+    populate: () => cadenaFind,
+    sort: () => cadenaFind,
+    limit: () => cadenaFind,
     exec: () => Promise.resolve(filas),
+  };
+  const cadenaFindOne = {
+    exec: () => Promise.resolve(filas[0] ?? null),
   };
 
   return {
@@ -31,7 +46,11 @@ const modeloCon = (
     escrituras,
     find: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
-      return cadena;
+      return cadenaFind;
+    }),
+    findOne: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      return cadenaFindOne;
     }),
     exists: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
@@ -65,26 +84,48 @@ describe('ConceptosService.findAll', () => {
     const modelo = modeloCon([documento()]);
     const service = new ConceptosService(modelo as never);
 
-    await service.findAll('cop-1');
+    await service.findAll(COP_ID);
 
-    expect(modelo.filtros[0]).toEqual({ coPropertyId: 'cop-1' });
+    expect(modelo.filtros[0]).toEqual({
+      coPropertyId: new Types.ObjectId(COP_ID),
+    });
   });
 
   it('devuelve el contrato en español', async () => {
     const modelo = modeloCon([documento()]);
     const service = new ConceptosService(modelo as never);
 
-    const [concepto] = await service.findAll('cop-1');
+    const [concepto] = await service.findAll(COP_ID);
 
     expect(concepto).toEqual({
-      id: 'con-1',
-      copropiedadId: 'cop-1',
+      id: CON_ID,
+      copropiedadId: COP_ID,
       nombre: 'Administración',
       tipo: 'administracion',
       tasaImpuesto: 0,
       orden: 100,
-      activo: true,
+      cuentaDebitoId: null,
+      cuentaDebitoCodigo: null,
+      cuentaCreditoId: null,
+      cuentaCreditoCodigo: null,
+      liquidaMora: false,
+      cargaXls: false,
+      sistema: false,
     });
+  });
+
+  it('extrae el código de cuenta solo cuando llega poblada', async () => {
+    const cuentaPoblada = {
+      _id: { toString: () => CUENTA_DEBITO_ID },
+      code: '413501',
+    };
+    const modelo = modeloCon([documento({ cuentaDebitoId: cuentaPoblada })]);
+    const service = new ConceptosService(modelo as never);
+
+    const [concepto] = await service.findAll(COP_ID);
+
+    expect(concepto.cuentaDebitoId).toBe(CUENTA_DEBITO_ID);
+    expect(concepto.cuentaDebitoCodigo).toBe('413501');
   });
 });
 
@@ -94,7 +135,7 @@ describe('ConceptosService.create', () => {
     const service = new ConceptosService(modelo as never);
 
     await expect(
-      service.create('cop-1', { nombre: 'Administración' }),
+      service.create(COP_ID, { nombre: 'Administración' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -105,7 +146,7 @@ describe('ConceptosService.create', () => {
     const service = new ConceptosService(modelo as never);
 
     await expect(
-      service.create('cop-1', {
+      service.create(COP_ID, {
         nombre: 'Cuota extra',
         tipo: 'administracion',
       }),
@@ -116,47 +157,50 @@ describe('ConceptosService.create', () => {
     const modelo = modeloCon([], { duplicadoTipo: true });
     const service = new ConceptosService(modelo as never);
 
-    await service.create('cop-1', { nombre: 'Parqueadero', tipo: 'otro' });
+    await service.create(COP_ID, { nombre: 'Parqueadero', tipo: 'otro' });
 
     expect(modelo.escrituras[0]).toEqual({
-      coPropertyId: 'cop-1',
+      coPropertyId: new Types.ObjectId(COP_ID),
+      sortOrder: 1,
       name: 'Parqueadero',
       kind: 'otro',
     });
   });
 
-  it('crea con los campos traducidos al inglés', async () => {
+  it('crea con los campos traducidos al inglés, incluida la cuenta contable', async () => {
     const modelo = modeloCon([]);
     const service = new ConceptosService(modelo as never);
 
-    await service.create('cop-1', {
+    await service.create(COP_ID, {
       nombre: 'Interés de mora',
       tipo: 'intereses',
       tasaImpuesto: 0,
-      orden: 50,
+      cuentaDebitoId: CUENTA_DEBITO_ID,
+      cuentaCreditoId: CUENTA_CREDITO_ID,
+      liquidaMora: true,
+      cargaXls: true,
     });
 
     expect(modelo.escrituras[0]).toEqual({
-      coPropertyId: 'cop-1',
+      coPropertyId: new Types.ObjectId(COP_ID),
+      sortOrder: 1,
       name: 'Interés de mora',
       kind: 'intereses',
       taxRate: 0,
-      sortOrder: 50,
+      cuentaDebitoId: new Types.ObjectId(CUENTA_DEBITO_ID),
+      cuentaCreditoId: new Types.ObjectId(CUENTA_CREDITO_ID),
+      liquidaMora: true,
+      availableAsNovedad: true,
     });
   });
 
-  it('guarda la cuenta contable de ingreso cuando viene', async () => {
-    const modelo = modeloCon([]);
+  it('el orden se asigna automáticamente, uno más que el mayor existente', async () => {
+    const modelo = modeloCon([documento({ sortOrder: 5 })]);
     const service = new ConceptosService(modelo as never);
 
-    await service.create('cop-1', {
-      nombre: 'Administración',
-      cuentaContableIngreso: '413501',
-    });
+    await service.create(COP_ID, { nombre: 'Parqueadero' });
 
-    expect(modelo.escrituras[0]).toMatchObject({
-      accountingIncomeAccount: '413501',
-    });
+    expect(modelo.escrituras[0]).toMatchObject({ sortOrder: 6 });
   });
 });
 
@@ -165,32 +209,62 @@ describe('ConceptosService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new ConceptosService(modelo as never);
 
-    await service.update('cop-1', 'con-1', { tasaImpuesto: 19 });
+    await service.update(COP_ID, CON_ID, { tasaImpuesto: 19 });
 
     expect(modelo.escrituras[0]).toEqual({ taxRate: 19 });
   });
 
-  it('desactivar es una edición, no un borrado', async () => {
-    // No hay endpoint de borrado: los documentos que ya usaron este cargo
-    // tienen que seguir apuntando a algo legible.
+  it('no toca cuentaDebitoId/cuentaCreditoId cuando el patch no los menciona', async () => {
+    // Antes esto los ponía en null igual, aunque el caller nunca los haya
+    // enviado — un patch de "solo cambio el nombre" borraba las cuentas.
     const modelo = modeloCon([documento()]);
     const service = new ConceptosService(modelo as never);
 
-    await service.update('cop-1', 'con-1', { activo: false });
+    await service.update(COP_ID, CON_ID, { nombre: 'Administración General' });
 
-    expect(modelo.escrituras[0]).toEqual({ active: false });
+    expect(modelo.escrituras[0]).toEqual({ name: 'Administración General' });
+  });
+
+  it('limpia una cuenta cuando el patch la manda explícitamente vacía', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new ConceptosService(modelo as never);
+
+    await service.update(COP_ID, CON_ID, { cuentaDebitoId: '' });
+
+    expect(modelo.escrituras[0]).toEqual({ cuentaDebitoId: null });
+  });
+
+  it('actualiza liquidaMora y cargaXls', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new ConceptosService(modelo as never);
+
+    await service.update(COP_ID, CON_ID, { liquidaMora: true, cargaXls: true });
+
+    expect(modelo.escrituras[0]).toEqual({
+      liquidaMora: true,
+      availableAsNovedad: true,
+    });
+  });
+
+  it('rechaza editar un cargo de sistema', async () => {
+    const modelo = modeloCon([documento({ isSystem: true })]);
+    const service = new ConceptosService(modelo as never);
+
+    await expect(
+      service.update(COP_ID, CON_ID, { tasaImpuesto: 19 }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('no choca consigo mismo al guardar sin cambiar el tipo', async () => {
     const modelo = modeloCon([documento()]);
     const service = new ConceptosService(modelo as never);
 
-    await service.update('cop-1', 'con-1', { tipo: 'administracion' });
+    await service.update(COP_ID, CON_ID, { tipo: 'administracion' });
 
-    expect(modelo.filtros[0]).toEqual({
-      coPropertyId: 'cop-1',
+    expect(modelo.filtros[1]).toEqual({
+      coPropertyId: new Types.ObjectId(COP_ID),
       kind: 'administracion',
-      _id: { $ne: 'con-1' },
+      _id: { $ne: CON_ID },
     });
   });
 
@@ -199,7 +273,7 @@ describe('ConceptosService.update', () => {
     const service = new ConceptosService(modelo as never);
 
     await expect(
-      service.update('cop-1', 'con-ajeno', { tasaImpuesto: 5 }),
+      service.update(COP_ID, CON_ID, { tasaImpuesto: 5 }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
