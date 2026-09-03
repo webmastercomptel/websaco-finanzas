@@ -18,10 +18,12 @@ NestJS 11, TypeScript, MongoDB/Mongoose, Redis (ioredis), Firebase Admin
 
 Scope so far: configuration, Mongo/Redis connections, health, Firebase
 authentication resolved against local accounts, the catalog and identity model
-(coproperties, units, parties, charge concepts, accounts and assignments), and
-the authorization layer — tenant context, CASL, the API contract convention.
-The financial documents are not built yet: they are a double-entry ledger and
-they wait on domain answers. Queues and mailer land later.
+(coproperties, units, parties, charge concepts, accounts and assignments), the
+authorization layer — tenant context, CASL, the API contract convention — and
+the financial documents themselves: facturación, recibos, notas contables/
+crédito/débito, PDF generation for all of them, the accounting ledger
+(`consultas`/movimiento-contable), estado de cuenta, cartera aging, and
+auditoría. Queues and mailer still land later — see "Not here yet".
 
 ## Commands
 
@@ -386,7 +388,10 @@ inject the token directly, e.g. `@Inject(REDIS_CLIENT)`).
 
 ## Not here yet — do not assume it exists
 
-Local Account/Role/Membership collections (identity is still the single
-`ROOT_ADMIN_EMAIL` shortcut), BullMQ queues, the mailer, the Mongo schemas for
-the financial documents, and every business module. Design each one here against
-the rules above, and update this file in the same change.
+BullMQ queues and the mailer (`app.module.ts` still just comments where they'll
+attach; no consumer of Redis exists beyond its own health check). Verify against
+`src/modules/` and `src/database/schemas/` before assuming any other module is
+missing — this list drifts fast and the rest of this file (Account/Asignacion
+schemas, the financial document modules) is the more current source. Design
+each new module here against the rules above, and update this file in the same
+change.
