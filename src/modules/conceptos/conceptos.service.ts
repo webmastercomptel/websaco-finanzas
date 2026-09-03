@@ -10,6 +10,14 @@ import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  ValorRecurrente,
+  ValorRecurrenteDocument,
+} from '../../database/schemas/conceptos/valor-recurrente.schema';
+import {
+  SaldoCartera,
+  SaldoCarteraDocument,
+} from '../../database/schemas/facturacion/saldo-cartera.schema';
 import type { ConceptoCobro as ConceptoContract } from '../../contracts';
 import { toConcepto } from './conceptos.mapper';
 import type {
@@ -39,6 +47,10 @@ export class ConceptosService {
   constructor(
     @InjectModel(ConceptoCobro.name)
     private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(SaldoCartera.name)
+    private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(ValorRecurrente.name)
+    private readonly valoresRecurrentes: Model<ValorRecurrenteDocument>,
   ) {}
 
   async findAll(copropiedadId: string): Promise<ConceptoContract[]> {
@@ -90,8 +102,9 @@ export class ConceptosService {
   }
 
   /**
-   * Edits a concept. There is no delete: system concepts cannot be edited,
-   * and non-system ones carry documents that must stay readable.
+   * Edits a concept. The three system concepts (Administración, Intereses
+   * por Mora, Multas) are editable like any other — only deleting them is
+   * blocked, in `delete()` below.
    */
   async update(
     copropiedadId: string,
@@ -104,9 +117,6 @@ export class ConceptosService {
       .exec();
     if (!existente) {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
-    }
-    if (existente.isSystem) {
-      throw new ConflictException('Los cargos de sistema no pueden editarse');
     }
 
     if (dto.nombre) {
@@ -139,6 +149,52 @@ export class ConceptosService {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
     }
     return toConcepto(actualizado);
+  }
+
+  /**
+   * Deletes a concept. Two things make it un-deletable:
+   *
+   * - It is one of the three system concepts (Administración, Intereses por
+   *   Mora, Multas) — the billing cycle depends on them existing.
+   * - It has ever actually been used: a `SaldoCartera` row means some
+   *   document already posted against it (recurring charge, novedad,
+   *   interest, a Nota Crédito/Débito/Contable), and deleting it would leave
+   *   that document's `conceptoId` pointing at nothing. A `ValorRecurrente`
+   *   row means a unit is still actively configured to be charged this each
+   *   cycle — deleting it would silently drop that charge from every future
+   *   lote instead of erroring.
+   *
+   * Both checks are `coPropertyId`-scoped, same as everything else here.
+   */
+  async delete(copropiedadId: string, id: string): Promise<void> {
+    const oid = new Types.ObjectId(copropiedadId);
+    const existente = await this.conceptos
+      .findOne({ _id: id, coPropertyId: oid })
+      .exec();
+    if (!existente) {
+      throw new NotFoundException(`No se encontró el cargo ${id}`);
+    }
+    if (existente.isSystem) {
+      throw new ConflictException('Los cargos de sistema no pueden eliminarse');
+    }
+
+    const conceptoId = new Types.ObjectId(id);
+    const [enSaldos, enRecurrentes] = await Promise.all([
+      this.saldos.exists({ coPropertyId: oid, conceptoId }).exec(),
+      this.valoresRecurrentes.exists({ coPropertyId: oid, conceptoId }).exec(),
+    ]);
+    if (enSaldos) {
+      throw new ConflictException(
+        'Este cargo ya fue usado en documentos financieros y no puede eliminarse',
+      );
+    }
+    if (enRecurrentes) {
+      throw new ConflictException(
+        'Este cargo todavía está asignado como valor recurrente a una o más unidades',
+      );
+    }
+
+    await this.conceptos.deleteOne({ _id: id, coPropertyId: oid }).exec();
   }
 
   /**

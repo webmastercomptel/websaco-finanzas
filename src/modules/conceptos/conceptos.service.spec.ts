@@ -76,13 +76,34 @@ const modeloCon = (
         return { exec: () => Promise.resolve(filas[0] ? documento() : null) };
       },
     ),
+    deleteOne: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      return { exec: () => Promise.resolve({ deletedCount: 1 }) };
+    }),
   };
 };
+
+/** Stub for `saldos`/`valoresRecurrentes`: only `.exists()` is ever called. */
+const modeloExists = (existe: boolean) => ({
+  exists: jest.fn(() => ({
+    exec: () => Promise.resolve(existe ? { _id: 'x' } : null),
+  })),
+});
+
+const crearServicio = (
+  modelo: ReturnType<typeof modeloCon>,
+  opts: { enSaldos?: boolean; enRecurrentes?: boolean } = {},
+): ConceptosService =>
+  new ConceptosService(
+    modelo as never,
+    modeloExists(opts.enSaldos ?? false) as never,
+    modeloExists(opts.enRecurrentes ?? false) as never,
+  );
 
 describe('ConceptosService.findAll', () => {
   it('filtra por la copropiedad del route param, ordenado por sortOrder', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.findAll(COP_ID);
 
@@ -93,7 +114,7 @@ describe('ConceptosService.findAll', () => {
 
   it('devuelve el contrato en español', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     const [concepto] = await service.findAll(COP_ID);
 
@@ -120,7 +141,7 @@ describe('ConceptosService.findAll', () => {
       code: '413501',
     };
     const modelo = modeloCon([documento({ cuentaDebitoId: cuentaPoblada })]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     const [concepto] = await service.findAll(COP_ID);
 
@@ -132,7 +153,7 @@ describe('ConceptosService.findAll', () => {
 describe('ConceptosService.create', () => {
   it('rechaza un nombre repetido en la misma copropiedad', async () => {
     const modelo = modeloCon([], { duplicadoNombre: true });
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await expect(
       service.create(COP_ID, { nombre: 'Administración' }),
@@ -143,7 +164,7 @@ describe('ConceptosService.create', () => {
     // El índice único parcial del schema exige lo mismo — este chequeo solo
     // convierte ese choque en un mensaje que un operador puede entender.
     const modelo = modeloCon([], { duplicadoTipo: true });
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await expect(
       service.create(COP_ID, {
@@ -155,7 +176,7 @@ describe('ConceptosService.create', () => {
 
   it('no exige unicidad de tipo para "otro": es la categoría libre', async () => {
     const modelo = modeloCon([], { duplicadoTipo: true });
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.create(COP_ID, { nombre: 'Parqueadero', tipo: 'otro' });
 
@@ -169,7 +190,7 @@ describe('ConceptosService.create', () => {
 
   it('crea con los campos traducidos al inglés, incluida la cuenta contable', async () => {
     const modelo = modeloCon([]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.create(COP_ID, {
       nombre: 'Interés de mora',
@@ -196,7 +217,7 @@ describe('ConceptosService.create', () => {
 
   it('el orden se asigna automáticamente, uno más que el mayor existente', async () => {
     const modelo = modeloCon([documento({ sortOrder: 5 })]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.create(COP_ID, { nombre: 'Parqueadero' });
 
@@ -207,7 +228,7 @@ describe('ConceptosService.create', () => {
 describe('ConceptosService.update', () => {
   it('solo escribe los campos que vinieron en el patch', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { tasaImpuesto: 19 });
 
@@ -218,7 +239,7 @@ describe('ConceptosService.update', () => {
     // Antes esto los ponía en null igual, aunque el caller nunca los haya
     // enviado — un patch de "solo cambio el nombre" borraba las cuentas.
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { nombre: 'Administración General' });
 
@@ -227,7 +248,7 @@ describe('ConceptosService.update', () => {
 
   it('limpia una cuenta cuando el patch la manda explícitamente vacía', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { cuentaDebitoId: '' });
 
@@ -236,7 +257,7 @@ describe('ConceptosService.update', () => {
 
   it('actualiza liquidaMora y cargaXls', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { liquidaMora: true, cargaXls: true });
 
@@ -246,18 +267,20 @@ describe('ConceptosService.update', () => {
     });
   });
 
-  it('rechaza editar un cargo de sistema', async () => {
+  it('permite editar un cargo de sistema', async () => {
+    // Solo eliminar está bloqueado para los tres cargos de sistema — editar
+    // no. Ver ConceptosService.delete para el bloqueo real.
     const modelo = modeloCon([documento({ isSystem: true })]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
-    await expect(
-      service.update(COP_ID, CON_ID, { tasaImpuesto: 19 }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await service.update(COP_ID, CON_ID, { tasaImpuesto: 19 });
+
+    expect(modelo.escrituras[0]).toEqual({ taxRate: 19 });
   });
 
   it('no choca consigo mismo al guardar sin cambiar el tipo', async () => {
     const modelo = modeloCon([documento()]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { tipo: 'administracion' });
 
@@ -270,10 +293,63 @@ describe('ConceptosService.update', () => {
 
   it('responde "no existe" cuando el id no corresponde a esta copropiedad', async () => {
     const modelo = modeloCon([]);
-    const service = new ConceptosService(modelo as never);
+    const service = crearServicio(modelo);
 
     await expect(
       service.update(COP_ID, CON_ID, { tasaImpuesto: 5 }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('ConceptosService.delete', () => {
+  it('elimina un cargo sin uso', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = crearServicio(modelo);
+
+    await service.delete(COP_ID, CON_ID);
+
+    expect(modelo.deleteOne).toHaveBeenCalledWith({
+      _id: CON_ID,
+      coPropertyId: new Types.ObjectId(COP_ID),
+    });
+  });
+
+  it('rechaza eliminar un cargo de sistema', async () => {
+    const modelo = modeloCon([documento({ isSystem: true })]);
+    const service = crearServicio(modelo);
+
+    await expect(service.delete(COP_ID, CON_ID)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('rechaza eliminar un cargo que ya tiene saldo de cartera', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = crearServicio(modelo, { enSaldos: true });
+
+    await expect(service.delete(COP_ID, CON_ID)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('rechaza eliminar un cargo con un valor recurrente activo', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = crearServicio(modelo, { enRecurrentes: true });
+
+    await expect(service.delete(COP_ID, CON_ID)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('responde "no existe" cuando el id no corresponde a esta copropiedad', async () => {
+    const modelo = modeloCon([]);
+    const service = crearServicio(modelo);
+
+    await expect(service.delete(COP_ID, CON_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
