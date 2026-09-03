@@ -26,7 +26,6 @@ export const MODULE_TO_SUBJECT = {
   'cuentas-contables': 'Configuracion',
   'parametros-facturacion': 'Configuracion',
   documentos: 'Configuracion',
-  'interfaz-contable': 'Configuracion',
 } satisfies Record<string, Subject>;
 
 /**

@@ -56,12 +56,6 @@ export class CrearEntidadDto extends CamposEntidadDto {
  */
 export class ActualizarEntidadDto extends CamposEntidadDto {
   @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(40)
-  codigo?: string;
-
-  @IsOptional()
   @IsIn(['activo', 'inactivo'])
   estado?: 'activo' | 'inactivo';
 }

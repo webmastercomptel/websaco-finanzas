@@ -2,6 +2,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
+import { CuentaContable } from '../contabilidad/cuenta-contable.schema';
 
 export type ConceptoCobroDocument = HydratedDocument<ConceptoCobro>;
 
@@ -17,6 +18,10 @@ export type ConceptoCobroDocument = HydratedDocument<ConceptoCobro>;
  * Here they are rows. A building declares as many as it needs, in the order it
  * wants to see them, and the documents that use them carry line items rather
  * than a fixed column per concept. Do not reintroduce concept columns anywhere.
+ *
+ * The accounting mapping (debit/credit accounts) lives directly on the concept
+ * rather than in a separate InterfazContable collection — one row per concept,
+ * no extra join.
  */
 @Schema({ timestamps: true, collection: 'conceptos_cobro' })
 export class ConceptoCobro {
@@ -57,10 +62,6 @@ export class ConceptoCobro {
    * concept rather than on the invoice. A single invoice can mix a fee that is
    * exempt with a charge that is not.
    *
-   * The exception is commercial exploitation of common areas: visitor parking
-   * sold to outsiders, the social hall rented to non-residents. Those do
-   * generate VAT at the general rate.
-   *
    * Documents copy the rate onto each line when they are issued. Changing it
    * here must never alter what an issued invoice says.
    */
@@ -71,15 +72,28 @@ export class ConceptoCobro {
   @Prop({ required: true, default: 100 })
   sortOrder: number;
 
+  /** Accounting debit account for this concept's journal entries. */
+  @Prop({
+    type: Types.ObjectId,
+    ref: CuentaContable.name,
+    default: null,
+  })
+  cuentaDebitoId: Types.ObjectId | null;
+
+  /** Accounting credit account for this concept's journal entries. */
+  @Prop({
+    type: Types.ObjectId,
+    ref: CuentaContable.name,
+    default: null,
+  })
+  cuentaCreditoId: Types.ObjectId | null;
+
   /**
-   * Free-text accounting account this concept posts income to when a
-   * consolidated invoice generates its journal entry — see AsientoContable.
-   * Never validated against a fixed chart of accounts: Colombian propiedad
-   * horizontal has no mandated PUC, so a building adapts the general
-   * commercial one (Decreto 2650 de 1993) however it already does today.
+   * Whether this concept triggers late-interest calculation on overdue
+   * balances. Only `intereses` kind typically has this true.
    */
-  @Prop({ type: String, default: null, trim: true })
-  accountingIncomeAccount: string | null;
+  @Prop({ required: true, default: false })
+  liquidaMora: boolean;
 
   /**
    * Whether this concept may be uploaded as a Novedad via XLS. Default false
@@ -90,12 +104,12 @@ export class ConceptoCobro {
   availableAsNovedad: boolean;
 
   /**
-   * Inactive stops it being charged going forward. It is never removed: past
-   * documents reference it, and a line item pointing at nothing is a hole in
-   * the ledger.
+   * System-created charges (Administración, Intereses, Multas) are seeded
+   * automatically when a coproperty is born. They cannot be edited or
+   * deactivated from the UI — the billing cycle depends on them.
    */
-  @Prop({ required: true, default: true })
-  active: boolean;
+  @Prop({ required: true, default: false })
+  isSystem: boolean;
 }
 
 export const ConceptoCobroSchema = SchemaFactory.createForClass(ConceptoCobro);

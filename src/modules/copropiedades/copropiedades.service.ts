@@ -22,6 +22,7 @@ import type {
 } from './dto/guardar-copropiedad.dto';
 import { escapeRegex } from '../../common/utils/query.utils';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { ConceptosService } from '../conceptos/conceptos.service';
 
 /**
  * Manages the platform's catalogue of coproperties.
@@ -37,6 +38,7 @@ export class CopropiedadesService {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly auditoria: AuditoriaService,
+    private readonly conceptos: ConceptosService,
   ) {}
 
   async findAll(
@@ -59,7 +61,7 @@ export class CopropiedadesService {
       this.copropiedades
         .find(filtro)
         .populate('managingEntityId', 'name')
-        .sort({ name: 1 })
+        .sort({ code: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -104,6 +106,21 @@ export class CopropiedadesService {
       entidadEtiqueta: creada.name,
     });
 
+    const copropiedadId = creada._id.toString();
+    const cargosSistema = [
+      { nombre: 'Administración', tipo: 'administracion' as const, orden: 1 },
+      { nombre: 'Intereses por Mora', tipo: 'intereses' as const, orden: 2 },
+      { nombre: 'Multas', tipo: 'otro' as const, orden: 3 },
+    ];
+    for (const cargo of cargosSistema) {
+      await this.conceptos.create(copropiedadId, {
+        nombre: cargo.nombre,
+        tipo: cargo.tipo,
+        orden: cargo.orden,
+        sistema: true,
+      });
+    }
+
     // Re-read populated: the created document holds a raw id for the managing
     // entity, and the contract promises its name.
     return this.findOne(creada._id.toString());
@@ -120,17 +137,6 @@ export class CopropiedadesService {
     dto: ActualizarCopropiedadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
-    if (dto.codigo) {
-      const chocaConOtra = await this.copropiedades
-        .exists({ code: dto.codigo, _id: { $ne: id } })
-        .exec();
-      if (chocaConOtra) {
-        throw new ConflictException(
-          `Ya existe otra copropiedad con el código ${dto.codigo}`,
-        );
-      }
-    }
-
     const actualizada = await this.copropiedades
       .findByIdAndUpdate(id, { $set: this.aDocumento(dto) }, { new: true })
       .exec();
@@ -169,7 +175,6 @@ export class CopropiedadesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('code', dto.codigo);
     set('name', dto.nombre);
     set('taxId', dto.nit);
     set('taxIdVerificationDigit', dto.digitoVerificacion);

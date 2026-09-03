@@ -665,8 +665,10 @@ export interface ConceptoCobro {
   tipo: 'administracion' | 'intereses' | 'otro';
   tasaImpuesto: number;
   orden: number;
-  activo: boolean;
-  cuentaContableIngreso: string | null;
+  cuentaDebitoCodigo: string | null;
+  cuentaCreditoCodigo: string | null;
+  liquidaMora: boolean;
+  sistema: boolean;
 }
 
 /* ── Usuarios (platform config) ───────────────────────────────────
@@ -823,18 +825,4 @@ export interface ResolucionAdmin {
   nombreDocumento: string | null;
   comprob: string | null;
   numeroE: number | null;
-}
-
-/* ── Configuración: Interfaz Contable ────────────────────────── */
-
-export interface MapeoContable {
-  id: string;
-  tipo: 'concepto' | 'especial';
-  conceptoId: string | null;
-  conceptoNombre: string | null;
-  especial: 'descuentos' | 'interesesOrdenDb' | null;
-  cuentaDebitoId: string;
-  cuentaDebitoCodigo: string | null;
-  cuentaCreditoId: string;
-  cuentaCreditoCodigo: string | null;
 }

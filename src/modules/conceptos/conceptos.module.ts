@@ -10,5 +10,6 @@ import { ConceptosService } from './conceptos.service';
 @Module({
   controllers: [ConceptosController],
   providers: [ConceptosService],
+  exports: [ConceptosService],
 })
 export class ConceptosModule {}

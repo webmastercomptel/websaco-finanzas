@@ -43,8 +43,21 @@ class CamposConceptoDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
-  cuentaContableIngreso?: string;
+  @MaxLength(24)
+  cuentaDebitoId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  cuentaCreditoId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  liquidaMora?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  sistema?: boolean;
 }
 
 /** Creating a concept. The name is the one thing it cannot be created without. */
@@ -56,9 +69,7 @@ export class CrearConceptoDto extends CamposConceptoDto {
 }
 
 /**
- * Editing a concept. `activo` is here, and it is how one is retired:
- * `false` stops it being charged going forward without touching a single
- * document that already references it. There is no delete.
+ * Editing a concept. All fields optional — the caller only sends what changes.
  */
 export class ActualizarConceptoDto extends CamposConceptoDto {
   @IsOptional()
@@ -66,8 +77,4 @@ export class ActualizarConceptoDto extends CamposConceptoDto {
   @MinLength(1)
   @MaxLength(120)
   nombre?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  activo?: boolean;
 }

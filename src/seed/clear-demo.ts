@@ -62,10 +62,6 @@ import {
   CuentaContableDocument,
 } from '../database/schemas/contabilidad/cuenta-contable.schema';
 import {
-  InterfazContable,
-  InterfazContableDocument,
-} from '../database/schemas/contabilidad/interfaz-contable.schema';
-import {
   ResolucionFacturacion,
   ResolucionFacturacionDocument,
 } from '../database/schemas/numeracion/resolucion-facturacion.schema';
@@ -161,9 +157,6 @@ async function clearDemo(): Promise<void> {
     const cuentasContables = app.get<Model<CuentaContableDocument>>(
       getModelToken(CuentaContable.name),
     );
-    const interfazContable = app.get<Model<InterfazContableDocument>>(
-      getModelToken(InterfazContable.name),
-    );
     const resoluciones = app.get<Model<ResolucionFacturacionDocument>>(
       getModelToken(ResolucionFacturacion.name),
     );
@@ -184,7 +177,6 @@ async function clearDemo(): Promise<void> {
     await wipe('consecutivos_lote', consecutivosLote);
     await wipe('periodos_contables', periodos);
     await wipe('cuentas_contables', cuentasContables);
-    await wipe('interfaz_contable', interfazContable);
     await wipe('resoluciones_facturacion', resoluciones);
     await wipe('valores_recurrentes', valoresRecurrentes);
 

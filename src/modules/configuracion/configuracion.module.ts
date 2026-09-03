@@ -7,16 +7,10 @@ import { ParametrosController } from './parametros/parametros.controller';
 import { ParametrosService } from './parametros/parametros.service';
 import { DocumentosController } from './documentos/documentos.controller';
 import { DocumentosService } from './documentos/documentos.service';
-import { InterfazContableController } from './interfaz-contable/interfaz-contable.controller';
-import { InterfazContableService } from './interfaz-contable/interfaz-contable.service';
 import {
   CuentaContable,
   CuentaContableSchema,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
-import {
-  InterfazContable as InterfazContableSchemaClass,
-  InterfazContableSchema,
-} from '../../database/schemas/contabilidad/interfaz-contable.schema';
 import {
   Copropiedad,
   CopropiedadSchema,
@@ -51,11 +45,11 @@ import {
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 
 /**
- * Houses the four Configuración screens: Maestro de Cuentas, Parámetros de
- * Facturación, Tabla de Documentos, and Interfaz Contable. All share one
- * CASL subject (`Configuracion`) and one nav group.
+ * Houses the three Configuración screens: Maestro de Cuentas, Parámetros de
+ * Facturación, and Tabla de Documentos. All share one CASL subject
+ * (`Configuracion`) and one nav group.
  *
- * Registers every schema its four services inject directly via
+ * Registers every schema its services inject directly via
  * `MongooseModule.forFeature`, matching `ConsultasModule`/`PanelControlModule`'s
  * established pattern for reading schemas this module doesn't own — Recibo/
  * NotaCredito/NotaDebito/NotaContable are needed only by DocumentosService's
@@ -65,10 +59,6 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: CuentaContable.name, schema: CuentaContableSchema },
-      {
-        name: InterfazContableSchemaClass.name,
-        schema: InterfazContableSchema,
-      },
       { name: Copropiedad.name, schema: CopropiedadSchema },
       { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
       { name: ConsecutivoDocumento.name, schema: ConsecutivoDocumentoSchema },
@@ -83,13 +73,11 @@ import {
     CuentasContablesController,
     ParametrosController,
     DocumentosController,
-    InterfazContableController,
   ],
   providers: [
     CuentasContablesService,
     ParametrosService,
     DocumentosService,
-    InterfazContableService,
   ],
 })
 export class ConfiguracionModule {}

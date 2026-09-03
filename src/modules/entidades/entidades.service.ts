@@ -55,7 +55,7 @@ export class EntidadesService {
     const [documentos, total] = await Promise.all([
       this.entidades
         .find(filtro)
-        .sort({ name: 1 })
+        .sort({ code: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -108,17 +108,6 @@ export class EntidadesService {
     dto: ActualizarEntidadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<EntidadContract> {
-    if (dto.codigo) {
-      const chocaConOtra = await this.entidades
-        .exists({ code: dto.codigo, _id: { $ne: id } })
-        .exec();
-      if (chocaConOtra) {
-        throw new ConflictException(
-          `Ya existe otra entidad con el código ${dto.codigo}`,
-        );
-      }
-    }
-
     const actualizada = await this.entidades
       .findByIdAndUpdate(id, { $set: this.aDocumento(dto) }, { new: true })
       .exec();
@@ -150,7 +139,6 @@ export class EntidadesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('code', dto.codigo);
     set('name', dto.nombre);
     set('taxId', dto.nit);
     set('taxIdVerificationDigit', dto.digitoVerificacion);

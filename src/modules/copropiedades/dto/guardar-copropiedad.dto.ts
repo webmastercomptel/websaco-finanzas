@@ -101,12 +101,6 @@ export class CrearCopropiedadDto extends CamposCopropiedadDto {
  */
 export class ActualizarCopropiedadDto extends CamposCopropiedadDto {
   @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(40)
-  codigo?: string;
-
-  @IsOptional()
   @IsIn(['activo', 'inactivo'])
   estado?: 'activo' | 'inactivo';
 }

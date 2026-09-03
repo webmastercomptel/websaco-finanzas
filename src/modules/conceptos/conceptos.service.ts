@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   ConceptoCobro,
   ConceptoCobroDocument,
@@ -42,8 +42,11 @@ export class ConceptosService {
   ) {}
 
   async findAll(copropiedadId: string): Promise<ConceptoContract[]> {
+    const oid = new Types.ObjectId(copropiedadId);
     const documentos = await this.conceptos
-      .find({ coPropertyId: copropiedadId })
+      .find({ coPropertyId: oid })
+      .populate('cuentaDebitoId', 'code')
+      .populate('cuentaCreditoId', 'code')
       .sort({ sortOrder: 1 })
       .exec();
     return documentos.map(toConcepto);
@@ -53,37 +56,50 @@ export class ConceptosService {
     copropiedadId: string,
     dto: CrearConceptoDto,
   ): Promise<ConceptoContract> {
+    const oid = new Types.ObjectId(copropiedadId);
     const yaExiste = await this.conceptos
-      .exists({ coPropertyId: copropiedadId, name: dto.nombre })
+      .exists({ coPropertyId: oid, name: dto.nombre })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
         `Ya existe un cargo llamado "${dto.nombre}" en esta copropiedad`,
       );
     }
-    await this.verificarUnicidadPorTipo(copropiedadId, dto.tipo);
+    await this.verificarUnicidadPorTipo(oid, dto.tipo);
 
     const creado = await this.conceptos.create({
-      coPropertyId: copropiedadId,
+      coPropertyId: oid,
       ...this.aDocumento(dto),
     });
     return toConcepto(creado);
   }
 
   /**
-   * Edits a concept. There is no delete: `activo: false` is how one stops
-   * being charged going forward without orphaning the documents that already
-   * reference it.
+   * Edits a concept. There is no delete: system concepts cannot be edited,
+   * and non-system ones carry documents that must stay readable.
    */
   async update(
     copropiedadId: string,
     id: string,
     dto: ActualizarConceptoDto,
   ): Promise<ConceptoContract> {
+    const oid = new Types.ObjectId(copropiedadId);
+    const existente = await this.conceptos
+      .findOne({ _id: id, coPropertyId: oid })
+      .exec();
+    if (!existente) {
+      throw new NotFoundException(`No se encontró el cargo ${id}`);
+    }
+    if (existente.isSystem) {
+      throw new ConflictException(
+        'Los cargos de sistema no pueden editarse',
+      );
+    }
+
     if (dto.nombre) {
       const chocaConOtro = await this.conceptos
         .exists({
-          coPropertyId: copropiedadId,
+          coPropertyId: oid,
           name: dto.nombre,
           _id: { $ne: id },
         })
@@ -95,12 +111,12 @@ export class ConceptosService {
       }
     }
     if (dto.tipo) {
-      await this.verificarUnicidadPorTipo(copropiedadId, dto.tipo, id);
+      await this.verificarUnicidadPorTipo(oid, dto.tipo, id);
     }
 
     const actualizado = await this.conceptos
       .findOneAndUpdate(
-        { _id: id, coPropertyId: copropiedadId },
+        { _id: id, coPropertyId: oid },
         { $set: this.aDocumento(dto) },
         { new: true },
       )
@@ -119,14 +135,14 @@ export class ConceptosService {
    * duplicate-key error.
    */
   private async verificarUnicidadPorTipo(
-    copropiedadId: string,
+    coPropertyId: Types.ObjectId,
     tipo: string | undefined,
     idAExcluir?: string,
   ): Promise<void> {
     if (tipo !== 'administracion' && tipo !== 'intereses') return;
 
     const filtro: Record<string, unknown> = {
-      coPropertyId: copropiedadId,
+      coPropertyId,
       kind: tipo,
     };
     if (idAExcluir) filtro._id = { $ne: idAExcluir };
@@ -156,8 +172,10 @@ export class ConceptosService {
     set('kind', dto.tipo);
     set('taxRate', dto.tasaImpuesto);
     set('sortOrder', dto.orden);
-    set('accountingIncomeAccount', dto.cuentaContableIngreso);
-    if ('activo' in dto) set('active', dto.activo);
+    set('cuentaDebitoId', dto.cuentaDebitoId ? new Types.ObjectId(dto.cuentaDebitoId) : null);
+    set('cuentaCreditoId', dto.cuentaCreditoId ? new Types.ObjectId(dto.cuentaCreditoId) : null);
+    set('liquidaMora', dto.liquidaMora);
+    if ('sistema' in dto) set('isSystem', dto.sistema);
 
     return doc;
   }
