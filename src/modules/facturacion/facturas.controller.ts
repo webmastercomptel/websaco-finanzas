@@ -61,13 +61,15 @@ export class FacturasController {
     const factura = await this.facturas.findOneRaw(id);
 
     const [resolucion, copropiedad] = await Promise.all([
-      this.resoluciones
-        .findOne({ _id: factura.resolucionId, coPropertyId })
-        .exec(),
+      factura.resolucionId
+        ? this.resoluciones
+            .findOne({ _id: factura.resolucionId, coPropertyId })
+            .exec()
+        : Promise.resolve(null),
       this.copropiedades.findById(coPropertyId).exec(),
     ]);
 
-    if (!resolucion) {
+    if (factura.resolucionId && !resolucion) {
       throw new Error(
         `No se encontró la resolución de facturación ${factura.resolucionId.toString()}`,
       );

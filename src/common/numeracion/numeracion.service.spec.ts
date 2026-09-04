@@ -52,22 +52,16 @@ const resolucionesCon = (fila: Record<string, unknown> | null) => {
 };
 
 const consecutivosCon = (fila: Record<string, unknown> | null) => {
-  let estado = fila ? { ...fila } : null;
+  const estado = fila ? { ...fila } : null;
 
   return {
     findOneAndUpdate: jest.fn(
-      (
-        filtro: { documentType?: string },
-        _update?: unknown,
-        _opciones?: unknown,
-      ) => ({
+      (_filtro?: unknown, _update?: unknown, _opciones?: unknown) => ({
         exec: () => {
-          if (!estado) {
-            // On upsert, $inc creates nextNumber at 1, new: true returns post-image
-            estado = { prefix: filtro?.documentType ?? 'RC', nextNumber: 1 };
-            return Promise.resolve({ ...estado });
-          }
-          // On normal update, increment first, then return post-image
+          // No upsert: a real findOneAndUpdate matches nothing and returns
+          // null when the row doesn't exist — the service turns that into
+          // NotFoundException.
+          if (!estado) return Promise.resolve(null);
           estado.nextNumber = (estado.nextNumber as number) + 1;
           return Promise.resolve({ ...estado });
         },
@@ -203,17 +197,55 @@ describe('NumeracionService.siguienteFactura', () => {
     const [, actualizacion] = resoluciones.findOneAndUpdate.mock.calls[0];
     expect(actualizacion).toEqual({ $inc: { nextNumber: 1 } });
   });
+
+  it('usa el consecutivo simple de categoría FV cuando no hay resolución activa', async () => {
+    // DIAN no es obligatorio para todos los clientes — sin resolución, factura
+    // igual puede emitirse con el consecutivo simple, sin resolucionId.
+    const service = servicio(null, { prefix: 'FV-A', nextNumber: 10 });
+
+    // { new: true }, como en siguienteDocumento: la fila post-incremento es
+    // la que se usa — el mock simula el mismo comportamiento.
+    await expect(service.siguienteFactura(COP)).resolves.toEqual({
+      prefijo: 'FV-A',
+      numero: 11,
+      completo: 'FV-A-11',
+    });
+  });
+
+  it('busca el consecutivo de respaldo por categoría FV', async () => {
+    const consecutivos = consecutivosCon({ prefix: 'FV', nextNumber: 1 });
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    await service.siguienteFactura(COP);
+
+    const [filtro] = consecutivos.findOneAndUpdate.mock.calls[0];
+    expect(filtro).toMatchObject({ category: 'FV' });
+  });
+
+  it('rechaza cuando no hay resolución activa ni consecutivo FV configurado', async () => {
+    const service = servicio(null, null);
+
+    await expect(service.siguienteFactura(COP)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
 });
 
 describe('NumeracionService.siguienteDocumento', () => {
-  it('arranca en 1 la primera vez, creando el contador', async () => {
+  it('rechaza un código sin fila configurada — ya no se crea sola', async () => {
+    // El comportamiento viejo (upsert on first use) tenía sentido cuando una
+    // categoría era exactamente una fila. Con varios códigos posibles por
+    // categoría no hay un default razonable que inventar: el administrador
+    // declara el código en Documentos antes de poder emitir con él.
     const service = servicio(null, null);
 
-    await expect(service.siguienteDocumento(COP, 'RC')).resolves.toEqual({
-      prefijo: 'RC',
-      numero: 1,
-      completo: 'RC-1',
-    });
+    await expect(service.siguienteDocumento(COP, 'RC')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('continúa desde el contador existente', async () => {
@@ -233,22 +265,7 @@ describe('NumeracionService.siguienteDocumento', () => {
   });
 
   it('avanza uno por documento y nunca repite, arrancando desde un contador existente', async () => {
-    // El bug real que esto reemplaza: con {new: false}, la SEGUNDA llamada
-    // repetía el número que ya había entregado la primera.
     const service = servicio(null, { prefix: 'RC', nextNumber: 0 });
-
-    const numeros = [
-      await service.siguienteDocumento(COP, 'RC'),
-      await service.siguienteDocumento(COP, 'RC'),
-      await service.siguienteDocumento(COP, 'RC'),
-    ].map((n) => n.numero);
-
-    expect(numeros).toEqual([1, 2, 3]);
-    expect(new Set(numeros).size).toBe(3);
-  });
-
-  it('avanza uno por documento y nunca repite, arrancando en frío (contador recién creado)', async () => {
-    const service = servicio(null, null);
 
     const numeros = [
       await service.siguienteDocumento(COP, 'RC'),

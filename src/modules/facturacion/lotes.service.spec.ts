@@ -976,6 +976,43 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(resultado.errores).toEqual([]);
   });
 
+  it('guarda resolucionId null cuando siguienteFactura usó el consecutivo FV de respaldo', async () => {
+    // Sin resolución DIAN activa, siguienteFactura ya no incluye
+    // resolucionId — la factura debe quedar con null, no con un valor
+    // inventado por un non-null assertion.
+    const m = construirModelos({});
+    const numeracion = {
+      siguienteLote: jest.fn().mockResolvedValue(1),
+      siguienteFactura: jest.fn().mockResolvedValue({
+        prefijo: 'FV',
+        numero: 1,
+        completo: 'FV-1',
+      }),
+    } as unknown as NumeracionService;
+
+    const servicio2 = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos — unused by consolidar()
+      {} as never, // valoresRecurrentes — unused by consolidar()
+      {} as never, // inmuebles — unused by consolidar()
+      {} as never, // terceros — unused by consolidar()
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+    );
+
+    await servicio2.consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      fullNumber: 'FV-1',
+      resolucionId: null,
+    });
+  });
+
   it('exige el periodo abierto ANTES de numerar nada', async () => {
     const m = construirModelos({});
     const periodo = {

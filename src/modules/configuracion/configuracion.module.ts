@@ -43,6 +43,10 @@ import {
   NotaContable,
   NotaContableSchema,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
+import {
+  Factura,
+  FacturaSchema,
+} from '../../database/schemas/facturacion/factura.schema';
 
 /**
  * Houses the three Configuración screens: Maestro de Cuentas, Parámetros de
@@ -53,7 +57,8 @@ import {
  * `MongooseModule.forFeature`, matching `ConsultasModule`/`PanelControlModule`'s
  * established pattern for reading schemas this module doesn't own — Recibo/
  * NotaCredito/NotaDebito/NotaContable are needed only by DocumentosService's
- * already-issued-number guardrail (§5), never mutated here.
+ * already-issued-number guardrail (§5), never mutated here. Factura joins
+ * them for the same reason once FV became a creatable consecutivo category.
  */
 @Module({
   imports: [
@@ -67,6 +72,7 @@ import {
       { name: NotaCredito.name, schema: NotaCreditoSchema },
       { name: NotaDebito.name, schema: NotaDebitoSchema },
       { name: NotaContable.name, schema: NotaContableSchema },
+      { name: Factura.name, schema: FacturaSchema },
     ]),
   ],
   controllers: [

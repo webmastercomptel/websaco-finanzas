@@ -103,6 +103,15 @@ describe('generarPdfFactura', () => {
   noLanzaCuando('lines está vacío', { lines: [] });
   noLanzaCuando('outstandingBalance es 0', { outstandingBalance: 0 });
 
+  it('no lanza y omite el pie de resolución cuando resolucion es null', async () => {
+    const bytes = await generarPdfFactura(
+      makeFactura({ resolucionId: null }),
+      null,
+      makeCopropiedad(),
+    );
+    expect(Buffer.from(bytes.slice(0, 5)).toString('utf-8')).toBe('%PDF-');
+  });
+
   it('no lanza cuando validUntil es null (resolución abierta)', async () => {
     const bytes = await generarPdfFactura(
       makeFactura(),

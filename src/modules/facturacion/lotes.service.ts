@@ -483,9 +483,9 @@ export class LotesFacturacionService {
           unitCode: preliminar.unitCode,
           terceroId: preliminar.terceroId,
           holder: preliminar.holder,
-          // Always set on this path — only siguienteDocumento's internal
-          // documents (RC/NC/ND/NT) omit it. See NumeroAsignado's own comment.
-          resolucionId: numero.resolucionId!,
+          // Null when siguienteFactura fell back to the plain FV consecutivo
+          // because this coproperty has no active DIAN resolution.
+          resolucionId: numero.resolucionId ?? null,
           prefix: numero.prefijo,
           number: numero.numero,
           fullNumber: numero.completo,
