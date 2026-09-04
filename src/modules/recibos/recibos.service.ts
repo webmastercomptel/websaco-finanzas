@@ -193,7 +193,7 @@ export class RecibosService {
     return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
-        'RC',
+        dto.codigo,
         session,
       );
 

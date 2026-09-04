@@ -165,6 +165,7 @@ const notaCreditoCreada = (over: Record<string, unknown> = {}) => ({
 });
 
 const dtoBase = (over: Record<string, unknown> = {}) => ({
+  codigo: 'NC',
   inmuebleId: INMUEBLE.toString(),
   facturaId: new Types.ObjectId().toString(),
   motivo: 'error_facturacion' as const,

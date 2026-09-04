@@ -143,6 +143,7 @@ describe('NotasDebitoService', () => {
     it('crea una nota débito con saldo igual al total', async () => {
       const svc = servicio();
       const resultado = await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
         total: 50000,
@@ -165,6 +166,7 @@ describe('NotasDebitoService', () => {
 
       await expect(
         svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
           inmuebleId: INMUEBLE.toString(),
           conceptoId: CONCEPTO.toString(),
           total: 50000,

@@ -33,6 +33,7 @@ describe('NotasDebitoController.crear', () => {
     };
 
     await controller.crear(user, {
+      codigo: 'ND',
       inmuebleId: new Types.ObjectId().toString(),
       conceptoId: new Types.ObjectId().toString(),
       total: 150000,

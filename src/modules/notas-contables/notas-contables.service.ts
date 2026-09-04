@@ -130,7 +130,7 @@ export class NotasContablesService {
 
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
-        'NT',
+        dto.codigo,
         session,
       );
 

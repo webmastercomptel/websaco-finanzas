@@ -132,7 +132,7 @@ export class NotasDebitoService {
     return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
-        'ND',
+        dto.codigo,
         session,
       );
 

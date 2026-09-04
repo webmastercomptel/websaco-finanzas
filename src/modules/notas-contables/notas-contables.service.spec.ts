@@ -122,6 +122,7 @@ const construirServicio = (opts: {
 };
 
 const dtoBase = (over: Record<string, unknown> = {}) => ({
+  codigo: 'NT',
   inmuebleId: INMUEBLE.toString(),
   conceptoOrigenId: CONCEPTO_ORIGEN.toString(),
   conceptoDestinoId: CONCEPTO_DESTINO.toString(),
