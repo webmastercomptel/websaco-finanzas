@@ -73,7 +73,12 @@ describe('InmueblesService.create', () => {
     // Aceptar el tenant del body dejaría crear un inmueble dentro del edificio
     // de otro cliente.
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.create({ codigo: '401' });
 
@@ -87,7 +92,12 @@ describe('InmueblesService.create', () => {
     // Sin este chequeo el índice único devuelve un error del driver nombrando
     // un índice que la persona nunca vio.
     const modelo = modeloCon({ duplicado: true });
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await expect(service.create({ codigo: '301' })).rejects.toBeInstanceOf(
       ConflictException,
@@ -97,7 +107,12 @@ describe('InmueblesService.create', () => {
   it('busca el duplicado solo dentro de la copropiedad activa', async () => {
     // "301" existe en todos los edificios; el choque es dentro de uno.
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.create({ codigo: '301' });
 
@@ -110,6 +125,7 @@ describe('InmueblesService.create', () => {
       modelo as never,
       {} as never,
       tenantSinCopropiedad,
+      {} as never,
     );
 
     await expect(service.create({ codigo: '401' })).rejects.toBeInstanceOf(
@@ -123,7 +139,12 @@ describe('InmueblesService.update', () => {
   it('incluye la copropiedad en el match, no la verifica después', async () => {
     // Es lo que impide editar un inmueble de otro edificio conociendo su id.
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.update('inm-1', { zona: 'Norte' });
 
@@ -134,7 +155,12 @@ describe('InmueblesService.update', () => {
     // Esparcir el DTO entero escribiría `undefined` sobre campos que nadie
     // quiso borrar — la forma clásica en que un patch borra datos en silencio.
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.update('inm-1', { zona: 'Norte' });
 
@@ -143,7 +169,12 @@ describe('InmueblesService.update', () => {
 
   it('traduce estado activo/inactivo al del documento', async () => {
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.update('inm-1', { estado: 'inactivo' });
 
@@ -154,7 +185,12 @@ describe('InmueblesService.update', () => {
     // No existe endpoint de borrado y no debe existir: quitar la fila dejaría
     // huérfano cada documento emitido contra ella.
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.update('inm-1', { estado: 'inactivo' });
 
@@ -166,7 +202,12 @@ describe('InmueblesService.update', () => {
 
   it('no choca consigo mismo al guardar sin cambiar el código', async () => {
     const modelo = modeloCon();
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await service.update('inm-1', { codigo: '301' });
 
@@ -182,7 +223,12 @@ describe('InmueblesService.update', () => {
     modelo.findOneAndUpdate = jest.fn(() => ({
       exec: () => Promise.resolve(null),
     })) as never;
-    const service = new InmueblesService(modelo as never, {} as never, tenant);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      tenant,
+      {} as never,
+    );
 
     await expect(
       service.update('inm-ajeno', { zona: 'Norte' }),

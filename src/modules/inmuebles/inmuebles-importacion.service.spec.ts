@@ -52,14 +52,29 @@ const tenant = {
   resolveCoPropertyId: () => COP,
 } as unknown as TenantContextService;
 
+/** Records every `guardar` call — the DTO's `cargos` line, unchanged, is
+ *  what a row's import must forward. */
+const valoresRecurrentesModeloCon = () => {
+  const llamadas: { inmuebleId: string; valores: unknown }[] = [];
+  return {
+    llamadas,
+    guardar: jest.fn((inmuebleId: string, dto: { valores: unknown }) => {
+      llamadas.push({ inmuebleId, valores: dto.valores });
+      return Promise.resolve([]);
+    }),
+  };
+};
+
 describe('InmueblesService.importar', () => {
   it('crea cada fila como una unidad, contando el total', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     const resultado = await service.importar({
@@ -75,10 +90,12 @@ describe('InmueblesService.importar', () => {
     // resubirse entero.
     const inmuebles = inmueblesModeloCon(['301']);
     const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     const resultado = await service.importar({
@@ -94,10 +111,12 @@ describe('InmueblesService.importar', () => {
   it('reutiliza un tercero existente por identificación, sin duplicarlo', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon({ '123456': 'ter-1' });
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     await service.importar({
@@ -117,10 +136,12 @@ describe('InmueblesService.importar', () => {
   it('crea un tercero nuevo cuando la identificación no coincide con ninguno', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     await service.importar({
@@ -137,10 +158,12 @@ describe('InmueblesService.importar', () => {
   it('deja la unidad sin titular cuando la fila no trae ninguno: se carga antes que sus papeles', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
@@ -152,14 +175,53 @@ describe('InmueblesService.importar', () => {
   it('escribe siempre la copropiedad activa, nunca una de la fila', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
+      valoresRecurrentes as never,
     );
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
 
     expect(inmuebles.escrituras[0]).toMatchObject({ coPropertyId: COP });
+  });
+
+  it('guarda los cargos de la fila contra la unidad recién creada', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      terceros as never,
+      tenant,
+      valoresRecurrentes as never,
+    );
+    const cargos = [{ conceptoId: 'con-1', monto: 350000 }];
+
+    await service.importar({ filas: [fila({ codigo: '301', cargos })] });
+
+    expect(valoresRecurrentes.guardar).toHaveBeenCalledTimes(1);
+    expect(valoresRecurrentes.llamadas[0]).toEqual({
+      inmuebleId: 'inm-nuevo',
+      valores: cargos,
+    });
+  });
+
+  it('una fila sin cargos no llama a guardar los valores recurrentes', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const valoresRecurrentes = valoresRecurrentesModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      terceros as never,
+      tenant,
+      valoresRecurrentes as never,
+    );
+
+    await service.importar({ filas: [fila({ codigo: '301' })] });
+
+    expect(valoresRecurrentes.guardar).not.toHaveBeenCalled();
   });
 });

@@ -15,6 +15,7 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type {
   Inmueble as InmuebleContract,
@@ -40,6 +41,7 @@ export class InmueblesService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
+    private readonly valoresRecurrentes: ValoresRecurrentesService,
   ) {}
 
   /**
@@ -218,7 +220,7 @@ export class InmueblesService {
 
         const holderId = await this.resolverTitular(coPropertyId, fila);
 
-        await this.inmuebles.create({
+        const creado = await this.inmuebles.create({
           coPropertyId,
           code: fila.codigo,
           block: fila.bloque,
@@ -234,6 +236,17 @@ export class InmueblesService {
           contactName: fila.contacto,
           notes: fila.observaciones,
         });
+
+        // Same call the "Valores Recurrentes" tab makes — the row's cargo-N
+        // columns already arrive resolved to real conceptoIds (see the note
+        // on FilaImportarInmuebleDto.cargos), so this is just the ordinary
+        // save, not a special import-only path.
+        if (fila.cargos?.length) {
+          await this.valoresRecurrentes.guardar(creado._id.toString(), {
+            valores: fila.cargos,
+          });
+        }
+
         creados += 1;
       } catch (err) {
         errores.push({
