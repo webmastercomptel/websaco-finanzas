@@ -33,6 +33,12 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
+/** No open Lote in any test here — the guard always passes. */
+const lotesFacturacionFalso = () =>
+  ({
+    exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+  }) as never;
+
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   coPropertyId: COP,
@@ -123,6 +129,7 @@ const construirServicio = (opts: {
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NC-1'),
     conexionCon(session),
+    lotesFacturacionFalso(),
   );
 
   return {
@@ -253,6 +260,7 @@ describe('NotasCreditoService.crear', () => {
       tenantQueDevuelve(COP),
       numeracion,
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -432,6 +440,7 @@ describe('NotasCreditoService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.aplicar(
@@ -513,6 +522,7 @@ describe('NotasCreditoService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.aplicar(
@@ -601,6 +611,7 @@ describe('NotasCreditoService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -628,6 +639,7 @@ describe('NotasCreditoService.aplicar', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -691,6 +703,7 @@ describe('NotasCreditoService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.anular(
@@ -764,6 +777,7 @@ describe('NotasCreditoService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -881,6 +895,7 @@ describe('NotasCreditoService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.anular(
@@ -942,6 +957,7 @@ describe('NotasCreditoService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.anular(
@@ -984,6 +1000,7 @@ describe('NotasCreditoService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1023,6 +1040,7 @@ describe('NotasCreditoService.findAll', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.findAll({
@@ -1069,6 +1087,7 @@ describe('NotasCreditoService.findAll', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.findAll({ conAnticipoDisponible: true });
@@ -1101,6 +1120,7 @@ describe('NotasCreditoService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     const detalle = await service.findOne(nota._id.toString());
@@ -1123,6 +1143,7 @@ describe('NotasCreditoService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(

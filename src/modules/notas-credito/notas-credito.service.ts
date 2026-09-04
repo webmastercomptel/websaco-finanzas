@@ -32,6 +32,7 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   AplicacionInvalidaError,
   ajustarSaldosCartera,
@@ -64,6 +65,9 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
  * CANONICAL CONSTRUCTOR — pinned in Task 3, unchanged here. NO
  * `PeriodoService` argument — see Task 3's own note on why `crear()` needs
  * no period check (a Nota Crédito is always dated `new Date()`).
+ *
+ * `lotes` was APPENDED for the "no Nota Crédito while a billing run is open"
+ * rule — same reasoning as `RecibosService`'s own `lotes` argument.
  */
 @Injectable()
 export class NotasCreditoService {
@@ -83,6 +87,7 @@ export class NotasCreditoService {
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly lotes: LotesFacturacionService,
   ) {}
 
   private async transaccion<T>(
@@ -113,6 +118,10 @@ export class NotasCreditoService {
   ): Promise<NotaCreditoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const facturaId = new Types.ObjectId(dto.facturaId);
+
+    // A refusal costs no session — same placement as
+    // RecibosService.crear()'s own periodo/lotes checks.
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     return this.transaccion(async (session) => {
       const factura = await this.facturas

@@ -119,6 +119,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
       ),
     },
     connection: conexionCon(session),
+    // No open Lote in any test here — the guard always passes.
+    lotes: { exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)) },
   };
 
   const merged = { ...defaults, ...overrides };
@@ -135,6 +137,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     merged.tenant as never,
     merged.numeracion as never,
     merged.connection as never,
+    merged.lotes as never,
   );
 };
 

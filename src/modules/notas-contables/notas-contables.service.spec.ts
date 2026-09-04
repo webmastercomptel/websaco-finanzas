@@ -27,6 +27,12 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
+/** No open Lote in any test here — the guard always passes. */
+const lotesFacturacionFalso = () =>
+  ({
+    exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+  }) as never;
+
 const notaContableCreada = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   inmuebleId: INMUEBLE,
@@ -105,6 +111,7 @@ const construirServicio = (opts: {
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NT-1'),
     conexionCon(session),
+    lotesFacturacionFalso(),
   );
 
   // Override saldos.findOne for the balance check.
@@ -287,6 +294,7 @@ describe('NotasContablesService.crear', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
     (service as unknown as { saldos: { findOne: jest.Mock } }).saldos.findOne =
       jest.fn(() => ({
@@ -337,6 +345,7 @@ describe('NotasContablesService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.anular(
@@ -362,6 +371,7 @@ describe('NotasContablesService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -387,6 +397,7 @@ describe('NotasContablesService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -438,6 +449,7 @@ describe('NotasContablesService.anular', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.anular(
@@ -483,6 +495,7 @@ describe('NotasContablesService.findAll', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     await service.findAll({
@@ -518,6 +531,7 @@ describe('NotasContablesService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.findOne(nota._id.toString());
@@ -533,6 +547,7 @@ describe('NotasContablesService.findOne', () => {
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
     );
     // Override findOne to return null.
     (

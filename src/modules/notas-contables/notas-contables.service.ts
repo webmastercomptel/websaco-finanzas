@@ -24,6 +24,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
+import { LotesFacturacionService } from '../facturacion/lotes.service';
 import { ajustarSaldosCarteraPorDistribucion } from '../recibos/cruce.util';
 import {
   construirMovimientosReclasificacion,
@@ -56,6 +57,7 @@ export class NotasContablesService {
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly lotes: LotesFacturacionService,
   ) {}
 
   private async transaccion<T>(
@@ -107,6 +109,10 @@ export class NotasContablesService {
     if (dto.monto <= 0) {
       throw new ConflictException('El monto debe ser mayor que cero');
     }
+
+    // A refusal costs no session — same placement as
+    // RecibosService.crear()'s own periodo/lotes checks.
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     return this.transaccion(async (session) => {
       // Read origin concepto's current balance — the ONLY authoritative

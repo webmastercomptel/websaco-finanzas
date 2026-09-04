@@ -8,6 +8,7 @@ import { Model, Types } from 'mongoose';
 import {
   LoteFacturacion,
   LoteFacturacionDocument,
+  NovedadLote,
 } from '../../database/schemas/facturacion/lote-facturacion.schema';
 import {
   Factura,
@@ -55,6 +56,10 @@ import type {
 import { toLote, toLoteDetalle } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
 import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
+import type {
+  AgregarNovedadLineaDto,
+  EditarNovedadLineaDto,
+} from './dto/novedad-linea.dto';
 import type { ResultadoCargaNovedades } from '../../contracts';
 import type { ErrorConsolidacion } from '../../contracts';
 import { construirMovimientos, CUENTA_SIN_ASIGNAR } from './asiento.builder';
@@ -147,8 +152,17 @@ export class LotesFacturacionService {
    * independently by human-readable identifiers (unit código, concept
    * nombre), the same shape as the Inmuebles bulk import: a row that cannot
    * be resolved is reported and skipped, the rest of the file still loads.
-   * A fresh upload REPLACES the Lote's previous novedades, since re-uploading
-   * a corrected file is the expected flow, not accumulating duplicates.
+   *
+   * ADDITIVE, not a replace: a fresh upload appends its valid rows to
+   * whatever `adjustments` already holds (a previous Excel batch, manual
+   * lines, recurrente/interes overrides) instead of wiping them — this is
+   * what lets a second, unrelated file (e.g. a "multas" batch for owners who
+   * skipped the assembly) be uploaded at any point, even after the table has
+   * already been hand-edited, without losing anything. Correcting a mistake
+   * from an earlier upload is done by editing/zeroing the specific bad row
+   * via `editarNovedadLinea`, not by re-uploading the whole file — nothing
+   * here de-duplicates, so uploading the exact same file twice double-charges
+   * (an accepted risk, same category as typing the same manual line twice).
    */
   async cargarNovedades(
     loteId: string,
@@ -195,22 +209,235 @@ export class LotesFacturacionService {
       }
 
       novedades.push({
+        _id: new Types.ObjectId(),
         inmuebleId: inmueble._id,
         conceptoId: concepto._id,
         amount: fila.monto,
         note: fila.observacion?.trim() ? fila.observacion : null,
+        overrides: null,
       });
     }
 
-    await this.lotes
+    const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId },
-        { $set: { adjustments: novedades } },
+        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { $push: { adjustments: { $each: novedades } } },
         { new: true },
       )
       .exec();
 
+    if (
+      actualizado &&
+      actualizado.status === 'liquidado' &&
+      novedades.length > 0
+    ) {
+      await this.recalcularYPersistirPreview(actualizado, coPropertyId);
+    }
+
     return { total: filas.length, cargadas: novedades.length, errores };
+  }
+
+  /**
+   * Adds ONE charge to `adjustments` without touching the rest of the array
+   * (unlike `cargarNovedades`'s bulk case, this is always a single row from
+   * the Liquidación screen's manual-add form). `dto.overrides` set means this
+   * line REPLACES a recurrente/interes line instead of adding a separate one
+   * — see NovedadLote's schema comment. If the Lote is already `liquidado`,
+   * the preview is recalculated and persisted in this same call, so the
+   * table's totals never require a separate manual "recalcular" step.
+   */
+  async agregarNovedadLinea(
+    loteId: string,
+    dto: AgregarNovedadLineaDto,
+  ): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${loteId} ya está consolidado y no se le pueden agregar cargos`,
+      );
+    }
+
+    const inmueble = await this.inmuebles
+      .findOne({ _id: dto.inmuebleId, coPropertyId })
+      .exec();
+    if (!inmueble) {
+      throw new NotFoundException(
+        `No se encontró el inmueble ${dto.inmuebleId}`,
+      );
+    }
+    const concepto = await this.conceptos
+      .findOne({ _id: dto.conceptoId, coPropertyId })
+      .exec();
+    if (!concepto) {
+      throw new NotFoundException(
+        `No se encontró el concepto ${dto.conceptoId}`,
+      );
+    }
+    if (dto.overrides === 'interes' && concepto.kind !== 'intereses') {
+      throw new ConflictException(
+        'Solo el concepto de intereses de esta copropiedad puede reemplazar la mora calculada',
+      );
+    }
+    if (dto.overrides) {
+      this.validarUnicidadOverride(
+        lote.adjustments,
+        dto.inmuebleId,
+        dto.conceptoId,
+        dto.overrides,
+      );
+    }
+
+    const nuevaNovedad = {
+      _id: new Types.ObjectId(),
+      inmuebleId: new Types.ObjectId(dto.inmuebleId),
+      conceptoId: new Types.ObjectId(dto.conceptoId),
+      amount: dto.amount,
+      note: dto.note?.trim() ? dto.note : null,
+      overrides: dto.overrides ?? null,
+    };
+
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { $push: { adjustments: nuevaNovedad } },
+        { new: true },
+      )
+      .exec();
+    if (!actualizado) {
+      throw new ConflictException(
+        `El lote ${loteId} ya no admite cambios (se consolidó mientras se procesaba esta operación)`,
+      );
+    }
+
+    if (actualizado.status === 'liquidado') {
+      return this.recalcularYPersistirPreview(actualizado, coPropertyId);
+    }
+    return toLote(actualizado);
+  }
+
+  /**
+   * Edits amount/note on an existing `adjustments` row, addressed by its own
+   * `_id` — never `overrides` (the UI never needs to change it: a line
+   * without a `novedadId` gets a fresh override via `agregarNovedadLinea`
+   * instead, see the Liquidación screen's edit rule). Recalculates and
+   * persists `preview` in the same call if the Lote is already `liquidado`.
+   */
+  async editarNovedadLinea(
+    loteId: string,
+    novedadId: string,
+    dto: EditarNovedadLineaDto,
+  ): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${loteId}`);
+    }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${loteId} ya está consolidado y no se le pueden editar cargos`,
+      );
+    }
+    const novedad = lote.adjustments.find(
+      (n) => n._id.toString() === novedadId,
+    );
+    if (!novedad) {
+      throw new NotFoundException(
+        `No se encontró la novedad ${novedadId} en el lote ${loteId}`,
+      );
+    }
+    novedad.amount = dto.amount;
+    if (dto.note !== undefined) {
+      novedad.note = dto.note.trim() ? dto.note : null;
+    }
+
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { $set: { adjustments: lote.adjustments } },
+        { new: true },
+      )
+      .exec();
+    if (!actualizado) {
+      throw new ConflictException(
+        `El lote ${loteId} ya no admite cambios (se consolidó mientras se procesaba esta operación)`,
+      );
+    }
+
+    if (actualizado.status === 'liquidado') {
+      return this.recalcularYPersistirPreview(actualizado, coPropertyId);
+    }
+    return toLote(actualizado);
+  }
+
+  /**
+   * Guard for the 4 document-creation services (Recibos, NotasCredito,
+   * NotasDebito, NotasContables): while a billing run is in flight for a
+   * coproperty, SaldoCartera and every FacturaPreliminar total can still
+   * change under it, so a payment or note posted mid-run could apply against
+   * numbers that are about to move — none of the 4 may be created until the
+   * run is `consolidado`. Same `$in` list as the partial unique index on
+   * LoteFacturacion, kept literal (not `$ne: 'consolidado'`) so the two can
+   * never silently diverge if a fourth status is ever added to the enum.
+   */
+  async exigirSinLoteAbierto(coPropertyId: string): Promise<void> {
+    const abierto = await this.lotes
+      .findOne({ coPropertyId, status: { $in: ['borrador', 'liquidado'] } })
+      .exec();
+    if (abierto) {
+      throw new ConflictException(
+        `Hay un lote de facturación (No. ${abierto.number}) en curso para esta copropiedad. ` +
+          'No se pueden registrar recibos ni notas mientras el proceso de facturación no termine.',
+      );
+    }
+  }
+
+  /** Rejects a second override of the same kind for the same inmueble+concepto
+   *  — otherwise construirPreview() would have two candidate overrides for
+   *  one line and no principled way to pick a winner. Only `agregarNovedadLinea`
+   *  calls this: `editarNovedadLinea` never changes `overrides`, so it can
+   *  never create this conflict on an existing row. */
+  private validarUnicidadOverride(
+    adjustments: NovedadLote[],
+    inmuebleId: string,
+    conceptoId: string,
+    overrides: 'recurrente' | 'interes',
+  ): void {
+    const conflicto = adjustments.find(
+      (n) =>
+        n.overrides === overrides &&
+        n.inmuebleId.toString() === inmuebleId &&
+        n.conceptoId.toString() === conceptoId,
+    );
+    if (conflicto) {
+      throw new ConflictException(
+        `Ya existe un ajuste de tipo "${overrides}" para este inmueble y concepto en este lote`,
+      );
+    }
+  }
+
+  /** Shared tail of agregarNovedadLinea/editarNovedadLinea/cargarNovedades:
+   *  re-derives `preview` from the Lote's current adjustments and persists
+   *  it, without touching `status` (already `liquidado` by the time this
+   *  runs). Not folded into a single atomic write together with the
+   *  adjustments change that triggers it — see the plan's concurrency notes
+   *  for why that gap is accepted rather than solved with a transaction. */
+  private async recalcularYPersistirPreview(
+    lote: LoteFacturacionDocument,
+    coPropertyId: Types.ObjectId,
+  ): Promise<LoteContract> {
+    const preview = await this.construirPreview(lote, coPropertyId);
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: lote._id, coPropertyId, status: { $ne: 'consolidado' } },
+        { $set: { preview } },
+        { new: true },
+      )
+      .exec();
+    return toLote(actualizado ?? lote);
   }
 
   /**
@@ -218,8 +445,11 @@ export class LotesFacturacionService {
    * holder — combining its ValorRecurrente template, this run's novedades,
    * and a mora-interest line derived from SaldoCartera. Nothing is written
    * to Factura, SaldoCartera, or AsientoContable here; this only persists
-   * the preview and moves the Lote to `liquidado`. Re-running liquidar
-   * simply overwrites the previous preview.
+   * the preview and moves the Lote to `liquidado`. Safe to run again later
+   * (e.g. from the Liquidación screen's "Generar novedades automáticas"
+   * button) — every recurrente/interes line first checks `construirPreview`
+   * for a manual override before falling back to the automatic amount, so a
+   * re-run reflects edits already made instead of discarding them.
    */
   async liquidar(loteId: string): Promise<LoteContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -233,6 +463,37 @@ export class LotesFacturacionService {
       );
     }
 
+    const preview = await this.construirPreview(lote, coPropertyId);
+
+    const actualizado = await this.lotes
+      .findOneAndUpdate(
+        { _id: loteId, coPropertyId },
+        { $set: { preview, status: 'liquidado' } },
+        { new: true },
+      )
+      .exec();
+
+    return toLote(actualizado!);
+  }
+
+  /**
+   * Builds one FacturaPreliminar per active unit with a holder, from
+   * ValorRecurrente + adjustments (additive novedades and recurrente/interes
+   * overrides) + mora — shared by `liquidar()` (first run) and by
+   * `agregarNovedadLinea`/`editarNovedadLinea`/`cargarNovedades` (automatic
+   * recalculation once the Lote is already `liquidado`). Re-reads every
+   * catalog fresh on each call — deterministic given the current state of
+   * ValorRecurrente/adjustments/SaldoCartera, but those can change between
+   * calls, so two calls at different times may legitimately differ.
+   *
+   * A line whose final amount is exactly 0 is never pushed — this is how
+   * "edit a line to 0 to remove it" actually removes it from the eventual
+   * Factura and AsientoContable, since both are built from this same array.
+   */
+  private async construirPreview(
+    lote: LoteFacturacionDocument,
+    coPropertyId: Types.ObjectId,
+  ): Promise<Record<string, unknown>[]> {
     const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
       this.inmuebles.find({ coPropertyId, status: 'active' }).exec(),
       // No more active/inactive switch on a concepto (design note on the
@@ -244,6 +505,7 @@ export class LotesFacturacionService {
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
+    const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
 
     const preview: Record<string, unknown>[] = [];
 
@@ -259,34 +521,79 @@ export class LotesFacturacionService {
         if (valor.inmuebleId.toString() !== unidad._id.toString()) continue;
         const concepto = conceptoPorId.get(valor.conceptoId.toString());
         if (!concepto) continue;
-        lines.push(this.aLinea(concepto, valor.amount, 'recurrente'));
+        const override = lote.adjustments.find(
+          (n) =>
+            n.overrides === 'recurrente' &&
+            n.inmuebleId.toString() === unidad._id.toString() &&
+            n.conceptoId.toString() === valor.conceptoId.toString(),
+        );
+        const monto = override ? override.amount : valor.amount;
+        if (monto === 0) continue;
+        lines.push(
+          this.aLinea(concepto, monto, 'recurrente', override?._id ?? null),
+        );
       }
 
       for (const novedad of lote.adjustments) {
         if (novedad.inmuebleId.toString() !== unidad._id.toString()) continue;
+        // Consumed above/below as an override candidate, not an additive
+        // line of its own.
+        if (novedad.overrides) continue;
         const concepto = conceptoPorId.get(novedad.conceptoId.toString());
         if (!concepto) continue;
-        lines.push(this.aLinea(concepto, novedad.amount, 'novedad'));
+        if (novedad.amount === 0) continue;
+        lines.push(
+          this.aLinea(concepto, novedad.amount, 'novedad', novedad._id),
+        );
       }
 
-      const saldosUnidad = await this.saldos
-        .find({ coPropertyId, inmuebleId: unidad._id.toString() })
-        .exec();
-      const saldoTotal = saldosUnidad.reduce((acc, s) => acc + s.balance, 0);
-      const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
-      if (interesConcepto && lote.lateInterestRate > 0 && saldoTotal > 0) {
-        const bruto = saldoTotal * (lote.lateInterestRate / 100);
-        const tope = lote.lateInterestCap;
-        const valor = Math.round(tope !== null ? Math.min(bruto, tope) : bruto);
-        if (valor > 0) {
-          lines.push(this.aLinea(interesConcepto, valor, 'interes'));
+      if (interesConcepto) {
+        const overrideInteres = lote.adjustments.find(
+          (n) =>
+            n.overrides === 'interes' &&
+            n.inmuebleId.toString() === unidad._id.toString() &&
+            n.conceptoId.toString() === interesConcepto._id.toString(),
+        );
+        if (overrideInteres) {
+          // Confirmed with product: a manual mora override has no ceiling —
+          // it may land above or below what the automatic formula would
+          // have given, same as an override on a recurrente line.
+          if (overrideInteres.amount !== 0) {
+            lines.push(
+              this.aLinea(
+                interesConcepto,
+                overrideInteres.amount,
+                'interes',
+                overrideInteres._id,
+              ),
+            );
+          }
+        } else {
+          const saldosUnidad = await this.saldos
+            .find({ coPropertyId, inmuebleId: unidad._id.toString() })
+            .exec();
+          const saldoTotal = saldosUnidad.reduce(
+            (acc, s) => acc + s.balance,
+            0,
+          );
+          if (lote.lateInterestRate > 0 && saldoTotal > 0) {
+            const bruto = saldoTotal * (lote.lateInterestRate / 100);
+            const tope = lote.lateInterestCap;
+            const valor = Math.round(
+              tope !== null ? Math.min(bruto, tope) : bruto,
+            );
+            if (valor > 0) {
+              lines.push(this.aLinea(interesConcepto, valor, 'interes', null));
+            }
+          }
         }
       }
 
       // A unit can land here with nothing to charge — no ValorRecurrente, no
-      // novedad, no interest. Silently excluding it, like every other
-      // per-unit condition in this loop, rather than surfacing it as an
-      // error: it is not a data problem, just nothing to invoice.
+      // novedad, no interest (or everything present landed at 0). Silently
+      // excluding it, like every other per-unit condition in this loop,
+      // rather than surfacing it as an error: it is not a data problem, just
+      // nothing to invoice.
       if (lines.length === 0) continue;
 
       const subtotal = lines.reduce(
@@ -321,15 +628,7 @@ export class LotesFacturacionService {
       });
     }
 
-    const actualizado = await this.lotes
-      .findOneAndUpdate(
-        { _id: loteId, coPropertyId },
-        { $set: { preview, status: 'liquidado' } },
-        { new: true },
-      )
-      .exec();
-
-    return toLote(actualizado!);
+    return preview;
   }
 
   /**
@@ -591,11 +890,28 @@ export class LotesFacturacionService {
     return toLoteDetalle(documento);
   }
 
+  /** Returns the raw Mongoose document — used by the prefactura PDF, which
+   *  needs the parent Lote's dates (billingDate/dueDate/periodStart/
+   *  periodEnd) that the mapped contract does not carry per row. */
+  async findOneRaw(id: string): Promise<LoteFacturacionDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documento = await this.lotes
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!documento) {
+      throw new NotFoundException(`No se encontró el lote ${id}`);
+    }
+    return documento;
+  }
+
   /** Builds one frozen invoice line from a concept and a base amount —
-   *  shared by the recurrente, novedad, and interes cases in liquidar().
-   *  `accountingIncomeAccount` on the resulting line is the concept's
-   *  CREDIT account code — invoicing credits income, per
-   *  `construirMovimientos` in asiento.builder.ts. */
+   *  shared by the recurrente, novedad, and interes cases in
+   *  construirPreview(). `accountingIncomeAccount` on the resulting line is
+   *  the concept's CREDIT account code — invoicing credits income, per
+   *  `construirMovimientos` in asiento.builder.ts. `novedadId` is the
+   *  NovedadLote this line came from or was overridden by, null for a
+   *  recurrente/interes line never touched manually — see FacturaLinea's
+   *  schema comment. */
   private aLinea(
     concepto: {
       _id: Types.ObjectId;
@@ -606,6 +922,7 @@ export class LotesFacturacionService {
     },
     baseAmount: number,
     origen: 'recurrente' | 'novedad' | 'interes',
+    novedadId: Types.ObjectId | null = null,
   ): Record<string, unknown> {
     const taxAmount = Math.round(baseAmount * (concepto.taxRate / 100));
     return {
@@ -614,6 +931,7 @@ export class LotesFacturacionService {
       conceptKind: concepto.kind,
       accountingIncomeAccount: codigoDeCuentaContable(concepto.cuentaCreditoId),
       source: origen,
+      novedadId,
       baseAmount,
       taxRate: concepto.taxRate,
       taxAmount,

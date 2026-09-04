@@ -14,10 +14,28 @@ import {
 
 export type LoteFacturacionDocument = HydratedDocument<LoteFacturacion>;
 
-/** A one-off charge for this run only — never written back into
- *  ValorRecurrente, the standing monthly template. */
-@Schema({ _id: false })
+/**
+ * A one-off charge for this run only — never written back into
+ * ValorRecurrente, the standing monthly template. Has its own `_id` (schema
+ * default, not disabled here) so a single row can be targeted individually by
+ * `PATCH /lotes/:id/novedades/:novedadId` — needed once editing became
+ * per-line instead of "replace the whole file".
+ *
+ * `overrides` is null for an ordinary additive charge (the Excel/manual case
+ * that always existed): it becomes its own FacturaLinea, alongside whatever
+ * else the unit is charged. Set to `'recurrente'` or `'interes'`, it instead
+ * REPLACES what construirPreview() would have computed from ValorRecurrente
+ * or from the mora calculation for that same (inmuebleId, conceptoId) — the
+ * mechanism behind "edit any line of the table, including a recurring quota
+ * or the mora charge, for this run only, without touching the permanent
+ * ValorRecurrente or the general mora formula".
+ */
+@Schema()
 export class NovedadLote {
+  /** Mongoose-assigned (schema default, not `_id: false`); declared here only
+   *  so TypeScript knows it exists on the plain class shape. */
+  _id: Types.ObjectId;
+
   @Prop({ type: Types.ObjectId, ref: Inmueble.name, required: true })
   inmuebleId: Types.ObjectId;
 
@@ -29,6 +47,9 @@ export class NovedadLote {
 
   @Prop({ type: String, default: null, trim: true })
   note: string | null;
+
+  @Prop({ type: String, enum: ['recurrente', 'interes'], default: null })
+  overrides: 'recurrente' | 'interes' | null;
 }
 
 export const NovedadLoteSchema = SchemaFactory.createForClass(NovedadLote);

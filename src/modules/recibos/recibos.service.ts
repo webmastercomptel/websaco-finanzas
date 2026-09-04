@@ -37,6 +37,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
+import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   ajustarSaldosCartera,
   ajustarSaldosCarteraPorDistribucion,
@@ -93,6 +94,11 @@ import type { ListarRecibosDto } from './dto/listar-recibos.dto';
  * Recibo can pay one exactly like it pays a Factura (Notas Débito design
  * §5/§6). Same append-only discipline as `periodo` — last, so every
  * position above keeps its meaning.
+ *
+ * `lotes` was APPENDED as a twelfth argument for the "no Recibo while a
+ * billing run is open" rule: `crear()` calls
+ * `lotes.exigirSinLoteAbierto()` before the transaction opens, same
+ * placement as `periodo.exigirAbierto` — a refusal costs no session.
  */
 @Injectable()
 export class RecibosService {
@@ -115,6 +121,7 @@ export class RecibosService {
     private readonly periodo: PeriodoService,
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
+    private readonly lotes: LotesFacturacionService,
   ) {}
 
   /**
@@ -179,6 +186,11 @@ export class RecibosService {
       coPropertyId.toString(),
       new Date(dto.fechaRecibo),
     );
+    // Same "a refusal costs no session" placement: SaldoCartera and every
+    // FacturaPreliminar total can still move while a billing run is open, so
+    // a Recibo applied against them mid-run would settle against numbers
+    // about to change.
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     const destinationAccount =
       dto.cuentaDestino ??

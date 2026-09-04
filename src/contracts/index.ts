@@ -156,6 +156,14 @@ export interface FacturaLinea {
   nombreConcepto: string;
   tipoConcepto: 'administracion' | 'intereses' | 'otro';
   origen: 'recurrente' | 'novedad' | 'interes';
+  /**
+   * Id of the NovedadLote this line came from or was overridden by, null for
+   * a recurrente/interes line never edited manually. Only meaningful while
+   * the parent Lote is still open — the Liquidación screen uses it to decide
+   * whether editing this line means PATCHing this id or POSTing a brand-new
+   * override.
+   */
+  novedadId: string | null;
   valorBase: Monto;
   tasaImpuesto: number;
   valorImpuesto: Monto;
