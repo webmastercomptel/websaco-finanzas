@@ -53,4 +53,5 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   // translation belongs here, not in a client that would have to learn English
   // to read a Spanish payload.
   estado: doc.status === 'active' ? 'activo' : 'inactivo',
+  fechaActualizacion: doc.updatedAt.toISOString(),
 });

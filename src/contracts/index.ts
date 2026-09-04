@@ -76,6 +76,8 @@ export interface Inmueble {
   resideEnElInmueble: boolean;
   estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
   estado: 'activo' | 'inactivo';
+  /** ISO 8601 — when this unit's record was last saved. */
+  fechaActualizacion: IsoDate;
 }
 
 /** One row's outcome from a bulk import that could not be created. */
