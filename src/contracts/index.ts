@@ -676,6 +676,25 @@ export interface ConceptoCobro {
   sistema: boolean;
 }
 
+/**
+ * What one unit is charged for one concept, every billing cycle — the
+ * standing template `LotesFacturacionService.liquidar()` reads to build each
+ * month's invoice lines. See the note on `ValorRecurrente`'s schema: this
+ * replaces the legacy "Datos Financieros" tab's twelve fixed columns with one
+ * row per concept the building actually declared.
+ *
+ * Always one entry per concept in the coproperty's catalog (`intereses`
+ * excluded — that one is computed from overdue balances, never a flat
+ * amount), `monto: 0` meaning no `ValorRecurrente` row exists for that pair
+ * yet — never that a zero-amount row was saved. Saving `monto: 0` back
+ * deletes the row rather than persisting a zero.
+ */
+export interface ValorRecurrente {
+  conceptoId: string;
+  conceptoNombre: string;
+  monto: Monto;
+}
+
 /* ── Usuarios (platform config) ───────────────────────────────────
  *
  * Who may sign in and operate this system, and where. Platform-operator

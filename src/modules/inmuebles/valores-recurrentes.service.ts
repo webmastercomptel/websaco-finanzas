@@ -1,0 +1,130 @@
+// src/modules/inmuebles/valores-recurrentes.service.ts
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  ValorRecurrente,
+  ValorRecurrenteDocument,
+} from '../../database/schemas/conceptos/valor-recurrente.schema';
+import type { ValorRecurrente as ValorRecurrenteContract } from '../../contracts';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { toValorRecurrente } from './valores-recurrentes.mapper';
+import type { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
+
+/**
+ * Manages one unit's recurring monthly amounts — the "Datos Financieros" tab
+ * of the system this replaces, rebuilt as rows over the coproperty's actual
+ * concept catalog instead of twelve fixed columns. See the note on the
+ * `ValorRecurrente` contract type and schema for the full design.
+ */
+@Injectable()
+export class ValoresRecurrentesService {
+  constructor(
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(ValorRecurrente.name)
+    private readonly valoresRecurrentes: Model<ValorRecurrenteDocument>,
+    private readonly tenant: TenantContextService,
+  ) {}
+
+  private async exigirInmueble(inmuebleId: string): Promise<{
+    coPropertyId: Types.ObjectId;
+    inmuebleOid: Types.ObjectId;
+  }> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmuebleOid = new Types.ObjectId(inmuebleId);
+    const existe = await this.inmuebles
+      .exists({ _id: inmuebleOid, coPropertyId })
+      .exec();
+    if (!existe) {
+      throw new NotFoundException(`No se encontró el inmueble ${inmuebleId}`);
+    }
+    return { coPropertyId, inmuebleOid };
+  }
+
+  /**
+   * One entry per concept in the building's catalog — `intereses` excluded,
+   * since that one is computed from overdue balances, never a flat amount
+   * (see the note on `ConceptoCobro.kind`). A concept without a
+   * `ValorRecurrente` row for this unit shows `monto: 0`, indistinguishable
+   * from a saved zero — see the contract type's own note on why saving 0
+   * deletes the row instead of persisting it.
+   */
+  async obtener(inmuebleId: string): Promise<ValorRecurrenteContract[]> {
+    const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
+
+    const [conceptos, valores] = await Promise.all([
+      this.conceptos
+        .find({ coPropertyId, kind: { $ne: 'intereses' } })
+        .sort({ sortOrder: 1 })
+        .exec(),
+      this.valoresRecurrentes
+        .find({ coPropertyId, inmuebleId: inmuebleOid })
+        .exec(),
+    ]);
+
+    const montoPorConcepto = new Map(
+      valores.map((v) => [v.conceptoId.toString(), v.amount]),
+    );
+
+    return conceptos.map((concepto) =>
+      toValorRecurrente(
+        concepto,
+        montoPorConcepto.get(concepto._id.toString()) ?? 0,
+      ),
+    );
+  }
+
+  /**
+   * Replaces the unit's whole set of recurring amounts to match `dto.valores`
+   * exactly: a positive amount upserts that pair's row, `0` deletes it. Plain
+   * per-pair writes, not one Mongo transaction — each pair is independent
+   * data, not a multi-collection accounting effect the way posting a
+   * document is.
+   */
+  async guardar(
+    inmuebleId: string,
+    dto: GuardarValoresRecurrentesDto,
+  ): Promise<ValorRecurrenteContract[]> {
+    const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
+
+    await Promise.all(
+      dto.valores.map(async (linea) => {
+        const conceptoOid = new Types.ObjectId(linea.conceptoId);
+        if (linea.monto > 0) {
+          await this.valoresRecurrentes
+            .findOneAndUpdate(
+              {
+                coPropertyId,
+                inmuebleId: inmuebleOid,
+                conceptoId: conceptoOid,
+              },
+              { $set: { amount: linea.monto } },
+              { upsert: true },
+            )
+            .exec();
+        } else {
+          await this.valoresRecurrentes
+            .deleteOne({
+              coPropertyId,
+              inmuebleId: inmuebleOid,
+              conceptoId: conceptoOid,
+            })
+            .exec();
+        }
+      }),
+    );
+
+    return this.obtener(inmuebleId);
+  }
+}
