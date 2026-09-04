@@ -12,6 +12,7 @@ import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../../casl/policies.guard';
 import { CheckAbility } from '../../casl/check-ability.decorator';
 import { DocumentosService } from './documentos.service';
+import type { CrearConsecutivoDto } from './dto/crear-consecutivo.dto';
 import type { ActualizarConsecutivoDto } from './dto/actualizar-consecutivo.dto';
 import type { CrearResolucionDto } from './dto/crear-resolucion.dto';
 import type { ActualizarResolucionMetadataDto } from './dto/actualizar-resolucion-metadata.dto';
@@ -30,6 +31,15 @@ export class DocumentosController {
     resolucion: ResolucionAdmin | null;
   }> {
     return this.documentos.findAll();
+  }
+
+  @Post('consecutivos/:documentType')
+  @CheckAbility({ action: 'create', subject: 'Configuracion' })
+  crearConsecutivo(
+    @Param('documentType') documentType: TipoDocumento,
+    @Body() dto: CrearConsecutivoDto,
+  ): Promise<DocumentoAdmin> {
+    return this.documentos.crearConsecutivo(documentType, dto);
   }
 
   @Patch('consecutivos/:documentType')

@@ -37,6 +37,7 @@ import { TenantContextService } from '../../../common/tenant/tenant-context.serv
 import { escapeRegex } from '../../../common/utils/query.utils';
 import { toDocumentoAdmin, toResolucionAdmin } from './documentos.mapper';
 import type { ActualizarConsecutivoDto } from './dto/actualizar-consecutivo.dto';
+import type { CrearConsecutivoDto } from './dto/crear-consecutivo.dto';
 import type { CrearResolucionDto } from './dto/crear-resolucion.dto';
 import type { ActualizarResolucionMetadataDto } from './dto/actualizar-resolucion-metadata.dto';
 
@@ -78,6 +79,43 @@ export class DocumentosService {
       items: consecutivos.map(toDocumentoAdmin),
       resolucion: resolucionActiva ? toResolucionAdmin(resolucionActiva) : null,
     };
+  }
+
+  /**
+   * Creates a ConsecutivoDocumento row for a type that does not have one yet.
+   * FV is excluded: its numbering comes from ResolucionFacturacion, never
+   * from this collection — see the note on the schema.
+   */
+  async crearConsecutivo(
+    documentType: TipoDocumento,
+    dto: CrearConsecutivoDto,
+  ): Promise<DocumentoAdmin> {
+    if (documentType === 'FV') {
+      throw new BadRequestException(
+        'La numeración de facturas se gestiona desde la Resolución de Facturación, no acá.',
+      );
+    }
+
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const yaExiste = await this.consecutivos
+      .exists({ coPropertyId, documentType })
+      .exec();
+    if (yaExiste) {
+      throw new ConflictException(
+        `Ya existe un consecutivo para ${documentType}`,
+      );
+    }
+
+    const creado = await this.consecutivos.create({
+      coPropertyId,
+      documentType,
+      prefix: dto.prefijo ?? documentType,
+      nextNumber: dto.numeroInicial ?? 1,
+      displayName: dto.nombreDocumento ?? null,
+      accountingVoucherCode: dto.comprobanteContable ?? null,
+    });
+
+    return toDocumentoAdmin(creado);
   }
 
   /**

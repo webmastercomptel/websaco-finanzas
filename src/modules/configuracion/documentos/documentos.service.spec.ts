@@ -52,13 +52,18 @@ const resolucionDoc = (over: Record<string, unknown> = {}) => ({
 /** A `find/findOne/findOneAndUpdate` chain mock that supports both a plain
  *  `.exec()` and `.session(s).exec()`/`.lean().exec()` — the shapes
  *  documentos.service.ts actually calls across its different methods. */
-const modeloConsecutivos = (filas: Record<string, unknown>[]) => {
+const modeloConsecutivos = (
+  filas: Record<string, unknown>[],
+  opts: { existeYa?: boolean } = {},
+) => {
   const cadena = (data: unknown): Record<string, unknown> => ({
     session: () => cadena(data),
     sort: () => cadena(data),
     exec: () => Promise.resolve(data),
   });
+  const creadas: Record<string, unknown>[] = [];
   return {
+    creadas,
     find: jest.fn(() => cadena(filas)),
     findOne: jest.fn(() => cadena(filas[0] ?? null)),
     findOneAndUpdate: jest.fn(
@@ -67,6 +72,13 @@ const modeloConsecutivos = (filas: Record<string, unknown>[]) => {
         return cadena({ ...(filas[0] ?? {}), ...set });
       },
     ),
+    exists: jest.fn(() => ({
+      exec: () => Promise.resolve(opts.existeYa ? { _id: 'x' } : null),
+    })),
+    create: jest.fn((doc: Record<string, unknown>) => {
+      creadas.push(doc);
+      return Promise.resolve({ _id: new Types.ObjectId(), ...doc });
+    }),
   };
 };
 
@@ -142,6 +154,62 @@ describe('DocumentosService.findAll', () => {
     const resultado = await service.findAll();
 
     expect(resultado.resolucion).toBeNull();
+  });
+});
+
+describe('DocumentosService.crearConsecutivo', () => {
+  it('rechaza crear un consecutivo para FV', async () => {
+    const service = construir({ consecutivos: modeloConsecutivos([]) });
+
+    await expect(service.crearConsecutivo('FV', {})).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('rechaza si ya existe un consecutivo para ese tipo', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: true });
+    const service = construir({ consecutivos });
+
+    await expect(service.crearConsecutivo('RC', {})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(consecutivos.create).not.toHaveBeenCalled();
+  });
+
+  it('crea con los defaults correctos cuando no vienen', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    const resultado = await service.crearConsecutivo('NC', {});
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      documentType: 'NC',
+      prefix: 'NC',
+      nextNumber: 1,
+      displayName: null,
+      accountingVoucherCode: null,
+    });
+    expect(resultado.tipo).toBe('NC');
+  });
+
+  it('usa el prefijo y número inicial enviados', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    await service.crearConsecutivo('ND', {
+      prefijo: 'ND-2026',
+      numeroInicial: 500,
+      nombreDocumento: 'Nota Débito',
+      comprobanteContable: '05',
+    });
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      documentType: 'ND',
+      prefix: 'ND-2026',
+      nextNumber: 500,
+      displayName: 'Nota Débito',
+      accountingVoucherCode: '05',
+    });
   });
 });
 
