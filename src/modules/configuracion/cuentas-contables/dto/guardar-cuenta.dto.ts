@@ -25,23 +25,20 @@ class CamposCuentaDto {
   flujoCaja?: boolean;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  centroUtilidad?: string;
+  @IsBoolean()
+  centroUtilidad?: boolean;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  centroDestino?: string;
+  @IsBoolean()
+  centroDestino?: boolean;
 
   @IsOptional()
   @IsBoolean()
   requiereDocumentoCruce?: boolean;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(40)
-  tipoImpuesto?: string;
+  @IsBoolean()
+  aplicaImpuesto?: boolean;
 
   @IsOptional()
   @IsNumber()

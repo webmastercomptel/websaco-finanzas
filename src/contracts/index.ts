@@ -796,10 +796,10 @@ export interface CuentaContableContract {
   nombre: string;
   requiereTercero: boolean;
   flujoCaja: boolean;
-  centroUtilidad: string | null;
-  centroDestino: string | null;
+  centroUtilidad: boolean;
+  centroDestino: boolean;
   requiereDocumentoCruce: boolean;
-  tipoImpuesto: string | null;
+  aplicaImpuesto: boolean;
   tasaImpuesto: number;
   activo: boolean;
 }
