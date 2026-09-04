@@ -807,7 +807,8 @@ export interface CuentaContableContract {
 /* ── Configuración: Tabla de Documentos ──────────────────────── */
 
 export interface DocumentoAdmin {
-  tipo: 'FV' | 'RC' | 'NC' | 'ND' | 'NT';
+  categoria: 'FV' | 'IN' | 'NC' | 'ND' | 'NT';
+  codigo: string;
   nombreDocumento: string | null;
   prefijo: string;
   numero: number;
