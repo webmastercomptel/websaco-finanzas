@@ -66,7 +66,7 @@ const valoresRecurrentesModeloCon = () => {
 };
 
 describe('InmueblesService.importar', () => {
-  it('crea cada fila como una unidad, contando el total', async () => {
+  it('crea cada fila como un inmueble, contando el total', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
     const valoresRecurrentes = valoresRecurrentesModeloCon();
@@ -155,7 +155,7 @@ describe('InmueblesService.importar', () => {
     expect(inmuebles.escrituras[0]).toMatchObject({ holderId: 'ter-nuevo' });
   });
 
-  it('deja la unidad sin titular cuando la fila no trae ninguno: se carga antes que sus papeles', async () => {
+  it('deja el inmueble sin titular cuando la fila no trae ninguno: se carga antes que sus papeles', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
     const valoresRecurrentes = valoresRecurrentesModeloCon();
@@ -188,7 +188,7 @@ describe('InmueblesService.importar', () => {
     expect(inmuebles.escrituras[0]).toMatchObject({ coPropertyId: COP });
   });
 
-  it('guarda los cargos de la fila contra la unidad recién creada', async () => {
+  it('guarda los cargos de la fila contra el inmueble recién creado', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
     const valoresRecurrentes = valoresRecurrentesModeloCon();

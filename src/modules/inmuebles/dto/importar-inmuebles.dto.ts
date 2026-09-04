@@ -85,7 +85,7 @@ export class FilaImportarInmuebleDto {
 
   /* ── El titular, en la misma fila ──────────────────────────────
    * Ninguno de estos campos es obligatorio: una fila puede describir una
-   * unidad sin papeles todavía, el mismo caso que ya contempla Tercero.
+   * inmueble sin papeles todavía, el mismo caso que ya contempla Tercero.
    */
 
   @IsOptional()

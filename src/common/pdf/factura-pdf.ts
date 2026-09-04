@@ -42,7 +42,7 @@ export async function generarPdfFactura(
     'Fecha de vencimiento:',
     formatoFecha(factura.dueDate),
   );
-  escribirLabelValor(ctx, 'Unidad:', factura.unitCode);
+  escribirLabelValor(ctx, 'Inmueble:', factura.unitCode);
   escribirLabelValor(
     ctx,
     'Periodo:',

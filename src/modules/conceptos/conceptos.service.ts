@@ -190,7 +190,7 @@ export class ConceptosService {
     }
     if (enRecurrentes) {
       throw new ConflictException(
-        'Este cargo todavía está asignado como valor recurrente a una o más unidades',
+        'Este cargo todavía está asignado como valor recurrente a uno o más inmuebles',
       );
     }
 

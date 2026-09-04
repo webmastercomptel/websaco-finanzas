@@ -39,7 +39,7 @@ export async function generarPdfEstadoCuenta(
   ctx.y -= 24;
 
   // ── Property + owner info ──
-  escribirLabelValor(ctx, 'Unidad:', estado.inmuebleCodigo);
+  escribirLabelValor(ctx, 'Inmueble:', estado.inmuebleCodigo);
   if (estado.propietario) {
     escribirLabelValor(ctx, 'Propietario:', estado.propietario);
   }
