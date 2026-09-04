@@ -764,6 +764,13 @@ export interface AuthMe {
   nombre: string | null;
   esAdministradorPlataforma: boolean;
   copropiedades: CopropiedadResumen[];
+  /**
+   * Scope of the caller's primary assignment — enough for the header to
+   * label who is signed in, without the names/permissions `AsignacionResumen`
+   * carries. Null for a platform administrator (that flag already says
+   * enough) and for a person with no assignment yet.
+   */
+  alcance: 'copropiedad' | 'entidad' | null;
 }
 
 /* ── Consulta de Movimiento Contable (§12) ────────────────────── */
@@ -832,6 +839,22 @@ export interface CuentaContableContract {
   aplicaImpuesto: boolean;
   tasaImpuesto: number;
   activo: boolean;
+}
+
+/** One row of a bulk cuentas-contables import that failed — same shape as
+ *  `ErrorImportacionInmueble`, kept separate so each import endpoint's
+ *  contract can evolve independently. */
+export interface ErrorImportacionCuenta {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string | null;
+  mensaje: string;
+}
+
+export interface ResultadoImportacionCuentas {
+  total: number;
+  creados: number;
+  errores: ErrorImportacionCuenta[];
 }
 
 /* ── Configuración: Tabla de Documentos ──────────────────────── */

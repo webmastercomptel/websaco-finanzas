@@ -164,6 +164,22 @@ export class AccesoService {
     }));
   }
 
+  /**
+   * The scope of this account's primary assignment, for display purposes
+   * (the header's "who is signed in" label) — not an access decision, so it
+   * skips permissions and names entirely. Null means no active assignment.
+   */
+  async alcancePrimarioDe(
+    accountId: string,
+  ): Promise<'copropiedad' | 'entidad' | null> {
+    const asignacion = await this.asignaciones
+      .findOne({ accountId: new Types.ObjectId(accountId), status: 'active' })
+      .select('scope')
+      .lean()
+      .exec();
+    return asignacion?.scope ?? null;
+  }
+
   /** Loads names for the resolved ids, dropping any that is not active. */
   private async describir(
     ids: string[],

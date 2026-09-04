@@ -206,6 +206,87 @@ describe('CuentasContablesService.update', () => {
   });
 });
 
+describe('CuentasContablesService.importar', () => {
+  /** Records every code checked and every doc written; codes in `existentes`
+   *  are reported as already taken — same shape as the inmuebles import
+   *  spec's per-code model, since `importar` here is per-row, not a single
+   *  global duplicate switch like `modeloCon`'s `opts.duplicado`. */
+  const modeloImportarCon = (existentes: string[] = []) => {
+    const creadas: Record<string, unknown>[] = [];
+    return {
+      creadas,
+      exists: jest.fn(({ code }: Filtro) => ({
+        exec: () =>
+          Promise.resolve(
+            existentes.includes(code as string) ? { _id: 'x' } : null,
+          ),
+      })),
+      create: jest.fn((doc: Record<string, unknown>) => {
+        creadas.push(doc);
+        return Promise.resolve(cuentaDoc(doc));
+      }),
+    };
+  };
+
+  it('crea cada fila como una cuenta, contando el total', async () => {
+    const modelo = modeloImportarCon();
+    const service = crearServicio(modelo as never);
+
+    const resultado = await service.importar({
+      filas: [
+        { codigo: '11050501', nombre: 'Caja' },
+        { codigo: '11050502', nombre: 'Banco' },
+      ],
+    });
+
+    expect(resultado).toEqual({ total: 2, creados: 2, errores: [] });
+    expect(modelo.creadas).toHaveLength(2);
+  });
+
+  it('una fila con código repetido falla sola, sin abortar el resto', async () => {
+    // Un archivo de 400 filas con tres typos no debería tener que
+    // resubirse entero.
+    const modelo = modeloImportarCon(['11050501']);
+    const service = crearServicio(modelo as never);
+
+    const resultado = await service.importar({
+      filas: [
+        { codigo: '11050501', nombre: 'Caja' },
+        { codigo: '11050502', nombre: 'Banco' },
+      ],
+    });
+
+    expect(resultado.creados).toBe(1);
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0]).toMatchObject({
+      fila: 1,
+      codigo: '11050501',
+    });
+    expect(resultado.errores[0].mensaje).toContain('11050501');
+  });
+
+  it('reenvía los flags booleanos y la tasa de impuesto de cada fila', async () => {
+    const modelo = modeloImportarCon();
+    const service = crearServicio(modelo as never);
+
+    await service.importar({
+      filas: [
+        {
+          codigo: '11050501',
+          nombre: 'Caja',
+          aplicaImpuesto: true,
+          tasaImpuesto: 19,
+        },
+      ],
+    });
+
+    expect(modelo.creadas[0]).toMatchObject({
+      appliesTax: true,
+      taxRate: 19,
+    });
+  });
+});
+
 describe('CuentasContablesService.delete', () => {
   it('elimina una cuenta sin uso', async () => {
     const modelo = modeloCon([cuentaDoc()]);

@@ -17,7 +17,12 @@ import { CheckAbility } from '../../casl/check-ability.decorator';
 import { CuentasContablesService } from './cuentas-contables.service';
 import { ListarCuentasDto } from './dto/listar-cuentas.dto';
 import { ActualizarCuentaDto, CrearCuentaDto } from './dto/guardar-cuenta.dto';
-import type { CuentaContableContract, Paginado } from '../../../contracts';
+import { ImportarCuentasDto } from './dto/importar-cuentas.dto';
+import type {
+  CuentaContableContract,
+  Paginado,
+  ResultadoImportacionCuentas,
+} from '../../../contracts';
 
 @Controller('cuentas-contables')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
@@ -42,6 +47,18 @@ export class CuentasContablesController {
   @CheckAbility({ action: 'create', subject: 'Configuracion' })
   create(@Body() dto: CrearCuentaDto): Promise<CuentaContableContract> {
     return this.cuentas.create(dto);
+  }
+
+  /**
+   * Loads the chart of accounts from one file. Gated the same as a single
+   * `create` — importing is bulk creation, not a separate capability.
+   */
+  @Post('importar')
+  @CheckAbility({ action: 'create', subject: 'Configuracion' })
+  importar(
+    @Body() dto: ImportarCuentasDto,
+  ): Promise<ResultadoImportacionCuentas> {
+    return this.cuentas.importar(dto);
   }
 
   @Patch(':id')

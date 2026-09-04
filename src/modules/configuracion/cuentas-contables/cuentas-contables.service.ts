@@ -29,6 +29,8 @@ import type {
   ActualizarCuentaDto,
   CrearCuentaDto,
 } from './dto/guardar-cuenta.dto';
+import type { ImportarCuentasDto } from './dto/importar-cuentas.dto';
+import type { ResultadoImportacionCuentas } from '../../../contracts';
 import { TenantContextService } from '../../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../../common/utils/query.utils';
 
@@ -115,6 +117,34 @@ export class CuentasContablesService {
     });
 
     return toCuentaContable(creada);
+  }
+
+  /**
+   * Loads a chart-of-accounts file in one act: one row, one account. Reuses
+   * `create` per row — same duplicate-code check, same field mapping — so
+   * a bad row fails on its own without aborting the rest (mirrors
+   * `InmueblesService.importar`).
+   */
+  async importar(
+    dto: ImportarCuentasDto,
+  ): Promise<ResultadoImportacionCuentas> {
+    const errores: ResultadoImportacionCuentas['errores'] = [];
+    let creados = 0;
+
+    for (const [indice, fila] of dto.filas.entries()) {
+      try {
+        await this.create(fila);
+        creados += 1;
+      } catch (err) {
+        errores.push({
+          fila: indice + 1,
+          codigo: fila.codigo ?? null,
+          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
+    }
+
+    return { total: dto.filas.length, creados, errores };
   }
 
   async update(

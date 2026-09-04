@@ -27,23 +27,31 @@ export class AuthController {
   async me(@CurrentUser() user: IRequestUser): Promise<AuthMe> {
     // No local account means no assignments to look up, and asking anyway
     // would be a query whose answer is known.
+    const esAdministradorPlataforma = user.isPlatformAdmin === true;
     const copropiedades = user.accountId
       ? await this.acceso.copropiedadesDe(
           user.accountId,
-          user.isPlatformAdmin === true,
+          esAdministradorPlataforma,
         )
       : [];
+    // A platform administrator's own flag already says enough; no need to
+    // also look up an assignment they don't need.
+    const alcance =
+      user.accountId && !esAdministradorPlataforma
+        ? await this.acceso.alcancePrimarioDe(user.accountId)
+        : null;
 
     return {
       uid: user.uid,
       email: user.email,
       nombre: user.nombre ?? null,
-      esAdministradorPlataforma: user.isPlatformAdmin === true,
+      esAdministradorPlataforma,
       copropiedades: copropiedades.map((c) => ({
         id: c.coPropertyId,
         codigo: c.codigo,
         nombre: c.nombre,
       })),
+      alcance,
     };
   }
 }
