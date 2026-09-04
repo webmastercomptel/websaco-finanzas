@@ -1,6 +1,7 @@
 // src/modules/copropiedades/copropiedades.module.ts
 import { Module } from '@nestjs/common';
 import { CopropiedadesController } from './copropiedades.controller';
+import { MiCopropiedadController } from './mi-copropiedad.controller';
 import { CopropiedadesService } from './copropiedades.service';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { ConceptosModule } from '../conceptos/conceptos.module';
@@ -14,7 +15,7 @@ import { ConceptosModule } from '../conceptos/conceptos.module';
  */
 @Module({
   imports: [AuditoriaModule, ConceptosModule],
-  controllers: [CopropiedadesController],
+  controllers: [CopropiedadesController, MiCopropiedadController],
   providers: [CopropiedadesService],
 })
 export class CopropiedadesModule {}

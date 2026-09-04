@@ -44,6 +44,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
+import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   construirContraAsientoNotaDebito,
   construirMovimientos,
@@ -88,6 +89,7 @@ export class NotasDebitoService {
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly lotes: LotesFacturacionService,
   ) {}
 
   private async transaccion<T>(
@@ -117,6 +119,10 @@ export class NotasDebitoService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(dto.inmuebleId);
     const conceptoId = new Types.ObjectId(dto.conceptoId);
+
+    // A refusal costs no session — same placement as
+    // RecibosService.crear()'s own periodo/lotes checks.
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos

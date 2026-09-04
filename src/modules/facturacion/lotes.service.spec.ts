@@ -221,7 +221,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     name: nombre,
   });
 
-  it('resuelve inmueble por código y concepto por nombre, y reemplaza las novedades anteriores', async () => {
+  it('resuelve inmueble por código y concepto por nombre, y agrega la novedad sin reemplazar las anteriores', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
         exec: () =>
@@ -268,13 +268,19 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
     const [, actualizacion] = calls[0] as [
       Record<string, unknown>,
-      Record<string, unknown>,
+      { $push: { adjustments: { $each: Record<string, unknown>[] } } },
     ];
-    expect(actualizacion.$set as Record<string, unknown>).toEqual({
-      adjustments: [
-        { inmuebleId: 'inm-1', conceptoId: 'con-1', amount: 50000, note: null },
-      ],
-    });
+    // ADDITIVE now: $push (not $set) — a fresh upload must never wipe
+    // whatever adjustments already existed on the lote.
+    expect(actualizacion.$push.adjustments.$each).toEqual([
+      expect.objectContaining({
+        inmuebleId: 'inm-1',
+        conceptoId: 'con-1',
+        amount: 50000,
+        note: null,
+        overrides: null,
+      }),
+    ]);
   });
 
   it('reporta por fila cuando el inmueble o el concepto no existen, sin abortar el resto', async () => {
@@ -322,13 +328,17 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
     const [, actualizacion] = calls[0] as [
       Record<string, unknown>,
-      Record<string, unknown>,
+      { $push: { adjustments: { $each: Record<string, unknown>[] } } },
     ];
-    expect(actualizacion.$set as Record<string, unknown>).toEqual({
-      adjustments: [
-        { inmuebleId: 'inm-1', conceptoId: 'con-1', amount: 20000, note: null },
-      ],
-    });
+    expect(actualizacion.$push.adjustments.$each).toEqual([
+      expect.objectContaining({
+        inmuebleId: 'inm-1',
+        conceptoId: 'con-1',
+        amount: 20000,
+        note: null,
+        overrides: null,
+      }),
+    ]);
   });
 
   it('rechaza con NotFoundException si el lote no existe o pertenece a otra copropiedad', async () => {

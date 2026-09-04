@@ -31,16 +31,14 @@ import type {
  * system's twelve fixed slots with rows a building declares as many of as it
  * needs; see the note on the ConceptoCobro schema.
  *
- * Scoped by an explicit `copropiedadId` route param, never
- * TenantContextService: PlatformAdminGuard is what lets an operator edit ANY
- * building's concepts from the platform catalogue — the same shape
- * CopropiedadesService itself uses, and for the same reason.
- *
- * This is a temporary access shape, not the final one: see the CASL subject
- * `ConceptoCobro` already reserved in permission-map.ts. Once a building's own
- * administrator gets a screen for this, it will read the id from
- * TenantContextService instead of a route param and check
- * `conceptos.gestionar` instead of PlatformAdminGuard.
+ * Takes an explicit `copropiedadId` rather than reading
+ * `TenantContextService` itself: `CopropiedadesService.create()` calls
+ * `create()` here to seed the three system concepts for a brand-new building,
+ * before that building has ever been an active tenant on any request — there
+ * is no CLS context to read yet. `ConceptosController` is what resolves the
+ * id from `TenantContextService` for every real end-user request (CASL
+ * subject `ConceptoCobro`, see the note there); this service stays usable by
+ * either caller.
  */
 @Injectable()
 export class ConceptosService {

@@ -5,11 +5,19 @@ import type {
 } from '../../common/acceso/acceso.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-const accesoQueDevuelve = (copropiedades: AccesoCopropiedad[]) => {
+const accesoQueDevuelve = (
+  copropiedades: AccesoCopropiedad[],
+  alcance: 'copropiedad' | 'entidad' | null = null,
+) => {
   const copropiedadesDe = jest.fn().mockResolvedValue(copropiedades);
+  const alcancePrimarioDe = jest.fn().mockResolvedValue(alcance);
   return {
-    servicio: { copropiedadesDe } as unknown as AccesoService,
+    servicio: {
+      copropiedadesDe,
+      alcancePrimarioDe,
+    } as unknown as AccesoService,
     copropiedadesDe,
+    alcancePrimarioDe,
   };
 };
 
@@ -100,5 +108,36 @@ describe('AuthController.me', () => {
     await controller.me(user({ accountId: 'acc-1', isPlatformAdmin: true }));
 
     expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', true);
+  });
+
+  it('devuelve el alcance de la asignación primaria de una cuenta normal', async () => {
+    const { servicio } = accesoQueDevuelve([], 'copropiedad');
+    const controller = new AuthController(servicio);
+
+    const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+    expect(resultado.alcance).toBe('copropiedad');
+  });
+
+  it('no consulta el alcance para un administrador de plataforma: su propia bandera ya alcanza', async () => {
+    const { servicio, alcancePrimarioDe } = accesoQueDevuelve([]);
+    const controller = new AuthController(servicio);
+
+    const resultado = await controller.me(
+      user({ accountId: 'acc-1', isPlatformAdmin: true }),
+    );
+
+    expect(alcancePrimarioDe).not.toHaveBeenCalled();
+    expect(resultado.alcance).toBeNull();
+  });
+
+  it('sin cuenta local, el alcance es null', async () => {
+    const { servicio, alcancePrimarioDe } = accesoQueDevuelve([]);
+    const controller = new AuthController(servicio);
+
+    const resultado = await controller.me(user({ accountId: undefined }));
+
+    expect(alcancePrimarioDe).not.toHaveBeenCalled();
+    expect(resultado.alcance).toBeNull();
   });
 });

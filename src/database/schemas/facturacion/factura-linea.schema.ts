@@ -38,7 +38,9 @@ export const TitularCongeladoSchema =
 /**
  * One invoice line. Everything about the concept it charges is frozen at the
  * moment the line is built — see ConceptoCobro's own schema comment for why:
- * "changing it here must never alter what an issued invoice says."
+ * "changing it here must never alter what an issued invoice says." The one
+ * exception is `novedadId`, which is trace/edit-linking metadata rather than
+ * a frozen billing fact — see its own comment below.
  */
 @Schema({ _id: false })
 export class FacturaLinea {
@@ -68,6 +70,18 @@ export class FacturaLinea {
     enum: ['recurrente', 'novedad', 'interes'],
   })
   source: 'recurrente' | 'novedad' | 'interes';
+
+  /**
+   * The NovedadLote this line came from or was replaced by — null for a
+   * recurrente/interes line never touched manually. Not one of the frozen
+   * facts above: it is a live pointer used while the Lote is still open
+   * (editing a line finds it here to know whether to PATCH that novedad or
+   * POST a new override), not billing data. On an already-consolidado
+   * Factura it is inert history — the NovedadLote it names still lives on
+   * the Lote, but nothing reads this field again once issued.
+   */
+  @Prop({ type: Types.ObjectId, ref: 'NovedadLote', default: null })
+  novedadId: Types.ObjectId | null;
 
   @Prop({ required: true })
   baseAmount: number;

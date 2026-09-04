@@ -27,6 +27,7 @@ export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
   nombreConcepto: linea.conceptName,
   tipoConcepto: linea.conceptKind,
   origen: linea.source,
+  novedadId: linea.novedadId ? linea.novedadId.toString() : null,
   valorBase: linea.baseAmount,
   tasaImpuesto: linea.taxRate,
   valorImpuesto: linea.taxAmount,

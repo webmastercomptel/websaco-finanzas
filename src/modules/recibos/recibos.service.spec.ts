@@ -34,6 +34,12 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
+/** No open Lote in any test here — the guard always passes. */
+const lotesFacturacionFalso = () =>
+  ({
+    exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+  }) as never;
+
 /**
  * Periodo abierto: `exigirAbierto` no lanza. Es el default de TODOS los tests
  * de acá — el periodo cerrado es el caso excepcional, y tiene el suyo propio
@@ -179,6 +185,7 @@ const construirServicio = (opts: {
     conexionCon(session),
     periodo,
     notasDebito as never,
+    lotesFacturacionFalso(),
   );
 
   return {
@@ -742,6 +749,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await service.crear(CUENTA.toString(), {
@@ -846,6 +854,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       conexionCon(session),
       periodoAbierto(),
       notasDebito as never,
+      lotesFacturacionFalso(),
     );
 
     await service.crear(CUENTA.toString(), {
@@ -930,6 +939,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     // aplicarFifo is private — exercised indirectly through crear(), and its
@@ -1012,6 +1022,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       conexionCon(sesionFalsa()),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1067,6 +1078,7 @@ describe('RecibosService.aplicar', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.aplicar(
@@ -1131,6 +1143,7 @@ describe('RecibosService.aplicar', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1170,6 +1183,7 @@ describe('RecibosService.aplicar', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1266,6 +1280,7 @@ describe('RecibosService.anular', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     const resultado = await service.anular(
@@ -1387,6 +1402,7 @@ describe('RecibosService.anular', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1425,6 +1441,7 @@ describe('RecibosService.anular', () => {
       conexionCon(session),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(
@@ -1475,6 +1492,7 @@ describe('RecibosService.findAll', () => {
       conexionCon(sesionFalsa()),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
   function modeloAplicacionesGenerico() {
@@ -1555,6 +1573,7 @@ describe('RecibosService.findOne', () => {
       conexionCon(sesionFalsa()),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     const detalle = await service.findOne(reciboId.toString());
@@ -1579,6 +1598,7 @@ describe('RecibosService.findOne', () => {
       conexionCon(sesionFalsa()),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(
@@ -1706,6 +1726,7 @@ describe('RecibosService — ciclo de vida completo', () => {
       conexionCon(sesionFalsa()),
       periodoAbierto(),
       modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
     );
 
     /** Débitos menos créditos, por cuenta, sobre TODOS los asientos posteados. */
