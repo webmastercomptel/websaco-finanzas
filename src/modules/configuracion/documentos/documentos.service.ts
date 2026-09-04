@@ -307,14 +307,16 @@ export class DocumentosService {
     coPropertyId: unknown,
     prefix: string,
   ): Promise<number> {
-    const modelMap: Record<CategoriaDocumento, Model<{ fullNumber: string }>> =
-      {
-        FV: this.facturas,
-        IN: this.recibos,
-        NC: this.notasCredito,
-        ND: this.notasDebito,
-        NT: this.notasContables,
-      };
+    const modelMap: Record<
+      CategoriaDocumento,
+      Model<{ fullNumber: string }>
+    > = {
+      FV: this.facturas,
+      IN: this.recibos,
+      NC: this.notasCredito,
+      ND: this.notasDebito,
+      NT: this.notasContables,
+    };
     const model = modelMap[categoria];
 
     const matchPrefix = prefix ? `${prefix}-` : '';
