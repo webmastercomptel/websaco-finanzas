@@ -23,6 +23,7 @@ import {
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { ajustarSaldosCarteraPorDistribucion } from '../recibos/cruce.util';
 import {
   construirMovimientosReclasificacion,
@@ -129,7 +130,7 @@ export class NotasContablesService {
 
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
-        'NT',
+        dto.codigo,
         session,
       );
 
@@ -340,7 +341,8 @@ export class NotasContablesService {
 
   /**
    * Posts the 2-leg accounting entry for a reclassification. Reads each
-   * concepto's `accountingIncomeAccount` and falls back to
+   * concepto's CREDIT account (the one invoicing posts income to, per
+   * `construirMovimientos` in asiento.builder.ts) and falls back to
    * `CUENTA_SIN_ASIGNAR` when unset.
    *
    * Called at creation with (origen, destino) and at void with (destino,
@@ -356,18 +358,22 @@ export class NotasContablesService {
     const [cuentaOrigenDoc, cuentaDestinoDoc] = await Promise.all([
       this.conceptos
         .findOne({ _id: cuentaOrigenConceptoId, coPropertyId })
+        .populate('cuentaCreditoId', 'code')
         .session(session)
         .exec(),
       this.conceptos
         .findOne({ _id: cuentaDestinoConceptoId, coPropertyId })
+        .populate('cuentaCreditoId', 'code')
         .session(session)
         .exec(),
     ]);
 
     const cuentaOrigen =
-      cuentaOrigenDoc?.accountingIncomeAccount ?? CUENTA_SIN_ASIGNAR;
+      codigoDeCuentaContable(cuentaOrigenDoc?.cuentaCreditoId) ??
+      CUENTA_SIN_ASIGNAR;
     const cuentaDestino =
-      cuentaDestinoDoc?.accountingIncomeAccount ?? CUENTA_SIN_ASIGNAR;
+      codigoDeCuentaContable(cuentaDestinoDoc?.cuentaCreditoId) ??
+      CUENTA_SIN_ASIGNAR;
 
     const entries = construirMovimientosReclasificacion(
       cuentaOrigen,

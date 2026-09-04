@@ -5,6 +5,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -84,7 +85,7 @@ export class FilaImportarInmuebleDto {
 
   /* ── El titular, en la misma fila ──────────────────────────────
    * Ninguno de estos campos es obligatorio: una fila puede describir una
-   * unidad sin papeles todavía, el mismo caso que ya contempla Tercero.
+   * inmueble sin papeles todavía, el mismo caso que ya contempla Tercero.
    */
 
   @IsOptional()
@@ -116,6 +117,29 @@ export class FilaImportarInmuebleDto {
   @IsString()
   @MaxLength(30)
   telefonoTitular?: string;
+
+  /**
+   * Recurring monthly amounts, same pair shape `ValoresRecurrentesService`
+   * already uses — the frontend resolves each sheet column ("cargo-1",
+   * "cargo-2"…) to a `conceptoId` using the coproperty's own concept order
+   * before this DTO ever sees it (see `inmuebles-importar.tsx`); this side
+   * only ever deals in real ids, never column positions.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CargoImportadoDto)
+  cargos?: CargoImportadoDto[];
+}
+
+class CargoImportadoDto {
+  @IsMongoId()
+  conceptoId: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  monto: number;
 }
 
 /**

@@ -14,12 +14,14 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 
 /**
  * Generates a real PDF for a Factura (sales invoice). Includes the DIAN
- * resolution text — legally required on Colombian invoices — and the
- * copropiedad header. When duplicado is true, stamps the "DUPLICADO" mark.
+ * resolution text — legally required on Colombian invoices that file DIAN
+ * electronic invoicing — and the copropiedad header. When duplicado is
+ * true, stamps the "DUPLICADO" mark. `resolucion` is null for invoices
+ * numbered through the plain FV consecutivo, and the footer is skipped.
  */
 export async function generarPdfFactura(
   factura: FacturaDocument,
-  resolucion: ResolucionFacturacionDocument,
+  resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },
 ): Promise<Uint8Array> {
@@ -40,7 +42,7 @@ export async function generarPdfFactura(
     'Fecha de vencimiento:',
     formatoFecha(factura.dueDate),
   );
-  escribirLabelValor(ctx, 'Unidad:', factura.unitCode);
+  escribirLabelValor(ctx, 'Inmueble:', factura.unitCode);
   escribirLabelValor(
     ctx,
     'Periodo:',
@@ -87,16 +89,18 @@ export async function generarPdfFactura(
   }
 
   // ── DIAN Resolution footer ──
-  ctx.y -= 10;
-  const vigenteHasta = resolucion.validUntil
-    ? ` vigente hasta ${formatoFecha(resolucion.validUntil)}`
-    : '';
-  const resolucionTexto =
-    `Resolución de Facturación DIAN No. ${resolucion.resolutionNumber} ` +
-    `del ${formatoFecha(resolucion.validFrom)}. ` +
-    `Numeración autorizada de ${resolucion.prefix}${resolucion.rangeFrom} ` +
-    `a ${resolucion.prefix}${resolucion.rangeTo}${vigenteHasta}`;
-  escribirLinea(ctx, resolucionTexto, { size: 8 });
+  if (resolucion) {
+    ctx.y -= 10;
+    const vigenteHasta = resolucion.validUntil
+      ? ` vigente hasta ${formatoFecha(resolucion.validUntil)}`
+      : '';
+    const resolucionTexto =
+      `Resolución de Facturación DIAN No. ${resolucion.resolutionNumber} ` +
+      `del ${formatoFecha(resolucion.validFrom)}. ` +
+      `Numeración autorizada de ${resolucion.prefix}${resolucion.rangeFrom} ` +
+      `a ${resolucion.prefix}${resolucion.rangeTo}${vigenteHasta}`;
+    escribirLinea(ctx, resolucionTexto, { size: 8 });
+  }
 
   // ── Duplicado stamp ──
   if (opciones?.duplicado) {

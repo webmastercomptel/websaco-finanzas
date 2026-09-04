@@ -154,7 +154,7 @@ export class NotasCreditoService {
 
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
-        'NC',
+        dto.codigo,
         session,
       );
 

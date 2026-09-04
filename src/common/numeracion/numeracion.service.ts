@@ -13,7 +13,6 @@ import {
 import {
   ConsecutivoDocumento,
   ConsecutivoDocumentoDocument,
-  type TipoDocumento,
 } from '../../database/schemas/numeracion/consecutivo-documento.schema';
 import {
   ConsecutivoLote,
@@ -27,7 +26,7 @@ export interface NumeroAsignado {
   /** How it is printed and searched for: "CONJ-2026-1041". */
   completo: string;
   /** Only set by siguienteFactura — siguienteDocumento's internal documents
-   *  (RC/NC/ND/NT) draw from ConsecutivoDocumento, not a tax resolution. */
+   *  draw from ConsecutivoDocumento, not a tax resolution. */
   resolucionId?: Types.ObjectId;
 }
 
@@ -65,6 +64,13 @@ export class NumeracionService {
    * Numbers are consumed, never returned. A document that fails to save leaves
    * a gap, and a gap is the honest outcome: reusing the number would mean two
    * different documents wore it, which is worse than a hole in the sequence.
+   *
+   * DIAN's electronic-invoicing filing (a ResolucionFacturacion) is not
+   * mandatory for every client. When a coproperty has no active one at all —
+   * never loaded one, as opposed to having exhausted its range — this falls
+   * back to the simple FV consecutivo instead of blocking invoicing outright.
+   * `resolucionId` is absent on that path (see NumeroAsignado), and the
+   * created Factura's own `resolucionId` stays null.
    */
   async siguienteFactura(coPropertyId: string): Promise<NumeroAsignado> {
     const previa = await this.resoluciones
@@ -89,7 +95,7 @@ export class NumeracionService {
       };
 
     // Nothing matched. Two very different situations, and telling them apart is
-    // the difference between "ask an administrator to load the resolution" and
+    // the difference between "fall back to the simple consecutivo" and
     // "call the accountant, we ran out of numbers".
     const activa = await this.resoluciones
       .findOne({
@@ -99,26 +105,47 @@ export class NumeracionService {
       .lean()
       .exec();
 
-    if (!activa) {
-      throw new NotFoundException(
-        'Esta copropiedad no tiene una resolución de facturación activa. ' +
-          'Cargala antes de emitir facturas.',
+    if (activa) {
+      throw new ConflictException(
+        `Se agotó el rango de la resolución ${activa.resolutionNumber} ` +
+          `(hasta ${activa.rangeTo}). Hay que cargar una resolución nueva.`,
       );
     }
 
-    throw new ConflictException(
-      `Se agotó el rango de la resolución ${activa.resolutionNumber} ` +
-        `(hasta ${activa.rangeTo}). Hay que cargar una resolución nueva.`,
-    );
+    // No resolución at all — not every client files DIAN electronic
+    // invoicing. Falls back to a plain ConsecutivoDocumento, category FV,
+    // the same mechanism siguienteDocumento uses for RC/NC/ND/NT.
+    const consecutivo = await this.consecutivos
+      .findOneAndUpdate(
+        { coPropertyId: new Types.ObjectId(coPropertyId), category: 'FV' },
+        { $inc: { nextNumber: 1 } },
+        { new: true },
+      )
+      .exec();
+
+    if (!consecutivo) {
+      throw new NotFoundException(
+        'Esta copropiedad no tiene una Resolución de Facturación activa ni ' +
+          'un tipo de documento FV configurado. Cargá una de las dos en ' +
+          'Documentos antes de emitir facturas.',
+      );
+    }
+
+    return componer(consecutivo.prefix, consecutivo.nextNumber);
   }
 
   /**
-   * Reserves the next number for a document that is not a sales invoice.
+   * Reserves the next number for a document that is not a sales invoice, by
+   * its type CODE (e.g. "RC") — never a category. A building may have
+   * several codes under the same category (see the note on
+   * ConsecutivoDocumento), so the category alone can no longer identify a
+   * row; the caller already knows which code it means.
    *
-   * Same atomicity, without a ceiling: receipts and notes are internal, so
-   * there is no external range to stay inside. The counter is created on first
-   * use — a building that has never issued a receipt should not need somebody
-   * to have prepared a row for it.
+   * No upsert: the row must already exist. Auto-creating one on first use
+   * made sense when a category meant exactly one row, but with several
+   * possible codes per category there is no longer a single sensible
+   * default to invent — an administrator declares a code in Documentos
+   * before anything can be issued under it.
    *
    * `session` is optional so every existing caller keeps compiling unchanged.
    * RecibosService passes one (see design §6, "RC numbering happens inside
@@ -128,33 +155,27 @@ export class NumeracionService {
    */
   async siguienteDocumento(
     coPropertyId: string,
-    tipo: Exclude<TipoDocumento, 'FV'>,
+    code: string,
     session?: ClientSession,
   ): Promise<NumeroAsignado> {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
         {
           coPropertyId: new Types.ObjectId(coPropertyId),
-          documentType: tipo,
+          code,
         },
-        {
-          $inc: { nextNumber: 1 },
-          $setOnInsert: {
-            coPropertyId: new Types.ObjectId(coPropertyId),
-            documentType: tipo,
-            prefix: tipo,
-          },
-        },
+        { $inc: { nextNumber: 1 } },
         // The post-increment document: its nextNumber is the one to use.
-        // {new: false} was the bug here — on an upsert it returns null for
-        // the very first call (forcing a hardcoded "1" fallback), and on
-        // every call after that it returns the PRE-increment value, which
-        // the previous call already handed out. Reading the post-image
-        // directly, like siguienteLote() already does, needs no fallback
-        // and never repeats a number.
-        { new: true, upsert: true, session },
+        { new: true, session },
       )
       .exec();
+
+    if (!actualizado) {
+      throw new NotFoundException(
+        `Esta copropiedad no tiene configurado el tipo de documento "${code}". ` +
+          'Cargalo en Documentos antes de emitir uno.',
+      );
+    }
 
     return componer(actualizado.prefix, actualizado.nextNumber);
   }

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -13,16 +14,19 @@ import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { InmueblesService } from './inmuebles.service';
+import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import {
   ActualizarInmuebleDto,
   CrearInmuebleDto,
 } from './dto/guardar-inmueble.dto';
 import { ImportarInmueblesDto } from './dto/importar-inmuebles.dto';
+import { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
 import type {
   Inmueble,
   Paginado,
   ResultadoImportacionInmuebles,
+  ValorRecurrente,
 } from '../../contracts';
 
 /**
@@ -43,7 +47,10 @@ import type {
 @Controller('inmuebles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class InmueblesController {
-  constructor(private readonly inmuebles: InmueblesService) {}
+  constructor(
+    private readonly inmuebles: InmueblesService,
+    private readonly valoresRecurrentes: ValoresRecurrentesService,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Inmueble' })
@@ -88,5 +95,26 @@ export class InmueblesController {
     @Body() dto: ActualizarInmuebleDto,
   ): Promise<Inmueble> {
     return this.inmuebles.update(id, dto);
+  }
+
+  /**
+   * The unit's recurring monthly amounts — one entry per concept in the
+   * building's catalog. See the note on `ValoresRecurrentesService`.
+   */
+  @Get(':id/valores-recurrentes')
+  @CheckAbility({ action: 'read', subject: 'Inmueble' })
+  obtenerValoresRecurrentes(
+    @Param('id') id: string,
+  ): Promise<ValorRecurrente[]> {
+    return this.valoresRecurrentes.obtener(id);
+  }
+
+  @Put(':id/valores-recurrentes')
+  @CheckAbility({ action: 'update', subject: 'Inmueble' })
+  guardarValoresRecurrentes(
+    @Param('id') id: string,
+    @Body() dto: GuardarValoresRecurrentesDto,
+  ): Promise<ValorRecurrente[]> {
+    return this.valoresRecurrentes.guardar(id, dto);
   }
 }

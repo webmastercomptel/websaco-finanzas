@@ -20,6 +20,7 @@ const documento = (over: Record<string, unknown> = {}) => ({
   holderResides: true,
   collectionStatus: 'al_dia',
   status: 'active',
+  updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...over,
 });
 
@@ -68,6 +69,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.findAll({});
@@ -83,6 +85,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(null),
+      {} as never,
     );
 
     await expect(service.findAll({})).rejects.toBeInstanceOf(
@@ -98,6 +101,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.findAll({});
@@ -111,6 +115,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.findAll({ estado: 'todos' });
@@ -126,6 +131,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.findAll({ buscar: 'Torre A (301)' });
@@ -142,6 +148,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     const resultado = await service.findAll({ buscar: '301' });
@@ -156,6 +163,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     const { items } = await service.findAll({});
@@ -175,6 +183,7 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     const resultado = await service.findAll({});
@@ -192,6 +201,7 @@ describe('InmueblesService.findOne', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.findOne('inm-1');
@@ -207,6 +217,7 @@ describe('InmueblesService.findOne', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await expect(service.findOne('inm-ajeno')).rejects.toBeInstanceOf(

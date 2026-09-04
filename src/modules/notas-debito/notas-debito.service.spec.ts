@@ -90,11 +90,12 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     },
     conceptos: {
       findOne: jest.fn(() => ({
+        populate: jest.fn().mockReturnThis(),
         exec: jest.fn(() =>
           Promise.resolve({
             _id: CONCEPTO,
             coPropertyId: COP,
-            accountingIncomeAccount: '4105',
+            cuentaCreditoId: { code: '4105' },
           }),
         ),
       })),
@@ -142,6 +143,7 @@ describe('NotasDebitoService', () => {
     it('crea una nota débito con saldo igual al total', async () => {
       const svc = servicio();
       const resultado = await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
         total: 50000,
@@ -156,6 +158,7 @@ describe('NotasDebitoService', () => {
       const svc = servicio({
         conceptos: {
           findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
             exec: jest.fn(() => Promise.resolve(null)),
           })),
         },
@@ -163,6 +166,7 @@ describe('NotasDebitoService', () => {
 
       await expect(
         svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
           inmuebleId: INMUEBLE.toString(),
           conceptoId: CONCEPTO.toString(),
           total: 50000,

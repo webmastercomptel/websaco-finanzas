@@ -23,7 +23,8 @@ const tenantQueDevuelve = () => ({ resolveCoPropertyId: () => COP }) as never;
 const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   coPropertyId: COP,
-  documentType: 'RC',
+  category: 'IN',
+  code: 'RC',
   prefix: 'RC',
   nextNumber: 10,
   displayName: 'Recibo de Caja',
@@ -52,13 +53,18 @@ const resolucionDoc = (over: Record<string, unknown> = {}) => ({
 /** A `find/findOne/findOneAndUpdate` chain mock that supports both a plain
  *  `.exec()` and `.session(s).exec()`/`.lean().exec()` — the shapes
  *  documentos.service.ts actually calls across its different methods. */
-const modeloConsecutivos = (filas: Record<string, unknown>[]) => {
+const modeloConsecutivos = (
+  filas: Record<string, unknown>[],
+  opts: { existeYa?: boolean } = {},
+) => {
   const cadena = (data: unknown): Record<string, unknown> => ({
     session: () => cadena(data),
     sort: () => cadena(data),
     exec: () => Promise.resolve(data),
   });
+  const creadas: Record<string, unknown>[] = [];
   return {
+    creadas,
     find: jest.fn(() => cadena(filas)),
     findOne: jest.fn(() => cadena(filas[0] ?? null)),
     findOneAndUpdate: jest.fn(
@@ -67,6 +73,13 @@ const modeloConsecutivos = (filas: Record<string, unknown>[]) => {
         return cadena({ ...(filas[0] ?? {}), ...set });
       },
     ),
+    exists: jest.fn(() => ({
+      exec: () => Promise.resolve(opts.existeYa ? { _id: 'x' } : null),
+    })),
+    create: jest.fn((doc: Record<string, unknown>) => {
+      creadas.push(doc);
+      return Promise.resolve({ _id: new Types.ObjectId(), ...doc });
+    }),
   };
 };
 
@@ -107,6 +120,7 @@ const construir = (opts: {
   consecutivos?: ReturnType<typeof modeloConsecutivos>;
   resoluciones?: ReturnType<typeof modeloResoluciones>;
   recibos?: ReturnType<typeof modeloDocumentos>;
+  facturas?: ReturnType<typeof modeloDocumentos>;
   session?: ReturnType<typeof sesionFalsa>;
 }) => {
   const session = opts.session ?? sesionFalsa();
@@ -117,6 +131,7 @@ const construir = (opts: {
     modeloDocumentos([]) as never, // notasCredito
     modeloDocumentos([]) as never, // notasDebito
     modeloDocumentos([]) as never, // notasContables
+    (opts.facturas ?? modeloDocumentos([])) as never,
     tenantQueDevuelve(),
     conexionCon(session),
   );
@@ -132,7 +147,8 @@ describe('DocumentosService.findAll', () => {
     const resultado = await service.findAll();
 
     expect(resultado.items).toHaveLength(1);
-    expect(resultado.items[0].tipo).toBe('RC');
+    expect(resultado.items[0].categoria).toBe('IN');
+    expect(resultado.items[0].codigo).toBe('RC');
     expect(resultado.resolucion?.numeroResolucion).toBe('RES-001');
   });
 
@@ -142,6 +158,86 @@ describe('DocumentosService.findAll', () => {
     const resultado = await service.findAll();
 
     expect(resultado.resolucion).toBeNull();
+  });
+});
+
+describe('DocumentosService.crearConsecutivo', () => {
+  it('permite crear un consecutivo para FV — la resolución DIAN es opcional', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    const resultado = await service.crearConsecutivo('FV', { codigo: 'FV' });
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      category: 'FV',
+      code: 'FV',
+    });
+    expect(resultado.categoria).toBe('FV');
+  });
+
+  it('rechaza si ya existe un consecutivo con ese código', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: true });
+    const service = construir({ consecutivos });
+
+    await expect(
+      service.crearConsecutivo('IN', { codigo: 'RC' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(consecutivos.create).not.toHaveBeenCalled();
+  });
+
+  it('crea con los defaults correctos cuando no vienen', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    const resultado = await service.crearConsecutivo('NC', { codigo: 'NC' });
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      category: 'NC',
+      code: 'NC',
+      prefix: 'NC',
+      nextNumber: 1,
+      displayName: null,
+      accountingVoucherCode: null,
+    });
+    expect(resultado.categoria).toBe('NC');
+    expect(resultado.codigo).toBe('NC');
+  });
+
+  it('permite varios códigos bajo la misma categoría', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    await service.crearConsecutivo('IN', {
+      codigo: 'CI',
+      nombreDocumento: 'Comprobante de Ingreso',
+    });
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      category: 'IN',
+      code: 'CI',
+    });
+  });
+
+  it('usa el prefijo y número inicial enviados', async () => {
+    const consecutivos = modeloConsecutivos([], { existeYa: false });
+    const service = construir({ consecutivos });
+
+    await service.crearConsecutivo('ND', {
+      codigo: 'ND',
+      prefijo: 'ND-2026',
+      numeroInicial: 500,
+      nombreDocumento: 'Nota Débito',
+      comprobanteContable: '05',
+    });
+
+    expect(consecutivos.creadas[0]).toMatchObject({
+      category: 'ND',
+      code: 'ND',
+      prefix: 'ND-2026',
+      nextNumber: 500,
+      displayName: 'Nota Débito',
+      accountingVoucherCode: '05',
+    });
   });
 });
 

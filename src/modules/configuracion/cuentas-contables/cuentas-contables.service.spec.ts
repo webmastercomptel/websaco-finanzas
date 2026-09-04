@@ -10,10 +10,10 @@ const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   name: 'Caja General',
   requiresTercero: false,
   cashFlow: true,
-  profitCenterCode: null,
-  destinationCenterCode: null,
+  profitCenter: false,
+  destinationCenter: false,
   requiresCrossDocument: false,
-  taxType: null,
+  appliesTax: false,
   taxRate: 0,
   active: true,
   ...over,
@@ -54,10 +54,36 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
         exec: () => Promise.resolve(cuentaDoc()),
       }),
     ),
+    deleteOne: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      return { exec: () => Promise.resolve({ deletedCount: 1 }) };
+    }),
   };
 };
 
 const tenant = () => ({ resolveCoPropertyId: () => COP }) as never;
+
+const modeloExists = (existe: boolean) => ({
+  exists: jest.fn(() => ({
+    exec: () => Promise.resolve(existe ? { _id: 'x' } : null),
+  })),
+});
+
+const crearServicio = (
+  modelo: ReturnType<typeof modeloCon>,
+  opts: {
+    enConceptos?: boolean;
+    enAsientos?: boolean;
+    enCopropiedad?: boolean;
+  } = {},
+): CuentasContablesService =>
+  new CuentasContablesService(
+    modelo as never,
+    modeloExists(opts.enConceptos ?? false) as never,
+    modeloExists(opts.enAsientos ?? false) as never,
+    modeloExists(opts.enCopropiedad ?? false) as never,
+    tenant(),
+  );
 
 describe('CuentasContablesService.findAll', () => {
   it('sin filtro de estado, muestra solo las activas — no las inactivas', async () => {
@@ -65,7 +91,7 @@ describe('CuentasContablesService.findAll', () => {
     // (`estado === 'activo'`) y con `estado` sin enviar terminaba filtrando
     // por `active: false`, mostrando cuentas inactivas por defecto.
     const modelo = modeloCon([cuentaDoc()]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.findAll({});
 
@@ -74,7 +100,7 @@ describe('CuentasContablesService.findAll', () => {
 
   it('estado=inactivo muestra solo las inactivas', async () => {
     const modelo = modeloCon([]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.findAll({ estado: 'inactivo' });
 
@@ -83,7 +109,7 @@ describe('CuentasContablesService.findAll', () => {
 
   it('estado=todos no filtra por active', async () => {
     const modelo = modeloCon([]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.findAll({ estado: 'todos' });
 
@@ -92,7 +118,7 @@ describe('CuentasContablesService.findAll', () => {
 
   it('busca por código o por nombre', async () => {
     const modelo = modeloCon([]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.findAll({ buscar: 'Caja' });
 
@@ -106,7 +132,7 @@ describe('CuentasContablesService.findAll', () => {
 describe('CuentasContablesService.findOne', () => {
   it('responde "no existe" cuando no hay fila', async () => {
     const modelo = modeloCon([]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await expect(service.findOne('cta-ajena')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -117,7 +143,7 @@ describe('CuentasContablesService.findOne', () => {
 describe('CuentasContablesService.create', () => {
   it('rechaza un código repetido', async () => {
     const modelo = modeloCon([], { duplicado: true });
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await expect(
       service.create({ codigo: '11050501', nombre: 'Otra' }),
@@ -126,7 +152,7 @@ describe('CuentasContablesService.create', () => {
 
   it('crea con los defaults correctos cuando los flags no vienen', async () => {
     const modelo = modeloCon([]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.create({ codigo: '11050502', nombre: 'Banco' });
 
@@ -147,7 +173,7 @@ describe('CuentasContablesService.create', () => {
 describe('CuentasContablesService.update', () => {
   it('solo escribe los campos enviados', async () => {
     const modelo = modeloCon([cuentaDoc()]);
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await service.update('cta-1', { nombre: 'Caja Principal' });
 
@@ -163,7 +189,7 @@ describe('CuentasContablesService.update', () => {
     modelo.findOneAndUpdate = jest.fn(() => ({
       exec: () => Promise.resolve(null),
     })) as never;
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await expect(
       service.update('cta-ajena', { nombre: 'X' }),
@@ -172,10 +198,63 @@ describe('CuentasContablesService.update', () => {
 
   it('rechaza chocar el código con otra cuenta', async () => {
     const modelo = modeloCon([cuentaDoc()], { duplicado: true });
-    const service = new CuentasContablesService(modelo as never, tenant());
+    const service = crearServicio(modelo);
 
     await expect(
       service.update('cta-1', { codigo: '11050501' }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('CuentasContablesService.delete', () => {
+  it('elimina una cuenta sin uso', async () => {
+    const modelo = modeloCon([cuentaDoc()]);
+    const service = crearServicio(modelo);
+
+    await service.delete('cta-1');
+
+    expect(modelo.deleteOne).toHaveBeenCalledWith({
+      _id: 'cta-1',
+      coPropertyId: COP,
+    });
+  });
+
+  it('rechaza eliminar una cuenta asignada a un cargo', async () => {
+    const modelo = modeloCon([cuentaDoc()]);
+    const service = crearServicio(modelo, { enConceptos: true });
+
+    await expect(service.delete('cta-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('rechaza eliminar una cuenta con movimientos contables', async () => {
+    const modelo = modeloCon([cuentaDoc()]);
+    const service = crearServicio(modelo, { enAsientos: true });
+
+    await expect(service.delete('cta-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('rechaza eliminar una cuenta configurada en la copropiedad', async () => {
+    const modelo = modeloCon([cuentaDoc()]);
+    const service = crearServicio(modelo, { enCopropiedad: true });
+
+    await expect(service.delete('cta-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(modelo.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('responde "no existe" cuando el id no corresponde a ninguna', async () => {
+    const modelo = modeloCon([]);
+    const service = crearServicio(modelo);
+
+    await expect(service.delete('cta-ajena')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

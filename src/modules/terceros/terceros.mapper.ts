@@ -6,7 +6,7 @@ import type { TerceroDocument } from '../../database/schemas/terceros/tercero.sc
  * Maps a party document to the Spanish API contract.
  *
  * Persistence is English, the API is Spanish, and this is the only place the
- * two meet — see "the contract law" in AGENTS.md.
+ * two meet — see "the contract law" in CLAUDE.md.
  */
 export const toTercero = (doc: TerceroDocument): TerceroContract => ({
   id: doc._id.toString(),

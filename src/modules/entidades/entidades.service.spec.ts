@@ -230,21 +230,6 @@ describe('EntidadesService.update', () => {
     expect(resultado.estado).toBe('activo'); // el doc devuelto por el stub
   });
 
-  it('no choca consigo misma al guardar sin cambiar el código', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new EntidadesService(
-      modelo as never,
-      mockAuditoria() as never,
-    );
-
-    await service.update('ent-1', { codigo: 'ENT-001' }, ACTOR);
-
-    expect(modelo.filtros[0]).toEqual({
-      code: 'ENT-001',
-      _id: { $ne: 'ent-1' },
-    });
-  });
-
   it('responde "no existe" cuando el id no corresponde a ninguna', async () => {
     const modelo = modeloCon([documento()]);
     modelo.findByIdAndUpdate = jest.fn(() => ({

@@ -4,7 +4,15 @@ import { HydratedDocument, Types } from 'mongoose';
 import { Copropiedad } from './copropiedad.schema';
 import { Tercero } from '../terceros/tercero.schema';
 
-export type InmuebleDocument = HydratedDocument<Inmueble>;
+// `mongoose.SchemaTimestampsConfig` is the *options* shape (`timestamps:
+// true` accepts it) — not the resulting document's field types, which
+// mongoose adds at runtime but the `Inmueble` class never declares. This
+// intersection surfaces `createdAt`/`updatedAt` as real `Date`s on the type
+// so the mapper can read `doc.updatedAt` without a class field for it.
+export type InmuebleDocument = HydratedDocument<Inmueble> & {
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 /**
  * A unit inside a coproperty — what an invoice is addressed to.
@@ -16,7 +24,7 @@ export type InmuebleDocument = HydratedDocument<Inmueble>;
 export class Inmueble {
   /**
    * Owning coproperty. Every query for units MUST filter by this — see the
-   * tenancy law in AGENTS.md.
+   * tenancy law in CLAUDE.md.
    */
   @Prop({
     type: Types.ObjectId,

@@ -76,6 +76,8 @@ export interface Inmueble {
   resideEnElInmueble: boolean;
   estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
   estado: 'activo' | 'inactivo';
+  /** ISO 8601 — when this unit's record was last saved. */
+  fechaActualizacion: IsoDate;
 }
 
 /** One row's outcome from a bulk import that could not be created. */
@@ -630,6 +632,15 @@ export interface Copropiedad {
    * Account holding an assignment scoped to this coproperty.
    */
   nombreAdministrador: string | null;
+  /**
+   * Who `nombreAdministrador`'s own note points to: the account(s) with an
+   * active Asignación scoped directly to this coproperty (`entidadAdministradora`
+   * null case only — an entidad grant covers the building through the
+   * company, not through a per-building Asignación row). Several names,
+   * comma-joined, when more than one account is assigned. Null when nobody
+   * is, same as `entidadAdministradora`.
+   */
+  usuarioAdministrador: string | null;
   estado: 'activo' | 'inactivo';
   /** Whether this building ALSO uses the building-management system. */
   usaGestionEdificios: boolean;
@@ -665,8 +676,32 @@ export interface ConceptoCobro {
   tipo: 'administracion' | 'intereses' | 'otro';
   tasaImpuesto: number;
   orden: number;
-  activo: boolean;
-  cuentaContableIngreso: string | null;
+  cuentaDebitoId: string | null;
+  cuentaDebitoCodigo: string | null;
+  cuentaCreditoId: string | null;
+  cuentaCreditoCodigo: string | null;
+  liquidaMora: boolean;
+  cargaXls: boolean;
+  sistema: boolean;
+}
+
+/**
+ * What one unit is charged for one concept, every billing cycle — the
+ * standing template `LotesFacturacionService.liquidar()` reads to build each
+ * month's invoice lines. See the note on `ValorRecurrente`'s schema: this
+ * replaces the legacy "Datos Financieros" tab's twelve fixed columns with one
+ * row per concept the building actually declared.
+ *
+ * Always one entry per concept in the coproperty's catalog (`intereses`
+ * excluded — that one is computed from overdue balances, never a flat
+ * amount), `monto: 0` meaning no `ValorRecurrente` row exists for that pair
+ * yet — never that a zero-amount row was saved. Saving `monto: 0` back
+ * deletes the row rather than persisting a zero.
+ */
+export interface ValorRecurrente {
+  conceptoId: string;
+  conceptoNombre: string;
+  monto: Monto;
 }
 
 /* ── Usuarios (platform config) ───────────────────────────────────
@@ -791,10 +826,10 @@ export interface CuentaContableContract {
   nombre: string;
   requiereTercero: boolean;
   flujoCaja: boolean;
-  centroUtilidad: string | null;
-  centroDestino: string | null;
+  centroUtilidad: boolean;
+  centroDestino: boolean;
   requiereDocumentoCruce: boolean;
-  tipoImpuesto: string | null;
+  aplicaImpuesto: boolean;
   tasaImpuesto: number;
   activo: boolean;
 }
@@ -802,7 +837,8 @@ export interface CuentaContableContract {
 /* ── Configuración: Tabla de Documentos ──────────────────────── */
 
 export interface DocumentoAdmin {
-  tipo: 'FV' | 'RC' | 'NC' | 'ND' | 'NT';
+  categoria: 'FV' | 'IN' | 'NC' | 'ND' | 'NT';
+  codigo: string;
   nombreDocumento: string | null;
   prefijo: string;
   numero: number;
@@ -823,18 +859,4 @@ export interface ResolucionAdmin {
   nombreDocumento: string | null;
   comprob: string | null;
   numeroE: number | null;
-}
-
-/* ── Configuración: Interfaz Contable ────────────────────────── */
-
-export interface MapeoContable {
-  id: string;
-  tipo: 'concepto' | 'especial';
-  conceptoId: string | null;
-  conceptoNombre: string | null;
-  especial: 'descuentos' | 'interesesOrdenDb' | null;
-  cuentaDebitoId: string;
-  cuentaDebitoCodigo: string | null;
-  cuentaCreditoId: string;
-  cuentaCreditoCodigo: string | null;
 }

@@ -17,7 +17,7 @@ const nombreDe = (ref: unknown): { id: string; nombre: string } | null => {
 
 /**
  * Maps one assignment to the Spanish contract. Persistence is English, the
- * API is Spanish — see "the contract law" in AGENTS.md.
+ * API is Spanish — see "the contract law" in CLAUDE.md.
  */
 export const toAsignacionResumen = (
   doc: AsignacionDocument,

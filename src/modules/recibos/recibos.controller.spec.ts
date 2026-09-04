@@ -31,6 +31,7 @@ describe('RecibosController.crear', () => {
     };
 
     await controller.crear(user, {
+      codigo: 'RC',
       inmuebleId: new Types.ObjectId().toString(),
       terceroId: new Types.ObjectId().toString(),
       montoRecibido: 100000,

@@ -10,7 +10,7 @@ import { Connection, Model } from 'mongoose';
 import {
   ConsecutivoDocumento,
   ConsecutivoDocumentoDocument,
-  type TipoDocumento,
+  type CategoriaDocumento,
 } from '../../../database/schemas/numeracion/consecutivo-documento.schema';
 import {
   ResolucionFacturacion,
@@ -32,11 +32,16 @@ import {
   NotaContable,
   NotaContableDocument,
 } from '../../../database/schemas/notas-contables/nota-contable.schema';
+import {
+  Factura,
+  FacturaDocument,
+} from '../../../database/schemas/facturacion/factura.schema';
 import type { DocumentoAdmin, ResolucionAdmin } from '../../../contracts';
 import { TenantContextService } from '../../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../../common/utils/query.utils';
 import { toDocumentoAdmin, toResolucionAdmin } from './documentos.mapper';
 import type { ActualizarConsecutivoDto } from './dto/actualizar-consecutivo.dto';
+import type { CrearConsecutivoDto } from './dto/crear-consecutivo.dto';
 import type { CrearResolucionDto } from './dto/crear-resolucion.dto';
 import type { ActualizarResolucionMetadataDto } from './dto/actualizar-resolucion-metadata.dto';
 
@@ -55,6 +60,8 @@ export class DocumentosService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(Factura.name)
+    private readonly facturas: Model<FacturaDocument>,
     private readonly tenant: TenantContextService,
     @InjectConnection() private readonly connection: Connection,
   ) {}
@@ -70,7 +77,10 @@ export class DocumentosService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     const [consecutivos, resolucionActiva] = await Promise.all([
-      this.consecutivos.find({ coPropertyId }).sort({ documentType: 1 }).exec(),
+      this.consecutivos
+        .find({ coPropertyId })
+        .sort({ category: 1, code: 1 })
+        .exec(),
       this.resoluciones.findOne({ coPropertyId, status: 'active' }).exec(),
     ]);
 
@@ -81,22 +91,59 @@ export class DocumentosService {
   }
 
   /**
-   * Updates a ConsecutivoDocumento row. The nextNumber guardrail (spec §5):
+   * Creates a ConsecutivoDocumento row for a code that does not exist yet.
+   * FV is allowed too: DIAN electronic-invoicing filing (ResolucionFacturacion)
+   * is optional, so a coproperty without one still needs a plain consecutivo
+   * to number its invoices — see NumeracionService.siguienteFactura. When
+   * both exist, siguienteFactura prefers the resolución; this row is only
+   * consulted as its fallback. `dto.codigo` is unique per building across
+   * every category, not just within this one.
+   */
+  async crearConsecutivo(
+    categoria: CategoriaDocumento,
+    dto: CrearConsecutivoDto,
+  ): Promise<DocumentoAdmin> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const yaExiste = await this.consecutivos
+      .exists({ coPropertyId, code: dto.codigo })
+      .exec();
+    if (yaExiste) {
+      throw new ConflictException(
+        `Ya existe un tipo de documento con el código ${dto.codigo}`,
+      );
+    }
+
+    const creado = await this.consecutivos.create({
+      coPropertyId,
+      category: categoria,
+      code: dto.codigo,
+      prefix: dto.prefijo ?? dto.codigo,
+      nextNumber: dto.numeroInicial ?? 1,
+      displayName: dto.nombreDocumento ?? null,
+      accountingVoucherCode: dto.comprobanteContable ?? null,
+    });
+
+    return toDocumentoAdmin(creado);
+  }
+
+  /**
+   * Updates a ConsecutivoDocumento row, looked up by its code — a category
+   * no longer identifies a single row. The nextNumber guardrail (spec §5):
    * reject if the new value would be at or below an already-issued number
    * under the SAME prefix.
    */
   async updateConsecutivo(
-    documentType: TipoDocumento,
+    codigo: string,
     dto: ActualizarConsecutivoDto,
   ): Promise<DocumentoAdmin> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const current = await this.consecutivos
-      .findOne({ coPropertyId, documentType })
+      .findOne({ coPropertyId, code: codigo })
       .exec();
 
     if (!current) {
       throw new NotFoundException(
-        `No se encontró consecutivo para ${documentType}`,
+        `No se encontró el tipo de documento ${codigo}`,
       );
     }
 
@@ -104,12 +151,8 @@ export class DocumentosService {
     const newNextNumber = dto.numeroSiguiente ?? current.nextNumber;
 
     if (newPrefix === current.prefix && newNextNumber < current.nextNumber) {
-      // `current` only ever exists for RC/NC/ND/NT — ConsecutivoDocumento
-      // never carries an FV row (see NumeracionService.siguienteDocumento's
-      // own `Exclude<TipoDocumento, 'FV'>` signature), so this narrowing is
-      // safe: reaching this line already proves documentType isn't 'FV'.
       const maxIssued = await this.getHighestIssuedNumber(
-        documentType as Exclude<TipoDocumento, 'FV'>,
+        current.category,
         coPropertyId,
         current.prefix,
       );
@@ -251,7 +294,7 @@ export class DocumentosService {
    * back below a number some real document already carries.
    *
    * Plain `find()` + in-memory max, never `.aggregate()` — house convention
-   * (see AGENTS.md and every other cross-collection computation in this
+   * (see CLAUDE.md and every other cross-collection computation in this
    * backend). `fullNumber` is the real persisted field
    * (`NumeracionService`'s `componer()`: `"${prefix}-${numero}"`, or bare
    * `numero` when the prefix is empty) — there is no separate `prefijo`/
@@ -260,20 +303,19 @@ export class DocumentosService {
    * database.
    */
   private async getHighestIssuedNumber(
-    documentType: Exclude<TipoDocumento, 'FV'>,
+    categoria: CategoriaDocumento,
     coPropertyId: unknown,
     prefix: string,
   ): Promise<number> {
-    const modelMap: Record<
-      Exclude<TipoDocumento, 'FV'>,
-      Model<{ fullNumber: string }>
-    > = {
-      RC: this.recibos,
-      NC: this.notasCredito,
-      ND: this.notasDebito,
-      NT: this.notasContables,
-    };
-    const model = modelMap[documentType];
+    const modelMap: Record<CategoriaDocumento, Model<{ fullNumber: string }>> =
+      {
+        FV: this.facturas,
+        IN: this.recibos,
+        NC: this.notasCredito,
+        ND: this.notasDebito,
+        NT: this.notasContables,
+      };
+    const model = modelMap[categoria];
 
     const matchPrefix = prefix ? `${prefix}-` : '';
     const docs = await model

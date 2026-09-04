@@ -40,28 +40,21 @@ export class CuentaContable {
   @Prop({ required: true, default: false })
   cashFlow: boolean;
 
-  /**
-   * Free-text code for Centro de Utilidad. Same value for every operation
-   * that uses this account — property of the ACCOUNT, not per-transaction.
-   * Consuming when building a Movimiento is future engine work.
-   */
-  @Prop({ type: String, default: null, trim: true })
-  profitCenterCode: string | null;
+  /** "Centro Utilidad" column. */
+  @Prop({ required: true, default: false })
+  profitCenter: boolean;
 
-  /** Same shape and reasoning as profitCenterCode. */
-  @Prop({ type: String, default: null, trim: true })
-  destinationCenterCode: string | null;
+  /** "Centro Destino" column. */
+  @Prop({ required: true, default: false })
+  destinationCenter: boolean;
 
   /** "Doc. Cruce" column — whether this account requires a cross-document. */
   @Prop({ required: true, default: false })
   requiresCrossDocument: boolean;
 
-  /**
-   * Free text for tax category — same reasoning as
-   * ConceptoCobro.accountingIncomeAccount.
-   */
-  @Prop({ type: String, default: null, trim: true })
-  taxType: string | null;
+  /** "Aplica Impuesto" column — whether `taxRate` applies at all. */
+  @Prop({ required: true, default: false })
+  appliesTax: boolean;
 
   /** "tasa %" */
   @Prop({ required: true, default: 0, min: 0, max: 100 })

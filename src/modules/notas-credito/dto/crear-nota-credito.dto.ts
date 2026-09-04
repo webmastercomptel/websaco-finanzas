@@ -9,6 +9,7 @@ import {
   IsPositive,
   IsString,
   MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { DistribucionLineaDto } from './distribucion-linea.dto';
@@ -25,6 +26,13 @@ export const MOTIVOS_NOTA_CREDITO = [
 ] as const;
 
 export class CrearNotaCreditoDto {
+  /** Which configured tipo de documento (código, category NC) numbers this
+   *  nota — a building may have more than one configured under NC. */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20)
+  codigo: string;
+
   @IsMongoId()
   inmuebleId: string;
 

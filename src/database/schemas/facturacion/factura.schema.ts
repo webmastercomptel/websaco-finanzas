@@ -57,12 +57,18 @@ export class Factura {
   @Prop({ type: TitularCongeladoSchema, default: null })
   holder: TitularCongelado | null;
 
+  /**
+   * Null when this invoice was numbered through the simple FV consecutivo
+   * instead of a DIAN resolution — the DIAN electronic-invoicing filing is
+   * not mandatory for every client, so a coproperty without one still needs
+   * a way to issue invoices. See NumeracionService.siguienteFactura.
+   */
   @Prop({
     type: Types.ObjectId,
     ref: ResolucionFacturacion.name,
-    required: true,
+    default: null,
   })
-  resolucionId: Types.ObjectId;
+  resolucionId: Types.ObjectId | null;
 
   @Prop({ required: true, trim: true, default: '' })
   prefix: string;

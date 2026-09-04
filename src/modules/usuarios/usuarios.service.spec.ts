@@ -252,7 +252,9 @@ describe('UsuariosService.create', () => {
     expect(asignacionesModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: 'copropiedad',
-        coPropertyId: copId,
+        // The tenancy law: stored as an ObjectId, never the raw string —
+        // see TenantContextService.resolveCoPropertyId's docblock.
+        coPropertyId: new Types.ObjectId(copId),
         permissions: ['inmuebles.gestionar'],
       }),
     );
@@ -438,7 +440,9 @@ describe('UsuariosService.update', () => {
     expect(anterior.save).toHaveBeenCalled();
     expect(
       asignacionesGuardadas.some(
-        (g) => (g as { coPropertyId?: string }).coPropertyId === nuevaCopId,
+        (g) =>
+          (g as { coPropertyId?: Types.ObjectId }).coPropertyId?.toString() ===
+          nuevaCopId,
       ),
     ).toBe(true);
   });

@@ -33,6 +33,7 @@ describe('NotasContablesController.crear', () => {
     };
 
     await controller.crear(user, {
+      codigo: 'NT',
       inmuebleId: new Types.ObjectId().toString(),
       conceptoOrigenId: new Types.ObjectId().toString(),
       conceptoDestinoId: new Types.ObjectId().toString(),

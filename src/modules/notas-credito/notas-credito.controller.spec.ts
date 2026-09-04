@@ -35,6 +35,7 @@ describe('NotasCreditoController.crear', () => {
     };
 
     await controller.crear(user, {
+      codigo: 'NC',
       inmuebleId: new Types.ObjectId().toString(),
       facturaId: new Types.ObjectId().toString(),
       motivo: 'error_facturacion',

@@ -195,6 +195,7 @@ const construirServicio = (opts: {
 };
 
 const dtoBase = () => ({
+  codigo: 'RC',
   inmuebleId: INMUEBLE.toString(),
   terceroId: TERCERO.toString(),
   montoRecibido: 500000,

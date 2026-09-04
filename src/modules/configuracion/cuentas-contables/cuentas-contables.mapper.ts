@@ -14,10 +14,10 @@ export const toCuentaContable = (
   nombre: doc.name,
   requiereTercero: doc.requiresTercero,
   flujoCaja: doc.cashFlow,
-  centroUtilidad: doc.profitCenterCode,
-  centroDestino: doc.destinationCenterCode,
+  centroUtilidad: doc.profitCenter,
+  centroDestino: doc.destinationCenter,
   requiereDocumentoCruce: doc.requiresCrossDocument,
-  tipoImpuesto: doc.taxType,
+  aplicaImpuesto: doc.appliesTax,
   tasaImpuesto: doc.taxRate,
   activo: doc.active,
 });

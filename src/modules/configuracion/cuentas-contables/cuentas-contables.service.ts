@@ -10,6 +10,18 @@ import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  AsientoContable,
+  AsientoContableDocument,
+} from '../../../database/schemas/facturacion/asiento-contable.schema';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../../database/schemas/copropiedades/copropiedad.schema';
 import type { CuentaContableContract, Paginado } from '../../../contracts';
 import { toCuentaContable } from './cuentas-contables.mapper';
 import type { ListarCuentasDto } from './dto/listar-cuentas.dto';
@@ -25,6 +37,12 @@ export class CuentasContablesService {
   constructor(
     @InjectModel(CuentaContable.name)
     private readonly cuentas: Model<CuentaContableDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(AsientoContable.name)
+    private readonly asientos: Model<AsientoContableDocument>,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -89,10 +107,10 @@ export class CuentasContablesService {
       name: dto.nombre,
       requiresTercero: dto.requiereTercero ?? false,
       cashFlow: dto.flujoCaja ?? false,
-      profitCenterCode: dto.centroUtilidad ?? null,
-      destinationCenterCode: dto.centroDestino ?? null,
+      profitCenter: dto.centroUtilidad ?? false,
+      destinationCenter: dto.centroDestino ?? false,
       requiresCrossDocument: dto.requiereDocumentoCruce ?? false,
-      taxType: dto.tipoImpuesto ?? null,
+      appliesTax: dto.aplicaImpuesto ?? false,
       taxRate: dto.tasaImpuesto ?? 0,
     });
 
@@ -125,10 +143,10 @@ export class CuentasContablesService {
     set('name', dto.nombre);
     set('requiresTercero', dto.requiereTercero);
     set('cashFlow', dto.flujoCaja);
-    set('profitCenterCode', dto.centroUtilidad);
-    set('destinationCenterCode', dto.centroDestino);
+    set('profitCenter', dto.centroUtilidad);
+    set('destinationCenter', dto.centroDestino);
     set('requiresCrossDocument', dto.requiereDocumentoCruce);
-    set('taxType', dto.tipoImpuesto);
+    set('appliesTax', dto.aplicaImpuesto);
     set('taxRate', dto.tasaImpuesto);
     if (dto.activo !== undefined) {
       update.active = dto.activo;
@@ -146,5 +164,58 @@ export class CuentasContablesService {
       throw new NotFoundException(`No se encontró la cuenta ${id}`);
     }
     return toCuentaContable(actualizada);
+  }
+
+  async delete(id: string): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const cuenta = await this.cuentas.findOne({ _id: id, coPropertyId }).exec();
+    if (!cuenta) {
+      throw new NotFoundException(`No se encontró la cuenta ${id}`);
+    }
+
+    const [enConceptos, enAsientos, enCopropiedad] = await Promise.all([
+      this.conceptos
+        .exists({
+          coPropertyId,
+          $or: [
+            { cuentaDebitoId: cuenta._id },
+            { cuentaCreditoId: cuenta._id },
+          ],
+        })
+        .exec(),
+      this.asientos
+        .exists({ coPropertyId, 'entries.account': cuenta.code })
+        .exec(),
+      this.copropiedades
+        .exists({
+          _id: coPropertyId,
+          $or: [
+            { receivablesAccount: cuenta.code },
+            { advancesAccount: cuenta.code },
+            { creditNotesAccount: cuenta.code },
+            { debitNotesAccount: cuenta.code },
+            { defaultBankAccountCode: cuenta.code },
+          ],
+        })
+        .exec(),
+    ]);
+
+    if (enConceptos) {
+      throw new ConflictException(
+        'Esta cuenta está asignada como cuenta débito o crédito de uno o más cargos',
+      );
+    }
+    if (enAsientos) {
+      throw new ConflictException(
+        'Esta cuenta ya tiene movimientos contables registrados y no puede eliminarse',
+      );
+    }
+    if (enCopropiedad) {
+      throw new ConflictException(
+        'Esta cuenta está configurada como cuenta predeterminada de la copropiedad',
+      );
+    }
+
+    await this.cuentas.deleteOne({ _id: id, coPropertyId }).exec();
   }
 }

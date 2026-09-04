@@ -6,7 +6,8 @@ import type { ResolucionFacturacionDocument } from '../../../database/schemas/nu
 export const toDocumentoAdmin = (
   doc: ConsecutivoDocumentoDocument,
 ): DocumentoAdmin => ({
-  tipo: doc.documentType,
+  categoria: doc.category,
+  codigo: doc.code,
   nombreDocumento: doc.displayName,
   prefijo: doc.prefix,
   numero: doc.nextNumber,

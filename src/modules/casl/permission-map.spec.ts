@@ -226,12 +226,11 @@ describe('permisos de NotaContable', () => {
   });
 });
 
-describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos, Interfaz Contable)', () => {
-  it('las cuatro claves de módulo nuevas resuelven al mismo subject Configuracion', () => {
+describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos)', () => {
+  it('las tres claves de módulo nuevas resuelven al mismo subject Configuracion', () => {
     expect(MODULE_TO_SUBJECT['cuentas-contables']).toBe('Configuracion');
     expect(MODULE_TO_SUBJECT['parametros-facturacion']).toBe('Configuracion');
     expect(MODULE_TO_SUBJECT.documentos).toBe('Configuracion');
-    expect(MODULE_TO_SUBJECT['interfaz-contable']).toBe('Configuracion');
   });
 
   it('cuentas-contables.ver concede solo lectura sobre Configuracion', () => {
@@ -247,14 +246,6 @@ describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos
 
     expect(ability.can('update', 'Configuracion')).toBe(true);
     expect(ability.can('read', 'Configuracion')).toBe(false);
-  });
-
-  it('interfaz-contable.gestionar concede manage sobre Configuracion', () => {
-    const ability = abilityFor(['interfaz-contable.gestionar']);
-
-    expect(ability.can('read', 'Configuracion')).toBe(true);
-    expect(ability.can('create', 'Configuracion')).toBe(true);
-    expect(ability.can('update', 'Configuracion')).toBe(true);
   });
 
   it('un permiso de Configuracion no concede acceso a otros subjects', () => {

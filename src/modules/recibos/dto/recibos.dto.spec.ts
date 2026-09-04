@@ -7,6 +7,7 @@ import { AnularReciboDto } from './anular-recibo.dto';
 import { ListarRecibosDto } from './listar-recibos.dto';
 
 const validoCrear = () => ({
+  codigo: 'RC',
   inmuebleId: '507f1f77bcf86cd799439011',
   terceroId: '507f1f77bcf86cd799439012',
   montoRecibido: 500000,

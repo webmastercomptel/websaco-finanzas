@@ -2,7 +2,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -26,7 +28,9 @@ import type { ConceptoCobro } from '../../contracts';
  * arrangement while there is no screen yet for a building's own
  * administrator. See the note on ConceptosService.
  *
- * No DELETE: a concept is retired via `PATCH { activo: false }`.
+ * DELETE exists, unlike most of this domain — see the guards in
+ * ConceptosService.delete() for why a concept is the one thing here that
+ * can be gone for good rather than just retired.
  */
 @Controller('copropiedades/:copropiedadId/conceptos')
 @UseGuards(FirebaseAuthGuard, PlatformAdminGuard)
@@ -55,5 +59,14 @@ export class ConceptosController {
     @Body() dto: ActualizarConceptoDto,
   ): Promise<ConceptoCobro> {
     return this.conceptos.update(copropiedadId, id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  delete(
+    @Param('copropiedadId') copropiedadId: string,
+    @Param('id') id: string,
+  ): Promise<void> {
+    return this.conceptos.delete(copropiedadId, id);
   }
 }

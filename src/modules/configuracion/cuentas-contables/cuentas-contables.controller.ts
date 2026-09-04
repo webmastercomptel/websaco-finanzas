@@ -2,7 +2,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -49,5 +51,14 @@ export class CuentasContablesController {
     @Body() dto: ActualizarCuentaDto,
   ): Promise<CuentaContableContract> {
     return this.cuentas.update(id, dto);
+  }
+
+  // Gated by 'update', not a new 'delete' verb — see the note on
+  // VERB_TO_ACTION in permission-map.ts for why one is never added.
+  @Delete(':id')
+  @HttpCode(204)
+  @CheckAbility({ action: 'update', subject: 'Configuracion' })
+  delete(@Param('id') id: string): Promise<void> {
+    return this.cuentas.delete(id);
   }
 }

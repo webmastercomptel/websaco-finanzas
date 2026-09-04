@@ -12,11 +12,12 @@ import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../../casl/policies.guard';
 import { CheckAbility } from '../../casl/check-ability.decorator';
 import { DocumentosService } from './documentos.service';
+import type { CrearConsecutivoDto } from './dto/crear-consecutivo.dto';
 import type { ActualizarConsecutivoDto } from './dto/actualizar-consecutivo.dto';
 import type { CrearResolucionDto } from './dto/crear-resolucion.dto';
 import type { ActualizarResolucionMetadataDto } from './dto/actualizar-resolucion-metadata.dto';
 import type { DocumentoAdmin, ResolucionAdmin } from '../../../contracts';
-import type { TipoDocumento } from '../../../database/schemas/numeracion/consecutivo-documento.schema';
+import type { CategoriaDocumento } from '../../../database/schemas/numeracion/consecutivo-documento.schema';
 
 @Controller('documentos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
@@ -32,13 +33,22 @@ export class DocumentosController {
     return this.documentos.findAll();
   }
 
-  @Patch('consecutivos/:documentType')
+  @Post('consecutivos/:categoria')
+  @CheckAbility({ action: 'create', subject: 'Configuracion' })
+  crearConsecutivo(
+    @Param('categoria') categoria: CategoriaDocumento,
+    @Body() dto: CrearConsecutivoDto,
+  ): Promise<DocumentoAdmin> {
+    return this.documentos.crearConsecutivo(categoria, dto);
+  }
+
+  @Patch('consecutivos/:codigo')
   @CheckAbility({ action: 'update', subject: 'Configuracion' })
   updateConsecutivo(
-    @Param('documentType') documentType: TipoDocumento,
+    @Param('codigo') codigo: string,
     @Body() dto: ActualizarConsecutivoDto,
   ): Promise<DocumentoAdmin> {
-    return this.documentos.updateConsecutivo(documentType, dto);
+    return this.documentos.updateConsecutivo(codigo, dto);
   }
 
   @Post('resolucion')

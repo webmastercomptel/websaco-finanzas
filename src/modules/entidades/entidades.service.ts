@@ -55,7 +55,7 @@ export class EntidadesService {
     const [documentos, total] = await Promise.all([
       this.entidades
         .find(filtro)
-        .sort({ name: 1 })
+        .sort({ code: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -108,17 +108,6 @@ export class EntidadesService {
     dto: ActualizarEntidadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<EntidadContract> {
-    if (dto.codigo) {
-      const chocaConOtra = await this.entidades
-        .exists({ code: dto.codigo, _id: { $ne: id } })
-        .exec();
-      if (chocaConOtra) {
-        throw new ConflictException(
-          `Ya existe otra entidad con el código ${dto.codigo}`,
-        );
-      }
-    }
-
     const actualizada = await this.entidades
       .findByIdAndUpdate(id, { $set: this.aDocumento(dto) }, { new: true })
       .exec();
@@ -143,20 +132,26 @@ export class EntidadesService {
    * Translates the Spanish payload into the English document shape. Only keys
    * the caller actually sent are included — spreading the DTO whole would
    * write `undefined` over fields nobody meant to clear.
+   *
+   * `codigo` only exists on `CrearEntidadDto` — it is immutable after
+   * creation, so `ActualizarEntidadDto` never carries it — hence the `in`
+   * check rather than a plain `set()`.
    */
-  private aDocumento(dto: ActualizarEntidadDto): Record<string, unknown> {
+  private aDocumento(
+    dto: CrearEntidadDto | ActualizarEntidadDto,
+  ): Record<string, unknown> {
     const doc: Record<string, unknown> = {};
     const set = (clave: string, valor: unknown): void => {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('code', dto.codigo);
+    if ('codigo' in dto) set('code', dto.codigo);
     set('name', dto.nombre);
     set('taxId', dto.nit);
     set('taxIdVerificationDigit', dto.digitoVerificacion);
     set('email', dto.email);
     set('phone', dto.telefono);
-    if (dto.estado !== undefined) {
+    if ('estado' in dto && dto.estado !== undefined) {
       doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
     }
 

@@ -11,6 +11,7 @@ import {
   IsPositive,
   IsString,
   MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { AplicacionSolicitadaDto } from './aplicacion-solicitada.dto';
@@ -23,6 +24,13 @@ export const MEDIOS_PAGO = [
 ] as const;
 
 export class CrearReciboDto {
+  /** Which configured tipo de documento (código, category IN) numbers this
+   *  receipt — a building may have more than one, e.g. "RC" and "RT". */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20)
+  codigo: string;
+
   @IsMongoId()
   inmuebleId: string;
 
