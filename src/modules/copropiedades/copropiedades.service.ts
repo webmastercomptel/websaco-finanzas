@@ -5,11 +5,19 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  Asignacion,
+  AsignacionDocument,
+} from '../../database/schemas/cuentas/asignacion.schema';
+import {
+  Account,
+  AccountDocument,
+} from '../../database/schemas/cuentas/account.schema';
 import type {
   Copropiedad as CopropiedadContract,
   Paginado,
@@ -37,6 +45,10 @@ export class CopropiedadesService {
   constructor(
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Asignacion.name)
+    private readonly asignaciones: Model<AsignacionDocument>,
+    @InjectModel(Account.name)
+    private readonly accounts: Model<AccountDocument>,
     private readonly auditoria: AuditoriaService,
     private readonly conceptos: ConceptosService,
   ) {}
@@ -68,7 +80,18 @@ export class CopropiedadesService {
       this.copropiedades.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toCopropiedad), total, pagina, porPagina };
+    const usuariosPorCopropiedad = await this.usuariosAdministradores(
+      documentos.filter((d) => !d.managingEntityId).map((d) => d._id),
+    );
+
+    return {
+      items: documentos.map((d) =>
+        toCopropiedad(d, usuariosPorCopropiedad.get(d._id.toString()) ?? null),
+      ),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   async findOne(id: string): Promise<CopropiedadContract> {
@@ -79,7 +102,63 @@ export class CopropiedadesService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
     }
-    return toCopropiedad(documento);
+    const usuariosPorCopropiedad = documento.managingEntityId
+      ? new Map<string, string>()
+      : await this.usuariosAdministradores([documento._id]);
+    return toCopropiedad(
+      documento,
+      usuariosPorCopropiedad.get(documento._id.toString()) ?? null,
+    );
+  }
+
+  /**
+   * The account(s) with an active Asignación scoped directly to each given
+   * coproperty — one batch query for the page, not one per row. Callers
+   * only pass ids of buildings with no `managingEntityId`: an entidad grant
+   * covers a building through the company, never through a per-building
+   * Asignación row, so a managed building's "who has access" question is
+   * already answered by `entidadAdministradora`.
+   */
+  private async usuariosAdministradores(
+    coPropertyIds: Types.ObjectId[],
+  ): Promise<Map<string, string>> {
+    if (coPropertyIds.length === 0) return new Map();
+
+    const asignaciones = await this.asignaciones
+      .find({
+        scope: 'copropiedad',
+        coPropertyId: { $in: coPropertyIds },
+        status: 'active',
+      })
+      .exec();
+    if (asignaciones.length === 0) return new Map();
+
+    const accountIds = [
+      ...new Set(asignaciones.map((a) => a.accountId.toString())),
+    ];
+    const cuentas = await this.accounts
+      .find({ _id: { $in: accountIds } })
+      .exec();
+    const nombrePorCuenta = new Map(
+      cuentas.map((c) => [c._id.toString(), c.fullName]),
+    );
+
+    const nombresPorCopropiedad = new Map<string, string[]>();
+    for (const asignacion of asignaciones) {
+      const cop = asignacion.coPropertyId!.toString();
+      const nombre = nombrePorCuenta.get(asignacion.accountId.toString());
+      if (!nombre) continue;
+      const lista = nombresPorCopropiedad.get(cop) ?? [];
+      lista.push(nombre);
+      nombresPorCopropiedad.set(cop, lista);
+    }
+
+    return new Map(
+      [...nombresPorCopropiedad.entries()].map(([cop, nombres]) => [
+        cop,
+        nombres.join(', '),
+      ]),
+    );
   }
 
   async create(

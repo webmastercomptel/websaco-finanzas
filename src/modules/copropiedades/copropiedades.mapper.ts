@@ -32,6 +32,7 @@ const entidadDe = (
  */
 export const toCopropiedad = (
   doc: CopropiedadDocument,
+  usuarioAdministrador: string | null = null,
 ): CopropiedadContract => ({
   id: doc._id.toString(),
   codigo: doc.code,
@@ -44,6 +45,7 @@ export const toCopropiedad = (
   email: doc.email,
   entidadAdministradora: entidadDe(doc.managingEntityId),
   nombreAdministrador: doc.administratorName,
+  usuarioAdministrador,
   estado: doc.status === 'active' ? 'activo' : 'inactivo',
   usaGestionEdificios: doc.usesBuildingManagement,
   cuentaContableCartera: doc.receivablesAccount,

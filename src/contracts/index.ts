@@ -632,6 +632,15 @@ export interface Copropiedad {
    * Account holding an assignment scoped to this coproperty.
    */
   nombreAdministrador: string | null;
+  /**
+   * Who `nombreAdministrador`'s own note points to: the account(s) with an
+   * active Asignación scoped directly to this coproperty (`entidadAdministradora`
+   * null case only — an entidad grant covers the building through the
+   * company, not through a per-building Asignación row). Several names,
+   * comma-joined, when more than one account is assigned. Null when nobody
+   * is, same as `entidadAdministradora`.
+   */
+  usuarioAdministrador: string | null;
   estado: 'activo' | 'inactivo';
   /** Whether this building ALSO uses the building-management system. */
   usaGestionEdificios: boolean;
