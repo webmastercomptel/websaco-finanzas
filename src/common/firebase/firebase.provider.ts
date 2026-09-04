@@ -72,7 +72,7 @@ const parseServiceAccount = (base64: string): ServiceAccount => {
  *
  * Only ever used to VERIFY tokens. This project does not create, list, update
  * or delete users: accounts are provisioned by hand in the Firebase console.
- * That is a deliberate limit, not a missing feature — see AGENTS.md.
+ * That is a deliberate limit, not a missing feature — see CLAUDE.md.
  *
  * `getApps()` is checked first because Jest can load this module more than once
  * in a single process, and initializing twice throws.

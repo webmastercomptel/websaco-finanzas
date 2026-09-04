@@ -294,7 +294,7 @@ export class DocumentosService {
    * back below a number some real document already carries.
    *
    * Plain `find()` + in-memory max, never `.aggregate()` — house convention
-   * (see AGENTS.md and every other cross-collection computation in this
+   * (see CLAUDE.md and every other cross-collection computation in this
    * backend). `fullNumber` is the real persisted field
    * (`NumeracionService`'s `componer()`: `"${prefix}-${numero}"`, or bare
    * `numero` when the prefix is empty) — there is no separate `prefijo`/

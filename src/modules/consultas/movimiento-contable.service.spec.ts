@@ -211,7 +211,7 @@ describe('MovimientoContableService', () => {
     });
 
     it('resolves Inmueble and Tercero scoped to coPropertyId, never by bare _id', async () => {
-      // Regression guard named in AGENTS.md: a prior test in this codebase kept
+      // Regression guard named in CLAUDE.md: a prior test in this codebase kept
       // its name and shape while its assertion was quietly weakened from
       // checking `coPropertyId` to checking `_id` alone, silently accepting a
       // `findOne({_id})`-without-tenant-filter regression. Asserting on the

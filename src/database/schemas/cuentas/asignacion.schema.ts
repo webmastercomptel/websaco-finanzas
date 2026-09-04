@@ -19,7 +19,7 @@ export type AsignacionDocument = HydratedDocument<Asignacion>;
  *
  * The second is checked on EVERY request. A choice the browser remembers is a
  * request, never a grant, so an assignment revoked five minutes ago has to stop
- * working now — see the tenancy law in AGENTS.md.
+ * working now — see the tenancy law in CLAUDE.md.
  *
  * A grant has one of two shapes:
  *

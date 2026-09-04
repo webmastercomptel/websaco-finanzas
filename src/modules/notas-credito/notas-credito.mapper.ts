@@ -9,7 +9,7 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
 /**
  * Maps a credit note document to the Spanish API contract. Persistence is
  * English, the API is Spanish, and this is the only place the two meet — see
- * "the contract law" in AGENTS.md, same pattern as `toRecibo`.
+ * "the contract law" in CLAUDE.md, same pattern as `toRecibo`.
  */
 export const toNotaCredito = (
   doc: NotaCreditoDocument,

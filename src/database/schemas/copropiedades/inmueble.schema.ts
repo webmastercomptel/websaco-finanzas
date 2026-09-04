@@ -24,7 +24,7 @@ export type InmuebleDocument = HydratedDocument<Inmueble> & {
 export class Inmueble {
   /**
    * Owning coproperty. Every query for units MUST filter by this — see the
-   * tenancy law in AGENTS.md.
+   * tenancy law in CLAUDE.md.
    */
   @Prop({
     type: Types.ObjectId,

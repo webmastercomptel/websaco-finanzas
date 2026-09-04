@@ -35,7 +35,7 @@ const titularDe = (holderId: unknown): TitularResumen | null => {
  * Maps a unit document to the Spanish API contract.
  *
  * Persistence is English, the API is Spanish, and this is the only place the
- * two meet — see "the contract law" in AGENTS.md.
+ * two meet — see "the contract law" in CLAUDE.md.
  */
 export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   id: doc._id.toString(),

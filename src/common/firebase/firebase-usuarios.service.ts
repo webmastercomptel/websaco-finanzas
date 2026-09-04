@@ -5,7 +5,7 @@ import { FIREBASE_AUTH } from './firebase.constants';
 
 /**
  * The ONE deliberate exception to "this project only ever verifies
- * identities" (see FirebaseAuthGuard and AGENTS.md). The Usuarios screen is
+ * identities" (see FirebaseAuthGuard and CLAUDE.md). The Usuarios screen is
  * the platform administrator's own console for provisioning staff, and the
  * legacy system this replaces did exactly this — created the login and the
  * local access record in the same step, rather than sending someone to a
