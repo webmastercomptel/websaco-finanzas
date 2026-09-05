@@ -158,6 +158,15 @@ export class Copropiedad {
   @Prop({ required: true, default: 0 })
   lateFeeInterestRate: number;
 
+  /**
+   * Minimum overdue balance a unit must owe before mora is calculated at
+   * all — NOT a ceiling on the mora amount. Below this, `construirPreview()`
+   * (lotes.service.ts) charges nothing rather than a token amount on a
+   * trivial balance. Null means no threshold: mora is always calculated
+   * when `lateFeeEnabled`. Name kept as `ValueLimit` for now — the value it
+   * limits changed (from "how much mora" to "whether mora applies"), the
+   * field itself did not move.
+   */
   @Prop({ type: Number, default: null })
   lateFeeValueLimit: number | null;
 
@@ -166,6 +175,56 @@ export class Copropiedad {
 
   @Prop({ type: String, default: null, trim: true })
   billingNotes: string | null;
+
+  /**
+   * Cost centre for accounting purposes — one per coproperty, not per unit.
+   * Used to live on `Inmueble` (`costCentre`); moved here because a
+   * building's cost centre is a facturación-wide parameter, not something
+   * that varies unit by unit.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  defaultCostCentre: string | null;
+
+  /**
+   * Free-text accounting codes carried over from the predecessor system's
+   * "interfaz contable" table (a fixed grid of hardcoded debit/credit
+   * columns, deleted from this app — see the note on `navGroups` in
+   * `navigation.tsx`). These six survive as coproperty-level parameters
+   * because they are not tied to a `ConceptoCobro` line item: they feed the
+   * accounting coding of facturación, recibos and notas directly, the same
+   * way `receivablesAccount`/`advancesAccount`/`creditNotesAccount`/
+   * `debitNotesAccount` above do. Not yet read by `asiento.builder.ts` or any
+   * document service — persisted here so "Parámetros de Facturación" has
+   * somewhere to keep them until that wiring lands.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  otherIncomeDebitAccount: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  otherIncomeCreditAccount: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  discountsDebitAccount: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  discountsCreditAccount: string | null;
+
+  /** "Cuentas de orden" — memorandum/off-balance-sheet accounts. */
+  @Prop({ type: String, default: null, trim: true })
+  memorandumDebitAccount: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  memorandumCreditAccount: string | null;
+
+  /**
+   * The predecessor system's `codeordendb`/`codeordencr` toggle: when 'S',
+   * facturación posted an extra self-balancing debit/credit pair to the
+   * "cuentas de orden" above, alongside the normal cartera/ingreso entry.
+   * `construirMovimientos` (asiento.builder.ts) reads this to decide whether
+   * to add that pair. Default false — most coproperties never used it.
+   */
+  @Prop({ required: true, default: false })
+  usesMemorandumAccounts: boolean;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

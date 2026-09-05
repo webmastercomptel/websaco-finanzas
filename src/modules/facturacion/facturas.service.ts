@@ -70,4 +70,20 @@ export class FacturasService {
     }
     return documento;
   }
+
+  /**
+   * Every Factura one lote's consolidación produced, raw — used by the
+   * "todas las facturas" bulk PDF (`LotesController`), same reason
+   * `findOneRaw` skips the mapped contract: PDF generation needs
+   * `resolucionId` and the other fields the Spanish contract omits.
+   * Ordered by unit code, the same order the roster and the Liquidación
+   * table already use, so a printed batch reads in a predictable sequence.
+   */
+  async findAllRawPorLote(loteId: string): Promise<FacturaDocument[]> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    return this.facturas
+      .find({ coPropertyId, loteId })
+      .sort({ unitCode: 1 })
+      .exec();
+  }
 }

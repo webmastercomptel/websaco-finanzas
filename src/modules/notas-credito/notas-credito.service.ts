@@ -43,6 +43,7 @@ import {
   construirAsientoCruce,
   construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
+  cuentasOrdenDe,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
@@ -683,6 +684,7 @@ export class NotasCreditoService {
         nota.unappliedAmount,
         nota.totalAmount,
         'NC',
+        cuentasOrdenDe(copropiedad),
       );
       await this.asientos.create(
         [
@@ -867,6 +869,7 @@ export class NotasCreditoService {
       montoAplicado,
       montoSinAplicar,
       'NC',
+      cuentasOrdenDe(copropiedad),
     );
 
     await this.asientos.create(

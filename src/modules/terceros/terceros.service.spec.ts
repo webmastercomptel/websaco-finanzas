@@ -233,6 +233,102 @@ describe('TercerosService.create', () => {
       name: 'Ferretería SAS',
     });
   });
+
+  it('persona natural: concatena nom1+nom2+ape1+ape2 en name, ignorando un nombre explícito', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.create({
+      tipoPersona: 'natural',
+      nombre: 'esto se descarta',
+      nom1: 'Ana',
+      nom2: 'María',
+      ape1: 'Pérez',
+      ape2: 'Gómez',
+    });
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      name: 'Ana María Pérez Gómez',
+      firstName: 'Ana',
+      middleName: 'María',
+      firstLastName: 'Pérez',
+      secondLastName: 'Gómez',
+    });
+  });
+
+  it('persona natural: nom2/ape2 son opcionales, solo nom1+ape1 son obligatorios', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.create({
+      tipoPersona: 'natural',
+      nom1: 'Luis',
+      ape1: 'Ruiz',
+    });
+
+    expect(modelo.escrituras[0]).toMatchObject({ name: 'Luis Ruiz' });
+  });
+
+  it('persona jurídica: razonSocial pasa a name, ignorando un nombre explícito', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.create({
+      tipoPersona: 'juridica',
+      nombre: 'esto se descarta',
+      razonSocial: 'Inversiones ABC S.A.S.',
+    });
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      name: 'Inversiones ABC S.A.S.',
+      businessName: 'Inversiones ABC S.A.S.',
+    });
+  });
+
+  it('sin nom1+ape1 ni razonSocial, usa nombre como respaldo (ej. importación masiva)', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.create({ tipoPersona: 'natural', nombre: 'Carga de Excel' });
+
+    expect(modelo.escrituras[0]).toMatchObject({ name: 'Carga de Excel' });
+  });
+
+  it('rechaza crear persona natural sin nom1+ape1 ni nombre', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await expect(
+      service.create({ tipoPersona: 'natural' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza crear persona jurídica sin razonSocial ni nombre', async () => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await expect(
+      service.create({ tipoPersona: 'juridica' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
 });
 
 describe('TercerosService.update', () => {
@@ -246,20 +342,6 @@ describe('TercerosService.update', () => {
     await service.update('ter-1', { email: 'nuevo@ejemplo.com' });
 
     expect(modelo.escrituras[0]).toEqual({ email: 'nuevo@ejemplo.com' });
-  });
-
-  it('desactivar es una edición, no un borrado', async () => {
-    // Un documento emitido en el pasado tiene que seguir nombrando a alguien,
-    // no apuntar a nada.
-    const modelo = modeloCon([documento()]);
-    const service = new TercerosService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
-
-    await service.update('ter-1', { estado: 'inactivo' });
-
-    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
   });
 
   it('no choca consigo mismo al guardar sin cambiar la identificación', async () => {
@@ -288,5 +370,79 @@ describe('TercerosService.update', () => {
     await expect(
       service.update('ter-ajeno', { email: 'x@x.com' }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('editar solo ape2 recalcula name mezclado con nom1/nom2/ape1 ya guardados', async () => {
+    const modelo = modeloCon([
+      documento({
+        name: 'Ana Pérez',
+        firstName: 'Ana',
+        middleName: null,
+        firstLastName: 'Pérez',
+        secondLastName: null,
+      }),
+    ]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.update('ter-1', { ape2: 'Gómez' });
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      secondLastName: 'Gómez',
+      name: 'Ana Pérez Gómez',
+    });
+  });
+
+  it('no toca name cuando el patch no cambia ningún campo del nombre', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.update('ter-1', { ciudad: 'Bogotá' });
+
+    expect(modelo.escrituras[0]).toEqual({ city: 'Bogotá' });
+  });
+
+  it('editar solo la razón social conserva el resto del registro y no exige volver a enviarla toda', async () => {
+    const modelo = modeloCon([
+      documento({
+        personType: 'juridica',
+        name: 'Ferretería SAS',
+        businessName: 'Ferretería SAS',
+      }),
+    ]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.update('ter-1', { razonSocial: 'Ferretería y Cía SAS' });
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      businessName: 'Ferretería y Cía SAS',
+      name: 'Ferretería y Cía SAS',
+    });
+  });
+
+  it('rechaza borrar el nombre por completo al editar: limpiar razonSocial y nombre a la vez', async () => {
+    const modelo = modeloCon([
+      documento({
+        personType: 'juridica',
+        name: 'Ferretería SAS',
+        businessName: 'Ferretería SAS',
+      }),
+    ]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await expect(
+      service.update('ter-1', { razonSocial: '', nombre: '' }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });

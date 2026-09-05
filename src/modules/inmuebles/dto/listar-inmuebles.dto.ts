@@ -1,6 +1,6 @@
 // src/modules/inmuebles/dto/listar-inmuebles.dto.ts
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
 /**
  * Query parameters for the unit listing.
@@ -22,10 +22,6 @@ export class ListarInmueblesDto {
     typeof value === 'string' ? value.trim() : undefined,
   )
   buscar?: string;
-
-  @IsOptional()
-  @IsIn(['activo', 'inactivo', 'todos'])
-  estado?: 'activo' | 'inactivo' | 'todos';
 
   @IsOptional()
   @Type(() => Number)

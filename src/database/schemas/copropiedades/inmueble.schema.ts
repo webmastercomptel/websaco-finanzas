@@ -42,15 +42,12 @@ export class Inmueble {
   @Prop({ type: String, default: null, trim: true })
   block: string | null;
 
-  /** Zone, use and cost centre, as the previous system grouped units. */
+  /** Zone and use, as the previous system grouped units. */
   @Prop({ type: String, default: null, trim: true })
   zone: string | null;
 
   @Prop({ type: String, default: null, trim: true })
   usage: string | null;
-
-  @Prop({ type: String, default: null, trim: true })
-  costCentre: string | null;
 
   /** Built area in square metres. */
   @Prop({ type: Number, default: null })

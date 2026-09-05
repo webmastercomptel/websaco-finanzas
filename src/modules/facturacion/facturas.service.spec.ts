@@ -160,3 +160,29 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
     expect(modelo.filtros[0].status).toBeUndefined();
   });
 });
+
+describe('FacturasService.findAllRawPorLote', () => {
+  it('filtra por copropiedad Y loteId, ordenado por código de unidad', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAllRawPorLote('lote-1');
+
+    expect(modelo.filtros[0]).toEqual({ coPropertyId: COP, loteId: 'lote-1' });
+  });
+
+  it('devuelve los documentos crudos, no el contrato mapeado', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    const resultado = await service.findAllRawPorLote('lote-1');
+
+    expect(resultado[0]).toMatchObject({ fullNumber: 'CONJ-2026-1041' });
+  });
+});

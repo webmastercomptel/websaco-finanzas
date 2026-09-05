@@ -42,11 +42,6 @@ class CamposInmuebleDto {
   uso?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  centroCostos?: string;
-
-  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -104,10 +99,9 @@ export class CrearInmuebleDto extends CamposInmuebleDto {
  * Editing a unit. Every field optional — a patch that had to carry the whole
  * record would make two people editing different fields overwrite each other.
  *
- * `estado` is here, and it is how a unit is retired: `inactivo` stops it being
- * billed and keeps every document that ever pointed at it readable. There is no
- * delete endpoint and there must not be one — removing a unit would orphan its
- * invoices, which is the accounting equivalent of losing the money.
+ * No `estado` here: every unit in a coproperty is active by definition — see
+ * `InmueblesEliminacionService` for the one way a unit stops existing (a
+ * hard delete, only when it has never been billed).
  */
 export class ActualizarInmuebleDto extends CamposInmuebleDto {
   @IsOptional()
@@ -115,8 +109,4 @@ export class ActualizarInmuebleDto extends CamposInmuebleDto {
   @MinLength(1)
   @MaxLength(40)
   codigo?: string;
-
-  @IsOptional()
-  @IsIn(['activo', 'inactivo'])
-  estado?: 'activo' | 'inactivo';
 }

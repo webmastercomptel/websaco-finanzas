@@ -49,9 +49,6 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   tipoTitular: doc.holderKind,
   resideEnElInmueble: doc.holderResides,
   estadoCartera: doc.collectionStatus,
-  // The schema stores active/inactive; the contract says activo/inactivo. The
-  // translation belongs here, not in a client that would have to learn English
-  // to read a Spanish payload.
-  estado: doc.status === 'active' ? 'activo' : 'inactivo',
+  observaciones: doc.notes,
   fechaActualizacion: doc.updatedAt.toISOString(),
 });

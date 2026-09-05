@@ -28,6 +28,7 @@ import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { PanelControlModule } from './modules/panel-control/panel-control.module';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
 import { HealthModule } from './modules/health/health.module';
+import { CatalogosModule } from './modules/catalogos/catalogos.module';
 
 /**
  * Bootstrap module: config, the database connection and its schemas, the
@@ -73,6 +74,7 @@ import { HealthModule } from './modules/health/health.module';
     PanelControlModule,
     ConfiguracionModule,
     HealthModule,
+    CatalogosModule,
   ],
 })
 export class AppModule {}

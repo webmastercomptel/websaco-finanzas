@@ -21,6 +21,10 @@ import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
@@ -28,6 +32,8 @@ import { LotesFacturacionService } from '../facturacion/lotes.service';
 import { ajustarSaldosCarteraPorDistribucion } from '../recibos/cruce.util';
 import {
   construirMovimientosReclasificacion,
+  cuentasOrdenDe,
+  invertirCuentasOrden,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { toNotaContable } from './notas-contables.mapper';
@@ -54,6 +60,8 @@ export class NotasContablesService {
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(ConceptoCobro.name)
     private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
@@ -319,6 +327,7 @@ export class NotasContablesService {
         nota,
         nota.conceptoDestinoId,
         nota.conceptoOrigenId,
+        true,
       );
 
       await this.notasContables
@@ -352,7 +361,11 @@ export class NotasContablesService {
    * `CUENTA_SIN_ASIGNAR` when unset.
    *
    * Called at creation with (origen, destino) and at void with (destino,
-   * origen) — the same function, accounts swapped (design §7).
+   * origen) — the same function, accounts swapped (design §7). `esAnulacion`
+   * mirrors that same swap onto `cuentasOrden` (`invertirCuentasOrden`) so the
+   * memo pair nets to zero on void instead of doubling — the real accounts
+   * already get this for free from the swapped ids, but `cuentasOrden` is
+   * fixed per coproperty and needs telling explicitly.
    */
   private async postearAsiento(
     session: ClientSession,
@@ -360,8 +373,9 @@ export class NotasContablesService {
     nota: NotaContableDocument,
     cuentaOrigenConceptoId: Types.ObjectId,
     cuentaDestinoConceptoId: Types.ObjectId,
+    esAnulacion = false,
   ): Promise<void> {
-    const [cuentaOrigenDoc, cuentaDestinoDoc] = await Promise.all([
+    const [cuentaOrigenDoc, cuentaDestinoDoc, copropiedad] = await Promise.all([
       this.conceptos
         .findOne({ _id: cuentaOrigenConceptoId, coPropertyId })
         .populate('cuentaCreditoId', 'code')
@@ -372,6 +386,7 @@ export class NotasContablesService {
         .populate('cuentaCreditoId', 'code')
         .session(session)
         .exec(),
+      this.copropiedades.findById(coPropertyId).session(session).exec(),
     ]);
 
     const cuentaOrigen =
@@ -380,11 +395,13 @@ export class NotasContablesService {
     const cuentaDestino =
       codigoDeCuentaContable(cuentaDestinoDoc?.cuentaCreditoId) ??
       CUENTA_SIN_ASIGNAR;
+    const cuentasOrden = cuentasOrdenDe(copropiedad);
 
     const entries = construirMovimientosReclasificacion(
       cuentaOrigen,
       cuentaDestino,
       nota.monto,
+      esAnulacion ? invertirCuentasOrden(cuentasOrden) : cuentasOrden,
     );
 
     await this.asientos.create(

@@ -141,8 +141,31 @@ export class LoteFacturacion {
   @Prop({ required: true, default: 0 })
   lateInterestRate: number;
 
+  /**
+   * Minimum overdue balance before mora is calculated for a unit this run —
+   * not a ceiling. See the note on `Copropiedad.lateFeeValueLimit`, which
+   * this defaults from at `crear()` time; a coproperty admin may override it
+   * per-lote here without changing the standing parameter.
+   */
   @Prop({ type: Number, default: null })
   lateInterestCap: number | null;
+
+  /**
+   * "Fecha límite para descuento" — the last date a payment still earns the
+   * early-payment discount. Defaults at `crear()` time to
+   * `billingDate + discountGraceDays - 1 día`, editable per-lote same as
+   * every other field on this screen (design note in `crear-lote.dto.ts`).
+   * Not yet read anywhere — applying it belongs to the Recibo work.
+   */
+  @Prop({ required: true })
+  discountDeadline: Date;
+
+  /**
+   * "Fecha de suspensión del servicio" — defaults to `periodEnd` (the last
+   * day of the billing month), editable per-lote. Not yet read anywhere.
+   */
+  @Prop({ required: true })
+  serviceSuspensionDate: Date;
 
   @Prop({ type: [NovedadLoteSchema], required: true, default: [] })
   adjustments: NovedadLote[];

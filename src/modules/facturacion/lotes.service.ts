@@ -55,6 +55,7 @@ import type {
 } from '../../contracts';
 import { toLote, toLoteDetalle } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
+import type { ActualizarLoteDto } from './dto/actualizar-lote.dto';
 import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
 import type {
   AgregarNovedadLineaDto,
@@ -62,7 +63,11 @@ import type {
 } from './dto/novedad-linea.dto';
 import type { ResultadoCargaNovedades } from '../../contracts';
 import type { ErrorConsolidacion } from '../../contracts';
-import { construirMovimientos, CUENTA_SIN_ASIGNAR } from './asiento.builder';
+import {
+  construirMovimientos,
+  cuentasOrdenDe,
+  CUENTA_SIN_ASIGNAR,
+} from './asiento.builder';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -125,6 +130,22 @@ export class LotesFacturacionService {
 
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
 
+    const discountGraceDays =
+      dto.diasGraciaDescuento ?? copropiedad?.discountGraceDays ?? 0;
+
+    // "Fecha límite para descuento": last day a payment still earns the
+    // early-payment discount. The screen pre-fills this and lets the admin
+    // override it; only computed here when the caller omits it entirely.
+    let discountDeadline: Date;
+    if (dto.fechaLimiteDescuento) {
+      discountDeadline = new Date(dto.fechaLimiteDescuento);
+    } else {
+      discountDeadline = new Date(dto.fechaFacturacion);
+      discountDeadline.setDate(
+        discountDeadline.getDate() + discountGraceDays - 1,
+      );
+    }
+
     const creado = await this.lotes.create({
       coPropertyId,
       number: numero,
@@ -134,16 +155,86 @@ export class LotesFacturacionService {
       periodStart: new Date(dto.periodoDesde),
       periodEnd: new Date(dto.periodoHasta),
       earlyPaymentDiscount: dto.descuentoProntoPago ?? 0,
-      discountGraceDays: dto.diasGraciaDescuento ?? 0,
+      discountGraceDays,
       lateInterestRate:
         dto.interesMora ??
         (copropiedad?.lateFeeEnabled ? copropiedad.lateFeeInterestRate : 0),
       lateInterestCap:
         dto.topeInteresMora ?? copropiedad?.lateFeeValueLimit ?? null,
+      discountDeadline,
+      serviceSuspensionDate: dto.fechaSuspension
+        ? new Date(dto.fechaSuspension)
+        : new Date(dto.periodoHasta),
       generatedBy: accountId,
     });
 
     return toLote(creado);
+  }
+
+  /**
+   * Edits an in-progress run's own definition — refused once consolidado,
+   * when the period/discount/mora parameters have already produced real
+   * Facturas and can no longer change retroactively.
+   *
+   * Always resets the lote back to `borrador` and clears its `preview`
+   * (`summary` along with it): a preview already computed from the OLD
+   * parameters no longer matches what changed ones would bill, so showing
+   * it as `liquidado` would be a stale table wearing a "confirmed" badge.
+   * `adjustments` (novedades) survive the reset — a manual charge against a
+   * specific unit/concept has nothing to do with which dates the run covers.
+   */
+  async actualizar(id: string, dto: ActualizarLoteDto): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${id}`);
+    }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${id} ya está consolidado y su definición no puede editarse`,
+      );
+    }
+
+    const doc: Record<string, unknown> = {};
+    const set = (clave: string, valor: unknown): void => {
+      if (valor !== undefined) doc[clave] = valor;
+    };
+    set(
+      'billingDate',
+      dto.fechaFacturacion ? new Date(dto.fechaFacturacion) : undefined,
+    );
+    set(
+      'dueDate',
+      dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : undefined,
+    );
+    set(
+      'periodStart',
+      dto.periodoDesde ? new Date(dto.periodoDesde) : undefined,
+    );
+    set('periodEnd', dto.periodoHasta ? new Date(dto.periodoHasta) : undefined);
+    set(
+      'discountDeadline',
+      dto.fechaLimiteDescuento ? new Date(dto.fechaLimiteDescuento) : undefined,
+    );
+    set(
+      'serviceSuspensionDate',
+      dto.fechaSuspension ? new Date(dto.fechaSuspension) : undefined,
+    );
+    set('earlyPaymentDiscount', dto.descuentoProntoPago);
+    set('discountGraceDays', dto.diasGraciaDescuento);
+    set('lateInterestRate', dto.interesMora);
+    set('lateInterestCap', dto.topeInteresMora);
+    doc.status = 'borrador';
+    doc.preview = [];
+    doc.summary = null;
+
+    const actualizado = await this.lotes
+      .findOneAndUpdate({ _id: id, coPropertyId }, { $set: doc }, { new: true })
+      .exec();
+    if (!actualizado) {
+      throw new NotFoundException(`No se encontró el lote ${id}`);
+    }
+    return toLote(actualizado);
   }
 
   /**
@@ -576,11 +667,15 @@ export class LotesFacturacionService {
             (acc, s) => acc + s.balance,
             0,
           );
-          if (lote.lateInterestRate > 0 && saldoTotal > 0) {
-            const bruto = saldoTotal * (lote.lateInterestRate / 100);
-            const tope = lote.lateInterestCap;
+          // `lateInterestCap` is a MINIMUM overdue balance to bother
+          // charging mora at all, not a ceiling on the amount — see the
+          // note on `Copropiedad.lateFeeValueLimit`. Null means no
+          // threshold: mora is always calculated when the rate is set.
+          const minimo = lote.lateInterestCap;
+          const alcanzaElMinimo = minimo === null || saldoTotal >= minimo;
+          if (lote.lateInterestRate > 0 && saldoTotal > 0 && alcanzaElMinimo) {
             const valor = Math.round(
-              tope !== null ? Math.min(bruto, tope) : bruto,
+              saldoTotal * (lote.lateInterestRate / 100),
             );
             if (valor > 0) {
               lines.push(this.aLinea(interesConcepto, valor, 'interes', null));
@@ -675,6 +770,7 @@ export class LotesFacturacionService {
 
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentasOrden = cuentasOrdenDe(copropiedad);
 
     // Resume support: if an earlier attempt at this same Lote already
     // created some Facturas before a resolution-exhaustion blocker (or a
@@ -741,7 +837,11 @@ export class LotesFacturacionService {
       // for this row. This checks a bug in the posting logic itself, not a
       // data problem a re-run fixes, so it is thrown (uncaught, propagates
       // out of consolidar entirely), not recorded as a row error.
-      const entries = construirMovimientos(preliminar, cuentaCartera);
+      const entries = construirMovimientos(
+        preliminar,
+        cuentaCartera,
+        cuentasOrden,
+      );
       const sumaDebitos = entries
         .filter((m) => m.type === 'debito')
         .reduce((acc, m) => acc + m.amount, 0);
@@ -902,6 +1002,33 @@ export class LotesFacturacionService {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
     return documento;
+  }
+
+  /**
+   * Cancels a run that never became real invoices — the one hard delete in
+   * this domain, same exception the audit law already carves out for
+   * `Inmueble`/`ConceptoCobro`: a `borrador`/`liquidado` lote's `preview` is
+   * a computed, throwaway draft, and its `invoiceIds` is still empty —
+   * `consolidar` is the only place that ever creates a real `Factura` and
+   * fills it in. Refused once consolidado, when that stops being true.
+   *
+   * Exists mainly to recover from a run started with wrong parameters (a
+   * stale Parámetros de Facturación snapshot, say) — the unique partial
+   * index only allows one `borrador`/`liquidado` lote per coproperty at a
+   * time, so a mistaken one blocks every new attempt until it is gone.
+   */
+  async cancelar(id: string): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote ${id}`);
+    }
+    if (lote.status === 'consolidado') {
+      throw new ConflictException(
+        `El lote ${id} ya está consolidado y generó facturas reales; no puede cancelarse`,
+      );
+    }
+    await this.lotes.deleteOne({ _id: id, coPropertyId }).exec();
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —
