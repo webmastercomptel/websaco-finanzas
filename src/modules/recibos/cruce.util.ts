@@ -120,21 +120,40 @@ export async function decrementarSaldoNotaDebito(
 }
 
 /**
- * Splits `montoTotal` across a Factura's lines proportionally to each
- * line's `totalAmount`, and adjusts the matching SaldoCartera row for each
- * by `signo * parte` — mirroring the per-line `$inc` loop
- * `LotesFacturacionService.consolidar()` uses to build these balances in
- * the first place.
+ * Splits `montoTotal` across a Factura's lines as a WATERFALL, not
+ * proportionally: `factura.lines` arrives sorted by each line's own
+ * `ConceptoCobro.sortOrder` ASCENDING (`LotesFacturacionService.consolidar()`
+ * sorts them that way before freezing the document, "Cargos order" —
+ * Administración is seeded first and so normally sits at index 0). This
+ * walks them in REVERSE — most-recently-created concept first — filling each
+ * one's own `totalAmount` bucket completely before spilling into the next,
+ * so Administración (`sortOrder` 1, almost always the oldest concept in a
+ * building's Cargos table) is the LAST bucket to receive money. Business
+ * rule, not a technical default: ancillary charges (parking, fines, other
+ * income…) get paid off before the core administration fee does.
+ *
+ * Buckets are laid out on one running number line in that priority order —
+ * concept N's bucket is `[cursor, cursor + N.totalAmount)` — and each call
+ * only fills/drains the segment `[lo, hi)` between how much of the invoice
+ * was applied BEFORE this call and how much is applied AFTER it (both
+ * derived from `factura.total` and the ALREADY-UPDATED `outstandingBalance`
+ * the caller passes in, post-`decrementarSaldoFactura`/post-restore). This
+ * is what makes repeated partial payments against the SAME invoice correct:
+ * a second payment does not re-fill a bucket a first payment already
+ * finished — it resumes exactly where the running total left off. The same
+ * segment math handles `signo: 1` (a void's restoration) for free: `lo`/`hi`
+ * simply swap which one is "before" and which is "after".
  *
  * `SaldoCartera` is a RECONCILABLE CACHE (see its schema comment), not the
  * authoritative balance — so this clamps at zero via an aggregation-pipeline
  * update instead of ever refusing the transaction: a cache that has drifted
- * low must never be the reason a real payment fails to record. `signo: 1`
- * is a void's restoration and structurally cannot go negative; `signo: -1`
- * is an application and is the one this clamp actually protects.
+ * low must never be the reason a real payment fails to record.
  *
- * Rounding: every line but the last is `Math.round()`-ed; the last absorbs
- * whatever remainder keeps the parts summing exactly to `montoTotal`.
+ * Returns the same per-concepto split it just applied to SaldoCartera —
+ * single source of truth for "how is this amount divided among the
+ * invoice's concepts", reused by the calling service to code the matching
+ * journal entry per concepto instead of recomputing the split independently
+ * (which would risk the two drifting apart).
  */
 export async function ajustarSaldosCartera(
   saldos: Model<SaldoCarteraDocument>,
@@ -143,23 +162,38 @@ export async function ajustarSaldosCartera(
   factura: {
     inmuebleId: Types.ObjectId;
     total: number;
+    outstandingBalance: number;
     lines: { conceptoId: Types.ObjectId; totalAmount: number }[];
   },
   montoTotal: number,
   signo: 1 | -1,
-): Promise<void> {
+): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
   if (factura.lines.length === 0 || factura.total === 0 || montoTotal === 0) {
-    return;
+    return [];
   }
 
-  let repartido = 0;
-  for (const [indice, linea] of factura.lines.entries()) {
-    const esUltima = indice === factura.lines.length - 1;
-    const parte = esUltima
-      ? montoTotal - repartido
-      : Math.round(montoTotal * (linea.totalAmount / factura.total));
-    repartido += parte;
+  // How much of the invoice is applied AFTER this call vs. BEFORE it — see
+  // docblock. `aplicadoDespues` uses `factura.outstandingBalance`, which the
+  // caller has ALREADY updated for this call's effect.
+  const aplicadoDespues = factura.total - factura.outstandingBalance;
+  const aplicadoAntes = aplicadoDespues + signo * montoTotal;
+  const lo = Math.min(aplicadoAntes, aplicadoDespues);
+  const hi = Math.max(aplicadoAntes, aplicadoDespues);
+
+  const ordenAplicacion = [...factura.lines].reverse();
+  const partes: { conceptoId: Types.ObjectId; parte: number }[] = [];
+  let cursor = 0;
+  for (const linea of ordenAplicacion) {
+    const inicioLinea = cursor;
+    const finLinea = cursor + linea.totalAmount;
+    cursor = finLinea;
+
+    const parte = Math.max(
+      0,
+      Math.min(finLinea, hi) - Math.max(inicioLinea, lo),
+    );
     if (parte === 0) continue;
+    partes.push({ conceptoId: linea.conceptoId, parte });
 
     await saldos
       .findOneAndUpdate(
@@ -179,6 +213,7 @@ export async function ajustarSaldosCartera(
       )
       .exec();
   }
+  return partes;
 }
 
 /**
@@ -212,6 +247,10 @@ export async function ajustarSaldosCartera(
  * `Math.min(montoTotal, factura.outstandingBalance)` plus
  * `validarDistribucionNotaCredito`'s own sum-to-`montoTotal` check) — so this
  * never guards that direction.
+ *
+ * Returns the same per-concepto split it just applied, same reasoning as
+ * `ajustarSaldosCartera`'s own return: the caller codes the journal entry
+ * per concepto from this, instead of re-deriving the rounding independently.
  */
 export async function ajustarSaldosCarteraPorDistribucion(
   saldos: Model<SaldoCarteraDocument>,
@@ -221,9 +260,9 @@ export async function ajustarSaldosCarteraPorDistribucion(
   distribucion: { conceptoId: Types.ObjectId; monto: number }[],
   montoAplicado: number,
   signo: 1 | -1,
-): Promise<void> {
+): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
   if (distribucion.length === 0 || montoAplicado === 0) {
-    return;
+    return [];
   }
 
   const sumaDistribucion = distribucion.reduce(
@@ -232,6 +271,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
   );
   const esAplicacionCompleta = montoAplicado === sumaDistribucion;
 
+  const partes: { conceptoId: Types.ObjectId; parte: number }[] = [];
   let repartido = 0;
   for (const [indice, linea] of distribucion.entries()) {
     const esUltima = indice === distribucion.length - 1;
@@ -242,6 +282,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
         : Math.round(montoAplicado * (linea.monto / sumaDistribucion));
     repartido += parte;
     if (parte === 0) continue;
+    partes.push({ conceptoId: linea.conceptoId, parte });
 
     await saldos
       .findOneAndUpdate(
@@ -261,4 +302,5 @@ export async function ajustarSaldosCarteraPorDistribucion(
       )
       .exec();
   }
+  return partes;
 }

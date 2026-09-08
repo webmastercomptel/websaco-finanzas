@@ -30,6 +30,14 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
@@ -44,7 +52,9 @@ import {
   construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   cuentasOrdenDe,
+  enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
+  type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
 import { toNotaCredito, toNotaCreditoDetalle } from './notas-credito.mapper';
@@ -89,7 +99,45 @@ export class NotasCreditoService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables?: Model<CuentaContableDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
+
+  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
+  private async conAuxiliares(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    inmuebleId: Types.ObjectId,
+    copropiedad: {
+      defaultCostCentre: string | null;
+      cashFlowCode: string | null;
+    } | null,
+    entries: ReturnType<typeof construirAsientoCruce>,
+  ): Promise<ReturnType<typeof construirAsientoCruce>> {
+    if (!this.cuentasContables) return entries;
+    const [cuentas, inmueble] = await Promise.all([
+      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.inmuebles?.findById(inmuebleId).session(session).exec(),
+    ]);
+    const marcas = new Map<string, MarcasCuentaContable>(
+      cuentas.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+        },
+      ]),
+    );
+    return enriquecerMovimientosConAuxiliares(entries, marcas, {
+      terceroCode: inmueble?.code ?? null,
+      centroCosto: copropiedad?.defaultCostCentre ?? null,
+      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+    });
+  }
 
   private async transaccion<T>(
     fn: (session: ClientSession) => Promise<T>,
@@ -201,11 +249,11 @@ export class NotasCreditoService {
         factura.outstandingBalance,
       );
       let totalAplicadoAhora = 0;
+      const creditosPorCuenta = new Map<string | null, number>();
       if (montoAAplicar > 0) {
-        // The returned Factura isn't needed here (unlike Recibos'
-        // `ajustarSaldosCartera` call sites) — `ajustarSaldosCarteraPorDistribucion`
-        // below takes `inmuebleId` and `dto.distribucion` directly, not the
-        // Factura's own lines.
+        // Needed now (unlike before per-concepto coding): each distribution
+        // line's own accountingReceivableAccount comes off the anchor
+        // Factura's own lines, matched by conceptoId.
         await decrementarSaldoFactura(
           this.facturas,
           session,
@@ -217,7 +265,7 @@ export class NotasCreditoService {
         // `ajustarSaldosCartera` uses — this application is against the
         // anchor invoice, whose concepto breakdown the user explicitly chose
         // via `dto.distribucion` (Task 11 / review Finding 3).
-        await ajustarSaldosCarteraPorDistribucion(
+        const partes = await ajustarSaldosCarteraPorDistribucion(
           this.saldos,
           session,
           coPropertyId,
@@ -229,6 +277,16 @@ export class NotasCreditoService {
           montoAAplicar,
           -1,
         );
+        for (const parte of partes) {
+          const linea = factura.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          const cuenta = linea?.accountingReceivableAccount ?? null;
+          creditosPorCuenta.set(
+            cuenta,
+            (creditosPorCuenta.get(cuenta) ?? 0) + parte.parte,
+          );
+        }
         await this.aplicaciones.create(
           [
             {
@@ -270,6 +328,7 @@ export class NotasCreditoService {
         notaActual!,
         totalAplicadoAhora,
         dto.montoTotal - totalAplicadoAhora,
+        creditosPorCuenta,
       );
 
       const final = await this.notasCredito
@@ -676,7 +735,7 @@ export class NotasCreditoService {
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaDevoluciones =
         copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
-      const entries = construirContraAsientoCruce(
+      let entries = construirContraAsientoCruce(
         cuentaDevoluciones,
         cuentaCartera,
         cuentaAnticipos,
@@ -685,6 +744,13 @@ export class NotasCreditoService {
         nota.totalAmount,
         'NC',
         cuentasOrdenDe(copropiedad),
+      );
+      entries = await this.conAuxiliares(
+        session,
+        coPropertyId,
+        nota.inmuebleId,
+        copropiedad,
+        entries,
       );
       await this.asientos.create(
         [
@@ -817,11 +883,18 @@ export class NotasCreditoService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const entries = construirMovimientosAplicacionAnticipo(
+    let entries = construirMovimientosAplicacionAnticipo(
       cuentaAnticipos,
       cuentaCartera,
       montoAplicado,
       'NC',
+    );
+    entries = await this.conAuxiliares(
+      session,
+      coPropertyId,
+      nota.inmuebleId,
+      copropiedad,
+      entries,
     );
 
     await this.asientos.create(
@@ -842,10 +915,11 @@ export class NotasCreditoService {
 
   /**
    * Posts the CREATION-time journal entry: debit `cuentaDevoluciones` for
-   * the full `montoTotal`, credit `cuentaCartera` for whatever applied
-   * against the anchor invoice in this call, credit `cuentaAnticipos` for
-   * whatever remains unapplied (design §7). Shares `construirAsientoCruce`
-   * with Recibos — only `origen: 'NC'` differs.
+   * the full `montoTotal`, credit cartera for whatever applied against the
+   * anchor invoice in this call (per concepto, via `desgloseCartera` — see
+   * `construirAsientoCruce`), credit `cuentaAnticipos` for whatever remains
+   * unapplied (design §7). Shares `construirAsientoCruce` with Recibos —
+   * only `origen: 'NC'` differs.
    */
   private async postearAsientoCreacion(
     session: ClientSession,
@@ -853,6 +927,7 @@ export class NotasCreditoService {
     nota: NotaCreditoDocument,
     montoAplicado: number,
     montoSinAplicar: number,
+    creditosPorCuenta: Map<string | null, number>,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -862,7 +937,10 @@ export class NotasCreditoService {
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaDevoluciones =
       copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
-    const entries = construirAsientoCruce(
+    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
+      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
+    );
+    let entries = construirAsientoCruce(
       cuentaDevoluciones,
       cuentaCartera,
       cuentaAnticipos,
@@ -870,6 +948,14 @@ export class NotasCreditoService {
       montoSinAplicar,
       'NC',
       cuentasOrdenDe(copropiedad),
+      desgloseCartera,
+    );
+    entries = await this.conAuxiliares(
+      session,
+      coPropertyId,
+      nota.inmuebleId,
+      copropiedad,
+      entries,
     );
 
     await this.asientos.create(

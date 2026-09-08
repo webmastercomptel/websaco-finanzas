@@ -1,6 +1,6 @@
 // src/database/schemas/conceptos/valor-recurrente.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from './concepto-cobro.schema';
@@ -23,7 +23,7 @@ export type ValorRecurrenteDocument = HydratedDocument<ValorRecurrente>;
 export class ValorRecurrente {
   /** Denormalised from the unit so tenant filtering never needs a join. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -31,7 +31,7 @@ export class ValorRecurrente {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
@@ -39,7 +39,7 @@ export class ValorRecurrente {
   inmuebleId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: ConceptoCobro.name,
     required: true,
     index: true,

@@ -1,7 +1,10 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   PDFDocument,
   PDFPage,
   PDFFont,
+  PDFImage,
   StandardFonts,
   rgb,
   degrees,
@@ -15,37 +18,61 @@ export interface PdfContext {
   fontBold: PDFFont;
   /** Current vertical cursor, top-down. Mutated by every write helper. */
   y: number;
+  /** Page dimensions for this context — Letter portrait unless `crearContexto`
+   *  was asked for `orientacion: 'horizontal'`. Every write helper reads
+   *  these instead of a hardcoded Letter-portrait constant, so a landscape
+   *  report (e.g. a wide table with many columns) lays out correctly. */
+  pageWidth: number;
+  pageHeight: number;
+  contentWidth: number;
 }
 
 const MARGIN_LEFT = 50;
 const MARGIN_RIGHT = 50;
-const PAGE_WIDTH = 612; // Letter
+const PAGE_WIDTH = 612; // Letter portrait
 const PAGE_HEIGHT = 792;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-const TOP_Y = PAGE_HEIGHT - 50;
-const BOTTOM_Y = 50;
+const TOP_MARGIN = 50;
+const BOTTOM_MARGIN = 50;
 const LINE_HEIGHT = 14;
 const FONT_SIZE = 10;
 const HEADER_FONT_SIZE = 14;
 
 /**
- * Creates a fresh PdfContext on a single Letter page with Helvetica embedded.
+ * Creates a fresh PdfContext on a single page with Helvetica embedded.
  * No filesystem writes — the PDF lives entirely in memory until saved.
+ * Defaults to Letter portrait; pass `orientacion: 'horizontal'` for a wide
+ * report (Letter landscape) instead.
  */
-export async function crearContexto(): Promise<PdfContext> {
+export async function crearContexto(opciones?: {
+  orientacion?: 'vertical' | 'horizontal';
+}): Promise<PdfContext> {
+  const horizontal = opciones?.orientacion === 'horizontal';
+  const pageWidth = horizontal ? PAGE_HEIGHT : PAGE_WIDTH;
+  const pageHeight = horizontal ? PAGE_WIDTH : PAGE_HEIGHT;
+  const contentWidth = pageWidth - MARGIN_LEFT - MARGIN_RIGHT;
+
   const doc = await PDFDocument.create();
-  const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const page = doc.addPage([pageWidth, pageHeight]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  return { doc, page, font, fontBold, y: TOP_Y };
+  return {
+    doc,
+    page,
+    font,
+    fontBold,
+    y: pageHeight - TOP_MARGIN,
+    pageWidth,
+    pageHeight,
+    contentWidth,
+  };
 }
 
 /** Advances y to the next line. Adds a new page when the cursor reaches the bottom. */
 function saltarLinea(ctx: PdfContext, veces = 1): void {
   ctx.y -= LINE_HEIGHT * veces;
-  if (ctx.y < BOTTOM_Y) {
-    ctx.page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    ctx.y = TOP_Y;
+  if (ctx.y < BOTTOM_MARGIN) {
+    ctx.page = ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
+    ctx.y = ctx.pageHeight - TOP_MARGIN;
   }
 }
 
@@ -61,8 +88,8 @@ export function escribirLinea(
   const font = opciones?.bold ? ctx.fontBold : ctx.font;
   const size = opciones?.size ?? FONT_SIZE;
   const truncated =
-    font.widthOfTextAtSize(texto, size) > CONTENT_WIDTH
-      ? truncateToFit(font, texto, size, CONTENT_WIDTH)
+    font.widthOfTextAtSize(texto, size) > ctx.contentWidth
+      ? truncateToFit(font, texto, size, ctx.contentWidth)
       : texto;
   ctx.page.drawText(truncated, {
     x: MARGIN_LEFT,
@@ -87,7 +114,7 @@ export function escribirLabelValor(
   const valueWidth = ctx.fontBold.widthOfTextAtSize(valor, FONT_SIZE);
   const gap = 10;
 
-  if (labelWidth + gap + valueWidth <= CONTENT_WIDTH) {
+  if (labelWidth + gap + valueWidth <= ctx.contentWidth) {
     ctx.page.drawText(label, {
       x: MARGIN_LEFT,
       y: ctx.y,
@@ -96,7 +123,7 @@ export function escribirLabelValor(
       color: rgb(0, 0, 0),
     });
     ctx.page.drawText(valor, {
-      x: MARGIN_LEFT + CONTENT_WIDTH - valueWidth,
+      x: MARGIN_LEFT + ctx.contentWidth - valueWidth,
       y: ctx.y,
       size: FONT_SIZE,
       font: ctx.fontBold,
@@ -125,20 +152,23 @@ export function escribirLabelValor(
 
 /**
  * Writes a simple ruled table. Columns are left-aligned by default;
- * the last N columns are right-aligned when detected as numeric (starts with
- * digit, minus sign, or is empty).
+ * the last `columnasNumericas` columns are right-aligned (default 2, the
+ * original "last 2 columns are numeric" heuristic — every existing caller
+ * omits the option and sees no behavior change).
  */
 export function escribirTabla(
   ctx: PdfContext,
   columnas: string[],
   filas: string[][],
+  opciones?: { columnasNumericas?: number },
 ): void {
   const colCount = columnas.length;
-  const colWidth = CONTENT_WIDTH / colCount;
+  const colWidth = ctx.contentWidth / colCount;
+  const primeraNumerica = colCount - (opciones?.columnasNumericas ?? 2);
 
   // Header row
   for (let i = 0; i < colCount; i++) {
-    const isNumeric = i >= colCount - 2;
+    const isNumeric = i >= primeraNumerica;
     const textWidth = ctx.fontBold.widthOfTextAtSize(columnas[i], FONT_SIZE);
     const x = isNumeric
       ? MARGIN_LEFT + colWidth * (i + 1) - textWidth - 4
@@ -156,7 +186,7 @@ export function escribirTabla(
   // Header underline
   ctx.page.drawLine({
     start: { x: MARGIN_LEFT, y: ctx.y + 4 },
-    end: { x: MARGIN_LEFT + CONTENT_WIDTH, y: ctx.y + 4 },
+    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 4 },
     thickness: 0.5,
     color: rgb(0, 0, 0),
   });
@@ -165,13 +195,13 @@ export function escribirTabla(
   // Data rows
   for (const fila of filas) {
     // Page break check
-    if (ctx.y < BOTTOM_Y + LINE_HEIGHT) {
-      ctx.page = ctx.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-      ctx.y = TOP_Y;
+    if (ctx.y < BOTTOM_MARGIN + LINE_HEIGHT) {
+      ctx.page = ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
+      ctx.y = ctx.pageHeight - TOP_MARGIN;
     }
 
     for (let i = 0; i < colCount; i++) {
-      const isNumeric = i >= colCount - 2;
+      const isNumeric = i >= primeraNumerica;
       const cell = fila[i] ?? '';
       const textWidth = ctx.font.widthOfTextAtSize(cell, FONT_SIZE);
       const x = isNumeric
@@ -191,7 +221,7 @@ export function escribirTabla(
   // Bottom rule
   ctx.page.drawLine({
     start: { x: MARGIN_LEFT, y: ctx.y + 4 },
-    end: { x: MARGIN_LEFT + CONTENT_WIDTH, y: ctx.y + 4 },
+    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 4 },
     thickness: 0.5,
     color: rgb(0, 0, 0),
   });
@@ -208,7 +238,7 @@ export function escribirMarcaDuplicado(
   fechaEmision: string | null,
 ): void {
   const texto = fechaEmision
-    ? `DUPLICADO — Documento original emitido el ${new Date(fechaEmision).toLocaleDateString('es-CO')}`
+    ? `DUPLICADO — Documento original emitido el ${new Date(fechaEmision).toLocaleDateString('es-CO', { timeZone: 'UTC' })}`
     : 'DUPLICADO — Documento Original';
 
   ctx.page.drawText(texto, {
@@ -268,7 +298,7 @@ export function escribirEncabezado(
   // Document title (bold, centered)
   const titleWidth = ctx.fontBold.widthOfTextAtSize(titulo, HEADER_FONT_SIZE);
   ctx.page.drawText(titulo, {
-    x: MARGIN_LEFT + (CONTENT_WIDTH - titleWidth) / 2,
+    x: MARGIN_LEFT + (ctx.contentWidth - titleWidth) / 2,
     y: ctx.y,
     size: HEADER_FONT_SIZE,
     font: ctx.fontBold,
@@ -280,7 +310,7 @@ export function escribirEncabezado(
   if (subtitulo) {
     const subWidth = ctx.font.widthOfTextAtSize(subtitulo, FONT_SIZE);
     ctx.page.drawText(subtitulo, {
-      x: MARGIN_LEFT + (CONTENT_WIDTH - subWidth) / 2,
+      x: MARGIN_LEFT + (ctx.contentWidth - subWidth) / 2,
       y: ctx.y,
       size: FONT_SIZE,
       font: ctx.font,
@@ -290,14 +320,51 @@ export function escribirEncabezado(
   }
 }
 
+/** "Muy pequeñito" per spec — the logo is a corner mark, not a masthead.
+ *  Every document that shows the WebSACO logo (Estado de Cuenta, Factura,
+ *  Prefactura) draws it at this same width, aspect ratio preserved. */
+export const LOGO_WIDTH = 50;
+
+let logoBytesCache: Buffer | null = null;
+
+/** Lazily reads and caches the WebSACO logo PNG from the shared static-assets
+ *  folder (copied into `dist/` by nest-cli.json's `assets` config) — read
+ *  once per process, not once per PDF. */
+function cargarLogoBytes(): Buffer {
+  logoBytesCache ??= readFileSync(
+    join(__dirname, '../assets/websaco-logo.png'),
+  );
+  return logoBytesCache;
+}
+
+/**
+ * Embeds the WebSACO logo into `doc` at the shared `LOGO_WIDTH`, aspect
+ * ratio preserved. Each caller still positions it — headers differ too much
+ * (Estado de Cuenta's two-row block vs. Factura's gray banner) to share a
+ * single draw call, but the size and the asset must stay identical.
+ */
+export async function embebirLogoWebsaco(doc: PDFDocument): Promise<{
+  image: PDFImage;
+  width: number;
+  height: number;
+}> {
+  const image = await doc.embedPng(cargarLogoBytes());
+  const height = image.height * (LOGO_WIDTH / image.width);
+  return { image, width: LOGO_WIDTH, height };
+}
+
 /** Formats a number as Colombian peso currency: $ 1.234.567 */
 export function formatoPeso(valor: number): string {
   return `$ ${valor.toLocaleString('es-CO')}`;
 }
 
-/** Formats a Date as dd/mm/yyyy. */
+/** Formats a Date as dd/mm/yyyy. Pinned to UTC — every date-only business
+ *  date this app stores is midnight UTC to begin with (see the note in
+ *  frontend's lote-definicion.tsx), so formatting in the server's local
+ *  timezone would show the day before whenever that offset is negative
+ *  (e.g. Cloud Run running in America/Bogota, UTC-5). */
 export function formatoFecha(fecha: Date | string): string {
-  return new Date(fecha).toLocaleDateString('es-CO');
+  return new Date(fecha).toLocaleDateString('es-CO', { timeZone: 'UTC' });
 }
 
 // ── internal helpers ──

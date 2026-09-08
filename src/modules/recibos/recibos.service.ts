@@ -34,6 +34,14 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
@@ -50,7 +58,9 @@ import {
   construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   cuentasOrdenDe,
+  enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
+  type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import {
   toAplicacionCartera,
@@ -123,6 +133,10 @@ export class RecibosService {
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables?: Model<CuentaContableDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
 
   /**
@@ -235,18 +249,20 @@ export class RecibosService {
       );
 
       let totalAplicadoAhora = 0;
+      let creditosPorCuenta = new Map<string | null, number>();
       if (dto.aplicaciones?.length) {
-        const creadas = await this.aplicarManual(
+        const resultado = await this.aplicarManual(
           session,
           coPropertyId,
           creado,
           dto.aplicaciones,
           accountId,
         );
-        totalAplicadoAhora = creadas.reduce(
+        totalAplicadoAhora = resultado.creadas.reduce(
           (acc, a) => acc + a.amountApplied,
           0,
         );
+        creditosPorCuenta = resultado.creditosPorCuenta;
       } else if (dto.aplicacionAutomatica) {
         const resultado = await this.aplicarFifo(
           session,
@@ -259,6 +275,7 @@ export class RecibosService {
           (acc, a) => acc + a.amountApplied,
           0,
         );
+        creditosPorCuenta = resultado.creditosPorCuenta;
       }
 
       // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
@@ -276,6 +293,7 @@ export class RecibosService {
         reciboActual!,
         totalAplicadoAhora,
         dto.montoRecibido - totalAplicadoAhora,
+        creditosPorCuenta,
       );
 
       const final = await this.recibos
@@ -328,7 +346,12 @@ export class RecibosService {
       }
 
       if (dto.aplicaciones?.length) {
-        const creadas = await this.aplicarManual(
+        // `creditosPorCuenta` intentionally unused here — the deferred
+        // anticipo application still posts through
+        // `postearAsientoAplicacionAnticipo`'s flat `cuentaCartera` credit.
+        // Per-concepto coding for this path is a separate, not-yet-scoped
+        // piece of work.
+        const { creadas } = await this.aplicarManual(
           session,
           coPropertyId,
           recibo,
@@ -475,7 +498,7 @@ export class RecibosService {
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-      const entries = construirContraAsientoCruce(
+      let entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,
         cuentaAnticipos,
@@ -484,6 +507,13 @@ export class RecibosService {
         recibo.receivedAmount,
         'RC',
         cuentasOrdenDe(copropiedad),
+      );
+      entries = await this.conAuxiliares(
+        session,
+        coPropertyId,
+        recibo.inmuebleId,
+        copropiedad,
+        entries,
       );
       await this.asientos.create(
         [
@@ -629,7 +659,10 @@ export class RecibosService {
     recibo: ReciboDocument,
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
-  ): Promise<AplicacionCarteraDocument[]> {
+  ): Promise<{
+    creadas: AplicacionCarteraDocument[];
+    creditosPorCuenta: Map<string | null, number>;
+  }> {
     const sumaSolicitada = solicitadas.reduce(
       (acc, a) => acc + a.montoAplicado,
       0,
@@ -642,6 +675,18 @@ export class RecibosService {
     }
 
     const creadas: AplicacionCarteraDocument[] = [];
+    // Per-account breakdown of the cartera credit — null is the "no
+    // per-concepto account" bucket (a Nota Débito application, or a Factura
+    // line whose concepto has no accountingReceivableAccount configured),
+    // resolved to the coproperty's shared cuentaCartera by the poster.
+    const creditosPorCuenta = new Map<string | null, number>();
+    const acumular = (cuenta: string | null, monto: number) => {
+      if (monto === 0) return;
+      creditosPorCuenta.set(
+        cuenta,
+        (creditosPorCuenta.get(cuenta) ?? 0) + monto,
+      );
+    };
     for (const solicitada of solicitadas) {
       const documentoId = new Types.ObjectId(solicitada.documentoId);
 
@@ -684,6 +729,9 @@ export class RecibosService {
           solicitada.montoAplicado,
           -1,
         );
+        // A Nota Débito has no accountingReceivableAccount breakdown here —
+        // its cartera credit stays on the coproperty's shared account.
+        acumular(null, solicitada.montoAplicado);
 
         const [creada] = await this.aplicaciones.create(
           [
@@ -721,7 +769,7 @@ export class RecibosService {
         );
       }
 
-      await ajustarSaldosCartera(
+      const partes = await ajustarSaldosCartera(
         this.saldos,
         session,
         coPropertyId,
@@ -729,6 +777,12 @@ export class RecibosService {
         solicitada.montoAplicado,
         -1,
       );
+      for (const parte of partes) {
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+      }
 
       const [creada] = await this.aplicaciones.create(
         [
@@ -762,7 +816,7 @@ export class RecibosService {
       )
       .exec();
 
-    return creadas;
+    return { creadas, creditosPorCuenta };
   }
 
   /**
@@ -790,6 +844,7 @@ export class RecibosService {
     aplicadas: AplicacionCarteraDocument[];
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
+    creditosPorCuenta: Map<string | null, number>;
   }> {
     const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
       this.facturas
@@ -837,6 +892,14 @@ export class RecibosService {
 
     const aplicadas: AplicacionCarteraDocument[] = [];
     const errores: ErrorAplicacion[] = [];
+    const creditosPorCuenta = new Map<string | null, number>();
+    const acumular = (cuenta: string | null, valor: number) => {
+      if (valor === 0) return;
+      creditosPorCuenta.set(
+        cuenta,
+        (creditosPorCuenta.get(cuenta) ?? 0) + valor,
+      );
+    };
     let restante = montoDisponible;
     let totalAplicado = 0;
 
@@ -868,6 +931,9 @@ export class RecibosService {
             monto,
             -1,
           );
+          // Same as aplicarManual: a Nota Débito has no per-concepto
+          // account here, so its cartera credit stays on the shared one.
+          acumular(null, monto);
 
           const [creada] = await this.aplicaciones.create(
             [
@@ -899,7 +965,7 @@ export class RecibosService {
           candidato.doc._id,
           monto,
         );
-        await ajustarSaldosCartera(
+        const partes = await ajustarSaldosCartera(
           this.saldos,
           session,
           coPropertyId,
@@ -907,6 +973,12 @@ export class RecibosService {
           monto,
           -1,
         );
+        for (const parte of partes) {
+          const linea = facturaActualizada.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+        }
 
         const [creada] = await this.aplicaciones.create(
           [
@@ -966,7 +1038,51 @@ export class RecibosService {
         .exec();
     }
 
-    return { aplicadas, errores, montoSinAplicar: restante };
+    return { aplicadas, errores, montoSinAplicar: restante, creditosPorCuenta };
+  }
+
+  /**
+   * Enriches `entries` with tercero/centroCosto/flujoCaja right before
+   * `this.asientos.create(...)`, same call-site shape every asiento-posting
+   * service uses (see `enriquecerMovimientosConAuxiliares`'s own docblock).
+   * `tercero` is the inmueble's OWN unit code — Recibos has no unitCode
+   * frozen on itself, so this is the one extra lookup (`this.inmuebles`)
+   * every other caller of this helper's sibling in `lotes.service.ts`
+   * doesn't need (a Factura's own `preliminar.unitCode` is already at hand
+   * there). Returns `entries` untouched when `cuentasContables` was never
+   * injected — the test-only case documented on this class's constructor.
+   */
+  private async conAuxiliares(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    inmuebleId: Types.ObjectId,
+    copropiedad: {
+      defaultCostCentre: string | null;
+      cashFlowCode: string | null;
+    } | null,
+    entries: ReturnType<typeof construirAsientoCruce>,
+  ): Promise<ReturnType<typeof construirAsientoCruce>> {
+    if (!this.cuentasContables) return entries;
+    const [cuentas, inmueble] = await Promise.all([
+      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.inmuebles?.findById(inmuebleId).session(session).exec(),
+    ]);
+    const marcas = new Map<string, MarcasCuentaContable>(
+      cuentas.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+        },
+      ]),
+    );
+    return enriquecerMovimientosConAuxiliares(entries, marcas, {
+      terceroCode: inmueble?.code ?? null,
+      centroCosto: copropiedad?.defaultCostCentre ?? null,
+      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+    });
   }
 
   /**
@@ -984,6 +1100,7 @@ export class RecibosService {
     recibo: ReciboDocument,
     montoAplicado: number,
     montoSinAplicar: number,
+    creditosPorCuenta: Map<string | null, number>,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -991,7 +1108,12 @@ export class RecibosService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const entries = construirAsientoCruce(
+    // null key (no accountingReceivableAccount for that concepto, or a Nota
+    // Débito application) resolves to the coproperty's shared cuentaCartera.
+    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
+      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
+    );
+    let entries = construirAsientoCruce(
       recibo.destinationAccount,
       cuentaCartera,
       cuentaAnticipos,
@@ -999,6 +1121,14 @@ export class RecibosService {
       montoSinAplicar,
       'RC',
       cuentasOrdenDe(copropiedad),
+      desgloseCartera,
+    );
+    entries = await this.conAuxiliares(
+      session,
+      coPropertyId,
+      recibo.inmuebleId,
+      copropiedad,
+      entries,
     );
 
     await this.asientos.create(
@@ -1037,11 +1167,18 @@ export class RecibosService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const entries = construirMovimientosAplicacionAnticipo(
+    let entries = construirMovimientosAplicacionAnticipo(
       cuentaAnticipos,
       cuentaCartera,
       montoAplicado,
       'RC',
+    );
+    entries = await this.conAuxiliares(
+      session,
+      coPropertyId,
+      recibo.inmuebleId,
+      copropiedad,
+      entries,
     );
 
     await this.asientos.create(

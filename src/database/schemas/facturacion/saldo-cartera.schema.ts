@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
@@ -41,7 +41,7 @@ export type SaldoCarteraDocument = HydratedDocument<SaldoCartera>;
 @Schema({ timestamps: true, collection: 'saldos_cartera' })
 export class SaldoCartera {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -49,7 +49,7 @@ export class SaldoCartera {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
@@ -57,7 +57,7 @@ export class SaldoCartera {
   inmuebleId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: ConceptoCobro.name,
     required: true,
     index: true,

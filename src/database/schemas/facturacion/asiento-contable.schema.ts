@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { LoteFacturacion } from './lote-facturacion.schema';
 import { Factura } from './factura.schema';
@@ -24,6 +24,32 @@ export class Movimiento {
 
   @Prop({ required: true, trim: true })
   description: string;
+
+  /** The inmueble's own unit code — set only when this line's account has
+   *  `requiereTercero` on the chart of accounts. See
+   *  `enriquecerMovimientosConAuxiliares` (asiento.builder.ts). Optional in
+   *  TS (unlike `account`/`type`/`amount`/`description` above) because every
+   *  builder in `asiento.builder.ts` constructs a `Movimiento` BEFORE this
+   *  enrichment step runs — Mongoose still applies `default: null` for any
+   *  document that omits it. */
+  @Prop({ type: String, default: null, trim: true })
+  tercero?: string | null;
+
+  /** The coproperty's single `defaultCostCentre` — set only when this
+   *  line's account has `centroUtilidad`/`centroDestino`. */
+  @Prop({ type: String, default: null, trim: true })
+  centroCosto?: string | null;
+
+  /** The coproperty's single `cashFlowCode` — set only when this line's
+   *  account has `flujoCaja`. */
+  @Prop({ type: String, default: null, trim: true })
+  flujoCaja?: string | null;
+
+  /** The taxable base a TAX line was computed from — set only on the
+   *  tax-credit line `construirMovimientos` splits out when a Cargo's
+   *  `taxAmount > 0`; null on every other line. */
+  @Prop({ type: Number, default: null })
+  baseGravable?: number | null;
 }
 
 export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);
@@ -50,29 +76,33 @@ export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);
 @Schema({ timestamps: true, collection: 'asientos_contables' })
 export class AsientoContable {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
   })
   coPropertyId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: LoteFacturacion.name, default: null })
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: LoteFacturacion.name,
+    default: null,
+  })
   loteId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: Factura.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Factura.name, default: null })
   facturaId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: Recibo.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Recibo.name, default: null })
   reciboId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: NotaCredito.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: NotaCredito.name, default: null })
   notaCreditoId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: NotaDebito.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: NotaDebito.name, default: null })
   notaDebitoId: Types.ObjectId | null;
 
-  @Prop({ type: Types.ObjectId, ref: NotaContable.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: NotaContable.name, default: null })
   notaContableId: Types.ObjectId | null;
 
   @Prop({ required: true })

@@ -46,6 +46,11 @@ class CamposConceptoDto {
   cuentaCreditoId?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(24)
+  cuentaImpuestoId?: string;
+
+  @IsOptional()
   @IsBoolean()
   liquidaMora?: boolean;
 

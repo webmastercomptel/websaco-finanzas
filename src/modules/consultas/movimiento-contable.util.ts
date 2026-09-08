@@ -61,15 +61,21 @@ export function resolverMovimientoContable(
     nit: string | null;
     numeroDocumento: string;
   },
+  nombrePorCuenta: Map<string, string> = new Map(),
 ): MovimientoContable {
   const tipoDocumento = deriveTipoDocumento(asiento);
   const documentoId = resolveAnchorId(asiento).toString();
 
   const lineas = asiento.entries.map((e) => ({
     cuenta: e.account,
+    nombreCuenta: nombrePorCuenta.get(e.account) ?? e.account,
     tipo: e.type,
     monto: e.amount,
     descripcion: e.description,
+    tercero: e.tercero ?? null,
+    centroCosto: e.centroCosto ?? null,
+    flujoCaja: e.flujoCaja ?? null,
+    baseGravable: e.baseGravable ?? null,
   }));
 
   const totalDebito = asiento.entries

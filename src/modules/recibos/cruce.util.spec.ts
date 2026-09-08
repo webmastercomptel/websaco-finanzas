@@ -175,7 +175,7 @@ describe('ajustarSaldosCartera', () => {
   const conceptoA = new Types.ObjectId();
   const conceptoB = new Types.ObjectId();
 
-  it('reparte el monto proporcionalmente entre las líneas de la factura', async () => {
+  it('aplica primero a la línea MÁS RECIENTE (la última del arreglo, mayor sortOrder), nunca proporcional', async () => {
     const llamadas: Array<[Record<string, unknown>, unknown]> = [];
     const saldos = {
       findOneAndUpdate: jest.fn(
@@ -190,6 +190,9 @@ describe('ajustarSaldosCartera', () => {
       ),
     };
 
+    // `lines` llega ordenado por sortOrder ascendente (conceptoA = el más
+    // antiguo, p.ej. Administración); un pago parcial debe agotar PRIMERO
+    // conceptoB (el último del arreglo) antes de tocar conceptoA siquiera.
     await ajustarSaldosCartera(
       saldos as never,
       SESSION,
@@ -197,6 +200,7 @@ describe('ajustarSaldosCartera', () => {
       {
         inmuebleId,
         total: 500000,
+        outstandingBalance: 400000, // primer pago de esta factura: 500000 → 400000
         lines: [
           { conceptoId: conceptoA, totalAmount: 400000 },
           { conceptoId: conceptoB, totalAmount: 100000 },
@@ -206,57 +210,97 @@ describe('ajustarSaldosCartera', () => {
       -1,
     );
 
-    expect(llamadas).toHaveLength(2);
-    expect(llamadas[0][0]).toMatchObject({ conceptoId: conceptoA });
-    expect(llamadas[1][0]).toMatchObject({ conceptoId: conceptoB });
-    // 80% a conceptoA (80000), 20% a conceptoB (20000) — 100000 en total.
+    // Solo UNA llamada: conceptoB absorbe el pago completo, conceptoA ni se
+    // toca — nada de "80/20 proporcional".
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0][0]).toMatchObject({ conceptoId: conceptoB });
     expect(llamadas[0][1]).toEqual([
-      { $set: { balance: { $max: [0, { $add: ['$balance', -80000] }] } } },
-    ]);
-    expect(llamadas[1][1]).toEqual([
-      { $set: { balance: { $max: [0, { $add: ['$balance', -20000] }] } } },
+      { $set: { balance: { $max: [0, { $add: ['$balance', -100000] }] } } },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
     expect(opciones).toMatchObject({ session: SESSION });
   });
 
-  it('la última línea absorbe el resto del redondeo, para que la suma cierre exacto', async () => {
-    const llamadas: unknown[][] = [];
+  it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
     const saldos = {
-      findOneAndUpdate: jest.fn((filtro: unknown, pipeline: unknown) => {
-        llamadas.push([filtro, pipeline]);
-        return { exec: () => Promise.resolve(null) };
-      }),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
 
-    await ajustarSaldosCartera(
+    const partes = await ajustarSaldosCartera(
       saldos as never,
       SESSION,
       COP,
       {
         inmuebleId,
-        total: 300000,
+        total: 500000,
+        outstandingBalance: 400000,
         lines: [
-          { conceptoId: conceptoA, totalAmount: 100000 },
+          { conceptoId: conceptoA, totalAmount: 400000 },
           { conceptoId: conceptoB, totalAmount: 100000 },
-          { conceptoId: new Types.ObjectId(), totalAmount: 100000 },
         ],
       },
-      10000,
+      100000,
       -1,
     );
 
-    const montos = llamadas.map(
-      ([, pipeline]) =>
-        -(
-          pipeline as [
-            {
-              $set: { balance: { $max: [number, { $add: [string, number] }] } };
-            },
-          ]
-        )[0].$set.balance.$max[1].$add[1],
+    expect(partes).toEqual([{ conceptoId: conceptoB, parte: 100000 }]);
+  });
+
+  it('un segundo pago retoma donde quedó el primero, sin volver a llenar un bucket ya agotado', async () => {
+    // Factura de 100000: Multas (20000, sortOrder más alto → se llena
+    // primero) y Administración (80000, sortOrder más bajo → de última).
+    // Primer pago de 20000 agota Multas por completo; el segundo pago de
+    // 80000 debe ir TODO a Administración, no volver a repartir Multas.
+    const conceptoMultas = new Types.ObjectId();
+    const conceptoAdministracion = new Types.ObjectId();
+    const factura = {
+      inmuebleId,
+      total: 100000,
+      lines: [
+        { conceptoId: conceptoAdministracion, totalAmount: 80000 },
+        { conceptoId: conceptoMultas, totalAmount: 20000 },
+      ],
+    };
+
+    const llamadas1: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos1 = {
+      findOneAndUpdate: jest.fn(
+        (filtro: Record<string, unknown>, pipeline: unknown) => {
+          llamadas1.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+    const partes1 = await ajustarSaldosCartera(
+      saldos1 as never,
+      SESSION,
+      COP,
+      { ...factura, outstandingBalance: 80000 }, // 100000 → 80000
+      20000,
+      -1,
     );
-    expect(montos.reduce((a, b) => a + b, 0)).toBe(10000);
+    expect(partes1).toEqual([{ conceptoId: conceptoMultas, parte: 20000 }]);
+
+    const llamadas2: Array<[Record<string, unknown>, unknown]> = [];
+    const saldos2 = {
+      findOneAndUpdate: jest.fn(
+        (filtro: Record<string, unknown>, pipeline: unknown) => {
+          llamadas2.push([filtro, pipeline]);
+          return { exec: () => Promise.resolve(null) };
+        },
+      ),
+    };
+    const partes2 = await ajustarSaldosCartera(
+      saldos2 as never,
+      SESSION,
+      COP,
+      { ...factura, outstandingBalance: 0 }, // 80000 → 0
+      80000,
+      -1,
+    );
+    expect(partes2).toEqual([
+      { conceptoId: conceptoAdministracion, parte: 80000 },
+    ]);
   });
 
   it('con signo +1, restaura (nunca descuenta) — el reverso de una anulación', async () => {
@@ -275,6 +319,7 @@ describe('ajustarSaldosCartera', () => {
       {
         inmuebleId,
         total: 100000,
+        outstandingBalance: 100000, // restaurado por completo: 0 → 100000
         lines: [{ conceptoId: conceptoA, totalAmount: 100000 }],
       },
       100000,
@@ -294,7 +339,7 @@ describe('ajustarSaldosCartera', () => {
       saldos as never,
       SESSION,
       COP,
-      { inmuebleId, total: 0, lines: [] },
+      { inmuebleId, total: 0, outstandingBalance: 0, lines: [] },
       0,
       -1,
     );
@@ -351,6 +396,30 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
     expect(opciones).toMatchObject({ session: SESSION });
+  });
+
+  it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
+    const saldos = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+
+    const partes = await ajustarSaldosCarteraPorDistribucion(
+      saldos as never,
+      SESSION,
+      COP,
+      inmuebleId,
+      [
+        { conceptoId: conceptoA, monto: 60000 },
+        { conceptoId: conceptoB, monto: 40000 },
+      ],
+      100000,
+      -1,
+    );
+
+    expect(partes).toEqual([
+      { conceptoId: conceptoA, parte: 60000 },
+      { conceptoId: conceptoB, parte: 40000 },
+    ]);
   });
 
   it('aplicación parcial (anticipo): escala cada línea proporcionalmente, y la última absorbe el resto del redondeo para cerrar exacto en montoAplicado', async () => {

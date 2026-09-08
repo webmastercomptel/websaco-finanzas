@@ -10,10 +10,6 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
-  SaldoCartera,
-  SaldoCarteraDocument,
-} from '../../database/schemas/facturacion/saldo-cartera.schema';
-import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -26,16 +22,18 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { calcularDocumentosConSaldoAFecha } from './cartera-historica.util';
+import { activeAsOf } from './cartera-historica.util';
 import type {
-  FilaVencimientos,
+  FilaVencimientoCartera,
+  RangoVencimiento,
+  RangoVencimientoCartera,
   RespuestaVencimientosCartera,
 } from '../../contracts';
 import type { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 
 /** Compute days overdue: max(0, floor((corte - referenceDate) / day)). */
-const calcularDiasMora = (fechaReferencia: Date, corte?: Date): number => {
-  const c = corte ?? new Date();
+const calcularDiasMora = (fechaReferencia: Date, corte: Date): number => {
+  const c = new Date(corte);
   c.setHours(0, 0, 0, 0);
   const ref = new Date(fechaReferencia);
   ref.setHours(0, 0, 0, 0);
@@ -43,12 +41,30 @@ const calcularDiasMora = (fechaReferencia: Date, corte?: Date): number => {
   return Math.max(0, Math.floor(diff / 86_400_000));
 };
 
+/** Fixed aging buckets, in display order — never a per-coproperty catalog. */
+const RANGOS: { key: RangoVencimiento; etiqueta: string; max: number }[] = [
+  { key: 'dias_1_30', etiqueta: 'Vencida de 1-30', max: 30 },
+  { key: 'dias_31_60', etiqueta: 'Vencida de 31-60', max: 60 },
+  { key: 'dias_61_90', etiqueta: 'Vencida de 61-90', max: 90 },
+  { key: 'dias_91_120', etiqueta: 'Vencida de 91-120', max: 120 },
+  { key: 'dias_121_180', etiqueta: 'Vencida de 121-180', max: 180 },
+  { key: 'dias_181_360', etiqueta: 'Vencida de 181-360', max: 360 },
+  { key: 'dias_361_720', etiqueta: 'Vencida de 361-720', max: 720 },
+  { key: 'dias_720_mas', etiqueta: 'Vencida +720', max: Infinity },
+];
+
+/** Classifies an already-overdue document (diasVencido >= 0) into a bucket. */
+const clasificarVencido = (diasVencido: number): RangoVencimiento => {
+  for (const r of RANGOS) {
+    if (diasVencido <= r.max) return r.key;
+  }
+  return 'dias_720_mas';
+};
+
 /**
- * Read-only snapshot report: outstanding balance and days overdue
- * across ALL inmuebles in a coproperty. Supports two modes:
- *  - "as of now" (fecha omitted): reads `outstandingBalance` directly
- *  - "historical" (fecha present): uses the shared `cartera-historica.util`
- *    to reconstruct balances as of the given date
+ * Coproperty-wide aging report: every pending Factura/Nota Débito as of a
+ * cut-off date, one row per document (never aggregated per inmueble), each
+ * falling into exactly one aging bucket — mirrors a classic AR aging report.
  */
 @Injectable()
 export class VencimientosCarteraService {
@@ -57,8 +73,6 @@ export class VencimientosCarteraService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
-    @InjectModel(SaldoCartera.name)
-    private readonly saldosCartera: Model<SaldoCarteraDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(Inmueble.name)
@@ -72,181 +86,156 @@ export class VencimientosCarteraService {
     query: ConsultarVencimientosCarteraDto,
   ): Promise<RespuestaVencimientosCartera> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+    const fecha = query.fecha ? new Date(query.fecha) : new Date();
 
-    if (query.fecha) {
-      return this.findByFecha(coPropertyId, query.fecha, query.conceptoId);
-    }
-
-    if (query.conceptoId) {
-      return this.findByConcepto(coPropertyId, query.conceptoId);
-    }
-    return this.findByAllConcepts(coPropertyId);
-  }
-
-  /* ── "As of now" path (unchanged from §3/§4/§5) ─────────────── */
-
-  /** No concept filter: read outstandingBalance directly from Factura + ND. */
-  private async findByAllConcepts(
-    coPropertyId: Types.ObjectId,
-  ): Promise<RespuestaVencimientosCartera> {
     const [facturas, notasDebito] = await Promise.all([
       this.facturas
-        .find({
-          coPropertyId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-        })
+        .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
       this.notasDebito
-        .find({
-          coPropertyId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-        })
+        .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
     ]);
 
-    const saldoMap = new Map<string, number>();
-    const diasMoraMap = new Map<string, number>();
+    const docIds = [
+      ...facturas.map((f) => f._id),
+      ...notasDebito.map((nd) => nd._id),
+    ];
+    const aplicaciones = docIds.length
+      ? await this.aplicaciones
+          .find({ coPropertyId, documentId: { $in: docIds } })
+          .exec()
+      : [];
+
+    const appsByDoc = new Map<string, typeof aplicaciones>();
+    for (const app of aplicaciones) {
+      const key = app.documentId.toString();
+      const list = appsByDoc.get(key) ?? [];
+      list.push(app);
+      appsByDoc.set(key, list);
+    }
+
+    type FilaRaw = {
+      inmuebleId: Types.ObjectId;
+      tipo: 'FV' | 'ND';
+      numeroCompleto: string;
+      fecha: Date;
+      vence: Date;
+      saldo: number;
+    };
+
+    const filasRaw: FilaRaw[] = [];
 
     for (const f of facturas) {
-      const key = f.inmuebleId.toString();
-      saldoMap.set(key, (saldoMap.get(key) ?? 0) + f.outstandingBalance);
-      const dm = calcularDiasMora(f.dueDate);
-      diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
+      const apps = appsByDoc.get(f._id.toString()) ?? [];
+      const aplicadoActivo = apps
+        .filter((a) => activeAsOf(a, fecha))
+        .reduce((sum, a) => sum + a.amountApplied, 0);
+      const saldo = Math.max(0, f.total - aplicadoActivo);
+      if (saldo <= 0) continue;
+
+      filasRaw.push({
+        inmuebleId: f.inmuebleId,
+        tipo: 'FV',
+        numeroCompleto: f.fullNumber,
+        fecha: f.issueDate,
+        vence: f.dueDate,
+        saldo,
+      });
     }
 
     for (const nd of notasDebito) {
-      const key = nd.inmuebleId.toString();
-      saldoMap.set(key, (saldoMap.get(key) ?? 0) + nd.outstandingBalance);
-      const dm = calcularDiasMora(nd.issueDate);
-      diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
+      const apps = appsByDoc.get(nd._id.toString()) ?? [];
+      const aplicadoActivo = apps
+        .filter((a) => activeAsOf(a, fecha))
+        .reduce((sum, a) => sum + a.amountApplied, 0);
+      const saldo = Math.max(0, nd.total - aplicadoActivo);
+      if (saldo <= 0) continue;
+
+      // A debit note carries no separate due date — it is due the moment
+      // it is issued.
+      filasRaw.push({
+        inmuebleId: nd.inmuebleId,
+        tipo: 'ND',
+        numeroCompleto: nd.fullNumber,
+        fecha: nd.issueDate,
+        vence: nd.issueDate,
+        saldo,
+      });
     }
 
-    if (saldoMap.size === 0) return empty();
+    if (filasRaw.length === 0) return empty(fecha);
 
-    const inmuebleIds = [...saldoMap.keys()].map(
-      (id) => new Types.ObjectId(id),
-    );
-    const inmuebleData = await this.resolveInmuebles(coPropertyId, inmuebleIds);
-
-    return this.buildResult(saldoMap, diasMoraMap, inmuebleData);
-  }
-
-  /** With concept filter: saldo from SaldoCartera, diasMora from matching docs. */
-  private async findByConcepto(
-    coPropertyId: Types.ObjectId,
-    conceptoId: string,
-  ): Promise<RespuestaVencimientosCartera> {
-    const conceptoObjectId = new Types.ObjectId(conceptoId);
-
-    const [saldos, facturas, notasDebito] = await Promise.all([
-      this.saldosCartera
-        .find({
-          coPropertyId,
-          conceptoId: conceptoObjectId,
-          balance: { $gt: 0 },
-        })
-        .exec(),
-      this.facturas
-        .find({
-          coPropertyId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-          'lines.conceptoId': conceptoObjectId,
-        })
-        .exec(),
-      this.notasDebito
-        .find({
-          coPropertyId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-          conceptoId: conceptoObjectId,
-        })
-        .exec(),
-    ]);
-
-    const saldoMap = new Map<string, number>();
-    for (const sc of saldos) {
-      saldoMap.set(sc.inmuebleId.toString(), sc.balance);
-    }
-
-    const diasMoraMap = new Map<string, number>();
-    for (const f of facturas) {
-      const key = f.inmuebleId.toString();
-      const dm = calcularDiasMora(f.dueDate);
-      diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
-    }
-    for (const nd of notasDebito) {
-      const key = nd.inmuebleId.toString();
-      const dm = calcularDiasMora(nd.issueDate);
-      diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
-    }
-
-    if (saldoMap.size === 0) return empty();
-
-    const inmuebleIds = [...saldoMap.keys()].map(
-      (id) => new Types.ObjectId(id),
-    );
-    const inmuebleData = await this.resolveInmuebles(coPropertyId, inmuebleIds);
-
-    return this.buildResult(saldoMap, diasMoraMap, inmuebleData);
-  }
-
-  /* ── Historical path (§8 — fecha present, uses shared utility) ── */
-
-  /**
-   * Reconstruct balances as of `fechaCorte` using the shared
-   * `cartera-historica.util`, then group by inmuebleId and compute diasMora.
-   */
-  private async findByFecha(
-    coPropertyId: Types.ObjectId,
-    fechaCorte: string,
-    conceptoId?: string,
-  ): Promise<RespuestaVencimientosCartera> {
-    const fecha = new Date(fechaCorte);
-
-    const documentos = await calcularDocumentosConSaldoAFecha(
-      {
-        facturas: this.facturas,
-        notasDebito: this.notasDebito,
-        aplicaciones: this.aplicaciones,
-      },
+    const inmuebleData = await this.resolveInmuebles(
       coPropertyId,
-      fecha,
-      conceptoId ? { conceptoId: new Types.ObjectId(conceptoId) } : undefined,
+      filasRaw.map((r) => r.inmuebleId),
     );
 
-    // Group by inmuebleId: saldo = sum of montoPendiente, diasMora = worst
-    const saldoMap = new Map<string, number>();
-    const diasMoraMap = new Map<string, number>();
+    const rangoTotales = new Map<RangoVencimiento, number>();
+    const filas: FilaVencimientoCartera[] = filasRaw.map((r) => {
+      const noVencidoAun = r.vence > fecha;
+      const diasMora = calcularDiasMora(r.vence, fecha);
+      const rango: RangoVencimiento = noVencidoAun
+        ? 'sinVencer'
+        : clasificarVencido(diasMora);
+      rangoTotales.set(rango, (rangoTotales.get(rango) ?? 0) + r.saldo);
 
-    for (const doc of documentos) {
-      const key = doc.inmuebleId.toString();
-      saldoMap.set(key, (saldoMap.get(key) ?? 0) + doc.montoPendiente);
-      const dm = calcularDiasMora(doc.fechaReferencia, fecha);
-      diasMoraMap.set(key, Math.max(diasMoraMap.get(key) ?? 0, dm));
-    }
+      const data = inmuebleData.get(r.inmuebleId.toString());
+      return {
+        inmuebleId: r.inmuebleId.toString(),
+        inmuebleCodigo: data?.codigo ?? '',
+        propietario: data?.propietario ?? null,
+        tipo: r.tipo,
+        numeroCompleto: r.numeroCompleto,
+        fecha: r.fecha.toISOString(),
+        vence: r.vence.toISOString(),
+        diasMora,
+        saldo: r.saldo,
+        rango,
+      };
+    });
 
-    if (saldoMap.size === 0) return empty();
+    filas.sort((a, b) => {
+      const porCodigo = a.inmuebleCodigo.localeCompare(b.inmuebleCodigo, 'es', {
+        numeric: true,
+      });
+      if (porCodigo !== 0) return porCodigo;
+      return new Date(a.fecha).getTime() - new Date(b.fecha).getTime();
+    });
 
-    const inmuebleIds = [...saldoMap.keys()].map(
-      (id) => new Types.ObjectId(id),
-    );
-    const inmuebleData = await this.resolveInmuebles(coPropertyId, inmuebleIds);
+    const rangos: RangoVencimientoCartera[] = [
+      {
+        rango: 'sinVencer',
+        etiqueta: 'Sin Vencer',
+        valor: rangoTotales.get('sinVencer') ?? 0,
+      },
+      ...RANGOS.map((r) => ({
+        rango: r.key,
+        etiqueta: r.etiqueta,
+        valor: rangoTotales.get(r.key) ?? 0,
+      })),
+    ];
 
-    return this.buildResult(saldoMap, diasMoraMap, inmuebleData);
+    const totalCartera = filas.reduce((sum, f) => sum + f.saldo, 0);
+
+    return {
+      fechaCorte: fecha.toISOString(),
+      filas,
+      rangos,
+      totalCartera,
+    };
   }
 
-  /* ── Shared helpers ──────────────────────────────────────────── */
-
-  /** Batch-fetch inmueble codes and tercero names for the units that have debt. */
+  /** Batch-fetch inmueble codes and tercero names for the units involved. */
   private async resolveInmuebles(
     coPropertyId: Types.ObjectId,
     inmuebleIds: Types.ObjectId[],
   ): Promise<Map<string, { codigo: string; propietario: string | null }>> {
+    const uniqueIds = [...new Set(inmuebleIds.map((id) => id.toString()))].map(
+      (id) => new Types.ObjectId(id),
+    );
     const inmuebles = await this.inmuebles
-      .find({ coPropertyId, _id: { $in: inmuebleIds } })
+      .find({ coPropertyId, _id: { $in: uniqueIds } })
       .exec();
 
     const holderIds = inmuebles
@@ -261,9 +250,7 @@ export class VencimientosCarteraService {
       const terceros = await this.terceros
         .find({
           coPropertyId,
-          _id: {
-            $in: uniqueHolderIds.map((id) => new Types.ObjectId(id)),
-          },
+          _id: { $in: uniqueHolderIds.map((id) => new Types.ObjectId(id)) },
         })
         .exec();
       for (const t of terceros) {
@@ -285,54 +272,16 @@ export class VencimientosCarteraService {
     }
     return result;
   }
-
-  /** Build the final sorted response from aggregated maps. */
-  private buildResult(
-    saldoMap: Map<string, number>,
-    diasMoraMap: Map<string, number>,
-    inmuebleData: Map<string, { codigo: string; propietario: string | null }>,
-  ): RespuestaVencimientosCartera {
-    const filas: FilaVencimientos[] = [...saldoMap.entries()].map(
-      ([inmuebleId, saldoPendiente]) => {
-        const dm = diasMoraMap.get(inmuebleId) ?? 0;
-        const data = inmuebleData.get(inmuebleId);
-        return {
-          inmuebleId,
-          inmuebleCodigo: data?.codigo ?? '',
-          propietario: data?.propietario ?? null,
-          saldoPendiente,
-          diasMora: dm,
-          estado: dm > 0 ? ('vencido' as const) : ('pendiente' as const),
-        };
-      },
-    );
-
-    filas.sort((a, b) => b.diasMora - a.diasMora);
-
-    const totalCartera = filas.reduce((s, f) => s + f.saldoPendiente, 0);
-    const totalVencido = filas
-      .filter((f) => f.estado === 'vencido')
-      .reduce((s, f) => s + f.saldoPendiente, 0);
-    const totalPendiente = totalCartera - totalVencido;
-    const porcentajeVencido =
-      totalCartera > 0 ? (totalVencido / totalCartera) * 100 : 0;
-
-    return {
-      filas,
-      totalCartera,
-      totalVencido,
-      totalPendiente,
-      porcentajeVencido,
-    };
-  }
 }
 
-function empty(): RespuestaVencimientosCartera {
+function empty(fecha: Date): RespuestaVencimientosCartera {
   return {
+    fechaCorte: fecha.toISOString(),
     filas: [],
+    rangos: [
+      { rango: 'sinVencer', etiqueta: 'Sin Vencer', valor: 0 },
+      ...RANGOS.map((r) => ({ rango: r.key, etiqueta: r.etiqueta, valor: 0 })),
+    ],
     totalCartera: 0,
-    totalVencido: 0,
-    totalPendiente: 0,
-    porcentajeVencido: 0,
   };
 }

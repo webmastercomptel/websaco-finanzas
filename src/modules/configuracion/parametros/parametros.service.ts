@@ -29,6 +29,8 @@ export interface ParametrosFacturacion {
   cuentasOrdenDebito: string | null;
   cuentasOrdenCredito: string | null;
   usaCuentasOrden: boolean;
+  cuentaAnticipos: string | null;
+  codigoFlujoCaja: string | null;
 }
 
 @Injectable()
@@ -66,6 +68,8 @@ export class ParametrosService {
       cuentasOrdenDebito: doc.memorandumDebitAccount,
       cuentasOrdenCredito: doc.memorandumCreditAccount,
       usaCuentasOrden: doc.usesMemorandumAccounts,
+      cuentaAnticipos: doc.advancesAccount,
+      codigoFlujoCaja: doc.cashFlowCode,
     };
   }
 
@@ -95,6 +99,8 @@ export class ParametrosService {
     set('memorandumDebitAccount', dto.cuentasOrdenDebito);
     set('memorandumCreditAccount', dto.cuentasOrdenCredito);
     set('usesMemorandumAccounts', dto.usaCuentasOrden);
+    set('advancesAccount', dto.cuentaAnticipos);
+    set('cashFlowCode', dto.codigoFlujoCaja);
 
     const updated = await this.copropiedades
       .findByIdAndUpdate(coPropertyId, { $set: update }, { new: true })
@@ -125,6 +131,8 @@ export class ParametrosService {
       cuentasOrdenDebito: updated.memorandumDebitAccount,
       cuentasOrdenCredito: updated.memorandumCreditAccount,
       usaCuentasOrden: updated.usesMemorandumAccounts,
+      cuentaAnticipos: updated.advancesAccount,
+      codigoFlujoCaja: updated.cashFlowCode,
     };
   }
 }

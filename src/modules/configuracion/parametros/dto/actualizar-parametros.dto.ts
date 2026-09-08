@@ -101,4 +101,14 @@ export class ActualizarParametrosDto {
   @IsOptional()
   @IsBoolean()
   usaCuentasOrden?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  cuentaAnticipos?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  codigoFlujoCaja?: string | null;
 }

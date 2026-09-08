@@ -34,26 +34,30 @@ import {
   Tercero,
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
-import { resolverMovimientoContable } from './movimiento-contable.util';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  resolveAnchorId,
+  resolverMovimientoContable,
+} from './movimiento-contable.util';
 import type { RespuestaMovimientoContable } from '../../contracts';
 
-/** Map from tipoDocumento to the corresponding anchor field name on AsientoContable. */
-const ANCHOR_FIELD: Record<
-  string,
-  keyof Pick<
-    AsientoContableDocument,
-    | 'facturaId'
-    | 'reciboId'
-    | 'notaCreditoId'
-    | 'notaDebitoId'
-    | 'notaContableId'
-  >
-> = {
-  FC: 'facturaId',
-  RC: 'reciboId',
-  NC: 'notaCreditoId',
-  ND: 'notaDebitoId',
-  NT: 'notaContableId',
+/** One anchor document's identity — enough to resolve `numeroDocumento` and
+ *  which inmueble it belongs to, across all five document types. */
+type AnchorInfo = { fullNumber: string; inmuebleId: Types.ObjectId };
+
+type InmuebleMeta = {
+  inmuebleCodigo: string | null;
+  propietario: string | null;
+  nit: string | null;
+};
+
+const META_VACIA: InmuebleMeta = {
+  inmuebleCodigo: null,
+  propietario: null,
+  nit: null,
 };
 
 @Injectable()
@@ -74,256 +78,186 @@ export class MovimientoContableService {
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
   /**
-   * Endpoint 1: look up every AsientoContable anchored to a specific document
-   * (by tipoDocumento + numeroCompleto).
-   */
-  async buscar(params: {
-    tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
-    numeroCompleto: string;
-  }): Promise<RespuestaMovimientoContable> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const anchorField = ANCHOR_FIELD[params.tipoDocumento];
-
-    // 1. Resolve the source document
-    const anchorModel = this.getAnchorModel(params.tipoDocumento);
-    const anchor = await anchorModel
-      .findOne({ coPropertyId, fullNumber: params.numeroCompleto })
-      .exec();
-    if (!anchor) return { movimientos: [] };
-
-    // 2. Query AsientoContable by the matching anchor field
-    const filter: Record<string, unknown> = {
-      coPropertyId,
-      [anchorField]: anchor._id,
-    };
-    const asientos = await this.asientos.find(filter).sort({ date: 1 }).exec();
-    if (asientos.length === 0) return { movimientos: [] };
-
-    // 3. Resolve inmueble + propietario once (shared by all entries)
-    const meta = await this.resolveMeta(anchor.inmuebleId, coPropertyId);
-
-    // 4. Map each asiento
-    const movimientos = asientos.map((a) =>
-      resolverMovimientoContable(a, {
-        ...meta,
-        numeroDocumento: anchor.fullNumber,
-      }),
-    );
-
-    return { movimientos };
-  }
-
-  /**
-   * Endpoint 2: list every AsientoContable for one inmueble within a date range.
+   * Coproperty-wide accounting journal for a date range — every
+   * AsientoContable in the window, regardless of which inmueble or document
+   * type anchors it. Unlike the per-inmueble browse this replaced,
+   * AsientoContable already carries `date` and `coPropertyId` directly, so no
+   * document-id prefetch per type is needed to scope the query.
    */
   async findAll(params: {
-    inmuebleId: string;
     desde: string;
     hasta: string;
   }): Promise<RespuestaMovimientoContable> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    const inmuebleObjectId = new Types.ObjectId(params.inmuebleId);
     const desde = new Date(params.desde);
     const hasta = new Date(params.hasta);
 
-    // 1. Fetch all document IDs for this inmueble (unfiltered by date — only IDs needed)
-    const [facturas, recibos, notasCredito, notasDebito, notasContables] =
-      await Promise.all([
-        this.facturas
-          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
-          .exec(),
-        this.recibos
-          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
-          .exec(),
-        this.notasCredito
-          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
-          .exec(),
-        this.notasDebito
-          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
-          .exec(),
-        this.notasContables
-          .find({ coPropertyId, inmuebleId: inmuebleObjectId }, { _id: 1 })
-          .exec(),
-      ]);
-
-    const facturaIds = facturas.map((f) => f._id);
-    const reciboIds = recibos.map((r) => r._id);
-    const ncIds = notasCredito.map((nc) => nc._id);
-    const ndIds = notasDebito.map((nd) => nd._id);
-    const ntIds = notasContables.map((nt) => nt._id);
-
-    // 2. Build $or filter — only include non-empty arrays
-    const orConditions: Record<string, unknown>[] = [];
-    if (facturaIds.length)
-      orConditions.push({ facturaId: { $in: facturaIds } });
-    if (reciboIds.length) orConditions.push({ reciboId: { $in: reciboIds } });
-    if (ncIds.length) orConditions.push({ notaCreditoId: { $in: ncIds } });
-    if (ndIds.length) orConditions.push({ notaDebitoId: { $in: ndIds } });
-    if (ntIds.length) orConditions.push({ notaContableId: { $in: ntIds } });
-
-    if (orConditions.length === 0) return { movimientos: [] };
-
     const asientos = await this.asientos
-      .find({
-        coPropertyId,
-        date: { $gte: desde, $lte: hasta },
-        $or: orConditions,
-      })
+      .find({ coPropertyId, date: { $gte: desde, $lte: hasta } })
       .sort({ date: 1 })
       .exec();
 
     if (asientos.length === 0) return { movimientos: [] };
 
-    // 3. Resolve inmueble + propietario once
-    const meta = await this.resolveMeta(inmuebleObjectId, coPropertyId);
-
-    // 4. Build a lookup map for anchor documents (all share the same inmueble)
     const anchorMap = await this.buildAnchorMap(asientos, coPropertyId);
 
-    // 5. Map each asiento
+    const inmuebleIds = [
+      ...new Set([...anchorMap.values()].map((a) => a.inmuebleId.toString())),
+    ].map((id) => new Types.ObjectId(id));
+    const metaMap = await this.resolveMetaBatch(inmuebleIds, coPropertyId);
+
+    const cuentaCodigos = [
+      ...new Set(asientos.flatMap((a) => a.entries.map((e) => e.account))),
+    ];
+    const nombrePorCuenta = await this.resolveNombresCuenta(
+      cuentaCodigos,
+      coPropertyId,
+    );
+
     const movimientos = asientos.map((a) => {
-      const anchorId = this.getAnchorId(a).toString();
-      const numeroDocumento = anchorMap.get(anchorId)?.fullNumber ?? '—';
-      return resolverMovimientoContable(a, { ...meta, numeroDocumento });
+      const anchorId = resolveAnchorId(a).toString();
+      const anchorInfo = anchorMap.get(anchorId);
+      const numeroDocumento = anchorInfo?.fullNumber ?? '—';
+      const meta = anchorInfo
+        ? (metaMap.get(anchorInfo.inmuebleId.toString()) ?? META_VACIA)
+        : META_VACIA;
+      return resolverMovimientoContable(
+        a,
+        { ...meta, numeroDocumento },
+        nombrePorCuenta,
+      );
     });
 
     return { movimientos };
   }
 
-  /** Get the Mongoose model for a given document type. */
-  private getAnchorModel(
-    tipo: string,
-  ): Model<
-    | FacturaDocument
-    | ReciboDocument
-    | NotaCreditoDocument
-    | NotaDebitoDocument
-    | NotaContableDocument
-  > {
-    switch (tipo) {
-      case 'FC':
-        return this.facturas;
-      case 'RC':
-        return this.recibos;
-      case 'NC':
-        return this.notasCredito;
-      case 'ND':
-        return this.notasDebito;
-      case 'NT':
-        return this.notasContables;
-      default:
-        throw new Error(`Unknown tipoDocumento: ${tipo}`);
-    }
-  }
-
-  /** Resolve the inmueble code and propietario/nit from the anchor's inmuebleId. */
-  private async resolveMeta(
-    inmuebleId: Types.ObjectId,
+  /** Batch-resolve inmueble code + propietario/nit for every inmueble
+   *  referenced by this batch of asientos — one query per collection
+   *  regardless of how many distinct inmuebles are involved. */
+  private async resolveMetaBatch(
+    inmuebleIds: Types.ObjectId[],
     coPropertyId: Types.ObjectId,
-  ): Promise<{
-    inmuebleCodigo: string | null;
-    propietario: string | null;
-    nit: string | null;
-  }> {
-    const inmueble = await this.inmuebles
-      .findOne({ _id: inmuebleId, coPropertyId })
+  ): Promise<Map<string, InmuebleMeta>> {
+    const result = new Map<string, InmuebleMeta>();
+    if (inmuebleIds.length === 0) return result;
+
+    const inmuebles = await this.inmuebles
+      .find({ coPropertyId, _id: { $in: inmuebleIds } })
       .exec();
-    if (!inmueble)
-      return { inmuebleCodigo: null, propietario: null, nit: null };
 
-    if (!inmueble.holderId) {
-      return { inmuebleCodigo: inmueble.code, propietario: null, nit: null };
-    }
-
-    const tercero = await this.terceros
-      .findOne({ _id: inmueble.holderId, coPropertyId })
-      .exec();
-    if (!tercero) {
-      return { inmuebleCodigo: inmueble.code, propietario: null, nit: null };
-    }
-
-    const nit = tercero.identificationNumber
-      ? `${tercero.identificationNumber}${tercero.identificationVerificationDigit ? `-${tercero.identificationVerificationDigit}` : ''}`
-      : null;
-
-    return {
-      inmuebleCodigo: inmueble.code,
-      propietario: tercero.name,
-      nit,
-    };
-  }
-
-  /** Extract the anchor document's _id from an AsientoContable. */
-  private getAnchorId(asiento: AsientoContableDocument): Types.ObjectId {
-    if (asiento.facturaId) return asiento.facturaId;
-    if (asiento.reciboId) return asiento.reciboId;
-    if (asiento.notaCreditoId) return asiento.notaCreditoId;
-    if (asiento.notaDebitoId) return asiento.notaDebitoId;
-    if (asiento.notaContableId) return asiento.notaContableId;
-    throw new Error('AsientoContable has no anchor');
-  }
-
-  /** Build a Map<anchorId, { fullNumber }> for all anchor types referenced by the asientos. */
-  private async buildAnchorMap(
-    asientos: AsientoContableDocument[],
-    coPropertyId: Types.ObjectId,
-  ): Promise<Map<string, { fullNumber: string }>> {
-    const map = new Map<string, { fullNumber: string }>();
-
-    // Collect IDs per type
-    const idsByType = new Map<string, Types.ObjectId[]>();
-    for (const a of asientos) {
-      if (a.facturaId) {
-        const key = 'FC';
-        const list = idsByType.get(key) ?? [];
-        list.push(a.facturaId);
-        idsByType.set(key, list);
-      } else if (a.reciboId) {
-        const key = 'RC';
-        const list = idsByType.get(key) ?? [];
-        list.push(a.reciboId);
-        idsByType.set(key, list);
-      } else if (a.notaCreditoId) {
-        const key = 'NC';
-        const list = idsByType.get(key) ?? [];
-        list.push(a.notaCreditoId);
-        idsByType.set(key, list);
-      } else if (a.notaDebitoId) {
-        const key = 'ND';
-        const list = idsByType.get(key) ?? [];
-        list.push(a.notaDebitoId);
-        idsByType.set(key, list);
-      } else if (a.notaContableId) {
-        const key = 'NT';
-        const list = idsByType.get(key) ?? [];
-        list.push(a.notaContableId);
-        idsByType.set(key, list);
+    const holderIds = inmuebles
+      .map((i) => i.holderId)
+      .filter((id): id is Types.ObjectId => id !== null);
+    const nombreMap = new Map<string, { name: string; nit: string | null }>();
+    if (holderIds.length > 0) {
+      const uniqueHolderIds = [
+        ...new Set(holderIds.map((id) => id.toString())),
+      ].map((id) => new Types.ObjectId(id));
+      const terceros = await this.terceros
+        .find({ coPropertyId, _id: { $in: uniqueHolderIds } })
+        .exec();
+      for (const t of terceros) {
+        const nit = t.identificationNumber
+          ? `${t.identificationNumber}${t.identificationVerificationDigit ? `-${t.identificationVerificationDigit}` : ''}`
+          : null;
+        nombreMap.set(t._id.toString(), { name: t.name, nit });
       }
     }
 
-    // Fetch each type's documents
-    const fetchers: Array<[string, Model<unknown>]> = [
-      ['FC', this.facturas],
-      ['RC', this.recibos],
-      ['NC', this.notasCredito],
-      ['ND', this.notasDebito],
-      ['NT', this.notasContables],
+    for (const i of inmuebles) {
+      const holder = i.holderId
+        ? (nombreMap.get(i.holderId.toString()) ?? null)
+        : null;
+      result.set(i._id.toString(), {
+        inmuebleCodigo: i.code,
+        propietario: holder?.name ?? null,
+        nit: holder?.nit ?? null,
+      });
+    }
+    return result;
+  }
+
+  /** Batch-resolve account code -> name from the coproperty's chart of
+   *  accounts. A code with no chart entry is simply absent from the map —
+   *  the caller falls back to the code itself. */
+  private async resolveNombresCuenta(
+    codigos: string[],
+    coPropertyId: Types.ObjectId,
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    if (codigos.length === 0) return map;
+
+    const cuentas = await this.cuentasContables
+      .find({ coPropertyId, code: { $in: codigos } })
+      .exec();
+    for (const c of cuentas) {
+      map.set(c.code, c.name);
+    }
+    return map;
+  }
+
+  /** Build a Map<anchorId, {fullNumber, inmuebleId}> for all anchor types
+   *  referenced by this batch of asientos. */
+  private async buildAnchorMap(
+    asientos: AsientoContableDocument[],
+    coPropertyId: Types.ObjectId,
+  ): Promise<Map<string, AnchorInfo>> {
+    const map = new Map<string, AnchorInfo>();
+
+    const idsByType = new Map<string, Types.ObjectId[]>();
+    for (const a of asientos) {
+      const anchorId = resolveAnchorId(a);
+      const key = a.facturaId
+        ? 'FC'
+        : a.reciboId
+          ? 'RC'
+          : a.notaCreditoId
+            ? 'NC'
+            : a.notaDebitoId
+              ? 'ND'
+              : 'NT';
+      const list = idsByType.get(key) ?? [];
+      list.push(anchorId);
+      idsByType.set(key, list);
+    }
+
+    const fetchers: Array<
+      [
+        string,
+        Model<{
+          _id: Types.ObjectId;
+          fullNumber: string;
+          inmuebleId: Types.ObjectId;
+        }>,
+      ]
+    > = [
+      ['FC', this.facturas as never],
+      ['RC', this.recibos as never],
+      ['NC', this.notasCredito as never],
+      ['ND', this.notasDebito as never],
+      ['NT', this.notasContables as never],
     ];
 
     for (const [tipo, model] of fetchers) {
       const ids = idsByType.get(tipo);
       if (!ids || ids.length === 0) continue;
-      const docs = await (
-        model as Model<{ _id: Types.ObjectId; fullNumber: string }>
-      )
-        .find({ _id: { $in: ids }, coPropertyId }, { fullNumber: 1 })
+      const docs = await model
+        .find(
+          { _id: { $in: ids }, coPropertyId },
+          { fullNumber: 1, inmuebleId: 1 },
+        )
         .exec();
       for (const doc of docs) {
-        map.set(doc._id.toString(), { fullNumber: doc.fullNumber });
+        map.set(doc._id.toString(), {
+          fullNumber: doc.fullNumber,
+          inmuebleId: doc.inmuebleId,
+        });
       }
     }
 

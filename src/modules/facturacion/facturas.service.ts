@@ -6,6 +6,7 @@ import {
   FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { escapeRegex } from '../../common/utils/query.utils';
 import type { Factura as FacturaContract, Paginado } from '../../contracts';
 import { toFactura } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
@@ -24,6 +25,11 @@ export class FacturasService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
+    if (query.buscar) {
+      // Escaped: a search box is user input, and an unescaped regex lets a
+      // stray "(" throw, or a crafted one pin the database at 100%.
+      filtro.fullNumber = { $regex: escapeRegex(query.buscar), $options: 'i' };
+    }
     if (query.conSaldoPendiente) {
       filtro.outstandingBalance = { $gt: 0 };
       filtro.status = 'emitida';

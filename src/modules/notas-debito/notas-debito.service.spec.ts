@@ -138,6 +138,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     merged.numeracion as never,
     merged.connection as never,
     merged.lotes as never,
+    merged.cuentasContables as never,
+    merged.inmuebles as never,
   );
 };
 
@@ -155,6 +157,63 @@ describe('NotasDebitoService', () => {
       });
 
       expect(resultado.saldoPendiente).toBe(50000);
+    });
+
+    it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '4105',
+                defaultCostCentre: 'CC-01',
+                cashFlowCode: 'FC-OPER',
+              }),
+            ),
+          })),
+        },
+        cuentasContables: {
+          find: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve([
+                {
+                  code: '4105',
+                  requiresTercero: false,
+                  profitCenter: false,
+                  destinationCenter: false,
+                  cashFlow: true,
+                },
+              ]),
+            ),
+          })),
+        },
+        inmuebles: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve({ code: '1304' })),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+        descripcion: 'Cargo por multa',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string; flujoCaja?: string | null }> }[]],
+      ];
+      const credito = documentos[0].entries.find((e) => e.account === '4105');
+      expect(credito?.flujoCaja).toBe('FC-OPER');
     });
 
     it('rechaza concepto inexistente', async () => {

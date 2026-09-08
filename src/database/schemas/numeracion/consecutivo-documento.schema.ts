@@ -1,6 +1,6 @@
 // src/database/schemas/numeracion/consecutivo-documento.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
 export type ConsecutivoDocumentoDocument =
@@ -38,7 +38,7 @@ export type CategoriaDocumento = (typeof CATEGORIAS_DOCUMENTO)[number];
 @Schema({ timestamps: true, collection: 'consecutivos_documento' })
 export class ConsecutivoDocumento {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,

@@ -160,6 +160,8 @@ const construirServicio = (opts: {
   saldos?: { findOneAndUpdate: jest.Mock };
   notasDebito?: Record<string, unknown>[];
   copropiedades?: { findById: jest.Mock };
+  cuentasContables?: Record<string, unknown>[];
+  inmueble?: Record<string, unknown> | null;
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
@@ -172,6 +174,18 @@ const construirServicio = (opts: {
   const periodo = opts.periodo ?? espia.periodo;
   const exigirAbierto = espia.exigirAbierto;
   const notasDebito = modeloNotasDebito(opts.notasDebito ?? []);
+  const cuentasContables = opts.cuentasContables && {
+    find: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
+    })),
+  };
+  const inmuebles = opts.cuentasContables && {
+    findById: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      }),
+    })),
+  };
 
   const service = new RecibosService(
     recibos as never,
@@ -186,6 +200,8 @@ const construirServicio = (opts: {
     periodo,
     notasDebito as never,
     lotesFacturacionFalso(),
+    cuentasContables as never,
+    inmuebles as never,
   );
 
   return {
@@ -265,6 +281,68 @@ describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
         description: expect.any(String),
       },
     ]);
+  });
+
+  it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 500000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 0,
+      unappliedAmount: 500000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const { service, asientos } = construirServicio({
+      reciboCreado,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                defaultCostCentre: 'CC-01',
+                cashFlowCode: 'FC-OPER',
+              }),
+          }),
+        })),
+      },
+      cuentasContables: [
+        {
+          code: '210505',
+          requiresTercero: false,
+          profitCenter: false,
+          destinationCenter: false,
+          cashFlow: true,
+        },
+      ],
+      inmueble: { code: '1304' },
+    });
+
+    await service.crear(CUENTA.toString(), dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      flujoCaja?: string | null;
+      tercero?: string | null;
+    }>;
+    const anticipo = entries.find((e) => e.account === '210505');
+    expect(anticipo?.flujoCaja).toBe('FC-OPER');
+    const banco = entries.find((e) => e.account === '111005');
+    expect(banco?.tercero ?? null).toBeNull();
   });
 });
 
@@ -473,6 +551,78 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       },
       {
         account: '130501',
+        type: 'credito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+      {
+        account: '210505',
+        type: 'credito',
+        amount: 300000,
+        description: expect.any(String),
+      },
+    ]);
+  });
+
+  it('acredita la cuenta propia del concepto cuando la línea de la factura la trae configurada', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      _id: facturaId,
+      lines: [
+        {
+          conceptoId: conceptoMora,
+          totalAmount: 500000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 500000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 200000,
+      unappliedAmount: 300000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const { service, asientos } = construirServicio({ reciboCreado, factura });
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: facturaId.toString(),
+          montoAplicado: 200000,
+        },
+      ],
+    });
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
+    const creditos = entries.filter((m) => m.type === 'credito');
+    // La cuenta propia del concepto de mora (130599), NO la cuenta plana de
+    // cartera de la copropiedad (130501) — esta última solo aparece por
+    // anticipos.
+    expect(creditos).toEqual([
+      {
+        account: '130599',
         type: 'credito',
         amount: 200000,
         description: expect.any(String),

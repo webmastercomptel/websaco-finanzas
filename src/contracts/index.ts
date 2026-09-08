@@ -187,6 +187,10 @@ export interface FacturaLinea {
   tasaImpuesto: number;
   valorImpuesto: Monto;
   valorTotal: Monto;
+  /** This concept's saldo de cartera immediately before/after this line —
+   *  frozen at the moment the line was built, never recomputed later. */
+  saldoAnterior: Monto;
+  nuevoSaldo: Monto;
 }
 
 /** A sales invoice ("FV"), only ever created already numbered. */
@@ -274,6 +278,67 @@ export interface ErrorConsolidacion {
   fila: number;
   inmuebleCodigo: string;
   mensaje: string;
+}
+
+/**
+ * Result of wiping every Lote/Factura (and their derived asientos/saldos)
+ * of the one hardcoded test coproperty, so its billing cycle can be
+ * replayed from zero. See `ReiniciarCicloService` for the safety checks.
+ */
+export interface ResultadoReinicioCiclo {
+  lotesEliminados: number;
+  facturasEliminadas: number;
+  asientosEliminados: number;
+  saldosEliminados: number;
+}
+
+/* ── Consulta de Facturación (reporte de lote) ────────────────────── */
+
+/**
+ * One concept's aggregate across a whole lote — dynamic, derived from
+ * whichever ConceptoCobro rows actually appear on at least one Factura of
+ * the lote. Never the legacy fixed twelve-slot list; a coproperty with 3
+ * concepts gets 3 entries here, one with 20 gets 20.
+ */
+export interface TotalConceptoLote {
+  conceptoId: string;
+  nombreConcepto: string;
+  monto: Monto;
+}
+
+/**
+ * One invoice row. `valoresPorConcepto` is keyed by `conceptoId` — the same
+ * id space as `totalesPorConcepto` — so the frontend pivots into columns
+ * without either side ever naming a concept. A concept this invoice has no
+ * line for is simply absent from the map, not zero-filled.
+ */
+export interface FilaConsultaFacturacion {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  tipoDocumento: 'FV';
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  fechaFactura: IsoDate;
+  fechaVence: IsoDate;
+  valoresPorConcepto: Record<string, Monto>;
+  subtotal: Monto;
+  totalImpuestos: Monto;
+  total: Monto;
+}
+
+/** Response of `GET /lotes/:id/consulta-facturacion`. */
+export interface RespuestaConsultaFacturacion {
+  loteId: string;
+  loteNumero: number;
+  loteEstado: 'borrador' | 'liquidado' | 'consolidado';
+  fechaFacturacion: IsoDate;
+  fechaVencimiento: IsoDate;
+  totalesPorConcepto: TotalConceptoLote[];
+  subtotal: Monto;
+  totalImpuestos: Monto;
+  total: Monto;
+  filas: FilaConsultaFacturacion[];
 }
 
 /* ── Recibos de Caja ───────────────────────────────────────────── */
@@ -497,6 +562,11 @@ export interface MovimientoKardex {
 
 /** Response shape for GET /consultas/auxiliar-cartera. */
 export interface RespuestaAuxiliarCartera {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  propietario: string | null;
+  desde: string;
+  hasta: string;
   saldoInicial: number;
   movimientos: MovimientoKardex[];
   totalDebitos: number;
@@ -504,25 +574,97 @@ export interface RespuestaAuxiliarCartera {
   saldoFinal: number;
 }
 
-/* ── Vencimientos de Cartera (snapshot report) ────────────────── */
+/* ── Vencimientos de Cartera (aging report) ───────────────────── */
 
-/** One row in the vencimientos report: current state of one inmueble's debt. */
-export interface FilaVencimientos {
+/**
+ * One aging bucket. Fixed, universal set (never a per-coproperty catalog
+ * like ConceptoCobro) — this is the one place columns-per-bucket is fine,
+ * unlike concepts, which are always rows (see ConceptoCobro's own schema
+ * comment).
+ */
+export type RangoVencimiento =
+  | 'sinVencer'
+  | 'dias_1_30'
+  | 'dias_31_60'
+  | 'dias_61_90'
+  | 'dias_91_120'
+  | 'dias_121_180'
+  | 'dias_181_360'
+  | 'dias_361_720'
+  | 'dias_720_mas';
+
+/**
+ * One pending Factura or Nota Débito, coproperty-wide, aged as of the
+ * cut-off. Falls into exactly one `rango` — `saldo` is that document's full
+ * pending amount, not split across buckets.
+ */
+export interface FilaVencimientoCartera {
   inmuebleId: string;
   inmuebleCodigo: string;
   propietario: string | null;
-  saldoPendiente: number;
+  tipo: 'FV' | 'ND';
+  numeroCompleto: string;
+  fecha: string;
+  vence: string;
   diasMora: number;
-  estado: 'pendiente' | 'vencido';
+  saldo: number;
+  rango: RangoVencimiento;
+}
+
+/** One aging bucket's total across every pending document. */
+export interface RangoVencimientoCartera {
+  rango: RangoVencimiento;
+  etiqueta: string;
+  valor: number;
 }
 
 /** Response shape for GET /consultas/vencimientos-cartera. */
 export interface RespuestaVencimientosCartera {
-  filas: FilaVencimientos[];
+  fechaCorte: string;
+  filas: FilaVencimientoCartera[];
+  rangos: RangoVencimientoCartera[];
   totalCartera: number;
-  totalVencido: number;
-  totalPendiente: number;
-  porcentajeVencido: number;
+}
+
+/* ── Cartera por Inmueble (single-unit snapshot) ──────────────── */
+
+/**
+ * One pending Factura or Nota Débito for one inmueble as of a cut-off date.
+ * `cargosPorConcepto` keys by `conceptoId` — one entry per concept charged
+ * on this specific document, so the table can lay out one column per
+ * concept the coproperty uses (a concept absent from this document simply
+ * has no key, read as 0 on the frontend).
+ */
+export interface DocumentoCarteraPorInmueble {
+  tipo: 'FV' | 'ND';
+  numeroCompleto: string;
+  fecha: string;
+  vence: string | null;
+  saldo: number;
+  cargosPorConcepto: Record<string, number>;
+}
+
+/**
+ * One row of the per-concept breakdown. Every concept in the coproperty's
+ * catalog is included, zero-balance ones too — concepts are rows here, never
+ * columns (see ConceptoCobro's own schema comment on why this codebase
+ * replaced the old system's fixed twelve-column design).
+ */
+export interface CargoCarteraPorConcepto {
+  conceptoId: string;
+  nombre: string;
+  monto: number;
+}
+
+/** Response shape for GET /consultas/cartera-por-inmueble. */
+export interface RespuestaCarteraPorInmueble {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  propietario: string | null;
+  fechaCorte: string;
+  documentos: DocumentoCarteraPorInmueble[];
+  cargosPorConcepto: CargoCarteraPorConcepto[];
+  saldoTotalCartera: number;
 }
 
 /* ── Cartera General (§3) ──────────────────────────────────────── */
@@ -712,6 +854,8 @@ export interface ConceptoCobro {
   cuentaDebitoCodigo: string | null;
   cuentaCreditoId: string | null;
   cuentaCreditoCodigo: string | null;
+  cuentaImpuestoId: string | null;
+  cuentaImpuestoCodigo: string | null;
   liquidaMora: boolean;
   cargaXls: boolean;
   sistema: boolean;
@@ -816,9 +960,24 @@ export interface AuthMe {
 /** One debit or credit line within a journal entry card. */
 export interface LineaMovimientoContable {
   cuenta: string;
+  /** Resolved from the coproperty's chart of accounts by `cuenta` (code);
+   *  falls back to the code itself if no matching CuentaContable exists. */
+  nombreCuenta: string;
   tipo: 'debito' | 'credito';
   monto: number;
   descripcion: string;
+  /** The inmueble's unit code — present only when this line's account
+   *  requires a tercero. */
+  tercero: string | null;
+  /** The coproperty's cost centre — present only when this line's account
+   *  requires one. */
+  centroCosto: string | null;
+  /** The coproperty's cash-flow code — present only when this line's
+   *  account is flagged for cash-flow reporting. */
+  flujoCaja: string | null;
+  /** The taxable base this line's tax was computed from — present only on
+   *  the tax-credit line a taxed Cargo splits out. */
+  baseGravable: number | null;
 }
 
 /** One journal entry card in the accounting journal view. */

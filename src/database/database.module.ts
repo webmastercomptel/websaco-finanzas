@@ -73,6 +73,10 @@ import {
   NotaContable,
   NotaContableSchema,
 } from './schemas/notas-contables/nota-contable.schema';
+import {
+  CuentaContable,
+  CuentaContableSchema,
+} from './schemas/contabilidad/cuenta-contable.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -96,6 +100,7 @@ const models = [
   { name: NotaCredito.name, schema: NotaCreditoSchema },
   { name: NotaDebito.name, schema: NotaDebitoSchema },
   { name: NotaContable.name, schema: NotaContableSchema },
+  { name: CuentaContable.name, schema: CuentaContableSchema },
 ];
 
 /**

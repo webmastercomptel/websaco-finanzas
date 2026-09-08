@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
@@ -23,7 +23,7 @@ export type FacturaDocument = HydratedDocument<Factura>;
 @Schema({ timestamps: true, collection: 'facturas' })
 export class Factura {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -31,7 +31,7 @@ export class Factura {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: 'LoteFacturacion',
     required: true,
     index: true,
@@ -39,7 +39,7 @@ export class Factura {
   loteId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
@@ -51,7 +51,7 @@ export class Factura {
   @Prop({ required: true, trim: true })
   unitCode: string;
 
-  @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
@@ -64,7 +64,7 @@ export class Factura {
    * a way to issue invoices. See NumeracionService.siguienteFactura.
    */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: ResolucionFacturacion.name,
     default: null,
   })
@@ -113,7 +113,7 @@ export class Factura {
 
   /** Exists now so voiding, once NotaCredito is designed, fills this field
    *  instead of migrating the schema. */
-  @Prop({ type: Types.ObjectId, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, default: null })
   voidedByCreditNoteId: Types.ObjectId | null;
 }
 

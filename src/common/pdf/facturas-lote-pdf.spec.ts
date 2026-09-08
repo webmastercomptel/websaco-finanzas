@@ -3,6 +3,7 @@ import { generarPdfFacturasLote } from './facturas-lote-pdf';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
+import type { LoteFacturacionDocument } from '../../database/schemas/facturacion/lote-facturacion.schema';
 
 function makeFactura(overrides?: Partial<FacturaDocument>): FacturaDocument {
   return {
@@ -39,6 +40,8 @@ function makeFactura(overrides?: Partial<FacturaDocument>): FacturaDocument {
         taxRate: 0,
         taxAmount: 0,
         totalAmount: 200000,
+        balanceBefore: 1000000,
+        balanceAfter: 1200000,
       },
     ],
     subtotal: 200000,
@@ -86,12 +89,25 @@ function makeCopropiedad(
   } as unknown as CopropiedadDocument;
 }
 
+function makeLote(
+  overrides?: Partial<LoteFacturacionDocument>,
+): LoteFacturacionDocument {
+  return {
+    _id: { toString: () => 'lote-001' },
+    coPropertyId: { toString: () => 'cop-001' },
+    earlyPaymentDiscount: 0,
+    discountDeadline: new Date('2026-08-10'),
+    ...overrides,
+  } as unknown as LoteFacturacionDocument;
+}
+
 describe('generarPdfFacturasLote', () => {
   it('resuelve a bytes que empiezan con %PDF-', async () => {
     const bytes = await generarPdfFacturasLote(
       [makeFactura()],
       new Map([['res-001', makeResolucion()]]),
       makeCopropiedad(),
+      makeLote(),
     );
 
     expect(Buffer.from(bytes.slice(0, 5)).toString('utf-8')).toBe('%PDF-');
@@ -117,6 +133,7 @@ describe('generarPdfFacturasLote', () => {
       facturas,
       new Map([['res-001', makeResolucion()]]),
       makeCopropiedad(),
+      makeLote(),
     );
 
     const releido = await PDFDocument.load(bytes);
@@ -133,6 +150,7 @@ describe('generarPdfFacturasLote', () => {
       facturas,
       new Map([['res-001', makeResolucion()]]),
       makeCopropiedad(),
+      makeLote(),
     );
 
     const releido = await PDFDocument.load(bytes);
@@ -147,6 +165,7 @@ describe('generarPdfFacturasLote', () => {
       [],
       new Map(),
       makeCopropiedad(),
+      makeLote(),
     );
 
     expect(Buffer.from(bytes.slice(0, 5)).toString('utf-8')).toBe('%PDF-');

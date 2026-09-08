@@ -1,6 +1,6 @@
 // src/database/schemas/cuentas/asignacion.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { EntidadAdministradora } from '../entidades/entidad-administradora.schema';
 import { Account } from './account.schema';
@@ -36,7 +36,7 @@ export type AsignacionDocument = HydratedDocument<Asignacion>;
 @Schema({ timestamps: true, collection: 'asignaciones' })
 export class Asignacion {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Account.name,
     required: true,
     index: true,
@@ -49,7 +49,7 @@ export class Asignacion {
 
   /** Set when scope is `copropiedad`, null otherwise. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     default: null,
     index: true,
@@ -58,7 +58,7 @@ export class Asignacion {
 
   /** Set when scope is `entidad`, null otherwise. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: EntidadAdministradora.name,
     default: null,
     index: true,

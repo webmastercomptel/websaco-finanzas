@@ -57,6 +57,7 @@ export class ConceptosService {
       .find({ coPropertyId: oid })
       .populate('cuentaDebitoId', 'code')
       .populate('cuentaCreditoId', 'code')
+      .populate('cuentaImpuestoId', 'code')
       .sort({ sortOrder: 1 })
       .exec();
     return documentos.map(toConcepto);
@@ -251,6 +252,12 @@ export class ConceptosService {
       set(
         'cuentaCreditoId',
         dto.cuentaCreditoId ? new Types.ObjectId(dto.cuentaCreditoId) : null,
+      );
+    }
+    if ('cuentaImpuestoId' in dto) {
+      set(
+        'cuentaImpuestoId',
+        dto.cuentaImpuestoId ? new Types.ObjectId(dto.cuentaImpuestoId) : null,
       );
     }
     set('liquidaMora', dto.liquidaMora);

@@ -129,6 +129,8 @@ describe('ConceptosService.findAll', () => {
       cuentaDebitoCodigo: null,
       cuentaCreditoId: null,
       cuentaCreditoCodigo: null,
+      cuentaImpuestoId: null,
+      cuentaImpuestoCodigo: null,
       liquidaMora: false,
       cargaXls: false,
       sistema: false,

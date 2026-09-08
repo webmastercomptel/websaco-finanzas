@@ -1,6 +1,6 @@
 // src/database/schemas/numeracion/resolucion-facturacion.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
 export type ResolucionFacturacionDocument =
@@ -25,7 +25,7 @@ export type ResolucionFacturacionDocument =
 @Schema({ timestamps: true, collection: 'resoluciones_facturacion' })
 export class ResolucionFacturacion {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,

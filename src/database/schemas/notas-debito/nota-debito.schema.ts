@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
@@ -29,7 +29,7 @@ export type VoidReasonNotaDebito = (typeof VOID_REASONS_NOTA_DEBITO)[number];
 @Schema({ timestamps: true, collection: 'notas_debito' })
 export class NotaDebito {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -37,18 +37,18 @@ export class NotaDebito {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
   })
   inmuebleId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: ConceptoCobro.name,
     required: true,
   })
@@ -88,10 +88,10 @@ export class NotaDebito {
   @Prop({ type: Date, default: null })
   voidedAt: Date | null;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
   voidedBy: Types.ObjectId | null;
 }
 

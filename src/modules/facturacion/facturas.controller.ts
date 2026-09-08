@@ -18,6 +18,10 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  LoteFacturacion,
+  LoteFacturacionDocument,
+} from '../../database/schemas/facturacion/lote-facturacion.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
@@ -35,6 +39,8 @@ export class FacturasController {
     private readonly resoluciones: Model<ResolucionFacturacionDocument>,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(LoteFacturacion.name)
+    private readonly lotes: Model<LoteFacturacionDocument>,
   ) {}
 
   @Get()
@@ -60,13 +66,14 @@ export class FacturasController {
 
     const factura = await this.facturas.findOneRaw(id);
 
-    const [resolucion, copropiedad] = await Promise.all([
+    const [resolucion, copropiedad, lote] = await Promise.all([
       factura.resolucionId
         ? this.resoluciones
             .findOne({ _id: factura.resolucionId, coPropertyId })
             .exec()
         : Promise.resolve(null),
       this.copropiedades.findById(coPropertyId).exec(),
+      this.lotes.findOne({ _id: factura.loteId, coPropertyId }).exec(),
     ]);
 
     if (factura.resolucionId && !resolucion) {
@@ -80,9 +87,15 @@ export class FacturasController {
       );
     }
 
-    const bytes = await generarPdfFactura(factura, resolucion, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
+    const bytes = await generarPdfFactura(
+      factura,
+      resolucion,
+      copropiedad,
+      lote,
+      {
+        duplicado: duplicado === 'true',
+      },
+    );
 
     res.set({
       'Content-Type': 'application/pdf',
