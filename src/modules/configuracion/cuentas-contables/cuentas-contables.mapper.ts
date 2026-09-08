@@ -13,6 +13,7 @@ export const toCuentaContable = (
   codigo: doc.code,
   nombre: doc.name,
   requiereTercero: doc.requiresTercero,
+  esBanco: doc.isBank,
   flujoCaja: doc.cashFlow,
   centroUtilidad: doc.profitCenter,
   centroDestino: doc.destinationCenter,

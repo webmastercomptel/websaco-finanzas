@@ -173,6 +173,57 @@ describe('ConsultaFacturacionService.generar', () => {
     ]);
   });
 
+  it('desglosa el IVA por concepto, para que fila y totales cuadren con el total facturado', async () => {
+    const service = makeService({
+      facturas: [
+        factura({
+          lines: [
+            linea({ baseAmount: 100000, taxRate: 0, taxAmount: 0 }),
+            linea({
+              conceptoId: { toString: () => 'con-multas' },
+              conceptName: 'Multas',
+              baseAmount: 50000,
+              taxRate: 10,
+              taxAmount: 5000,
+              totalAmount: 55000,
+            }),
+          ],
+          subtotal: 150000,
+          totalTax: 5000,
+          total: 155000,
+        }),
+      ],
+      conceptos: [
+        concepto(),
+        concepto({
+          _id: { toString: () => 'con-multas' },
+          name: 'Multas',
+          sortOrder: 2,
+        }),
+      ],
+    });
+    const resultado = await service.generar('lote-1');
+
+    expect(resultado.filas[0].valoresIvaPorConcepto).toEqual({
+      'con-multas': 5000,
+    });
+    const [admin, multas] = resultado.totalesPorConcepto;
+    expect(admin).toMatchObject({ conceptoId: 'con-admin', montoIva: 0 });
+    expect(multas).toMatchObject({ conceptoId: 'con-multas', montoIva: 5000 });
+
+    // La fila cuadra: base(s) + iva(s) == total facturado.
+    const fila = resultado.filas[0];
+    const sumaBase = Object.values(fila.valoresPorConcepto).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    const sumaIva = Object.values(fila.valoresIvaPorConcepto).reduce(
+      (a, b) => a + b,
+      0,
+    );
+    expect(sumaBase + sumaIva).toBe(fila.total);
+  });
+
   it('un lote consolidado sin facturas devuelve arrays vacíos sin lanzar', async () => {
     const service = makeService({ facturas: [] });
     const resultado = await service.generar('lote-1');

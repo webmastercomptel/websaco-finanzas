@@ -108,6 +108,7 @@ export class CuentasContablesService {
       code: dto.codigo,
       name: dto.nombre,
       requiresTercero: dto.requiereTercero ?? false,
+      isBank: dto.esBanco ?? false,
       cashFlow: dto.flujoCaja ?? false,
       profitCenter: dto.centroUtilidad ?? false,
       destinationCenter: dto.centroDestino ?? false,
@@ -172,6 +173,7 @@ export class CuentasContablesService {
     set('code', dto.codigo);
     set('name', dto.nombre);
     set('requiresTercero', dto.requiereTercero);
+    set('isBank', dto.esBanco);
     set('cashFlow', dto.flujoCaja);
     set('profitCenter', dto.centroUtilidad);
     set('destinationCenter', dto.centroDestino);

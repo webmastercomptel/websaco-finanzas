@@ -304,6 +304,11 @@ export interface TotalConceptoLote {
   conceptoId: string;
   nombreConcepto: string;
   monto: Monto;
+  /** Sum of this concept's own `taxAmount` across the lote — 0 for a
+   *  concept that never carries tax. Tells the frontend which concept
+   *  column(s) need their own adjoining "IVA" column, so a taxed cargo's
+   *  IVA shows right next to it instead of only in the aggregate below. */
+  montoIva: Monto;
 }
 
 /**
@@ -311,6 +316,14 @@ export interface TotalConceptoLote {
  * id space as `totalesPorConcepto` — so the frontend pivots into columns
  * without either side ever naming a concept. A concept this invoice has no
  * line for is simply absent from the map, not zero-filled.
+ *
+ * `valoresPorConcepto` carries each concept's BASE amount only — same
+ * convention as the Factura PDF's "Cargos del Mes" column — so a taxed
+ * concept's tax is never silently folded in there. `valoresIvaPorConcepto`
+ * (same key space, same "absent means no line" rule) is what makes the
+ * row's `total` reconcile with what's actually shown: sum of every
+ * `valoresPorConcepto` entry plus every `valoresIvaPorConcepto` entry equals
+ * `total`.
  */
 export interface FilaConsultaFacturacion {
   inmuebleId: string;
@@ -322,6 +335,7 @@ export interface FilaConsultaFacturacion {
   fechaFactura: IsoDate;
   fechaVence: IsoDate;
   valoresPorConcepto: Record<string, Monto>;
+  valoresIvaPorConcepto: Record<string, Monto>;
   subtotal: Monto;
   totalImpuestos: Monto;
   total: Monto;
@@ -1029,6 +1043,7 @@ export interface CuentaContableContract {
   codigo: string;
   nombre: string;
   requiereTercero: boolean;
+  esBanco: boolean;
   flujoCaja: boolean;
   centroUtilidad: boolean;
   centroDestino: boolean;
