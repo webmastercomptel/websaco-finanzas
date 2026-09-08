@@ -1,10 +1,8 @@
-import { rgb, type PDFFont } from 'pdf-lib';
+import { degrees, rgb, type PDFFont } from 'pdf-lib';
 import {
   crearContexto,
   escribirLinea,
-  escribirLabelValor,
   escribirTabla,
-  escribirMarcaDuplicado,
   embebirLogoWebsaco,
   formatoPeso,
   formatoFecha,
@@ -39,6 +37,10 @@ export interface DatosDocumentoFacturacion {
   periodEnd: Date;
   lines: FacturaLinea[];
   descuento: InfoDescuentoProntoPago | null;
+  /** ISO date string when this is a reprint ("DUPLICADO"), null otherwise —
+   *  see `dibujarMarcaDuplicadoFondo` for why this is drawn FIRST rather
+   *  than as a footer note. */
+  marcaDuplicado: string | null;
 }
 
 export interface InfoDescuentoProntoPago {
@@ -106,6 +108,10 @@ export async function generarContextoDocumentoFacturacion(
 ): Promise<PdfContext> {
   const ctx = await crearContexto();
 
+  if (datos.marcaDuplicado) {
+    dibujarMarcaDuplicadoFondo(ctx, datos.marcaDuplicado);
+  }
+
   await dibujarEncabezadoFactura(ctx, copropiedad, datos.titulo);
   dibujarBloqueInmueble(ctx, datos);
   dibujarTablaConceptos(ctx, datos.lines);
@@ -142,6 +148,29 @@ export async function generarContextoDocumentoFacturacion(
   ctx.y -= cajaAltura + 10;
 
   return ctx;
+}
+
+/** Stamps "DUPLICADO — Documento original emitido el {fecha}" diagonally,
+ *  light gray, across the page — drawn FIRST, before any other content, so
+ *  every real number/label painted afterward lands fully opaque on top of
+ *  it and stays legible; the stamp only shows through blank space. Drawing
+ *  it LAST (as this used to, right before saving) painted it OVER the
+ *  finished invoice instead, and a stamp this long — the whole sentence,
+ *  rotated 30° — reaches most of the page's height, so it visibly crossed
+ *  through the Periodo box and the cargos table, garbling both. */
+function dibujarMarcaDuplicadoFondo(
+  ctx: PdfContext,
+  fechaEmisionIso: string,
+): void {
+  const texto = `DUPLICADO — Documento original emitido el ${formatoFecha(fechaEmisionIso)}`;
+  ctx.page.drawText(texto, {
+    x: 40,
+    y: ctx.pageHeight * 0.4,
+    size: 16,
+    font: ctx.fontBold,
+    color: rgb(0.85, 0.85, 0.85),
+    rotate: degrees(28),
+  });
 }
 
 /** Gray banner with the copropiedad name, contact block, and the document
@@ -285,7 +314,10 @@ function dibujarBloqueInmueble(
   // ── Bordered date/period box, right-aligned ──
   const cajaAncho = 170;
   const cajaX = MARGIN_LEFT + ctx.contentWidth - cajaAncho;
-  const cajaAlto = 82;
+  // 82pt is exactly the six lines drawn below (dd/mm/aaaa, Fecha, Vence,
+  // Periodo, Desde, Hasta) with NO bottom margin — the last line's baseline
+  // landed flush on the border. +8 gives it real breathing room.
+  const cajaAlto = 90;
   const cajaYtope = inicioBloque + 4;
   ctx.page.drawRectangle({
     x: cajaX,
@@ -338,12 +370,12 @@ function dibujarBloqueInmueble(
 
   // The next element (the concept table) must clear whichever column runs
   // LOWER on the page — the left column (`ctx.y`, five 13pt rows) or this
-  // box (`cajaAlto` 82pt, taller than the five rows). Advancing by only the
-  // left column's own height, as this used to, left the box's bottom ~3pt
-  // BELOW where the table then started drawing — the table's own header
-  // collided with "Periodo/Hasta" here, "montados" on top of each other.
+  // box (`cajaAlto`, taller than the five rows). Advancing by only the left
+  // column's own height, as this used to, left the box's bottom BELOW where
+  // the table then started drawing — the table's own header collided with
+  // "Periodo/Hasta" here, "montados" on top of each other.
   const cajaBottom = cajaYtope - cajaAlto;
-  ctx.y = Math.min(ctx.y, cajaBottom) - 10;
+  ctx.y = Math.min(ctx.y, cajaBottom) - 14;
 }
 
 /** Greedy word-wrap: splits `texto` into lines no wider than `maxWidth` at
@@ -539,10 +571,30 @@ function dibujarSubtotal(ctx: PdfContext, lines: FacturaLinea[]): void {
   const tasas = new Set(
     lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
   );
-  const etiquetaIva = tasas.size === 1 ? `IVA (${[...tasas][0]}%)` : 'IVA';
+  const etiquetaIva = tasas.size === 1 ? `IVA ${[...tasas][0]}%` : 'IVA';
 
   ctx.y -= 4;
-  escribirLabelValor(ctx, etiquetaIva, formatoPeso(totalIva));
+  ctx.page.drawText(etiquetaIva, {
+    x: MARGIN_LEFT + 4,
+    y: ctx.y,
+    size: 10,
+    font: ctx.fontBold,
+    color: rgb(0, 0, 0),
+  });
+  const textoIva = formatoPeso(totalIva);
+  const anchoIva = ctx.fontBold.widthOfTextAtSize(textoIva, 10);
+  ctx.page.drawText(textoIva, {
+    // Right-aligned to the SAME column edge as Subtotal's "Nuevo Saldo"
+    // total right above it — `escribirLabelValor`'s own right margin (flush
+    // to `contentWidth`, no padding) put this a few points further right
+    // than that column, reading as "corrida a la derecha" against it.
+    x: MARGIN_LEFT + colWidth * 4 - anchoIva - 4,
+    y: ctx.y,
+    size: 10,
+    font: ctx.fontBold,
+    color: rgb(0, 0, 0),
+  });
+  ctx.y -= 14;
 }
 
 /** "Total a Pagar" — the sum of every concept's `nuevoSaldo`, i.e. the
@@ -622,6 +674,9 @@ export async function generarPdfFactura(
       periodEnd: factura.periodEnd,
       lines: factura.lines,
       descuento,
+      marcaDuplicado: opciones?.duplicado
+        ? factura.issueDate.toISOString()
+        : null,
     },
     copropiedad,
   );
@@ -636,10 +691,6 @@ export async function generarPdfFactura(
       `Numeración autorizada de ${resolucion.prefix}${resolucion.rangeFrom} ` +
       `a ${resolucion.prefix}${resolucion.rangeTo}${vigenteHasta}`;
     escribirLinea(ctx, resolucionTexto, { size: 8 });
-  }
-
-  if (opciones?.duplicado) {
-    escribirMarcaDuplicado(ctx, factura.issueDate.toISOString());
   }
 
   return ctx.doc.save();

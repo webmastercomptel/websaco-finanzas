@@ -22,6 +22,10 @@ class CamposCuentaDto {
 
   @IsOptional()
   @IsBoolean()
+  esBanco?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   flujoCaja?: boolean;
 
   @IsOptional()

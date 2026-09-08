@@ -95,8 +95,10 @@ export class ConsultaFacturacionService {
     });
 
     const totalPorConcepto = new Map<string, number>();
+    const totalIvaPorConcepto = new Map<string, number>();
     const filas: FilaConsultaFacturacion[] = facturas.map((f) => {
       const valoresPorConcepto: Record<string, number> = {};
+      const valoresIvaPorConcepto: Record<string, number> = {};
       for (const l of f.lines) {
         const key = l.conceptoId.toString();
         // A concept can appear on more than one line of the same invoice
@@ -106,6 +108,14 @@ export class ConsultaFacturacionService {
           key,
           (totalPorConcepto.get(key) ?? 0) + l.baseAmount,
         );
+        if (l.taxAmount > 0) {
+          valoresIvaPorConcepto[key] =
+            (valoresIvaPorConcepto[key] ?? 0) + l.taxAmount;
+          totalIvaPorConcepto.set(
+            key,
+            (totalIvaPorConcepto.get(key) ?? 0) + l.taxAmount,
+          );
+        }
       }
       return {
         inmuebleId: f.inmuebleId.toString(),
@@ -117,6 +127,7 @@ export class ConsultaFacturacionService {
         fechaFactura: f.issueDate.toISOString(),
         fechaVence: f.dueDate.toISOString(),
         valoresPorConcepto,
+        valoresIvaPorConcepto,
         subtotal: f.subtotal,
         totalImpuestos: f.totalTax,
         total: f.total,
@@ -127,6 +138,7 @@ export class ConsultaFacturacionService {
       conceptoId: id,
       nombreConcepto: nombrePorId.get(id) ?? '',
       monto: totalPorConcepto.get(id) ?? 0,
+      montoIva: totalIvaPorConcepto.get(id) ?? 0,
     }));
     const subtotal = facturas.reduce((acc, f) => acc + f.subtotal, 0);
     const totalImpuestos = facturas.reduce((acc, f) => acc + f.totalTax, 0);

@@ -162,10 +162,26 @@ describe('CuentasContablesService.create', () => {
         code: '11050502',
         name: 'Banco',
         requiresTercero: false,
+        isBank: false,
         cashFlow: false,
         requiresCrossDocument: false,
         taxRate: 0,
       }),
+    );
+  });
+
+  it('crea una cuenta marcada como banco cuando esBanco viene en true', async () => {
+    const modelo = modeloCon([]);
+    const service = crearServicio(modelo);
+
+    await service.create({
+      codigo: '11050503',
+      nombre: 'Bancolombia',
+      esBanco: true,
+    });
+
+    expect(modelo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ isBank: true }),
     );
   });
 });
@@ -203,6 +219,19 @@ describe('CuentasContablesService.update', () => {
     await expect(
       service.update('cta-1', { codigo: '11050501' }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('actualiza esBanco a isBank', async () => {
+    const modelo = modeloCon([cuentaDoc()]);
+    const service = crearServicio(modelo);
+
+    await service.update('cta-1', { esBanco: true });
+
+    const [, update] = modelo.findOneAndUpdate.mock.calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(update.$set).toEqual({ isBank: true });
   });
 });
 

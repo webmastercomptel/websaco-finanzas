@@ -37,6 +37,7 @@ export async function generarPdfPrefactura(
       periodEnd: lote.periodEnd,
       lines: preliminar.lines,
       descuento,
+      marcaDuplicado: null,
     },
     copropiedad,
   );
