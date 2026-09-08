@@ -1,15 +1,15 @@
 // src/modules/copropiedades/copropiedades.service.ts
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  ContadorCopropiedad,
+  ContadorCopropiedadDocument,
+} from '../../database/schemas/copropiedades/contador-copropiedad.schema';
 import {
   Asignacion,
   AsignacionDocument,
@@ -45,6 +45,8 @@ export class CopropiedadesService {
   constructor(
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(ContadorCopropiedad.name)
+    private readonly contador: Model<ContadorCopropiedadDocument>,
     @InjectModel(Asignacion.name)
     private readonly asignaciones: Model<AsignacionDocument>,
     @InjectModel(Account.name)
@@ -92,6 +94,59 @@ export class CopropiedadesService {
       pagina,
       porPagina,
     };
+  }
+
+  /**
+   * Read-only preview of the code the next `create()` would assign — for
+   * the "Código" field on the create form, auto-populated instead of typed
+   * by hand. A pure read: it never touches the counter, so opening the form
+   * and never submitting never burns a number.
+   */
+  async previsualizarSiguienteCodigo(): Promise<string> {
+    return String((await this.pisoActual()) + 1).padStart(4, '0');
+  }
+
+  /**
+   * The highest numeric `code` already in use — either already recorded on
+   * the counter, or typed by hand before this became automatic (or any
+   * future direct insert).
+   */
+  private async pisoActual(): Promise<number> {
+    const [maximo] = await this.copropiedades
+      .find({ code: /^\d+$/ })
+      .sort({ code: -1 })
+      .collation({ locale: 'en_US', numericOrdering: true })
+      .limit(1)
+      .exec();
+    const pisoCopropiedades = maximo ? parseInt(maximo.code, 10) : 0;
+
+    const contadorActual = await this.contador.findOne({}).exec();
+    const pisoContador = contadorActual?.valor ?? 0;
+
+    return Math.max(pisoCopropiedades, pisoContador);
+  }
+
+  /**
+   * Atomically increments the single counter document and formats the
+   * result as a zero-padded 4-digit code ("0001", "0002", ...). Floors the
+   * counter at `pisoActual()` first — cheap to repeat on every call: once
+   * the counter has caught up, the floor is a no-op.
+   */
+  private async siguienteCodigo(): Promise<string> {
+    const piso = await this.pisoActual();
+
+    await this.contador
+      .updateOne(
+        { valor: { $lt: piso } },
+        { $set: { valor: piso } },
+        { upsert: true },
+      )
+      .exec();
+
+    const contador = await this.contador
+      .findOneAndUpdate({}, { $inc: { valor: 1 } }, { upsert: true, new: true })
+      .exec();
+    return String(contador.valor).padStart(4, '0');
   }
 
   async findOne(id: string): Promise<CopropiedadContract> {
@@ -165,16 +220,11 @@ export class CopropiedadesService {
     dto: CrearCopropiedadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
-    const yaExiste = await this.copropiedades
-      .exists({ code: dto.codigo })
-      .exec();
-    if (yaExiste) {
-      throw new ConflictException(
-        `Ya existe una copropiedad con el código ${dto.codigo}`,
-      );
-    }
-
-    const creada = await this.copropiedades.create(this.aDocumento(dto));
+    const code = await this.siguienteCodigo();
+    const creada = await this.copropiedades.create({
+      ...this.aDocumento(dto),
+      code,
+    });
 
     await this.auditoria.registrar({
       actorAccountId: actor.accountId,
@@ -257,10 +307,6 @@ export class CopropiedadesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    // `codigo` only exists on `CrearCopropiedadDto` — immutable after
-    // creation, so `ActualizarCopropiedadDto` never carries it — hence the
-    // `in` check rather than a plain `set()`.
-    if ('codigo' in dto) set('code', dto.codigo);
     set('name', dto.nombre);
     set('taxId', dto.nit);
     set('taxIdVerificationDigit', dto.digitoVerificacion);

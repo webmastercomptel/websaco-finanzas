@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { EntidadesService } from './entidades.service';
 
 type Filtro = Record<string, unknown>;
@@ -6,6 +6,17 @@ type Filtro = Record<string, unknown>;
 const mockAuditoria = () => ({
   registrar: jest.fn().mockResolvedValue(undefined),
 });
+
+/** Mimics the atomic counter: each call returns the next integer. */
+const mockContador = (valorInicial = 0) => {
+  let valor = valorInicial;
+  return {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(undefined) })),
+    findOneAndUpdate: jest.fn(() => ({
+      exec: () => Promise.resolve({ valor: ++valor }),
+    })),
+  };
+};
 
 const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
@@ -22,13 +33,14 @@ const documento = (over: Record<string, unknown> = {}) => ({
 });
 
 /** Chainable stub; records every filter it was called with. */
-const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
+const modeloCon = (filas: unknown[]) => {
   const filtros: Filtro[] = [];
   const escrituras: Record<string, unknown>[] = [];
   const cadena = {
     sort: () => cadena,
     skip: () => cadena,
     limit: () => cadena,
+    collation: () => cadena,
     exec: () => Promise.resolve(filas),
   };
 
@@ -45,12 +57,6 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
     countDocuments: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
       return { exec: () => Promise.resolve(filas.length) };
-    }),
-    exists: jest.fn((filtro: Filtro) => {
-      filtros.push(filtro);
-      return {
-        exec: () => Promise.resolve(opts.duplicado ? { _id: 'x' } : null),
-      };
     }),
     create: jest.fn((doc: Record<string, unknown>) => {
       escrituras.push(doc);
@@ -72,6 +78,7 @@ describe('EntidadesService.findAll', () => {
     const modelo = modeloCon([documento()]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -84,6 +91,7 @@ describe('EntidadesService.findAll', () => {
     const modelo = modeloCon([]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -99,6 +107,7 @@ describe('EntidadesService.findAll', () => {
     const modelo = modeloCon([]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -111,6 +120,7 @@ describe('EntidadesService.findAll', () => {
     const modelo = modeloCon([documento()]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -129,6 +139,7 @@ describe('EntidadesService.findOne', () => {
     const modelo = modeloCon([]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -139,29 +150,24 @@ describe('EntidadesService.findOne', () => {
 });
 
 describe('EntidadesService.create', () => {
-  it('rechaza un código repetido con un mensaje entendible', async () => {
-    const modelo = modeloCon([], { duplicado: true });
-    const service = new EntidadesService(
-      modelo as never,
-      mockAuditoria() as never,
-    );
-
-    await expect(
-      service.create({ codigo: 'ENT-001', nombre: 'Otra' }, ACTOR),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('crea con los campos traducidos al inglés', async () => {
+  it('asigna el código automáticamente desde el contador, incrementándolo de forma atómica', async () => {
     const modelo = modeloCon([]);
+    const contador = mockContador(41);
     const service = new EntidadesService(
       modelo as never,
+      contador as never,
       mockAuditoria() as never,
     );
 
-    await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR);
+    await service.create({ nombre: 'Nueva Entidad' }, ACTOR);
 
+    expect(contador.findOneAndUpdate).toHaveBeenCalledWith(
+      {},
+      { $inc: { valor: 1 } },
+      { upsert: true, new: true },
+    );
     expect(modelo.escrituras[0]).toEqual({
-      code: 'ENT-002',
+      code: '0042',
       name: 'Nueva Entidad',
     });
   });
@@ -169,9 +175,13 @@ describe('EntidadesService.create', () => {
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
     const modelo = modeloCon([]);
     const auditoria = mockAuditoria();
-    const service = new EntidadesService(modelo as never, auditoria as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockContador() as never,
+      auditoria as never,
+    );
 
-    await service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR);
+    await service.create({ nombre: 'Nueva Entidad' }, ACTOR);
 
     expect(auditoria.registrar).toHaveBeenCalledWith({
       actorAccountId: ACTOR.accountId,
@@ -188,10 +198,14 @@ describe('EntidadesService.create', () => {
     const auditoria = {
       registrar: jest.fn().mockRejectedValue(new Error('audit down')),
     };
-    const service = new EntidadesService(modelo as never, auditoria as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockContador() as never,
+      auditoria as never,
+    );
 
     await expect(
-      service.create({ codigo: 'ENT-002', nombre: 'Nueva Entidad' }, ACTOR),
+      service.create({ nombre: 'Nueva Entidad' }, ACTOR),
     ).rejects.toThrow('audit down');
   });
 });
@@ -203,6 +217,7 @@ describe('EntidadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -217,6 +232,7 @@ describe('EntidadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -237,6 +253,7 @@ describe('EntidadesService.update', () => {
     })) as never;
     const service = new EntidadesService(
       modelo as never,
+      mockContador() as never,
       mockAuditoria() as never,
     );
 
@@ -248,7 +265,11 @@ describe('EntidadesService.update', () => {
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
     const modelo = modeloCon([documento()]);
     const auditoria = mockAuditoria();
-    const service = new EntidadesService(modelo as never, auditoria as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockContador() as never,
+      auditoria as never,
+    );
 
     await service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR);
 
@@ -267,7 +288,11 @@ describe('EntidadesService.update', () => {
     const auditoria = {
       registrar: jest.fn().mockRejectedValue(new Error('audit down')),
     };
-    const service = new EntidadesService(modelo as never, auditoria as never);
+    const service = new EntidadesService(
+      modelo as never,
+      mockContador() as never,
+      auditoria as never,
+    );
 
     await expect(
       service.update('ent-1', { email: 'nuevo@ejemplo.com' }, ACTOR),

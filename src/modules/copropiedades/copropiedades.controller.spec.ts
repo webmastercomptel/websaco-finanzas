@@ -19,10 +19,10 @@ describe('CopropiedadesController.create', () => {
     };
     const controller = makeController(copropiedades);
 
-    await controller.create({ codigo: 'COP-001', nombre: 'Granada' }, USER);
+    await controller.create({ nombre: 'Granada' }, USER);
 
     expect(copropiedades.create).toHaveBeenCalledWith(
-      { codigo: 'COP-001', nombre: 'Granada' },
+      { nombre: 'Granada' },
       { accountId: 'account-real-1', nombre: 'Admin Real' },
     );
   });
@@ -34,13 +34,10 @@ describe('CopropiedadesController.create', () => {
     const controller = makeController(copropiedades);
     const userSinNombre: IRequestUser = { ...USER, nombre: undefined };
 
-    await controller.create(
-      { codigo: 'COP-001', nombre: 'Granada' },
-      userSinNombre,
-    );
+    await controller.create({ nombre: 'Granada' }, userSinNombre);
 
     expect(copropiedades.create).toHaveBeenCalledWith(
-      { codigo: 'COP-001', nombre: 'Granada' },
+      { nombre: 'Granada' },
       { accountId: 'account-real-1', nombre: userSinNombre.email },
     );
   });

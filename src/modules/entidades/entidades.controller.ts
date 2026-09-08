@@ -46,6 +46,14 @@ export class EntidadesController {
     return this.entidades.findAll(query);
   }
 
+  /** Must come before `:id` — otherwise "siguiente-codigo" is read as an id. */
+  @Get('siguiente-codigo')
+  siguienteCodigo(): Promise<{ codigo: string }> {
+    return this.entidades
+      .previsualizarSiguienteCodigo()
+      .then((codigo) => ({ codigo }));
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string): Promise<EntidadAdministradora> {
     return this.entidades.findOne(id);
