@@ -3,6 +3,10 @@ import {
   construirAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   construirContraAsientoCruce,
+  construirMovimientosReclasificacion,
+  construirContraAsientoNotaDebito,
+  cuentasOrdenDe,
+  invertirCuentasOrden,
 } from './asiento.builder';
 
 describe('construirMovimientos', () => {
@@ -100,6 +104,46 @@ describe('construirMovimientos', () => {
 
     const credito = movimientos.find((m) => m.type === 'credito');
     expect(credito?.account).toBe('SIN-CUENTA-ASIGNADA');
+  });
+
+  it('agrega el par de cuentas de orden cuando se provee', () => {
+    const movimientos = construirMovimientos(
+      {
+        total: 520000,
+        lines: [{ accountingIncomeAccount: '413501', totalAmount: 520000 }],
+      },
+      '130501',
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos).toHaveLength(4);
+    expect(
+      movimientos.find((m) => m.account === '831505' && m.type === 'debito')
+        ?.amount,
+    ).toBe(520000);
+    expect(
+      movimientos.find((m) => m.account === '831510' && m.type === 'credito')
+        ?.amount,
+    ).toBe(520000);
+
+    const suma = (type: 'debito' | 'credito') =>
+      movimientos
+        .filter((m) => m.type === type)
+        .reduce((acc, m) => acc + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('omite las cuentas de orden cuando no se proveen', () => {
+    const movimientos = construirMovimientos(
+      {
+        total: 520000,
+        lines: [{ accountingIncomeAccount: '413501', totalAmount: 520000 }],
+      },
+      '130501',
+      null,
+    );
+
+    expect(movimientos).toHaveLength(2);
   });
 });
 
@@ -425,5 +469,184 @@ describe('construirContraAsientoCruce', () => {
       })),
     );
     expect(nc[2].description).not.toBe(rc[2].description);
+  });
+});
+
+describe('cuentasOrdenDe', () => {
+  it('devuelve null cuando la copropiedad no usa cuentas de orden', () => {
+    expect(
+      cuentasOrdenDe({
+        usesMemorandumAccounts: false,
+        memorandumDebitAccount: '831505',
+        memorandumCreditAccount: '831510',
+      }),
+    ).toBeNull();
+    expect(cuentasOrdenDe(null)).toBeNull();
+    expect(cuentasOrdenDe(undefined)).toBeNull();
+  });
+
+  it('resuelve el par cuando está habilitado, con reserva para cuentas sin asignar', () => {
+    expect(
+      cuentasOrdenDe({
+        usesMemorandumAccounts: true,
+        memorandumDebitAccount: '831505',
+        memorandumCreditAccount: null,
+      }),
+    ).toEqual({ debito: '831505', credito: 'SIN-CUENTA-ASIGNADA' });
+  });
+});
+
+describe('invertirCuentasOrden', () => {
+  it('intercambia débito y crédito', () => {
+    expect(
+      invertirCuentasOrden({ debito: '831505', credito: '831510' }),
+    ).toEqual({ debito: '831510', credito: '831505' });
+  });
+
+  it('preserva null', () => {
+    expect(invertirCuentasOrden(null)).toBeNull();
+  });
+});
+
+describe('construirAsientoCruce con cuentasOrden', () => {
+  it('agrega el par por el monto total (aplicado + sin aplicar)', () => {
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos).toHaveLength(5);
+    expect(movimientos.find((m) => m.account === '831505')?.amount).toBe(
+      300000,
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.amount).toBe(
+      300000,
+    );
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('no agrega nada cuando no se provee', () => {
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+    );
+    expect(movimientos).toHaveLength(3);
+  });
+});
+
+describe('construirContraAsientoCruce con cuentasOrden', () => {
+  it('revierte el par (lados invertidos) por el monto de origen', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      300000,
+      'RC',
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(
+      movimientos.find((m) => m.account === '831510' && m.type === 'debito')
+        ?.amount,
+    ).toBe(300000);
+    expect(
+      movimientos.find((m) => m.account === '831505' && m.type === 'credito')
+        ?.amount,
+    ).toBe(300000);
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+});
+
+describe('construirMovimientosReclasificacion', () => {
+  it('sin cuentasOrden produce solo el par de reclasificación', () => {
+    const movimientos = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+    );
+    expect(movimientos).toHaveLength(2);
+  });
+
+  it('con cuentasOrden agrega el par memo por el mismo monto', () => {
+    const movimientos = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos).toHaveLength(4);
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('con cuentasOrden invertido (voiding) queda en la dirección contraria', () => {
+    const creacion = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+      { debito: '831505', credito: '831510' },
+    );
+    const anulacion = construirMovimientosReclasificacion(
+      '413502',
+      '413501',
+      100000,
+      invertirCuentasOrden({ debito: '831505', credito: '831510' }),
+    );
+
+    const memoDe = (mov: typeof creacion) =>
+      mov.filter((m) => m.account === '831505' || m.account === '831510');
+
+    expect(memoDe(anulacion).find((m) => m.type === 'debito')?.account).toBe(
+      memoDe(creacion).find((m) => m.type === 'credito')?.account,
+    );
+  });
+});
+
+describe('construirContraAsientoNotaDebito con cuentasOrden', () => {
+  it('revierte el par (lados invertidos) por el monto', () => {
+    const movimientos = construirContraAsientoNotaDebito(
+      '130501',
+      '413501',
+      250000,
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(
+      movimientos.find((m) => m.account === '831510' && m.type === 'debito')
+        ?.amount,
+    ).toBe(250000);
+    expect(
+      movimientos.find((m) => m.account === '831505' && m.type === 'credito')
+        ?.amount,
+    ).toBe(250000);
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('no agrega nada cuando no se provee', () => {
+    const movimientos = construirContraAsientoNotaDebito(
+      '130501',
+      '413501',
+      250000,
+    );
+    expect(movimientos).toHaveLength(2);
   });
 });

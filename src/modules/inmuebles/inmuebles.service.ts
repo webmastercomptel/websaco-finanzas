@@ -17,6 +17,9 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { escapeRegex } from '../../common/utils/query.utils';
+import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
+import { CatalogosService } from '../catalogos/catalogos.service';
+import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
 import type {
   Inmueble as InmuebleContract,
   Paginado,
@@ -42,6 +45,8 @@ export class InmueblesService {
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
     private readonly valoresRecurrentes: ValoresRecurrentesService,
+    private readonly catalogos: CatalogosService,
+    private readonly eliminacion: InmueblesEliminacionService,
   ) {}
 
   /**
@@ -54,13 +59,12 @@ export class InmueblesService {
     query: ListarInmueblesDto,
   ): Promise<Paginado<InmuebleContract>> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
-
-    // Default to the ones that are actually in use: a listing that opens with
-    // deactivated units mixed in makes people distrust the count.
-    if (query.estado !== 'todos') {
-      filtro.status = query.estado === 'inactivo' ? 'inactive' : 'active';
-    }
+    // Every unit in a coproperty is active by definition — there is no
+    // `estado` filter to accept here anymore (see `ActualizarInmuebleDto`'s
+    // own note). `status` stays `active` on every document Mongo actually
+    // holds; this still names it explicitly rather than dropping the clause,
+    // matching `LotesFacturacionService`'s own billing-eligibility query.
+    const filtro: Record<string, unknown> = { coPropertyId, status: 'active' };
 
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
@@ -196,6 +200,14 @@ export class InmueblesService {
    * answers for it — the same "one concept, two tables" pair `findOne`
    * returns joined, just going in instead of coming out.
    *
+   * REPLACES the roster, on purpose: every import first wipes every unit of
+   * the active coproperty that can be wiped (see
+   * `InmueblesEliminacionService.eliminarTodosEliminables`), then loads the
+   * file as if into an empty building. A unit with a Factura survives the
+   * wipe untouched — the same guard `eliminar` applies one at a time — and
+   * its code is reported back in `bloqueadosPorFactura` rather than silently
+   * kept, since the file might otherwise expect to recreate it.
+   *
    * Rows are independent. One bad code or a repeated identification fails
    * only that row and keeps going, because asking somebody to re-upload a
    * 400-row file over three typos is not a serious answer.
@@ -204,6 +216,8 @@ export class InmueblesService {
     dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+    const { eliminados, bloqueados } =
+      await this.eliminacion.eliminarTodosEliminables();
     const errores: ResultadoImportacionInmuebles['errores'] = [];
     let creados = 0;
 
@@ -226,7 +240,6 @@ export class InmueblesService {
           block: fila.bloque,
           zone: fila.zona,
           usage: fila.uso,
-          costCentre: fila.centroCostos,
           area: fila.area,
           participationFactor: fila.coeficiente,
           holderId,
@@ -257,7 +270,13 @@ export class InmueblesService {
       }
     }
 
-    return { total: dto.filas.length, creados, errores };
+    return {
+      total: dto.filas.length,
+      creados,
+      errores,
+      eliminadosAntes: eliminados,
+      bloqueadosPorFactura: bloqueados,
+    };
   }
 
   /**
@@ -265,11 +284,67 @@ export class InmueblesService {
    * new one when the row names somebody without a match, or leaves the unit
    * without a titular when the row carries neither — a building loaded
    * before its ownership papers is the ordinary case here, not an error.
+   *
+   * A reused party is also REFRESHED with whatever this row provides —
+   * never left as-is. Every import wipes the unit roster but never touches
+   * `Tercero` (see `InmueblesEliminacionService`), so a second import of the
+   * same building reuses the same parties every time; if that reuse only
+   * returned the id, a corrected file could never fix a party's own data
+   * (address, city, document type…) once it existed — exactly the bug a
+   * repeated import is supposed to be able to fix.
+   *
+   * `personType` is inferred from which name columns the row filled in
+   * (`razonSocialTitular` → jurídica, otherwise natural) — the template has
+   * no separate "tipo de persona" column, since a row that names nobody at
+   * all already leaves the unit without a titular above.
+   *
+   * `tipoIdentificacionTitular`/`ciudadTitular` are DIAN/DANE codes, the same
+   * ones the manual Titular form's dropdowns write — validated against the
+   * same static catalog (`CatalogosService`) rather than trusted as free
+   * text, since a typo here would silently save a code no DIAN reader
+   * recognizes. A bad code fails only this row, same as a repeated codigo.
    */
   private async resolverTitular(
     coPropertyId: Types.ObjectId,
     fila: FilaImportarInmuebleDto,
   ): Promise<Types.ObjectId | undefined> {
+    const personType = fila.razonSocialTitular ? 'juridica' : 'natural';
+    const nombre = resolverNombreTercero({
+      tipoPersona: personType,
+      nombre: fila.nombreTitular,
+      nom1: fila.nom1Titular,
+      nom2: fila.nom2Titular,
+      ape1: fila.ape1Titular,
+      ape2: fila.ape2Titular,
+      razonSocial: fila.razonSocialTitular,
+    });
+
+    if (
+      fila.tipoIdentificacionTitular &&
+      !this.catalogos
+        .listarTiposIdentificacion()
+        .some((t) => t.codigo === fila.tipoIdentificacionTitular)
+    ) {
+      throw new Error(
+        `El código de tipo de identificación "${fila.tipoIdentificacionTitular}" no existe en el catálogo DIAN`,
+      );
+    }
+
+    let ciudad: string | undefined;
+    let ciudadDepartamento: string | undefined;
+    if (fila.ciudadTitular) {
+      const encontrada = this.catalogos
+        .listarCiudades()
+        .find((c) => c.codigo === fila.ciudadTitular);
+      if (!encontrada) {
+        throw new Error(
+          `El código de ciudad "${fila.ciudadTitular}" no existe en el catálogo DANE`,
+        );
+      }
+      ciudad = encontrada.nombre;
+      ciudadDepartamento = encontrada.departamentoCodigo;
+    }
+
     if (fila.numeroIdentificacionTitular) {
       const existente = await this.terceros
         .findOne({
@@ -277,22 +352,84 @@ export class InmueblesService {
           identificationNumber: fila.numeroIdentificacionTitular,
         })
         .exec();
-      if (existente) return existente._id;
+      if (existente) {
+        await this.actualizarTitularExistente(existente._id, {
+          personType: nombre ? personType : undefined,
+          nombre,
+          fila,
+          ciudad,
+          ciudadDepartamento,
+        });
+        return existente._id;
+      }
     }
 
-    if (!fila.nombreTitular) return undefined;
+    if (!nombre) return undefined;
 
     const creado = await this.terceros.create({
       coPropertyId,
-      personType: 'natural',
-      name: fila.nombreTitular,
+      personType,
+      name: nombre,
+      firstName: fila.nom1Titular,
+      middleName: fila.nom2Titular,
+      firstLastName: fila.ape1Titular,
+      secondLastName: fila.ape2Titular,
+      businessName: fila.razonSocialTitular,
       identificationType: fila.tipoIdentificacionTitular,
       identificationNumber: fila.numeroIdentificacionTitular,
       identificationVerificationDigit: fila.digitoVerificacionTitular,
       email: fila.emailTitular,
       phone: fila.telefonoTitular,
+      address: fila.direccionTitular,
+      city: ciudad,
+      cityCode: fila.ciudadTitular,
+      cityDepartmentCode: ciudadDepartamento,
     });
     return creado._id;
+  }
+
+  /**
+   * Merges a row's fields into an already-existing party — only the ones
+   * this row actually sent, same "don't clear what wasn't touched" rule
+   * `aDocumento` follows for the unit itself. `nombre`/`personType` are
+   * skipped when the row named nobody (`resolverNombreTercero` returned
+   * null) — a row that only repeats a known identification number must not
+   * blank out a name it never mentioned.
+   */
+  private async actualizarTitularExistente(
+    id: Types.ObjectId,
+    datos: {
+      personType: 'natural' | 'juridica' | undefined;
+      nombre: string | null;
+      fila: FilaImportarInmuebleDto;
+      ciudad: string | undefined;
+      ciudadDepartamento: string | undefined;
+    },
+  ): Promise<void> {
+    const { personType, nombre, fila, ciudad, ciudadDepartamento } = datos;
+    const cambios: Record<string, unknown> = {};
+    const set = (clave: string, valor: unknown): void => {
+      if (valor !== undefined) cambios[clave] = valor;
+    };
+
+    set('personType', personType);
+    set('name', nombre ?? undefined);
+    set('firstName', fila.nom1Titular);
+    set('middleName', fila.nom2Titular);
+    set('firstLastName', fila.ape1Titular);
+    set('secondLastName', fila.ape2Titular);
+    set('businessName', fila.razonSocialTitular);
+    set('identificationType', fila.tipoIdentificacionTitular);
+    set('identificationVerificationDigit', fila.digitoVerificacionTitular);
+    set('email', fila.emailTitular);
+    set('phone', fila.telefonoTitular);
+    set('address', fila.direccionTitular);
+    set('city', ciudad);
+    set('cityCode', fila.ciudadTitular);
+    set('cityDepartmentCode', ciudadDepartamento);
+
+    if (Object.keys(cambios).length === 0) return;
+    await this.terceros.updateOne({ _id: id }, { $set: cambios }).exec();
   }
 
   /**
@@ -312,7 +449,6 @@ export class InmueblesService {
     set('block', dto.bloque);
     set('zone', dto.zona);
     set('usage', dto.uso);
-    set('costCentre', dto.centroCostos);
     set('area', dto.area);
     set('participationFactor', dto.coeficiente);
     set('holderId', dto.titularId);
@@ -321,9 +457,6 @@ export class InmueblesService {
     set('collectionStatus', dto.estadoCartera);
     set('contactName', dto.contacto);
     set('notes', dto.observaciones);
-    if (dto.estado !== undefined) {
-      doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
-    }
 
     return doc;
   }

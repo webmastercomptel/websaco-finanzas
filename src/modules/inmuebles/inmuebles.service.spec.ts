@@ -70,6 +70,8 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.findAll({});
@@ -86,6 +88,8 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       tenantQueDevuelve(null),
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await expect(service.findAll({})).rejects.toBeInstanceOf(
@@ -95,32 +99,20 @@ describe('InmueblesService.findAll', () => {
     expect(modelo.find).not.toHaveBeenCalled();
   });
 
-  it('muestra solo los activos por defecto', async () => {
+  it('siempre filtra por status activo: no hay estado que alternar', async () => {
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
+      {} as never,
       {} as never,
     );
 
     await service.findAll({});
 
     expect(modelo.filtros[0].status).toBe('active');
-  });
-
-  it('permite pedir todos explícitamente', async () => {
-    const modelo = modeloCon([]);
-    const service = new InmueblesService(
-      modelo as never,
-      {} as never,
-      tenantQueDevuelve(COP),
-      {} as never,
-    );
-
-    await service.findAll({ estado: 'todos' });
-
-    expect(modelo.filtros[0].status).toBeUndefined();
   });
 
   it('escapa la búsqueda para que no actúe como expresión regular', async () => {
@@ -131,6 +123,8 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
+      {} as never,
       {} as never,
     );
 
@@ -149,6 +143,8 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     const resultado = await service.findAll({ buscar: '301' });
@@ -164,6 +160,8 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     const { items } = await service.findAll({});
@@ -172,7 +170,6 @@ describe('InmueblesService.findAll', () => {
       codigo: '301',
       bloque: 'Torre A',
       coeficiente: 1.8452,
-      estado: 'activo',
       titular: null,
     });
   });
@@ -183,6 +180,8 @@ describe('InmueblesService.findAll', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
+      {} as never,
       {} as never,
     );
 
@@ -202,6 +201,8 @@ describe('InmueblesService.findOne', () => {
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.findOne('inm-1');
@@ -217,6 +218,8 @@ describe('InmueblesService.findOne', () => {
       modelo as never,
       {} as never,
       tenantQueDevuelve(COP),
+      {} as never,
+      {} as never,
       {} as never,
     );
 

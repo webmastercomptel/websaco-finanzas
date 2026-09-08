@@ -26,11 +26,10 @@ import type { Paginado, Tercero } from '../../contracts';
  * Guards in this order, always: authentication first, then authorization —
  * PoliciesGuard reads `request.user`, which the first one puts there.
  *
- * **There is no DELETE, and adding one would be a mistake.** A party is
- * retired by setting `estado: 'inactivo'`, which stops it being offered as a
- * new unit's holder without touching a single document that already names
- * it — see the note on the Tercero schema for why history must never rewrite
- * itself.
+ * **There is no DELETE, and adding one would be a mistake.** Every party
+ * stays `activo` for as long as it exists — see the note on
+ * `ActualizarTerceroDto` — and a document issued in the past must keep
+ * naming somebody either way, so there is nothing here to retire it either.
  */
 @Controller('terceros')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)

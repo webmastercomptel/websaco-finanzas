@@ -49,6 +49,7 @@ import {
   construirAsientoCruce,
   construirContraAsientoCruce,
   construirMovimientosAplicacionAnticipo,
+  cuentasOrdenDe,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import {
@@ -482,6 +483,7 @@ export class RecibosService {
         recibo.unappliedAmount,
         recibo.receivedAmount,
         'RC',
+        cuentasOrdenDe(copropiedad),
       );
       await this.asientos.create(
         [
@@ -996,6 +998,7 @@ export class RecibosService {
       montoAplicado,
       montoSinAplicar,
       'RC',
+      cuentasOrdenDe(copropiedad),
     );
 
     await this.asientos.create(

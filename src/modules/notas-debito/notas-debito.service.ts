@@ -48,6 +48,7 @@ import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   construirContraAsientoNotaDebito,
   construirMovimientos,
+  cuentasOrdenDe,
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { toNotaDebito, toNotaDebitoDetalle } from './notas-debito.mapper';
@@ -317,6 +318,7 @@ export class NotasDebitoService {
         cuentaCartera,
         cuentaIngreso,
         nota.total,
+        cuentasOrdenDe(copropiedad),
       );
       await this.asientos.create(
         [
@@ -425,6 +427,7 @@ export class NotasDebitoService {
         ],
       },
       cuentaCartera,
+      cuentasOrdenDe(copropiedad),
     );
 
     await this.asientos.create(

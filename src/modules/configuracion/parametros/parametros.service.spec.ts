@@ -17,11 +17,19 @@ const copropiedadDoc = (over: Record<string, unknown> = {}) => ({
   lateFeeValueLimit: null,
   defaultBankAccountCode: null,
   billingNotes: null,
+  defaultCostCentre: null,
+  otherIncomeDebitAccount: null,
+  otherIncomeCreditAccount: null,
+  discountsDebitAccount: null,
+  discountsCreditAccount: null,
+  memorandumDebitAccount: null,
+  memorandumCreditAccount: null,
+  usesMemorandumAccounts: false,
   ...over,
 });
 
 describe('ParametrosService.findOne', () => {
-  it('mapea los 10 campos de la copropiedad activa', async () => {
+  it('mapea los 17 campos de la copropiedad activa', async () => {
     const copropiedades = {
       findById: jest.fn(() => ({
         exec: () =>
@@ -49,6 +57,14 @@ describe('ParametrosService.findOne', () => {
       topeValorMora: null,
       cuentaBancoPredeterminada: '111005',
       observacionesFacturacion: null,
+      centroCostos: null,
+      otrosIngresosDebito: null,
+      otrosIngresosCredito: null,
+      descuentosDebito: null,
+      descuentosCredito: null,
+      cuentasOrdenDebito: null,
+      cuentasOrdenCredito: null,
+      usaCuentasOrden: false,
     });
   });
 

@@ -302,7 +302,9 @@ export function formatoFecha(fecha: Date | string): string {
 
 // ── internal helpers ──
 
-function truncateToFit(
+/** Exported for the odd builder that needs per-cell truncation of its own
+ *  (fixed-width table columns, e.g.) rather than whole-line truncation. */
+export function truncateToFit(
   font: PDFFont,
   text: string,
   size: number,

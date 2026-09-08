@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ValoresRecurrentesService } from './valores-recurrentes.service';
 
@@ -8,6 +8,7 @@ const COP = new Types.ObjectId();
 const INMUEBLE_ID = new Types.ObjectId().toString();
 const CONCEPTO_ADMIN = new Types.ObjectId();
 const CONCEPTO_PARQUEADERO = new Types.ObjectId();
+const CONCEPTO_INTERESES = new Types.ObjectId();
 
 const tenantQueDevuelve = (cop: Types.ObjectId) =>
   ({ resolveCoPropertyId: () => cop }) as never;
@@ -26,17 +27,16 @@ const conceptoDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** `find` returns every concept passed in (unfiltered — `obtener` no longer
+ *  excludes `intereses` at the query level); `findOne` mimics the
+ *  `{ kind: 'intereses' }` lookup `guardar` uses to find that one concept. */
 const modeloConceptos = (conceptos: Record<string, unknown>[]) => ({
-  find: jest.fn((filtro: Filtro) => ({
-    sort: () => ({
-      exec: () =>
-        Promise.resolve(
-          conceptos.filter(
-            (c) => !filtro.kind || c.kind !== (filtro.kind as Filtro).$ne,
-          ),
-        ),
-    }),
-    filtro,
+  find: jest.fn(() => ({
+    sort: () => ({ exec: () => Promise.resolve(conceptos) }),
+  })),
+  findOne: jest.fn((filtro: Filtro) => ({
+    exec: () =>
+      Promise.resolve(conceptos.find((c) => c.kind === filtro.kind) ?? null),
   })),
 });
 
@@ -105,11 +105,13 @@ describe('ValoresRecurrentesService.obtener', () => {
       {
         conceptoId: CONCEPTO_ADMIN.toString(),
         conceptoNombre: 'Administración',
+        tipoConcepto: 'administracion',
         monto: 0,
       },
       {
         conceptoId: CONCEPTO_PARQUEADERO.toString(),
         conceptoNombre: 'Cuota Parqueadero',
+        tipoConcepto: 'otro',
         monto: 0,
       },
     ]);
@@ -125,25 +127,27 @@ describe('ValoresRecurrentesService.obtener', () => {
     expect(resultado[0]).toMatchObject({ monto: 350000 });
   });
 
-  it('excluye el concepto de tipo intereses — se calcula, nunca es un monto fijo', async () => {
-    const conceptos = modeloConceptos([
-      conceptoDoc(),
-      conceptoDoc({
-        _id: new Types.ObjectId(),
-        name: 'Intereses',
-        kind: 'intereses',
-      }),
-    ]);
-    const service = new ValoresRecurrentesService(
-      modeloInmuebles(true) as never,
-      conceptos as never,
-      modeloValoresRecurrentes([]) as never,
-      tenantQueDevuelve(COP),
-    );
+  it('incluye el concepto de intereses, identificado por tipoConcepto — para mostrarlo, no para guardarle un monto fijo', async () => {
+    const service = crearServicio({
+      conceptos: [
+        conceptoDoc(),
+        conceptoDoc({
+          _id: CONCEPTO_INTERESES,
+          name: 'Intereses por mora',
+          kind: 'intereses',
+        }),
+      ],
+    });
 
     const resultado = await service.obtener(INMUEBLE_ID);
 
-    expect(resultado.map((r) => r.conceptoNombre)).toEqual(['Administración']);
+    expect(resultado.map((r) => r.conceptoNombre)).toEqual([
+      'Administración',
+      'Intereses por mora',
+    ]);
+    expect(
+      resultado.find((r) => r.conceptoId === CONCEPTO_INTERESES.toString()),
+    ).toMatchObject({ tipoConcepto: 'intereses', monto: 0 });
   });
 });
 
@@ -205,5 +209,55 @@ describe('ValoresRecurrentesService.guardar', () => {
     });
 
     expect(resultado[0]).toMatchObject({ monto: 999 });
+  });
+
+  it('rechaza un monto positivo contra el concepto de intereses: se calcula, no se guarda fijo', async () => {
+    const valoresRecurrentes = modeloValoresRecurrentes([]);
+    const service = new ValoresRecurrentesService(
+      modeloInmuebles(true) as never,
+      modeloConceptos([
+        conceptoDoc(),
+        conceptoDoc({
+          _id: CONCEPTO_INTERESES,
+          name: 'Intereses por mora',
+          kind: 'intereses',
+        }),
+      ]) as never,
+      valoresRecurrentes as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await expect(
+      service.guardar(INMUEBLE_ID, {
+        valores: [
+          { conceptoId: CONCEPTO_ADMIN.toString(), monto: 350000 },
+          { conceptoId: CONCEPTO_INTERESES.toString(), monto: 50000 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(valoresRecurrentes.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('acepta un monto de 0 para el concepto de intereses (equivale a no guardar nada)', async () => {
+    const valoresRecurrentes = modeloValoresRecurrentes([]);
+    const service = new ValoresRecurrentesService(
+      modeloInmuebles(true) as never,
+      modeloConceptos([
+        conceptoDoc(),
+        conceptoDoc({
+          _id: CONCEPTO_INTERESES,
+          name: 'Intereses por mora',
+          kind: 'intereses',
+        }),
+      ]) as never,
+      valoresRecurrentes as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.guardar(INMUEBLE_ID, {
+      valores: [{ conceptoId: CONCEPTO_INTERESES.toString(), monto: 0 }],
+    });
+
+    expect(valoresRecurrentes.deleteOne).toHaveBeenCalledTimes(1);
   });
 });

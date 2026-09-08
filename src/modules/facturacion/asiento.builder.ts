@@ -22,12 +22,86 @@ export interface FacturaParaAsiento {
  */
 export const CUENTA_SIN_ASIGNAR = 'SIN-CUENTA-ASIGNADA';
 
+/** The `codeordendb`/`codeordencr` pair from `usesMemorandumAccounts` — see
+ *  the note on that field in copropiedad.schema.ts. */
+export interface CuentasOrden {
+  debito: string;
+  credito: string;
+}
+
+/** The coproperty shape `cuentasOrdenDe` needs — structurally matches
+ *  `CopropiedadDocument`, kept minimal so callers don't have to import it. */
+export interface CopropiedadParaCuentasOrden {
+  usesMemorandumAccounts: boolean;
+  memorandumDebitAccount: string | null;
+  memorandumCreditAccount: string | null;
+}
+
+/**
+ * Resolves the `cuentasOrden` pair every builder below optionally takes, from
+ * a coproperty — null when it does not use them. The single place the
+ * `CUENTA_SIN_ASIGNAR` fallback for an unconfigured account lives, so every
+ * calling service (facturación, recibos, notas) asks the same way instead of
+ * repeating the ternary.
+ */
+export function cuentasOrdenDe(
+  copropiedad: CopropiedadParaCuentasOrden | null | undefined,
+): CuentasOrden | null {
+  if (!copropiedad?.usesMemorandumAccounts) return null;
+  return {
+    debito: copropiedad.memorandumDebitAccount ?? CUENTA_SIN_ASIGNAR,
+    credito: copropiedad.memorandumCreditAccount ?? CUENTA_SIN_ASIGNAR,
+  };
+}
+
+/**
+ * One shared self-balancing debit/credit pair for `cuentasOrden`, at `monto`
+ * — appended by every builder below when the coproperty uses them. `[]` when
+ * `cuentasOrden` is null, so callers can always splice the result in.
+ *
+ * `invertido` swaps which side is debited/credited — a void/reversal entry
+ * undoing what the original posting added, the same "same shape, accounts
+ * swapped" convention every contra-builder here already uses for its real
+ * accounts.
+ */
+function movimientosCuentasOrden(
+  cuentasOrden: CuentasOrden | null | undefined,
+  monto: number,
+  descripcion: string,
+  invertido = false,
+): Movimiento[] {
+  if (!cuentasOrden) return [];
+  const debito = invertido ? cuentasOrden.credito : cuentasOrden.debito;
+  const credito = invertido ? cuentasOrden.debito : cuentasOrden.credito;
+  return [
+    {
+      account: debito,
+      type: 'debito',
+      amount: monto,
+      description: descripcion,
+    },
+    {
+      account: credito,
+      type: 'credito',
+      amount: monto,
+      description: descripcion,
+    },
+  ];
+}
+
 /**
  * Builds the double-entry posting for one consolidated invoice: one debit to
  * the coproperty's receivables account for the full total, and one credit
  * per distinct income account among the invoice's lines — collapsing to
  * exactly one debit and one credit for the common single-concept case,
  * matching the real export's 342-facturas-to-684-asientos ratio.
+ *
+ * When `cuentasOrden` is given (the coproperty has `usesMemorandumAccounts`
+ * on), an extra self-balancing pair is appended — debit `cuentasOrden.debito`
+ * and credit `cuentasOrden.credito`, both for the invoice's full `total` —
+ * mirroring what the predecessor system posted to "cuentas de orden" on
+ * every sale. Omitted (`undefined`/`null`) for every coproperty that never
+ * used it, which is most of them.
  *
  * Pure and synchronous on purpose: the double-entry invariant this produces
  * (debits equal credits) has to be checked before anything is written to the
@@ -37,6 +111,7 @@ export const CUENTA_SIN_ASIGNAR = 'SIN-CUENTA-ASIGNADA';
 export function construirMovimientos(
   factura: FacturaParaAsiento,
   cuentaCartera: string,
+  cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
   const porCuenta = new Map<string, number>();
   for (const linea of factura.lines) {
@@ -62,6 +137,14 @@ export function construirMovimientos(
     });
   }
 
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      factura.total,
+      'Cuenta de orden — factura de venta',
+    ),
+  );
+
   return movimientos;
 }
 
@@ -83,6 +166,8 @@ interface DescripcionesAsiento {
   contraDebitoCartera: string;
   contraDebitoAnticipo: string;
   contraCredito: string;
+  cuentaOrden: string;
+  cuentaOrdenContra: string;
 }
 
 const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
@@ -95,6 +180,9 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de cartera — anulación de recibo de caja',
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de recibo de caja',
     contraCredito: 'Reversión de recaudo — anulación de recibo de caja',
+    cuentaOrden: 'Cuenta de orden — recibo de caja',
+    cuentaOrdenContra:
+      'Reversión de cuenta de orden — anulación de recibo de caja',
   },
   NC: {
     creacionDebito: 'Corrección de ingreso — nota crédito',
@@ -107,6 +195,9 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de nota crédito',
     contraCredito:
       'Reversión de corrección de ingreso — anulación de nota crédito',
+    cuentaOrden: 'Cuenta de orden — nota crédito',
+    cuentaOrdenContra:
+      'Reversión de cuenta de orden — anulación de nota crédito',
   },
   ND: {
     creacionDebito: 'Cartera por cobrar — nota débito',
@@ -117,6 +208,9 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de ingreso — anulación de nota débito',
     contraDebitoAnticipo: '',
     contraCredito: 'Reversión de cartera — anulación de nota débito',
+    cuentaOrden: 'Cuenta de orden — nota débito',
+    cuentaOrdenContra:
+      'Reversión de cuenta de orden — anulación de nota débito',
   },
 };
 
@@ -136,6 +230,10 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * Structurally balanced by construction: the single debit always equals the
  * sum of the one or two credits, since callers pass the same split that adds
  * up to the document's own total everywhere else in each service.
+ *
+ * `cuentasOrden`, when given, appends the same self-balancing memo pair
+ * `construirMovimientos` posts for facturación — debit/credit, both for the
+ * document's full `montoAplicado + montoSinAplicar`.
  */
 export function construirAsientoCruce(
   cuentaOrigen: string,
@@ -144,6 +242,7 @@ export function construirAsientoCruce(
   montoAplicado: number,
   montoSinAplicar: number,
   origen: OrigenAsiento,
+  cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [
@@ -171,6 +270,14 @@ export function construirAsientoCruce(
       description: d.creacionCreditoAnticipo,
     });
   }
+
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoAplicado + montoSinAplicar,
+      d.cuentaOrden,
+    ),
+  );
 
   return movimientos;
 }
@@ -222,6 +329,11 @@ export function construirMovimientosAplicacionAnticipo(
  * RENAMED from `construirContraAsientoRecibo` (Task 2): `destinationAccount`
  * → `cuentaOrigen`, `montoRecibido` → `montoOrigen` (a Nota Crédito's
  * `montoTotal`, not anything "received").
+ *
+ * `cuentasOrden`, when given, appends the reversal of the memo pair the
+ * creation-time entry posted — same accounts, sides swapped (`invertido`),
+ * for the full `montoOrigen` — zeroing out what `construirAsientoCruce` added
+ * rather than doubling it.
  */
 export function construirContraAsientoCruce(
   cuentaOrigen: string,
@@ -231,6 +343,7 @@ export function construirContraAsientoCruce(
   montoSinAplicar: number,
   montoOrigen: number,
   origen: OrigenAsiento,
+  cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
@@ -259,6 +372,15 @@ export function construirContraAsientoCruce(
     description: d.contraCredito,
   });
 
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoOrigen,
+      d.cuentaOrdenContra,
+      true,
+    ),
+  );
+
   return movimientos;
 }
 
@@ -270,11 +392,19 @@ export function construirContraAsientoCruce(
  * Pure and synchronous, same discipline as every other builder function
  * here: the double-entry invariant (debits equal credits) must be
  * verifiable before anything touches the database.
+ *
+ * `cuentasOrden`, when given, appends the same self-balancing memo pair as
+ * every other document. There is no separate "contra" builder for a Nota
+ * Contable — void calls this SAME function with `cuentaOrigen`/`cuentaDestino`
+ * swapped (design §7) — so a caller voiding one must pass `cuentasOrden` with
+ * `debito`/`credito` swapped too, the same way, for the memo pair to net to
+ * zero instead of doubling.
  */
 export function construirMovimientosReclasificacion(
   cuentaOrigen: string,
   cuentaDestino: string,
   monto: number,
+  cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
   return [
     {
@@ -289,7 +419,22 @@ export function construirMovimientosReclasificacion(
       amount: monto,
       description: 'Reclasificación de ingreso — nota contable',
     },
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      monto,
+      'Cuenta de orden — nota contable',
+    ),
   ];
+}
+
+/** Swaps which account is debited/credited in a `CuentasOrden` pair — for
+ *  voiding a Nota Contable, see `construirMovimientosReclasificacion`. */
+export function invertirCuentasOrden(
+  cuentasOrden: CuentasOrden | null,
+): CuentasOrden | null {
+  return cuentasOrden
+    ? { debito: cuentasOrden.credito, credito: cuentasOrden.debito }
+    : null;
 }
 
 /**
@@ -298,11 +443,15 @@ export function construirMovimientosReclasificacion(
  * (undoes the recognized revenue) — a 2-leg reversal, simpler than Recibos'/
  * Notas Crédito's 3-leg version, since a Nota Débito has no anticipo/cash
  * concept.
+ *
+ * `cuentasOrden`, when given, appends the reversal (sides swapped) of the
+ * memo pair `construirMovimientos` posted at creation, for the full `monto`.
  */
 export function construirContraAsientoNotaDebito(
   cuentaCartera: string,
   cuentaIngreso: string,
   monto: number,
+  cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
   return [
     {
@@ -317,5 +466,11 @@ export function construirContraAsientoNotaDebito(
       amount: monto,
       description: 'Reversión de cartera — anulación de nota débito',
     },
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      monto,
+      'Reversión de cuenta de orden — anulación de nota débito',
+      true,
+    ),
   ];
 }

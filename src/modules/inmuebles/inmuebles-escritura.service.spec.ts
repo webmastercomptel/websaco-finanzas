@@ -78,6 +78,8 @@ describe('InmueblesService.create', () => {
       {} as never,
       tenant,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.create({ codigo: '401' });
@@ -97,6 +99,8 @@ describe('InmueblesService.create', () => {
       {} as never,
       tenant,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await expect(service.create({ codigo: '301' })).rejects.toBeInstanceOf(
@@ -112,6 +116,8 @@ describe('InmueblesService.create', () => {
       {} as never,
       tenant,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.create({ codigo: '301' });
@@ -125,6 +131,8 @@ describe('InmueblesService.create', () => {
       modelo as never,
       {} as never,
       tenantSinCopropiedad,
+      {} as never,
+      {} as never,
       {} as never,
     );
 
@@ -144,6 +152,8 @@ describe('InmueblesService.update', () => {
       {} as never,
       tenant,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.update('inm-1', { zona: 'Norte' });
@@ -160,44 +170,13 @@ describe('InmueblesService.update', () => {
       {} as never,
       tenant,
       {} as never,
+      {} as never,
+      {} as never,
     );
 
     await service.update('inm-1', { zona: 'Norte' });
 
     expect(modelo.escrituras[0]).toEqual({ zone: 'Norte' });
-  });
-
-  it('traduce estado activo/inactivo al del documento', async () => {
-    const modelo = modeloCon();
-    const service = new InmueblesService(
-      modelo as never,
-      {} as never,
-      tenant,
-      {} as never,
-    );
-
-    await service.update('inm-1', { estado: 'inactivo' });
-
-    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
-  });
-
-  it('desactivar es una edición, no un borrado', async () => {
-    // No existe endpoint de borrado y no debe existir: quitar la fila dejaría
-    // huérfano cada documento emitido contra ella.
-    const modelo = modeloCon();
-    const service = new InmueblesService(
-      modelo as never,
-      {} as never,
-      tenant,
-      {} as never,
-    );
-
-    await service.update('inm-1', { estado: 'inactivo' });
-
-    expect(modelo.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(
-      (modelo as unknown as Record<string, unknown>).deleteOne,
-    ).toBeUndefined();
   });
 
   it('no choca consigo mismo al guardar sin cambiar el código', async () => {
@@ -206,6 +185,8 @@ describe('InmueblesService.update', () => {
       modelo as never,
       {} as never,
       tenant,
+      {} as never,
+      {} as never,
       {} as never,
     );
 
@@ -227,6 +208,8 @@ describe('InmueblesService.update', () => {
       modelo as never,
       {} as never,
       tenant,
+      {} as never,
+      {} as never,
       {} as never,
     );
 

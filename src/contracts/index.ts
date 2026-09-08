@@ -75,7 +75,8 @@ export interface Inmueble {
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
   estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
-  estado: 'activo' | 'inactivo';
+  /** Free-text notes — see the note on `Inmueble.notes` in the schema. */
+  observaciones: string | null;
   /** ISO 8601 — when this unit's record was last saved. */
   fechaActualizacion: IsoDate;
 }
@@ -97,6 +98,12 @@ export interface ResultadoImportacionInmuebles {
   total: number;
   creados: number;
   errores: ErrorImportacionInmueble[];
+  /** Units of this coproperty erased right before this import — every
+   *  import replaces the whole roster, see `InmueblesService.importar`. */
+  eliminadosAntes: number;
+  /** Codes left untouched because they already have a Factura issued —
+   *  never deleted, only skipped. */
+  bloqueadosPorFactura: string[];
 }
 
 /* ── Terceros ──────────────────────────────────────────────────── */
@@ -111,6 +118,14 @@ export interface Tercero {
   tipoPersona: 'natural' | 'juridica';
   /** Full name for a person, trade name for a company. */
   nombre: string;
+  /** Split name parts — see the note on `Tercero.name` in the schema.
+   *  `nom1`/`ape1` for `natural`, `razonSocial` for `juridica`; null when
+   *  the party was loaded without them (e.g. the Excel import). */
+  nom1: string | null;
+  nom2: string | null;
+  ape1: string | null;
+  ape2: string | null;
+  razonSocial: string | null;
   tipoIdentificacion: string | null;
   numeroIdentificacion: string | null;
   digitoVerificacion: string | null;
@@ -118,6 +133,10 @@ export interface Tercero {
   telefono: string | null;
   direccion: string | null;
   ciudad: string | null;
+  /** DANE municipio/departamento codes paired with `ciudad` — see the note
+   *  on `Tercero.cityCode` in the schema. */
+  ciudadCodigo: string | null;
+  ciudadDepartamentoCodigo: string | null;
   /**
    * What the tax authority requires beyond a name and a general
    * identification. Kept separate from the fields above — see the note on
@@ -212,7 +231,12 @@ export interface LoteFacturacion {
   descuentoProntoPago: number;
   diasGraciaDescuento: number;
   interesMora: number;
+  /** Not a ceiling on the mora amount — the minimum overdue balance before
+   *  mora is calculated at all. See the note on `lateInterestCap` in
+   *  lote-facturacion.schema.ts. */
   topeInteresMora: number | null;
+  fechaLimiteDescuento: IsoDate;
+  fechaSuspension: IsoDate;
   totalNovedades: number;
   totalPrevisualizacion: number;
   resumen: {
@@ -700,15 +724,21 @@ export interface ConceptoCobro {
  * replaces the legacy "Datos Financieros" tab's twelve fixed columns with one
  * row per concept the building actually declared.
  *
- * Always one entry per concept in the coproperty's catalog (`intereses`
- * excluded — that one is computed from overdue balances, never a flat
- * amount), `monto: 0` meaning no `ValorRecurrente` row exists for that pair
- * yet — never that a zero-amount row was saved. Saving `monto: 0` back
- * deletes the row rather than persisting a zero.
+ * One entry per concept in the coproperty's catalog, `intereses` included —
+ * shown so the "Valores Recurrentes" screen can list it for context, but
+ * never savable as a flat amount (see `tipoConcepto` below and the note on
+ * `ValoresRecurrentesService.guardar`: saving a nonzero `monto` against an
+ * `intereses` concepto is rejected, because `LotesFacturacionService`
+ * already computes that line from overdue balances — a saved flat amount
+ * would double-charge it, once as a recurring line and once as mora).
+ * `monto: 0` means no `ValorRecurrente` row exists for that pair yet —
+ * never that a zero-amount row was saved. Saving `monto: 0` back deletes
+ * the row rather than persisting a zero.
  */
 export interface ValorRecurrente {
   conceptoId: string;
   conceptoNombre: string;
+  tipoConcepto: 'administracion' | 'intereses' | 'otro';
   monto: Monto;
 }
 
@@ -890,4 +920,26 @@ export interface ResolucionAdmin {
   nombreDocumento: string | null;
   comprob: string | null;
   numeroE: number | null;
+}
+
+/* ── Catálogos DIAN/DANE (solo lectura) ──────────────────────────
+ *
+ * Ya nacen en español porque no hay documento inglés detrás que traducir —
+ * ver la nota en `catalogos.data.ts`. La API los reexporta tal cual.
+ */
+
+export interface TipoIdentificacionDian {
+  codigo: string;
+  nombre: string;
+}
+
+export interface DepartamentoDian {
+  codigo: string;
+  nombre: string;
+}
+
+export interface CiudadDian {
+  codigo: string;
+  nombre: string;
+  departamentoCodigo: string;
 }

@@ -42,12 +42,51 @@ export class Tercero {
   /**
    * Display name: full name for a person, trade name for a company.
    *
-   * One field rather than first/last name: a company has no surname, and the
-   * split forces every screen and every document to branch on personType just
-   * to print a name.
+   * COMPUTED, not typed directly, whenever the fields below are present —
+   * `TercerosService` concatenates `firstName middleName firstLastName
+   * secondLastName` (natural) or copies `businessName` (jurídica) into this
+   * field on every create/update that touches them. Kept as its own stored
+   * field (not a virtual) because every other query/report/document in this
+   * app — search, sorting, `TitularCongelado`, invoice PDFs — reads a single
+   * display name and must not branch on `personType` to print one.
+   *
+   * Still directly settable as a fallback for callers with no name parts to
+   * offer — the Excel bulk import (`ImportarInmueblesDto`'s `nombreTitular`)
+   * loads a unit's holder from one free-text column and has no reliable way
+   * to split a Spanish name into parts, so it keeps writing this field
+   * directly rather than guessing a split.
    */
   @Prop({ required: true, trim: true })
   name: string;
+
+  /**
+   * "Nom1"/"Nom2"/"Ape1"/"Ape2" — only meaningful when `personType` is
+   * `natural`. `firstName` and `firstLastName` are the two DIAN requires
+   * (PrimerNombre/PrimerApellido); the other two are optional, same as the
+   * DIAN schema's OtrosNombres/SegundoApellido. Kept separate from `name` so
+   * accounting-interface exports and future DIAN electronic-invoicing files
+   * can report each part on its own — `name` alone loses the split once
+   * concatenated.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  firstName: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  middleName: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  firstLastName: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  secondLastName: string | null;
+
+  /**
+   * "Razón social" — only meaningful when `personType` is `juridica`. Kept
+   * apart from `name` for the same reporting reason as the four fields
+   * above, even though today the two are identical for a company.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  businessName: string | null;
 
   /** CC, NIT, CE, passport. Free text — the catalogue varies by country. */
   @Prop({ type: String, default: null, trim: true })
@@ -69,8 +108,29 @@ export class Tercero {
   @Prop({ type: String, default: null, trim: true })
   address: string | null;
 
+  /**
+   * The city's display NAME — unchanged meaning, so every existing
+   * screen/PDF that prints `city` keeps working. Picking a city from the
+   * DANE catalog (see `CatalogosService`) fills this with that municipio's
+   * own `nombre`; `cityCode`/`cityDepartmentCode` below carry the actual
+   * DANE codes DIAN electronic invoicing needs, which `city` alone cannot
+   * safely be repurposed to hold without breaking every reader that already
+   * expects a human name here.
+   */
   @Prop({ type: String, default: null, trim: true })
   city: string | null;
+
+  /** DANE municipio code — see the note on `city`. */
+  @Prop({ type: String, default: null, trim: true })
+  cityCode: string | null;
+
+  /**
+   * DANE department code. Technically derivable as `cityCode`'s own first
+   * two digits (that is how DANE encodes it), but stored explicitly so
+   * nothing downstream has to know that encoding detail to read it.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  cityDepartmentCode: string | null;
 
   /* ── Electronic invoicing ─────────────────────────────────────
    *

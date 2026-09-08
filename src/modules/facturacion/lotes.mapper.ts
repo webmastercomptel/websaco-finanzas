@@ -26,6 +26,14 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
   diasGraciaDescuento: doc.discountGraceDays,
   interesMora: doc.lateInterestRate,
   topeInteresMora: doc.lateInterestCap,
+  // `discountDeadline`/`serviceSuspensionDate` have no schema `default` (only
+  // `required: true`, which Mongoose enforces on save, never on read) — a
+  // lote created before these two fields existed reads back with them
+  // `undefined`, and `.toISOString()` on that would 500 the WHOLE list, not
+  // just this one row. Falls back to the same defaults `crear()` computes
+  // when the caller omits them, so an old lote still shows something sane.
+  fechaLimiteDescuento: (doc.discountDeadline ?? doc.billingDate).toISOString(),
+  fechaSuspension: (doc.serviceSuspensionDate ?? doc.periodEnd).toISOString(),
   totalNovedades: doc.adjustments.length,
   totalPrevisualizacion: doc.preview.length,
   resumen: doc.summary

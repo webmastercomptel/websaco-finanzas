@@ -1,5 +1,9 @@
 // src/modules/inmuebles/valores-recurrentes.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -53,9 +57,12 @@ export class ValoresRecurrentesService {
   }
 
   /**
-   * One entry per concept in the building's catalog — `intereses` excluded,
-   * since that one is computed from overdue balances, never a flat amount
-   * (see the note on `ConceptoCobro.kind`). A concept without a
+   * One entry per concept in the building's catalog, `intereses` INCLUDED —
+   * shown for context (the screen lists every cargo the building has), but
+   * `guardar` below refuses to persist a value against it: that line is
+   * computed from overdue balances, never a flat amount (see the note on
+   * `ConceptoCobro.kind`), and saving one would double-charge it alongside
+   * `LotesFacturacionService`'s own mora calculation. A concept without a
    * `ValorRecurrente` row for this unit shows `monto: 0`, indistinguishable
    * from a saved zero — see the contract type's own note on why saving 0
    * deletes the row instead of persisting it.
@@ -64,10 +71,7 @@ export class ValoresRecurrentesService {
     const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
 
     const [conceptos, valores] = await Promise.all([
-      this.conceptos
-        .find({ coPropertyId, kind: { $ne: 'intereses' } })
-        .sort({ sortOrder: 1 })
-        .exec(),
+      this.conceptos.find({ coPropertyId }).sort({ sortOrder: 1 }).exec(),
       this.valoresRecurrentes
         .find({ coPropertyId, inmuebleId: inmuebleOid })
         .exec(),
@@ -97,6 +101,24 @@ export class ValoresRecurrentesService {
     dto: GuardarValoresRecurrentesDto,
   ): Promise<ValorRecurrenteContract[]> {
     const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
+
+    // Refuses a flat amount against the `intereses` concepto — see the note
+    // on `obtener` above. Checked against the DB, not trusted from a
+    // `tipoConcepto` the client might send back, since this DTO carries no
+    // such field at all.
+    const interesConcepto = await this.conceptos
+      .findOne({ coPropertyId, kind: 'intereses' })
+      .exec();
+    if (interesConcepto) {
+      const lineaIntereses = dto.valores.find(
+        (v) => v.conceptoId === interesConcepto._id.toString(),
+      );
+      if (lineaIntereses && lineaIntereses.monto > 0) {
+        throw new ConflictException(
+          `El concepto "${interesConcepto.name}" se calcula automáticamente sobre la cartera vencida y no admite un valor recurrente fijo`,
+        );
+      }
+    }
 
     await Promise.all(
       dto.valores.map(async (linea) => {

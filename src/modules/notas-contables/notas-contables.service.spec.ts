@@ -33,6 +33,24 @@ const lotesFacturacionFalso = () =>
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
   }) as never;
 
+/** A coproperty that does not use "cuentas de orden" — the default for
+ *  every test here except the ones specifically about that feature. */
+const modeloCopropiedad = (over: Record<string, unknown> = {}) => ({
+  findById: jest.fn(() => ({
+    session: () => ({
+      exec: () =>
+        Promise.resolve({
+          usesMemorandumAccounts: false,
+          memorandumDebitAccount: null,
+          memorandumCreditAccount: null,
+          ...over,
+        }),
+    }),
+  })),
+});
+
+const copropiedades = modeloCopropiedad();
+
 const notaContableCreada = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   inmuebleId: INMUEBLE,
@@ -108,6 +126,7 @@ const construirServicio = (opts: {
     saldos as never,
     asientos as never,
     conceptos as never,
+    copropiedades as never,
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NT-1'),
     conexionCon(session),
@@ -291,6 +310,7 @@ describe('NotasContablesService.crear', () => {
       modeloSaldos() as never,
       asientos as never,
       conceptos as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -342,6 +362,7 @@ describe('NotasContablesService.anular', () => {
       modeloSaldos() as never,
       asientos as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -368,6 +389,7 @@ describe('NotasContablesService.anular', () => {
       modeloSaldos() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -394,6 +416,7 @@ describe('NotasContablesService.anular', () => {
       modeloSaldos() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -446,6 +469,7 @@ describe('NotasContablesService.anular', () => {
       modeloSaldos() as never,
       asientos as never,
       conceptos as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -492,6 +516,7 @@ describe('NotasContablesService.findAll', () => {
       modeloSaldos() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -528,6 +553,7 @@ describe('NotasContablesService.findOne', () => {
       modeloSaldos() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),
@@ -544,6 +570,7 @@ describe('NotasContablesService.findOne', () => {
       modeloSaldos() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
+      copropiedades as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NT-1'),
       conexionCon(sesionFalsa()),

@@ -21,6 +21,14 @@ export interface ParametrosFacturacion {
   topeValorMora: number | null;
   cuentaBancoPredeterminada: string | null;
   observacionesFacturacion: string | null;
+  centroCostos: string | null;
+  otrosIngresosDebito: string | null;
+  otrosIngresosCredito: string | null;
+  descuentosDebito: string | null;
+  descuentosCredito: string | null;
+  cuentasOrdenDebito: string | null;
+  cuentasOrdenCredito: string | null;
+  usaCuentasOrden: boolean;
 }
 
 @Injectable()
@@ -50,6 +58,14 @@ export class ParametrosService {
       topeValorMora: doc.lateFeeValueLimit,
       cuentaBancoPredeterminada: doc.defaultBankAccountCode,
       observacionesFacturacion: doc.billingNotes,
+      centroCostos: doc.defaultCostCentre,
+      otrosIngresosDebito: doc.otherIncomeDebitAccount,
+      otrosIngresosCredito: doc.otherIncomeCreditAccount,
+      descuentosDebito: doc.discountsDebitAccount,
+      descuentosCredito: doc.discountsCreditAccount,
+      cuentasOrdenDebito: doc.memorandumDebitAccount,
+      cuentasOrdenCredito: doc.memorandumCreditAccount,
+      usaCuentasOrden: doc.usesMemorandumAccounts,
     };
   }
 
@@ -71,6 +87,14 @@ export class ParametrosService {
     set('lateFeeValueLimit', dto.topeValorMora);
     set('defaultBankAccountCode', dto.cuentaBancoPredeterminada);
     set('billingNotes', dto.observacionesFacturacion);
+    set('defaultCostCentre', dto.centroCostos);
+    set('otherIncomeDebitAccount', dto.otrosIngresosDebito);
+    set('otherIncomeCreditAccount', dto.otrosIngresosCredito);
+    set('discountsDebitAccount', dto.descuentosDebito);
+    set('discountsCreditAccount', dto.descuentosCredito);
+    set('memorandumDebitAccount', dto.cuentasOrdenDebito);
+    set('memorandumCreditAccount', dto.cuentasOrdenCredito);
+    set('usesMemorandumAccounts', dto.usaCuentasOrden);
 
     const updated = await this.copropiedades
       .findByIdAndUpdate(coPropertyId, { $set: update }, { new: true })
@@ -93,6 +117,14 @@ export class ParametrosService {
       topeValorMora: updated.lateFeeValueLimit,
       cuentaBancoPredeterminada: updated.defaultBankAccountCode,
       observacionesFacturacion: updated.billingNotes,
+      centroCostos: updated.defaultCostCentre,
+      otrosIngresosDebito: updated.otherIncomeDebitAccount,
+      otrosIngresosCredito: updated.otherIncomeCreditAccount,
+      descuentosDebito: updated.discountsDebitAccount,
+      descuentosCredito: updated.discountsCreditAccount,
+      cuentasOrdenDebito: updated.memorandumDebitAccount,
+      cuentasOrdenCredito: updated.memorandumCreditAccount,
+      usaCuentasOrden: updated.usesMemorandumAccounts,
     };
   }
 }

@@ -12,6 +12,7 @@ import {
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../common/utils/query.utils';
+import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
 import type { Tercero as TerceroContract, Paginado } from '../../contracts';
 import { toTercero } from './terceros.mapper';
 import type { ListarTercerosDto } from './dto/listar-terceros.dto';
@@ -104,8 +105,26 @@ export class TercerosService {
       }
     }
 
+    const nombre = resolverNombreTercero({
+      tipoPersona: dto.tipoPersona,
+      nombre: dto.nombre,
+      nom1: dto.nom1,
+      nom2: dto.nom2,
+      ape1: dto.ape1,
+      ape2: dto.ape2,
+      razonSocial: dto.razonSocial,
+    });
+    if (!nombre) {
+      throw new ConflictException(
+        dto.tipoPersona === 'juridica'
+          ? 'Debe indicar la razón social'
+          : 'Debe indicar primer nombre y primer apellido',
+      );
+    }
+
     const creado = await this.terceros.create({
       ...this.aDocumento(dto),
+      name: nombre,
       coPropertyId,
     });
     return toTercero(creado);
@@ -114,9 +133,10 @@ export class TercerosService {
   /**
    * Edits a party of the active coproperty.
    *
-   * A party is retired by setting `estado` to `inactivo`; there is
-   * deliberately no delete, because a document issued in the past must keep
-   * naming somebody, not point at nothing.
+   * There is no way to retire one through this method — see the note on
+   * `ActualizarTerceroDto`. A document issued in the past must keep naming
+   * somebody, not point at nothing, and unlike `Inmueble` a party has no
+   * "never billed yet" escape hatch either, so there is no delete.
    */
   async update(
     id: string,
@@ -139,12 +159,52 @@ export class TercerosService {
       }
     }
 
+    const doc = this.aDocumento(dto);
+
+    // `name` is recomputed only when a field it depends on is actually
+    // touched — an edit to, say, `email` costs no extra read. When one IS
+    // touched, the untouched parts still count: patching only `nom2` must
+    // not blank out `nom1`/`ape1` from the resulting `name`, so the current
+    // document is read and merged in before recomputing.
+    const tocaNombre =
+      dto.tipoPersona !== undefined ||
+      dto.nombre !== undefined ||
+      dto.nom1 !== undefined ||
+      dto.nom2 !== undefined ||
+      dto.ape1 !== undefined ||
+      dto.ape2 !== undefined ||
+      dto.razonSocial !== undefined;
+
+    if (tocaNombre) {
+      const actual = await this.terceros
+        .findOne({ _id: id, coPropertyId })
+        .exec();
+      if (!actual) {
+        throw new NotFoundException(`No se encontró el tercero ${id}`);
+      }
+
+      const tipoPersona = dto.tipoPersona ?? actual.personType;
+      const nombre = resolverNombreTercero({
+        tipoPersona,
+        nombre: dto.nombre ?? actual.name,
+        nom1: dto.nom1 ?? actual.firstName ?? undefined,
+        nom2: dto.nom2 ?? actual.middleName ?? undefined,
+        ape1: dto.ape1 ?? actual.firstLastName ?? undefined,
+        ape2: dto.ape2 ?? actual.secondLastName ?? undefined,
+        razonSocial: dto.razonSocial ?? actual.businessName ?? undefined,
+      });
+      if (!nombre) {
+        throw new ConflictException(
+          tipoPersona === 'juridica'
+            ? 'Debe indicar la razón social'
+            : 'Debe indicar primer nombre y primer apellido',
+        );
+      }
+      doc.name = nombre;
+    }
+
     const actualizado = await this.terceros
-      .findOneAndUpdate(
-        { _id: id, coPropertyId },
-        { $set: this.aDocumento(dto) },
-        { new: true },
-      )
+      .findOneAndUpdate({ _id: id, coPropertyId }, { $set: doc }, { new: true })
       .exec();
 
     if (!actualizado) {
@@ -165,7 +225,13 @@ export class TercerosService {
     };
 
     set('personType', dto.tipoPersona);
-    set('name', dto.nombre);
+    // `name` is NOT set here — `create`/`update` compute it via
+    // `resolverNombre` and set it explicitly, after this method returns.
+    set('firstName', dto.nom1);
+    set('middleName', dto.nom2);
+    set('firstLastName', dto.ape1);
+    set('secondLastName', dto.ape2);
+    set('businessName', dto.razonSocial);
     set('identificationType', dto.tipoIdentificacion);
     set('identificationNumber', dto.numeroIdentificacion);
     set('identificationVerificationDigit', dto.digitoVerificacion);
@@ -173,6 +239,8 @@ export class TercerosService {
     set('phone', dto.telefono);
     set('address', dto.direccion);
     set('city', dto.ciudad);
+    set('cityCode', dto.ciudadCodigo);
+    set('cityDepartmentCode', dto.ciudadDepartamentoCodigo);
     set('einvoiceIdentificationType', dto.facturacionTipoIdentificacion);
     set('einvoiceIdentificationNumber', dto.facturacionNumeroIdentificacion);
     set('einvoiceVerificationDigit', dto.facturacionDigitoVerificacion);
@@ -181,9 +249,6 @@ export class TercerosService {
     set('fiscalResponsibilities', dto.responsabilidadesFiscales);
     set('withholdsIncomeTax', dto.retieneRenta);
     set('withholdsLocalTax', dto.retieneIca);
-    if (dto.estado !== undefined) {
-      doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
-    }
 
     return doc;
   }

@@ -28,6 +28,8 @@ const loteDoc = (over: Record<string, unknown> = {}) => ({
   discountGraceDays: 0,
   lateInterestRate: 0,
   lateInterestCap: null,
+  discountDeadline: new Date('2026-08-27'),
+  serviceSuspensionDate: new Date('2026-08-31'),
   adjustments: [],
   preview: [],
   invoiceIds: [],
@@ -208,6 +210,113 @@ describe('LotesFacturacionService.crear', () => {
     expect(lotes.escrituras[0]).toMatchObject({
       lateInterestRate: 0,
     });
+  });
+
+  it('calcula fechaLimiteDescuento como fechaFacturacion + días de gracia - 1 cuando no se envía', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {
+        findById: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, {
+      fechaFacturacion: '2026-09-01',
+      fechaVencimiento: '2026-09-30',
+      periodoDesde: '2026-09-01',
+      periodoHasta: '2026-09-30',
+      diasGraciaDescuento: 10,
+    });
+
+    const escritura = lotes.escrituras[0] as { discountDeadline: Date };
+    // 2026-09-01 + 10 días de gracia - 1 = 2026-09-10.
+    expect(escritura.discountDeadline.toISOString().slice(0, 10)).toBe(
+      '2026-09-10',
+    );
+  });
+
+  it('usa fechaLimiteDescuento y fechaSuspension enviadas en el DTO, sin recalcularlas', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {
+        findById: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, {
+      fechaFacturacion: '2026-09-01',
+      fechaVencimiento: '2026-09-30',
+      periodoDesde: '2026-09-01',
+      periodoHasta: '2026-09-30',
+      diasGraciaDescuento: 10,
+      fechaLimiteDescuento: '2026-09-15',
+      fechaSuspension: '2026-10-05',
+    });
+
+    const escritura = lotes.escrituras[0] as {
+      discountDeadline: Date;
+      serviceSuspensionDate: Date;
+    };
+    expect(escritura.discountDeadline.toISOString().slice(0, 10)).toBe(
+      '2026-09-15',
+    );
+    expect(escritura.serviceSuspensionDate.toISOString().slice(0, 10)).toBe(
+      '2026-10-05',
+    );
+  });
+
+  it('sin fechaSuspension en el DTO, usa periodoHasta', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {
+        findById: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, {
+      fechaFacturacion: '2026-09-01',
+      fechaVencimiento: '2026-09-30',
+      periodoDesde: '2026-09-01',
+      periodoHasta: '2026-09-30',
+    });
+
+    const escritura = lotes.escrituras[0] as { serviceSuspensionDate: Date };
+    expect(escritura.serviceSuspensionDate.toISOString().slice(0, 10)).toBe(
+      '2026-09-30',
+    );
   });
 });
 
@@ -484,6 +593,123 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   });
 });
 
+describe('LotesFacturacionService.actualizar', () => {
+  const actualizacionDe = (mockFn: jest.Mock) => {
+    const calls = mockFn.mock.calls as unknown[][];
+    const [, actualizacion] = calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    return actualizacion.$set;
+  };
+
+  const construir = (lotes: unknown) =>
+    new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+  it('rechaza editar un lote consolidado: ya generó facturas reales', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+      })),
+      findOneAndUpdate: jest.fn(),
+    };
+    const service = construir(lotes);
+
+    await expect(
+      service.actualizar('lote-1', { fechaFacturacion: '2026-09-01' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(lotes.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lanza NotFoundException si el lote no existe para esta copropiedad', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      findOneAndUpdate: jest.fn(),
+    };
+    const service = construir(lotes);
+
+    await expect(
+      service.actualizar('lote-ajeno', { fechaFacturacion: '2026-09-01' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('guarda solo los campos que vinieron en el patch, traducidos al inglés', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+      })),
+    };
+    const service = construir(lotes);
+
+    await service.actualizar('lote-1', {
+      fechaFacturacion: '2026-09-01',
+      interesMora: 2.1,
+    });
+
+    const guardado = actualizacionDe(lotes.findOneAndUpdate);
+    expect(guardado.billingDate).toEqual(new Date('2026-09-01'));
+    expect(guardado.lateInterestRate).toBe(2.1);
+    expect(guardado).not.toHaveProperty('dueDate');
+    expect(guardado).not.toHaveProperty('periodStart');
+  });
+
+  it('siempre vuelve a borrador y borra la previsualización — ya no corresponde a los parámetros nuevos', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve(
+            loteDoc({ status: 'liquidado', preview: [{ inmuebleId: 'x' }] }),
+          ),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+      })),
+    };
+    const service = construir(lotes);
+
+    await service.actualizar('lote-1', { interesMora: 1 });
+
+    const guardado = actualizacionDe(lotes.findOneAndUpdate);
+    expect(guardado.status).toBe('borrador');
+    expect(guardado.preview).toEqual([]);
+    expect(guardado.summary).toBeNull();
+  });
+
+  it('no toca adjustments: las novedades ya cargadas no dependen del período', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+      })),
+    };
+    const service = construir(lotes);
+
+    await service.actualizar('lote-1', { interesMora: 1 });
+
+    expect(actualizacionDe(lotes.findOneAndUpdate)).not.toHaveProperty(
+      'adjustments',
+    );
+  });
+});
+
 describe('LotesFacturacionService.liquidar', () => {
   type ActualizacionLiquidar = {
     $set: {
@@ -653,7 +879,7 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(actualizacion.$set.preview).toEqual([]);
   });
 
-  it('calcula el interés como % del saldo de cartera total, con tope, y lo omite si da cero', async () => {
+  it('calcula el interés como % del saldo de cartera total cuando alcanza el mínimo', async () => {
     const m = construirModelos({
       conceptos: [
         concepto(),
@@ -676,6 +902,9 @@ describe('LotesFacturacionService.liquidar', () => {
           balance: 1000000,
         },
       ],
+      // lateInterestCap ahora es el MÍNIMO de saldo para cobrar mora, no un
+      // tope — 4,000,000 supera el mínimo de 50,000, así que se calcula
+      // completo: 1.9% de 4,000,000 = 76,000, sin topar.
       lote: { lateInterestRate: 1.9, lateInterestCap: 50000 },
     });
     const service = new LotesFacturacionService(
@@ -699,8 +928,53 @@ describe('LotesFacturacionService.liquidar', () => {
     const interes = actualizacion.$set.preview[0].lines.find(
       (l: { source: string }) => l.source === 'interes',
     );
-    // 1.9% of 4,000,000 = 76,000, capped at 50,000.
-    expect(interes?.totalAmount).toBe(50000);
+    expect(interes?.totalAmount).toBe(76000);
+  });
+
+  it('omite la mora cuando el saldo no alcanza el mínimo configurado', async () => {
+    const m = construirModelos({
+      conceptos: [
+        concepto(),
+        concepto({
+          _id: { toString: () => 'con-intereses' },
+          name: 'Interés por mora',
+          kind: 'intereses',
+          cuentaCreditoId: { code: '413595' },
+        }),
+      ],
+      saldos: [
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'c1',
+          balance: 30000,
+        },
+      ],
+      // 10% de 30,000 = 3,000 (no redondearía a cero), pero el saldo no
+      // alcanza el mínimo de 50,000 — no se cobra mora en absoluto.
+      lote: { lateInterestRate: 10, lateInterestCap: 50000 },
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const interes = actualizacion.$set.preview[0].lines.find(
+      (l: { source: string }) => l.source === 'interes',
+    );
+    expect(interes).toBeUndefined();
   });
 
   it('omite la línea de interés si el cálculo redondea a cero', async () => {
@@ -1374,6 +1648,50 @@ describe('LotesFacturacionService.consolidar', () => {
   });
 });
 
+describe('LotesFacturacionService.findAll', () => {
+  it('no revienta con un lote viejo al que le faltan discountDeadline/serviceSuspensionDate', async () => {
+    // Esos dos campos son `required: true` pero SIN `default` — Mongoose solo
+    // lo exige al guardar, nunca al leer, así que un lote creado antes de que
+    // existieran esas columnas vuelve con `undefined` en las dos. Antes de
+    // esta prueba, `.toISOString()` sobre ese `undefined` tumbaba TODA la
+    // lista, no solo esta fila — justo lo que le pasó a Bernardo.
+    const legado = loteDoc({
+      discountDeadline: undefined,
+      serviceSuspensionDate: undefined,
+      billingDate: new Date('2026-07-01'),
+      periodEnd: new Date('2026-07-31'),
+    });
+    const lotes = {
+      find: jest.fn(() => ({
+        sort: () => ({ exec: () => Promise.resolve([legado]) }),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    const resultado = await service.findAll();
+
+    expect(resultado[0].fechaLimiteDescuento).toBe(
+      new Date('2026-07-01').toISOString(),
+    );
+    expect(resultado[0].fechaSuspension).toBe(
+      new Date('2026-07-31').toISOString(),
+    );
+  });
+});
+
 describe('LotesFacturacionService.findOne', () => {
   it('incluye la previsualización completa, no solo el conteo', async () => {
     const preliminar = {
@@ -1473,5 +1791,85 @@ describe('LotesFacturacionService.findOne', () => {
     await expect(service.findOne('lote-1')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('LotesFacturacionService.cancelar', () => {
+  const construir = (lotes: unknown) =>
+    new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+    );
+
+  it('borra un lote en borrador — el caso típico: parámetros mal cargados y hay que empezar de nuevo', async () => {
+    const eliminados: Filtro[] = [];
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+      })),
+      deleteOne: jest.fn((filtro: Filtro) => {
+        eliminados.push(filtro);
+        return { exec: () => Promise.resolve({ deletedCount: 1 }) };
+      }),
+    };
+    const service = construir(lotes);
+
+    await service.cancelar('lote-1');
+
+    expect(eliminados).toEqual([{ _id: 'lote-1', coPropertyId: COP }]);
+  });
+
+  it('también borra uno en liquidado — todavía no generó ninguna factura real', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+      })),
+      deleteOne: jest.fn(() => ({
+        exec: () => Promise.resolve({ deletedCount: 1 }),
+      })),
+    };
+    const service = construir(lotes);
+
+    await service.cancelar('lote-1');
+
+    expect(lotes.deleteOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza cancelar uno consolidado: ya generó facturas reales', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+      })),
+      deleteOne: jest.fn(),
+    };
+    const service = construir(lotes);
+
+    await expect(service.cancelar('lote-1')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(lotes.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('lanza NotFoundException si el lote no existe para esta copropiedad', async () => {
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      deleteOne: jest.fn(),
+    };
+    const service = construir(lotes);
+
+    await expect(service.cancelar('lote-ajeno')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(lotes.deleteOne).not.toHaveBeenCalled();
   });
 });

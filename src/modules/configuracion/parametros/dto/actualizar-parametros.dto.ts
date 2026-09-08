@@ -62,4 +62,43 @@ export class ActualizarParametrosDto {
   @IsString()
   @MaxLength(500)
   observacionesFacturacion?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  centroCostos?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  otrosIngresosDebito?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  otrosIngresosCredito?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  descuentosDebito?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  descuentosCredito?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  cuentasOrdenDebito?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  cuentasOrdenCredito?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  usaCuentasOrden?: boolean;
 }

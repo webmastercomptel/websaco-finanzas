@@ -2,7 +2,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Patch,
@@ -18,7 +20,9 @@ import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LotesFacturacionService } from './lotes.service';
+import { FacturasService } from './facturas.service';
 import { CrearLoteDto } from './dto/crear-lote.dto';
+import { ActualizarLoteDto } from './dto/actualizar-lote.dto';
 import { CargarNovedadesDto } from './dto/cargar-novedades.dto';
 import {
   AgregarNovedadLineaDto,
@@ -32,10 +36,15 @@ import type {
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
+import { generarPdfFacturasLote } from '../../common/pdf/facturas-lote-pdf';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  ResolucionFacturacion,
+  ResolucionFacturacionDocument,
+} from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
@@ -49,9 +58,12 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 export class LotesController {
   constructor(
     private readonly lotes: LotesFacturacionService,
+    private readonly facturas: FacturasService,
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(ResolucionFacturacion.name)
+    private readonly resoluciones: Model<ResolucionFacturacionDocument>,
   ) {}
 
   @Get()
@@ -76,6 +88,22 @@ export class LotesController {
     // an account with an active assignment can hold — accountId is
     // guaranteed set here, unlike on the account-less-allowed /auth/me route.
     return this.lotes.crear(user.accountId!, dto);
+  }
+
+  /**
+   * Edits the run's own definition — reachable up to consolidación, exactly
+   * what lets a coproperty admin fix a wrong date or a stale Parámetros
+   * snapshot without cancelling the whole run. See
+   * `LotesFacturacionService.actualizar` for why this always resets the
+   * lote to `borrador` (its `preview`, if any, no longer matches).
+   */
+  @Patch(':id/definicion')
+  @CheckAbility({ action: 'update', subject: 'Factura' })
+  actualizarDefinicion(
+    @Param('id') id: string,
+    @Body() dto: ActualizarLoteDto,
+  ): Promise<LoteFacturacion> {
+    return this.lotes.actualizar(id, dto);
   }
 
   @Post(':id/novedades')
@@ -145,11 +173,79 @@ export class LotesController {
     res.send(Buffer.from(bytes));
   }
 
+  /**
+   * Every Factura this lote's consolidación produced, bundled into one PDF —
+   * one invoice per page, in the exact layout `GET /facturas/:id/pdf`
+   * already shows for one at a time. See `generarPdfFacturasLote`.
+   */
+  @Get(':id/facturas.pdf')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async generarPdfFacturas(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOneRaw(id);
+
+    const facturas = await this.facturas.findAllRawPorLote(id);
+    if (facturas.length === 0) {
+      throw new NotFoundException(
+        `El lote ${id} todavía no tiene facturas emitidas`,
+      );
+    }
+
+    const idsResolucion = [
+      ...new Set(
+        facturas
+          .map((f) => f.resolucionId?.toString())
+          .filter((x): x is string => Boolean(x)),
+      ),
+    ];
+    const resoluciones = idsResolucion.length
+      ? await this.resoluciones
+          .find({ _id: { $in: idsResolucion }, coPropertyId })
+          .exec()
+      : [];
+    const resolucionesPorId = new Map(
+      resoluciones.map((r) => [r._id.toString(), r]),
+    );
+
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfFacturasLote(
+      facturas,
+      resolucionesPorId,
+      copropiedad,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="facturas-lote-${lote.number}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
   @Post(':id/consolidar')
   @CheckAbility({ action: 'create', subject: 'Factura' })
   consolidar(
     @Param('id') id: string,
   ): Promise<{ lote: LoteFacturacion; errores: ErrorConsolidacion[] }> {
     return this.lotes.consolidar(id);
+  }
+
+  /**
+   * Hard delete — refused once consolidado, when it would mean discarding
+   * real Facturas. See `LotesFacturacionService.cancelar`.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  @CheckAbility({ action: 'manage', subject: 'Factura' })
+  cancelar(@Param('id') id: string): Promise<void> {
+    return this.lotes.cancelar(id);
   }
 }

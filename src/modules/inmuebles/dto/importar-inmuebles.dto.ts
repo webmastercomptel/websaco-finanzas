@@ -44,11 +44,6 @@ export class FilaImportarInmuebleDto {
   uso?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  centroCostos?: string;
-
-  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -86,13 +81,48 @@ export class FilaImportarInmuebleDto {
   /* ── El titular, en la misma fila ──────────────────────────────
    * Ninguno de estos campos es obligatorio: una fila puede describir una
    * inmueble sin papeles todavía, el mismo caso que ya contempla Tercero.
+   *
+   * nom1Titular/ape1Titular (persona natural) o razonSocialTitular (persona
+   * jurídica) son las columnas actuales de la plantilla — ver
+   * `resolverNombreTercero`. `nombreTitular` sigue aceptándose como
+   * respaldo para plantillas viejas ya en circulación que no tienen las
+   * columnas separadas; nunca compite con ellas si están presentes.
    */
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nom1Titular?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nom2Titular?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ape1Titular?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ape2Titular?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  razonSocialTitular?: string;
+
+  /** @deprecated Respaldo para plantillas viejas — ver la nota arriba. */
   @IsOptional()
   @IsString()
   @MaxLength(200)
   nombreTitular?: string;
 
+  /** DIAN código (e.g. "13", "31") — validated against the catalog in
+   *  `InmueblesService.resolverTitular`, same as the manual Titular form's
+   *  dropdown; a code that doesn't exist there fails only this row. */
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -117,6 +147,20 @@ export class FilaImportarInmuebleDto {
   @IsString()
   @MaxLength(30)
   telefonoTitular?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  direccionTitular?: string;
+
+  /** DANE código de municipio — resolved to its name and department code by
+   *  `InmueblesService.resolverTitular`, same lookup the manual form's
+   *  cascading Departamento/Ciudad selector does; nothing else in the row
+   *  names the department, it always comes from this code. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  ciudadTitular?: string;
 
   /**
    * Recurring monthly amounts, same pair shape `ValoresRecurrentesService`

@@ -21,6 +21,42 @@ import {
  * the body would let a caller write into somebody else's tenant.
  */
 class CamposTerceroDto {
+  /* ── Nombre ───────────────────────────────────────────────────
+   * Split fields for a `natural` party — see the note on `Tercero.name`.
+   * `nom1`/`ape1` are what DIAN requires (PrimerNombre/PrimerApellido);
+   * `nom2`/`ape2` are optional, same as its OtrosNombres/SegundoApellido.
+   * `razonSocial` is the `juridica` equivalent. Whichever pair applies wins
+   * over a directly-sent `nombre` — see `TercerosService.resolverNombre`.
+   */
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nom1?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nom2?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ape1?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  ape2?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  razonSocial?: string;
+
+  /** Free text always — the "Titular" screen now fills it from the DIAN
+   *  tipos-identificación catalog (`GET /catalogos/tipos-identificacion`),
+   *  but nothing here enforces that shape, same reasoning as `ciudad`. */
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -56,11 +92,25 @@ class CamposTerceroDto {
   @MaxLength(80)
   ciudad?: string;
 
+  /** DANE municipio code, from the same catalog pick that filled `ciudad`. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  ciudadCodigo?: string;
+
+  /** DANE department code — saved alongside the city, not derived from it
+   *  on every read. See the note on `Tercero.cityDepartmentCode`. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  ciudadDepartamentoCodigo?: string;
+
   /* ── Facturación electrónica ──────────────────────────────────
    * Separada de la identificación general de arriba a propósito — ver la
    * nota en el schema de Tercero.
    */
 
+  /** Same DIAN catalog as `tipoIdentificacion` above. */
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -101,24 +151,30 @@ class CamposTerceroDto {
 }
 
 /**
- * Creating a party. Person type and name are the two things it cannot be
- * created without — a company has no surname, so there is no name to split.
+ * Creating a party. `tipoPersona` is the one thing it cannot be created
+ * without. A name is also required, but not necessarily THIS field —
+ * `nombre` is optional here on purpose: `TercerosService.create` accepts it
+ * as a fallback only when `nom1`+`ape1` (natural) or `razonSocial`
+ * (jurídica) are absent, and rejects the request if NEITHER path yields a
+ * name.
  */
 export class CrearTerceroDto extends CamposTerceroDto {
   @IsIn(['natural', 'juridica'])
   tipoPersona: 'natural' | 'juridica';
 
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(200)
-  nombre: string;
+  nombre?: string;
 }
 
 /**
- * Editing a party. `estado` is here, and it is the only way one is retired:
- * `inactivo` stops it being offered as a new unit's holder, without touching
- * a single document that already names it — see the note on the schema for
- * why history must never rewrite itself. There is no delete.
+ * Editing a party. There is no `estado` here on purpose: a party can never
+ * be retired through this endpoint — every Tercero stays `activo` for as
+ * long as it exists, and there is no delete either. `status` on the schema
+ * still allows `inactive`, kept only for whatever a party has already
+ * carried in from before this rule, never reachable going forward.
  */
 export class ActualizarTerceroDto extends CamposTerceroDto {
   @IsOptional()
@@ -130,8 +186,4 @@ export class ActualizarTerceroDto extends CamposTerceroDto {
   @MinLength(1)
   @MaxLength(200)
   nombre?: string;
-
-  @IsOptional()
-  @IsIn(['activo', 'inactivo'])
-  estado?: 'activo' | 'inactivo';
 }
