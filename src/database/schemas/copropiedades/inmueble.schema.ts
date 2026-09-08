@@ -1,6 +1,6 @@
 // src/database/schemas/copropiedades/inmueble.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from './copropiedad.schema';
 import { Tercero } from '../terceros/tercero.schema';
 
@@ -27,7 +27,7 @@ export class Inmueble {
    * tenancy law in CLAUDE.md.
    */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -72,7 +72,7 @@ export class Inmueble {
    * intact, which is the whole point of keeping units and parties apart.
    */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Tercero.name,
     default: null,
     index: true,

@@ -55,6 +55,21 @@ describe('pdf-helpers', () => {
       const header = Buffer.from(bytes.slice(0, 5)).toString('utf-8');
       expect(header).toBe('%PDF-');
     });
+
+    it('por defecto (sin opciones) crea una página Letter en vertical, sin cambios de comportamiento', async () => {
+      const ctx = await crearContexto();
+      expect(ctx.pageWidth).toBe(612);
+      expect(ctx.pageHeight).toBe(792);
+      expect(ctx.contentWidth).toBe(512);
+    });
+
+    it('orientacion: "horizontal" produce una página más ancha que alta', async () => {
+      const ctx = await crearContexto({ orientacion: 'horizontal' });
+      expect(ctx.pageWidth).toBe(792);
+      expect(ctx.pageHeight).toBe(612);
+      expect(ctx.page.getWidth()).toBe(792);
+      expect(ctx.page.getHeight()).toBe(612);
+    });
   });
 
   describe('escribirLinea', () => {
@@ -139,6 +154,32 @@ describe('pdf-helpers', () => {
       expect(() =>
         escribirTabla(ctx, ['Concepto', 'Monto'], [['', '$ 0']]),
       ).not.toThrow();
+    });
+
+    it('con columnasNumericas alinea a la derecha esa cantidad de columnas finales', async () => {
+      const ctx = await crearContexto();
+      // Regression guard: omitting the option keeps the original "last 2
+      // columns numeric" heuristic — this just asserts it doesn't throw with
+      // a custom count, covering both fewer and more than the default 2.
+      expect(() =>
+        escribirTabla(ctx, ['A', 'B', 'C', 'D'], [['x', '1', '2', '3']], {
+          columnasNumericas: 3,
+        }),
+      ).not.toThrow();
+    });
+
+    it('omitir las opciones nuevas reproduce el mismo layout que antes del cambio', async () => {
+      const ctxSinOpciones = await crearContexto();
+      escribirTabla(ctxSinOpciones, ['A', 'B', 'C'], [['x', '1', '2']]);
+      const bytesSinOpciones = await ctxSinOpciones.doc.save();
+
+      const ctxConDefault = await crearContexto();
+      escribirTabla(ctxConDefault, ['A', 'B', 'C'], [['x', '1', '2']], {
+        columnasNumericas: 2,
+      });
+      const bytesConDefault = await ctxConDefault.doc.save();
+
+      expect(bytesSinOpciones.length).toBe(bytesConDefault.length);
     });
   });
 

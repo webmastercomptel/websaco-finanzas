@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
@@ -34,7 +34,7 @@ export type VoidReason = (typeof VOID_REASONS)[number];
 @Schema({ timestamps: true, collection: 'recibos' })
 export class Recibo {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -42,14 +42,14 @@ export class Recibo {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
   })
   inmuebleId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Tercero.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, required: true })
   terceroId: Types.ObjectId;
 
   @Prop({ type: String, trim: true, default: '' })
@@ -100,7 +100,7 @@ export class Recibo {
   @Prop({ type: Date, default: null })
   voidedAt: Date | null;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
 
   /**
@@ -115,7 +115,7 @@ export class Recibo {
    * `generatedBy` and `appliedBy`, which no `Recibo`/`AplicacionRecibo`
    * response exposes either.
    */
-  @Prop({ type: Types.ObjectId, ref: Account.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
   voidedBy: Types.ObjectId | null;
 }
 

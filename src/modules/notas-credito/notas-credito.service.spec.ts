@@ -109,6 +109,9 @@ const construirServicio = (opts: {
   notaCreada: Record<string, unknown>;
   factura?: Record<string, unknown>;
   saldos?: { findOneAndUpdate: jest.Mock };
+  copropiedades?: { findById: jest.Mock };
+  cuentasContables?: Record<string, unknown>[];
+  inmueble?: Record<string, unknown> | null;
 }) => {
   const session = sesionFalsa();
   const notasCredito = modeloNotasCredito(opts.notaCreada);
@@ -117,7 +120,19 @@ const construirServicio = (opts: {
   const saldos = opts.saldos ?? modeloSaldos();
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
-  const copropiedades = modeloCopropiedades();
+  const copropiedades = opts.copropiedades ?? modeloCopropiedades();
+  const cuentasContables = opts.cuentasContables && {
+    find: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
+    })),
+  };
+  const inmuebles = opts.cuentasContables && {
+    findById: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      }),
+    })),
+  };
 
   const service = new NotasCreditoService(
     notasCredito as never,
@@ -130,6 +145,8 @@ const construirServicio = (opts: {
     numeracionQueEntrega('NC-1'),
     conexionCon(session),
     lotesFacturacionFalso(),
+    cuentasContables as never,
+    inmuebles as never,
   );
 
   return {
@@ -202,6 +219,83 @@ describe('NotasCreditoService.crear', () => {
       { $inc: { appliedAmount: 200000, unappliedAmount: -200000 } },
       expect.objectContaining({}),
     );
+  });
+
+  it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
+    const notaCreada = notaCreditoCreada();
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                creditNotesAccount: '413595',
+                defaultCostCentre: 'CC-01',
+                cashFlowCode: 'FC-OPER',
+              }),
+          }),
+        })),
+      },
+      cuentasContables: [
+        {
+          code: '413595',
+          requiresTercero: true,
+          profitCenter: true,
+          destinationCenter: false,
+          cashFlow: false,
+        },
+      ],
+      inmueble: { code: '1304' },
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      tercero?: string | null;
+      centroCosto?: string | null;
+    }>;
+    const devoluciones = entries.find((e) => e.account === '413595');
+    expect(devoluciones?.tercero).toBe('1304');
+    expect(devoluciones?.centroCosto).toBe('CC-01');
+  });
+
+  it('acredita la cuenta propia del concepto cuando la línea de la factura ancla la trae configurada', async () => {
+    const factura = facturaDoc({
+      lines: [
+        {
+          conceptoId: CONCEPTO,
+          totalAmount: 200000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const notaCreada = notaCreditoCreada();
+    const { service, asientos } = construirServicio({ notaCreada, factura });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
+    const creditos = entries.filter((m) => m.type === 'credito');
+    // La cuenta propia del concepto (130599), NO la cuenta plana de cartera
+    // de la copropiedad (130501) — aplicación total, sin anticipo.
+    expect(creditos).toEqual([
+      {
+        account: '130599',
+        type: 'credito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+    ]);
   });
 
   it('cuando montoTotal excede el saldo de la factura ancla, aplica lo que cabe y el resto queda como anticipo', async () => {
@@ -838,6 +932,7 @@ describe('NotasCreditoService.anular', () => {
       _id: facturaOtra,
       inmuebleId: INMUEBLE,
       total: 80000,
+      outstandingBalance: 80000, // restaurada por completo: 0 → 80000
       lines: [{ conceptoId: conceptoZ, totalAmount: 80000 }],
     };
 

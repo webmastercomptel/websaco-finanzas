@@ -26,7 +26,7 @@ export interface DocumentoConSaldoAFecha {
  * The second condition means: at `fecha` the application had already reduced
  * the balance but its reversal had not yet happened.
  */
-function activeAsOf(
+export function activeAsOf(
   app: { status: string; appliedAt: Date; revertedAt: Date | null },
   fecha: Date,
 ): boolean {

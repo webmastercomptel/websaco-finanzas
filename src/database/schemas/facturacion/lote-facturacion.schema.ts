@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
@@ -36,10 +36,10 @@ export class NovedadLote {
    *  so TypeScript knows it exists on the plain class shape. */
   _id: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Inmueble.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Inmueble.name, required: true })
   inmuebleId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: ConceptoCobro.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: ConceptoCobro.name, required: true })
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -61,13 +61,13 @@ export const NovedadLoteSchema = SchemaFactory.createForClass(NovedadLote);
  */
 @Schema({ _id: false })
 export class FacturaPreliminar {
-  @Prop({ type: Types.ObjectId, ref: Inmueble.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Inmueble.name, required: true })
   inmuebleId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
   unitCode: string;
 
-  @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
@@ -100,7 +100,7 @@ export const FacturaPreliminarSchema =
 @Schema({ timestamps: true, collection: 'lotes_facturacion' })
 export class LoteFacturacion {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -174,7 +174,7 @@ export class LoteFacturacion {
   preview: FacturaPreliminar[];
 
   @Prop({
-    type: [Types.ObjectId],
+    type: [SchemaTypes.ObjectId],
     ref: 'Factura',
     required: true,
     default: [],
@@ -195,7 +195,7 @@ export class LoteFacturacion {
     totalUnits: number;
   } | null;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
 }
 

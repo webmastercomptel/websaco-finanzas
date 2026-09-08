@@ -161,6 +161,49 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
   });
 });
 
+describe('FacturasService.findAll — buscar', () => {
+  it('filtra por fullNumber con regex insensible a mayúsculas cuando se pasa buscar', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({ buscar: '1041' });
+
+    expect(modelo.filtros[0].fullNumber).toEqual({
+      $regex: '1041',
+      $options: 'i',
+    });
+  });
+
+  it('escapa caracteres especiales de regex en buscar', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({ buscar: 'CONJ-2026(1041)' });
+
+    expect((modelo.filtros[0].fullNumber as { $regex: string }).$regex).toBe(
+      'CONJ-2026\\(1041\\)',
+    );
+  });
+
+  it('no aplica el filtro cuando buscar está ausente', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({});
+
+    expect(modelo.filtros[0].fullNumber).toBeUndefined();
+  });
+});
+
 describe('FacturasService.findAllRawPorLote', () => {
   it('filtra por copropiedad Y loteId, ordenado por código de unidad', async () => {
     const modelo = modeloCon([documento()]);

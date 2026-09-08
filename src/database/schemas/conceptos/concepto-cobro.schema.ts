@@ -1,6 +1,6 @@
 // src/database/schemas/conceptos/concepto-cobro.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { CuentaContable } from '../contabilidad/cuenta-contable.schema';
 
@@ -26,7 +26,7 @@ export type ConceptoCobroDocument = HydratedDocument<ConceptoCobro>;
 @Schema({ timestamps: true, collection: 'conceptos_cobro' })
 export class ConceptoCobro {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -74,7 +74,7 @@ export class ConceptoCobro {
 
   /** Accounting debit account for this concept's journal entries. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: CuentaContable.name,
     default: null,
   })
@@ -82,11 +82,26 @@ export class ConceptoCobro {
 
   /** Accounting credit account for this concept's journal entries. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: CuentaContable.name,
     default: null,
   })
   cuentaCreditoId: Types.ObjectId | null;
+
+  /**
+   * Accounting account credited for the TAX portion of this concept's
+   * charge, when `taxRate > 0` — kept separate from `cuentaCreditoId` so the
+   * tax liability never gets folded into ordinary income. Null means no tax
+   * account configured; `construirMovimientos` (asiento.builder.ts) falls
+   * back to `CUENTA_SIN_ASIGNAR` for the tax line in that case, same as an
+   * unconfigured `cuentaCreditoId`.
+   */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: CuentaContable.name,
+    default: null,
+  })
+  cuentaImpuestoId: Types.ObjectId | null;
 
   /**
    * Whether this concept triggers late-interest calculation on overdue

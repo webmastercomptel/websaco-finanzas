@@ -1,6 +1,6 @@
 // src/database/schemas/copropiedades/copropiedad.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { EntidadAdministradora } from '../entidades/entidad-administradora.schema';
 
 export type CopropiedadDocument = HydratedDocument<Copropiedad>;
@@ -60,7 +60,7 @@ export class Copropiedad {
    * anyone editing a single person's access.
    */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: EntidadAdministradora.name,
     default: null,
     index: true,
@@ -186,6 +186,15 @@ export class Copropiedad {
   defaultCostCentre: string | null;
 
   /**
+   * Cash-flow classification code for accounting purposes — one per
+   * coproperty, same reasoning and shape as `defaultCostCentre` right above.
+   * Applied to every journal line whose account has `flujoCaja` set on the
+   * chart of accounts.
+   */
+  @Prop({ type: String, default: null, trim: true })
+  cashFlowCode: string | null;
+
+  /**
    * Free-text accounting codes carried over from the predecessor system's
    * "interfaz contable" table (a fixed grid of hardcoded debit/credit
    * columns, deleted from this app — see the note on `navGroups` in
@@ -218,10 +227,13 @@ export class Copropiedad {
 
   /**
    * The predecessor system's `codeordendb`/`codeordencr` toggle: when 'S',
-   * facturación posted an extra self-balancing debit/credit pair to the
-   * "cuentas de orden" above, alongside the normal cartera/ingreso entry.
-   * `construirMovimientos` (asiento.builder.ts) reads this to decide whether
-   * to add that pair. Default false — most coproperties never used it.
+   * facturación posted the mora-interest charge ("Cargo 2" of the fixed
+   * Administración/Intereses/Multas trio) to the "cuentas de orden" above
+   * INSTEAD of that concept's own Cargos accounts — every other concept kept
+   * coding normally. `construirMovimientos` (asiento.builder.ts) reads this
+   * to decide, per line, whether the `conceptKind === 'intereses'` line
+   * takes its accounts from here instead of from its ConceptoCobro. Default
+   * false — most coproperties never used it.
    */
   @Prop({ required: true, default: false })
   usesMemorandumAccounts: boolean;

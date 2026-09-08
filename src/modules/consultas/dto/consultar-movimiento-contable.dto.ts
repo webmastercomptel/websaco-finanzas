@@ -1,10 +1,7 @@
-import { IsDateString, IsMongoId } from 'class-validator';
+import { IsDateString } from 'class-validator';
 
-/** DTO for GET /consultas/movimiento-contable — browse by inmueble + date range. */
+/** DTO for GET /consultas/movimiento-contable — coproperty-wide date range. */
 export class ConsultarMovimientoContableDto {
-  @IsMongoId()
-  inmuebleId!: string;
-
   @IsDateString()
   desde!: string;
 

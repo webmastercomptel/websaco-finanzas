@@ -1,6 +1,6 @@
 // src/database/schemas/terceros/tercero.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
 export type TerceroDocument = HydratedDocument<Tercero>;
@@ -28,7 +28,7 @@ export type TerceroDocument = HydratedDocument<Tercero>;
 @Schema({ timestamps: true, collection: 'terceros' })
 export class Tercero {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,

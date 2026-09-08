@@ -1,6 +1,6 @@
 // src/database/schemas/contabilidad/cuenta-contable.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
 export type CuentaContableDocument = HydratedDocument<CuentaContable>;
@@ -17,7 +17,7 @@ export type CuentaContableDocument = HydratedDocument<CuentaContable>;
 @Schema({ timestamps: true, collection: 'cuentas_contables' })
 export class CuentaContable {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,

@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
 export type ConsecutivoLoteDocument = HydratedDocument<ConsecutivoLote>;
@@ -16,7 +16,7 @@ export type ConsecutivoLoteDocument = HydratedDocument<ConsecutivoLote>;
 @Schema({ timestamps: true, collection: 'consecutivos_lote' })
 export class ConsecutivoLote {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     unique: true,

@@ -4,6 +4,7 @@ import { ConsultasController } from './consultas.controller';
 import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
+import { CarteraPorInmuebleService } from './cartera-por-inmueble.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
 import {
@@ -54,6 +55,10 @@ import {
   AsientoContable,
   AsientoContableSchema,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
+import {
+  CuentaContable,
+  CuentaContableSchema,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 
 @Module({
   imports: [
@@ -70,6 +75,7 @@ import {
       { name: Tercero.name, schema: TerceroSchema },
       { name: Copropiedad.name, schema: CopropiedadSchema },
       { name: AsientoContable.name, schema: AsientoContableSchema },
+      { name: CuentaContable.name, schema: CuentaContableSchema },
     ]),
   ],
   controllers: [ConsultasController],
@@ -77,6 +83,7 @@ import {
     AuxiliarCarteraService,
     VencimientosCarteraService,
     CarteraGeneralService,
+    CarteraPorInmuebleService,
     EstadoCuentaService,
     MovimientoContableService,
   ],

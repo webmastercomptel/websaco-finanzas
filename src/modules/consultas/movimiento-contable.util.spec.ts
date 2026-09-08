@@ -191,6 +191,41 @@ describe('resolverMovimientoContable', () => {
     expect(result.id).toBe(asientoId.toString());
   });
 
+  it('nombreCuenta se resuelve desde el mapa de codigo->nombre, con el codigo como respaldo', () => {
+    const asiento = asientoBase({
+      facturaId: id(),
+      entries: [
+        {
+          account: '1355-01',
+          type: 'debito',
+          amount: 100000,
+          description: 'Línea 1',
+        },
+        {
+          account: '9999-99',
+          type: 'credito',
+          amount: 100000,
+          description: 'Sin cuenta en el catalogo',
+        },
+      ],
+    });
+
+    const result = resolverMovimientoContable(
+      asiento,
+      {
+        inmuebleCodigo: '301',
+        propietario: null,
+        nit: null,
+        numeroDocumento: 'FV-0001',
+      },
+      new Map([['1355-01', 'CxC Administracion']]),
+    );
+
+    expect(result.lineas[0].nombreCuenta).toBe('CxC Administracion');
+    // No matching CuentaContable — falls back to the code itself.
+    expect(result.lineas[1].nombreCuenta).toBe('9999-99');
+  });
+
   it('inmuebleCodigo is null when inmueble was deleted', () => {
     const asiento = asientoBase({ facturaId: id() });
 

@@ -102,12 +102,27 @@ const construirServicio = (opts: {
   notaCreada: Record<string, unknown>;
   saldos?: { findOneAndUpdate: jest.Mock };
   saldoOrigen?: number;
+  copropiedades?: { findById: jest.Mock };
+  cuentasContables?: Record<string, unknown>[];
+  inmueble?: Record<string, unknown> | null;
 }) => {
   const session = sesionFalsa();
   const notasContables = modeloNotasContables(opts.notaCreada);
   const saldos = opts.saldos ?? modeloSaldos();
   const asientos = modeloAsientos();
   const conceptos = modeloConceptos();
+  const cuentasContables = opts.cuentasContables && {
+    find: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
+    })),
+  };
+  const inmuebles = opts.cuentasContables && {
+    findById: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      }),
+    })),
+  };
 
   // Mock saldo origin balance for the balance check in crear().
   const saldofindOne = jest.fn(() => ({
@@ -126,11 +141,13 @@ const construirServicio = (opts: {
     saldos as never,
     asientos as never,
     conceptos as never,
-    copropiedades as never,
+    (opts.copropiedades ?? copropiedades) as never,
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NT-1'),
     conexionCon(session),
     lotesFacturacionFalso(),
+    cuentasContables as never,
+    inmuebles as never,
   );
 
   // Override saldos.findOne for the balance check.
@@ -192,6 +209,37 @@ describe('NotasContablesService.crear', () => {
 
     expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(-100000);
     expect(extraerMonto(CONCEPTO_DESTINO)).toBe(100000);
+  });
+
+  it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
+    const notaCreada = notaContableCreada();
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      copropiedades: modeloCopropiedad({
+        defaultCostCentre: 'CC-01',
+        cashFlowCode: 'FC-OPER',
+      }),
+      cuentasContables: [
+        {
+          code: '413501',
+          requiresTercero: true,
+          profitCenter: false,
+          destinationCenter: false,
+          cashFlow: false,
+        },
+      ],
+      inmueble: { code: '1304' },
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      tercero?: string | null;
+    }>;
+    const destino = entries.find((e) => e.account === '413501');
+    expect(destino?.tercero).toBe('1304');
   });
 
   it('rechaza un monto no positivo antes de tocar ningún saldo', async () => {

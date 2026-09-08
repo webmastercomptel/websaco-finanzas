@@ -6,7 +6,37 @@ import type { Movimiento } from '../../database/schemas/facturacion/asiento-cont
  *  assignable here without a translation step. */
 export interface FacturaLineaParaAsiento {
   accountingIncomeAccount: string | null;
+  /** This line's DEBIT account. Optional/`null` falls back to
+   *  `cuentaCartera` — every caller that predates per-concept debit
+   *  accounts (e.g. Nota Débito's single-line posting) keeps its exact
+   *  prior behavior without passing this field. */
+  accountingReceivableAccount?: string | null;
+  /** The concept's `kind` (`ConceptoCobro.kind`/`FacturaLinea.conceptKind`).
+   *  Optional so non-invoice callers (e.g. Nota Débito's single-line
+   *  posting) that never set it simply never match `'intereses'` below.
+   *  Only `'intereses'` is inspected — see `construirMovimientos`'s
+   *  cuentasOrden override. */
+  conceptKind?: 'administracion' | 'intereses' | 'otro';
+  /** The concept's name, exactly as configured in the Cargos tab
+   *  (`ConceptoCobro.name`/`FacturaLinea.conceptName`) — used verbatim as
+   *  this line's movimiento description, debit and credit alike, so a
+   *  bookkeeper reading the ledger sees which cargo each line belongs to.
+   *  Optional so non-invoice callers (e.g. Nota Débito's single-line
+   *  posting, which has no per-line cargo name to hand over) fall back to
+   *  the generic description below. */
+  conceptName?: string;
   totalAmount: number;
+  /** This line's tax portion (`FacturaLinea.taxAmount`) — optional so every
+   *  caller that predates per-line tax splitting (Nota Débito's single-line
+   *  posting) keeps crediting the full amount to `accountingIncomeAccount`,
+   *  same as before. `> 0` is what triggers the split in
+   *  `construirMovimientos`. */
+  taxAmount?: number;
+  /** This line's tax account (`ConceptoCobro.cuentaImpuestoId`, frozen as
+   *  `FacturaLinea.accountingTaxAccount`) — falls back to
+   *  `CUENTA_SIN_ASIGNAR` when `taxAmount > 0` but no account is configured,
+   *  same reasoning as every other unconfigured-account fallback here. */
+  accountingTaxAccount?: string | null;
 }
 
 export interface FacturaParaAsiento {
@@ -90,62 +120,173 @@ function movimientosCuentasOrden(
 }
 
 /**
- * Builds the double-entry posting for one consolidated invoice: one debit to
- * the coproperty's receivables account for the full total, and one credit
- * per distinct income account among the invoice's lines — collapsing to
- * exactly one debit and one credit for the common single-concept case,
- * matching the real export's 342-facturas-to-684-asientos ratio.
+ * Builds the double-entry posting for one consolidated invoice.
  *
- * When `cuentasOrden` is given (the coproperty has `usesMemorandumAccounts`
- * on), an extra self-balancing pair is appended — debit `cuentasOrden.debito`
- * and credit `cuentasOrden.credito`, both for the invoice's full `total` —
- * mirroring what the predecessor system posted to "cuentas de orden" on
- * every sale. Omitted (`undefined`/`null`) for every coproperty that never
- * used it, which is most of them.
+ * ONE DEBIT AND ONE CREDIT PER LINE, never merged across lines (confirmed
+ * with product, correcting an earlier merge-by-account reading): two
+ * concepts that happen to share an account — e.g. Pintura and Televisión
+ * both configured to the same income account — still post as two distinct
+ * movimientos, not one collapsed line carrying their combined amount. A
+ * cargo that never shows its own line in the ledger is, from a bookkeeper's
+ * standpoint, uncoded — silently merging it into a neighboring concept's
+ * line was the bug this fixes. A line's debit account is its own
+ * `accountingReceivableAccount` — set per `ConceptoCobro.cuentaDebitoId` —
+ * falling back to the shared `cuentaCartera` (the coproperty's
+ * `receivablesAccount`) when that concept has none configured; its credit
+ * account is `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`),
+ * falling back to `CUENTA_SIN_ASIGNAR`.
+ *
+ * PER-LINE override: `cuentasOrden`, when given, replaces the accounts used
+ * ONLY for the mora-interest line — `conceptKind === 'intereses'`, the
+ * "Cargo 2" of the predecessor system's fixed Administración/Intereses/
+ * Multas trio — with `cuentasOrden.debito`/`cuentasOrden.credito` from
+ * Parámetros de Facturación instead of that concept's own Cargos accounts.
+ * Every other line, and the intereses line itself when `cuentasOrden` is
+ * null/undefined, always codes with its own Cargos accounts. This mirrors
+ * the predecessor system's `codeordendb`/`codeordencr` mode, which only ever
+ * applied to the interest charge, never to the whole invoice.
  *
  * Pure and synchronous on purpose: the double-entry invariant this produces
  * (debits equal credits) has to be checked before anything is written to the
  * database, and a pure function is what makes that check trivial to test in
  * isolation from Mongo.
+ *
+ * DESCRIPTION per line is the concept's own `conceptName` (Cargos tab), debit
+ * and credit alike — so two lines that share an account still read as
+ * distinct cargos in the ledger, not just distinct amounts. Falls back to a
+ * generic debit/credit description when a caller has no cargo name to give
+ * (Nota Débito's single-line posting), or to a "Cuenta de orden" label when
+ * the intereses line's own `conceptName` is unavailable but `cuentasOrden`
+ * fired — `conceptName`, when present, always wins.
+ *
+ * TAX SPLIT: a line with `taxAmount > 0` (never true for the `cuentasOrden`
+ * path — mora carries no tax) posts its credit side as TWO movements instead
+ * of one: `accountingIncomeAccount` for the base only
+ * (`totalAmount - taxAmount`), and `accountingTaxAccount` (falling back to
+ * `CUENTA_SIN_ASIGNAR`, same as any other unconfigured account) for
+ * `taxAmount` — carrying `baseGravable` so the tax line shows what it was
+ * computed from. The debit side is unchanged either way: the receivable
+ * always covers the full `totalAmount`, tax included. Confirmed with
+ * product: crediting the tax portion straight to income (the prior
+ * behavior) is wrong — it belongs in its own tax-payable account.
  */
 export function construirMovimientos(
   factura: FacturaParaAsiento,
   cuentaCartera: string,
   cuentasOrden?: CuentasOrden | null,
 ): Movimiento[] {
-  const porCuenta = new Map<string, number>();
+  const movimientos: Movimiento[] = [];
+
   for (const linea of factura.lines) {
-    const cuenta = linea.accountingIncomeAccount ?? CUENTA_SIN_ASIGNAR;
-    porCuenta.set(cuenta, (porCuenta.get(cuenta) ?? 0) + linea.totalAmount);
-  }
+    const usaCuentasOrden = !!cuentasOrden && linea.conceptKind === 'intereses';
+    const debito = usaCuentasOrden
+      ? cuentasOrden.debito
+      : (linea.accountingReceivableAccount ?? cuentaCartera);
+    const credito = usaCuentasOrden
+      ? cuentasOrden.credito
+      : (linea.accountingIncomeAccount ?? CUENTA_SIN_ASIGNAR);
+    const descripcion =
+      linea.conceptName ??
+      (usaCuentasOrden
+        ? 'Cuenta de orden — intereses de mora, factura de venta'
+        : undefined);
 
-  const movimientos: Movimiento[] = [
-    {
-      account: cuentaCartera,
-      type: 'debito',
-      amount: factura.total,
-      description: 'Cartera por cobrar — factura de venta',
-    },
-  ];
-
-  for (const [cuenta, valor] of porCuenta) {
     movimientos.push({
-      account: cuenta,
-      type: 'credito',
-      amount: valor,
-      description: 'Ingreso por factura de venta',
+      account: debito,
+      type: 'debito',
+      amount: linea.totalAmount,
+      description: descripcion ?? 'Cartera por cobrar — factura de venta',
     });
-  }
 
-  movimientos.push(
-    ...movimientosCuentasOrden(
-      cuentasOrden,
-      factura.total,
-      'Cuenta de orden — factura de venta',
-    ),
-  );
+    const taxAmount = linea.taxAmount ?? 0;
+    const separaImpuesto = !usaCuentasOrden && taxAmount > 0;
+    if (separaImpuesto) {
+      const baseGravable = linea.totalAmount - taxAmount;
+      movimientos.push({
+        account: credito,
+        type: 'credito',
+        amount: baseGravable,
+        description: descripcion ?? 'Ingreso por factura de venta',
+      });
+      movimientos.push({
+        account: linea.accountingTaxAccount ?? CUENTA_SIN_ASIGNAR,
+        type: 'credito',
+        amount: taxAmount,
+        description: `${descripcion ?? 'Ingreso por factura de venta'} — Impuesto`,
+        baseGravable,
+      });
+    } else {
+      movimientos.push({
+        account: credito,
+        type: 'credito',
+        amount: linea.totalAmount,
+        description: descripcion ?? 'Ingreso por factura de venta',
+      });
+    }
+  }
 
   return movimientos;
+}
+
+/** The chart-of-accounts flags `enriquecerMovimientosConAuxiliares` needs per
+ *  account code — a projection of `CuentaContable`, kept minimal so callers
+ *  don't have to import the full document type. */
+export interface MarcasCuentaContable {
+  requiereTercero: boolean;
+  centroUtilidad: boolean;
+  centroDestino: boolean;
+  flujoCaja: boolean;
+}
+
+/** The per-transaction values `enriquecerMovimientosConAuxiliares` attaches
+ *  when an account's flags call for them — the inmueble's own unit code, and
+ *  the coproperty's two single auxiliary codes (Parámetros de Facturación). */
+export interface ContextoAuxiliares {
+  terceroCode: string | null;
+  centroCosto: string | null;
+  flujoCajaCodigo: string | null;
+}
+
+/**
+ * Attaches tercero/centroCosto/flujoCaja to every movement whose OWN account
+ * carries the matching flag on the chart of accounts (design: tercero is
+ * always the inmueble's unit code, never the owner's NIT; centro de costos
+ * and flujo de caja are each one code per coproperty, applied uniformly to
+ * every account marked for it).
+ *
+ * Deliberately decoupled from every builder above (`construirMovimientos`,
+ * `construirAsientoCruce`, etc.) instead of threading a `cuentasPorCodigo`
+ * lookup through each one's signature: every caller already has to build
+ * `entries` first, so running this ONE extra pass right before
+ * `this.asientos.create(...)` — same call-site shape everywhere — keeps "what
+ * marks a movement with tercero/centro/flujo" in a single, independently
+ * testable place. An account absent from `cuentasPorCodigo` (unconfigured, or
+ * `CUENTA_SIN_ASIGNAR`) gets nothing added, same as today.
+ *
+ * Pure and synchronous, same reasoning as every builder above.
+ */
+export function enriquecerMovimientosConAuxiliares(
+  movimientos: Movimiento[],
+  cuentasPorCodigo: Map<string, MarcasCuentaContable>,
+  contexto: ContextoAuxiliares,
+): Movimiento[] {
+  return movimientos.map((movimiento) => {
+    const marcas = cuentasPorCodigo.get(movimiento.account);
+    if (!marcas) return movimiento;
+    return {
+      ...movimiento,
+      tercero: marcas.requiereTercero
+        ? contexto.terceroCode
+        : (movimiento.tercero ?? null),
+      centroCosto:
+        marcas.centroUtilidad || marcas.centroDestino
+          ? contexto.centroCosto
+          : (movimiento.centroCosto ?? null),
+      flujoCaja: marcas.flujoCaja
+        ? contexto.flujoCajaCodigo
+        : (movimiento.flujoCaja ?? null),
+    };
+  });
 }
 
 /**
@@ -219,17 +360,30 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * one debit to `cuentaOrigen` for the FULL `montoAplicado + montoSinAplicar`
  * — for a Recibo this is the bank/cash account the money arrived in; for a
  * Nota Crédito it is `cuentaDevoluciones`, the expense/contra-revenue
- * account the correction debits. The credit side splits: `cuentaCartera`
- * gets whatever was applied in this same call (skipped when zero), and
+ * account the correction debits. The credit side splits: whatever was
+ * applied in this same call goes to cartera (skipped when zero), and
  * `cuentaAnticipos` gets whatever remains unapplied (skipped when zero).
  *
  * RENAMED from `construirAsientoRecibo` (Task 2): `destinationAccount` →
  * `cuentaOrigen`, since it is not always a "destination" — for a Nota
  * Crédito nothing is received, something is corrected.
  *
+ * The cartera credit is, by default, one line for `cuentaCartera` — the
+ * coproperty's shared receivables account. When `desgloseCartera` is given
+ * (non-empty), it REPLACES that single line with one credit per distinct
+ * account in it instead — the same per-concepto coding `construirMovimientos`
+ * uses for facturación, so a payment applied against a mora line credits that
+ * concepto's own account, not the shared one. `cuentaCartera` is still the
+ * right account for whatever `desgloseCartera` couldn't attribute (e.g. an
+ * applied Nota Débito, which has no per-concepto breakdown here) — callers
+ * fold that amount into the breakdown under `cuentaCartera` itself rather
+ * than leaving it out, so `desgloseCartera`'s own sum always equals
+ * `montoAplicado`. Anticipo (`montoSinAplicar`/`cuentaAnticipos`) is never
+ * broken down: at the moment money lands unapplied it has no concepto yet.
+ *
  * Structurally balanced by construction: the single debit always equals the
- * sum of the one or two credits, since callers pass the same split that adds
- * up to the document's own total everywhere else in each service.
+ * sum of the credits, since callers pass the same split that adds up to the
+ * document's own total everywhere else in each service.
  *
  * `cuentasOrden`, when given, appends the same self-balancing memo pair
  * `construirMovimientos` posts for facturación — debit/credit, both for the
@@ -243,6 +397,7 @@ export function construirAsientoCruce(
   montoSinAplicar: number,
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
+  desgloseCartera?: { account: string; monto: number }[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [
@@ -255,12 +410,28 @@ export function construirAsientoCruce(
   ];
 
   if (montoAplicado > 0) {
-    movimientos.push({
-      account: cuentaCartera,
-      type: 'credito',
-      amount: montoAplicado,
-      description: d.creacionCreditoCartera,
-    });
+    if (desgloseCartera && desgloseCartera.length > 0) {
+      const porCuenta = new Map<string, number>();
+      for (const { account, monto } of desgloseCartera) {
+        if (monto === 0) continue;
+        porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+      }
+      for (const [account, monto] of porCuenta) {
+        movimientos.push({
+          account,
+          type: 'credito',
+          amount: monto,
+          description: d.creacionCreditoCartera,
+        });
+      }
+    } else {
+      movimientos.push({
+        account: cuentaCartera,
+        type: 'credito',
+        amount: montoAplicado,
+        description: d.creacionCreditoCartera,
+      });
+    }
   }
   if (montoSinAplicar > 0) {
     movimientos.push({

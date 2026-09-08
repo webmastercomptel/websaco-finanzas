@@ -41,6 +41,14 @@ import {
   NotaCredito,
   NotaCreditoDocument,
 } from '../../database/schemas/notas-credito/nota-credito.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
@@ -49,7 +57,9 @@ import {
   construirContraAsientoNotaDebito,
   construirMovimientos,
   cuentasOrdenDe,
+  enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
+  type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toNotaDebito, toNotaDebitoDetalle } from './notas-debito.mapper';
 import type {
@@ -91,7 +101,45 @@ export class NotasDebitoService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables?: Model<CuentaContableDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
+
+  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
+  private async conAuxiliares(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    inmuebleId: Types.ObjectId,
+    copropiedad: {
+      defaultCostCentre: string | null;
+      cashFlowCode: string | null;
+    } | null,
+    entries: ReturnType<typeof construirMovimientos>,
+  ): Promise<ReturnType<typeof construirMovimientos>> {
+    if (!this.cuentasContables) return entries;
+    const [cuentas, inmueble] = await Promise.all([
+      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.inmuebles?.findById(inmuebleId).session(session).exec(),
+    ]);
+    const marcas = new Map<string, MarcasCuentaContable>(
+      cuentas.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+        },
+      ]),
+    );
+    return enriquecerMovimientosConAuxiliares(entries, marcas, {
+      terceroCode: inmueble?.code ?? null,
+      centroCosto: copropiedad?.defaultCostCentre ?? null,
+      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+    });
+  }
 
   private async transaccion<T>(
     fn: (session: ClientSession) => Promise<T>,
@@ -314,11 +362,18 @@ export class NotasDebitoService {
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaIngreso =
         copropiedad?.debitNotesAccount ?? CUENTA_SIN_ASIGNAR;
-      const entries = construirContraAsientoNotaDebito(
+      let entries = construirContraAsientoNotaDebito(
         cuentaCartera,
         cuentaIngreso,
         nota.total,
         cuentasOrdenDe(copropiedad),
+      );
+      entries = await this.conAuxiliares(
+        session,
+        coPropertyId,
+        nota.inmuebleId,
+        copropiedad,
+        entries,
       );
       await this.asientos.create(
         [
@@ -419,7 +474,7 @@ export class NotasDebitoService {
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const incomeAccount = cuentaIngreso ?? CUENTA_SIN_ASIGNAR;
 
-    const entries = construirMovimientos(
+    let entries = construirMovimientos(
       {
         total: nota.total,
         lines: [
@@ -428,6 +483,13 @@ export class NotasDebitoService {
       },
       cuentaCartera,
       cuentasOrdenDe(copropiedad),
+    );
+    entries = await this.conAuxiliares(
+      session,
+      coPropertyId,
+      nota.inmuebleId,
+      copropiedad,
+      entries,
     );
 
     await this.asientos.create(

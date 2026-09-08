@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Account } from '../cuentas/account.schema';
 
@@ -38,7 +38,7 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 @Schema({ timestamps: true, collection: 'aplicaciones_cartera' })
 export class AplicacionCartera {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -51,13 +51,13 @@ export class AplicacionCartera {
   /** The Recibo's or NotaCredito's `_id` — which collection to look in is
    *  determined by `sourceType`, so this is a plain ObjectId, not a `ref`
    *  pointing at one fixed collection. */
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
   sourceId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: DOCUMENT_TYPES })
   documentType: DocumentType;
 
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
   documentId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -75,7 +75,7 @@ export class AplicacionCartera {
   @Prop({ type: Date, default: null })
   revertedAt: Date | null;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   appliedBy: Types.ObjectId;
 }
 

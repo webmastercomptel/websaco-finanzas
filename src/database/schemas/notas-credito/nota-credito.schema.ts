@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
@@ -29,7 +29,7 @@ export type VoidReasonNotaCredito = (typeof VOID_REASONS_NOTA_CREDITO)[number];
  *  concepto on the anchor invoice (design §3.2/§6). */
 @Schema({ _id: false })
 export class DistribucionLinea {
-  @Prop({ type: Types.ObjectId, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -51,7 +51,7 @@ export const DistribucionLineaSchema =
 @Schema({ timestamps: true, collection: 'notas_credito' })
 export class NotaCredito {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -59,18 +59,18 @@ export class NotaCredito {
   coPropertyId: Types.ObjectId;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Inmueble.name,
     required: true,
     index: true,
   })
   inmuebleId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Tercero.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Factura.name,
     required: true,
     index: true,
@@ -119,10 +119,10 @@ export class NotaCredito {
   @Prop({ type: Date, default: null })
   voidedAt: Date | null;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, required: true })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: Account.name, default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
   voidedBy: Types.ObjectId | null;
 }
 

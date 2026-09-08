@@ -1,6 +1,6 @@
 // src/database/schemas/contabilidad/periodo-contable.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Account } from '../cuentas/account.schema';
 
@@ -28,7 +28,7 @@ export type PeriodoContableDocument = HydratedDocument<PeriodoContable>;
 @Schema({ timestamps: true, collection: 'periodos_contables' })
 export class PeriodoContable {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Copropiedad.name,
     required: true,
     index: true,
@@ -51,7 +51,7 @@ export class PeriodoContable {
 
   /** Who closed it. A closed month is somebody's decision, not an event. */
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Account.name,
     default: null,
   })

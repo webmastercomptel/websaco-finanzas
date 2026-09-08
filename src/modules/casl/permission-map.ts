@@ -26,6 +26,7 @@ export const MODULE_TO_SUBJECT = {
   'cuentas-contables': 'Configuracion',
   'parametros-facturacion': 'Configuracion',
   documentos: 'Configuracion',
+  'ciclo-facturacion-prueba': 'CicloFacturacionPrueba',
 } satisfies Record<string, Subject>;
 
 /**
@@ -42,6 +43,7 @@ export const VERB_TO_ACTION = {
   aprobar: 'approve',
   exportar: 'export',
   gestionar: 'manage',
+  reiniciar: 'reiniciar',
 } satisfies Record<string, Action>;
 
 /**

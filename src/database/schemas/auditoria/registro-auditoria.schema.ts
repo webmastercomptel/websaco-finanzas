@@ -1,6 +1,6 @@
 // src/database/schemas/auditoria/registro-auditoria.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Account } from '../cuentas/account.schema';
 
 export type RegistroAuditoriaDocument = HydratedDocument<RegistroAuditoria>;
@@ -18,7 +18,7 @@ export type RegistroAuditoriaDocument = HydratedDocument<RegistroAuditoria>;
 @Schema({ timestamps: true, collection: 'audit_log_entries' })
 export class RegistroAuditoria {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: Account.name,
     required: true,
     index: true,
@@ -39,7 +39,7 @@ export class RegistroAuditoria {
   })
   entidadTipo: 'entidad-administradora' | 'copropiedad' | 'usuario';
 
-  @Prop({ type: Types.ObjectId, required: true, index: true })
+  @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;
 
   /**

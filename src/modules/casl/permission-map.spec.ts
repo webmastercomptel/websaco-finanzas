@@ -261,3 +261,28 @@ describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos
     expect(ability.can('read', 'Configuracion')).toBe(false);
   });
 });
+
+describe('permisos de CicloFacturacionPrueba (reinicio de datos de prueba)', () => {
+  it('ciclo-facturacion-prueba.reiniciar concede solo esa acción sobre ese subject', () => {
+    const ability = abilityFor(['ciclo-facturacion-prueba.reiniciar']);
+
+    expect(ability.can('reiniciar', 'CicloFacturacionPrueba')).toBe(true);
+    expect(ability.can('manage', 'CicloFacturacionPrueba')).toBe(false);
+  });
+
+  it('tener el permiso no concede ningún poder sobre Factura', () => {
+    // El punto entero de aislar este subject: nadie gana capacidad de borrado
+    // sobre datos financieros reales por tener esta llave.
+    const ability = abilityFor(['ciclo-facturacion-prueba.reiniciar']);
+
+    expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('update', 'Factura')).toBe(false);
+    expect(ability.can('annul', 'Factura')).toBe(false);
+  });
+
+  it('facturas.gestionar no concede reiniciar sobre CicloFacturacionPrueba', () => {
+    const ability = abilityFor(['facturas.gestionar']);
+
+    expect(ability.can('reiniciar', 'CicloFacturacionPrueba')).toBe(false);
+  });
+});

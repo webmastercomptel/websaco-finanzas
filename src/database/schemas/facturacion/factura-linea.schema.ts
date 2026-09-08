@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Types } from 'mongoose';
+import { SchemaTypes, Types } from 'mongoose';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
 
 /**
@@ -45,7 +45,7 @@ export const TitularCongeladoSchema =
 @Schema({ _id: false })
 export class FacturaLinea {
   @Prop({
-    type: Types.ObjectId,
+    type: SchemaTypes.ObjectId,
     ref: ConceptoCobro.name,
     required: true,
   })
@@ -62,6 +62,19 @@ export class FacturaLinea {
 
   @Prop({ type: String, default: null, trim: true })
   accountingIncomeAccount: string | null;
+
+  /** This concept's DEBIT account — null falls back to the coproperty's
+   *  shared `receivablesAccount` at posting time, the same way
+   *  `accountingIncomeAccount` falls back to `CUENTA_SIN_ASIGNAR`. See
+   *  `construirMovimientos` (asiento.builder.ts). */
+  @Prop({ type: String, default: null, trim: true })
+  accountingReceivableAccount: string | null;
+
+  /** This concept's TAX account (`ConceptoCobro.cuentaImpuestoId`), frozen
+   *  the same way as `accountingIncomeAccount` — null when the concept has
+   *  no tax account configured, or when `taxAmount` is 0. */
+  @Prop({ type: String, default: null, trim: true })
+  accountingTaxAccount: string | null;
 
   /** Whether this line came from the unit's standing monthly template, a
    *  one-off novedad for this run, or the computed mora interest line. */
@@ -80,7 +93,7 @@ export class FacturaLinea {
    * Factura it is inert history — the NovedadLote it names still lives on
    * the Lote, but nothing reads this field again once issued.
    */
-  @Prop({ type: Types.ObjectId, ref: 'NovedadLote', default: null })
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'NovedadLote', default: null })
   novedadId: Types.ObjectId | null;
 
   @Prop({ required: true })
@@ -94,6 +107,22 @@ export class FacturaLinea {
 
   @Prop({ required: true })
   totalAmount: number;
+
+  /**
+   * This concept's SaldoCartera balance for the unit immediately before and
+   * after this line's `totalAmount` was added — frozen at the moment the
+   * line was built (consolidación time for a real Factura, "as of right
+   * now" for a still-editable FacturaPreliminar), never recomputed later.
+   * Lets the printed document show "Saldo Anterior / Nuevo Saldo" per
+   * concept the way the predecessor system did, without depending on the
+   * live (payment-mutable) SaldoCartera when the PDF is regenerated months
+   * afterward. `balanceAfter - balanceBefore` always equals `totalAmount`.
+   */
+  @Prop({ required: true })
+  balanceBefore: number;
+
+  @Prop({ required: true })
+  balanceAfter: number;
 }
 
 export const FacturaLineaSchema = SchemaFactory.createForClass(FacturaLinea);

@@ -42,6 +42,10 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
@@ -66,7 +70,9 @@ import type { ErrorConsolidacion } from '../../contracts';
 import {
   construirMovimientos,
   cuentasOrdenDe,
+  enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
+  type MarcasCuentaContable,
 } from './asiento.builder';
 
 /**
@@ -78,6 +84,16 @@ import {
  * test in Tasks 6, 7, 9, and 10 constructs this class with all twelve
  * arguments, in this exact order, using `{} as never` for whichever ones
  * that particular test does not exercise.
+ *
+ * `cuentasContables` was APPENDED as a thirteenth argument, and made
+ * OPTIONAL, when tercero/centro de costos/flujo de caja auxiliares shipped:
+ * `consolidar()` needs it to look up which accounts carry those flags before
+ * calling `enriquecerMovimientosConAuxiliares`. Optional (unlike `periodo`'s
+ * own later append) specifically so the ~35 existing tests that construct
+ * this class positionally, one argument short, keep compiling unchanged —
+ * only tests that exercise `consolidar()`'s posted entries need to pass a
+ * real mock. In the real app this is always injected; a `consolidar()` call
+ * with it `undefined` (test-only) simply posts entries with no auxiliares.
  */
 @Injectable()
 export class LotesFacturacionService {
@@ -103,6 +119,8 @@ export class LotesFacturacionService {
     private readonly tenant: TenantContextService,
     private readonly periodo: PeriodoService,
     private readonly numeracion: NumeracionService,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables?: Model<CuentaContableDocument>,
   ) {}
 
   /**
@@ -592,11 +610,16 @@ export class LotesFacturacionService {
       this.conceptos
         .find({ coPropertyId })
         .populate('cuentaCreditoId', 'code')
+        .populate('cuentaDebitoId', 'code')
+        .populate('cuentaImpuestoId', 'code')
         .exec(),
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
     const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
+    const administracionConcepto = conceptos.find(
+      (c) => c.kind === 'administracion',
+    );
 
     const preview: Record<string, unknown>[] = [];
 
@@ -607,6 +630,31 @@ export class LotesFacturacionService {
         .findOne({ _id: unidad.holderId, coPropertyId })
         .exec();
       const lines: Record<string, unknown>[] = [];
+
+      // Fetched once per unit, before any line is built, so every line's
+      // `balanceBefore` reflects the same instant — including the mora
+      // calculation below, which used to re-fetch this same data later in
+      // the loop for no reason (nothing between here and there writes to
+      // SaldoCartera; construirPreview never does).
+      //
+      // `unidad._id` passed as-is, NOT `.toString()`'d: `SaldoCartera`'s
+      // `inmuebleId`/`coPropertyId` paths compile as `Mixed` rather than a
+      // real ObjectId SchemaType under the installed mongoose/@nestjs-mongoose
+      // pair (`@nestjs/mongoose`'s `isMongooseSchemaType()` doesn't recognize
+      // `Types.ObjectId` — the BSON value class — as a mongoose SchemaType,
+      // so `SchemaFactory` falls back to Mixed for every `@Prop({ type:
+      // Types.ObjectId })` field project-wide). A `Mixed` path never
+      // auto-casts a query value, so a STRING id silently matches nothing
+      // against the real ObjectIds stored in the collection — this is what
+      // made mora silently vanish (a whole unit's prior balance read back as
+      // empty). Passing the real `ObjectId` instance sidesteps the cast
+      // entirely: Mongo compares the raw BSON value either way.
+      const saldosUnidad = await this.saldos
+        .find({ coPropertyId, inmuebleId: unidad._id })
+        .exec();
+      const saldoCorrientePorConcepto = new Map(
+        saldosUnidad.map((s) => [s.conceptoId.toString(), s.balance]),
+      );
 
       for (const valor of valoresRecurrentes) {
         if (valor.inmuebleId.toString() !== unidad._id.toString()) continue;
@@ -621,7 +669,13 @@ export class LotesFacturacionService {
         const monto = override ? override.amount : valor.amount;
         if (monto === 0) continue;
         lines.push(
-          this.aLinea(concepto, monto, 'recurrente', override?._id ?? null),
+          this.aLinea(
+            concepto,
+            monto,
+            'recurrente',
+            override?._id ?? null,
+            saldoCorrientePorConcepto,
+          ),
         );
       }
 
@@ -634,7 +688,13 @@ export class LotesFacturacionService {
         if (!concepto) continue;
         if (novedad.amount === 0) continue;
         lines.push(
-          this.aLinea(concepto, novedad.amount, 'novedad', novedad._id),
+          this.aLinea(
+            concepto,
+            novedad.amount,
+            'novedad',
+            novedad._id,
+            saldoCorrientePorConcepto,
+          ),
         );
       }
 
@@ -656,29 +716,49 @@ export class LotesFacturacionService {
                 overrideInteres.amount,
                 'interes',
                 overrideInteres._id,
+                saldoCorrientePorConcepto,
               ),
             );
           }
-        } else {
-          const saldosUnidad = await this.saldos
-            .find({ coPropertyId, inmuebleId: unidad._id.toString() })
-            .exec();
-          const saldoTotal = saldosUnidad.reduce(
-            (acc, s) => acc + s.balance,
-            0,
-          );
+        } else if (administracionConcepto) {
+          // Mora is charged on Administración's OWN prior balance — not the
+          // unit's total cartera across every concepto (product correction:
+          // Multas/Parqueadero/etc. sitting overdue must never inflate the
+          // interest base). Read straight from `saldosUnidad`, the pre-cycle
+          // snapshot, rather than `saldoCorrientePorConcepto` — that map gets
+          // mutated to `balanceAfter` the moment Administración's own
+          // recurrente/novedad line is built above, which would double-count
+          // this cycle's own charge into "saldo anterior".
+          const idAdministracion = administracionConcepto._id.toString();
+          const saldoAdministracionAnterior =
+            saldosUnidad.find(
+              (s) => s.conceptoId.toString() === idAdministracion,
+            )?.balance ?? 0;
           // `lateInterestCap` is a MINIMUM overdue balance to bother
           // charging mora at all, not a ceiling on the amount — see the
           // note on `Copropiedad.lateFeeValueLimit`. Null means no
           // threshold: mora is always calculated when the rate is set.
           const minimo = lote.lateInterestCap;
-          const alcanzaElMinimo = minimo === null || saldoTotal >= minimo;
-          if (lote.lateInterestRate > 0 && saldoTotal > 0 && alcanzaElMinimo) {
+          const alcanzaElMinimo =
+            minimo === null || saldoAdministracionAnterior >= minimo;
+          if (
+            lote.lateInterestRate > 0 &&
+            saldoAdministracionAnterior > 0 &&
+            alcanzaElMinimo
+          ) {
             const valor = Math.round(
-              saldoTotal * (lote.lateInterestRate / 100),
+              saldoAdministracionAnterior * (lote.lateInterestRate / 100),
             );
             if (valor > 0) {
-              lines.push(this.aLinea(interesConcepto, valor, 'interes', null));
+              lines.push(
+                this.aLinea(
+                  interesConcepto,
+                  valor,
+                  'interes',
+                  null,
+                  saldoCorrientePorConcepto,
+                ),
+              );
             }
           }
         }
@@ -691,6 +771,27 @@ export class LotesFacturacionService {
       // nothing to invoice.
       if (lines.length === 0) continue;
 
+      // Cargos order (§ "pestaña de Cargos"), not build order: recurrentes,
+      // novedades and interés are pushed above in THREE separate loops (the
+      // order they're computed in, needed for `balanceBefore`/`balanceAfter`
+      // chaining per concepto), which is never the order a building wants to
+      // see them in — interés, for instance, is always computed last even
+      // though it should print/post second (Administración, Intereses,
+      // Multas…). This reorders the already-computed lines by each line's
+      // own ConceptoCobro.sortOrder, stable on ties, WITHOUT touching the
+      // balances already frozen on each line above. That order also drives
+      // `construirMovimientos`'s per-account grouping (asiento.builder.ts),
+      // which is why it reaches Consulta de Movimiento Contable too.
+      lines.sort((a, b) => {
+        const ordenA =
+          conceptoPorId.get((a.conceptoId as Types.ObjectId).toString())
+            ?.sortOrder ?? 0;
+        const ordenB =
+          conceptoPorId.get((b.conceptoId as Types.ObjectId).toString())
+            ?.sortOrder ?? 0;
+        return ordenA - ordenB;
+      });
+
       const subtotal = lines.reduce(
         (acc, l) => acc + (l.baseAmount as number),
         0,
@@ -701,9 +802,9 @@ export class LotesFacturacionService {
       );
 
       preview.push({
-        inmuebleId: unidad._id.toString(),
+        inmuebleId: unidad._id,
         unitCode: unidad.code,
-        terceroId: tercero?._id.toString() ?? null,
+        terceroId: tercero?._id ?? null,
         holder: tercero
           ? {
               name: tercero.name,
@@ -771,6 +872,11 @@ export class LotesFacturacionService {
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentasOrden = cuentasOrdenDe(copropiedad);
+    const marcasPorCuenta = await this.marcasCuentasPorCodigo(coPropertyId);
+    const contextoAuxiliares = {
+      centroCosto: copropiedad?.defaultCostCentre ?? null,
+      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+    };
 
     // Resume support: if an earlier attempt at this same Lote already
     // created some Facturas before a resolution-exhaustion blocker (or a
@@ -834,14 +940,24 @@ export class LotesFacturacionService {
 
       // Spec §6, "Unbalanced AsientoContable": refused before it would be
       // saved — and before a real DIAN number or any document is created
-      // for this row. This checks a bug in the posting logic itself, not a
-      // data problem a re-run fixes, so it is thrown (uncaught, propagates
-      // out of consolidar entirely), not recorded as a row error.
-      const entries = construirMovimientos(
+      // for this row. Since construirMovimientos posts one debit and one
+      // credit per line, both for that same line's totalAmount, the two
+      // sums are equal by construction for any real preliminar — this check
+      // is defense-in-depth against a future bug in that builder, not a
+      // reachable data problem a re-run fixes, so it is thrown
+      // (uncaught, propagates out of consolidar entirely), not recorded as a
+      // row error.
+      let entries = construirMovimientos(
         preliminar,
         cuentaCartera,
         cuentasOrden,
       );
+      if (marcasPorCuenta) {
+        entries = enriquecerMovimientosConAuxiliares(entries, marcasPorCuenta, {
+          ...contextoAuxiliares,
+          terceroCode: preliminar.unitCode,
+        });
+      }
       const sumaDebitos = entries
         .filter((m) => m.type === 'debito')
         .reduce((acc, m) => acc + m.amount, 0);
@@ -875,6 +991,34 @@ export class LotesFacturacionService {
       // row's own data problem, not a global blocker: record it and move
       // to the next row instead of aborting the whole batch.
       try {
+        // `preliminar.lines[].balanceBefore/After` were computed back at
+        // liquidar() time — stale the moment a payment posts in between.
+        // The number that actually gets printed on the issued Factura must
+        // reflect SaldoCartera as it stands RIGHT NOW, immediately before
+        // this row's own increment below — so it's recomputed fresh here,
+        // per concept, with the same running-map trick as aLinea() for a
+        // unit whose lines repeat a concept (e.g. recurrente + novedad on
+        // the same concepto).
+        const saldoCorrientePorConcepto = new Map<string, number>();
+        for (const linea of preliminar.lines) {
+          const key = linea.conceptoId.toString();
+          let balanceBefore = saldoCorrientePorConcepto.get(key);
+          if (balanceBefore === undefined) {
+            const saldoActual = await this.saldos
+              .findOne({
+                coPropertyId,
+                inmuebleId: preliminar.inmuebleId,
+                conceptoId: linea.conceptoId,
+              })
+              .exec();
+            balanceBefore = saldoActual?.balance ?? 0;
+          }
+          const balanceAfter = balanceBefore + linea.totalAmount;
+          linea.balanceBefore = balanceBefore;
+          linea.balanceAfter = balanceAfter;
+          saldoCorrientePorConcepto.set(key, balanceAfter);
+        }
+
         const factura = await this.facturas.create({
           coPropertyId,
           loteId,
@@ -1033,12 +1177,48 @@ export class LotesFacturacionService {
 
   /** Builds one frozen invoice line from a concept and a base amount —
    *  shared by the recurrente, novedad, and interes cases in
-   *  construirPreview(). `accountingIncomeAccount` on the resulting line is
-   *  the concept's CREDIT account code — invoicing credits income, per
+   *  construirPreview(). `accountingIncomeAccount`/`accountingReceivableAccount`
+   *  on the resulting line are the concept's CREDIT and DEBIT account codes —
+   *  invoicing credits income and debits cartera per concept, per
    *  `construirMovimientos` in asiento.builder.ts. `novedadId` is the
    *  NovedadLote this line came from or was overridden by, null for a
    *  recurrente/interes line never touched manually — see FacturaLinea's
    *  schema comment. */
+  /**
+   * One `find({coPropertyId})` for the whole chart of accounts, reused for
+   * every unit in `consolidar()`'s loop — same "fetch once outside the
+   * per-unit loop" shape as `conceptos`/`valoresRecurrentes` in
+   * `construirPreview()`. Returns `undefined` (not an empty Map) when
+   * `cuentasContables` was never injected — the test-only case documented on
+   * this class's own constructor — so callers can tell "no accounts
+   * configured" apart from "no lookup available at all" and skip enrichment
+   * entirely in the latter.
+   */
+  private async marcasCuentasPorCodigo(
+    coPropertyId: Types.ObjectId,
+  ): Promise<Map<string, MarcasCuentaContable> | undefined> {
+    if (!this.cuentasContables) return undefined;
+    const cuentas = await this.cuentasContables.find({ coPropertyId }).exec();
+    return new Map(
+      cuentas.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+        },
+      ]),
+    );
+  }
+
+  /**
+   * `saldoCorrientePorConcepto` is mutated in place: this line's
+   * `balanceAfter` becomes the map's new value for its concept, so a
+   * second line against the same concept on the same unit (e.g. a novedad
+   * on top of the recurrente charge) stacks on top of THIS line's result,
+   * not the value read at the start of the unit's loop.
+   */
   private aLinea(
     concepto: {
       _id: Types.ObjectId;
@@ -1046,23 +1226,37 @@ export class LotesFacturacionService {
       kind: string;
       taxRate: number;
       cuentaCreditoId: { code: string } | Types.ObjectId | null;
+      cuentaDebitoId: { code: string } | Types.ObjectId | null;
+      cuentaImpuestoId: { code: string } | Types.ObjectId | null;
     },
     baseAmount: number,
     origen: 'recurrente' | 'novedad' | 'interes',
     novedadId: Types.ObjectId | null = null,
+    saldoCorrientePorConcepto: Map<string, number>,
   ): Record<string, unknown> {
     const taxAmount = Math.round(baseAmount * (concepto.taxRate / 100));
+    const totalAmount = baseAmount + taxAmount;
+    const key = concepto._id.toString();
+    const balanceBefore = saldoCorrientePorConcepto.get(key) ?? 0;
+    const balanceAfter = balanceBefore + totalAmount;
+    saldoCorrientePorConcepto.set(key, balanceAfter);
     return {
       conceptoId: concepto._id,
       conceptName: concepto.name,
       conceptKind: concepto.kind,
       accountingIncomeAccount: codigoDeCuentaContable(concepto.cuentaCreditoId),
+      accountingReceivableAccount: codigoDeCuentaContable(
+        concepto.cuentaDebitoId,
+      ),
+      accountingTaxAccount: codigoDeCuentaContable(concepto.cuentaImpuestoId),
       source: origen,
       novedadId,
       baseAmount,
       taxRate: concepto.taxRate,
       taxAmount,
-      totalAmount: baseAmount + taxAmount,
+      totalAmount,
+      balanceBefore,
+      balanceAfter,
     };
   }
 }

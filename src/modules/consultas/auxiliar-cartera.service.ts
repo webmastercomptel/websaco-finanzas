@@ -25,6 +25,14 @@ import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type {
   MovimientoKardex,
@@ -63,6 +71,10 @@ export class AuxiliarCarteraService {
     private readonly notasContables: Model<NotaContableDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -73,7 +85,18 @@ export class AuxiliarCarteraService {
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.desde);
     const hasta = new Date(query.hasta);
-    const tiposFilter = query.tipos ?? [...TIPOS_VALIDOS];
+
+    const inmueble = await this.inmuebles
+      .findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    const inmuebleCodigo = inmueble?.code ?? '';
+    let propietario: string | null = null;
+    if (inmueble?.holderId) {
+      const tercero = await this.terceros
+        .findOne({ _id: inmueble.holderId, coPropertyId })
+        .exec();
+      propietario = tercero?.name ?? null;
+    }
 
     // Step 1: fetch all documents for this inmueble (no date filter — see §5)
     const [facturas, notasDebito, recibos, notasCredito, notasContables] =
@@ -221,12 +244,9 @@ export class AuxiliarCarteraService {
       .filter((m) => new Date(m.fecha) < desde)
       .reduce((sum, m) => sum + (m.debito ?? 0) - (m.credito ?? 0), 0);
 
-    // Step 7: apply date + tipo filters for DISPLAY (saldo already correct)
+    // Step 7: apply the date range for DISPLAY (saldo already correct)
     const movimientos = allMovimientos.filter(
-      (m) =>
-        new Date(m.fecha) >= desde &&
-        new Date(m.fecha) <= hasta &&
-        tiposFilter.includes(m.tipo),
+      (m) => new Date(m.fecha) >= desde && new Date(m.fecha) <= hasta,
     );
 
     const totalDebitos = movimientos.reduce(
@@ -244,6 +264,11 @@ export class AuxiliarCarteraService {
       saldoInicial;
 
     return {
+      inmuebleId: query.inmuebleId,
+      inmuebleCodigo,
+      propietario,
+      desde: desde.toISOString(),
+      hasta: hasta.toISOString(),
       saldoInicial,
       movimientos,
       totalDebitos,
@@ -252,5 +277,3 @@ export class AuxiliarCarteraService {
     };
   }
 }
-
-const TIPOS_VALIDOS = ['FC', 'RC', 'NC', 'ND', 'NT'] as const;

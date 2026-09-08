@@ -21,6 +21,7 @@ import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LotesFacturacionService } from './lotes.service';
 import { FacturasService } from './facturas.service';
+import { ConsultaFacturacionService } from './consulta-facturacion.service';
 import { CrearLoteDto } from './dto/crear-lote.dto';
 import { ActualizarLoteDto } from './dto/actualizar-lote.dto';
 import { CargarNovedadesDto } from './dto/cargar-novedades.dto';
@@ -33,10 +34,12 @@ import type {
   LoteFacturacion,
   LoteFacturacionDetalle,
   ResultadoCargaNovedades,
+  RespuestaConsultaFacturacion,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
 import { generarPdfFacturasLote } from '../../common/pdf/facturas-lote-pdf';
+import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import {
   Copropiedad,
   CopropiedadDocument,
@@ -59,6 +62,7 @@ export class LotesController {
   constructor(
     private readonly lotes: LotesFacturacionService,
     private readonly facturas: FacturasService,
+    private readonly consultaFacturacion: ConsultaFacturacionService,
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
@@ -221,11 +225,50 @@ export class LotesController {
       facturas,
       resolucionesPorId,
       copropiedad,
+      lote,
     );
 
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="facturas-lote-${lote.number}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
+  /**
+   * The results of a consolidado lote: per-concept totals and a per-invoice
+   * detail table, derived live from its Facturas. See
+   * ConsultaFacturacionService for why this is a focused query rather than
+   * a reuse of `findAllRawPorLote`.
+   */
+  @Get(':id/consulta-facturacion')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  obtenerConsultaFacturacion(
+    @Param('id') id: string,
+  ): Promise<RespuestaConsultaFacturacion> {
+    return this.consultaFacturacion.generar(id);
+  }
+
+  @Get(':id/consulta-facturacion.pdf')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async consultaFacturacionPdf(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.consultaFacturacion.generar(id);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfConsultaFacturacion(reporte, copropiedad);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="consulta-facturacion-lote-${reporte.loteNumero}.pdf"`,
     });
     res.send(Buffer.from(bytes));
   }

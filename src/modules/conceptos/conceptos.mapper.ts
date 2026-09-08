@@ -38,6 +38,8 @@ export const toConcepto = (doc: ConceptoCobroDocument): ConceptoContract => ({
   cuentaDebitoCodigo: codigoDeCuentaContable(doc.cuentaDebitoId),
   cuentaCreditoId: idDeCuenta(doc.cuentaCreditoId),
   cuentaCreditoCodigo: codigoDeCuentaContable(doc.cuentaCreditoId),
+  cuentaImpuestoId: idDeCuenta(doc.cuentaImpuestoId),
+  cuentaImpuestoCodigo: codigoDeCuentaContable(doc.cuentaImpuestoId),
   liquidaMora: doc.liquidaMora,
   cargaXls: doc.availableAsNovedad,
   sistema: doc.isSystem,

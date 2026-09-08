@@ -27,6 +27,13 @@ export const ACTIONS = [
   'annul',
   'approve',
   'export',
+  // Deliberately NOT `delete` — see the note above. `reiniciar` is a
+  // single, isolated escape hatch that physically deletes documents, kept
+  // completely separate from every other subject's vocabulary: it exists
+  // only for CicloFacturacionPrueba (see that subject's own note), and a
+  // role holding it gains no delete-like power over Factura, Recibo, or
+  // anything else the audit law actually protects.
+  'reiniciar',
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -46,6 +53,11 @@ export const SUBJECTS = [
   'Anulacion',
   'Consulta',
   'Configuracion',
+  // A demo/test-data reset, hardcoded server-side to one specific
+  // coproperty code — never a real customer's. Kept as its own subject
+  // rather than reusing `manage`/Factura precisely so granting it can never
+  // be confused with granting real delete power over financial documents.
+  'CicloFacturacionPrueba',
   'all', // CASL alias: every subject
 ] as const;
 export type Subject = (typeof SUBJECTS)[number];

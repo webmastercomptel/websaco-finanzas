@@ -32,6 +32,8 @@ export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
   tasaImpuesto: linea.taxRate,
   valorImpuesto: linea.taxAmount,
   valorTotal: linea.totalAmount,
+  saldoAnterior: linea.balanceBefore,
+  nuevoSaldo: linea.balanceAfter,
 });
 
 /**
