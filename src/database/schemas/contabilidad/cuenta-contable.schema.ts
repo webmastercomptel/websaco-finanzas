@@ -36,6 +36,11 @@ export class CuentaContable {
   @Prop({ required: true, default: false })
   requiresTercero: boolean;
 
+  /** "Banco" column — whether this account represents a bank account, e.g.
+   *  to offer as the destination account when posting a Recibo de Caja. */
+  @Prop({ required: true, default: false })
+  isBank: boolean;
+
   /** "Flujo Caja" column — cash-flow flag. */
   @Prop({ required: true, default: false })
   cashFlow: boolean;

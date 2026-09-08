@@ -32,6 +32,7 @@ function makeConceptos(cantidad: number): TotalConceptoLote[] {
     conceptoId: `con-${i}`,
     nombreConcepto: `Concepto ${i + 1}`,
     monto: 10000 * (i + 1),
+    montoIva: 0,
   }));
 }
 
@@ -62,6 +63,7 @@ function makeReporte(
         valoresPorConcepto: Object.fromEntries(
           totalesPorConcepto.map((c) => [c.conceptoId, c.monto]),
         ),
+        valoresIvaPorConcepto: {},
         subtotal: 30000,
         totalImpuestos: 0,
         total: 30000,
