@@ -45,6 +45,14 @@ export class CopropiedadesController {
     return this.copropiedades.findAll(query);
   }
 
+  /** Must come before `:id` — otherwise "siguiente-codigo" is read as an id. */
+  @Get('siguiente-codigo')
+  siguienteCodigo(): Promise<{ codigo: string }> {
+    return this.copropiedades
+      .previsualizarSiguienteCodigo()
+      .then((codigo) => ({ codigo }));
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string): Promise<Copropiedad> {
     return this.copropiedades.findOne(id);

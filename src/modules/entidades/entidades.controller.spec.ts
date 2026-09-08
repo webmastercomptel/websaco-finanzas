@@ -19,10 +19,10 @@ describe('EntidadesController.create', () => {
     };
     const controller = makeController(entidades);
 
-    await controller.create({ codigo: 'ENT-001', nombre: 'Calad' }, USER);
+    await controller.create({ nombre: 'Calad' }, USER);
 
     expect(entidades.create).toHaveBeenCalledWith(
-      { codigo: 'ENT-001', nombre: 'Calad' },
+      { nombre: 'Calad' },
       { accountId: 'account-real-1', nombre: 'Admin Real' },
     );
   });
@@ -34,13 +34,10 @@ describe('EntidadesController.create', () => {
     const controller = makeController(entidades);
     const userSinNombre: IRequestUser = { ...USER, nombre: undefined };
 
-    await controller.create(
-      { codigo: 'ENT-001', nombre: 'Calad' },
-      userSinNombre,
-    );
+    await controller.create({ nombre: 'Calad' }, userSinNombre);
 
     expect(entidades.create).toHaveBeenCalledWith(
-      { codigo: 'ENT-001', nombre: 'Calad' },
+      { nombre: 'Calad' },
       { accountId: 'account-real-1', nombre: userSinNombre.email },
     );
   });

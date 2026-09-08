@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { CopropiedadesService } from './copropiedades.service';
 
 type Filtro = Record<string, unknown>;
@@ -6,6 +6,18 @@ type Filtro = Record<string, unknown>;
 const mockAuditoria = () => ({
   registrar: jest.fn().mockResolvedValue(undefined),
 });
+
+/** Mimics the atomic counter: each call returns the next integer. */
+const mockContador = (valorInicial = 0) => {
+  let valor = valorInicial;
+  return {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve({ valor }) })),
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(undefined) })),
+    findOneAndUpdate: jest.fn(() => ({
+      exec: () => Promise.resolve({ valor: ++valor }),
+    })),
+  };
+};
 
 const mockConceptos = () => ({
   create: jest.fn().mockResolvedValue({}),
@@ -46,6 +58,7 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
     sort: () => cadenaLista,
     skip: () => cadenaLista,
     limit: () => cadenaLista,
+    collation: () => cadenaLista,
     exec: () => Promise.resolve(filas),
   };
 
@@ -90,6 +103,7 @@ describe('CopropiedadesService.findAll', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -107,6 +121,7 @@ describe('CopropiedadesService.findAll', () => {
     ]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -127,6 +142,7 @@ describe('CopropiedadesService.findAll', () => {
     ]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -152,6 +168,7 @@ describe('CopropiedadesService.findAll', () => {
     ]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       asignaciones as never,
       accounts as never,
       mockAuditoria() as never,
@@ -181,6 +198,7 @@ describe('CopropiedadesService.findAll', () => {
     ]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       asignaciones as never,
       accounts as never,
       mockAuditoria() as never,
@@ -201,6 +219,7 @@ describe('CopropiedadesService.findAll', () => {
     const asignaciones = mockAsignaciones();
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       asignaciones as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -217,6 +236,7 @@ describe('CopropiedadesService.findAll', () => {
     const modelo = modeloCon([documento({ managingEntityId: null })]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -230,19 +250,21 @@ describe('CopropiedadesService.findAll', () => {
 });
 
 describe('CopropiedadesService.create', () => {
-  it('rechaza un código repetido', async () => {
-    const modelo = modeloCon([], { duplicado: true });
+  it('asigna el código automáticamente desde el contador', async () => {
+    const modelo = modeloCon([documento({ name: 'Nueva Copro' })]);
+    const contador = mockContador(9);
     const service = new CopropiedadesService(
       modelo as never,
+      contador as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
     );
 
-    await expect(
-      service.create({ codigo: 'COP-001', nombre: 'Otra' }, ACTOR),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await service.create({ nombre: 'Nueva Copro' }, ACTOR);
+
+    expect(modelo.escrituras[0]).toMatchObject({ code: '0010' });
   });
 
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
@@ -252,13 +274,14 @@ describe('CopropiedadesService.create', () => {
     const auditoria = mockAuditoria();
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       auditoria as never,
       mockConceptos() as never,
     );
 
-    await service.create({ codigo: 'COP-002', nombre: 'Nueva Copro' }, ACTOR);
+    await service.create({ nombre: 'Nueva Copro' }, ACTOR);
 
     expect(auditoria.registrar).toHaveBeenCalledWith({
       actorAccountId: ACTOR.accountId,
@@ -277,6 +300,7 @@ describe('CopropiedadesService.create', () => {
     };
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       auditoria as never,
@@ -284,7 +308,7 @@ describe('CopropiedadesService.create', () => {
     );
 
     await expect(
-      service.create({ codigo: 'COP-002', nombre: 'Nueva Copro' }, ACTOR),
+      service.create({ nombre: 'Nueva Copro' }, ACTOR),
     ).rejects.toThrow('audit down');
   });
 });
@@ -294,6 +318,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -309,6 +334,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -327,6 +353,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -345,6 +372,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -363,6 +391,7 @@ describe('CopropiedadesService.update', () => {
     })) as never;
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -379,6 +408,7 @@ describe('CopropiedadesService.update', () => {
     const auditoria = mockAuditoria();
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       auditoria as never,
@@ -404,6 +434,7 @@ describe('CopropiedadesService.update', () => {
     };
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       auditoria as never,
@@ -419,6 +450,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -436,6 +468,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,
@@ -453,6 +486,7 @@ describe('CopropiedadesService.update', () => {
     const modelo = modeloCon([documento()]);
     const service = new CopropiedadesService(
       modelo as never,
+      mockContador() as never,
       mockAsignaciones() as never,
       mockAccounts() as never,
       mockAuditoria() as never,

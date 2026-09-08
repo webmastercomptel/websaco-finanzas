@@ -6,6 +6,10 @@ import {
   CopropiedadSchema,
 } from './schemas/copropiedades/copropiedad.schema';
 import {
+  ContadorCopropiedad,
+  ContadorCopropiedadSchema,
+} from './schemas/copropiedades/contador-copropiedad.schema';
+import {
   Inmueble,
   InmuebleSchema,
 } from './schemas/copropiedades/inmueble.schema';
@@ -14,6 +18,10 @@ import {
   EntidadAdministradora,
   EntidadAdministradoraSchema,
 } from './schemas/entidades/entidad-administradora.schema';
+import {
+  ContadorEntidadAdministradora,
+  ContadorEntidadAdministradoraSchema,
+} from './schemas/entidades/contador-entidad-administradora.schema';
 import {
   ConceptoCobro,
   ConceptoCobroSchema,
@@ -80,7 +88,12 @@ import {
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
+  {
+    name: ContadorEntidadAdministradora.name,
+    schema: ContadorEntidadAdministradoraSchema,
+  },
   { name: Copropiedad.name, schema: CopropiedadSchema },
+  { name: ContadorCopropiedad.name, schema: ContadorCopropiedadSchema },
   { name: Inmueble.name, schema: InmuebleSchema },
   { name: Tercero.name, schema: TerceroSchema },
   { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
