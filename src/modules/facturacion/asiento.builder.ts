@@ -87,7 +87,10 @@ export function cuentasOrdenDe(
 /**
  * One shared self-balancing debit/credit pair for `cuentasOrden`, at `monto`
  * — appended by every builder below when the coproperty uses them. `[]` when
- * `cuentasOrden` is null, so callers can always splice the result in.
+ * `cuentasOrden` is null, so callers can always splice the result in. Also
+ * `[]` at `monto === 0` — callers that scope this to a mora-specific portion
+ * (a cruce document that never touched an `intereses` concept) must not
+ * leave a zero-amount debit/credit pair sitting in the ledger.
  *
  * `invertido` swaps which side is debited/credited — a void/reversal entry
  * undoing what the original posting added, the same "same shape, accounts
@@ -100,7 +103,7 @@ function movimientosCuentasOrden(
   descripcion: string,
   invertido = false,
 ): Movimiento[] {
-  if (!cuentasOrden) return [];
+  if (!cuentasOrden || monto === 0) return [];
   const debito = invertido ? cuentasOrden.credito : cuentasOrden.debito;
   const credito = invertido ? cuentasOrden.debito : cuentasOrden.credito;
   return [
@@ -386,8 +389,17 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * document's own total everywhere else in each service.
  *
  * `cuentasOrden`, when given, appends the same self-balancing memo pair
- * `construirMovimientos` posts for facturación — debit/credit, both for the
- * document's full `montoAplicado + montoSinAplicar`.
+ * `construirMovimientos` posts for facturación — debit/credit, both for
+ * `montoCuentasOrden`: the portion of THIS call that was actually applied
+ * against an `intereses` (mora) concept, never the document's whole amount.
+ * Facturación only redirects a line to the memo accounts when that line's
+ * own `conceptKind` is `intereses` (see `construirMovimientos`) — a cruce
+ * document must mirror that same scoping, or a receipt that never touched a
+ * mora charge (e.g. one paying only Administración) would still post a
+ * memo entry, and one that pays BOTH mora and other concepts would post the
+ * memo for more than what was actually mora. Defaults to
+ * `montoAplicado + montoSinAplicar` when omitted, preserving prior callers'
+ * exact behavior.
  */
 export function construirAsientoCruce(
   cuentaOrigen: string,
@@ -398,6 +410,7 @@ export function construirAsientoCruce(
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
   desgloseCartera?: { account: string; monto: number }[],
+  montoCuentasOrden?: number,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [
@@ -445,7 +458,7 @@ export function construirAsientoCruce(
   movimientos.push(
     ...movimientosCuentasOrden(
       cuentasOrden,
-      montoAplicado + montoSinAplicar,
+      montoCuentasOrden ?? montoAplicado + montoSinAplicar,
       d.cuentaOrden,
     ),
   );
@@ -462,28 +475,64 @@ export function construirAsientoCruce(
  *
  * UNCHANGED name from before Task 2 (it never had an account parameter tied
  * to one side, so there was nothing to rename) — only `origen` is new.
+ *
+ * `desgloseCartera` and `cuentasOrden`/`montoCuentasOrden` work exactly as
+ * they do on `construirAsientoCruce` — this is the same cartera credit, only
+ * booked later instead of at creation, so a deferred application against a
+ * per-concepto-coded or mora-carrying document must be coded identically to
+ * an immediate one.
  */
 export function construirMovimientosAplicacionAnticipo(
   cuentaAnticipos: string,
   cuentaCartera: string,
   montoAplicado: number,
   origen: OrigenAsiento,
+  desgloseCartera?: { account: string; monto: number }[],
+  cuentasOrden?: CuentasOrden | null,
+  montoCuentasOrden?: number,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
-  return [
+  const movimientos: Movimiento[] = [
     {
       account: cuentaAnticipos,
       type: 'debito',
       amount: montoAplicado,
       description: d.aplicacionDebitoAnticipo,
     },
-    {
+  ];
+
+  if (desgloseCartera && desgloseCartera.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseCartera) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'credito',
+        amount: monto,
+        description: d.aplicacionCreditoCartera,
+      });
+    }
+  } else {
+    movimientos.push({
       account: cuentaCartera,
       type: 'credito',
       amount: montoAplicado,
       description: d.aplicacionCreditoCartera,
-    },
-  ];
+    });
+  }
+
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoCuentasOrden ?? 0,
+      d.cuentaOrden,
+    ),
+  );
+
+  return movimientos;
 }
 
 /**
@@ -501,10 +550,20 @@ export function construirMovimientosAplicacionAnticipo(
  * → `cuentaOrigen`, `montoRecibido` → `montoOrigen` (a Nota Crédito's
  * `montoTotal`, not anything "received").
  *
+ * The `cuentaCartera` debit is, by default, one line for the coproperty's
+ * shared receivables account — same default `construirAsientoCruce` uses.
+ * When `desgloseCartera` is given (non-empty), it REPLACES that single line
+ * with one debit per distinct account in it, restoring the SAME per-concepto
+ * accounts the original creation/application actually credited, not the
+ * shared one — otherwise a void would debit back an account the original
+ * entry never touched, leaving both permanently unbalanced.
+ *
  * `cuentasOrden`, when given, appends the reversal of the memo pair the
  * creation-time entry posted — same accounts, sides swapped (`invertido`),
- * for the full `montoOrigen` — zeroing out what `construirAsientoCruce` added
- * rather than doubling it.
+ * for `montoCuentasOrden` (defaults to the full `montoOrigen` when omitted,
+ * preserving prior callers' exact behavior) — see `construirAsientoCruce`'s
+ * own note on why this must be the mora-specific portion, not the whole
+ * document, whenever the caller can tell the two apart.
  */
 export function construirContraAsientoCruce(
   cuentaOrigen: string,
@@ -515,17 +574,35 @@ export function construirContraAsientoCruce(
   montoOrigen: number,
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
+  desgloseCartera?: { account: string; monto: number }[],
+  montoCuentasOrden?: number,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
 
   if (montoAplicado > 0) {
-    movimientos.push({
-      account: cuentaCartera,
-      type: 'debito',
-      amount: montoAplicado,
-      description: d.contraDebitoCartera,
-    });
+    if (desgloseCartera && desgloseCartera.length > 0) {
+      const porCuenta = new Map<string, number>();
+      for (const { account, monto } of desgloseCartera) {
+        if (monto === 0) continue;
+        porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+      }
+      for (const [account, monto] of porCuenta) {
+        movimientos.push({
+          account,
+          type: 'debito',
+          amount: monto,
+          description: d.contraDebitoCartera,
+        });
+      }
+    } else {
+      movimientos.push({
+        account: cuentaCartera,
+        type: 'debito',
+        amount: montoAplicado,
+        description: d.contraDebitoCartera,
+      });
+    }
   }
   if (montoSinAplicar > 0) {
     movimientos.push({
@@ -546,7 +623,7 @@ export function construirContraAsientoCruce(
   movimientos.push(
     ...movimientosCuentasOrden(
       cuentasOrden,
-      montoOrigen,
+      montoCuentasOrden ?? montoOrigen,
       d.cuentaOrdenContra,
       true,
     ),

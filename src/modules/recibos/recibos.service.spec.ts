@@ -636,6 +636,165 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     ]);
   });
 
+  it('con cuentas de orden habilitadas, escala el par memo SOLO a lo aplicado al cargo de mora', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      _id: facturaId,
+      lines: [
+        {
+          conceptoId: conceptoAdmin,
+          conceptKind: 'administracion',
+          totalAmount: 200000,
+          accountingReceivableAccount: '130501',
+        },
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 40000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 240000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 0,
+      // Read by aplicarManual's guard BEFORE this call's own application —
+      // the full receivedAmount, same as any freshly created recibo.
+      unappliedAmount: 240000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve({
+              receivablesAccount: '130501',
+              advancesAccount: '210505',
+              usesMemorandumAccounts: true,
+              memorandumDebitAccount: '831505',
+              memorandumCreditAccount: '831510',
+            }),
+        }),
+      })),
+    };
+    const { service, asientos } = construirServicio({
+      reciboCreado,
+      factura,
+      copropiedades,
+    });
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      montoRecibido: 240000,
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: facturaId.toString(),
+          montoAplicado: 240000,
+        },
+      ],
+    });
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
+    // 240.000 se aplicaron en total, pero solo 40.000 tocaron el cargo de
+    // mora — el par de cuentas de orden debe reflejar 40.000, no 240.000.
+    expect(entries.find((m) => m.account === '831505')?.amount).toBe(40000);
+    expect(entries.find((m) => m.account === '831510')?.amount).toBe(40000);
+  });
+
+  it('con cuentas de orden habilitadas, no agrega el par memo cuando nada se aplicó a mora', async () => {
+    const facturaId = new Types.ObjectId();
+    const factura = facturaDoc({
+      _id: facturaId,
+      lines: [
+        {
+          conceptoId: new Types.ObjectId(),
+          conceptKind: 'administracion',
+          totalAmount: 200000,
+          accountingReceivableAccount: '130501',
+        },
+      ],
+    });
+    const reciboCreado = {
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 200000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 0,
+      // Same reasoning as the test above.
+      unappliedAmount: 200000,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve({
+              receivablesAccount: '130501',
+              advancesAccount: '210505',
+              usesMemorandumAccounts: true,
+              memorandumDebitAccount: '831505',
+              memorandumCreditAccount: '831510',
+            }),
+        }),
+      })),
+    };
+    const { service, asientos } = construirServicio({
+      reciboCreado,
+      factura,
+      copropiedades,
+    });
+
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      montoRecibido: 200000,
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: facturaId.toString(),
+          montoAplicado: 200000,
+        },
+      ],
+    });
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{ account: string }>;
+    expect(entries.some((m) => m.account === '831505')).toBe(false);
+    expect(entries.some((m) => m.account === '831510')).toBe(false);
+  });
+
   it('rechaza — todo o nada — cuando la suma solicitada supera el monto recibido', async () => {
     const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
     const { service } = construirServicio({ reciboCreado });
@@ -1273,6 +1432,148 @@ describe('RecibosService.aplicar', () => {
     ]);
   });
 
+  it('acredita la cuenta propia del concepto, no la cuenta plana, en una aplicación diferida', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      _id: facturaId,
+      lines: [
+        {
+          conceptoId: conceptoMora,
+          totalAmount: 500000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const recibo = reciboExistente();
+
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(recibo),
+      })),
+    };
+    const facturas = modeloFacturas(factura);
+    const session = sesionFalsa();
+    const asientos = modeloAsientos();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+    );
+
+    await service.aplicar(
+      recibo._id.toString(),
+      {
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: facturaId.toString(),
+            montoAplicado: 200000,
+          },
+        ],
+      },
+      CUENTA.toString(),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+    }>;
+    const creditos = entries.filter((m) => m.type === 'credito');
+    expect(creditos).toEqual([expect.objectContaining({ account: '130599' })]);
+    expect(creditos.some((c) => c.account === '130501')).toBe(false);
+  });
+
+  it('con cuentas de orden habilitadas, escala el par memo a lo aplicado a mora en una aplicación diferida', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      _id: facturaId,
+      lines: [
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 500000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const recibo = reciboExistente();
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(recibo),
+      })),
+    };
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve({
+              receivablesAccount: '130501',
+              advancesAccount: '210505',
+              usesMemorandumAccounts: true,
+              memorandumDebitAccount: '831505',
+              memorandumCreditAccount: '831510',
+            }),
+        }),
+      })),
+    };
+    const session = sesionFalsa();
+    const asientos = modeloAsientos();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(factura) as never,
+      modeloSaldos() as never,
+      asientos as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+    );
+
+    await service.aplicar(
+      recibo._id.toString(),
+      {
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: facturaId.toString(),
+            montoAplicado: 200000,
+          },
+        ],
+      },
+      CUENTA.toString(),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      amount: number;
+    }>;
+    expect(entries.find((m) => m.account === '831505')?.amount).toBe(200000);
+    expect(entries.find((m) => m.account === '831510')?.amount).toBe(200000);
+  });
+
   it('rechaza cuando lo solicitado excede el saldo sin aplicar del recibo', async () => {
     const recibo = reciboExistente({ unappliedAmount: 50000 });
     const recibos = {
@@ -1513,6 +1814,170 @@ describe('RecibosService.anular', () => {
         description: expect.any(String),
       },
     ]);
+  });
+
+  it('debita de vuelta la cuenta propia del concepto, no la cuenta plana de cartera', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 200000,
+      status: 'activa',
+    };
+    // Antes de esta anulación: 200.000 de los 500.000 de la factura estaban
+    // aplicados (outstandingBalance=300.000); el $inc de la reversión la
+    // deja de nuevo en 500.000 (factura.total), toda ella otra vez pendiente.
+    const facturaRestaurada = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 500000,
+      outstandingBalance: 500000,
+      lines: [
+        {
+          conceptoId: conceptoMora,
+          totalAmount: 500000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    };
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaRestaurada),
+      })),
+    };
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const session = sesionFalsa();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicacionesActivas([aplicacionActiva]) as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+    );
+
+    await service.anular(
+      recibo._id.toString(),
+      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      CUENTA.toString(),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
+    const debitos = entries.filter((m) => m.type === 'debito');
+    // Debita de vuelta la cuenta propia del concepto de mora (130599) por lo
+    // que esta aplicación había acreditado — NO la cuenta plana de cartera
+    // de la copropiedad (130501).
+    expect(debitos.find((d) => d.account === '130599')?.amount).toBe(200000);
+    expect(debitos.some((d) => d.account === '130501')).toBe(false);
+  });
+
+  it('con cuentas de orden habilitadas, revierte el par memo SOLO por lo que era mora', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 200000,
+      status: 'activa',
+    };
+    const facturaRestaurada = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 500000,
+      outstandingBalance: 500000,
+      lines: [
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 500000,
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    };
+    const facturas = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaRestaurada),
+      })),
+    };
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve({
+              receivablesAccount: '130501',
+              advancesAccount: '210505',
+              usesMemorandumAccounts: true,
+              memorandumDebitAccount: '831505',
+              memorandumCreditAccount: '831510',
+            }),
+        }),
+      })),
+    };
+    const asientos = modeloAsientos();
+    const session = sesionFalsa();
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicacionesActivas([aplicacionActiva]) as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+    );
+
+    await service.anular(
+      recibo._id.toString(),
+      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      CUENTA.toString(),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      type: string;
+      amount: number;
+    }>;
+    // 300.000 es el receivedAmount total del recibo, pero solo 200.000
+    // fueron mora — el par memo revertido debe ser 200.000, no 300.000.
+    expect(
+      entries.find((m) => m.account === '831510' && m.type === 'debito')
+        ?.amount,
+    ).toBe(200000);
+    expect(
+      entries.find((m) => m.account === '831505' && m.type === 'credito')
+        ?.amount,
+    ).toBe(200000);
   });
 
   it('restaura el saldo aunque la factura afectada ya esté anulada por otra vía (no rompe, es contabilidad inofensiva)', async () => {

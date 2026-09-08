@@ -250,6 +250,7 @@ export class RecibosService {
 
       let totalAplicadoAhora = 0;
       let creditosPorCuenta = new Map<string | null, number>();
+      let montoAplicadoMora = 0;
       if (dto.aplicaciones?.length) {
         const resultado = await this.aplicarManual(
           session,
@@ -263,6 +264,7 @@ export class RecibosService {
           0,
         );
         creditosPorCuenta = resultado.creditosPorCuenta;
+        montoAplicadoMora = resultado.montoAplicadoMora;
       } else if (dto.aplicacionAutomatica) {
         const resultado = await this.aplicarFifo(
           session,
@@ -276,6 +278,7 @@ export class RecibosService {
           0,
         );
         creditosPorCuenta = resultado.creditosPorCuenta;
+        montoAplicadoMora = resultado.montoAplicadoMora;
       }
 
       // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
@@ -294,6 +297,7 @@ export class RecibosService {
         totalAplicadoAhora,
         dto.montoRecibido - totalAplicadoAhora,
         creditosPorCuenta,
+        montoAplicadoMora,
       );
 
       const final = await this.recibos
@@ -346,18 +350,14 @@ export class RecibosService {
       }
 
       if (dto.aplicaciones?.length) {
-        // `creditosPorCuenta` intentionally unused here — the deferred
-        // anticipo application still posts through
-        // `postearAsientoAplicacionAnticipo`'s flat `cuentaCartera` credit.
-        // Per-concepto coding for this path is a separate, not-yet-scoped
-        // piece of work.
-        const { creadas } = await this.aplicarManual(
-          session,
-          coPropertyId,
-          recibo,
-          dto.aplicaciones,
-          accountId,
-        );
+        const { creadas, creditosPorCuenta, montoAplicadoMora } =
+          await this.aplicarManual(
+            session,
+            coPropertyId,
+            recibo,
+            dto.aplicaciones,
+            accountId,
+          );
         const totalAplicado = creadas.reduce(
           (acc, a) => acc + a.amountApplied,
           0,
@@ -368,6 +368,8 @@ export class RecibosService {
             coPropertyId,
             recibo,
             totalAplicado,
+            creditosPorCuenta,
+            montoAplicadoMora,
           );
         }
         const reciboFinal = await this.recibos
@@ -398,6 +400,8 @@ export class RecibosService {
           coPropertyId,
           recibo,
           totalAplicado,
+          resultado.creditosPorCuenta,
+          resultado.montoAplicadoMora,
         );
       }
       return {
@@ -452,6 +456,22 @@ export class RecibosService {
         .session(session)
         .exec();
 
+      // Mirrors `aplicarManual`'s own two accumulators, in reverse: which
+      // specific accounts the reversal must debit BACK (the same ones the
+      // original application credited, not the shared cuentaCartera — see
+      // `construirContraAsientoCruce`'s `desgloseCartera`), and how much of
+      // this void's cuentas-de-orden reversal is actually mora (same
+      // `intereses`-kind check `construirMovimientos` uses at facturación).
+      const creditosPorCuenta = new Map<string | null, number>();
+      const acumular = (cuenta: string | null, monto: number) => {
+        if (monto === 0) return;
+        creditosPorCuenta.set(
+          cuenta,
+          (creditosPorCuenta.get(cuenta) ?? 0) + monto,
+        );
+      };
+      let montoAplicadoMora = 0;
+
       for (const aplicacion of aplicacionesActivas) {
         // Unconditional, plain $inc — never guarded by
         // decrementarSaldoFactura's floor (that guard exists to stop
@@ -467,7 +487,7 @@ export class RecibosService {
           .exec();
 
         if (factura) {
-          await ajustarSaldosCartera(
+          const partes = await ajustarSaldosCartera(
             this.saldos,
             session,
             coPropertyId,
@@ -475,6 +495,17 @@ export class RecibosService {
             aplicacion.amountApplied,
             1,
           );
+          for (const parte of partes) {
+            const linea = factura.lines.find((l) =>
+              l.conceptoId.equals(parte.conceptoId),
+            );
+            acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+            if (linea?.conceptKind === 'intereses') {
+              montoAplicadoMora += parte.parte;
+            }
+          }
+        } else {
+          acumular(null, aplicacion.amountApplied);
         }
 
         await this.aplicaciones
@@ -498,6 +529,9 @@ export class RecibosService {
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
+        ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
+      );
       let entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,
@@ -507,6 +541,8 @@ export class RecibosService {
         recibo.receivedAmount,
         'RC',
         cuentasOrdenDe(copropiedad),
+        desgloseCartera,
+        montoAplicadoMora,
       );
       entries = await this.conAuxiliares(
         session,
@@ -662,6 +698,7 @@ export class RecibosService {
   ): Promise<{
     creadas: AplicacionCarteraDocument[];
     creditosPorCuenta: Map<string | null, number>;
+    montoAplicadoMora: number;
   }> {
     const sumaSolicitada = solicitadas.reduce(
       (acc, a) => acc + a.montoAplicado,
@@ -687,6 +724,11 @@ export class RecibosService {
         (creditosPorCuenta.get(cuenta) ?? 0) + monto,
       );
     };
+    // Portion of THIS call applied specifically against an `intereses`
+    // (mora) concept line — what `postearAsientoRecibo` scopes the
+    // cuentas-de-orden memo pair to, mirroring `construirMovimientos`'
+    // own per-line `conceptKind === 'intereses'` check at facturación.
+    let montoAplicadoMora = 0;
     for (const solicitada of solicitadas) {
       const documentoId = new Types.ObjectId(solicitada.documentoId);
 
@@ -782,6 +824,9 @@ export class RecibosService {
           l.conceptoId.equals(parte.conceptoId),
         );
         acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+        if (linea?.conceptKind === 'intereses') {
+          montoAplicadoMora += parte.parte;
+        }
       }
 
       const [creada] = await this.aplicaciones.create(
@@ -816,7 +861,7 @@ export class RecibosService {
       )
       .exec();
 
-    return { creadas, creditosPorCuenta };
+    return { creadas, creditosPorCuenta, montoAplicadoMora };
   }
 
   /**
@@ -845,6 +890,7 @@ export class RecibosService {
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
     creditosPorCuenta: Map<string | null, number>;
+    montoAplicadoMora: number;
   }> {
     const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
       this.facturas
@@ -902,6 +948,8 @@ export class RecibosService {
     };
     let restante = montoDisponible;
     let totalAplicado = 0;
+    // Same mora-scoping accumulator as `aplicarManual` — see its own note.
+    let montoAplicadoMora = 0;
 
     for (const candidato of abiertas) {
       if (restante <= 0) break;
@@ -978,6 +1026,9 @@ export class RecibosService {
             l.conceptoId.equals(parte.conceptoId),
           );
           acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+          if (linea?.conceptKind === 'intereses') {
+            montoAplicadoMora += parte.parte;
+          }
         }
 
         const [creada] = await this.aplicaciones.create(
@@ -1038,7 +1089,13 @@ export class RecibosService {
         .exec();
     }
 
-    return { aplicadas, errores, montoSinAplicar: restante, creditosPorCuenta };
+    return {
+      aplicadas,
+      errores,
+      montoSinAplicar: restante,
+      creditosPorCuenta,
+      montoAplicadoMora,
+    };
   }
 
   /**
@@ -1101,6 +1158,7 @@ export class RecibosService {
     montoAplicado: number,
     montoSinAplicar: number,
     creditosPorCuenta: Map<string | null, number>,
+    montoAplicadoMora: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1122,6 +1180,7 @@ export class RecibosService {
       'RC',
       cuentasOrdenDe(copropiedad),
       desgloseCartera,
+      montoAplicadoMora,
     );
     entries = await this.conAuxiliares(
       session,
@@ -1148,18 +1207,27 @@ export class RecibosService {
 
   /**
    * Posts a LATER application's journal entry: debit `cuentaAnticipos`,
-   * credit `cuentaCartera`, both for `montoAplicado` — never touches
-   * `destinationAccount` (see the corrected accounting design, Task 2:
-   * the cash was already debited there at creation time, by
-   * `postearAsientoRecibo`). Only called when `montoAplicado > 0` — a call
-   * to `aplicar()` that applied nothing (every FIFO candidate was invalid)
-   * posts no entry.
+   * credit `cuentaCartera` (or each concepto's own account, via
+   * `creditosPorCuenta` — same desglose `postearAsientoRecibo` builds),
+   * both for `montoAplicado` — never touches `destinationAccount` (see the
+   * corrected accounting design, Task 2: the cash was already debited there
+   * at creation time, by `postearAsientoRecibo`). Only called when
+   * `montoAplicado > 0` — a call to `aplicar()` that applied nothing (every
+   * FIFO candidate was invalid) posts no entry.
+   *
+   * `montoAplicadoMora` scopes the cuentas-de-orden memo pair to whatever
+   * portion of THIS deferred application landed on an `intereses` concept —
+   * same reasoning as `postearAsientoRecibo`'s own note, a payment that
+   * happens to be applied later rather than at creation is coded no
+   * differently.
    */
   private async postearAsientoAplicacionAnticipo(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     recibo: ReciboDocument,
     montoAplicado: number,
+    creditosPorCuenta: Map<string | null, number>,
+    montoAplicadoMora: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1167,11 +1235,17 @@ export class RecibosService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
+      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
+    );
     let entries = construirMovimientosAplicacionAnticipo(
       cuentaAnticipos,
       cuentaCartera,
       montoAplicado,
       'RC',
+      desgloseCartera,
+      cuentasOrdenDe(copropiedad),
+      montoAplicadoMora,
     );
     entries = await this.conAuxiliares(
       session,
