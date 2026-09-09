@@ -38,6 +38,7 @@ import type {
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
+import { generarPdfPrefacturasLote } from '../../common/pdf/prefacturas-lote-pdf';
 import { generarPdfFacturasLote } from '../../common/pdf/facturas-lote-pdf';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import {
@@ -173,6 +174,47 @@ export class LotesController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="prefactura-${preliminar.unitCode}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
+  /**
+   * Every unit's prefactura from the lote's CURRENT previsualización,
+   * bundled into one PDF — the Liquidación screen's full-batch preview,
+   * reachable before consolidación even exists (unlike `:id/facturas.pdf`
+   * below, which needs real Facturas). Reflects whatever `preview` holds
+   * right now, edits included, since it is generated fresh on every call
+   * rather than cached.
+   */
+  @Get(':id/prefacturas.pdf')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async generarPdfPrefacturas(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOneRaw(id);
+    if (lote.preview.length === 0) {
+      throw new NotFoundException(
+        `El lote ${id} todavía no tiene una previsualización generada`,
+      );
+    }
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfPrefacturasLote(
+      lote.preview,
+      lote,
+      copropiedad,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="prefacturas-lote-${lote.number}.pdf"`,
     });
     res.send(Buffer.from(bytes));
   }
