@@ -197,6 +197,22 @@ export class LoteFacturacion {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
+
+  /**
+   * Set while `consolidar()` is running, cleared (`null`) the moment it
+   * finishes (fully or partially) — a coarse progress signal so the
+   * frontend can poll this same document and show "row 40 of 167" instead
+   * of a frozen button, given a real consolidación can run tens of seconds.
+   * Not itself a source of truth for anything financial; purely UI feedback.
+   */
+  @Prop({
+    type: {
+      current: { type: Number, required: true },
+      total: { type: Number, required: true },
+    },
+    default: null,
+  })
+  progress: { current: number; total: number } | null;
 }
 
 export const LoteFacturacionSchema =

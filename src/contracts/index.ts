@@ -248,6 +248,9 @@ export interface LoteFacturacion {
     totalFacturas: number;
     totalInmuebles: number;
   } | null;
+  /** Set while consolidar() is running this lote, null otherwise — lets the
+   *  frontend poll and show "fila X de Y" instead of a frozen button. */
+  progreso: { actual: number; total: number } | null;
 }
 
 /** One unit's computed invoice line as it stands in a Lote's previsualización. */

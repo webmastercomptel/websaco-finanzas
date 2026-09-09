@@ -43,6 +43,9 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
         totalInmuebles: doc.summary.totalUnits,
       }
     : null,
+  progreso: doc.progress
+    ? { actual: doc.progress.current, total: doc.progress.total }
+    : null,
 });
 
 const preliminarDe = (p: FacturaPreliminar): FacturaPreliminarContract => ({

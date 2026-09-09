@@ -1318,6 +1318,13 @@ describe('LotesFacturacionService.consolidar', () => {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
       })),
+      // Progress tracking. Declares both parameters (even where a given
+      // test doesn't assert on the call) so jest infers a two-element call
+      // tuple — see the same note on numeracion.service.spec.ts's
+      // resolucionesCon.
+      updateOne: jest.fn((_filtro?: Filtro, _actualizacion?: Filtro) => ({
+        exec: () => Promise.resolve({}),
+      })),
     };
     const facturas = {
       // Resume support: an already-existing Factura for this Lote (from an
@@ -1470,6 +1477,57 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     expect(m.asientosCreados[0].entries).toHaveLength(2);
     expect(resultado.errores).toEqual([]);
+  });
+
+  it('actualiza el progreso mientras procesa las filas, y lo limpia al terminar', async () => {
+    const m = construirModelos({
+      preview: [
+        preliminar(),
+        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+        preliminar({ inmuebleId: 'inm-3', unitCode: '303' }),
+      ],
+    });
+    const numeracion = {
+      siguienteLote: jest.fn().mockResolvedValue(1),
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
+        prefijo: 'CONJ-2026',
+        numero: 1041,
+        resolucionId: new Types.ObjectId(),
+      }),
+    } as unknown as NumeracionService;
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      {} as never, // inmuebles
+      {} as never, // terceros
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracion,
+      conexionCon(sesionFalsa()),
+    );
+
+    await service.consolidar('lote-1');
+
+    // First write, before any row is attempted: 0 of 3.
+    const escrituras = m.lotes.updateOne.mock.calls.map(
+      ([, actualizacion]) =>
+        (actualizacion as { $set: { progress: unknown } }).$set.progress,
+    );
+    expect(escrituras[0]).toEqual({ current: 0, total: 3 });
+    // Last progress write reaches the full count — every row completed.
+    expect(escrituras[escrituras.length - 1]).toEqual({
+      current: 3,
+      total: 3,
+    });
+    // The final findOneAndUpdate (status/invoiceIds/summary) clears it —
+    // nothing left to poll once consolidar() itself has returned.
+    const actualizacionFinal = actualizacionDe(m.lotes.findOneAndUpdate);
+    expect(actualizacionFinal.$set).toMatchObject({ progress: null });
   });
 
   it('agrega tercero/centroCosto/flujoCaja a las líneas cuya cuenta lo requiere', async () => {

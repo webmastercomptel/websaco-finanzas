@@ -1022,6 +1022,24 @@ export class LotesFacturacionService {
       );
     let indiceReservado = 0;
 
+    // Coarse progress signal, purely for the frontend to poll and show
+    // "fila X de Y" instead of a frozen button — a real consolidación can
+    // run tens of seconds. Throttled to ~20 writes total regardless of how
+    // many rows there are, so this doesn't reintroduce a per-row round-trip
+    // cost right after removing one above; never read for anything
+    // financial.
+    const totalPendientes = filasPendientes.length;
+    const intervaloProgreso = Math.max(1, Math.ceil(totalPendientes / 20));
+    let filasCompletadas = 0;
+    if (totalPendientes > 0) {
+      await this.lotes
+        .updateOne(
+          { _id: loteId, coPropertyId },
+          { $set: { progress: { current: 0, total: totalPendientes } } },
+        )
+        .exec();
+    }
+
     for (const [indice, preliminar] of lote.preview.entries()) {
       if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {
         continue;
@@ -1216,6 +1234,23 @@ export class LotesFacturacionService {
           mensaje: err instanceof Error ? err.message : 'Error desconocido',
         });
       }
+
+      filasCompletadas += 1;
+      if (
+        filasCompletadas % intervaloProgreso === 0 ||
+        filasCompletadas === totalPendientes
+      ) {
+        await this.lotes
+          .updateOne(
+            { _id: loteId, coPropertyId },
+            {
+              $set: {
+                progress: { current: filasCompletadas, total: totalPendientes },
+              },
+            },
+          )
+          .exec();
+      }
     }
 
     const consolidadoDelTodo = errores.length === 0;
@@ -1233,6 +1268,9 @@ export class LotesFacturacionService {
                   totalUnits: facturaIds.length,
                 }
               : null,
+            // The call is over either way (fully consolidado or stopped on
+            // an error) — nothing left to poll for.
+            progress: null,
           },
         },
         { returnDocument: 'after' },
