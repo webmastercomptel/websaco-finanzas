@@ -22,7 +22,7 @@ Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts,
 | `npm run test:cov` | Coverage |
 | `npm run seed:admin` | Creates the first platform-admin account from `ROOT_ADMIN_EMAIL` |
 
-Before declaring a change done: `npm run typecheck && npm run lint && npm test`.
+Before declaring a change done: `npm run typecheck && npm run lint && npm test` → delegate per your user-global `~/.claude/CLAUDE.md` routing rule (Test/Lint/Build Execution Routing, not this repo's `../CLAUDE.md`), do not run directly via Bash.
 
 No Docker, no local database — Mongo (Atlas) and Redis (Redis Cloud) are managed services reached over the network. `npm run start:dev` is the whole story. Don't add `docker-compose.yml` or a `start:local-services` script back; both were removed on purpose.
 

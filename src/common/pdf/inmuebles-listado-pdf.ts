@@ -90,7 +90,7 @@ export async function generarPdfListadoInmuebles(
   ];
   // Only Código/Titular are text — every other column here is a number.
   const primeraColumnaNumerica = 2;
-  const anchos = anchosDeColumna(columnas.length);
+  const anchos = anchosDeColumna(conceptos.length);
 
   const filas = inmuebles.map((inm) => [
     inm.codigo,
@@ -119,11 +119,40 @@ export async function generarPdfListadoInmuebles(
   return ctx.doc.save();
 }
 
-/** Even column widths, same rule the previous version used — good enough
- *  for the handful of columns a coproperty's own concepts add. */
-function anchosDeColumna(cantidad: number): number[] {
-  const ancho = CONTENT_WIDTH / cantidad;
-  return Array.from({ length: cantidad }, () => ancho);
+// Every column used to split CONTENT_WIDTH evenly, which starved "Titular"
+// (a person's full name, the one column someone actually needs to read in
+// full) down to the same width as a six-digit currency column. Now every
+// numeric column gets a fixed, generous-enough width, and Titular takes
+// whatever is left — it's the only column with genuinely unpredictable
+// content length.
+const ANCHO_CODIGO = 45;
+const ANCHO_AREA = 45;
+const ANCHO_PARTICIPACION = 55;
+const ANCHO_CONCEPTO = 60;
+const ANCHO_TITULAR_MINIMO = 120;
+
+/** Fixed widths for Código/Área/Particip. %/each concepto; Titular gets the
+ *  remainder of `CONTENT_WIDTH`. If enough concepto columns exist that they
+ *  would otherwise crowd Titular below its minimum, concepto columns shrink
+ *  first — a coproperty with many charge concepts still needs the name
+ *  readable more than it needs those columns at full width. */
+function anchosDeColumna(cantidadConceptos: number): number[] {
+  const fijos = ANCHO_CODIGO + ANCHO_AREA + ANCHO_PARTICIPACION;
+  const disponibleParaConceptos =
+    CONTENT_WIDTH - fijos - ANCHO_TITULAR_MINIMO;
+  const anchoConcepto =
+    cantidadConceptos > 0
+      ? Math.min(ANCHO_CONCEPTO, disponibleParaConceptos / cantidadConceptos)
+      : ANCHO_CONCEPTO;
+  const anchoTitular = CONTENT_WIDTH - fijos - anchoConcepto * cantidadConceptos;
+
+  return [
+    ANCHO_CODIGO,
+    anchoTitular,
+    ANCHO_AREA,
+    ANCHO_PARTICIPACION,
+    ...Array.from({ length: cantidadConceptos }, () => anchoConcepto),
+  ];
 }
 
 /**
