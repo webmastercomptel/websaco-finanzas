@@ -1396,17 +1396,42 @@ describe('LotesFacturacionService.consolidar', () => {
       exigirAbierto: jest.fn().mockResolvedValue(undefined),
     }) as unknown as PeriodoService;
 
+  /** Mocks reservarBloqueFacturas granting the FULL amount requested,
+   *  starting from `base.numero` and incrementing per slot — mirrors an
+   *  active resolution (or FV consecutivo, when `resolucionId` is omitted)
+   *  with plenty of range left. Mirrors what a single fixed
+   *  `siguienteFactura` mock used to stand in for, before consolidar()
+   *  switched to reserving the whole block in one call. */
+  const numeracionQueOtorgaTodo = (base: {
+    prefijo: string;
+    numero: number;
+    resolucionId?: Types.ObjectId;
+  }) =>
+    jest.fn((_coPropertyId: string, cantidad: number) =>
+      Promise.resolve({
+        numeros: Array.from({ length: cantidad }, (_, i) => ({
+          prefijo: base.prefijo,
+          numero: base.numero + i,
+          completo: base.prefijo
+            ? `${base.prefijo}-${base.numero + i}`
+            : String(base.numero + i),
+          ...(base.resolucionId !== undefined
+            ? { resolucionId: base.resolucionId }
+            : {}),
+        })),
+      }),
+    );
+
   it('numera, crea la factura, incrementa el saldo de cartera y postea el asiento, por cada fila', async () => {
     const m = construirModelos({});
 
-    // NumeracionService.siguienteFactura is a distinct method from
+    // NumeracionService.reservarBloqueFacturas is a distinct method from
     // siguienteLote — this describe block's stub needs both.
     const numeracion = {
       siguienteLote: jest.fn().mockResolvedValue(1),
-      siguienteFactura: jest.fn().mockResolvedValue({
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
         prefijo: 'CONJ-2026',
         numero: 1041,
-        completo: 'CONJ-2026-1041',
         resolucionId: new Types.ObjectId(),
       }),
     } as unknown as NumeracionService;
@@ -1473,10 +1498,9 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     const numeracion = {
       siguienteLote: jest.fn().mockResolvedValue(1),
-      siguienteFactura: jest.fn().mockResolvedValue({
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
         prefijo: 'FV',
         numero: 1,
-        completo: 'FV-1',
       }),
     } as unknown as NumeracionService;
 
@@ -1513,17 +1537,16 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(creditoIngreso?.flujoCaja).toBe('FC-OPER');
   });
 
-  it('guarda resolucionId null cuando siguienteFactura usó el consecutivo FV de respaldo', async () => {
-    // Sin resolución DIAN activa, siguienteFactura ya no incluye
+  it('guarda resolucionId null cuando reservarBloqueFacturas usó el consecutivo FV de respaldo', async () => {
+    // Sin resolución DIAN activa, reservarBloqueFacturas ya no incluye
     // resolucionId — la factura debe quedar con null, no con un valor
     // inventado por un non-null assertion.
     const m = construirModelos({});
     const numeracion = {
       siguienteLote: jest.fn().mockResolvedValue(1),
-      siguienteFactura: jest.fn().mockResolvedValue({
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
         prefijo: 'FV',
         numero: 1,
-        completo: 'FV-1',
       }),
     } as unknown as NumeracionService;
 
@@ -1587,19 +1610,24 @@ describe('LotesFacturacionService.consolidar', () => {
     // Kept as a separate reference and asserted on directly below — reading
     // it back off `numeracion` (typed as the real NumeracionService) is what
     // @typescript-eslint/unbound-method warns about; see the same pattern in
-    // firebase-usuarios.service.spec.ts.
-    const siguienteFactura = jest
-      .fn()
-      .mockResolvedValueOnce({
-        prefijo: '',
-        numero: 1,
-        completo: '1',
-        resolucionId: new Types.ObjectId(),
-      })
-      .mockRejectedValueOnce(new ConflictException('rango agotado'));
+    // firebase-usuarios.service.spec.ts. Grants only 1 of the 2 requested —
+    // reservarBloqueFacturas returning fewer than asked is now what a
+    // mid-batch exhaustion looks like (a single reserve call replaces the
+    // old per-row siguienteFactura calls, so there's no "Nth call rejects"
+    // anymore — the shortfall itself IS the exhaustion signal).
+    const reservarBloqueFacturas = jest.fn().mockResolvedValue({
+      numeros: [
+        {
+          prefijo: '',
+          numero: 1,
+          completo: '1',
+          resolucionId: new Types.ObjectId(),
+        },
+      ],
+    });
     const numeracion = {
       siguienteLote: jest.fn(),
-      siguienteFactura,
+      reservarBloqueFacturas,
     } as unknown as NumeracionService;
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1620,10 +1648,19 @@ describe('LotesFacturacionService.consolidar', () => {
     const resultado = await service.consolidar('lote-1');
 
     expect(m.facturasCreadas).toHaveLength(1);
-    expect(siguienteFactura).toHaveBeenCalledTimes(2);
+    // ONE call reserving both rows' worth up front, not one call per row.
+    expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
+    expect(reservarBloqueFacturas).toHaveBeenCalledWith(COP.toString(), 2);
     expect(resultado.lote.estado).not.toBe('consolidado');
     expect(resultado.errores).toEqual([
-      { fila: 2, inmuebleCodigo: '302', mensaje: 'rango agotado' },
+      {
+        fila: 2,
+        inmuebleCodigo: '302',
+        mensaje:
+          'Se agotó el rango de numeración disponible para este lote ' +
+          '(se pudieron numerar 1 de 2 facturas). Hay que cargar una ' +
+          'resolución nueva.',
+      },
     ]);
     // The RETURNED contract matching 'liquidado' isn't enough on its own —
     // pin what was actually persisted too, since the mocked
@@ -1700,11 +1737,9 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     const numeracion = {
       siguienteLote: jest.fn().mockResolvedValue(1),
-      siguienteFactura: jest.fn().mockResolvedValue({
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
         prefijo: 'FV',
         numero: 1,
-        completo: 'FV-1',
-        resolucionId: null,
       }),
     } as unknown as NumeracionService;
     const service = new LotesFacturacionService(
@@ -1750,15 +1785,14 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     // Kept as a separate reference and asserted on directly below — see the
     // same @typescript-eslint/unbound-method note above.
-    const siguienteFactura = jest.fn().mockResolvedValue({
+    const reservarBloqueFacturas = numeracionQueOtorgaTodo({
       prefijo: 'CONJ-2026',
       numero: 1042,
-      completo: 'CONJ-2026-1042',
       resolucionId: new Types.ObjectId(),
     });
     const numeracion = {
       siguienteLote: jest.fn(),
-      siguienteFactura,
+      reservarBloqueFacturas,
     } as unknown as NumeracionService;
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1781,7 +1815,10 @@ describe('LotesFacturacionService.consolidar', () => {
     // Only the not-yet-invoiced unit gets a NEW Factura.
     expect(m.facturasCreadas).toHaveLength(1);
     expect(m.facturasCreadas[0]).toMatchObject({ unitCode: '302' });
-    expect(siguienteFactura).toHaveBeenCalledTimes(1);
+    // Reserved exactly 1 — the already-invoiced unit never counted toward
+    // the block size (unidadesYaFacturadas already excluded it).
+    expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
+    expect(reservarBloqueFacturas).toHaveBeenCalledWith(COP.toString(), 1);
     // The pre-existing invoice is carried forward, not dropped.
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
     expect(actualizacion.$set.invoiceIds).toEqual(
@@ -1811,15 +1848,14 @@ describe('LotesFacturacionService.consolidar', () => {
       .mockResolvedValueOnce({}) as typeof m.asientos.create;
     // Kept as a separate reference and asserted on directly below — see the
     // same @typescript-eslint/unbound-method note above.
-    const siguienteFactura = jest.fn().mockResolvedValue({
+    const reservarBloqueFacturas = numeracionQueOtorgaTodo({
       prefijo: 'CONJ-2026',
       numero: 1042,
-      completo: 'CONJ-2026-1042',
       resolucionId: new Types.ObjectId(),
     });
     const numeracion = {
       siguienteLote: jest.fn(),
-      siguienteFactura,
+      reservarBloqueFacturas,
     } as unknown as NumeracionService;
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1839,9 +1875,11 @@ describe('LotesFacturacionService.consolidar', () => {
 
     const resultado = await service.consolidar('lote-1');
 
-    // Both rows got a real number, both Facturas were created — the failure
-    // happened only on row 1's journal posting.
-    expect(siguienteFactura).toHaveBeenCalledTimes(2);
+    // Both rows got a real number (reserved together, in one call), both
+    // Facturas were created — the failure happened only on row 1's journal
+    // posting.
+    expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
+    expect(reservarBloqueFacturas).toHaveBeenCalledWith(COP.toString(), 2);
     expect(m.facturasCreadas).toHaveLength(2);
     expect(resultado.errores).toEqual([
       expect.objectContaining({ fila: 1, inmuebleCodigo: '301' }),
@@ -1873,10 +1911,9 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     const numeracion = {
       siguienteLote: jest.fn(),
-      siguienteFactura: jest.fn().mockResolvedValue({
+      reservarBloqueFacturas: numeracionQueOtorgaTodo({
         prefijo: 'CONJ-2026',
         numero: 1042,
-        completo: 'CONJ-2026-1042',
         resolucionId: new Types.ObjectId(),
       }),
     } as unknown as NumeracionService;

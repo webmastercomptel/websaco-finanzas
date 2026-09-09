@@ -135,6 +135,122 @@ export class NumeracionService {
   }
 
   /**
+   * Reserves up to `cantidad` sequential invoice numbers in ONE atomic
+   * operation — used by a batch consolidación instead of calling
+   * `siguienteFactura` once per row, which used to mean one network
+   * round-trip per invoice. Returns fewer than `cantidad` (never more) when
+   * the active resolution doesn't have that many left; the caller (today,
+   * `LotesFacturacionService.consolidar`) is responsible for treating the
+   * shortfall as the same "range exhausted, stop the batch" case
+   * `siguienteFactura`'s own ConflictException represents for a single call.
+   *
+   * The granted COUNT is clamped server-side, atomically, via an
+   * aggregation-pipeline update — the same reasoning as `siguienteFactura`'s
+   * `$expr` ceiling check: computing "how many are actually left" and then
+   * incrementing in a SEPARATE step would leave a window where two
+   * concurrent callers both see the same leftover count and overrun the
+   * range together. Clamping and incrementing in the same atomic operation
+   * closes that window exactly like the existing single-number path does.
+   *
+   * `siguienteFactura` itself is untouched by this — it stays the correct,
+   * independently tested way to reserve exactly one number for any caller
+   * that doesn't need batching.
+   */
+  async reservarBloqueFacturas(
+    coPropertyId: string,
+    cantidad: number,
+  ): Promise<{ numeros: NumeroAsignado[] }> {
+    if (cantidad <= 0) return { numeros: [] };
+
+    const previa = await this.resoluciones
+      .findOneAndUpdate(
+        {
+          coPropertyId: new Types.ObjectId(coPropertyId),
+          status: 'active',
+        },
+        [
+          {
+            $set: {
+              _otorgados: {
+                $max: [
+                  0,
+                  {
+                    $min: [
+                      cantidad,
+                      {
+                        $subtract: [{ $add: ['$rangeTo', 1] }, '$nextNumber'],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          { $set: { nextNumber: { $add: ['$nextNumber', '$_otorgados'] } } },
+          { $unset: '_otorgados' },
+        ],
+        {
+          // The pre-update document: nextNumber/rangeTo from before the
+          // clamped increment, so the exact same clamp the pipeline just
+          // applied server-side can be reproduced here to know how many —
+          // and which — numbers were actually granted.
+          returnDocument: 'before',
+          // Required whenever the update argument is an array (an
+          // aggregation pipeline) rather than a plain update document —
+          // Mongoose refuses the array otherwise, even though the MongoDB
+          // driver itself accepts it unconditionally.
+          updatePipeline: true,
+        },
+      )
+      .exec();
+
+    if (previa) {
+      const otorgados = Math.max(
+        0,
+        Math.min(cantidad, previa.rangeTo - previa.nextNumber + 1),
+      );
+      return {
+        numeros: Array.from({ length: otorgados }, (_, i) => ({
+          ...componer(previa.prefix, previa.nextNumber + i),
+          resolucionId: previa._id,
+        })),
+      };
+    }
+
+    // `previa` is only null here when NO row matches
+    // `{coPropertyId, status:'active'}` at all — unlike siguienteFactura's
+    // `$expr` ceiling, this filter has no range condition, so an already
+    // fully exhausted (but still active) resolution DOES match above and
+    // is handled by the `if (previa)` branch, returning `otorgados: 0`.
+    // Reaching here means there genuinely never was an active resolution —
+    // the same "no resolución at all" case siguienteFactura falls back to.
+
+    // No resolución at all — same FV consecutivo fallback siguienteFactura
+    // uses, just incrementing by the whole requested count in one shot.
+    const consecutivo = await this.consecutivos
+      .findOneAndUpdate(
+        { coPropertyId: new Types.ObjectId(coPropertyId), category: 'FV' },
+        { $inc: { nextNumber: cantidad } },
+        { returnDocument: 'before' },
+      )
+      .exec();
+
+    if (!consecutivo) {
+      throw new NotFoundException(
+        'Esta copropiedad no tiene una Resolución de Facturación activa ni ' +
+          'un tipo de documento FV configurado. Cargá una de las dos en ' +
+          'Documentos antes de emitir facturas.',
+      );
+    }
+
+    return {
+      numeros: Array.from({ length: cantidad }, (_, i) =>
+        componer(consecutivo.prefix, consecutivo.nextNumber + 1 + i),
+      ),
+    };
+  }
+
+  /**
    * Reserves the next number for a document that is not a sales invoice, by
    * its type CODE (e.g. "RC") — never a category. A building may have
    * several codes under the same category (see the note on

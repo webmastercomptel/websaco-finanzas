@@ -1009,6 +1009,19 @@ export class LotesFacturacionService {
       ]),
     );
 
+    // One round-trip for every number this batch could possibly need,
+    // instead of one round-trip per row — `filasPendientes.length` is
+    // already exactly the count of rows that will reach the numbering step
+    // below (unidadesYaFacturadas-skipped rows never did). May grant fewer
+    // than requested if the active resolution runs out partway through;
+    // `indiceReservado` below tracks position into whatever was granted.
+    const { numeros: numerosReservados } =
+      await this.numeracion.reservarBloqueFacturas(
+        coPropertyId.toString(),
+        filasPendientes.length,
+      );
+    let indiceReservado = 0;
+
     for (const [indice, preliminar] of lote.preview.entries()) {
       if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {
         continue;
@@ -1046,20 +1059,23 @@ export class LotesFacturacionService {
         );
       }
 
-      let numero: NumeroAsignado;
-      try {
-        numero = await this.numeracion.siguienteFactura(
-          coPropertyId.toString(),
-        );
-      } catch (err) {
-        // Global blocker: every remaining row would fail the same way.
+      if (indiceReservado >= numerosReservados.length) {
+        // Global blocker: the reserved block ran out — every remaining row
+        // would fail identically, same as siguienteFactura's own
+        // ConflictException used to trigger before this batching fix.
         errores.push({
           fila: indice + 1,
           inmuebleCodigo: preliminar.unitCode,
-          mensaje: err instanceof Error ? err.message : 'Error desconocido',
+          mensaje:
+            `Se agotó el rango de numeración disponible para este lote ` +
+            `(se pudieron numerar ${numerosReservados.length} de ` +
+            `${filasPendientes.length} facturas). Hay que cargar una ` +
+            `resolución nueva.`,
         });
         break;
       }
+      const numero: NumeroAsignado = numerosReservados[indiceReservado];
+      indiceReservado += 1;
 
       // A real number is already consumed at this point — per the
       // numbering law ("a document that fails to save leaves a gap, and a
@@ -1097,12 +1113,12 @@ export class LotesFacturacionService {
         // used and audited in RecibosService.transaccion(): if anything in
         // here throws, all three writes roll back together — no orphaned
         // Factura, no half-applied SaldoCartera increment, no Asiento
-        // missing its Factura. The number already consumed by
-        // siguienteFactura() above is NOT part of this transaction and stays
-        // spent either way — that real gap is the same accepted outcome the
-        // numbering law already documents ("a gap is the honest outcome"),
-        // unchanged by this fix. What changes is that a row whose write
-        // phase fails no longer leaves a stuck, permanently-incomplete
+        // missing its Factura. The number already reserved by
+        // reservarBloqueFacturas() above is NOT part of this transaction and
+        // stays spent either way — that real gap is the same accepted
+        // outcome the numbering law already documents ("a gap is the honest
+        // outcome"), unchanged by this fix. What changes is that a row whose
+        // write phase fails no longer leaves a stuck, permanently-incomplete
         // Factura behind: it leaves nothing, so the next consolidar() call
         // reprocesses it cleanly with a fresh number instead of surfacing a
         // standing "requires manual reconciliation" error forever.
