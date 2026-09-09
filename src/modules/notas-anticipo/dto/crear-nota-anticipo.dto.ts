@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsMongoId,
   IsOptional,
   IsString,
@@ -20,8 +21,12 @@ import { AplicacionSolicitadaDto } from '../../recibos/dto/aplicacion-solicitada
  * `NotasAnticipoService.crear()`, not here, since it spans two fields.
  */
 export class CrearNotaAnticipoDto {
-  /** Which configured tipo de documento (código, category IN — same
-   *  category a Recibo's own código uses) numbers this nota. */
+  /** Which configured tipo de documento (código, category NT — "Nota
+   *  Contable") numbers this nota. NOT category IN: a Nota de Anticipo
+   *  never touches a bank account — the cash already arrived earlier, in
+   *  the original Recibo de Caja. Creating one only reclassifies cartera
+   *  against that Recibo's leftover anticipo, the same kind of pure
+   *  reclassification a Nota Contable does. */
   @IsString()
   @MinLength(1)
   @MaxLength(20)
@@ -29,6 +34,15 @@ export class CrearNotaAnticipoDto {
 
   @IsMongoId()
   reciboOrigenId: string;
+
+  /** The document's own business date — same pattern as `NotaDebito`'s
+   *  `fechaCargo`/`Recibo`'s `receivedDate`. NOT defaulted to "now" server
+   *  side: this document can legitimately be issued to catch up on an
+   *  earlier period, and its date is what both `issueDate` and the posted
+   *  asiento's `date` use — never the real instant, so it lands in the
+   *  right period regardless of when it's actually keyed in. */
+  @IsDateString()
+  fechaEmision: string;
 
   @IsOptional()
   @IsArray()

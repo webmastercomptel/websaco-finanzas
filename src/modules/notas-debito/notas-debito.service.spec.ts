@@ -166,6 +166,27 @@ describe('NotasDebitoService', () => {
       expect(resultado.saldoPendiente).toBe(50000);
     });
 
+    it('postea el asiento con la fecha declarada (issueDate/fechaCargo), no el instante real del servidor', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      // La nota mockeada trae un issueDate bien distinto de "hoy" — si el
+      // asiento se postea con `new Date()` en vez de `nota.issueDate`, esta
+      // fecha nunca aparecería en la llamada.
+      const svc = servicio({ asientos });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ date: Date }[]],
+      ];
+      expect(documentos[0].date).toEqual(new Date('2026-09-01'));
+    });
+
     it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
       const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
       const svc = servicio({

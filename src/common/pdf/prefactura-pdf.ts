@@ -1,7 +1,5 @@
-import {
-  generarContextoDocumentoFacturacion,
-  calcularDescuentoProntoPago,
-} from './factura-pdf';
+import { generarContextoDocumentoFacturacion } from './factura-pdf';
+import { calcularDescuentoProntoPago } from '../facturacion/descuento-pronto-pago.util';
 import type { FacturaPreliminar } from '../../database/schemas/facturacion/lote-facturacion.schema';
 import type { LoteFacturacionDocument } from '../../database/schemas/facturacion/lote-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -21,11 +19,17 @@ export async function generarPdfPrefactura(
   lote: LoteFacturacionDocument,
   copropiedad: CopropiedadDocument,
 ): Promise<Uint8Array> {
-  const descuento = calcularDescuentoProntoPago(
+  const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
     preliminar.lines,
     lote.earlyPaymentDiscount,
+    lote.earlyPaymentDiscountFixedValue,
     lote.discountDeadline,
+    copropiedad.discountAppliesWithLateFee,
   );
+  const descuento =
+    discountAmount > 0 && discountDeadline
+      ? { fechaLimite: discountDeadline, monto: discountAmount }
+      : null;
   const ctx = await generarContextoDocumentoFacturacion(
     {
       titulo: 'PREFACTURA',

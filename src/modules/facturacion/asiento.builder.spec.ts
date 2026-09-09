@@ -768,6 +768,75 @@ describe('construirAsientoCruce', () => {
     );
     expect(nc[0].description).not.toBe(rc[0].description);
   });
+
+  it('con descuento, reduce el débito de origen y agrega un débito a la cuenta de descuentos — sigue cuadrando', () => {
+    // Factura de 400000: el cliente consignó 360000, el descuento (40000) la
+    // salda completa — montoAplicado ya viene con el descuento sumado.
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      400000,
+      0,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540501', monto: 40000 },
+    );
+
+    expect(movimientos).toEqual([
+      {
+        account: '111005',
+        type: 'debito',
+        amount: 360000,
+        description: expect.any(String),
+      },
+      {
+        account: '540501',
+        type: 'debito',
+        amount: 40000,
+        description: expect.any(String),
+      },
+      {
+        account: '130501',
+        type: 'credito',
+        amount: 400000,
+        description: expect.any(String),
+      },
+    ]);
+    const debitos = movimientos
+      .filter((m) => m.type === 'debito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    const creditos = movimientos
+      .filter((m) => m.type === 'credito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    expect(debitos).toBe(creditos);
+  });
+
+  it('sin descuento (parámetro omitido), el comportamiento es idéntico al de antes de este parámetro', () => {
+    const conParametroEnCero = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540501', monto: 0 },
+    );
+    const sinParametro = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+    );
+    expect(conParametroEnCero).toEqual(sinParametro);
+  });
 });
 
 describe('construirMovimientosAplicacionAnticipo', () => {
@@ -948,6 +1017,53 @@ describe('construirContraAsientoCruce', () => {
       })),
     );
     expect(nc[2].description).not.toBe(rc[2].description);
+  });
+
+  it('con descuento, agrega un crédito de reversión a la cuenta de descuentos — sigue cuadrando', () => {
+    // Espejo del ejemplo de construirAsientoCruce: 400000 se habían
+    // acreditado a cartera (360000 cash + 40000 descuento); montoOrigen
+    // (receivedAmount cacheado) es 360000, el dinero real.
+    const movimientos = construirContraAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      400000,
+      0,
+      360000,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540502', monto: 40000 },
+    );
+
+    expect(movimientos).toEqual([
+      {
+        account: '130501',
+        type: 'debito',
+        amount: 400000,
+        description: expect.any(String),
+      },
+      {
+        account: '111005',
+        type: 'credito',
+        amount: 360000,
+        description: expect.any(String),
+      },
+      {
+        account: '540502',
+        type: 'credito',
+        amount: 40000,
+        description: expect.any(String),
+      },
+    ]);
+    const debitos = movimientos
+      .filter((m) => m.type === 'debito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    const creditos = movimientos
+      .filter((m) => m.type === 'credito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    expect(debitos).toBe(creditos);
   });
 });
 

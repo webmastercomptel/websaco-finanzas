@@ -193,12 +193,27 @@ export class EstadoCuentaService {
           .exec()
       : [];
 
-    // Step 3: build lookup maps
+    // Step 3: build lookup maps. Each carries the source document's own
+    // business date — never `AplicacionCartera.appliedAt`, which is always
+    // `new Date()` at cruce time (needed for the accounting entry, which
+    // posts at the real instant) and can land in a different period than
+    // the date the user actually declared for the payment.
     const reciboMap = new Map(
-      recibos.map((r) => [r._id.toString(), r.fullNumber]),
+      recibos.map((r) => [
+        r._id.toString(),
+        { fullNumber: r.fullNumber, fecha: r.receivedDate },
+      ]),
     );
     const ncMap = new Map(
-      notasCredito.map((nc) => [nc._id.toString(), nc.fullNumber]),
+      notasCredito.map((nc) => [
+        nc._id.toString(),
+        // NotaCredito has no declared business date field of its own —
+        // `createdAt` is its issue date, same as NotaContable rows below.
+        {
+          fullNumber: nc.fullNumber,
+          fecha: (nc as unknown as { createdAt: Date }).createdAt,
+        },
+      ]),
     );
 
     // Step 4: build raw rows
@@ -233,13 +248,14 @@ export class EstadoCuentaService {
     // AplicacionCartera → crédito with categoria
     for (const app of aplicaciones) {
       const sourceType = app.sourceType as TipoDocumentoKardex;
-      const sourceNumber =
+      const origen =
         sourceType === 'RC'
-          ? (reciboMap.get(app.sourceId.toString()) ?? app.sourceId.toString())
-          : (ncMap.get(app.sourceId.toString()) ?? app.sourceId.toString());
+          ? reciboMap.get(app.sourceId.toString())
+          : ncMap.get(app.sourceId.toString());
+      const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
 
       rows.push({
-        fecha: app.appliedAt,
+        fecha: origen?.fecha ?? app.appliedAt,
         tipo: sourceType,
         numeroCompleto: sourceNumber,
         concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,

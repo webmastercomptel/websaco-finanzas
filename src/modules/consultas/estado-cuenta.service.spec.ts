@@ -206,6 +206,41 @@ describe('EstadoCuentaService', () => {
       expect(result.descuentosAjustes).toBe(0);
     });
 
+    it('usa Recibo.receivedDate como fecha del movimiento, no AplicacionCartera.appliedAt', async () => {
+      // Bug real reportado: se liquida un lote de octubre y se elabora un
+      // Recibo #12 con receivedDate en octubre, pero el cruce corre en el
+      // instante real del servidor (appliedAt en septiembre) — el Estado de
+      // Cuenta de octubre debía mostrar el pago y no lo hacía porque
+      // filtraba/mostraba por appliedAt en vez de la fecha del Recibo.
+      const inmId = id();
+      const fId = id();
+      const rId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
+      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-10-01') });
+      const app = appDoc(rId, 'RC', {
+        amountApplied: 100000,
+        appliedAt: new Date('2026-09-09'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-10-01T00:00:00.000Z',
+        periodEnd: '2026-10-31T23:59:59.999Z',
+      });
+
+      const pagoRow = result.movimientos.find((m) => m.categoria === 'pago');
+      expect(pagoRow).toBeDefined();
+      expect(pagoRow!.fecha).toBe('2026-10-01T00:00:00.000Z');
+      expect(result.pagosRecibidos).toBe(100000);
+    });
+
     it('NC application produces categoria descuento', async () => {
       const inmId = id();
       const fId = id();

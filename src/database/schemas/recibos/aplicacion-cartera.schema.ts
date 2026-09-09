@@ -96,6 +96,15 @@ export class AplicacionCartera {
   @Prop({ required: true })
   amountApplied: number;
 
+  /** Portion of `amountApplied` that is early-payment discount, not real
+   *  money drawn from the source's own balance — 0 in the normal case (no
+   *  discount, or the discount didn't activate) and always 0 for a Nota
+   *  Débito target (never carries a discount). `amountApplied -
+   *  discountApplied` is the real cash this application drew down. See
+   *  `evaluarAplicacionConDescuento` (`cruce.util.ts`). */
+  @Prop({ required: true, default: 0 })
+  discountApplied: number;
+
   /** How `amountApplied` breaks down across the target document's own
    *  conceptos — empty on documents predating this field (a Nota Débito
    *  application from before it always had exactly one concepto anyway, so

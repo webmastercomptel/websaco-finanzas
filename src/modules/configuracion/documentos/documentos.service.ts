@@ -33,6 +33,10 @@ import {
   NotaContableDocument,
 } from '../../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   Factura,
   FacturaDocument,
 } from '../../../database/schemas/facturacion/factura.schema';
@@ -60,6 +64,8 @@ export class DocumentosService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(Factura.name)
     private readonly facturas: Model<FacturaDocument>,
     private readonly tenant: TenantContextService,
@@ -153,6 +159,7 @@ export class DocumentosService {
     if (newPrefix === current.prefix && newNextNumber < current.nextNumber) {
       const maxIssued = await this.getHighestIssuedNumber(
         current.category,
+        current.code,
         coPropertyId,
         current.prefix,
       );
@@ -301,9 +308,19 @@ export class DocumentosService {
    * `numeroCompleto` field on any of these documents; those are Spanish
    * contract-layer names that only exist after mapping, never in the
    * database.
+   *
+   * `categoria` alone is not always enough to pick the right collection:
+   * "NA" (Nota de Anticipo) is configured under category NT ("Nota
+   * Contable" — it never touches a bank account, see
+   * `CrearNotaAnticipoDto`'s own docblock), but its real documents live in
+   * their own `notas_anticipo` collection, not `notas_contables`. Checking
+   * `code` FIRST for that one special case, before falling back to the
+   * generic per-category map, is what keeps this guardrail from silently
+   * checking the wrong collection (and always seeing 0 issued) for NA.
    */
   private async getHighestIssuedNumber(
     categoria: CategoriaDocumento,
+    code: string,
     coPropertyId: unknown,
     prefix: string,
   ): Promise<number> {
@@ -317,7 +334,10 @@ export class DocumentosService {
       ND: this.notasDebito,
       NT: this.notasContables,
     };
-    const model = modelMap[categoria];
+    const model =
+      code === 'NA'
+        ? (this.notasAnticipo as unknown as Model<{ fullNumber: string }>)
+        : modelMap[categoria];
 
     const matchPrefix = prefix ? `${prefix}-` : '';
     const docs = await model

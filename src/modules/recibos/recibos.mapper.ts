@@ -56,6 +56,7 @@ export const toAplicacionCartera = (
   documentoId: doc.documentId.toString(),
   numeroDocumento,
   montoAplicado: doc.amountApplied,
+  montoDescuento: doc.discountApplied,
   detalleConceptos: (doc.detalleConceptos ?? []).map((d) => ({
     conceptoId: d.conceptoId.toString(),
     nombreConcepto: d.conceptName,

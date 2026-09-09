@@ -109,6 +109,20 @@ export class FacturaLinea {
   totalAmount: number;
 
   /**
+   * This line's own currently pending balance — the mutable field every
+   * application against this factura decrements, replacing the old trick of
+   * re-deriving a per-línea remainder from `Factura.outstandingBalance` plus
+   * a fixed drain order (see `remanentesPorLinea` in `recibos/cruce.util.ts`).
+   * `null` on any Factura issued before this field existed; those
+   * self-heal — the first application touching them derives this value once
+   * (from the SAME order every payment against them has always used) and
+   * persists it, same reasoning `discountAmount`/`discountDeadline` used for
+   * their own backward compatibility.
+   */
+  @Prop({ type: Number, default: null })
+  remainingAmount: number | null;
+
+  /**
    * This concept's SaldoCartera balance for the unit immediately before and
    * after this line's `totalAmount` was added — frozen at the moment the
    * line was built (consolidación time for a real Factura, "as of right

@@ -44,6 +44,12 @@ export class ActualizarLoteDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  valorFijoDescuentoProntoPago?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
   diasGraciaDescuento?: number;
 
   @IsOptional()

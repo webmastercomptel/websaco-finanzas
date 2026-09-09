@@ -76,6 +76,8 @@ const facturaDoc = (over: Partial<FacturaFixture> = {}): FacturaFixture => ({
   total: 200000,
   dueDate: new Date('2026-06-30'),
   lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+  discountAmount: 0,
+  discountDeadline: null,
   ...over,
 });
 
@@ -188,6 +190,19 @@ const construirServicio = (
         session: () => ({ exec: () => Promise.resolve(facturasState) }),
       }),
     })),
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: () => ({
+        exec: () =>
+          Promise.resolve(
+            (() => {
+              const factura = facturasState.find(
+                (f) => String(f._id) === String(filtro._id),
+              );
+              return factura ? { ...factura } : null;
+            })(),
+          ),
+      }),
+    })),
     findOneAndUpdate: jest.fn(
       (
         filtro: Record<string, unknown>,
@@ -214,6 +229,9 @@ const construirServicio = (
         },
       }),
     ),
+    // `actualizarRemanentesLinea` (cruce.util.ts) — no test here asserts on
+    // `remainingAmount` itself, only that the call doesn't blow up.
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
 
   const notasDebito = {
@@ -284,6 +302,7 @@ describe('NotasAnticipoService.crear', () => {
       service.crear(CUENTA.toString(), {
         codigo: 'NA',
         reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -294,6 +313,7 @@ describe('NotasAnticipoService.crear', () => {
       service.crear(CUENTA.toString(), {
         codigo: 'NA',
         reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
         aplicaciones: [
           {
             tipoDocumento: 'FV',
@@ -316,6 +336,7 @@ describe('NotasAnticipoService.crear', () => {
       service.crear(CUENTA.toString(), {
         codigo: 'NA',
         reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
         aplicacionAutomatica: true,
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -330,6 +351,7 @@ describe('NotasAnticipoService.crear', () => {
       service.crear(CUENTA.toString(), {
         codigo: 'NA',
         reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
         aplicacionAutomatica: true,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -342,6 +364,7 @@ describe('NotasAnticipoService.crear', () => {
       service.crear(CUENTA.toString(), {
         codigo: 'NA',
         reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
         aplicacionAutomatica: true,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -354,6 +377,7 @@ describe('NotasAnticipoService.crear', () => {
     const resultado = await service.crear(CUENTA.toString(), {
       codigo: 'NA',
       reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
       aplicacionAutomatica: true,
     });
 
@@ -377,6 +401,25 @@ describe('NotasAnticipoService.crear', () => {
     expect(creditos.some((c) => c.amount === 200000)).toBe(true);
   });
 
+  it('usa fechaEmision (no el instante real del servidor) como issueDate y como fecha del asiento', async () => {
+    const { service, recibo, asientosStore, notasAnticipo } =
+      construirServicio();
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-10-01',
+      aplicacionAutomatica: true,
+    });
+
+    expect(resultado.fechaEmision).toBe('2026-10-01T00:00:00.000Z');
+    const [filas] = notasAnticipo.create.mock.calls[0] as unknown as [
+      { issueDate: Date }[],
+    ];
+    expect(filas[0].issueDate).toEqual(new Date('2026-10-01'));
+    expect(asientosStore[0]).toMatchObject({ date: new Date('2026-10-01') });
+  });
+
   it('aplica manualmente contra un documento específico', async () => {
     const { service, recibo, facturasState } = construirServicio();
     const facturaId = facturasState[0]._id;
@@ -384,6 +427,7 @@ describe('NotasAnticipoService.crear', () => {
     const resultado = await service.crear(CUENTA.toString(), {
       codigo: 'NA',
       reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
       aplicaciones: [
         {
           tipoDocumento: 'FV',
@@ -397,6 +441,43 @@ describe('NotasAnticipoService.crear', () => {
     expect(recibo.unappliedAmount).toBe(150000);
     expect(facturasState[0].outstandingBalance).toBe(50000);
   });
+
+  it('aplica manualmente con reparto por concepto elegido por el usuario', async () => {
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoIntereses = new Types.ObjectId();
+    const factura = facturaDoc({
+      total: 300000,
+      outstandingBalance: 300000,
+      lines: [
+        { conceptoId: conceptoAdmin, totalAmount: 200000 },
+        { conceptoId: conceptoIntereses, totalAmount: 100000 },
+      ],
+    });
+    const { service, recibo } = construirServicio({
+      recibo: reciboDoc({ unappliedAmount: 100000, appliedAmount: 0 }),
+      facturas: [factura],
+    });
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: factura._id.toString(),
+          montoAplicado: 100000,
+          distribucion: [
+            { conceptoId: conceptoIntereses.toString(), monto: 100000 },
+          ],
+        },
+      ],
+    });
+
+    expect(resultado.montoAplicado).toBe(100000);
+    // Intereses queda saldado, Administración sigue intacta.
+    expect(factura.outstandingBalance).toBe(200000);
+  });
 });
 
 describe('NotasAnticipoService.anular', () => {
@@ -407,6 +488,7 @@ describe('NotasAnticipoService.anular', () => {
     const creada = await service.crear(CUENTA.toString(), {
       codigo: 'NA',
       reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
       aplicaciones: [
         {
           tipoDocumento: 'FV',
@@ -442,6 +524,7 @@ describe('NotasAnticipoService.anular', () => {
     const creada = await service.crear(CUENTA.toString(), {
       codigo: 'NA',
       reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
       aplicaciones: [
         {
           tipoDocumento: 'FV',

@@ -430,6 +430,16 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * memo for more than what was actually mora. Defaults to
  * `montoAplicado + montoSinAplicar` when omitted, preserving prior callers'
  * exact behavior.
+ *
+ * `descuento`, when given, is an early-payment discount THIS call absorbed
+ * (Recibos de Caja only, today): `montoAplicado` already carries the
+ * discount summed in — it is the FULL amount credited to cartera, real cash
+ * plus discount alike (see `evaluarAplicacionConDescuento`, cruce.util.ts).
+ * So `cuentaOrigen`'s debit is reduced by `descuento.monto` (the real cash
+ * that actually arrived), and a second debit line picks up the difference —
+ * balances exactly, since debits (`cuentaOrigen` reduced + `descuento.cuenta`)
+ * still sum to `montoAplicado + montoSinAplicar`, unchanged from before this
+ * parameter existed.
  */
 export function construirAsientoCruce(
   cuentaOrigen: string,
@@ -441,16 +451,25 @@ export function construirAsientoCruce(
   cuentasOrden?: CuentasOrden | null,
   desgloseCartera?: { account: string; monto: number }[],
   montoCuentasOrden?: number,
+  descuento?: { cuenta: string; monto: number },
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [
     {
       account: cuentaOrigen,
       type: 'debito',
-      amount: montoAplicado + montoSinAplicar,
+      amount: montoAplicado + montoSinAplicar - (descuento?.monto ?? 0),
       description: d.creacionDebito,
     },
   ];
+  if (descuento && descuento.monto > 0) {
+    movimientos.push({
+      account: descuento.cuenta,
+      type: 'debito',
+      amount: descuento.monto,
+      description: 'Descuento por pronto pago — recibo de caja',
+    });
+  }
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
@@ -672,6 +691,18 @@ export function construirContraAsientoAplicacionAnticipo(
  * preserving prior callers' exact behavior) — see `construirAsientoCruce`'s
  * own note on why this must be the mora-specific portion, not the whole
  * document, whenever the caller can tell the two apart.
+ *
+ * `descuento`, when given, reverses the discount debit `construirAsientoCruce`
+ * posted at creation: a credit back to `descuento.cuenta` for `descuento.monto`
+ * (Copropiedad's `discountsCreditAccount` — the "give-back" side, distinct
+ * from the debit-side account creation used). `montoAplicado` here is
+ * already the full cartera amount (cash plus discount, same convention as
+ * `construirAsientoCruce`), and `montoOrigen` is the Recibo's own cached
+ * `receivedAmount` (real cash only) — the balance holds without any other
+ * change: debits (`cuentaCartera`/`desgloseCartera` restore + `cuentaAnticipos`
+ * restore) equal credits (`cuentaOrigen` for `montoOrigen` + `descuento.cuenta`
+ * for `descuento.monto`), since `montoAplicado + montoSinAplicar ===
+ * montoOrigen + descuento.monto` by construction.
  */
 export function construirContraAsientoCruce(
   cuentaOrigen: string,
@@ -684,6 +715,7 @@ export function construirContraAsientoCruce(
   cuentasOrden?: CuentasOrden | null,
   desgloseCartera?: { account: string; monto: number }[],
   montoCuentasOrden?: number,
+  descuento?: { cuenta: string; monto: number },
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
@@ -727,6 +759,16 @@ export function construirContraAsientoCruce(
     amount: montoOrigen,
     description: d.contraCredito,
   });
+
+  if (descuento && descuento.monto > 0) {
+    movimientos.push({
+      account: descuento.cuenta,
+      type: 'credito',
+      amount: descuento.monto,
+      description:
+        'Reversión de descuento por pronto pago — anulación de recibo de caja',
+    });
+  }
 
   movimientos.push(
     ...movimientosCuentasOrden(

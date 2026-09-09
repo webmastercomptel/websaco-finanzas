@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -25,6 +26,7 @@ const loteDoc = (over: Record<string, unknown> = {}) => ({
   periodStart: new Date('2026-08-01'),
   periodEnd: new Date('2026-08-31'),
   earlyPaymentDiscount: 0,
+  earlyPaymentDiscountFixedValue: 0,
   discountGraceDays: 0,
   lateInterestRate: 0,
   lateInterestCap: null,
@@ -38,12 +40,26 @@ const loteDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const lotesModeloCon = (opts: { activo?: Record<string, unknown> } = {}) => {
+/** `ultimoConsolidado` es `null` por defecto — "esta copropiedad nunca
+ *  consolidó nada", que es exactamente el caso en el que `crear()` no debe
+ *  validar ninguna secuencia de fechas. Los tests que sí ejercitan esa
+ *  validación pasan su propio lote con `billingDate`. */
+const lotesModeloCon = (
+  opts: {
+    activo?: Record<string, unknown>;
+    ultimoConsolidado?: Record<string, unknown> | null;
+  } = {},
+) => {
   const escrituras: Record<string, unknown>[] = [];
   return {
     escrituras,
     exists: jest.fn(() => ({
       exec: () => Promise.resolve(opts.activo ? { _id: 'x' } : null),
+    })),
+    findOne: jest.fn(() => ({
+      sort: () => ({
+        exec: () => Promise.resolve(opts.ultimoConsolidado ?? null),
+      }),
     })),
     create: jest.fn((doc: Record<string, unknown>) => {
       escrituras.push(doc);
@@ -317,6 +333,232 @@ describe('LotesFacturacionService.crear', () => {
     expect(escritura.serviceSuspensionDate.toISOString().slice(0, 10)).toBe(
       '2026-09-30',
     );
+  });
+
+  const dtoBase = () => ({
+    fechaFacturacion: '2026-09-01',
+    fechaVencimiento: '2026-09-30',
+    periodoDesde: '2026-09-01',
+    periodoHasta: '2026-09-30',
+  });
+
+  it('hereda el % de descuento de Parámetros cuando el DTO no manda ninguno de los dos', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        findById: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              discountEnabled: true,
+              discountPercentage: 5,
+              discountFixedValue: 0,
+            }),
+        })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, dtoBase());
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      earlyPaymentDiscount: 5,
+      earlyPaymentDiscountFixedValue: 0,
+    });
+  });
+
+  it('hereda el valor fijo cuando no hay % configurado en Parámetros', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        findById: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              discountEnabled: true,
+              discountPercentage: 0,
+              discountFixedValue: 15000,
+            }),
+        })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, dtoBase());
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      earlyPaymentDiscount: 0,
+      earlyPaymentDiscountFixedValue: 15000,
+    });
+  });
+
+  it('no hereda nada cuando discountEnabled está apagado, aunque haya % o valor fijo guardados', async () => {
+    const lotes = lotesModeloCon();
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        findById: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              discountEnabled: false,
+              discountPercentage: 5,
+              discountFixedValue: 15000,
+            }),
+        })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, dtoBase());
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      earlyPaymentDiscount: 0,
+      earlyPaymentDiscountFixedValue: 0,
+    });
+  });
+
+  it('respeta lo que el DTO ya trae explícito, sin heredar de Parámetros', async () => {
+    const lotes = lotesModeloCon();
+    const copropiedades = {
+      findById: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve({
+            discountEnabled: true,
+            discountPercentage: 5,
+            discountFixedValue: 0,
+          }),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+    await service.crear(CUENTA, { ...dtoBase(), descuentoProntoPago: 8 });
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      earlyPaymentDiscount: 8,
+      earlyPaymentDiscountFixedValue: 0,
+    });
+  });
+
+  const servicioCon = (lotes: ReturnType<typeof lotesModeloCon>) =>
+    new LotesFacturacionService(
+      lotes as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        findById: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      } as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      numeracionCon(),
+    );
+
+  it('rechaza una fecha de facturación que no cae en el mes siguiente al último ciclo consolidado — el bug real reportado (typo de año)', async () => {
+    const lotes = lotesModeloCon({
+      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+    const service = servicioCon(lotes);
+
+    // El typo real: "9202" en vez de "2026" como año.
+    await expect(
+      service.crear(CUENTA, { ...dtoBase(), fechaFacturacion: '9202-10-02' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(lotes.escrituras).toHaveLength(0);
+  });
+
+  it('acepta la fecha de facturación cuando cae exactamente en el mes siguiente al último ciclo consolidado', async () => {
+    const lotes = lotesModeloCon({
+      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+    const service = servicioCon(lotes);
+
+    await service.crear(CUENTA, {
+      ...dtoBase(),
+      fechaFacturacion: '2026-09-15',
+    });
+
+    expect(lotes.escrituras).toHaveLength(1);
+  });
+
+  it('rechaza una fecha de facturación del mismo mes que el último ciclo consolidado (no avanzó el período)', async () => {
+    const lotes = lotesModeloCon({
+      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+    const service = servicioCon(lotes);
+
+    await expect(
+      service.crear(CUENTA, { ...dtoBase(), fechaFacturacion: '2026-08-20' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('maneja el cruce de año — diciembre consolidado exige enero del año siguiente', async () => {
+    const lotes = lotesModeloCon({
+      ultimoConsolidado: { billingDate: new Date('2026-12-01') },
+    });
+    const service = servicioCon(lotes);
+
+    await service.crear(CUENTA, {
+      ...dtoBase(),
+      fechaFacturacion: '2027-01-10',
+    });
+
+    expect(lotes.escrituras).toHaveLength(1);
+  });
+
+  it('no valida nada cuando la copropiedad nunca ha consolidado un lote (primer ciclo libre)', async () => {
+    const lotes = lotesModeloCon({ ultimoConsolidado: null });
+    const service = servicioCon(lotes);
+
+    await service.crear(CUENTA, {
+      ...dtoBase(),
+      fechaFacturacion: '2020-01-01',
+    });
+
+    expect(lotes.escrituras).toHaveLength(1);
   });
 });
 
@@ -1255,6 +1497,7 @@ describe('LotesFacturacionService.consolidar', () => {
     facturasExistentes?: Record<string, unknown>[];
     asientosExistentes?: Record<string, unknown>[];
     cuentasContables?: Record<string, unknown>[];
+    lote?: Record<string, unknown>;
   }) => {
     const facturasCreadas: Record<string, unknown>[] = [];
     const saldosActualizados: Filtro[] = [];
@@ -1267,6 +1510,7 @@ describe('LotesFacturacionService.consolidar', () => {
             loteDoc({
               status: 'liquidado',
               preview: opts.preview ?? [preliminar()],
+              ...opts.lote,
             }),
           ),
       })),
@@ -1850,6 +2094,155 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(actualizacion.$set.invoiceIds).toEqual(
       expect.arrayContaining(['fac-huerfana', 'fac-1']),
     );
+  });
+
+  const numeracionParaConsolidar = (completo = 'FV-1') =>
+    ({
+      siguienteLote: jest.fn().mockResolvedValue(1),
+      siguienteFactura: jest.fn().mockResolvedValue({
+        prefijo: 'FV',
+        numero: 1,
+        completo,
+      }),
+    }) as unknown as NumeracionService;
+
+  const servicioConsolidar = (m: ReturnType<typeof construirModelos>) =>
+    new LotesFacturacionService(
+      m.lotes as never,
+      m.facturas as never,
+      m.saldos as never,
+      m.asientos as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      m.copropiedades as never,
+      tenantQueDevuelve(COP),
+      periodoAbierto(),
+      numeracionParaConsolidar(),
+    );
+
+  it('calcula y guarda el descuento por pronto pago en cada factura, a partir del % del lote', async () => {
+    const m = construirModelos({
+      lote: {
+        earlyPaymentDiscount: 5,
+        discountDeadline: new Date('2026-08-10'),
+      },
+    });
+
+    await servicioConsolidar(m).consolidar('lote-1');
+
+    // 5% de 520000 (baseAmount de Administración en `preliminar()`) = 26000.
+    expect(m.facturasCreadas[0]).toMatchObject({
+      discountAmount: 26000,
+      discountDeadline: new Date('2026-08-10'),
+    });
+  });
+
+  it('usa el valor fijo directo, sin calcular, cuando el lote no trae %', async () => {
+    const m = construirModelos({
+      lote: {
+        earlyPaymentDiscount: 0,
+        earlyPaymentDiscountFixedValue: 15000,
+        discountDeadline: new Date('2026-08-10'),
+      },
+    });
+
+    await servicioConsolidar(m).consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      discountAmount: 15000,
+      discountDeadline: new Date('2026-08-10'),
+    });
+  });
+
+  it('no ofrece descuento cuando la factura tiene mora y descuentoAplicaConMora está apagado', async () => {
+    const m = construirModelos({
+      lote: {
+        earlyPaymentDiscount: 5,
+        discountDeadline: new Date('2026-08-10'),
+      },
+      copropiedad: {
+        receivablesAccount: '130501',
+        discountAppliesWithLateFee: false,
+      },
+      preview: [
+        preliminar({
+          lines: [
+            ...preliminar().lines,
+            {
+              conceptoId: 'con-2',
+              conceptName: 'Intereses de mora',
+              conceptKind: 'intereses',
+              accountingIncomeAccount: '413599',
+              source: 'interes',
+              baseAmount: 5000,
+              taxRate: 0,
+              taxAmount: 0,
+              totalAmount: 5000,
+            },
+          ],
+        }),
+      ],
+    });
+
+    await servicioConsolidar(m).consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      discountAmount: 0,
+      discountDeadline: null,
+    });
+  });
+
+  it('SÍ ofrece descuento con mora cuando descuentoAplicaConMora está encendido', async () => {
+    const m = construirModelos({
+      lote: {
+        earlyPaymentDiscount: 5,
+        discountDeadline: new Date('2026-08-10'),
+      },
+      copropiedad: {
+        receivablesAccount: '130501',
+        discountAppliesWithLateFee: true,
+      },
+      preview: [
+        preliminar({
+          lines: [
+            ...preliminar().lines,
+            {
+              conceptoId: 'con-2',
+              conceptName: 'Intereses de mora',
+              conceptKind: 'intereses',
+              accountingIncomeAccount: '413599',
+              source: 'interes',
+              baseAmount: 5000,
+              taxRate: 0,
+              taxAmount: 0,
+              totalAmount: 5000,
+            },
+          ],
+        }),
+      ],
+    });
+
+    await servicioConsolidar(m).consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      discountAmount: 26000,
+      discountDeadline: new Date('2026-08-10'),
+    });
+  });
+
+  it('no ofrece descuento cuando el lote no tiene ni % ni valor fijo configurados', async () => {
+    const m = construirModelos({
+      lote: { earlyPaymentDiscount: 0, earlyPaymentDiscountFixedValue: 0 },
+    });
+
+    await servicioConsolidar(m).consolidar('lote-1');
+
+    expect(m.facturasCreadas[0]).toMatchObject({
+      discountAmount: 0,
+      discountDeadline: null,
+    });
   });
 });
 

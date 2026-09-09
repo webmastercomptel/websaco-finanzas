@@ -13,7 +13,6 @@ import type {
   TitularCongelado,
 } from '../../database/schemas/facturacion/factura-linea.schema';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
-import type { LoteFacturacionDocument } from '../../database/schemas/facturacion/lote-facturacion.schema';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
@@ -43,50 +42,14 @@ export interface DatosDocumentoFacturacion {
   marcaDuplicado: string | null;
 }
 
+/** Display shape `dibujarDescuentoProntoPago` draws — the Spanish-named
+ *  on-page fields, kept distinct from `DescuentoProntoPago`
+ *  (`common/facturacion/descuento-pronto-pago.util.ts`, the calculation's
+ *  own English-named result) so the render layer never depends on that
+ *  util's shape directly. */
 export interface InfoDescuentoProntoPago {
   fechaLimite: Date;
   monto: number;
-}
-
-/**
- * Computes the early-payment discount offer for one invoice/preliminar, from
- * the lote's own `earlyPaymentDiscount` (%, "Descuento Pronto Pago" on the
- * Lote screen) and `discountDeadline` ("Fecha límite para descuento") —
- * neither of which had ever been READ anywhere before this (see both
- * fields' own schema comments). Applied to the Administración line's own
- * `baseAmount` — same target as the mora calculation, "el saldo anterior
- * que tenga el cargo de administración" (confirmed with product for mora;
- * mirrored here) — never to the whole invoice, which would mix in
- * multas/otros ingresos the discount was never meant to touch.
- *
- * Returns null (no red note on the page) when there is nothing to offer:
- * no discount percentage configured on this lote, no Administración line on
- * this document, the computed amount rounds to 0, or — the explicit
- * business rule — this cycle already charged mora. Paying late once
- * forfeits that cycle's early-payment offer; it does not retroactively
- * change what mora already computed.
- */
-export function calcularDescuentoProntoPago(
-  lines: FacturaLinea[],
-  earlyPaymentDiscount: number,
-  discountDeadline: Date,
-): InfoDescuentoProntoPago | null {
-  if (!(earlyPaymentDiscount > 0)) return null;
-
-  const tieneMora = lines.some(
-    (l) => l.conceptKind === 'intereses' && l.totalAmount > 0,
-  );
-  if (tieneMora) return null;
-
-  const administracion = lines.find((l) => l.conceptKind === 'administracion');
-  if (!administracion) return null;
-
-  const monto = Math.round(
-    administracion.baseAmount * (earlyPaymentDiscount / 100),
-  );
-  if (monto <= 0) return null;
-
-  return { fechaLimite: discountDeadline, monto };
 }
 
 /**
@@ -641,28 +604,23 @@ function dibujarTotalAPagar(ctx: PdfContext, lines: FacturaLinea[]): void {
  * generic Spanish title is used instead and the footer is skipped. When
  * `duplicado` is true, stamps the "DUPLICADO" mark.
  *
- * `lote` — the billing run this Factura came from — supplies the
- * early-payment discount offer (`calcularDescuentoProntoPago`); null when
- * the caller cannot resolve it (an orphaned `loteId`, in practice never
- * expected since lotes are never deleted once consolidado), in which case
- * the discount note is simply omitted, same as a coproperty with none
- * configured.
+ * The early-payment discount note reads `factura.discountAmount`/
+ * `discountDeadline` directly — frozen at `consolidar()` time
+ * (`LotesFacturacionService`), never recalculated here. No `lote` lookup
+ * needed for this anymore (see `FacturasController.generarPdf`, which used
+ * to load it solely for this).
  */
 export async function generarPdfFactura(
   factura: FacturaDocument,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
-  lote: LoteFacturacionDocument | null,
   opciones?: { duplicado?: boolean },
 ): Promise<Uint8Array> {
   const titulo = `${resolucion?.displayName ?? 'Cobro Expensas Comunes'} ${factura.fullNumber}`;
-  const descuento = lote
-    ? calcularDescuentoProntoPago(
-        factura.lines,
-        lote.earlyPaymentDiscount,
-        lote.discountDeadline,
-      )
-    : null;
+  const descuento =
+    factura.discountAmount > 0 && factura.discountDeadline
+      ? { fechaLimite: factura.discountDeadline, monto: factura.discountAmount }
+      : null;
   const ctx = await generarContextoDocumentoFacturacion(
     {
       titulo,

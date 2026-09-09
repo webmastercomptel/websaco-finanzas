@@ -44,15 +44,15 @@ import {
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
-import {
-  PeriodoService,
-  periodoDe,
-} from '../../common/contabilidad/periodo.service';
+import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
-  ajustarSaldosCartera,
+  actualizarRemanentesLinea,
+  ajustarSaldosCarteraPorDistribucion,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
+  remanentesPorLinea,
+  type ResumenAplicacion,
 } from './cruce.util';
 import {
   construirAsientoCruce,
@@ -73,6 +73,77 @@ import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
+
+/**
+ * The `{year, month}` of a bare calendar date (`fechaRecibo`,
+ * `LoteFacturacion.billingDate`) — both always a plain "YYYY-MM-DD" parsed
+ * as UTC midnight, never a real wall-clock timestamp. Deliberately reads
+ * UTC, NOT `periodoDe()`'s local-time reading (`common/contabilidad/
+ * periodo.service.ts`): `periodoDe` exists for a genuine local timestamp
+ * close to midnight, but applying it to a UTC-midnight calendar date on a
+ * host running a negative UTC offset (Colombia, UTC-5 — this backend's own
+ * users) rolls day 1 of the month back into the previous month entirely,
+ * which is exactly the bug a user hit in production comparing a lote
+ * `billingDate` of "2026-08-01" against a Recibo dated "2026-08-31" — both
+ * clearly August, but `periodoDe` read the lote as July.
+ */
+const periodoCalendarioDe = (fecha: Date): { year: number; month: number } => ({
+  year: fecha.getUTCFullYear(),
+  month: fecha.getUTCMonth() + 1,
+});
+
+/**
+ * Redacts "Cancela facturas 6, 173, 340 y genera anticipo" / "Abona a
+ * factura 341" from the applications a `crear()` call actually made — the
+ * single source of truth for both Automática (FIFO, decided entirely
+ * server-side) and Manual (the client already composes an equivalent
+ * preview from its own selections, but the server-computed text still wins
+ * whenever the caller left `observaciones` blank, so both paths render
+ * identically). Mirrors `recibo-nuevo.tsx`'s `observacionesSugeridas`
+ * formatting exactly: bare document numbers (never the prefixed
+ * `fullNumber`), comma-only joins (no "y" before the last one — that "y" is
+ * reserved for chaining "genera anticipo"), grouped Cancela-antes-que-Abona,
+ * Facturas-antes-que-Notas-Débito.
+ */
+const redactarObservaciones = (
+  resumen: ResumenAplicacion[],
+  generaAnticipo: boolean,
+): string => {
+  const facturasCanceladas = resumen
+    .filter((r) => r.tipo === 'FV' && r.completa)
+    .map((r) => r.numero);
+  const facturasAbonadas = resumen
+    .filter((r) => r.tipo === 'FV' && !r.completa)
+    .map((r) => r.numero);
+  const notasCanceladas = resumen
+    .filter((r) => r.tipo === 'ND' && r.completa)
+    .map((r) => r.numero);
+  const notasAbonadas = resumen
+    .filter((r) => r.tipo === 'ND' && !r.completa)
+    .map((r) => r.numero);
+
+  const clausula = (
+    verbo: string,
+    etiquetaSingular: string,
+    etiquetaPlural: string,
+    numeros: number[],
+  ): string | null =>
+    numeros.length === 0
+      ? null
+      : `${verbo} ${numeros.length === 1 ? etiquetaSingular : etiquetaPlural} ${numeros.join(', ')}`;
+
+  const partes = [
+    clausula('Cancela', 'factura', 'facturas', facturasCanceladas),
+    clausula('Abona a', 'factura', 'facturas', facturasAbonadas),
+    clausula('Cancela', 'nota débito', 'notas débito', notasCanceladas),
+    clausula('Abona a', 'nota débito', 'notas débito', notasAbonadas),
+  ].filter((p): p is string => p !== null);
+
+  if (partes.length === 0) {
+    return generaAnticipo ? 'Genera anticipo' : '';
+  }
+  return partes.join('. ') + (generaAnticipo ? ' y genera anticipo' : '');
+};
 
 /**
  * CANONICAL CONSTRUCTOR — pinned while the ten tasks of this plan were being
@@ -213,8 +284,8 @@ export class RecibosService {
       coPropertyId.toString(),
     );
     if (ultimoLote) {
-      const periodoLote = periodoDe(ultimoLote.billingDate);
-      const periodoRecibo = periodoDe(new Date(dto.fechaRecibo));
+      const periodoLote = periodoCalendarioDe(ultimoLote.billingDate);
+      const periodoRecibo = periodoCalendarioDe(new Date(dto.fechaRecibo));
       if (
         periodoLote.year !== periodoRecibo.year ||
         periodoLote.month !== periodoRecibo.month
@@ -275,6 +346,8 @@ export class RecibosService {
       let totalAplicadoAhora = 0;
       let creditosPorCuenta = new Map<string | null, number>();
       let montoAplicadoMora = 0;
+      let montoDescuentoAhora = 0;
+      let resumenAplicaciones: ResumenAplicacion[] = [];
       if (dto.aplicaciones?.length) {
         const resultado = await this.aplicarManual(
           session,
@@ -289,6 +362,8 @@ export class RecibosService {
         );
         creditosPorCuenta = resultado.creditosPorCuenta;
         montoAplicadoMora = resultado.montoAplicadoMora;
+        resumenAplicaciones = resultado.resumen;
+        montoDescuentoAhora = resultado.montoDescuentoTotal;
       } else if (dto.aplicacionAutomatica) {
         const resultado = await this.aplicarFifo(
           session,
@@ -303,6 +378,39 @@ export class RecibosService {
         );
         creditosPorCuenta = resultado.creditosPorCuenta;
         montoAplicadoMora = resultado.montoAplicadoMora;
+        resumenAplicaciones = resultado.resumen;
+        montoDescuentoAhora = resultado.montoDescuentoTotal;
+      }
+
+      // `totalAplicadoAhora` already includes any early-payment discount
+      // summed in (see `evaluarAplicacionConDescuento`, cruce.util.ts) — the
+      // real cash this call drew from `montoRecibido` is the difference.
+      // Every downstream use of "how much of the received money is left
+      // over as anticipo" (Observaciones, `postearAsientoRecibo`'s
+      // `montoSinAplicar`) must use this, never `totalAplicadoAhora` itself.
+      const cashAplicadoAhora = totalAplicadoAhora - montoDescuentoAhora;
+
+      // Observaciones is redacted from the ACTUAL applications, never
+      // whatever the frontend guessed beforehand — Automática mode only
+      // learns which documents FIFO touched once `aplicarFifo` above has
+      // already run, so this is the earliest point the real text can be
+      // known. A caller-supplied `dto.observaciones` always wins verbatim
+      // (a Manual submission already sent its own client-composed text; see
+      // `recibo-nuevo.tsx`'s `observacionesSugeridas`).
+      if (!dto.observaciones) {
+        const generado = redactarObservaciones(
+          resumenAplicaciones,
+          dto.montoRecibido - cashAplicadoAhora > 0,
+        );
+        if (generado) {
+          await this.recibos
+            .findOneAndUpdate(
+              { _id: creado._id, coPropertyId },
+              { $set: { notes: generado } },
+              { session },
+            )
+            .exec();
+        }
       }
 
       // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
@@ -319,9 +427,10 @@ export class RecibosService {
         coPropertyId,
         reciboActual!,
         totalAplicadoAhora,
-        dto.montoRecibido - totalAplicadoAhora,
+        dto.montoRecibido - cashAplicadoAhora,
         creditosPorCuenta,
         montoAplicadoMora,
+        montoDescuentoAhora,
       );
 
       const final = await this.recibos
@@ -391,6 +500,7 @@ export class RecibosService {
         );
       };
       let montoAplicadoMora = 0;
+      let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
         // Unconditional, plain $inc — never guarded by
@@ -407,13 +517,49 @@ export class RecibosService {
           .exec();
 
         if (factura) {
-          const partes = await ajustarSaldosCartera(
+          // Replays the EXACT split this application recorded
+          // (`detalleConceptos`) instead of re-deriving one via the default
+          // cascade — the only way a reversal is correct once the original
+          // application could have been a user-chosen manual distribution,
+          // not just the cascade (same reasoning `NotaCreditoService.anular()`
+          // already applies to its own anchor application's `distribution`).
+          //
+          // `factura` here already reflects the $inc above (outstandingBalance
+          // restored UP) — for a línea `remanentesPorLinea` still has to
+          // legacy-derive (never touched by a manual distribution), that
+          // function needs the state as it stood BEFORE this reversal, so
+          // the aggregate is walked back by exactly what this reversal is
+          // about to give back (a línea already carrying a real
+          // `remainingAmount` ignores this and reads its own tracked value
+          // regardless).
+          const remanentesAntes = remanentesPorLinea({
+            ...factura,
+            outstandingBalance:
+              factura.outstandingBalance - aplicacion.amountApplied,
+          });
+          const partes = await ajustarSaldosCarteraPorDistribucion(
             this.saldos,
             session,
             coPropertyId,
-            factura,
+            factura.inmuebleId,
+            aplicacion.detalleConceptos.map((d) => ({
+              conceptoId: d.conceptoId,
+              monto: d.monto,
+            })),
             aplicacion.amountApplied,
             1,
+          );
+          await actualizarRemanentesLinea(
+            this.facturas,
+            session,
+            coPropertyId,
+            factura._id,
+            partes.map((parte) => ({
+              conceptoId: parte.conceptoId,
+              nuevoValor:
+                (remanentesAntes.get(parte.conceptoId.toString()) ?? 0) +
+                parte.parte,
+            })),
           );
           for (const parte of partes) {
             const linea = factura.lines.find((l) =>
@@ -435,6 +581,8 @@ export class RecibosService {
             { session },
           )
           .exec();
+
+        montoDescuentoTotal += aplicacion.discountApplied ?? 0;
       }
 
       // ALWAYS posted (no `if (totalRevertido > 0)` gate — that gate was
@@ -449,20 +597,37 @@ export class RecibosService {
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+      const cuentaDescuentos =
+        copropiedad?.discountsCreditAccount ?? CUENTA_SIN_ASIGNAR;
       const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
         ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
       );
+      // The cartera side to restore is the FULL amount originally credited
+      // (cash plus any discount it absorbed) — `recibo.appliedAmount` alone
+      // is cash-only (see `crear()`'s own `cashAplicadoAhora`), so the
+      // discount this loop just totaled has to be added back. NOT derived
+      // by summing `desgloseCartera`: a factura with no matching `lines`
+      // (already-edge-case territory `ajustarSaldosCartera` guards against)
+      // would leave that sum short of what was actually applied, silently
+      // understating the reversal — the Recibo's own cached total is the
+      // one number that is always right regardless of what `lines` shows
+      // today, months after the original application.
+      const montoAplicadoCarteraTotal =
+        recibo.appliedAmount + montoDescuentoTotal;
       let entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,
         cuentaAnticipos,
-        recibo.appliedAmount,
+        montoAplicadoCarteraTotal,
         recibo.unappliedAmount,
         recibo.receivedAmount,
         'RC',
         cuentasOrdenDe(copropiedad),
         desgloseCartera,
         montoAplicadoMora,
+        montoDescuentoTotal > 0
+          ? { cuenta: cuentaDescuentos, monto: montoDescuentoTotal }
+          : undefined,
       );
       entries = await this.conAuxiliares(
         session,
@@ -547,7 +712,7 @@ export class RecibosService {
     const [documentos, total] = await Promise.all([
       this.recibos
         .find(filtro)
-        .sort({ receivedDate: -1, _id: -1 })
+        .sort({ number: -1, _id: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -645,6 +810,8 @@ export class RecibosService {
     creadas: AplicacionCarteraDocument[];
     creditosPorCuenta: Map<string | null, number>;
     montoAplicadoMora: number;
+    resumen: ResumenAplicacion[];
+    montoDescuentoTotal: number;
   }> {
     return ejecutarAplicacionManual(
       {
@@ -683,6 +850,8 @@ export class RecibosService {
     montoSinAplicar: number;
     creditosPorCuenta: Map<string | null, number>;
     montoAplicadoMora: number;
+    resumen: ResumenAplicacion[];
+    montoDescuentoTotal: number;
   }> {
     return ejecutarAplicacionFifo(
       {
@@ -763,6 +932,7 @@ export class RecibosService {
     montoSinAplicar: number,
     creditosPorCuenta: Map<string | null, number>,
     montoAplicadoMora: number,
+    montoDescuento: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -770,6 +940,8 @@ export class RecibosService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaDescuentos =
+      copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
     // null key (no accountingReceivableAccount for that concepto, or a Nota
     // Débito application) resolves to the coproperty's shared cuentaCartera.
     const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
@@ -785,6 +957,9 @@ export class RecibosService {
       cuentasOrdenDe(copropiedad),
       desgloseCartera,
       montoAplicadoMora,
+      montoDescuento > 0
+        ? { cuenta: cuentaDescuentos, monto: montoDescuento }
+        : undefined,
     );
     entries = await this.conAuxiliares(
       session,

@@ -21,6 +21,7 @@ describe('NotasAnticipoController.crear', () => {
     await controller.crear(user, {
       codigo: 'NA',
       reciboOrigenId: new Types.ObjectId().toString(),
+      fechaEmision: '2026-09-01',
       aplicacionAutomatica: true,
     });
 

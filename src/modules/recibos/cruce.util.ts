@@ -1,5 +1,5 @@
 // src/modules/recibos/cruce.util.ts
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { ClientSession, Model } from 'mongoose';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
@@ -226,6 +226,121 @@ export async function ajustarSaldosCartera(
 }
 
 /**
+ * How much of each of a Factura's own lines is CURRENTLY pending — the
+ * number a user-chosen manual distribution is validated against (never the
+ * frozen `totalAmount`, unlike `validarDistribucionNotaCredito`'s own cap: a
+ * Nota Crédito typically runs against a still-fresh invoice, but a Recibo's
+ * manual application can run against one already partly paid down).
+ *
+ * Resolved per LINE, independently: a line already carrying a real
+ * `remainingAmount` (written by a prior manual distribution against this
+ * same factura — see `ejecutarAplicacionManual`) reports that value
+ * directly; a line that has never been touched that way (`remainingAmount`
+ * still `null`, true for every factura issued before this field existed, and
+ * for any of THIS factura's lines a manual distribution never targeted)
+ * derives it from `factura.total`/`outstandingBalance` via the SAME reverse-
+ * order cascade `ajustarSaldosCartera` above has always used — the only
+ * order any of its own money could ever have drained through until now, so
+ * this reproduces exactly what that line's true remainder is.
+ *
+ * Deliberately does NOT require every line to be in the same state (all
+ * tracked or all derived) — a factura can have some lines already migrated
+ * by an earlier manual distribution and others still legacy, and each is
+ * resolved on its own.
+ */
+export function remanentesPorLinea(factura: {
+  total: number;
+  outstandingBalance: number;
+  lines: {
+    conceptoId: Types.ObjectId;
+    totalAmount: number;
+    remainingAmount?: number | null;
+  }[];
+}): Map<string, number> {
+  const aplicado = factura.total - factura.outstandingBalance;
+  const ordenAplicacion = [...factura.lines].reverse();
+  const resultado = new Map<string, number>();
+  let cursor = 0;
+  for (const linea of ordenAplicacion) {
+    const inicioLinea = cursor;
+    const finLinea = cursor + linea.totalAmount;
+    cursor = finLinea;
+
+    if (linea.remainingAmount != null) {
+      resultado.set(linea.conceptoId.toString(), linea.remainingAmount);
+      continue;
+    }
+    const pagado = Math.max(0, Math.min(finLinea, aplicado) - inicioLinea);
+    resultado.set(linea.conceptoId.toString(), linea.totalAmount - pagado);
+  }
+  return resultado;
+}
+
+/**
+ * Validates a Recibo's requested manual `distribucion` against its target
+ * invoice's OWN currently pending balance per concepto (`remanentesPorLinea`
+ * above): the distribution must sum to EXACTLY `montoAplicado`, and no line
+ * may ask for more than that concepto's own remainder — asking for LESS is
+ * always fine (that concepto simply stays partly pending, same as any
+ * ordinary partial abono). Mirrors `validarDistribucionNotaCredito`'s
+ * error style; never partially applies — the caller runs this before
+ * touching the database.
+ */
+export function validarDistribucionManual(
+  distribucion: { conceptoId: string; monto: number }[],
+  montoAplicado: number,
+  remanentes: Map<string, number>,
+): void {
+  const suma = distribucion.reduce((acc, linea) => acc + linea.monto, 0);
+  if (suma !== montoAplicado) {
+    throw new ConflictException(
+      `El reparto por concepto (${suma}) no coincide con el monto a aplicar (${montoAplicado})`,
+    );
+  }
+
+  for (const linea of distribucion) {
+    const remanente = remanentes.get(linea.conceptoId) ?? 0;
+    if (linea.monto > remanente) {
+      throw new ConflictException(
+        `El concepto ${linea.conceptoId} no admite aplicar ${linea.monto}: ` +
+          `su saldo pendiente en esta factura es ${remanente}`,
+      );
+    }
+  }
+}
+
+/**
+ * Persists this factura's per-línea `remainingAmount` after a manual
+ * distribution touched it — one targeted `$set` per línea (never `$inc`: a
+ * line still at its `null` default has nothing numeric to increment from,
+ * and the caller already knows the exact new value from
+ * `remanentesPorLinea`'s own read). Used both going forward (a manual
+ * distribution decrements) and in reverse (an anulación restores) — the
+ * caller computes `nuevoValor` either way, this just writes it.
+ */
+export async function actualizarRemanentesLinea(
+  facturas: Model<FacturaDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  facturaId: Types.ObjectId,
+  cambios: { conceptoId: Types.ObjectId; nuevoValor: number }[],
+): Promise<void> {
+  for (const cambio of cambios) {
+    await facturas
+      .updateOne(
+        {
+          _id: facturaId,
+          coPropertyId,
+          'lines.conceptoId': cambio.conceptoId,
+        },
+        { $set: { 'lines.$.remainingAmount': cambio.nuevoValor } },
+        { session },
+      )
+      .exec();
+  }
+}
+
+/**
  * Sibling to `ajustarSaldosCartera` above, for Notas Crédito ONLY. Adjusts
  * each concepto's `SaldoCartera` by that concepto's share of the Nota
  * Crédito's own user-chosen `distribucion` — never a proportional-by-invoice-
@@ -316,6 +431,87 @@ export async function ajustarSaldosCarteraPorDistribucion(
 }
 
 /**
+ * One applied document's outcome, as needed to redact a Recibo's
+ * Observaciones automatically ("Cancela factura 6, 173" / "Abona a factura
+ * 340") — `numero` is the document's bare number (never `fullNumber`, which
+ * carries the "FV-"/"ND-" prefix the redacted text doesn't want), `completa`
+ * is whether THIS application brought the document's `outstandingBalance`
+ * to exactly zero (a partial application never can, since
+ * `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` refuse to go
+ * negative — `=== 0` is unambiguous, no epsilon needed).
+ */
+export type ResumenAplicacion = {
+  tipo: 'FV' | 'ND';
+  numero: number;
+  completa: boolean;
+};
+
+/** `montoAFactura` — how much to actually decrement/credit for this
+ *  document: its full `outstandingBalance` when the discount activates,
+ *  otherwise `montoDisponible` VERBATIM, uncapped — the caller decides
+ *  whether/how to cap that (see this function's own docblock on why).
+ *  `montoDescuento` is the portion of that which is discount, not real
+ *  money (0 when it didn't activate). */
+export interface ResultadoElegibilidadDescuento {
+  montoAFactura: number;
+  montoDescuento: number;
+}
+
+/**
+ * The single place the early-payment-discount business rule lives, shared
+ * by `ejecutarAplicacionFifo` and `ejecutarAplicacionManual` — a document
+ * only ever earns its own `discountAmount` when paying it off COMPLETELY,
+ * never prorated onto a partial abono (confirmed with product: "debe
+ * pagarla totalmente"). Never called for a Nota Débito target — those never
+ * carry a discount, so both callers skip straight to their own plain path
+ * for that branch.
+ *
+ * Deliberately does NOT cap the "didn't activate" branch to
+ * `outstandingBalance` — `ejecutarAplicacionFifo` needs that cap (FIFO always
+ * bounds itself to what a document can accept), but `ejecutarAplicacionManual`
+ * must NOT: capping there would silently shrink a caller's over-large
+ * request instead of letting `decrementarSaldoFactura`'s own `$expr` guard
+ * reject it with the `ConflictException` a manual all-or-nothing request is
+ * supposed to get. So this returns `montoDisponible` untouched here; FIFO
+ * applies its own `Math.min` on the result.
+ *
+ * `factura.discountAmount` is capped to `outstandingBalance` defensively —
+ * a discount larger than what's actually owed (a misconfigured Parámetros
+ * value, or a partial payment already landed between consolidación and
+ * this Recibo) must never let `montoAFactura - montoDescuento` (the real
+ * cash drawn) go negative.
+ */
+export function evaluarAplicacionConDescuento(
+  factura: {
+    outstandingBalance: number;
+    discountAmount: number;
+    discountDeadline: Date | null;
+  },
+  fechaRecibo: Date,
+  montoDisponible: number,
+): ResultadoElegibilidadDescuento {
+  const descuentoOfrecido = Math.min(
+    factura.discountAmount,
+    factura.outstandingBalance,
+  );
+  const dentroDePlazo =
+    descuentoOfrecido > 0 &&
+    factura.discountDeadline !== null &&
+    fechaRecibo.getTime() <= factura.discountDeadline.getTime();
+
+  if (
+    dentroDePlazo &&
+    montoDisponible + descuentoOfrecido >= factura.outstandingBalance
+  ) {
+    return {
+      montoAFactura: factura.outstandingBalance,
+      montoDescuento: descuentoOfrecido,
+    };
+  }
+  return { montoAFactura: montoDisponible, montoDescuento: 0 };
+}
+
+/**
  * Shared context every cruce-execution call needs — models, the session,
  * and WHO this application event is (`sourceType`/`sourceId`), always
  * anchored to the Recibo whose `unappliedAmount` is being drawn down.
@@ -362,6 +558,8 @@ export async function ejecutarAplicacionManual(
   creadas: AplicacionCarteraDocument[];
   creditosPorCuenta: Map<string | null, number>;
   montoAplicadoMora: number;
+  resumen: ResumenAplicacion[];
+  montoDescuentoTotal: number;
 }> {
   const {
     facturas,
@@ -395,11 +593,20 @@ export async function ejecutarAplicacionManual(
     creditosPorCuenta.set(cuenta, (creditosPorCuenta.get(cuenta) ?? 0) + monto);
   };
   let montoAplicadoMora = 0;
+  let montoDescuentoTotal = 0;
+  let sumaCashAplicada = 0;
+  const resumen: ResumenAplicacion[] = [];
 
   for (const solicitada of solicitadas) {
     const documentoId = new Types.ObjectId(solicitada.documentoId);
 
     if (solicitada.tipoDocumento === 'ND') {
+      if (solicitada.distribucion?.length) {
+        throw new BadRequestException(
+          'No se puede repartir por concepto una aplicación contra una ' +
+            'Nota Débito — tiene un solo concepto.',
+        );
+      }
       const notaDebito = await decrementarSaldoNotaDebito(
         notasDebito,
         session,
@@ -426,6 +633,7 @@ export async function ejecutarAplicacionManual(
         -1,
       );
       acumular(null, solicitada.montoAplicado);
+      sumaCashAplicada += solicitada.montoAplicado;
 
       const [creada] = await aplicaciones.create(
         [
@@ -436,6 +644,7 @@ export async function ejecutarAplicacionManual(
             documentType: 'ND',
             documentId: documentoId,
             amountApplied: solicitada.montoAplicado,
+            discountApplied: 0,
             detalleConceptos: [
               {
                 conceptoId: notaDebito.conceptoId,
@@ -451,7 +660,57 @@ export async function ejecutarAplicacionManual(
         { session },
       );
       creadas.push(creada);
+      resumen.push({
+        tipo: 'ND',
+        numero: notaDebito.number,
+        completa: notaDebito.outstandingBalance === 0,
+      });
       continue;
+    }
+
+    // Read-before-write: `evaluarAplicacionConDescuento` needs the
+    // PRE-decrement `outstandingBalance` to decide whether this payment,
+    // plus the invoice's own discount, covers it completely — the atomic
+    // `decrementarSaldoFactura` below still guards the actual write with
+    // its own `$expr`, so a stale read here just means that guard throws
+    // (same failure mode as today), never a lost update.
+    const facturaActual = await facturas
+      .findOne({ _id: documentoId, coPropertyId, status: 'emitida' })
+      .session(session)
+      .exec();
+    if (!facturaActual) {
+      throw new AplicacionInvalidaError(
+        documentoId.toString(),
+        solicitada.montoAplicado,
+      );
+    }
+    // El usuario tomó control explícito del reparto por concepto — validado
+    // contra el saldo pendiente REAL de cada concepto de esta factura (nunca
+    // contra su totalAmount congelado, a diferencia de una Nota Crédito: esta
+    // factura puede ya venir parcialmente pagada). El descuento por pronto
+    // pago se omite en este caso — solo tiene sentido en la vía automática,
+    // donde saldar la factura completa lo activa; aquí el usuario ya decidió
+    // exactamente qué se paga.
+    const repartoElegido = solicitada.distribucion?.length
+      ? solicitada.distribucion
+      : null;
+    const remanentesAntes = remanentesPorLinea(facturaActual);
+    let montoAFactura: number;
+    let montoDescuento: number;
+    if (repartoElegido) {
+      validarDistribucionManual(
+        repartoElegido,
+        solicitada.montoAplicado,
+        remanentesAntes,
+      );
+      montoAFactura = solicitada.montoAplicado;
+      montoDescuento = 0;
+    } else {
+      ({ montoAFactura, montoDescuento } = evaluarAplicacionConDescuento(
+        facturaActual,
+        recibo.receivedDate,
+        solicitada.montoAplicado,
+      ));
     }
 
     const factura = await decrementarSaldoFactura(
@@ -459,7 +718,7 @@ export async function ejecutarAplicacionManual(
       session,
       coPropertyId,
       documentoId,
-      solicitada.montoAplicado,
+      montoAFactura,
     );
 
     if (!factura.inmuebleId.equals(recibo.inmuebleId)) {
@@ -470,14 +729,43 @@ export async function ejecutarAplicacionManual(
       );
     }
 
-    const partes = await ajustarSaldosCartera(
-      saldos,
-      session,
-      coPropertyId,
-      factura,
-      solicitada.montoAplicado,
-      -1,
-    );
+    const partes = repartoElegido
+      ? await ajustarSaldosCarteraPorDistribucion(
+          saldos,
+          session,
+          coPropertyId,
+          factura.inmuebleId,
+          repartoElegido.map((l) => ({
+            conceptoId: new Types.ObjectId(l.conceptoId),
+            monto: l.monto,
+          })),
+          montoAFactura,
+          -1,
+        )
+      : await ajustarSaldosCartera(
+          saldos,
+          session,
+          coPropertyId,
+          factura,
+          montoAFactura,
+          -1,
+        );
+
+    if (repartoElegido) {
+      await actualizarRemanentesLinea(
+        facturas,
+        session,
+        coPropertyId,
+        factura._id,
+        partes.map((parte) => ({
+          conceptoId: parte.conceptoId,
+          nuevoValor:
+            (remanentesAntes.get(parte.conceptoId.toString()) ?? 0) -
+            parte.parte,
+        })),
+      );
+    }
+
     const detalleConceptos = partes.map((parte) => {
       const linea = factura.lines.find((l) =>
         l.conceptoId.equals(parte.conceptoId),
@@ -497,6 +785,8 @@ export async function ejecutarAplicacionManual(
         montoAplicadoMora += parte.parte;
       }
     }
+    montoDescuentoTotal += montoDescuento;
+    sumaCashAplicada += montoAFactura - montoDescuento;
 
     const [creada] = await aplicaciones.create(
       [
@@ -506,7 +796,8 @@ export async function ejecutarAplicacionManual(
           sourceId,
           documentType: 'FV',
           documentId: documentoId,
-          amountApplied: solicitada.montoAplicado,
+          amountApplied: montoAFactura,
+          discountApplied: montoDescuento,
           detalleConceptos,
           status: 'activa',
           appliedAt: new Date(),
@@ -516,6 +807,11 @@ export async function ejecutarAplicacionManual(
       { session },
     );
     creadas.push(creada);
+    resumen.push({
+      tipo: 'FV',
+      numero: factura.number,
+      completa: factura.outstandingBalance === 0,
+    });
   }
 
   await recibos
@@ -523,15 +819,21 @@ export async function ejecutarAplicacionManual(
       { _id: recibo._id, coPropertyId },
       {
         $inc: {
-          appliedAmount: sumaSolicitada,
-          unappliedAmount: -sumaSolicitada,
+          appliedAmount: sumaCashAplicada,
+          unappliedAmount: -sumaCashAplicada,
         },
       },
       { session },
     )
     .exec();
 
-  return { creadas, creditosPorCuenta, montoAplicadoMora };
+  return {
+    creadas,
+    creditosPorCuenta,
+    montoAplicadoMora,
+    resumen,
+    montoDescuentoTotal,
+  };
 }
 
 /**
@@ -556,6 +858,8 @@ export async function ejecutarAplicacionFifo(
   montoSinAplicar: number;
   creditosPorCuenta: Map<string | null, number>;
   montoAplicadoMora: number;
+  resumen: ResumenAplicacion[];
+  montoDescuentoTotal: number;
 }> {
   const {
     facturas,
@@ -625,10 +929,27 @@ export async function ejecutarAplicacionFifo(
   let restante = montoDisponible;
   let totalAplicado = 0;
   let montoAplicadoMora = 0;
+  let montoDescuentoTotal = 0;
+  const resumen: ResumenAplicacion[] = [];
 
   for (const candidato of abiertas) {
     if (restante <= 0) break;
-    const monto = Math.min(restante, candidato.doc.outstandingBalance);
+    // Notas Débito never carry a discount — only a Factura candidate goes
+    // through `evaluarAplicacionConDescuento`. FIFO always caps to what the
+    // candidate can accept, whether or not the discount activated (that
+    // function deliberately leaves the "didn't activate" branch uncapped —
+    // see its own docblock; capping is this caller's job, not shared with
+    // `ejecutarAplicacionManual`, which must NOT cap).
+    const { montoAFactura: montoSinCapar, montoDescuento } =
+      candidato.tipo === 'FV'
+        ? evaluarAplicacionConDescuento(
+            candidato.doc,
+            recibo.receivedDate,
+            restante,
+          )
+        : { montoAFactura: restante, montoDescuento: 0 };
+    const monto = Math.min(montoSinCapar, candidato.doc.outstandingBalance);
+    const cashUsado = monto - montoDescuento;
 
     try {
       if (candidato.tipo === 'ND') {
@@ -665,6 +986,7 @@ export async function ejecutarAplicacionFifo(
               documentType: 'ND',
               documentId: candidato.doc._id,
               amountApplied: monto,
+              discountApplied: 0,
               detalleConceptos: [
                 {
                   conceptoId: notaActualizada.conceptoId,
@@ -681,8 +1003,13 @@ export async function ejecutarAplicacionFifo(
         );
 
         aplicadas.push(creada);
-        restante -= monto;
-        totalAplicado += monto;
+        resumen.push({
+          tipo: 'ND',
+          numero: notaActualizada.number,
+          completa: notaActualizada.outstandingBalance === 0,
+        });
+        restante -= cashUsado;
+        totalAplicado += cashUsado;
         continue;
       }
 
@@ -730,6 +1057,7 @@ export async function ejecutarAplicacionFifo(
             documentType: 'FV',
             documentId: candidato.doc._id,
             amountApplied: monto,
+            discountApplied: montoDescuento,
             detalleConceptos,
             status: 'activa',
             appliedAt: new Date(),
@@ -740,8 +1068,14 @@ export async function ejecutarAplicacionFifo(
       );
 
       aplicadas.push(creada);
-      restante -= monto;
-      totalAplicado += monto;
+      resumen.push({
+        tipo: 'FV',
+        numero: facturaActualizada.number,
+        completa: facturaActualizada.outstandingBalance === 0,
+      });
+      montoDescuentoTotal += montoDescuento;
+      restante -= cashUsado;
+      totalAplicado += cashUsado;
     } catch (err) {
       if (!(err instanceof AplicacionInvalidaError)) {
         throw err;
@@ -774,5 +1108,7 @@ export async function ejecutarAplicacionFifo(
     montoSinAplicar: restante,
     creditosPorCuenta,
     montoAplicadoMora,
+    resumen,
+    montoDescuentoTotal,
   };
 }

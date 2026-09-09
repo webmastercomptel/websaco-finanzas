@@ -191,6 +191,11 @@ export interface FacturaLinea {
    *  frozen at the moment the line was built, never recomputed later. */
   saldoAnterior: Monto;
   nuevoSaldo: Monto;
+  /** How much of THIS line is still pending today — unlike
+   *  saldoAnterior/nuevoSaldo above, this is live, not a frozen snapshot.
+   *  What a Recibo's manual per-concepto distribution is validated and
+   *  capped against. */
+  saldoPendiente: Monto;
 }
 
 /** A sales invoice ("FV"), only ever created already numbered. */
@@ -213,6 +218,12 @@ export interface Factura {
   totalImpuestos: Monto;
   total: Monto;
   saldoPendiente: Monto;
+  /** Early-payment discount this invoice offers — 0 when it has none (mora,
+   *  or nothing configured on the lote). See `Factura.discountAmount`. */
+  montoDescuento: Monto;
+  /** Last date a Recibo still earns `montoDescuento` — null exactly when
+   *  `montoDescuento` is 0. */
+  fechaLimiteDescuento: IsoDate | null;
   estado: 'emitida' | 'anulada';
 }
 
@@ -233,6 +244,9 @@ export interface LoteFacturacion {
   periodoDesde: IsoDate;
   periodoHasta: IsoDate;
   descuentoProntoPago: number;
+  /** Mutually exclusive with `descuentoProntoPago` in practice — only used
+   *  when the percentage is 0. See Parámetros de Facturación §4's rule. */
+  valorFijoDescuentoProntoPago: number;
   diasGraciaDescuento: number;
   interesMora: number;
   /** Not a ceiling on the mora amount — the minimum overdue balance before
@@ -281,13 +295,20 @@ export interface ErrorConsolidacion {
 }
 
 /**
- * Result of wiping every Lote/Factura (and their derived asientos/saldos)
- * of the one hardcoded test coproperty, so its billing cycle can be
- * replayed from zero. See `ReiniciarCicloService` for the safety checks.
+ * Result of wiping every financial document (Lotes/Facturas, Recibos, Notas
+ * Crédito/Débito/Anticipo/Contables, and their derived asientos/saldos) of
+ * the one hardcoded test coproperty, so its billing cycle can be replayed
+ * from a blank slate. See `ReiniciarCicloService` for the safety checks.
  */
 export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
   facturasEliminadas: number;
+  recibosEliminados: number;
+  notasCreditoEliminadas: number;
+  notasDebitoEliminadas: number;
+  notasAnticipoEliminadas: number;
+  notasContablesEliminadas: number;
+  aplicacionesEliminadas: number;
   asientosEliminados: number;
   saldosEliminados: number;
 }
@@ -423,6 +444,9 @@ export interface AplicacionCartera {
    *  documents are never deleted). */
   numeroDocumento: string | null;
   montoAplicado: Monto;
+  /** Portion of `montoAplicado` that is early-payment discount, not real
+   *  money — 0 in the normal case. See `AplicacionCartera.discountApplied`. */
+  montoDescuento: Monto;
   detalleConceptos: DetalleConceptoAplicacion[];
   estado: 'activa' | 'revertida';
   fecha: IsoDate;

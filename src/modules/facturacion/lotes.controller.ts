@@ -225,7 +225,6 @@ export class LotesController {
       facturas,
       resolucionesPorId,
       copropiedad,
-      lote,
     );
 
     res.set({

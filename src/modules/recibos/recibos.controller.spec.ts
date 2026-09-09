@@ -5,6 +5,28 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 
 const COP = new Types.ObjectId();
 
+/** Defaults every `generarPdf` test needs so `construirDatosImpresionRecibo`
+ *  resolves cleanly — overridable per test via the `modelos` param. */
+function modelosImpresionPorDefecto() {
+  return {
+    facturas: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
+    notasDebito: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
+    inmuebles: {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve({ code: '1201' }),
+      })),
+    },
+    terceros: {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve({ name: 'Titular Test' }),
+      })),
+    },
+    cuentasContables: {
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+    },
+  };
+}
+
 function makeController(
   recibos: Record<string, unknown>,
   copropiedades: Record<string, unknown> = {
@@ -12,11 +34,17 @@ function makeController(
       exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
     })),
   },
+  modelos: Record<string, unknown> = modelosImpresionPorDefecto(),
 ) {
   return new RecibosController(
     recibos as never,
     { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
     copropiedades as never,
+    modelos.facturas as never,
+    modelos.notasDebito as never,
+    modelos.inmuebles as never,
+    modelos.terceros as never,
+    modelos.cuentasContables as never,
   );
 }
 
@@ -101,22 +129,24 @@ describe('RecibosController.findAll / findOne', () => {
 });
 
 describe('RecibosController.generarPdf', () => {
+  const reciboBase = () => ({
+    _id: new Types.ObjectId(),
+    inmuebleId: new Types.ObjectId(),
+    terceroId: new Types.ObjectId(),
+    fullNumber: 'RC-001-0001',
+    receivedDate: new Date('2026-08-05'),
+    receivedAmount: 100000,
+    paymentMethod: 'efectivo',
+    destinationAccount: 'caja-1',
+    reference: null,
+    notes: null,
+    appliedAmount: 100000,
+    unappliedAmount: 0,
+  });
+
   it('responde con Content-Type application/pdf y bytes reales', async () => {
     const recibos = {
-      findOneRaw: jest.fn(() =>
-        Promise.resolve({
-          _id: new Types.ObjectId(),
-          fullNumber: 'RC-001-0001',
-          receivedDate: new Date('2026-08-05'),
-          receivedAmount: 100000,
-          paymentMethod: 'efectivo',
-          destinationAccount: 'caja-1',
-          reference: null,
-          notes: null,
-          appliedAmount: 100000,
-          unappliedAmount: 0,
-        }),
-      ),
+      findOneRaw: jest.fn(() => Promise.resolve(reciboBase())),
       findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
     };
     const controller = makeController(recibos);
@@ -135,20 +165,7 @@ describe('RecibosController.generarPdf', () => {
 
   it('propaga duplicado=true al generador de PDF', async () => {
     const recibos = {
-      findOneRaw: jest.fn(() =>
-        Promise.resolve({
-          _id: new Types.ObjectId(),
-          fullNumber: 'RC-001-0001',
-          receivedDate: new Date('2026-08-05'),
-          receivedAmount: 100000,
-          paymentMethod: 'efectivo',
-          destinationAccount: 'caja-1',
-          reference: null,
-          notes: null,
-          appliedAmount: 100000,
-          unappliedAmount: 0,
-        }),
-      ),
+      findOneRaw: jest.fn(() => Promise.resolve(reciboBase())),
       findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
     };
     const controller = makeController(recibos);

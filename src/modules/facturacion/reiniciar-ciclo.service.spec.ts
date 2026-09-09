@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -14,20 +14,29 @@ const copropiedad = (over: Record<string, unknown> = {}) => ({
 const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
   ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
 
+const deleteManyMock = (deletedCount: number) => ({
+  deleteMany: jest.fn(() => ({
+    exec: () => Promise.resolve({ deletedCount }),
+  })),
+});
+
 /** Builds a minimal, hand-rolled mock for every model the service injects.
  *  Each field can be overridden per test; unset ones return the harmless
- *  default a happy path needs (no facturas, no cross-references). */
+ *  default a happy path needs (0 deleted, no active resolución). */
 const makeModelos = (over: {
   copropiedad?: unknown;
-  facturaIds?: string[];
-  notaCreditoRef?: boolean;
-  aplicacionRef?: boolean;
   resolucionActiva?: Record<string, unknown> | null;
   deletedCounts?: Partial<{
     lotes: number;
     facturas: number;
     asientos: number;
     saldos: number;
+    recibos: number;
+    notasCredito: number;
+    notasDebito: number;
+    notasAnticipo: number;
+    notasContables: number;
+    aplicaciones: number;
   }>;
 }) => {
   const counts = {
@@ -35,6 +44,12 @@ const makeModelos = (over: {
     facturas: 0,
     asientos: 0,
     saldos: 0,
+    recibos: 0,
+    notasCredito: 0,
+    notasDebito: 0,
+    notasAnticipo: 0,
+    notasContables: 0,
+    aplicaciones: 0,
     ...over.deletedCounts,
   };
 
@@ -47,55 +62,28 @@ const makeModelos = (over: {
     })),
   };
 
-  const facturas = {
-    find: jest.fn(() => ({
-      distinct: () => ({
-        exec: () => Promise.resolve(over.facturaIds ?? []),
-      }),
-    })),
-    deleteMany: jest.fn(() => ({
-      exec: () => Promise.resolve({ deletedCount: counts.facturas }),
-    })),
-  };
-
-  const lotes = {
-    deleteMany: jest.fn(() => ({
-      exec: () => Promise.resolve({ deletedCount: counts.lotes }),
-    })),
-  };
-
-  const asientosFiltros: Record<string, unknown>[] = [];
-  const asientos = {
-    deleteMany: jest.fn((filtro: Record<string, unknown>) => {
-      asientosFiltros.push(filtro);
-      return { exec: () => Promise.resolve({ deletedCount: counts.asientos }) };
-    }),
-    filtros: asientosFiltros,
-  };
-
-  const saldos = {
-    deleteMany: jest.fn(() => ({
-      exec: () => Promise.resolve({ deletedCount: counts.saldos }),
-    })),
-  };
+  const facturas = deleteManyMock(counts.facturas);
+  const lotes = deleteManyMock(counts.lotes);
+  const asientos = deleteManyMock(counts.asientos);
+  const saldos = deleteManyMock(counts.saldos);
+  const recibos = deleteManyMock(counts.recibos);
+  const notasCredito = deleteManyMock(counts.notasCredito);
+  const notasDebito = deleteManyMock(counts.notasDebito);
+  const notasAnticipo = deleteManyMock(counts.notasAnticipo);
+  const notasContables = deleteManyMock(counts.notasContables);
+  const aplicaciones = deleteManyMock(counts.aplicaciones);
 
   const consecutivoLote = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const consecutivoDocumento = {
-    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+    updateMany: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const resoluciones = {
     findOne: jest.fn(() => ({
       exec: () => Promise.resolve(over.resolucionActiva ?? null),
     })),
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
-  };
-  const notasCredito = {
-    exists: jest.fn(() => Promise.resolve(over.notaCreditoRef ?? false)),
-  };
-  const aplicaciones = {
-    exists: jest.fn(() => Promise.resolve(over.aplicacionRef ?? false)),
   };
 
   return {
@@ -109,6 +97,10 @@ const makeModelos = (over: {
     resoluciones,
     notasCredito,
     aplicaciones,
+    recibos,
+    notasDebito,
+    notasAnticipo,
+    notasContables,
   };
 };
 
@@ -127,6 +119,10 @@ const makeService = (
     modelos.resoluciones as never,
     modelos.notasCredito as never,
     modelos.aplicaciones as never,
+    modelos.recibos as never,
+    modelos.notasDebito as never,
+    modelos.notasAnticipo as never,
+    modelos.notasContables as never,
     tenantQueDevuelve(coPropertyId),
   );
 
@@ -152,60 +148,78 @@ describe('ReiniciarCicloService.reiniciar', () => {
     );
   });
 
-  it('rechaza sin borrar nada si hay una Nota Crédito contra una factura de esta copropiedad', async () => {
+  it('borra TODO documento financiero de la copropiedad y devuelve los conteos', async () => {
     const modelos = makeModelos({
-      facturaIds: ['fac-1'],
-      notaCreditoRef: true,
-    });
-    const service = makeService(modelos);
-
-    await expect(service.reiniciar()).rejects.toBeInstanceOf(ConflictException);
-    expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
-    expect(modelos.lotes.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('rechaza sin borrar nada si hay un Recibo aplicado contra una factura de esta copropiedad', async () => {
-    const modelos = makeModelos({
-      facturaIds: ['fac-1'],
-      aplicacionRef: true,
-    });
-    const service = makeService(modelos);
-
-    await expect(service.reiniciar()).rejects.toBeInstanceOf(ConflictException);
-    expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('borra lotes, facturas, asientos y saldos, y devuelve los conteos', async () => {
-    const modelos = makeModelos({
-      deletedCounts: { lotes: 2, facturas: 5, asientos: 5, saldos: 8 },
+      deletedCounts: {
+        lotes: 2,
+        facturas: 5,
+        asientos: 12,
+        saldos: 8,
+        recibos: 3,
+        notasCredito: 1,
+        notasDebito: 2,
+        notasAnticipo: 1,
+        notasContables: 4,
+        aplicaciones: 6,
+      },
     });
     const service = makeService(modelos);
 
     const resultado = await service.reiniciar();
 
-    expect(modelos.facturas.deleteMany).toHaveBeenCalled();
-    expect(modelos.lotes.deleteMany).toHaveBeenCalled();
+    expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.lotes.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.recibos.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.notasCredito.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.notasDebito.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.notasAnticipo.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.notasContables.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.aplicaciones.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
     expect(resultado).toEqual({
       lotesEliminados: 2,
       facturasEliminadas: 5,
-      asientosEliminados: 5,
+      recibosEliminados: 3,
+      notasCreditoEliminadas: 1,
+      notasDebitoEliminadas: 2,
+      notasAnticipoEliminadas: 1,
+      notasContablesEliminadas: 4,
+      aplicacionesEliminadas: 6,
+      asientosEliminados: 12,
       saldosEliminados: 8,
     });
   });
 
-  it('solo borra asientos de origen Factura (facturaId no nulo), nunca de Recibos/Notas', async () => {
+  it('borra TODOS los asientos contables, sin filtrar por tipo de ancla', async () => {
     const modelos = makeModelos({});
     const service = makeService(modelos);
 
     await service.reiniciar();
 
-    expect(modelos.asientos.filtros[0]).toMatchObject({
+    // Antes solo se borraban los asientos anclados a Factura
+    // (facturaId: {$ne: null}) — ahora se borra todo, porque Recibos/Notas
+    // (los otros anclajes posibles) también se borran en esta misma pasada.
+    expect(modelos.asientos.deleteMany).toHaveBeenCalledWith({
       coPropertyId: COP,
-      facturaId: { $ne: null },
     });
   });
 
-  it('reinicia a 1 el consecutivo de lote y el de FV', async () => {
+  it('reinicia a 0 el consecutivo de lote y TODOS los consecutivos de documento de la copropiedad', async () => {
     const modelos = makeModelos({});
     const service = makeService(modelos);
 
@@ -218,8 +232,11 @@ describe('ReiniciarCicloService.reiniciar', () => {
       { coPropertyId: COP },
       { $set: { nextNumber: 0 } },
     );
-    expect(modelos.consecutivoDocumento.updateOne).toHaveBeenCalledWith(
-      { coPropertyId: COP, category: 'FV' },
+    // updateMany sin filtro de category/code — todo código configurado
+    // (RC, NC, ND, NA, ...) reinicia junto, porque todo tipo de documento
+    // se borró en esta misma pasada.
+    expect(modelos.consecutivoDocumento.updateMany).toHaveBeenCalledWith(
+      { coPropertyId: COP },
       { $set: { nextNumber: 0 } },
     );
   });
@@ -247,12 +264,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
     expect(modelos.resoluciones.updateOne).not.toHaveBeenCalled();
   });
 
-  it('una copropiedad de pruebas sin facturas se reinicia sin lanzar', async () => {
-    const modelos = makeModelos({ facturaIds: [] });
+  it('una copropiedad de pruebas sin ningún documento se reinicia sin lanzar', async () => {
+    const modelos = makeModelos({});
     const service = makeService(modelos);
 
     await expect(service.reiniciar()).resolves.toBeDefined();
-    expect(modelos.notasCredito.exists).not.toHaveBeenCalled();
-    expect(modelos.aplicaciones.exists).not.toHaveBeenCalled();
   });
 });

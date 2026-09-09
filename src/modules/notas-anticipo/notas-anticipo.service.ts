@@ -51,9 +51,11 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
-  ajustarSaldosCartera,
+  actualizarRemanentesLinea,
+  ajustarSaldosCarteraPorDistribucion,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
+  remanentesPorLinea,
 } from '../recibos/cruce.util';
 import {
   construirContraAsientoAplicacionAnticipo,
@@ -216,6 +218,8 @@ export class NotasAnticipoService {
         session,
       );
 
+      const fechaEmision = new Date(dto.fechaEmision);
+
       const [creada] = await this.notasAnticipo.create(
         [
           {
@@ -226,7 +230,7 @@ export class NotasAnticipoService {
             prefix: numero.prefijo,
             number: numero.numero,
             fullNumber: numero.completo,
-            issueDate: new Date(),
+            issueDate: fechaEmision,
             appliedAmount: 0,
             status: 'activo',
             generatedBy: accountId,
@@ -301,6 +305,7 @@ export class NotasAnticipoService {
         session,
         coPropertyId,
         { _id: creada._id, inmuebleId: recibo.inmuebleId },
+        fechaEmision,
         totalAplicado,
         creditosPorCuenta,
         montoAplicadoMora,
@@ -446,13 +451,40 @@ export class NotasAnticipoService {
             .exec();
 
           if (factura) {
-            const partes = await ajustarSaldosCartera(
+            // Replays the EXACT split this application recorded
+            // (`detalleConceptos`) instead of re-deriving one via the
+            // default cascade — same reasoning as `RecibosService.anular()`'s
+            // own identical change, INCLUDING its own note on why
+            // `remanentesPorLinea` needs the pre-reversal aggregate for any
+            // línea it still has to legacy-derive.
+            const remanentesAntes = remanentesPorLinea({
+              ...factura,
+              outstandingBalance:
+                factura.outstandingBalance - aplicacion.amountApplied,
+            });
+            const partes = await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
               session,
               coPropertyId,
-              factura,
+              factura.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
               aplicacion.amountApplied,
               1,
+            );
+            await actualizarRemanentesLinea(
+              this.facturas,
+              session,
+              coPropertyId,
+              factura._id,
+              partes.map((parte) => ({
+                conceptoId: parte.conceptoId,
+                nuevoValor:
+                  (remanentesAntes.get(parte.conceptoId.toString()) ?? 0) +
+                  parte.parte,
+              })),
             );
             for (const parte of partes) {
               const linea = factura.lines.find((l) =>
@@ -571,6 +603,7 @@ export class NotasAnticipoService {
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     nota: { _id: Types.ObjectId; inmuebleId: Types.ObjectId },
+    fechaEmision: Date,
     montoAplicado: number,
     creditosPorCuenta: Map<string | null, number>,
     montoAplicadoMora: number,
@@ -612,7 +645,7 @@ export class NotasAnticipoService {
           notaDebitoId: null,
           notaContableId: null,
           notaAnticipoId: nota._id,
-          date: new Date(),
+          date: fechaEmision,
           entries,
         },
       ],

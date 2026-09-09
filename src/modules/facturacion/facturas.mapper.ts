@@ -1,3 +1,4 @@
+import { remanentesPorLinea } from '../recibos/cruce.util';
 import type {
   Factura as FacturaContract,
   FacturaLinea as FacturaLineaContract,
@@ -22,7 +23,10 @@ export const titularDe = (
       }
     : null;
 
-export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
+export const lineaDe = (
+  linea: FacturaLinea,
+  saldoPendiente: number,
+): FacturaLineaContract => ({
   conceptoId: linea.conceptoId.toString(),
   nombreConcepto: linea.conceptName,
   tipoConcepto: linea.conceptKind,
@@ -34,6 +38,10 @@ export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
   valorTotal: linea.totalAmount,
   saldoAnterior: linea.balanceBefore,
   nuevoSaldo: linea.balanceAfter,
+  // El saldo VIVO de esta línea — a diferencia de saldoAnterior/nuevoSaldo,
+  // que son la foto congelada al emitir, este es cuánto le queda pendiente
+  // hoy (lo que valida y muestra el reparto manual de un Recibo).
+  saldoPendiente,
 });
 
 /**
@@ -42,24 +50,33 @@ export const lineaDe = (linea: FacturaLinea): FacturaLineaContract => ({
  * Persistence is English, the API is Spanish, and this is the only place the
  * two meet — see "the contract law" in CLAUDE.md.
  */
-export const toFactura = (doc: FacturaDocument): FacturaContract => ({
-  id: doc._id.toString(),
-  loteId: doc.loteId.toString(),
-  inmuebleId: doc.inmuebleId.toString(),
-  inmuebleCodigo: doc.unitCode,
-  terceroId: doc.terceroId ? doc.terceroId.toString() : null,
-  titular: titularDe(doc.holder),
-  prefijo: doc.prefix,
-  numero: doc.number,
-  numeroCompleto: doc.fullNumber,
-  fechaEmision: doc.issueDate.toISOString(),
-  fechaVencimiento: doc.dueDate.toISOString(),
-  periodoDesde: doc.periodStart.toISOString(),
-  periodoHasta: doc.periodEnd.toISOString(),
-  lineas: doc.lines.map(lineaDe),
-  subtotal: doc.subtotal,
-  totalImpuestos: doc.totalTax,
-  total: doc.total,
-  saldoPendiente: doc.outstandingBalance,
-  estado: doc.status,
-});
+export const toFactura = (doc: FacturaDocument): FacturaContract => {
+  const remanentes = remanentesPorLinea(doc);
+  return {
+    id: doc._id.toString(),
+    loteId: doc.loteId.toString(),
+    inmuebleId: doc.inmuebleId.toString(),
+    inmuebleCodigo: doc.unitCode,
+    terceroId: doc.terceroId ? doc.terceroId.toString() : null,
+    titular: titularDe(doc.holder),
+    prefijo: doc.prefix,
+    numero: doc.number,
+    numeroCompleto: doc.fullNumber,
+    fechaEmision: doc.issueDate.toISOString(),
+    fechaVencimiento: doc.dueDate.toISOString(),
+    periodoDesde: doc.periodStart.toISOString(),
+    periodoHasta: doc.periodEnd.toISOString(),
+    lineas: doc.lines.map((linea) =>
+      lineaDe(linea, remanentes.get(linea.conceptoId.toString()) ?? 0),
+    ),
+    subtotal: doc.subtotal,
+    totalImpuestos: doc.totalTax,
+    total: doc.total,
+    saldoPendiente: doc.outstandingBalance,
+    montoDescuento: doc.discountAmount,
+    fechaLimiteDescuento: doc.discountDeadline
+      ? doc.discountDeadline.toISOString()
+      : null,
+    estado: doc.status,
+  };
+};

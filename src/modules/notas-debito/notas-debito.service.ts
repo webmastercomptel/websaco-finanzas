@@ -535,7 +535,11 @@ export class NotasDebitoService {
           reciboId: null,
           notaCreditoId: null,
           notaDebitoId: nota._id,
-          date: new Date(),
+          // The nota's own declared business date (`dto.fechaCargo`), not
+          // the real instant of posting — same reasoning as Factura's
+          // `lote.billingDate`/Recibo's `receivedDate`: this document can be
+          // keyed in days after the date it actually charges.
+          date: nota.issueDate,
           entries,
         },
       ],

@@ -22,10 +22,31 @@ import { ListarRecibosDto } from './dto/listar-recibos.dto';
 import type { Paginado, Recibo, ReciboDetalle } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
+import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  Factura,
+  FacturaDocument,
+} from '../../database/schemas/facturacion/factura.schema';
+import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
@@ -44,6 +65,16 @@ export class RecibosController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Factura.name)
+    private readonly facturas: Model<FacturaDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
   ) {}
 
   @Get()
@@ -104,7 +135,21 @@ export class RecibosController {
       );
     }
 
-    const bytes = await generarPdfRecibo(recibo, aplicaciones, copropiedad, {
+    const datos = await construirDatosImpresionRecibo(
+      recibo,
+      aplicaciones,
+      copropiedad,
+      coPropertyId,
+      {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        inmuebles: this.inmuebles,
+        terceros: this.terceros,
+        cuentasContables: this.cuentasContables,
+      },
+    );
+
+    const bytes = await generarPdfRecibo(datos, copropiedad, {
       duplicado: duplicado === 'true',
     });
 
