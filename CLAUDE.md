@@ -112,6 +112,7 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 - Prettier (single quotes, trailing commas). ESLint `recommendedTypeChecked` — don't silence a rule inline without explaining the trade-off.
 - Imports are **relative**. The `@/*` alias exists in `tsconfig.json` but is **not** wired in `.swcrc` — an `@/` import typechecks then fails at runtime.
 - Tests: Jest, colocated `*.spec.ts`. Controllers tested by direct instantiation with hand-rolled mocks, not `Test.createTestingModule`, unless DI wiring itself is under test.
+- **DTO filenames are Spanish-verb-prefixed** (`guardar-`, `listar-`, `anular-`, `aplicar-`, `cargar-`, `importar-`, `actualizar-`, `distribucion-`, `filtros-`…), matching the action, not an English CRUD prefix like `create-`/`update-`. Follow the existing verb for the action you're adding rather than inventing a new one.
 
 ## Gotchas
 
@@ -124,3 +125,23 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 ## Not here yet — do not assume it exists
 
 BullMQ queues and the mailer (`app.module.ts` still just has comments where they'll attach). Verify against `src/modules/` and `src/database/schemas/` before assuming any other module is missing — this list drifts fast.
+
+## Decisions pending Engram save
+
+> Verified true in this codebase but not yet persisted via `mem_save`
+> (Engram was disconnected when these were written up). A human or a future
+> Engram-connected session should save each as `type: decision` and then
+> delete it from here.
+
+- **Builder: `nest-cli.json` sets `"builder": "swc"` with `"typeCheck": false`.**
+  What: the default Nest/tsc build path is bypassed; `npm run typecheck`
+  (`tsc --noEmit`) is the actual type gate, already called out in the
+  Commands table above. Why: not documented anywhere in this repo —
+  presumably faster build times in dev/CI, same as the equivalent choice in
+  the sibling building-management system, but that's an inference, not a
+  confirmed rationale. Where: `backend/nest-cli.json`.
+- **Graceful shutdown: `app.enableShutdownHooks()` is called explicitly in
+  `main.ts`.** Why: so Mongo and Redis connections close cleanly on SIGTERM
+  instead of being cut mid-request — relevant on Cloud Run, which sends
+  SIGTERM before killing an instance during a deploy or scale-down. Where:
+  `backend/src/main.ts`.
