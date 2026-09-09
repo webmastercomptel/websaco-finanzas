@@ -11,6 +11,9 @@ const mockAuditoria = () => ({
 const mockContador = (valorInicial = 0) => {
   let valor = valorInicial;
   return {
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(valor > 0 ? { valor } : null),
+    })),
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve(undefined) })),
     findOneAndUpdate: jest.fn(() => ({
       exec: () => Promise.resolve({ valor: ++valor }),
