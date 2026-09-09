@@ -12,6 +12,35 @@ export const DOCUMENT_TYPES = ['FV', 'ND'] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 /**
+ * This application's own share of one concepto — frozen at application
+ * time from `ajustarSaldosCartera`'s/`ajustarSaldosCarteraPorDistribucion`'s
+ * own per-concepto split, the SAME numbers the accounting ledger's per-line
+ * credit already uses (`RecibosService.aplicarManual`/`aplicarFifo`). Stored
+ * here, not re-derived later from `AsientoContable.entries` by account code:
+ * two concepts can share one account, which would make that reconstruction
+ * ambiguous — this is the one place "how much of THIS payment went to THIS
+ * cargo" is unambiguous and named.
+ */
+@Schema({ _id: false })
+export class DetalleConceptoAplicacion {
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
+  conceptoId: Types.ObjectId;
+
+  /** `ConceptoCobro.name`/`FacturaLinea.conceptName` at application time —
+   *  frozen, same reasoning as `FacturaLinea.conceptName` itself: a later
+   *  rename of the concepto must not reword history. */
+  @Prop({ required: true, trim: true })
+  conceptName: string;
+
+  @Prop({ required: true })
+  monto: number;
+}
+
+export const DetalleConceptoAplicacionSchema = SchemaFactory.createForClass(
+  DetalleConceptoAplicacion,
+);
+
+/**
  * One cruce: one row per application of a Recibo OR a Nota Crédito against a
  * document. `sourceType` discriminates which kind of document made the
  * application — the source-of-truth event log both modules share (design
@@ -62,6 +91,13 @@ export class AplicacionCartera {
 
   @Prop({ required: true })
   amountApplied: number;
+
+  /** How `amountApplied` breaks down across the target document's own
+   *  conceptos — empty on documents predating this field (a Nota Débito
+   *  application from before it always had exactly one concepto anyway, so
+   *  the frontend falls back to a single generic row for those). */
+  @Prop({ type: [DetalleConceptoAplicacionSchema], default: [] })
+  detalleConceptos: DetalleConceptoAplicacion[];
 
   @Prop({ required: true, enum: ['activa', 'revertida'], default: 'activa' })
   status: 'activa' | 'revertida';

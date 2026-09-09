@@ -388,13 +388,17 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * sum of the credits, since callers pass the same split that adds up to the
  * document's own total everywhere else in each service.
  *
- * `cuentasOrden`, when given, appends the same self-balancing memo pair
- * `construirMovimientos` posts for facturación — debit/credit, both for
- * `montoCuentasOrden`: the portion of THIS call that was actually applied
- * against an `intereses` (mora) concept, never the document's whole amount.
- * Facturación only redirects a line to the memo accounts when that line's
- * own `conceptKind` is `intereses` (see `construirMovimientos`) — a cruce
- * document must mirror that same scoping, or a receipt that never touched a
+ * `cuentasOrden`, when given, appends the memo pair `construirMovimientos`
+ * posts for facturación — SAME accounts, sides SWAPPED (`invertido: true`) —
+ * for `montoCuentasOrden`: the portion of THIS call that was actually
+ * applied against an `intereses` (mora) concept, never the document's whole
+ * amount. Facturación opens the memo pair when the mora is invoiced (debit
+ * `cuentasOrden.debito`, credit `cuentasOrden.credito`); a cruce document
+ * closes it when that same mora is actually collected — reversed sides, so
+ * the pair nets to zero across the two events instead of doubling. Scoped
+ * the same way facturación scopes it: only a line whose own `conceptKind` is
+ * `intereses` opens the pair (see `construirMovimientos`), so a cruce
+ * document must mirror that scoping too, or a receipt that never touched a
  * mora charge (e.g. one paying only Administración) would still post a
  * memo entry, and one that pays BOTH mora and other concepts would post the
  * memo for more than what was actually mora. Defaults to
@@ -460,6 +464,7 @@ export function construirAsientoCruce(
       cuentasOrden,
       montoCuentasOrden ?? montoAplicado + montoSinAplicar,
       d.cuentaOrden,
+      true,
     ),
   );
 
@@ -477,10 +482,10 @@ export function construirAsientoCruce(
  * to one side, so there was nothing to rename) — only `origen` is new.
  *
  * `desgloseCartera` and `cuentasOrden`/`montoCuentasOrden` work exactly as
- * they do on `construirAsientoCruce` — this is the same cartera credit, only
- * booked later instead of at creation, so a deferred application against a
- * per-concepto-coded or mora-carrying document must be coded identically to
- * an immediate one.
+ * they do on `construirAsientoCruce` (same swapped-sides memo pair) — this is
+ * the same cartera credit, only booked later instead of at creation, so a
+ * deferred application against a per-concepto-coded or mora-carrying
+ * document must be coded identically to an immediate one.
  */
 export function construirMovimientosAplicacionAnticipo(
   cuentaAnticipos: string,
@@ -529,6 +534,7 @@ export function construirMovimientosAplicacionAnticipo(
       cuentasOrden,
       montoCuentasOrden ?? 0,
       d.cuentaOrden,
+      true,
     ),
   );
 
@@ -559,8 +565,11 @@ export function construirMovimientosAplicacionAnticipo(
  * entry never touched, leaving both permanently unbalanced.
  *
  * `cuentasOrden`, when given, appends the reversal of the memo pair the
- * creation-time entry posted — same accounts, sides swapped (`invertido`),
- * for `montoCuentasOrden` (defaults to the full `montoOrigen` when omitted,
+ * creation-time entry posted. The creation entry itself already posts
+ * SWAPPED sides relative to facturación (see `construirAsientoCruce`'s own
+ * note) — so undoing it must go back to facturación's original sides
+ * (`invertido: false`, the plain pair), not swap them a second time. For
+ * `montoCuentasOrden` (defaults to the full `montoOrigen` when omitted,
  * preserving prior callers' exact behavior) — see `construirAsientoCruce`'s
  * own note on why this must be the mora-specific portion, not the whole
  * document, whenever the caller can tell the two apart.
@@ -625,7 +634,6 @@ export function construirContraAsientoCruce(
       cuentasOrden,
       montoCuentasOrden ?? montoOrigen,
       d.cuentaOrdenContra,
-      true,
     ),
   );
 

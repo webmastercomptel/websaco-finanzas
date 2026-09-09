@@ -49,5 +49,5 @@ export const toNotaCreditoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
 ): NotaCreditoDetalle => ({
   ...toNotaCredito(doc),
-  aplicaciones: aplicaciones.map(toAplicacionCartera),
+  aplicaciones: aplicaciones.map((a) => toAplicacionCartera(a)),
 });

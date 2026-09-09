@@ -39,16 +39,28 @@ export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
  * source and target document may be a Recibo or a Nota Crédito, discriminated
  * by `sourceType` — the Notas Crédito mapper reuses this function directly
  * (design §4).
+ *
+ * `numeroDocumento` is a second, EXPLICIT parameter (never positional-only
+ * via a bare `.map(toAplicacionCartera)`, which would leak `Array.map`'s own
+ * index into it) — every call site below uses `.map((doc) => ...)` for
+ * exactly this reason.
  */
 export const toAplicacionCartera = (
   doc: AplicacionCarteraDocument,
+  numeroDocumento: string | null = null,
 ): AplicacionCarteraContract => ({
   id: doc._id.toString(),
   sourceType: doc.sourceType,
   sourceId: doc.sourceId.toString(),
   tipoDocumento: doc.documentType,
   documentoId: doc.documentId.toString(),
+  numeroDocumento,
   montoAplicado: doc.amountApplied,
+  detalleConceptos: (doc.detalleConceptos ?? []).map((d) => ({
+    conceptoId: d.conceptoId.toString(),
+    nombreConcepto: d.conceptName,
+    monto: d.monto,
+  })),
   estado: doc.status,
   fecha: doc.appliedAt.toISOString(),
 });
@@ -57,11 +69,21 @@ export const toAplicacionCartera = (
  * `toRecibo` plus the full applications array — what `GET /recibos/:id`
  * returns so the Confirmación y Cruce screen can render its history.
  * `GET /recibos` (the listing) keeps using lean `toRecibo`.
+ *
+ * `numerosPorDocumento` is the caller's own batch-resolved
+ * `documentId.toString() -> fullNumber` lookup (a Factura or Nota Débito) —
+ * this module has no Factura/NotaDebito model of its own to resolve it here.
  */
 export const toReciboDetalle = (
   doc: ReciboDocument,
   aplicaciones: AplicacionCarteraDocument[],
+  numerosPorDocumento: Map<string, string> = new Map(),
 ): ReciboDetalle => ({
   ...toRecibo(doc),
-  aplicaciones: aplicaciones.map(toAplicacionCartera),
+  aplicaciones: aplicaciones.map((a) =>
+    toAplicacionCartera(
+      a,
+      numerosPorDocumento.get(a.documentId.toString()) ?? null,
+    ),
+  ),
 });

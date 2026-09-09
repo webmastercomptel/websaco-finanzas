@@ -34,6 +34,7 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { finDelDiaCorte } from './cartera-historica.util';
 import type {
   MovimientoKardex,
   RespuestaAuxiliarCartera,
@@ -84,7 +85,12 @@ export class AuxiliarCarteraService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.desde);
-    const hasta = new Date(query.hasta);
+    // A bare "hasta" date, as the frontend defaults it to "today" in
+    // Colombia local time, must extend to the end of that LOCAL day (see
+    // `finDelDiaCorte`) — otherwise a Recibo applied this evening (whose
+    // UTC timestamp already reads as "tomorrow") is excluded from `desde
+    // hasta hasta`.
+    const hasta = finDelDiaCorte(new Date(query.hasta));
 
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })

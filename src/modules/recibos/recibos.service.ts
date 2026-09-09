@@ -377,7 +377,7 @@ export class RecibosService {
           .session(session)
           .exec();
         return {
-          aplicadas: creadas.map(toAplicacionCartera),
+          aplicadas: creadas.map((a) => toAplicacionCartera(a)),
           montoSinAplicar: reciboFinal!.unappliedAmount,
           errores: [],
         };
@@ -405,7 +405,7 @@ export class RecibosService {
         );
       }
       return {
-        aplicadas: resultado.aplicadas.map(toAplicacionCartera),
+        aplicadas: resultado.aplicadas.map((a) => toAplicacionCartera(a)),
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };
@@ -652,7 +652,33 @@ export class RecibosService {
       .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
       .exec();
-    return toReciboDetalle(recibo, aplicaciones);
+
+    // Batch-resolve each application's target document's own printed
+    // number ("FV-1") for display — this row only stores `documentId`.
+    const facturaIds = aplicaciones
+      .filter((a) => a.documentType === 'FV')
+      .map((a) => a.documentId);
+    const notaDebitoIds = aplicaciones
+      .filter((a) => a.documentType === 'ND')
+      .map((a) => a.documentId);
+    const [facturasDoc, notasDebitoDoc] = await Promise.all([
+      facturaIds.length
+        ? this.facturas.find({ coPropertyId, _id: { $in: facturaIds } }).exec()
+        : [],
+      notaDebitoIds.length
+        ? this.notasDebito
+            .find({ coPropertyId, _id: { $in: notaDebitoIds } })
+            .exec()
+        : [],
+    ]);
+    const numerosPorDocumento = new Map<string, string>();
+    for (const f of facturasDoc)
+      numerosPorDocumento.set(f._id.toString(), f.fullNumber);
+    for (const nd of notasDebitoDoc) {
+      numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
+    }
+
+    return toReciboDetalle(recibo, aplicaciones, numerosPorDocumento);
   }
 
   /**
@@ -784,6 +810,13 @@ export class RecibosService {
               documentType: 'ND',
               documentId: documentoId,
               amountApplied: solicitada.montoAplicado,
+              detalleConceptos: [
+                {
+                  conceptoId: notaDebito.conceptoId,
+                  conceptName: notaDebito.description ?? 'Nota Débito',
+                  monto: solicitada.montoAplicado,
+                },
+              ],
               status: 'activa',
               appliedAt: new Date(),
               appliedBy: accountId,
@@ -819,6 +852,20 @@ export class RecibosService {
         solicitada.montoAplicado,
         -1,
       );
+      // Mirrors `creditosPorCuenta`'s own accumulation loop below, but named
+      // by concepto (for the frontend's "cargo por cargo" breakdown) rather
+      // than by account (for the ledger) — same `partes`, two different
+      // shapes of the same split.
+      const detalleConceptos = partes.map((parte) => {
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        return {
+          conceptoId: parte.conceptoId,
+          conceptName: linea?.conceptName ?? 'Concepto',
+          monto: parte.parte,
+        };
+      });
       for (const parte of partes) {
         const linea = factura.lines.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
@@ -838,6 +885,7 @@ export class RecibosService {
             documentType: 'FV',
             documentId: documentoId,
             amountApplied: solicitada.montoAplicado,
+            detalleConceptos,
             status: 'activa',
             appliedAt: new Date(),
             appliedBy: accountId,
@@ -992,6 +1040,13 @@ export class RecibosService {
                 documentType: 'ND',
                 documentId: candidato.doc._id,
                 amountApplied: monto,
+                detalleConceptos: [
+                  {
+                    conceptoId: notaActualizada.conceptoId,
+                    conceptName: notaActualizada.description ?? 'Nota Débito',
+                    monto,
+                  },
+                ],
                 status: 'activa',
                 appliedAt: new Date(),
                 appliedBy: accountId,
@@ -1021,6 +1076,17 @@ export class RecibosService {
           monto,
           -1,
         );
+        // See `aplicarManual`'s identical note on this same shape.
+        const detalleConceptos = partes.map((parte) => {
+          const linea = facturaActualizada.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          return {
+            conceptoId: parte.conceptoId,
+            conceptName: linea?.conceptName ?? 'Concepto',
+            monto: parte.parte,
+          };
+        });
         for (const parte of partes) {
           const linea = facturaActualizada.lines.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
@@ -1040,6 +1106,7 @@ export class RecibosService {
               documentType: 'FV',
               documentId: candidato.doc._id,
               amountApplied: monto,
+              detalleConceptos,
               status: 'activa',
               appliedAt: new Date(),
               appliedBy: accountId,

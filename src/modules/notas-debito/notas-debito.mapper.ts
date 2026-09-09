@@ -39,5 +39,5 @@ export const toNotaDebitoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
 ): NotaDebitoDetalle => ({
   ...toNotaDebito(doc),
-  aplicaciones: aplicaciones.map(toAplicacionCartera),
+  aplicaciones: aplicaciones.map((a) => toAplicacionCartera(a)),
 });

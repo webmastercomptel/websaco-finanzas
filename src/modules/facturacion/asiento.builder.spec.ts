@@ -1060,10 +1060,34 @@ describe('construirAsientoCruce con cuentasOrden', () => {
     expect(movimientos.some((m) => m.account === '831505')).toBe(false);
     expect(movimientos.some((m) => m.account === '831510')).toBe(false);
   });
+
+  it('postea el par con los lados INVERTIDOS respecto a facturacion — cobrar la mora cierra el memo que invoicing abrio', () => {
+    // Facturación abre el par al invoicing la mora: debito en `debito`,
+    // credito en `credito` (ver `construirMovimientos`). Un recibo que
+    // cobra esa misma mora debe cerrarlo, no repetirlo — de lo contrario
+    // el par se dobla en vez de quedar en cero quando ambos eventos ya
+    // ocurrieron. Reportado por el usuario tras confirmar en producción.
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      0,
+      'RC',
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos.find((m) => m.account === '831505')?.type).toBe(
+      'credito',
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.type).toBe(
+      'debito',
+    );
+  });
 });
 
 describe('construirContraAsientoCruce con cuentasOrden', () => {
-  it('revierte el par (lados invertidos) por el monto de origen', () => {
+  it('revierte el par de vuelta a los lados planos de facturacion (la creacion ya los invirtio) por el monto de origen', () => {
     const movimientos = construirContraAsientoCruce(
       '111005',
       '130501',
@@ -1076,11 +1100,11 @@ describe('construirContraAsientoCruce con cuentasOrden', () => {
     );
 
     expect(
-      movimientos.find((m) => m.account === '831510' && m.type === 'debito')
+      movimientos.find((m) => m.account === '831505' && m.type === 'debito')
         ?.amount,
     ).toBe(300000);
     expect(
-      movimientos.find((m) => m.account === '831505' && m.type === 'credito')
+      movimientos.find((m) => m.account === '831510' && m.type === 'credito')
         ?.amount,
     ).toBe(300000);
     const suma = (t: 'debito' | 'credito') =>
@@ -1103,11 +1127,11 @@ describe('construirContraAsientoCruce con cuentasOrden', () => {
     );
 
     expect(
-      movimientos.find((m) => m.account === '831510' && m.type === 'debito')
+      movimientos.find((m) => m.account === '831505' && m.type === 'debito')
         ?.amount,
     ).toBe(40000);
     expect(
-      movimientos.find((m) => m.account === '831505' && m.type === 'credito')
+      movimientos.find((m) => m.account === '831510' && m.type === 'credito')
         ?.amount,
     ).toBe(40000);
   });
@@ -1190,6 +1214,14 @@ describe('construirMovimientosAplicacionAnticipo con desglose y cuentasOrden', (
     const suma = (t: 'debito' | 'credito') =>
       movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
     expect(suma('debito')).toBe(suma('credito'));
+    // Same swapped-sides direction as `construirAsientoCruce` — a deferred
+    // application closing mora is the same kind of event as an immediate one.
+    expect(movimientos.find((m) => m.account === '831505')?.type).toBe(
+      'credito',
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.type).toBe(
+      'debito',
+    );
   });
 
   it('sin montoCuentasOrden, no agrega ningún par memo aunque cuentasOrden esté configurado', () => {

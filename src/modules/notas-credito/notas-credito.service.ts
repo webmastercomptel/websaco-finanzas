@@ -404,7 +404,7 @@ export class NotasCreditoService {
           .session(session)
           .exec();
         return {
-          aplicadas: creadas.map(toAplicacionCartera),
+          aplicadas: creadas.map((a) => toAplicacionCartera(a)),
           montoSinAplicar: notaFinal!.unappliedAmount,
           errores: [],
         };
@@ -430,7 +430,7 @@ export class NotasCreditoService {
         );
       }
       return {
-        aplicadas: resultado.aplicadas.map(toAplicacionCartera),
+        aplicadas: resultado.aplicadas.map((a) => toAplicacionCartera(a)),
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };

@@ -218,7 +218,12 @@ describe('ajustarSaldosCartera', () => {
       { $set: { balance: { $max: [0, { $add: ['$balance', -100000] }] } } },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
-    expect(opciones).toMatchObject({ session: SESSION });
+    // `updatePipeline: true` es obligatorio en Mongoose 9 para pasar un
+    // array (pipeline de agregación, necesario acá para $max/$add contra el
+    // propio valor del documento) como update — sin esto, Mongoose lanza
+    // "Cannot pass an array to query updates..." en tiempo de ejecución, algo
+    // que un mock de findOneAndUpdate nunca detecta por su cuenta.
+    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
@@ -395,7 +400,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
       { $set: { balance: { $max: [0, { $add: ['$balance', -40000] }] } } },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
-    expect(opciones).toMatchObject({ session: SESSION });
+    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {

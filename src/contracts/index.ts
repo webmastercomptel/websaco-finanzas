@@ -401,13 +401,29 @@ export interface Recibo {
  * (future) Confirmación y Cruce screen list them side by side (design §3.1).
  * Only `'FV'` (Factura) and `'ND'` (Nota Débito) are implemented as targets.
  */
+/** This application's own share of one concepto of the target document —
+ *  same breakdown the accounting ledger's per-line credit already uses, so
+ *  a Recibo/Nota Crédito detail screen can show "cargo por cargo" exactly
+ *  like a Factura's own line table does. */
+export interface DetalleConceptoAplicacion {
+  conceptoId: string;
+  nombreConcepto: string;
+  monto: Monto;
+}
+
 export interface AplicacionCartera {
   id: string;
   sourceType: 'RC' | 'NC';
   sourceId: string;
   tipoDocumento: 'FV' | 'ND';
   documentoId: string;
+  /** The target document's own printed number (e.g. "FV-1") — resolved for
+   *  display, never stored on this row itself. `null` when the document
+   *  can no longer be resolved (in practice never expected, since financial
+   *  documents are never deleted). */
+  numeroDocumento: string | null;
   montoAplicado: Monto;
+  detalleConceptos: DetalleConceptoAplicacion[];
   estado: 'activa' | 'revertida';
   fecha: IsoDate;
 }

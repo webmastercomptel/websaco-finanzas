@@ -597,7 +597,10 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       voidedDetail: null,
       voidedAt: null,
     };
-    const { service, asientos } = construirServicio({ reciboCreado, factura });
+    const { service, asientos, aplicaciones } = construirServicio({
+      reciboCreado,
+      factura,
+    });
 
     await service.crear(CUENTA.toString(), {
       ...dtoBase(),
@@ -609,6 +612,19 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         },
       ],
     });
+
+    // El "cargo por cargo" que la pantalla de detalle del recibo muestra —
+    // congelado en la propia fila de AplicacionCartera, no re-derivado más
+    // tarde desde las cuentas del asiento (dos conceptos podrían compartir
+    // una cuenta, lo que haría esa reconstrucción ambigua).
+    const [[filaAplicacion]] = (aplicaciones.create as jest.Mock).mock.calls;
+    expect(filaAplicacion[0].detalleConceptos).toEqual([
+      {
+        conceptoId: conceptoMora,
+        conceptName: expect.any(String),
+        monto: 200000,
+      },
+    ]);
 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls;
     const entries = fila[0].entries as Array<{
@@ -1970,12 +1986,15 @@ describe('RecibosService.anular', () => {
     }>;
     // 300.000 es el receivedAmount total del recibo, pero solo 200.000
     // fueron mora — el par memo revertido debe ser 200.000, no 300.000.
+    // La creación posteó con los lados invertidos respecto a facturación
+    // (831510 débito / 831505 crédito) — anular() vuelve a los lados
+    // planos de facturación para cerrar ese par en cero.
     expect(
-      entries.find((m) => m.account === '831510' && m.type === 'debito')
+      entries.find((m) => m.account === '831505' && m.type === 'debito')
         ?.amount,
     ).toBe(200000);
     expect(
-      entries.find((m) => m.account === '831505' && m.type === 'credito')
+      entries.find((m) => m.account === '831510' && m.type === 'credito')
         ?.amount,
     ).toBe(200000);
   });
@@ -2195,6 +2214,86 @@ describe('RecibosService.findOne', () => {
 
     expect(detalle.id).toBe(reciboId.toString());
     expect(detalle.aplicaciones).toEqual([]);
+  });
+
+  it('resuelve el número impreso (FV-1) de cada documento aplicado, para la tabla "cargo por cargo"', async () => {
+    const reciboId = new Types.ObjectId();
+    const facturaId = new Types.ObjectId();
+    const conceptoId = new Types.ObjectId();
+    const reciboDoc = {
+      _id: reciboId,
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefix: 'RC',
+      number: 1,
+      fullNumber: 'RC-1',
+      receivedAmount: 200000,
+      receivedDate: new Date('2026-08-27'),
+      paymentMethod: 'transferencia',
+      destinationAccount: '111005',
+      reference: null,
+      notes: null,
+      appliedAmount: 200000,
+      unappliedAmount: 0,
+      status: 'activo',
+      voidedReason: null,
+      voidedDetail: null,
+      voidedAt: null,
+    };
+    const aplicacionDoc = {
+      _id: new Types.ObjectId(),
+      sourceType: 'RC',
+      sourceId: reciboId,
+      documentType: 'FV',
+      documentId: facturaId,
+      amountApplied: 200000,
+      detalleConceptos: [
+        { conceptoId, conceptName: 'Administración', monto: 200000 },
+      ],
+      status: 'activa',
+      appliedAt: new Date('2026-08-27'),
+    };
+    const recibos = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(reciboDoc) })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        sort: () => ({ exec: () => Promise.resolve([aplicacionDoc]) }),
+      })),
+    };
+    const facturas = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve([{ _id: facturaId, fullNumber: 'FV-1' }]),
+      })),
+    };
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+    );
+
+    const detalle = await service.findOne(reciboId.toString());
+
+    expect(detalle.aplicaciones[0]).toMatchObject({
+      documentoId: facturaId.toString(),
+      numeroDocumento: 'FV-1',
+      detalleConceptos: [
+        {
+          conceptoId: conceptoId.toString(),
+          nombreConcepto: 'Administración',
+          monto: 200000,
+        },
+      ],
+    });
   });
 
   it('responde "no existe" para un recibo de otra copropiedad', async () => {

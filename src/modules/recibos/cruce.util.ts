@@ -209,7 +209,11 @@ export async function ajustarSaldosCartera(
             },
           },
         ],
-        { session },
+        // Mongoose 9 refuses an array update (an aggregation pipeline, needed
+        // here for `$max`/`$add` against the document's OWN current value)
+        // unless this is set explicitly — it used to infer this from the
+        // array shape alone.
+        { session, updatePipeline: true },
       )
       .exec();
   }
@@ -298,7 +302,8 @@ export async function ajustarSaldosCarteraPorDistribucion(
             },
           },
         ],
-        { session },
+        // See the identical note in `ajustarSaldosCartera` above.
+        { session, updatePipeline: true },
       )
       .exec();
   }

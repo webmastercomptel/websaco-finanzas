@@ -22,7 +22,10 @@ import {
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { calcularDocumentosConSaldoAFecha } from './cartera-historica.util';
+import {
+  calcularDocumentosConSaldoAFecha,
+  finDelDiaCorte,
+} from './cartera-historica.util';
 import type {
   RespuestaCarteraGeneral,
   CarteraPorConcepto,
@@ -65,7 +68,17 @@ export class CarteraGeneralService {
     query: ConsultarCarteraGeneralDto,
   ): Promise<RespuestaCarteraGeneral> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+    // `fecha` stays the raw calendar day — `calcularDiasMora` and the
+    // vencido/pendiente split below truncate it with LOCAL `setHours`, so
+    // it must still fall on the picked calendar day once truncated.
+    // `fechaCorte` is the Colombia-local end-of-day INSTANT used only to
+    // decide whether a Recibo/aplicación counts as already active — see
+    // `finDelDiaCorte`. Conflating the two previously shifted diasMora by
+    // a full day whenever `query.fecha` was set.
     const fecha = query.fecha ? new Date(query.fecha) : new Date();
+    const fechaCorte = query.fecha
+      ? finDelDiaCorte(new Date(query.fecha))
+      : fecha;
 
     // §2: point-in-time documents for aggregate KPIs
     const documentos = await calcularDocumentosConSaldoAFecha(
@@ -75,7 +88,7 @@ export class CarteraGeneralService {
         aplicaciones: this.aplicaciones,
       },
       coPropertyId,
-      fecha,
+      fechaCorte,
     );
 
     // Compute aggregate KPIs from documentos
