@@ -103,7 +103,11 @@ export class ParametrosService {
     set('cashFlowCode', dto.codigoFlujoCaja);
 
     const updated = await this.copropiedades
-      .findByIdAndUpdate(coPropertyId, { $set: update }, { new: true })
+      .findByIdAndUpdate(
+        coPropertyId,
+        { $set: update },
+        { returnDocument: 'after' },
+      )
       .exec();
 
     if (!updated) {

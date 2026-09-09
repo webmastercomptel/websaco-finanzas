@@ -188,7 +188,7 @@ export class CuentasContablesService {
       .findOneAndUpdate(
         { _id: id, coPropertyId },
         { $set: update },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 

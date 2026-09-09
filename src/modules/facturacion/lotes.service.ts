@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import {
   LoteFacturacion,
   LoteFacturacionDocument,
@@ -119,6 +119,7 @@ export class LotesFacturacionService {
     private readonly tenant: TenantContextService,
     private readonly periodo: PeriodoService,
     private readonly numeracion: NumeracionService,
+    @InjectConnection() private readonly connection: Connection,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
   ) {}
@@ -247,7 +248,11 @@ export class LotesFacturacionService {
     doc.summary = null;
 
     const actualizado = await this.lotes
-      .findOneAndUpdate({ _id: id, coPropertyId }, { $set: doc }, { new: true })
+      .findOneAndUpdate(
+        { _id: id, coPropertyId },
+        { $set: doc },
+        { returnDocument: 'after' },
+      )
       .exec();
     if (!actualizado) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
@@ -331,7 +336,7 @@ export class LotesFacturacionService {
       .findOneAndUpdate(
         { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
         { $push: { adjustments: { $each: novedades } } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 
@@ -413,7 +418,7 @@ export class LotesFacturacionService {
       .findOneAndUpdate(
         { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
         { $push: { adjustments: nuevaNovedad } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
     if (!actualizado) {
@@ -467,7 +472,7 @@ export class LotesFacturacionService {
       .findOneAndUpdate(
         { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
         { $set: { adjustments: lote.adjustments } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
     if (!actualizado) {
@@ -543,7 +548,7 @@ export class LotesFacturacionService {
       .findOneAndUpdate(
         { _id: lote._id, coPropertyId, status: { $ne: 'consolidado' } },
         { $set: { preview } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
     return toLote(actualizado ?? lote);
@@ -578,7 +583,7 @@ export class LotesFacturacionService {
       .findOneAndUpdate(
         { _id: loteId, coPropertyId },
         { $set: { preview, status: 'liquidado' } },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 
@@ -864,11 +869,18 @@ export class LotesFacturacionService {
    * independently EXCEPT resolution exhaustion or absence, which is a
    * global blocker — every remaining row would fail identically, so the
    * loop stops there instead of repeating the same failure for each one.
-   * A row whose Factura was created but whose SaldoCartera/AsientoContable
-   * write then failed is recorded as its own per-row error, not retried
-   * automatically on the next call (that would mean either duplicating a
-   * real DIAN number or re-running a non-idempotent `$inc`) — it surfaces
-   * as a standing error until a human reconciles it.
+   *
+   * The number is reserved OUTSIDE any transaction (per the numbering law,
+   * "a document that fails to save leaves a gap, and a gap is the honest
+   * outcome") — but Factura + SaldoCartera + AsientoContable for that same
+   * row run inside one Mongo transaction, scoped to the row alone. If any
+   * of the three fails, all three roll back together: no orphaned Factura,
+   * no half-applied balance, no Asiento missing its Factura. The row
+   * leaves no trace, so it is automatically retried, cleanly, with a fresh
+   * number, the next time this method is called — no standing error, no
+   * manual reconciliation, unless the same underlying problem recurs (in
+   * which case it is reported again, every time, never silently retried
+   * without surfacing it).
    * The Lote reaches `consolidado` only when every previewed row has both
    * a number AND a fully posted Factura/SaldoCartera/AsientoContable —
    * never while any row, past or present, is still incomplete.
@@ -906,21 +918,19 @@ export class LotesFacturacionService {
     };
 
     // Resume support: if an earlier attempt at this same Lote already
-    // created some Facturas before a resolution-exhaustion blocker (or a
-    // per-row write failure below) stopped it, a retry must never re-invoice
-    // those units — nothing else in this method (not the
-    // {coPropertyId, fullNumber} index, which only stops number reuse) would
-    // catch that, and a fresh number would just create a second, duplicate
-    // invoice while double-incrementing SaldoCartera.
+    // created some Facturas before a resolution-exhaustion blocker stopped
+    // it, a retry must never re-invoice those units — nothing else in this
+    // method (not the {coPropertyId, fullNumber} index, which only stops
+    // number reuse) would catch that, and a fresh number would just create
+    // a second, duplicate invoice while double-incrementing SaldoCartera.
     //
-    // A Factura existing is not by itself proof the row finished: the
-    // per-row catch below can leave one behind with no matching
-    // SaldoCartera increment or AsientoContable. Re-running that increment
-    // isn't safe (it isn't idempotent — that's the same reason this whole
-    // method has no transaction), and re-invoicing the unit would mint a
-    // second real DIAN number for it, so an incomplete row is surfaced as a
-    // standing error on every retry instead — never silently completed and
-    // never silently retried.
+    // A Factura existing without a matching AsientoContable should no
+    // longer occur going forward (Factura + SaldoCartera + AsientoContable
+    // now commit or roll back together, in one transaction, per row) — but
+    // this guard stays for any orphan left behind by an attempt from before
+    // that transaction existed: it is surfaced as a standing error on every
+    // retry instead of being silently re-invoiced (a second real DIAN
+    // number) or silently left incomplete.
     const facturasExistentes = await this.facturas
       .find({ coPropertyId, loteId, status: 'emitida' })
       .exec();
@@ -1080,61 +1090,109 @@ export class LotesFacturacionService {
           saldoCorrientePorConcepto.set(key, balanceAfter);
         }
 
-        const factura = await this.facturas.create({
-          coPropertyId,
-          loteId,
-          inmuebleId: preliminar.inmuebleId,
-          unitCode: preliminar.unitCode,
-          terceroId: preliminar.terceroId,
-          holder: preliminar.holder,
-          // Null when siguienteFactura fell back to the plain FV consecutivo
-          // because this coproperty has no active DIAN resolution.
-          resolucionId: numero.resolucionId ?? null,
-          prefix: numero.prefijo,
-          number: numero.numero,
-          fullNumber: numero.completo,
-          issueDate: lote.billingDate,
-          dueDate: lote.dueDate,
-          periodStart: lote.periodStart,
-          periodEnd: lote.periodEnd,
-          lines: preliminar.lines,
-          subtotal: preliminar.subtotal,
-          totalTax: preliminar.totalTax,
-          total: preliminar.total,
-          outstandingBalance: preliminar.total,
-          status: 'emitida',
-        });
-        facturaIds.push(factura._id.toString());
-        montoTotal += preliminar.total;
-
-        for (const linea of preliminar.lines) {
-          await this.saldos
-            .findOneAndUpdate(
-              {
-                coPropertyId,
-                inmuebleId: preliminar.inmuebleId,
-                conceptoId: linea.conceptoId,
-              },
-              {
-                $inc: { balance: linea.totalAmount },
-                $setOnInsert: {
+        // Factura + saldos + asiento run in one Mongo transaction, scoped to
+        // THIS row only (never the whole batch — a long-running multi-row
+        // transaction risks the driver's default transaction lifetime limit
+        // and holds locks far longer than it needs to). Same pattern already
+        // used and audited in RecibosService.transaccion(): if anything in
+        // here throws, all three writes roll back together — no orphaned
+        // Factura, no half-applied SaldoCartera increment, no Asiento
+        // missing its Factura. The number already consumed by
+        // siguienteFactura() above is NOT part of this transaction and stays
+        // spent either way — that real gap is the same accepted outcome the
+        // numbering law already documents ("a gap is the honest outcome"),
+        // unchanged by this fix. What changes is that a row whose write
+        // phase fails no longer leaves a stuck, permanently-incomplete
+        // Factura behind: it leaves nothing, so the next consolidar() call
+        // reprocesses it cleanly with a fresh number instead of surfacing a
+        // standing "requires manual reconciliation" error forever.
+        const session = await this.connection.startSession();
+        let facturaCreada!: FacturaDocument;
+        try {
+          await session.withTransaction(async () => {
+            const [factura] = await this.facturas.create(
+              [
+                {
                   coPropertyId,
+                  loteId,
                   inmuebleId: preliminar.inmuebleId,
-                  conceptoId: linea.conceptoId,
+                  unitCode: preliminar.unitCode,
+                  terceroId: preliminar.terceroId,
+                  holder: preliminar.holder,
+                  // Null when siguienteFactura fell back to the plain FV
+                  // consecutivo because this coproperty has no active DIAN
+                  // resolution.
+                  resolucionId: numero.resolucionId ?? null,
+                  prefix: numero.prefijo,
+                  number: numero.numero,
+                  fullNumber: numero.completo,
+                  issueDate: lote.billingDate,
+                  dueDate: lote.dueDate,
+                  periodStart: lote.periodStart,
+                  periodEnd: lote.periodEnd,
+                  lines: preliminar.lines,
+                  subtotal: preliminar.subtotal,
+                  totalTax: preliminar.totalTax,
+                  total: preliminar.total,
+                  outstandingBalance: preliminar.total,
+                  status: 'emitida',
                 },
-              },
-              { upsert: true },
-            )
-            .exec();
-        }
+              ],
+              { session },
+            );
+            facturaCreada = factura;
 
-        await this.asientos.create({
-          coPropertyId,
-          loteId,
-          facturaId: factura._id.toString(),
-          date: lote.billingDate,
-          entries,
-        });
+            // One bulkWrite instead of one findOneAndUpdate per line — same
+            // atomic, commutative $inc per document as before, just as one
+            // round trip instead of N. Safe inside a transaction (unlike
+            // Promise.all, which the driver refuses on a single session).
+            if (preliminar.lines.length) {
+              await this.saldos.bulkWrite(
+                preliminar.lines.map((linea) => ({
+                  updateOne: {
+                    filter: {
+                      coPropertyId,
+                      inmuebleId: preliminar.inmuebleId,
+                      conceptoId: linea.conceptoId,
+                    },
+                    update: {
+                      $inc: { balance: linea.totalAmount },
+                      $setOnInsert: {
+                        coPropertyId,
+                        inmuebleId: preliminar.inmuebleId,
+                        conceptoId: linea.conceptoId,
+                      },
+                    },
+                    upsert: true,
+                  },
+                })),
+                { session },
+              );
+            }
+
+            await this.asientos.create(
+              [
+                {
+                  coPropertyId,
+                  loteId,
+                  facturaId: factura._id.toString(),
+                  date: lote.billingDate,
+                  entries,
+                },
+              ],
+              { session },
+            );
+          });
+        } finally {
+          await session.endSession();
+        }
+        // Deliberately outside the withTransaction callback: the driver may
+        // retry that callback internally on a transient error, and these are
+        // plain in-memory mutations with no transactional undo — living
+        // inside the callback would double them on a retry even though only
+        // one attempt's writes actually commit.
+        facturaIds.push(facturaCreada._id.toString());
+        montoTotal += preliminar.total;
       } catch (err) {
         errores.push({
           fila: indice + 1,
@@ -1161,7 +1219,7 @@ export class LotesFacturacionService {
               : null,
           },
         },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 

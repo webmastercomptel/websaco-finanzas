@@ -144,7 +144,11 @@ export class CopropiedadesService {
       .exec();
 
     const contador = await this.contador
-      .findOneAndUpdate({}, { $inc: { valor: 1 } }, { upsert: true, new: true })
+      .findOneAndUpdate(
+        {},
+        { $inc: { valor: 1 } },
+        { upsert: true, returnDocument: 'after' },
+      )
       .exec();
     return String(contador.valor).padStart(4, '0');
   }
@@ -268,7 +272,11 @@ export class CopropiedadesService {
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
     const actualizada = await this.copropiedades
-      .findByIdAndUpdate(id, { $set: this.aDocumento(dto) }, { new: true })
+      .findByIdAndUpdate(
+        id,
+        { $set: this.aDocumento(dto) },
+        { returnDocument: 'after' },
+      )
       .exec();
 
     if (!actualizada) {

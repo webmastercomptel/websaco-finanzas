@@ -167,7 +167,7 @@ describe('EntidadesService.create', () => {
     expect(contador.findOneAndUpdate).toHaveBeenCalledWith(
       {},
       { $inc: { valor: 1 } },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
     expect(modelo.escrituras[0]).toEqual({
       code: '0042',

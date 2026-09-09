@@ -77,7 +77,7 @@ const consecutivosLoteCon = (fila: Record<string, unknown> | null) => {
     findOneAndUpdate: jest.fn(() => ({
       exec: () => {
         if (!estado) {
-          // On upsert, $inc creates nextNumber at 1, new: true returns post-image
+          // On upsert, $inc creates nextNumber at 1, returnDocument: 'after' returns post-image
           estado = { nextNumber: 1 };
           return Promise.resolve(estado);
         }
@@ -203,7 +203,7 @@ describe('NumeracionService.siguienteFactura', () => {
     // igual puede emitirse con el consecutivo simple, sin resolucionId.
     const service = servicio(null, { prefix: 'FV-A', nextNumber: 10 });
 
-    // { new: true }, como en siguienteDocumento: la fila post-incremento es
+    // { returnDocument: 'after' }, como en siguienteDocumento: la fila post-incremento es
     // la que se usa — el mock simula el mismo comportamiento.
     await expect(service.siguienteFactura(COP)).resolves.toEqual({
       prefijo: 'FV-A',

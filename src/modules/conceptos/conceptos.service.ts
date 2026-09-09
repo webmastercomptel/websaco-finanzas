@@ -140,7 +140,7 @@ export class ConceptosService {
       .findOneAndUpdate(
         { _id: id, coPropertyId: oid },
         { $set: this.aDocumento(dto) },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 

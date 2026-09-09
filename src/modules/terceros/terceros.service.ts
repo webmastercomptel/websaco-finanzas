@@ -204,7 +204,11 @@ export class TercerosService {
     }
 
     const actualizado = await this.terceros
-      .findOneAndUpdate({ _id: id, coPropertyId }, { $set: doc }, { new: true })
+      .findOneAndUpdate(
+        { _id: id, coPropertyId },
+        { $set: doc },
+        { returnDocument: 'after' },
+      )
       .exec();
 
     if (!actualizado) {

@@ -212,7 +212,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     await service.reiniciar();
 
     // 0, no 1: siguienteLote/siguienteDocumento incrementan antes de leer
-    // (`{ new: true }`), así que dejar el consecutivo en 1 haría que el
+    // (`{ returnDocument: 'after' }`), así que dejar el consecutivo en 1 haría que el
     // próximo número emitido fuera 2, no 1.
     expect(modelos.consecutivoLote.updateOne).toHaveBeenCalledWith(
       { coPropertyId: COP },

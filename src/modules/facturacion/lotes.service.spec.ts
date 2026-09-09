@@ -81,6 +81,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await expect(
@@ -114,6 +115,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracion,
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -157,6 +159,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(7),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -198,6 +201,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(7),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -229,6 +233,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -263,6 +268,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -304,6 +310,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, {
@@ -367,6 +374,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     const resultado = await service.cargarNovedades('lote-1', [
@@ -423,6 +431,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     const resultado = await service.cargarNovedades('lote-1', [
@@ -483,6 +492,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await expect(
@@ -524,6 +534,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await expect(
@@ -573,6 +584,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     const resultado = await service.cargarNovedades('lote-1', [
@@ -617,6 +629,7 @@ describe('LotesFacturacionService.actualizar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
   it('rechaza editar un lote consolidado: ya generó facturas reales', async () => {
@@ -846,6 +859,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -886,6 +900,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -969,6 +984,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -995,6 +1011,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1048,6 +1065,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1094,6 +1112,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1138,6 +1157,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1165,6 +1185,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1190,6 +1211,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await expect(service.liquidar('lote-1')).rejects.toBeInstanceOf(
@@ -1213,6 +1235,7 @@ describe('LotesFacturacionService.liquidar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.liquidar('lote-1');
@@ -1223,6 +1246,17 @@ describe('LotesFacturacionService.liquidar', () => {
 });
 
 describe('LotesFacturacionService.consolidar', () => {
+  /** Runs `fn` synchronously — no real transaction, matching how
+   *  recibos.service.spec.ts stubs the same `connection.startSession()` /
+   *  `session.withTransaction()` pair for RecibosService. */
+  const sesionFalsa = () => ({
+    withTransaction: (fn: () => Promise<unknown>) => fn(),
+    endSession: jest.fn(() => Promise.resolve(undefined)),
+  });
+
+  const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
+    ({ startSession: jest.fn(() => Promise.resolve(session)) }) as never;
+
   const preliminar = (over: Record<string, unknown> = {}) => ({
     inmuebleId: 'inm-1',
     unitCode: '301',
@@ -1292,11 +1326,16 @@ describe('LotesFacturacionService.consolidar', () => {
       find: jest.fn(() => ({
         exec: () => Promise.resolve(opts.facturasExistentes ?? []),
       })),
-      create: jest.fn((doc: Record<string, unknown>) => {
+      // Array + options form (`create([doc], { session })`), matching the
+      // per-row Mongo transaction — the mock ignores `opts` (no real
+      // session/transaction semantics in these tests, same simplification
+      // as recibos.service.spec.ts's own `sesionFalsa`).
+      create: jest.fn((docs: Record<string, unknown>[]) => {
+        const doc = docs[0];
         facturasCreadas.push(doc);
-        return Promise.resolve({
-          _id: { toString: () => `fac-${facturasCreadas.length}` },
-        });
+        return Promise.resolve([
+          { ...doc, _id: { toString: () => `fac-${facturasCreadas.length}` } },
+        ]);
       }),
     };
     const saldos = {
@@ -1308,9 +1347,11 @@ describe('LotesFacturacionService.consolidar', () => {
       // instead of a per-row-per-line `findOne` — same "nothing owed yet"
       // default as above, just as an empty array instead of null.
       find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
-      findOneAndUpdate: jest.fn((filtro: Filtro) => {
-        saldosActualizados.push(filtro);
-        return { exec: () => Promise.resolve({}) };
+      // One bulkWrite per row (was one findOneAndUpdate per line) — records
+      // each op's filter, same shape tests already assert on.
+      bulkWrite: jest.fn((ops: { updateOne: { filter: Filtro } }[]) => {
+        for (const op of ops) saldosActualizados.push(op.updateOne.filter);
+        return Promise.resolve({});
       }),
     };
     const asientos = {
@@ -1319,9 +1360,11 @@ describe('LotesFacturacionService.consolidar', () => {
       find: jest.fn(() => ({
         exec: () => Promise.resolve(opts.asientosExistentes ?? []),
       })),
-      create: jest.fn((doc: Record<string, unknown>) => {
+      // Array + options form, same reason as facturas.create above.
+      create: jest.fn((docs: Record<string, unknown>[]) => {
+        const doc = docs[0];
         asientosCreados.push(doc);
-        return Promise.resolve(doc);
+        return Promise.resolve([doc]);
       }),
     };
     const copropiedades = {
@@ -1384,6 +1427,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     const resultado = await servicio2.consolidar('lote-1');
@@ -1449,6 +1493,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
       m.cuentasContables as never,
     );
 
@@ -1495,6 +1540,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     await servicio2.consolidar('lote-1');
@@ -1525,6 +1571,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodo,
       numeracionCon(),
+      conexionCon(sesionFalsa()),
     );
 
     await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
@@ -1567,6 +1614,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     const resultado = await service.consolidar('lote-1');
@@ -1603,6 +1651,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracionCon(),
+      conexionCon(sesionFalsa()),
     );
 
     await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
@@ -1629,6 +1678,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracionCon(),
+      conexionCon(sesionFalsa()),
     );
 
     await expect(service.consolidar('lote-1')).rejects.toBeInstanceOf(
@@ -1670,6 +1720,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     await expect(service.consolidar('lote-1')).resolves.toBeDefined();
@@ -1722,6 +1773,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     const resultado = await service.consolidar('lote-1');
@@ -1782,6 +1834,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     const resultado = await service.consolidar('lote-1');
@@ -1840,6 +1893,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracion,
+      conexionCon(sesionFalsa()),
     );
 
     const resultado = await service.consolidar('lote-1');
@@ -1899,6 +1953,7 @@ describe('LotesFacturacionService.findAll', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     const resultado = await service.findAll();
@@ -1962,6 +2017,7 @@ describe('LotesFacturacionService.findOne', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
     const resultado = await service.findOne('lote-1');
@@ -2006,6 +2062,7 @@ describe('LotesFacturacionService.findOne', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     await expect(service.findOne('lote-1')).rejects.toBeInstanceOf(
@@ -2029,6 +2086,7 @@ describe('LotesFacturacionService.cancelar', () => {
       tenantQueDevuelve(COP),
       {} as never, // periodo
       numeracionCon(),
+      {} as never, // connection
     );
 
   it('borra un lote en borrador — el caso típico: parámetros mal cargados y hay que empezar de nuevo', async () => {

@@ -1445,7 +1445,7 @@ describe('RecibosService.anular', () => {
     expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: facturaId, coPropertyId: COP },
       { $inc: { outstandingBalance: 200000 } },
-      expect.objectContaining({ new: true }),
+      expect.objectContaining({ returnDocument: 'after' }),
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: aplicacionActiva._id, coPropertyId: COP },

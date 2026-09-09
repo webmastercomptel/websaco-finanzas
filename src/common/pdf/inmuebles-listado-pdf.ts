@@ -138,13 +138,13 @@ const ANCHO_TITULAR_MINIMO = 120;
  *  readable more than it needs those columns at full width. */
 function anchosDeColumna(cantidadConceptos: number): number[] {
   const fijos = ANCHO_CODIGO + ANCHO_AREA + ANCHO_PARTICIPACION;
-  const disponibleParaConceptos =
-    CONTENT_WIDTH - fijos - ANCHO_TITULAR_MINIMO;
+  const disponibleParaConceptos = CONTENT_WIDTH - fijos - ANCHO_TITULAR_MINIMO;
   const anchoConcepto =
     cantidadConceptos > 0
       ? Math.min(ANCHO_CONCEPTO, disponibleParaConceptos / cantidadConceptos)
       : ANCHO_CONCEPTO;
-  const anchoTitular = CONTENT_WIDTH - fijos - anchoConcepto * cantidadConceptos;
+  const anchoTitular =
+    CONTENT_WIDTH - fijos - anchoConcepto * cantidadConceptos;
 
   return [
     ANCHO_CODIGO,

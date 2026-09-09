@@ -145,7 +145,7 @@ export class ReiniciarCicloService {
       .exec();
 
     // 0, not 1: siguienteLote/siguienteDocumento increment BEFORE reading
-    // (`{ new: true }`), so a row left at 1 would hand out 2 as the first
+    // (`{ returnDocument: 'after' }`), so a row left at 1 would hand out 2 as the first
     // number after reset. 0 is what a brand-new row starts at (missing
     // field + $inc on upsert), so the next call returns 1.
     await this.consecutivoLote

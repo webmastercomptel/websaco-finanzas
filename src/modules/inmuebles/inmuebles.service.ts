@@ -184,7 +184,7 @@ export class InmueblesService {
         // stops an id from another building being edited.
         { _id: id, coPropertyId },
         { $set: this.aDocumento(dto) },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 

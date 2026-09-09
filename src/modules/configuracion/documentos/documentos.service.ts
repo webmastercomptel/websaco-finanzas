@@ -177,7 +177,11 @@ export class DocumentosService {
       update.electronicNumber = dto.numeroElectronico;
 
     const updated = await this.consecutivos
-      .findOneAndUpdate({ _id: current._id }, { $set: update }, { new: true })
+      .findOneAndUpdate(
+        { _id: current._id },
+        { $set: update },
+        { returnDocument: 'after' },
+      )
       .exec();
 
     return toDocumentoAdmin(updated!);
@@ -281,7 +285,11 @@ export class DocumentosService {
       update.electronicNumber = dto.numeroElectronico;
 
     const updated = await this.resoluciones
-      .findByIdAndUpdate(activa._id, { $set: update }, { new: true })
+      .findByIdAndUpdate(
+        activa._id,
+        { $set: update },
+        { returnDocument: 'after' },
+      )
       .exec();
 
     return toResolucionAdmin(updated!);

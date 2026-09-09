@@ -67,7 +67,7 @@ export async function decrementarSaldoFactura(
         $expr: { $gte: ['$outstandingBalance', amount] },
       },
       { $inc: { outstandingBalance: -amount } },
-      { new: true, session },
+      { returnDocument: 'after', session },
     )
     .exec();
 
@@ -108,7 +108,7 @@ export async function decrementarSaldoNotaDebito(
         $expr: { $gte: ['$outstandingBalance', amount] },
       },
       { $inc: { outstandingBalance: -amount } },
-      { new: true, session },
+      { returnDocument: 'after', session },
     )
     .exec();
 

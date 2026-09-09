@@ -812,7 +812,7 @@ describe('NotasCreditoService.anular', () => {
     expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: facturaId, coPropertyId: COP },
       { $inc: { outstandingBalance: 120000 } },
-      { new: true, session: expect.anything() },
+      { returnDocument: 'after', session: expect.anything() },
     );
     expect(resultado.estado).toBe('anulado');
     expect(resultado.montoAplicado).toBe(0);

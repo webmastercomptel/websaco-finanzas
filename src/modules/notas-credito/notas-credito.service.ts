@@ -669,7 +669,7 @@ export class NotasCreditoService {
           .findOneAndUpdate(
             { _id: aplicacion.documentId, coPropertyId },
             { $inc: { outstandingBalance: aplicacion.amountApplied } },
-            { new: true, session },
+            { returnDocument: 'after', session },
           )
           .exec();
 

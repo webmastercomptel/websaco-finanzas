@@ -123,7 +123,7 @@ async function seedDemo(): Promise<void> {
           status: 'active',
         },
       },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
     console.log(`Entidad ${entidad.name} lista.`);
 
@@ -149,7 +149,7 @@ async function seedDemo(): Promise<void> {
       const resultado = await copropiedades.findOneAndUpdate(
         { code: def.code },
         { $setOnInsert: { ...def, status: 'active', city: 'Bogotá' } },
-        { upsert: true, new: true, includeResultMetadata: true },
+        { upsert: true, returnDocument: 'after', includeResultMetadata: true },
       );
 
       const copropiedad = resultado.value!;
@@ -205,7 +205,7 @@ async function seedDemo(): Promise<void> {
               status: 'active',
             },
           },
-          { upsert: true, new: true },
+          { upsert: true, returnDocument: 'after' },
         );
 
         await inmuebles.updateOne(
