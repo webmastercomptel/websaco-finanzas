@@ -1304,6 +1304,10 @@ describe('LotesFacturacionService.consolidar', () => {
       // before its own increment — defaults to "nothing owed yet" here
       // since none of these tests assert on balanceBefore/After values.
       findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      // Batched via `find({ inmuebleId: { $in }, conceptoId: { $in } })`
+      // instead of a per-row-per-line `findOne` — same "nothing owed yet"
+      // default as above, just as an empty array instead of null.
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
       findOneAndUpdate: jest.fn((filtro: Filtro) => {
         saldosActualizados.push(filtro);
         return { exec: () => Promise.resolve({}) };

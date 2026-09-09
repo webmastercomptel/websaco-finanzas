@@ -960,6 +960,45 @@ export class LotesFacturacionService {
       });
     }
 
+    // Bulk pre-fetch every SaldoCartera row this batch's balanceBefore
+    // recomputation will need, keyed by `inmuebleId:conceptoId` — same N+1
+    // pattern and same fix already applied to construirPreview(). Safe to
+    // read once here rather than per-row-per-line: `preview` has one row per
+    // unit, and every inmuebleId below is one not already filtered out by
+    // `unidadesYaFacturadas`, so no two rows in this loop ever share an
+    // inmuebleId — no row's read can be affected by another row's write in
+    // this same call. The only staleness this changes is the (already
+    // unbounded, already non-transactional) window against a concurrent
+    // EXTERNAL write — e.g. a payment posting mid-consolidation — which
+    // widens from "immediately before this row" to "the top of this call",
+    // not a new category of risk.
+    const filasPendientes = lote.preview.filter(
+      (p) => !unidadesYaFacturadas.has(p.inmuebleId.toString()),
+    );
+    const conceptoIdsPendientes = Array.from(
+      new Map(
+        filasPendientes.flatMap((p) =>
+          p.lines.map((l) => [l.conceptoId.toString(), l.conceptoId] as const),
+        ),
+      ).values(),
+    );
+    const saldosExistentes =
+      filasPendientes.length && conceptoIdsPendientes.length
+        ? await this.saldos
+            .find({
+              coPropertyId,
+              inmuebleId: { $in: filasPendientes.map((p) => p.inmuebleId) },
+              conceptoId: { $in: conceptoIdsPendientes },
+            })
+            .exec()
+        : [];
+    const saldoPorClave = new Map<string, number>(
+      saldosExistentes.map((s) => [
+        `${s.inmuebleId.toString()}:${s.conceptoId.toString()}`,
+        s.balance,
+      ]),
+    );
+
     for (const [indice, preliminar] of lote.preview.entries()) {
       if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {
         continue;
@@ -1021,24 +1060,19 @@ export class LotesFacturacionService {
         // `preliminar.lines[].balanceBefore/After` were computed back at
         // liquidar() time — stale the moment a payment posts in between.
         // The number that actually gets printed on the issued Factura must
-        // reflect SaldoCartera as it stands RIGHT NOW, immediately before
-        // this row's own increment below — so it's recomputed fresh here,
-        // per concept, with the same running-map trick as aLinea() for a
-        // unit whose lines repeat a concept (e.g. recurrente + novedad on
-        // the same concepto).
+        // reflect SaldoCartera as it stood when this consolidar() call
+        // started (see `saldoPorClave` above) — so it's recomputed fresh
+        // here, per concept, with the same running-map trick as aLinea()
+        // for a unit whose lines repeat a concept (e.g. recurrente +
+        // novedad on the same concepto).
         const saldoCorrientePorConcepto = new Map<string, number>();
         for (const linea of preliminar.lines) {
           const key = linea.conceptoId.toString();
           let balanceBefore = saldoCorrientePorConcepto.get(key);
           if (balanceBefore === undefined) {
-            const saldoActual = await this.saldos
-              .findOne({
-                coPropertyId,
-                inmuebleId: preliminar.inmuebleId,
-                conceptoId: linea.conceptoId,
-              })
-              .exec();
-            balanceBefore = saldoActual?.balance ?? 0;
+            balanceBefore =
+              saldoPorClave.get(`${preliminar.inmuebleId.toString()}:${key}`) ??
+              0;
           }
           const balanceAfter = balanceBefore + linea.totalAmount;
           linea.balanceBefore = balanceBefore;
