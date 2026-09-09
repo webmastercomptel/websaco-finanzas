@@ -112,6 +112,12 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         exec: jest.fn(() => Promise.resolve({ _id: new Types.ObjectId() })),
       })),
     },
+    notasAnticipo: {
+      findOneAndUpdate: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve(null)),
+      })),
+    },
     tenant: { resolveCoPropertyId: () => COP },
     numeracion: {
       siguienteDocumento: jest.fn(() =>
@@ -134,6 +140,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     merged.conceptos as never,
     merged.recibos as never,
     merged.notasCredito as never,
+    merged.notasAnticipo as never,
     merged.tenant as never,
     merged.numeracion as never,
     merged.connection as never,
@@ -350,6 +357,72 @@ describe('NotasDebitoService', () => {
         expect.objectContaining({ _id: aplicacion.sourceId }),
         expect.objectContaining({
           $inc: { unappliedAmount: 30000, appliedAmount: -30000 },
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('anula nota débito con aplicación activa de una Nota de Anticipo, restaurando el Recibo de origen', async () => {
+      // Una Nota de Anticipo no tiene saldo propio (ver su schema) — deshacer
+      // su aplicación reduce SU propio appliedAmount y devuelve el dinero al
+      // Recibo del que salió, no a la Nota de Anticipo misma.
+      const reciboOrigenId = new Types.ObjectId();
+      const notaAnticipoId = new Types.ObjectId();
+      const aplicacion = {
+        _id: new Types.ObjectId(),
+        sourceType: 'NA',
+        sourceId: notaAnticipoId,
+        documentType: 'ND',
+        documentId: new Types.ObjectId(),
+        amountApplied: 40000,
+        status: 'activa',
+      };
+      const notasAnticipoFindOneAndUpdate = jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() =>
+          Promise.resolve({ _id: notaAnticipoId, reciboOrigenId }),
+        ),
+      }));
+      const recibosFindOneAndUpdate = jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({ _id: reciboOrigenId })),
+      }));
+      const svc = servicio({
+        aplicaciones: {
+          create: jest.fn(() => Promise.resolve([])),
+          find: jest.fn(() => ({
+            sort: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve([aplicacion])),
+          })),
+          findOneAndUpdate: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve({})),
+          })),
+        },
+        notasAnticipo: { findOneAndUpdate: notasAnticipoFindOneAndUpdate },
+        recibos: { findOneAndUpdate: recibosFindOneAndUpdate },
+      });
+
+      const resultado = await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_facturacion',
+          detalle: 'La nota débito fue emitida por error de facturación',
+        },
+        CUENTA.toString(),
+      );
+
+      expect(resultado.estado).toBe('anulada');
+      expect(notasAnticipoFindOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: notaAnticipoId }),
+        expect.objectContaining({ $inc: { appliedAmount: -40000 } }),
+        expect.anything(),
+      );
+      expect(recibosFindOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ _id: reciboOrigenId }),
+        expect.objectContaining({
+          $inc: { unappliedAmount: 40000, appliedAmount: -40000 },
         }),
         expect.anything(),
       );

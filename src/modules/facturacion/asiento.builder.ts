@@ -293,13 +293,14 @@ export function enriquecerMovimientosConAuxiliares(
 }
 
 /**
- * Which document produced a cruce entry — Recibos ('RC') or Notas Crédito
- * ('NC'). The ONLY thing this selects is which description strings a journal
- * line gets; every account, amount and debit/credit side is computed
- * identically regardless of `origen` (design §7: "the arithmetic and shape
- * are identical, only the account and description text differ").
+ * Which document produced a cruce entry — Recibos ('RC'), Notas Crédito
+ * ('NC'), Notas Débito ('ND'), or a Nota de Anticipo ('NA'). The ONLY thing
+ * this selects is which description strings a journal line gets; every
+ * account, amount and debit/credit side is computed identically regardless
+ * of `origen` (design §7: "the arithmetic and shape are identical, only the
+ * account and description text differ").
  */
-export type OrigenAsiento = 'RC' | 'NC' | 'ND';
+export type OrigenAsiento = 'RC' | 'NC' | 'ND' | 'NA';
 
 interface DescripcionesAsiento {
   creacionDebito: string;
@@ -310,6 +311,12 @@ interface DescripcionesAsiento {
   contraDebitoCartera: string;
   contraDebitoAnticipo: string;
   contraCredito: string;
+  /** Reversal CREDIT back to `cuentaAnticipos` — only a Nota de Anticipo's
+   *  void needs this: its creation DEBITS anticipos (the opposite of RC/NC,
+   *  whose creation CREDITS it), so undoing it credits anticipos back
+   *  instead of debiting it (`contraDebitoAnticipo`, above). Empty for
+   *  every other origin, same convention as ND's unused fields. */
+  contraCreditoAnticipo: string;
   cuentaOrden: string;
   cuentaOrdenContra: string;
 }
@@ -324,6 +331,7 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de cartera — anulación de recibo de caja',
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de recibo de caja',
     contraCredito: 'Reversión de recaudo — anulación de recibo de caja',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — recibo de caja',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de recibo de caja',
@@ -339,6 +347,7 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de nota crédito',
     contraCredito:
       'Reversión de corrección de ingreso — anulación de nota crédito',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — nota crédito',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de nota crédito',
@@ -352,9 +361,26 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de ingreso — anulación de nota débito',
     contraDebitoAnticipo: '',
     contraCredito: 'Reversión de cartera — anulación de nota débito',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — nota débito',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de nota débito',
+  },
+  NA: {
+    creacionDebito: '',
+    creacionCreditoCartera: '',
+    creacionCreditoAnticipo: '',
+    aplicacionDebitoAnticipo: 'Anticipo aplicado a cartera — nota de anticipo',
+    aplicacionCreditoCartera:
+      'Cartera por cobrar — aplicación de nota de anticipo',
+    contraDebitoCartera: 'Reversión de cartera — anulación de nota de anticipo',
+    contraDebitoAnticipo: '',
+    contraCredito: '',
+    contraCreditoAnticipo:
+      'Reversión de anticipo — anulación de nota de anticipo',
+    cuentaOrden: 'Cuenta de orden — nota de anticipo',
+    cuentaOrdenContra:
+      'Reversión de cuenta de orden — anulación de nota de anticipo',
   },
 };
 
@@ -535,6 +561,79 @@ export function construirMovimientosAplicacionAnticipo(
       montoCuentasOrden ?? 0,
       d.cuentaOrden,
       true,
+    ),
+  );
+
+  return movimientos;
+}
+
+/**
+ * Builds the ONE reversing entry a Nota de Anticipo's void posts — the
+ * mirror image of `construirMovimientosAplicacionAnticipo`'s own posting,
+ * sides swapped: credit `cuentaAnticipos` (undoes the debit that moved the
+ * anticipo out), debit each `desgloseCartera` account (undoes the credit
+ * that landed on cartera), both for `montoAplicado`. Never touches a bank
+ * account — a Nota de Anticipo only ever reassigns money already sitting in
+ * `cuentaAnticipos`, exactly like its own creation did.
+ *
+ * Distinct from `construirContraAsientoCruce` (which reverses a Recibo/Nota
+ * Crédito's OWN creation, always crediting back `cuentaOrigen`) because a
+ * Nota de Anticipo has no `cuentaOrigen` leg to give back — undoing it only
+ * ever involves the anticipo and cartera accounts.
+ *
+ * `cuentasOrden`, when given, reverses the memo pair the creation posted —
+ * `construirMovimientosAplicacionAnticipo` already posts it INVERTED
+ * relative to facturación (`invertido: true`), so undoing it goes back to
+ * facturación's plain sides (`invertido: false`, the default) — same
+ * reasoning as `construirContraAsientoCruce`'s own note.
+ */
+export function construirContraAsientoAplicacionAnticipo(
+  cuentaAnticipos: string,
+  cuentaCartera: string,
+  montoAplicado: number,
+  origen: OrigenAsiento,
+  desgloseCartera?: { account: string; monto: number }[],
+  cuentasOrden?: CuentasOrden | null,
+  montoCuentasOrden?: number,
+): Movimiento[] {
+  const d = DESCRIPCIONES[origen];
+  const movimientos: Movimiento[] = [];
+
+  if (desgloseCartera && desgloseCartera.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseCartera) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'debito',
+        amount: monto,
+        description: d.contraDebitoCartera,
+      });
+    }
+  } else {
+    movimientos.push({
+      account: cuentaCartera,
+      type: 'debito',
+      amount: montoAplicado,
+      description: d.contraDebitoCartera,
+    });
+  }
+
+  movimientos.push({
+    account: cuentaAnticipos,
+    type: 'credito',
+    amount: montoAplicado,
+    description: d.contraCreditoAnticipo,
+  });
+
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoCuentasOrden ?? montoAplicado,
+      d.cuentaOrdenContra,
     ),
   );
 

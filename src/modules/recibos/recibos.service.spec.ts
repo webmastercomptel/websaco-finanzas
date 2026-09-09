@@ -34,10 +34,15 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
-/** No open Lote in any test here — the guard always passes. */
-const lotesFacturacionFalso = () =>
+/** No open Lote in any test here — the guard always passes. No consolidated
+ *  Lote either, by default — `obtenerUltimoConsolidado` returning `null`
+ *  means "nothing to validate the payment date's period against", the same
+ *  default `RecibosService.crear()` treats as a no-op. Tests exercising the
+ *  period-match validation pass their own `lotes` override. */
+const lotesFacturacionFalso = (ultimoConsolidado: unknown = null) =>
   ({
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(ultimoConsolidado)),
   }) as never;
 
 /**
@@ -93,7 +98,15 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** `find` defaults to empty — most tests here apply manually to a specific
+ *  `documentoId` via `findOneAndUpdate` and never run FIFO's candidate
+ *  query. Tests that DO need FIFO to find something build their own richer
+ *  `facturas` mock (see `RecibosService.crear — con aplicacionAutomatica`),
+ *  same reasoning as `modeloNotasDebito`'s own default. */
 const modeloFacturas = (factura: Record<string, unknown>) => ({
+  find: jest.fn(() => ({
+    sort: () => ({ session: () => ({ exec: () => Promise.resolve([]) }) }),
+  })),
   findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
     exec: () => {
       const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
@@ -162,6 +175,10 @@ const construirServicio = (opts: {
   copropiedades?: { findById: jest.Mock };
   cuentasContables?: Record<string, unknown>[];
   inmueble?: Record<string, unknown> | null;
+  /** Default: sin lote consolidado — nada que validar contra el período de
+   *  facturación. Los tests de "candado de periodo de facturación" pasan
+   *  su propio lote consolidado. */
+  ultimoLoteConsolidado?: unknown;
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
@@ -199,7 +216,7 @@ const construirServicio = (opts: {
     conexionCon(session),
     periodo,
     notasDebito as never,
-    lotesFacturacionFalso(),
+    lotesFacturacionFalso(opts.ultimoLoteConsolidado ?? null),
     cuentasContables as never,
     inmuebles as never,
   );
@@ -227,7 +244,55 @@ const dtoBase = () => ({
   cuentaDestino: '111005',
 });
 
-describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
+describe('RecibosService.crear — elección de aplicación obligatoria', () => {
+  it('rechaza cuando no se indica ni aplicaciones ni aplicacionAutomatica', async () => {
+    const { service, recibos, asientos } = construirServicio({
+      reciboCreado: {
+        _id: new Types.ObjectId(),
+        inmuebleId: INMUEBLE,
+        terceroId: TERCERO,
+        fullNumber: 'RC-1',
+        destinationAccount: '111005',
+        unappliedAmount: 500000,
+        appliedAmount: 0,
+        receivedAmount: 500000,
+        status: 'activo',
+      },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), dtoBase()),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(recibos.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza cuando se indican aplicaciones manuales Y aplicacionAutomatica a la vez', async () => {
+    const { service } = construirServicio({
+      reciboCreado: {
+        _id: new Types.ObjectId(),
+        status: 'activo',
+      },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: new Types.ObjectId().toString(),
+            montoAplicado: 100000,
+          },
+        ],
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100% anticipo)', () => {
   it('crea el recibo con unappliedAmount = montoRecibido y SÍ postea el asiento — el efectivo ya llegó al banco', async () => {
     // Corrección de un bug de partida doble en un borrador anterior de este
     // plan: un anticipo puro NO deja de tener efecto contable — el dinero
@@ -256,7 +321,10 @@ describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
     };
     const { service, asientos } = construirServicio({ reciboCreado });
 
-    const resultado = await service.crear(CUENTA.toString(), dtoBase());
+    const resultado = await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      aplicacionAutomatica: true,
+    });
 
     expect(resultado.montoSinAplicar).toBe(500000);
     expect(resultado.montoAplicado).toBe(0);
@@ -331,7 +399,10 @@ describe('RecibosService.crear — sin aplicaciones (100% anticipo)', () => {
       inmueble: { code: '1304' },
     });
 
-    await service.crear(CUENTA.toString(), dtoBase());
+    await service.crear(CUENTA.toString(), {
+      ...dtoBase(),
+      aplicacionAutomatica: true,
+    });
 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls;
     const entries = fila[0].entries as Array<{
@@ -391,7 +462,10 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     });
 
     const { cuentaDestino: _omitido, ...dtoSinCuenta } = dtoBase();
-    await service.crear(CUENTA.toString(), dtoSinCuenta);
+    await service.crear(CUENTA.toString(), {
+      ...dtoSinCuenta,
+      aplicacionAutomatica: true,
+    });
 
     // `recibos.create([{...}], {session})` — Mongoose's array-form transactional
     // create — so the first call's first arg is a one-element array, not the
@@ -415,7 +489,10 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     const { cuentaDestino: _omitido, ...dtoSinCuenta } = dtoBase();
 
     await expect(
-      service.crear(CUENTA.toString(), dtoSinCuenta),
+      service.crear(CUENTA.toString(), {
+        ...dtoSinCuenta,
+        aplicacionAutomatica: true,
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
@@ -454,7 +531,10 @@ describe('RecibosService.crear — candado de periodo contable', () => {
     });
 
     await expect(
-      service.crear(CUENTA.toString(), dtoBase()),
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        aplicacionAutomatica: true,
+      }),
     ).rejects.toBeInstanceOf(ConflictException);
 
     // Y rechaza ANTES de escribir nada: ni el recibo, ni su asiento.
@@ -470,6 +550,7 @@ describe('RecibosService.crear — candado de periodo contable', () => {
     await service.crear(CUENTA.toString(), {
       ...dtoBase(),
       fechaRecibo: '2026-03-15',
+      aplicacionAutomatica: true,
     });
 
     expect(exigirAbierto).toHaveBeenCalledWith(
@@ -484,9 +565,84 @@ describe('RecibosService.crear — candado de periodo contable', () => {
     });
 
     await expect(
-      service.crear(CUENTA.toString(), dtoBase()),
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        aplicacionAutomatica: true,
+      }),
     ).resolves.toBeDefined();
     expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('RecibosService.crear — candado de período de facturación (mes/año del último lote)', () => {
+  const reciboCreado = () => ({
+    _id: new Types.ObjectId(),
+    inmuebleId: INMUEBLE,
+    terceroId: TERCERO,
+    prefix: 'RC',
+    number: 1,
+    fullNumber: 'RC-1',
+    receivedAmount: 500000,
+    receivedDate: new Date('2026-08-27'),
+    paymentMethod: 'transferencia',
+    destinationAccount: '111005',
+    reference: null,
+    notes: null,
+    appliedAmount: 0,
+    unappliedAmount: 500000,
+    status: 'activo',
+    voidedReason: null,
+    voidedDetail: null,
+    voidedAt: null,
+  });
+
+  it('rechaza una fecha de pago de un mes distinto al del último lote consolidado', async () => {
+    const { service, recibos, asientos } = construirServicio({
+      reciboCreado: reciboCreado(),
+      ultimoLoteConsolidado: { billingDate: new Date('2026-08-15') },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        fechaRecibo: '2026-07-15',
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(recibos.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
+  });
+
+  it('deja pasar una fecha de pago del mismo mes y año del último lote consolidado', async () => {
+    const { service, asientos } = construirServicio({
+      reciboCreado: reciboCreado(),
+      ultimoLoteConsolidado: { billingDate: new Date('2026-08-15') },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        fechaRecibo: '2026-08-27',
+        aplicacionAutomatica: true,
+      }),
+    ).resolves.toBeDefined();
+    expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('no valida nada cuando la copropiedad nunca ha consolidado un lote', async () => {
+    const { service } = construirServicio({
+      reciboCreado: reciboCreado(),
+      ultimoLoteConsolidado: null,
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        fechaRecibo: '2020-01-01',
+        aplicacionAutomatica: true,
+      }),
+    ).resolves.toBeDefined();
   });
 });
 
@@ -1360,309 +1516,6 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
   });
 });
 
-describe('RecibosService.aplicar', () => {
-  const reciboExistente = (over: Record<string, unknown> = {}) => ({
-    _id: new Types.ObjectId(),
-    coPropertyId: COP,
-    inmuebleId: INMUEBLE,
-    destinationAccount: '111005',
-    receivedDate: new Date('2026-08-20'),
-    fullNumber: 'RC-1',
-    status: 'activo',
-    unappliedAmount: 300000,
-    appliedAmount: 200000,
-    receivedAmount: 500000,
-    ...over,
-  });
-
-  it('aplica el anticipo disponible de un recibo existente contra un documento nuevo', async () => {
-    const facturaId = new Types.ObjectId();
-    const factura = facturaDoc({ _id: facturaId });
-    const recibo = reciboExistente();
-
-    const recibos = {
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(recibo) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(recibo),
-      })),
-    };
-    const facturas = modeloFacturas(factura);
-    const session = sesionFalsa();
-    const asientos = modeloAsientos();
-    const service = new RecibosService(
-      recibos as never,
-      modeloAplicaciones() as never,
-      facturas as never,
-      modeloSaldos() as never,
-      asientos as never,
-      modeloCopropiedades() as never,
-      tenantQueDevuelve(COP),
-      numeracionQueEntrega('RC-1'),
-      conexionCon(session),
-      periodoAbierto(),
-      modeloNotasDebito() as never,
-      lotesFacturacionFalso(),
-    );
-
-    const resultado = await service.aplicar(
-      recibo._id.toString(),
-      {
-        aplicaciones: [
-          {
-            tipoDocumento: 'FV',
-            documentoId: facturaId.toString(),
-            montoAplicado: 200000,
-          },
-        ],
-      },
-      CUENTA.toString(),
-    );
-
-    expect(resultado.aplicadas).toHaveLength(1);
-    expect(resultado.errores).toEqual([]);
-    // Solo mueve el pasivo hacia la cartera — el efectivo ya se había
-    // contabilizado en destinationAccount al momento de crear el recibo, así
-    // que esta posterior aplicación NUNCA vuelve a tocar esa cuenta.
-    expect(asientos.create).toHaveBeenCalledTimes(1);
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
-    }>;
-    expect(entries).toEqual([
-      {
-        account: '210505',
-        type: 'debito',
-        amount: 200000,
-        description: expect.any(String),
-      },
-      {
-        account: '130501',
-        type: 'credito',
-        amount: 200000,
-        description: expect.any(String),
-      },
-    ]);
-  });
-
-  it('acredita la cuenta propia del concepto, no la cuenta plana, en una aplicación diferida', async () => {
-    const facturaId = new Types.ObjectId();
-    const conceptoMora = new Types.ObjectId();
-    const factura = facturaDoc({
-      _id: facturaId,
-      lines: [
-        {
-          conceptoId: conceptoMora,
-          totalAmount: 500000,
-          accountingReceivableAccount: '130599',
-        },
-      ],
-    });
-    const recibo = reciboExistente();
-
-    const recibos = {
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(recibo) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(recibo),
-      })),
-    };
-    const facturas = modeloFacturas(factura);
-    const session = sesionFalsa();
-    const asientos = modeloAsientos();
-    const service = new RecibosService(
-      recibos as never,
-      modeloAplicaciones() as never,
-      facturas as never,
-      modeloSaldos() as never,
-      asientos as never,
-      modeloCopropiedades() as never,
-      tenantQueDevuelve(COP),
-      numeracionQueEntrega('RC-1'),
-      conexionCon(session),
-      periodoAbierto(),
-      modeloNotasDebito() as never,
-      lotesFacturacionFalso(),
-    );
-
-    await service.aplicar(
-      recibo._id.toString(),
-      {
-        aplicaciones: [
-          {
-            tipoDocumento: 'FV',
-            documentoId: facturaId.toString(),
-            montoAplicado: 200000,
-          },
-        ],
-      },
-      CUENTA.toString(),
-    );
-
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-    }>;
-    const creditos = entries.filter((m) => m.type === 'credito');
-    expect(creditos).toEqual([expect.objectContaining({ account: '130599' })]);
-    expect(creditos.some((c) => c.account === '130501')).toBe(false);
-  });
-
-  it('con cuentas de orden habilitadas, escala el par memo a lo aplicado a mora en una aplicación diferida', async () => {
-    const facturaId = new Types.ObjectId();
-    const conceptoMora = new Types.ObjectId();
-    const factura = facturaDoc({
-      _id: facturaId,
-      lines: [
-        {
-          conceptoId: conceptoMora,
-          conceptKind: 'intereses',
-          totalAmount: 500000,
-          accountingReceivableAccount: '130599',
-        },
-      ],
-    });
-    const recibo = reciboExistente();
-    const recibos = {
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(recibo) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(recibo),
-      })),
-    };
-    const copropiedades = {
-      findById: jest.fn(() => ({
-        session: () => ({
-          exec: () =>
-            Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              usesMemorandumAccounts: true,
-              memorandumDebitAccount: '831505',
-              memorandumCreditAccount: '831510',
-            }),
-        }),
-      })),
-    };
-    const session = sesionFalsa();
-    const asientos = modeloAsientos();
-    const service = new RecibosService(
-      recibos as never,
-      modeloAplicaciones() as never,
-      modeloFacturas(factura) as never,
-      modeloSaldos() as never,
-      asientos as never,
-      copropiedades as never,
-      tenantQueDevuelve(COP),
-      numeracionQueEntrega('RC-1'),
-      conexionCon(session),
-      periodoAbierto(),
-      modeloNotasDebito() as never,
-      lotesFacturacionFalso(),
-    );
-
-    await service.aplicar(
-      recibo._id.toString(),
-      {
-        aplicaciones: [
-          {
-            tipoDocumento: 'FV',
-            documentoId: facturaId.toString(),
-            montoAplicado: 200000,
-          },
-        ],
-      },
-      CUENTA.toString(),
-    );
-
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      amount: number;
-    }>;
-    expect(entries.find((m) => m.account === '831505')?.amount).toBe(200000);
-    expect(entries.find((m) => m.account === '831510')?.amount).toBe(200000);
-  });
-
-  it('rechaza cuando lo solicitado excede el saldo sin aplicar del recibo', async () => {
-    const recibo = reciboExistente({ unappliedAmount: 50000 });
-    const recibos = {
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(recibo) }),
-      })),
-    };
-    const session = sesionFalsa();
-    const service = new RecibosService(
-      recibos as never,
-      modeloAplicaciones() as never,
-      modeloFacturas(facturaDoc()) as never,
-      modeloSaldos() as never,
-      modeloAsientos() as never,
-      modeloCopropiedades() as never,
-      tenantQueDevuelve(COP),
-      numeracionQueEntrega('RC-1'),
-      conexionCon(session),
-      periodoAbierto(),
-      modeloNotasDebito() as never,
-      lotesFacturacionFalso(),
-    );
-
-    await expect(
-      service.aplicar(
-        recibo._id.toString(),
-        {
-          aplicaciones: [
-            {
-              tipoDocumento: 'FV',
-              documentoId: new Types.ObjectId().toString(),
-              montoAplicado: 200000,
-            },
-          ],
-        },
-        CUENTA.toString(),
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('rechaza aplicar sobre un recibo ya anulado', async () => {
-    const recibo = reciboExistente({ status: 'anulado' });
-    const recibos = {
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(recibo) }),
-      })),
-    };
-    const session = sesionFalsa();
-    const service = new RecibosService(
-      recibos as never,
-      modeloAplicaciones() as never,
-      modeloFacturas(facturaDoc()) as never,
-      modeloSaldos() as never,
-      modeloAsientos() as never,
-      modeloCopropiedades() as never,
-      tenantQueDevuelve(COP),
-      numeracionQueEntrega('RC-1'),
-      conexionCon(session),
-      periodoAbierto(),
-      modeloNotasDebito() as never,
-      lotesFacturacionFalso(),
-    );
-
-    await expect(
-      service.aplicar(
-        recibo._id.toString(),
-        { aplicacionAutomatica: true },
-        CUENTA.toString(),
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-});
-
 describe('RecibosService.anular', () => {
   const reciboActivo = (over: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
@@ -2461,14 +2314,18 @@ describe('RecibosService — ciclo de vida completo', () => {
     return { service, netoPorCuenta, asientosStore, leerRecibo: () => recibo };
   };
 
-  it('crear (parcial) → aplicar (diferido) → anular deja cada cuenta contable en cero', async () => {
+  // NOTA: el paso "aplicar en diferido" que este ciclo cubría antes ahora es
+  // una Nota de Anticipo (módulo `notas-anticipo`), no una segunda llamada
+  // sobre el propio Recibo — ver su propio ciclo de vida completo en
+  // `notas-anticipo.service.spec.ts`, que retoma exactamente donde este test
+  // termina (un recibo creado con aplicación parcial, con anticipo
+  // pendiente) y encadena Nota de Anticipo → anulación.
+  it('crear (parcial) → anular deja cada cuenta contable en cero', async () => {
     // LA INVARIANTE CENTRAL DEL DISEÑO: un recibo anulado no puede dejar
     // rastro contable neto en NINGUNA de las tres cuentas del esquema
-    // (destinationAccount / cartera / anticipos), sin importar por cuántas
-    // aplicaciones haya pasado antes. Los tres asientos se arman en lugares
-    // distintos — `construirAsientoRecibo` al crear,
-    // `construirMovimientosAplicacionAnticipo` al aplicar en diferido, y
-    // `construirContraAsientoRecibo` al anular usando los totales cacheados
+    // (destinationAccount / cartera / anticipos). Los dos asientos se arman
+    // en lugares distintos — `construirAsientoCruce` al crear y
+    // `construirContraAsientoCruce` al anular usando los totales cacheados
     // del propio recibo — así que sólo un test que recorra el ciclo entero
     // los ata entre sí.
     const facturaA = facturaDoc({
@@ -2477,15 +2334,9 @@ describe('RecibosService — ciclo de vida completo', () => {
       total: 200000,
       lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
     });
-    const facturaB = facturaDoc({
-      _id: new Types.ObjectId(),
-      outstandingBalance: 100000,
-      total: 100000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
-    });
 
     const { service, netoPorCuenta, asientosStore, leerRecibo } =
-      construirEntorno([facturaA, facturaB]);
+      construirEntorno([facturaA]);
 
     // 1. Crear por 500000 aplicando 200000 a la factura A → quedan 300000 de
     //    anticipo.
@@ -2504,27 +2355,7 @@ describe('RecibosService — ciclo de vida completo', () => {
     expect(creado.montoSinAplicar).toBe(300000);
     expect(facturaA.outstandingBalance).toBe(0);
 
-    // 2. Aplicar en diferido 100000 de ese anticipo contra la factura B →
-    //    quedan 200000 sin aplicar.
-    const aplicado = await service.aplicar(
-      String(leerRecibo()._id),
-      {
-        aplicaciones: [
-          {
-            tipoDocumento: 'FV',
-            documentoId: String(facturaB._id),
-            montoAplicado: 100000,
-          },
-        ],
-      },
-      CUENTA.toString(),
-    );
-    expect(aplicado.aplicadas).toHaveLength(1);
-    expect(aplicado.montoSinAplicar).toBe(200000);
-    expect(facturaB.outstandingBalance).toBe(0);
-
-    // 3. Anular todo: cascada sobre las dos aplicaciones y contra-asiento
-    //    consolidado.
+    // 2. Anular: cascada sobre la aplicación y contra-asiento consolidado.
     const anulado = await service.anular(
       String(leerRecibo()._id),
       {
@@ -2534,12 +2365,11 @@ describe('RecibosService — ciclo de vida completo', () => {
       CUENTA.toString(),
     );
     expect(anulado.estado).toBe('anulado');
-    // La cascada restituyó el saldo de las dos facturas.
+    // La cascada restituyó el saldo de la factura.
     expect(facturaA.outstandingBalance).toBe(200000);
-    expect(facturaB.outstandingBalance).toBe(100000);
 
-    // LA ASERCIÓN: tres asientos posteados, y neto CERO en cada cuenta.
-    expect(asientosStore).toHaveLength(3);
+    // LA ASERCIÓN: dos asientos posteados, y neto CERO en cada cuenta.
+    expect(asientosStore).toHaveLength(2);
     const neto = netoPorCuenta();
     // Anti-vacuidad: si un refactor dejara de tocar alguna de las tres
     // cuentas, su neto sería cero y el test pasaría sin haber probado nada.

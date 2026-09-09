@@ -17,15 +17,9 @@ import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RecibosService } from './recibos.service';
 import { CrearReciboDto } from './dto/crear-recibo.dto';
-import { AplicarReciboDto } from './dto/aplicar-recibo.dto';
 import { AnularReciboDto } from './dto/anular-recibo.dto';
 import { ListarRecibosDto } from './dto/listar-recibos.dto';
-import type {
-  Paginado,
-  Recibo,
-  ReciboDetalle,
-  ResultadoAplicacion,
-} from '../../contracts';
+import type { Paginado, Recibo, ReciboDetalle } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
 import {
@@ -35,10 +29,12 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
- * `subject: 'Recibo'` throughout, `create`/`read`/`update`/`annul` per
- * action — same one-subject-for-the-whole-lifecycle choice LotesController
- * already made for `'Factura'` (design §5). GET routes are added in Task
- * 10, `/aplicar` in Task 8, `/anular` in Task 9.
+ * `subject: 'Recibo'` throughout, `create`/`read`/`annul` per action — same
+ * one-subject-for-the-whole-lifecycle choice LotesController already made
+ * for `'Factura'` (design §5). There is deliberately no `/aplicar` route —
+ * a Recibo left with a pending anticipo (`unappliedAmount > 0`) is applied
+ * from the `notas-anticipo` module instead, never from here (see
+ * `NotasAnticipoService`).
  */
 @Controller('recibos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
@@ -72,16 +68,6 @@ export class RecibosController {
     // an account with an active assignment can hold — accountId is
     // guaranteed set here, same reasoning as LotesController.crear().
     return this.recibos.crear(user.accountId!, dto);
-  }
-
-  @Post(':id/aplicar')
-  @CheckAbility({ action: 'update', subject: 'Recibo' })
-  aplicar(
-    @CurrentUser() user: IRequestUser,
-    @Param('id') id: string,
-    @Body() dto: AplicarReciboDto,
-  ): Promise<ResultadoAplicacion> {
-    return this.recibos.aplicar(id, dto, user.accountId!);
   }
 
   @Post(':id/anular')

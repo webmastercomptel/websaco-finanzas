@@ -44,39 +44,33 @@ import {
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
-import { PeriodoService } from '../../common/contabilidad/periodo.service';
+import {
+  PeriodoService,
+  periodoDe,
+} from '../../common/contabilidad/periodo.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   ajustarSaldosCartera,
-  ajustarSaldosCarteraPorDistribucion,
-  AplicacionInvalidaError,
-  decrementarSaldoFactura,
-  decrementarSaldoNotaDebito,
+  ejecutarAplicacionFifo,
+  ejecutarAplicacionManual,
 } from './cruce.util';
 import {
   construirAsientoCruce,
   construirContraAsientoCruce,
-  construirMovimientosAplicacionAnticipo,
   cuentasOrdenDe,
   enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
-import {
-  toAplicacionCartera,
-  toRecibo,
-  toReciboDetalle,
-} from './recibos.mapper';
+import { toRecibo, toReciboDetalle } from './recibos.mapper';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
   Paginado,
   ReciboDetalle,
-  ResultadoAplicacion,
 } from '../../contracts';
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
-import type { AplicarReciboDto } from './dto/aplicar-recibo.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
 
@@ -172,6 +166,15 @@ export class RecibosService {
         'No se puede pedir aplicación manual y automática a la vez',
       );
     }
+    // Same guard `aplicar()` already had — the user must explicitly choose
+    // automática or manual, never leave both empty. A receipt with truly
+    // nothing to apply against still satisfies this by choosing automática
+    // (FIFO finds no open cartera and the whole amount becomes anticipo).
+    if (!dto.aplicaciones?.length && !dto.aplicacionAutomatica) {
+      throw new BadRequestException(
+        'Debe indicar aplicaciones manuales o aplicación automática',
+      );
+    }
     const sumaSolicitada = (dto.aplicaciones ?? []).reduce(
       (acc, a) => acc + a.montoAplicado,
       0,
@@ -201,6 +204,27 @@ export class RecibosService {
       coPropertyId.toString(),
       new Date(dto.fechaRecibo),
     );
+    // The payment date must fall in the same month/year as the last
+    // consolidated billing run — a Recibo dated outside the current
+    // billing period reads as paying a period that hasn't been (or is no
+    // longer being) billed. A coproperty that has never consolidated a
+    // lote has no "current period" yet, so nothing to validate against.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    if (ultimoLote) {
+      const periodoLote = periodoDe(ultimoLote.billingDate);
+      const periodoRecibo = periodoDe(new Date(dto.fechaRecibo));
+      if (
+        periodoLote.year !== periodoRecibo.year ||
+        periodoLote.month !== periodoRecibo.month
+      ) {
+        throw new BadRequestException(
+          `La fecha de pago debe corresponder al período de facturación actual ` +
+            `(${String(periodoLote.month).padStart(2, '0')}/${periodoLote.year})`,
+        );
+      }
+    }
     // Same "a refusal costs no session" placement: SaldoCartera and every
     // FacturaPreliminar total can still move while a billing run is open, so
     // a Recibo applied against them mid-run would settle against numbers
@@ -305,110 +329,6 @@ export class RecibosService {
         .session(session)
         .exec();
       return toRecibo(final!);
-    });
-  }
-
-  /**
-   * Applies an existing receipt's `unappliedAmount` against new documents —
-   * the deferred-cruce case (design §5). Manual and FIFO share the exact
-   * same private helpers `crear()` uses, so the two entry points never
-   * drift apart. Posts via `postearAsientoAplicacionAnticipo`, NOT
-   * `postearAsientoRecibo` — the cash was already booked at creation time,
-   * so this only ever moves the liability into the receivable, never
-   * `destinationAccount` again.
-   */
-  async aplicar(
-    id: string,
-    dto: AplicarReciboDto,
-    accountId: string,
-  ): Promise<ResultadoAplicacion> {
-    if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
-      throw new BadRequestException(
-        'No se puede pedir aplicación manual y automática a la vez',
-      );
-    }
-    if (!dto.aplicaciones?.length && !dto.aplicacionAutomatica) {
-      throw new BadRequestException(
-        'Debe indicar aplicaciones manuales o aplicación automática',
-      );
-    }
-
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-
-    return this.transaccion(async (session) => {
-      const recibo = await this.recibos
-        .findOne({ _id: id, coPropertyId })
-        .session(session)
-        .exec();
-      if (!recibo) {
-        throw new NotFoundException(`No se encontró el recibo ${id}`);
-      }
-      if (recibo.status !== 'activo') {
-        throw new ConflictException(
-          `El recibo ${recibo.fullNumber} está anulado y no admite nuevas aplicaciones`,
-        );
-      }
-
-      if (dto.aplicaciones?.length) {
-        const { creadas, creditosPorCuenta, montoAplicadoMora } =
-          await this.aplicarManual(
-            session,
-            coPropertyId,
-            recibo,
-            dto.aplicaciones,
-            accountId,
-          );
-        const totalAplicado = creadas.reduce(
-          (acc, a) => acc + a.amountApplied,
-          0,
-        );
-        if (totalAplicado > 0) {
-          await this.postearAsientoAplicacionAnticipo(
-            session,
-            coPropertyId,
-            recibo,
-            totalAplicado,
-            creditosPorCuenta,
-            montoAplicadoMora,
-          );
-        }
-        const reciboFinal = await this.recibos
-          .findOne({ _id: id, coPropertyId })
-          .session(session)
-          .exec();
-        return {
-          aplicadas: creadas.map((a) => toAplicacionCartera(a)),
-          montoSinAplicar: reciboFinal!.unappliedAmount,
-          errores: [],
-        };
-      }
-
-      const resultado = await this.aplicarFifo(
-        session,
-        coPropertyId,
-        recibo,
-        recibo.unappliedAmount,
-        accountId,
-      );
-      const totalAplicado = resultado.aplicadas.reduce(
-        (acc, a) => acc + a.amountApplied,
-        0,
-      );
-      if (totalAplicado > 0) {
-        await this.postearAsientoAplicacionAnticipo(
-          session,
-          coPropertyId,
-          recibo,
-          totalAplicado,
-          resultado.creditosPorCuenta,
-          resultado.montoAplicadoMora,
-        );
-      }
-      return {
-        aplicadas: resultado.aplicadas.map((a) => toAplicacionCartera(a)),
-        montoSinAplicar: resultado.montoSinAplicar,
-        errores: resultado.errores,
-      };
     });
   }
 
@@ -709,11 +629,11 @@ export class RecibosService {
   }
 
   /**
-   * Applies `solicitadas` against their documents — ALL of them, or none:
-   * if the sum exceeds `recibo.unappliedAmount`, or any single line's
-   * `decrementarSaldoFactura` call throws, the whole transaction aborts
-   * (design §6, "manual application mode is all-or-nothing"). Reused by
-   * `crear()` (this task) and `aplicar()` (Task 8).
+   * Applies `solicitadas` against their documents — ALL of them, or none.
+   * Thin wrapper: the actual logic lives in `ejecutarAplicacionManual`
+   * (`cruce.util.ts`), extracted so `NotasAnticipoService` can run the
+   * identical cruce against the same `unappliedAmount`, just recorded under
+   * a Nota de Anticipo (`sourceType: 'NA'`) instead of the Recibo itself.
    */
   private async aplicarManual(
     session: ClientSession,
@@ -726,206 +646,30 @@ export class RecibosService {
     creditosPorCuenta: Map<string | null, number>;
     montoAplicadoMora: number;
   }> {
-    const sumaSolicitada = solicitadas.reduce(
-      (acc, a) => acc + a.montoAplicado,
-      0,
+    return ejecutarAplicacionManual(
+      {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        aplicaciones: this.aplicaciones,
+        saldos: this.saldos,
+        recibos: this.recibos,
+        session,
+        coPropertyId,
+        recibo,
+        sourceType: 'RC',
+        sourceId: recibo._id,
+        accountId,
+      },
+      solicitadas,
     );
-    if (sumaSolicitada > recibo.unappliedAmount) {
-      throw new ConflictException(
-        `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
-          `del recibo ${recibo.fullNumber} (${recibo.unappliedAmount})`,
-      );
-    }
-
-    const creadas: AplicacionCarteraDocument[] = [];
-    // Per-account breakdown of the cartera credit — null is the "no
-    // per-concepto account" bucket (a Nota Débito application, or a Factura
-    // line whose concepto has no accountingReceivableAccount configured),
-    // resolved to the coproperty's shared cuentaCartera by the poster.
-    const creditosPorCuenta = new Map<string | null, number>();
-    const acumular = (cuenta: string | null, monto: number) => {
-      if (monto === 0) return;
-      creditosPorCuenta.set(
-        cuenta,
-        (creditosPorCuenta.get(cuenta) ?? 0) + monto,
-      );
-    };
-    // Portion of THIS call applied specifically against an `intereses`
-    // (mora) concept line — what `postearAsientoRecibo` scopes the
-    // cuentas-de-orden memo pair to, mirroring `construirMovimientos`'
-    // own per-line `conceptKind === 'intereses'` check at facturación.
-    let montoAplicadoMora = 0;
-    for (const solicitada of solicitadas) {
-      const documentoId = new Types.ObjectId(solicitada.documentoId);
-
-      // FIFO filters its candidates by `inmuebleId` when it builds the list;
-      // manual mode takes whatever `documentoId` the caller sent, and
-      // `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` only guard
-      // {_id, coPropertyId, status, saldo} — so without this a receipt
-      // issued for one unit could be applied against ANOTHER unit's
-      // document inside the same coproperty, corrupting both units'
-      // per-unit balance views.
-      //
-      // Checked after the decrement rather than before, because both
-      // decrement functions already return the document — no second read
-      // needed — and manual mode is all-or-nothing: throwing here aborts
-      // the whole transaction, so the decrement above is rolled back with
-      // it.
-      if (solicitada.tipoDocumento === 'ND') {
-        const notaDebito = await decrementarSaldoNotaDebito(
-          this.notasDebito,
-          session,
-          coPropertyId,
-          documentoId,
-          solicitada.montoAplicado,
-        );
-
-        if (!notaDebito.inmuebleId.equals(recibo.inmuebleId)) {
-          throw new ConflictException(
-            `La nota débito ${documentoId.toString()} pertenece a otro ` +
-              `inmueble (${notaDebito.inmuebleId.toString()}) que el recibo ` +
-              `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
-          );
-        }
-
-        await ajustarSaldosCarteraPorDistribucion(
-          this.saldos,
-          session,
-          coPropertyId,
-          notaDebito.inmuebleId,
-          [{ conceptoId: notaDebito.conceptoId, monto: notaDebito.total }],
-          solicitada.montoAplicado,
-          -1,
-        );
-        // A Nota Débito has no accountingReceivableAccount breakdown here —
-        // its cartera credit stays on the coproperty's shared account.
-        acumular(null, solicitada.montoAplicado);
-
-        const [creada] = await this.aplicaciones.create(
-          [
-            {
-              coPropertyId,
-              sourceType: 'RC',
-              sourceId: recibo._id,
-              documentType: 'ND',
-              documentId: documentoId,
-              amountApplied: solicitada.montoAplicado,
-              detalleConceptos: [
-                {
-                  conceptoId: notaDebito.conceptoId,
-                  conceptName: notaDebito.description ?? 'Nota Débito',
-                  monto: solicitada.montoAplicado,
-                },
-              ],
-              status: 'activa',
-              appliedAt: new Date(),
-              appliedBy: accountId,
-            },
-          ],
-          { session },
-        );
-        creadas.push(creada);
-        continue;
-      }
-
-      const factura = await decrementarSaldoFactura(
-        this.facturas,
-        session,
-        coPropertyId,
-        documentoId,
-        solicitada.montoAplicado,
-      );
-
-      if (!factura.inmuebleId.equals(recibo.inmuebleId)) {
-        throw new ConflictException(
-          `La factura ${documentoId.toString()} pertenece a otro inmueble ` +
-            `(${factura.inmuebleId.toString()}) que el recibo ` +
-            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
-        );
-      }
-
-      const partes = await ajustarSaldosCartera(
-        this.saldos,
-        session,
-        coPropertyId,
-        factura,
-        solicitada.montoAplicado,
-        -1,
-      );
-      // Mirrors `creditosPorCuenta`'s own accumulation loop below, but named
-      // by concepto (for the frontend's "cargo por cargo" breakdown) rather
-      // than by account (for the ledger) — same `partes`, two different
-      // shapes of the same split.
-      const detalleConceptos = partes.map((parte) => {
-        const linea = factura.lines.find((l) =>
-          l.conceptoId.equals(parte.conceptoId),
-        );
-        return {
-          conceptoId: parte.conceptoId,
-          conceptName: linea?.conceptName ?? 'Concepto',
-          monto: parte.parte,
-        };
-      });
-      for (const parte of partes) {
-        const linea = factura.lines.find((l) =>
-          l.conceptoId.equals(parte.conceptoId),
-        );
-        acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
-        if (linea?.conceptKind === 'intereses') {
-          montoAplicadoMora += parte.parte;
-        }
-      }
-
-      const [creada] = await this.aplicaciones.create(
-        [
-          {
-            coPropertyId,
-            sourceType: 'RC',
-            sourceId: recibo._id,
-            documentType: 'FV',
-            documentId: documentoId,
-            amountApplied: solicitada.montoAplicado,
-            detalleConceptos,
-            status: 'activa',
-            appliedAt: new Date(),
-            appliedBy: accountId,
-          },
-        ],
-        { session },
-      );
-      creadas.push(creada);
-    }
-
-    await this.recibos
-      .findOneAndUpdate(
-        { _id: recibo._id, coPropertyId },
-        {
-          $inc: {
-            appliedAmount: sumaSolicitada,
-            unappliedAmount: -sumaSolicitada,
-          },
-        },
-        { session },
-      )
-      .exec();
-
-    return { creadas, creditosPorCuenta, montoAplicadoMora };
   }
 
   /**
    * Walks the inmueble's open Facturas AND open Notas Débito, merged into
    * one oldest-first queue, applying until `montoDisponible` is exhausted or
-   * there is nothing left open — stopping partway through is the expected
-   * outcome (design §6, "FIFO automatic mode is best-effort"), not an error.
-   * A document that turns out invalid since the list was built (voided, or
-   * someone else just exhausted its balance in this same transaction) is
-   * skipped and reported in `errores`, never a hard failure of the whole
-   * call.
-   *
-   * Notas Débito (Notas Débito design §5) carry no `dueDate` of their own —
-   * only `issueDate` — so the merge key is each item's own due date when it
-   * has one, its issue date otherwise; ties break on `_id`, matching the
-   * pre-merge per-collection sort.
+   * there is nothing left open. Thin wrapper: the actual logic lives in
+   * `ejecutarAplicacionFifo` (`cruce.util.ts`) — see `aplicarManual`'s
+   * identical note on why this was extracted.
    */
   private async aplicarFifo(
     session: ClientSession,
@@ -940,229 +684,22 @@ export class RecibosService {
     creditosPorCuenta: Map<string | null, number>;
     montoAplicadoMora: number;
   }> {
-    const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
-      this.facturas
-        .find({
-          coPropertyId,
-          inmuebleId: recibo.inmuebleId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-        })
-        .sort({ dueDate: 1, issueDate: 1, _id: 1 })
-        .session(session)
-        .exec(),
-      this.notasDebito
-        .find({
-          coPropertyId,
-          inmuebleId: recibo.inmuebleId,
-          status: 'emitida',
-          outstandingBalance: { $gt: 0 },
-        })
-        .sort({ issueDate: 1, _id: 1 })
-        .session(session)
-        .exec(),
-    ]);
-
-    type Candidato =
-      | { tipo: 'FV'; doc: FacturaDocument; prioridad: Date }
-      | { tipo: 'ND'; doc: NotaDebitoDocument; prioridad: Date };
-
-    const abiertas: Candidato[] = [
-      ...facturasAbiertas.map((factura): Candidato => ({
-        tipo: 'FV',
-        doc: factura,
-        prioridad: factura.dueDate ?? factura.issueDate,
-      })),
-      ...notasDebitoAbiertas.map((nota): Candidato => ({
-        tipo: 'ND',
-        doc: nota,
-        prioridad: nota.issueDate,
-      })),
-    ].sort((a, b) => {
-      const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
-      if (porFecha !== 0) return porFecha;
-      return a.doc._id.toString().localeCompare(b.doc._id.toString());
-    });
-
-    const aplicadas: AplicacionCarteraDocument[] = [];
-    const errores: ErrorAplicacion[] = [];
-    const creditosPorCuenta = new Map<string | null, number>();
-    const acumular = (cuenta: string | null, valor: number) => {
-      if (valor === 0) return;
-      creditosPorCuenta.set(
-        cuenta,
-        (creditosPorCuenta.get(cuenta) ?? 0) + valor,
-      );
-    };
-    let restante = montoDisponible;
-    let totalAplicado = 0;
-    // Same mora-scoping accumulator as `aplicarManual` — see its own note.
-    let montoAplicadoMora = 0;
-
-    for (const candidato of abiertas) {
-      if (restante <= 0) break;
-      const monto = Math.min(restante, candidato.doc.outstandingBalance);
-
-      try {
-        if (candidato.tipo === 'ND') {
-          const notaActualizada = await decrementarSaldoNotaDebito(
-            this.notasDebito,
-            session,
-            coPropertyId,
-            candidato.doc._id,
-            monto,
-          );
-
-          await ajustarSaldosCarteraPorDistribucion(
-            this.saldos,
-            session,
-            coPropertyId,
-            notaActualizada.inmuebleId,
-            [
-              {
-                conceptoId: notaActualizada.conceptoId,
-                monto: notaActualizada.total,
-              },
-            ],
-            monto,
-            -1,
-          );
-          // Same as aplicarManual: a Nota Débito has no per-concepto
-          // account here, so its cartera credit stays on the shared one.
-          acumular(null, monto);
-
-          const [creada] = await this.aplicaciones.create(
-            [
-              {
-                coPropertyId,
-                sourceType: 'RC',
-                sourceId: recibo._id,
-                documentType: 'ND',
-                documentId: candidato.doc._id,
-                amountApplied: monto,
-                detalleConceptos: [
-                  {
-                    conceptoId: notaActualizada.conceptoId,
-                    conceptName: notaActualizada.description ?? 'Nota Débito',
-                    monto,
-                  },
-                ],
-                status: 'activa',
-                appliedAt: new Date(),
-                appliedBy: accountId,
-              },
-            ],
-            { session },
-          );
-
-          aplicadas.push(creada);
-          restante -= monto;
-          totalAplicado += monto;
-          continue;
-        }
-
-        const facturaActualizada = await decrementarSaldoFactura(
-          this.facturas,
-          session,
-          coPropertyId,
-          candidato.doc._id,
-          monto,
-        );
-        const partes = await ajustarSaldosCartera(
-          this.saldos,
-          session,
-          coPropertyId,
-          facturaActualizada,
-          monto,
-          -1,
-        );
-        // See `aplicarManual`'s identical note on this same shape.
-        const detalleConceptos = partes.map((parte) => {
-          const linea = facturaActualizada.lines.find((l) =>
-            l.conceptoId.equals(parte.conceptoId),
-          );
-          return {
-            conceptoId: parte.conceptoId,
-            conceptName: linea?.conceptName ?? 'Concepto',
-            monto: parte.parte,
-          };
-        });
-        for (const parte of partes) {
-          const linea = facturaActualizada.lines.find((l) =>
-            l.conceptoId.equals(parte.conceptoId),
-          );
-          acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
-          if (linea?.conceptKind === 'intereses') {
-            montoAplicadoMora += parte.parte;
-          }
-        }
-
-        const [creada] = await this.aplicaciones.create(
-          [
-            {
-              coPropertyId,
-              sourceType: 'RC',
-              sourceId: recibo._id,
-              documentType: 'FV',
-              documentId: candidato.doc._id,
-              amountApplied: monto,
-              detalleConceptos,
-              status: 'activa',
-              appliedAt: new Date(),
-              appliedBy: accountId,
-            },
-          ],
-          { session },
-        );
-
-        aplicadas.push(creada);
-        restante -= monto;
-        totalAplicado += monto;
-      } catch (err) {
-        // ONLY `AplicacionInvalidaError` means "this document turned out
-        // invalid, skip it and say why" — it is what
-        // `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` throws when
-        // its floor-at-zero guard refuses, the first statement in the try.
-        // Anything else came from `ajustarSaldosCartera`/
-        // `ajustarSaldosCarteraPorDistribucion` or `aplicaciones.create`,
-        // which run AFTER a decrement already succeeded: swallowing one of
-        // those into `errores` would let the transaction COMMIT with the
-        // document's balance reduced but no AplicacionCartera audit row and
-        // no `appliedAmount` increment — money gone with no trace. A real bug
-        // must abort the whole transaction loudly, not be filed as a skipped
-        // document.
-        if (!(err instanceof AplicacionInvalidaError)) {
-          throw err;
-        }
-        errores.push({
-          documentoId: candidato.doc._id.toString(),
-          mensaje: err.message,
-        });
-      }
-    }
-
-    if (totalAplicado > 0) {
-      await this.recibos
-        .findOneAndUpdate(
-          { _id: recibo._id, coPropertyId },
-          {
-            $inc: {
-              appliedAmount: totalAplicado,
-              unappliedAmount: -totalAplicado,
-            },
-          },
-          { session },
-        )
-        .exec();
-    }
-
-    return {
-      aplicadas,
-      errores,
-      montoSinAplicar: restante,
-      creditosPorCuenta,
-      montoAplicadoMora,
-    };
+    return ejecutarAplicacionFifo(
+      {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        aplicaciones: this.aplicaciones,
+        saldos: this.saldos,
+        recibos: this.recibos,
+        session,
+        coPropertyId,
+        recibo,
+        sourceType: 'RC',
+        sourceId: recibo._id,
+        accountId,
+      },
+      montoDisponible,
+    );
   }
 
   /**
@@ -1265,71 +802,6 @@ export class RecibosService {
           facturaId: null,
           reciboId: recibo._id,
           date: recibo.receivedDate,
-          entries,
-        },
-      ],
-      { session },
-    );
-  }
-
-  /**
-   * Posts a LATER application's journal entry: debit `cuentaAnticipos`,
-   * credit `cuentaCartera` (or each concepto's own account, via
-   * `creditosPorCuenta` — same desglose `postearAsientoRecibo` builds),
-   * both for `montoAplicado` — never touches `destinationAccount` (see the
-   * corrected accounting design, Task 2: the cash was already debited there
-   * at creation time, by `postearAsientoRecibo`). Only called when
-   * `montoAplicado > 0` — a call to `aplicar()` that applied nothing (every
-   * FIFO candidate was invalid) posts no entry.
-   *
-   * `montoAplicadoMora` scopes the cuentas-de-orden memo pair to whatever
-   * portion of THIS deferred application landed on an `intereses` concept —
-   * same reasoning as `postearAsientoRecibo`'s own note, a payment that
-   * happens to be applied later rather than at creation is coded no
-   * differently.
-   */
-  private async postearAsientoAplicacionAnticipo(
-    session: ClientSession,
-    coPropertyId: Types.ObjectId,
-    recibo: ReciboDocument,
-    montoAplicado: number,
-    creditosPorCuenta: Map<string | null, number>,
-    montoAplicadoMora: number,
-  ): Promise<void> {
-    const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
-      .session(session)
-      .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
-      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
-    );
-    let entries = construirMovimientosAplicacionAnticipo(
-      cuentaAnticipos,
-      cuentaCartera,
-      montoAplicado,
-      'RC',
-      desgloseCartera,
-      cuentasOrdenDe(copropiedad),
-      montoAplicadoMora,
-    );
-    entries = await this.conAuxiliares(
-      session,
-      coPropertyId,
-      recibo.inmuebleId,
-      copropiedad,
-      entries,
-    );
-
-    await this.asientos.create(
-      [
-        {
-          coPropertyId,
-          loteId: null,
-          facturaId: null,
-          reciboId: recibo._id,
-          date: new Date(),
           entries,
         },
       ],

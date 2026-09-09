@@ -50,6 +50,7 @@ export const SUBJECTS = [
   'NotaCredito',
   'NotaContable',
   'OtraNota',
+  'NotaAnticipo',
   'Anulacion',
   'Consulta',
   'Configuracion',

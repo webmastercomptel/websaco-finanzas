@@ -413,7 +413,7 @@ export interface DetalleConceptoAplicacion {
 
 export interface AplicacionCartera {
   id: string;
-  sourceType: 'RC' | 'NC';
+  sourceType: 'RC' | 'NC' | 'NA';
   sourceId: string;
   tipoDocumento: 'FV' | 'ND';
   documentoId: string;
@@ -551,6 +551,44 @@ export interface NotaDebitoDetalle extends NotaDebito {
   aplicaciones: AplicacionCartera[];
 }
 
+/* ── Notas de Anticipo ────────────────────────────────────────── */
+
+/** Why a Nota de Anticipo was voided — same shape as the other documents'
+ *  void catalogs (design consistency, no domain-specific list requested). */
+export type MotivoAnulacionNotaAnticipo =
+  'error_digitacion' | 'ajuste_contrato' | 'otro';
+
+/**
+ * A "Nota de Anticipo" ("NA") — applies a Recibo's leftover
+ * `montoSinAplicar` against open cartera LATER, as its own auditable
+ * document, from the Anticipos module (never from the Recibo itself — see
+ * `Recibo`'s own note on why there is no `/recibos/:id/aplicar`).
+ */
+export interface NotaAnticipo {
+  id: string;
+  inmuebleId: string;
+  terceroId: string | null;
+  reciboOrigenId: string;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  fechaEmision: IsoDate;
+  montoAplicado: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionNotaAnticipo | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * `NotaAnticipo` plus the cargo-por-cargo breakdown of what it applied —
+ * what `GET /notas-anticipo/:id` returns, same pattern as
+ * `NotaDebitoDetalle`.
+ */
+export interface NotaAnticipoDetalle extends NotaAnticipo {
+  aplicaciones: AplicacionCartera[];
+}
+
 /* ── Notas Contables ──────────────────────────────────────────── */
 
 /**
@@ -576,7 +614,7 @@ export interface NotaContable {
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
 
-export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
 
 /** One row in the chronological ledger for an inmueble. */
 export interface MovimientoKardex {
@@ -1014,7 +1052,7 @@ export interface LineaMovimientoContable {
 export interface MovimientoContable {
   id: string;
   fecha: string;
-  tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+  tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
   /** The anchor document's own _id — links to its detail page. */
   documentoId: string;
   numeroDocumento: string;

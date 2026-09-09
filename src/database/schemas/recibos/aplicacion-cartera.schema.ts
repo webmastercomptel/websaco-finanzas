@@ -5,7 +5,7 @@ import { Account } from '../cuentas/account.schema';
 
 export type AplicacionCarteraDocument = HydratedDocument<AplicacionCartera>;
 
-export const SOURCE_TYPES = ['RC', 'NC'] as const;
+export const SOURCE_TYPES = ['RC', 'NC', 'NA'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export const DOCUMENT_TYPES = ['FV', 'ND'] as const;
@@ -41,11 +41,15 @@ export const DetalleConceptoAplicacionSchema = SchemaFactory.createForClass(
 );
 
 /**
- * One cruce: one row per application of a Recibo OR a Nota Crédito against a
- * document. `sourceType` discriminates which kind of document made the
- * application — the source-of-truth event log both modules share (design
- * §3.1). `Factura.outstandingBalance` and `SaldoCartera.balance` are
- * reconcilable caches derived from these rows.
+ * One cruce: one row per application of a Recibo, a Nota Crédito, or a Nota
+ * de Anticipo against a document. `sourceType` discriminates which kind of
+ * document made the application — the source-of-truth event log all three
+ * modules share (design §3.1). A Nota de Anticipo (`'NA'`) always draws
+ * against a Recibo's own `unappliedAmount` — it exists specifically for
+ * applying a Recibo's leftover anticipo LATER, as its own auditable
+ * document, instead of a second call mutating the Recibo directly.
+ * `Factura.outstandingBalance` and `SaldoCartera.balance` are reconcilable
+ * caches derived from these rows.
  *
  * GENERALIZED FROM `AplicacionRecibo` (Recibos de Caja, merged earlier this
  * session): that schema hard-coded `reciboId`, with no discriminator for the

@@ -22,6 +22,10 @@ import {
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -70,6 +74,8 @@ export class AuxiliarCarteraService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(Inmueble.name)
@@ -105,25 +111,33 @@ export class AuxiliarCarteraService {
     }
 
     // Step 1: fetch all documents for this inmueble (no date filter — see §5)
-    const [facturas, notasDebito, recibos, notasCredito, notasContables] =
-      await Promise.all([
-        this.facturas
-          .find({ coPropertyId, inmuebleId, status: 'emitida' })
-          .exec(),
-        this.notasDebito
-          .find({ coPropertyId, inmuebleId, status: 'emitida' })
-          .exec(),
-        this.recibos.find({ coPropertyId, inmuebleId }).exec(),
-        this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
-        this.notasContables
-          .find({ coPropertyId, inmuebleId, status: 'activo' })
-          .exec(),
-      ]);
+    const [
+      facturas,
+      notasDebito,
+      recibos,
+      notasCredito,
+      notasContables,
+      notasAnticipo,
+    ] = await Promise.all([
+      this.facturas
+        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .exec(),
+      this.notasDebito
+        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .exec(),
+      this.recibos.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasContables
+        .find({ coPropertyId, inmuebleId, status: 'activo' })
+        .exec(),
+      this.notasAnticipo.find({ coPropertyId, inmuebleId }).exec(),
+    ]);
 
-    // Step 2: fetch active applications for the source documents (RC + NC)
+    // Step 2: fetch active applications for the source documents (RC + NC + NA)
     const sourceIds = [
       ...recibos.map((r) => r._id),
       ...notasCredito.map((nc) => nc._id),
+      ...notasAnticipo.map((na) => na._id),
     ];
     const aplicaciones = sourceIds.length
       ? await this.aplicaciones
@@ -147,6 +161,9 @@ export class AuxiliarCarteraService {
     );
     const ncMap = new Map(
       notasCredito.map((nc) => [nc._id.toString(), nc.fullNumber]),
+    );
+    const naMap = new Map(
+      notasAnticipo.map((na) => [na._id.toString(), na.fullNumber]),
     );
 
     // Step 4: build raw rows
@@ -179,12 +196,19 @@ export class AuxiliarCarteraService {
     }
 
     // AplicacionCartera → Crédito
+    const mapaPorTipo: Record<
+      'RC' | 'NC' | 'NA',
+      { mapa: Map<string, string>; etiqueta: string }
+    > = {
+      RC: { mapa: reciboMap, etiqueta: 'Recibo' },
+      NC: { mapa: ncMap, etiqueta: 'Nota Crédito' },
+      NA: { mapa: naMap, etiqueta: 'Nota de Anticipo' },
+    };
     for (const app of aplicaciones) {
-      const sourceType = app.sourceType as TipoDocumentoKardex;
+      const sourceType = app.sourceType;
+      const { mapa, etiqueta } = mapaPorTipo[sourceType];
       const sourceNumber =
-        sourceType === 'RC'
-          ? (reciboMap.get(app.sourceId.toString()) ?? app.sourceId.toString())
-          : (ncMap.get(app.sourceId.toString()) ?? app.sourceId.toString());
+        mapa.get(app.sourceId.toString()) ?? app.sourceId.toString();
 
       const targetMap = app.documentType === 'FV' ? facturaMap : ndMap;
       const refCruce = targetMap.get(app.documentId.toString()) ?? null;
@@ -193,7 +217,7 @@ export class AuxiliarCarteraService {
         fecha: app.appliedAt,
         tipo: sourceType,
         numeroCompleto: sourceNumber,
-        concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
+        concepto: `${etiqueta} ${sourceNumber}`,
         refCruce,
         debito: null,
         credito: app.amountApplied,

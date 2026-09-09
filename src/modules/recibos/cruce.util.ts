@@ -1,9 +1,14 @@
 // src/modules/recibos/cruce.util.ts
 import { ConflictException } from '@nestjs/common';
-import type { ClientSession, Model, Types } from 'mongoose';
+import { Types } from 'mongoose';
+import type { ClientSession, Model } from 'mongoose';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { SaldoCarteraDocument } from '../../database/schemas/facturacion/saldo-cartera.schema';
+import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
+import type { ErrorAplicacion } from '../../contracts';
+import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 
 /**
  * Raised when a Factura cannot accept the requested application — it does
@@ -308,4 +313,466 @@ export async function ajustarSaldosCarteraPorDistribucion(
       .exec();
   }
   return partes;
+}
+
+/**
+ * Shared context every cruce-execution call needs — models, the session,
+ * and WHO this application event is (`sourceType`/`sourceId`), always
+ * anchored to the Recibo whose `unappliedAmount` is being drawn down.
+ *
+ * `recibo` is always the source of the money, whether the caller is
+ * `RecibosService` (applying at creation or, historically, right after —
+ * `sourceType: 'RC'`, `sourceId: recibo._id`) or `NotasAnticipoService`
+ * (applying a Recibo's LEFTOVER anticipo later, as its own document —
+ * `sourceType: 'NA'`, `sourceId` the new Nota de Anticipo's `_id`). Either
+ * way, the balance that actually decreases is the Recibo's own
+ * `unappliedAmount` — a Nota de Anticipo has no running balance of its
+ * own, it is one complete record of a single application event.
+ */
+export interface ContextoAplicacion {
+  facturas: Model<FacturaDocument>;
+  notasDebito: Model<NotaDebitoDocument>;
+  aplicaciones: Model<AplicacionCarteraDocument>;
+  saldos: Model<SaldoCarteraDocument>;
+  recibos: Model<ReciboDocument>;
+  session: ClientSession;
+  coPropertyId: Types.ObjectId;
+  recibo: ReciboDocument;
+  sourceType: 'RC' | 'NA';
+  sourceId: Types.ObjectId;
+  accountId: string;
+}
+
+/**
+ * Applies `solicitadas` against their documents — ALL of them, or none: if
+ * the sum exceeds `ctx.recibo.unappliedAmount`, or any single line's
+ * `decrementarSaldoFactura` call throws, the whole transaction aborts
+ * (manual application mode is all-or-nothing).
+ *
+ * Extracted from `RecibosService.aplicarManual` (formerly private, formerly
+ * hardcoded to `sourceType: 'RC'`) so `NotasAnticipoService` can run the
+ * exact same logic against the exact same Recibo balance, just recorded
+ * under a Nota de Anticipo instead. Both `RecibosService.aplicarManual` and
+ * `NotasAnticipoService.crear()` are now thin wrappers around this.
+ */
+export async function ejecutarAplicacionManual(
+  ctx: ContextoAplicacion,
+  solicitadas: AplicacionSolicitadaDto[],
+): Promise<{
+  creadas: AplicacionCarteraDocument[];
+  creditosPorCuenta: Map<string | null, number>;
+  montoAplicadoMora: number;
+}> {
+  const {
+    facturas,
+    notasDebito,
+    aplicaciones,
+    saldos,
+    recibos,
+    session,
+    coPropertyId,
+    recibo,
+    sourceType,
+    sourceId,
+    accountId,
+  } = ctx;
+
+  const sumaSolicitada = solicitadas.reduce(
+    (acc, a) => acc + a.montoAplicado,
+    0,
+  );
+  if (sumaSolicitada > recibo.unappliedAmount) {
+    throw new ConflictException(
+      `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
+        `del recibo ${recibo.fullNumber} (${recibo.unappliedAmount})`,
+    );
+  }
+
+  const creadas: AplicacionCarteraDocument[] = [];
+  const creditosPorCuenta = new Map<string | null, number>();
+  const acumular = (cuenta: string | null, monto: number) => {
+    if (monto === 0) return;
+    creditosPorCuenta.set(cuenta, (creditosPorCuenta.get(cuenta) ?? 0) + monto);
+  };
+  let montoAplicadoMora = 0;
+
+  for (const solicitada of solicitadas) {
+    const documentoId = new Types.ObjectId(solicitada.documentoId);
+
+    if (solicitada.tipoDocumento === 'ND') {
+      const notaDebito = await decrementarSaldoNotaDebito(
+        notasDebito,
+        session,
+        coPropertyId,
+        documentoId,
+        solicitada.montoAplicado,
+      );
+
+      if (!notaDebito.inmuebleId.equals(recibo.inmuebleId)) {
+        throw new ConflictException(
+          `La nota débito ${documentoId.toString()} pertenece a otro ` +
+            `inmueble (${notaDebito.inmuebleId.toString()}) que el recibo ` +
+            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+        );
+      }
+
+      await ajustarSaldosCarteraPorDistribucion(
+        saldos,
+        session,
+        coPropertyId,
+        notaDebito.inmuebleId,
+        [{ conceptoId: notaDebito.conceptoId, monto: notaDebito.total }],
+        solicitada.montoAplicado,
+        -1,
+      );
+      acumular(null, solicitada.montoAplicado);
+
+      const [creada] = await aplicaciones.create(
+        [
+          {
+            coPropertyId,
+            sourceType,
+            sourceId,
+            documentType: 'ND',
+            documentId: documentoId,
+            amountApplied: solicitada.montoAplicado,
+            detalleConceptos: [
+              {
+                conceptoId: notaDebito.conceptoId,
+                conceptName: notaDebito.description ?? 'Nota Débito',
+                monto: solicitada.montoAplicado,
+              },
+            ],
+            status: 'activa',
+            appliedAt: new Date(),
+            appliedBy: accountId,
+          },
+        ],
+        { session },
+      );
+      creadas.push(creada);
+      continue;
+    }
+
+    const factura = await decrementarSaldoFactura(
+      facturas,
+      session,
+      coPropertyId,
+      documentoId,
+      solicitada.montoAplicado,
+    );
+
+    if (!factura.inmuebleId.equals(recibo.inmuebleId)) {
+      throw new ConflictException(
+        `La factura ${documentoId.toString()} pertenece a otro inmueble ` +
+          `(${factura.inmuebleId.toString()}) que el recibo ` +
+          `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+      );
+    }
+
+    const partes = await ajustarSaldosCartera(
+      saldos,
+      session,
+      coPropertyId,
+      factura,
+      solicitada.montoAplicado,
+      -1,
+    );
+    const detalleConceptos = partes.map((parte) => {
+      const linea = factura.lines.find((l) =>
+        l.conceptoId.equals(parte.conceptoId),
+      );
+      return {
+        conceptoId: parte.conceptoId,
+        conceptName: linea?.conceptName ?? 'Concepto',
+        monto: parte.parte,
+      };
+    });
+    for (const parte of partes) {
+      const linea = factura.lines.find((l) =>
+        l.conceptoId.equals(parte.conceptoId),
+      );
+      acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+      if (linea?.conceptKind === 'intereses') {
+        montoAplicadoMora += parte.parte;
+      }
+    }
+
+    const [creada] = await aplicaciones.create(
+      [
+        {
+          coPropertyId,
+          sourceType,
+          sourceId,
+          documentType: 'FV',
+          documentId: documentoId,
+          amountApplied: solicitada.montoAplicado,
+          detalleConceptos,
+          status: 'activa',
+          appliedAt: new Date(),
+          appliedBy: accountId,
+        },
+      ],
+      { session },
+    );
+    creadas.push(creada);
+  }
+
+  await recibos
+    .findOneAndUpdate(
+      { _id: recibo._id, coPropertyId },
+      {
+        $inc: {
+          appliedAmount: sumaSolicitada,
+          unappliedAmount: -sumaSolicitada,
+        },
+      },
+      { session },
+    )
+    .exec();
+
+  return { creadas, creditosPorCuenta, montoAplicadoMora };
+}
+
+/**
+ * Walks the inmueble's open Facturas AND open Notas Débito, merged into one
+ * oldest-first queue, applying until `montoDisponible` is exhausted or there
+ * is nothing left open — stopping partway through is the expected outcome
+ * (FIFO automatic mode is best-effort), not an error. A document that turns
+ * out invalid since the list was built (voided, or someone else just
+ * exhausted its balance in this same transaction) is skipped and reported
+ * in `errores`, never a hard failure of the whole call.
+ *
+ * Extracted from `RecibosService.aplicarFifo` — see `ejecutarAplicacionManual`'s
+ * own note on why, and on what `ctx.recibo`/`ctx.sourceType`/`ctx.sourceId`
+ * mean here.
+ */
+export async function ejecutarAplicacionFifo(
+  ctx: ContextoAplicacion,
+  montoDisponible: number,
+): Promise<{
+  aplicadas: AplicacionCarteraDocument[];
+  errores: ErrorAplicacion[];
+  montoSinAplicar: number;
+  creditosPorCuenta: Map<string | null, number>;
+  montoAplicadoMora: number;
+}> {
+  const {
+    facturas,
+    notasDebito,
+    aplicaciones,
+    saldos,
+    recibos,
+    session,
+    coPropertyId,
+    recibo,
+    sourceType,
+    sourceId,
+    accountId,
+  } = ctx;
+
+  const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
+    facturas
+      .find({
+        coPropertyId,
+        inmuebleId: recibo.inmuebleId,
+        status: 'emitida',
+        outstandingBalance: { $gt: 0 },
+      })
+      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+      .session(session)
+      .exec(),
+    notasDebito
+      .find({
+        coPropertyId,
+        inmuebleId: recibo.inmuebleId,
+        status: 'emitida',
+        outstandingBalance: { $gt: 0 },
+      })
+      .sort({ issueDate: 1, _id: 1 })
+      .session(session)
+      .exec(),
+  ]);
+
+  type Candidato =
+    | { tipo: 'FV'; doc: FacturaDocument; prioridad: Date }
+    | { tipo: 'ND'; doc: NotaDebitoDocument; prioridad: Date };
+
+  const abiertas: Candidato[] = [
+    ...facturasAbiertas.map((factura): Candidato => ({
+      tipo: 'FV',
+      doc: factura,
+      prioridad: factura.dueDate ?? factura.issueDate,
+    })),
+    ...notasDebitoAbiertas.map((nota): Candidato => ({
+      tipo: 'ND',
+      doc: nota,
+      prioridad: nota.issueDate,
+    })),
+  ].sort((a, b) => {
+    const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
+    if (porFecha !== 0) return porFecha;
+    return a.doc._id.toString().localeCompare(b.doc._id.toString());
+  });
+
+  const aplicadas: AplicacionCarteraDocument[] = [];
+  const errores: ErrorAplicacion[] = [];
+  const creditosPorCuenta = new Map<string | null, number>();
+  const acumular = (cuenta: string | null, valor: number) => {
+    if (valor === 0) return;
+    creditosPorCuenta.set(cuenta, (creditosPorCuenta.get(cuenta) ?? 0) + valor);
+  };
+  let restante = montoDisponible;
+  let totalAplicado = 0;
+  let montoAplicadoMora = 0;
+
+  for (const candidato of abiertas) {
+    if (restante <= 0) break;
+    const monto = Math.min(restante, candidato.doc.outstandingBalance);
+
+    try {
+      if (candidato.tipo === 'ND') {
+        const notaActualizada = await decrementarSaldoNotaDebito(
+          notasDebito,
+          session,
+          coPropertyId,
+          candidato.doc._id,
+          monto,
+        );
+
+        await ajustarSaldosCarteraPorDistribucion(
+          saldos,
+          session,
+          coPropertyId,
+          notaActualizada.inmuebleId,
+          [
+            {
+              conceptoId: notaActualizada.conceptoId,
+              monto: notaActualizada.total,
+            },
+          ],
+          monto,
+          -1,
+        );
+        acumular(null, monto);
+
+        const [creada] = await aplicaciones.create(
+          [
+            {
+              coPropertyId,
+              sourceType,
+              sourceId,
+              documentType: 'ND',
+              documentId: candidato.doc._id,
+              amountApplied: monto,
+              detalleConceptos: [
+                {
+                  conceptoId: notaActualizada.conceptoId,
+                  conceptName: notaActualizada.description ?? 'Nota Débito',
+                  monto,
+                },
+              ],
+              status: 'activa',
+              appliedAt: new Date(),
+              appliedBy: accountId,
+            },
+          ],
+          { session },
+        );
+
+        aplicadas.push(creada);
+        restante -= monto;
+        totalAplicado += monto;
+        continue;
+      }
+
+      const facturaActualizada = await decrementarSaldoFactura(
+        facturas,
+        session,
+        coPropertyId,
+        candidato.doc._id,
+        monto,
+      );
+      const partes = await ajustarSaldosCartera(
+        saldos,
+        session,
+        coPropertyId,
+        facturaActualizada,
+        monto,
+        -1,
+      );
+      const detalleConceptos = partes.map((parte) => {
+        const linea = facturaActualizada.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        return {
+          conceptoId: parte.conceptoId,
+          conceptName: linea?.conceptName ?? 'Concepto',
+          monto: parte.parte,
+        };
+      });
+      for (const parte of partes) {
+        const linea = facturaActualizada.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+        if (linea?.conceptKind === 'intereses') {
+          montoAplicadoMora += parte.parte;
+        }
+      }
+
+      const [creada] = await aplicaciones.create(
+        [
+          {
+            coPropertyId,
+            sourceType,
+            sourceId,
+            documentType: 'FV',
+            documentId: candidato.doc._id,
+            amountApplied: monto,
+            detalleConceptos,
+            status: 'activa',
+            appliedAt: new Date(),
+            appliedBy: accountId,
+          },
+        ],
+        { session },
+      );
+
+      aplicadas.push(creada);
+      restante -= monto;
+      totalAplicado += monto;
+    } catch (err) {
+      if (!(err instanceof AplicacionInvalidaError)) {
+        throw err;
+      }
+      errores.push({
+        documentoId: candidato.doc._id.toString(),
+        mensaje: err.message,
+      });
+    }
+  }
+
+  if (totalAplicado > 0) {
+    await recibos
+      .findOneAndUpdate(
+        { _id: recibo._id, coPropertyId },
+        {
+          $inc: {
+            appliedAmount: totalAplicado,
+            unappliedAmount: -totalAplicado,
+          },
+        },
+        { session },
+      )
+      .exec();
+  }
+
+  return {
+    aplicadas,
+    errores,
+    montoSinAplicar: restante,
+    creditosPorCuenta,
+    montoAplicadoMora,
+  };
 }

@@ -42,6 +42,10 @@ import {
   NotaCreditoDocument,
 } from '../../database/schemas/notas-credito/nota-credito.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -97,6 +101,8 @@ export class NotasDebitoService {
     private readonly recibos: Model<ReciboDocument>,
     @InjectModel(NotaCredito.name)
     private readonly notasCredito: Model<NotaCreditoDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
@@ -419,8 +425,14 @@ export class NotasDebitoService {
 
   /**
    * Restores the source document's unappliedAmount when voiding a Nota
-   * Débito application. The source is either a Recibo or a Nota Crédito —
-   * dispatched by `aplicacion.sourceType`.
+   * Débito application. The source is a Recibo, a Nota Crédito, or a Nota
+   * de Anticipo — dispatched by `aplicacion.sourceType`.
+   *
+   * A Nota de Anticipo has no `unappliedAmount` of its own (see its schema
+   * docblock) — undoing one of its applications reduces ITS OWN
+   * `appliedAmount` (this document applied less than it thought) and gives
+   * the money back to the RECIBO it drew from, exactly like voiding the
+   * Nota de Anticipo directly would.
    */
   private async restaurarMontoFuente(
     session: ClientSession,
@@ -453,6 +465,28 @@ export class NotasDebitoService {
           { session },
         )
         .exec();
+    } else if (aplicacion.sourceType === 'NA') {
+      const notaAnticipo = await this.notasAnticipo
+        .findOneAndUpdate(
+          { _id: aplicacion.sourceId, coPropertyId },
+          { $inc: { appliedAmount: -aplicacion.amountApplied } },
+          { session },
+        )
+        .exec();
+      if (notaAnticipo) {
+        await this.recibos
+          .findOneAndUpdate(
+            { _id: notaAnticipo.reciboOrigenId, coPropertyId },
+            {
+              $inc: {
+                unappliedAmount: aplicacion.amountApplied,
+                appliedAmount: -aplicacion.amountApplied,
+              },
+            },
+            { session },
+          )
+          .exec();
+      }
     }
   }
 

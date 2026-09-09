@@ -504,6 +504,24 @@ export class LotesFacturacionService {
     }
   }
 
+  /**
+   * The most recently consolidated billing run for a coproperty — the
+   * closest thing this system has to "the current billing period". `number`
+   * is a strictly increasing per-coproperty sequence assigned at `crear()`
+   * time, so it orders runs correctly even if `billingDate` were ever
+   * backdated. Returns `null` for a coproperty that has never consolidated a
+   * lote — callers must treat that as "nothing to validate against", not an
+   * error.
+   */
+  async obtenerUltimoConsolidado(
+    coPropertyId: string,
+  ): Promise<LoteFacturacionDocument | null> {
+    return this.lotes
+      .findOne({ coPropertyId, status: 'consolidado' })
+      .sort({ number: -1 })
+      .exec();
+  }
+
   /** Rejects a second override of the same kind for the same inmueble+concepto
    *  — otherwise construirPreview() would have two candidate overrides for
    *  one line and no principled way to pick a winner. Only `agregarNovedadLinea`

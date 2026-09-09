@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CrearReciboDto } from './crear-recibo.dto';
-import { AplicarReciboDto } from './aplicar-recibo.dto';
 import { AnularReciboDto } from './anular-recibo.dto';
 import { ListarRecibosDto } from './listar-recibos.dto';
 
@@ -66,28 +65,6 @@ describe('CrearReciboDto', () => {
       ],
     });
     expect(await validate(dto)).not.toHaveLength(0);
-  });
-});
-
-describe('AplicarReciboDto', () => {
-  it('acepta aplicacionAutomatica sola', async () => {
-    const dto = plainToInstance(AplicarReciboDto, {
-      aplicacionAutomatica: true,
-    });
-    expect(await validate(dto)).toHaveLength(0);
-  });
-
-  it('acepta aplicaciones manuales solas', async () => {
-    const dto = plainToInstance(AplicarReciboDto, {
-      aplicaciones: [
-        {
-          tipoDocumento: 'FV',
-          documentoId: '507f1f77bcf86cd799439013',
-          montoAplicado: 100000,
-        },
-      ],
-    });
-    expect(await validate(dto)).toHaveLength(0);
   });
 });
 

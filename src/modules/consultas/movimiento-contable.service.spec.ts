@@ -33,6 +33,7 @@ const asientoDoc = (
   notaCreditoId: anchorField === 'notaCreditoId' ? anchorId : null,
   notaDebitoId: anchorField === 'notaDebitoId' ? anchorId : null,
   notaContableId: anchorField === 'notaContableId' ? anchorId : null,
+  notaAnticipoId: anchorField === 'notaAnticipoId' ? anchorId : null,
   ...over,
 });
 
@@ -91,6 +92,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     notasCredito: find(),
     notasDebito: find(),
     notasContables: find(),
+    notasAnticipo: find(),
     inmuebles: find(),
     terceros: find(),
     cuentasContables: find(),
@@ -104,6 +106,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.notasCredito as never,
     m.notasDebito as never,
     m.notasContables as never,
+    m.notasAnticipo as never,
     m.inmuebles as never,
     m.terceros as never,
     m.cuentasContables as never,
@@ -213,6 +216,39 @@ describe('MovimientoContableService', () => {
         result.movimientos.find((m) => m.tipoDocumento === 'NC')
           ?.numeroDocumento,
       ).toBe('NC-001');
+    });
+
+    it('resuelve el ancla notaAnticipoId como tipoDocumento NA', async () => {
+      const na = {
+        _id: id(),
+        coPropertyId: COP,
+        inmuebleId: id(),
+        fullNumber: 'NA-001',
+      };
+      const asientoNA = asientoDoc('notaAnticipoId', na._id, {
+        date: new Date('2026-08-12'),
+      });
+
+      const svc = servicio({
+        notasAnticipo: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([na]),
+        },
+        asientos: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asientoNA]),
+        },
+      });
+
+      const result = await svc.findAll({
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      expect(result.movimientos).toHaveLength(1);
+      expect(result.movimientos[0].tipoDocumento).toBe('NA');
+      expect(result.movimientos[0].numeroDocumento).toBe('NA-001');
     });
 
     it('returns empty when no asientos exist in the range', async () => {

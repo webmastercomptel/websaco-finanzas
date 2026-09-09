@@ -23,5 +23,6 @@ export class ContadorEntidadAdministradora {
   valor: number;
 }
 
-export const ContadorEntidadAdministradoraSchema =
-  SchemaFactory.createForClass(ContadorEntidadAdministradora);
+export const ContadorEntidadAdministradoraSchema = SchemaFactory.createForClass(
+  ContadorEntidadAdministradora,
+);
