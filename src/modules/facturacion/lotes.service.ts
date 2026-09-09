@@ -621,37 +621,64 @@ export class LotesFacturacionService {
       (c) => c.kind === 'administracion',
     );
 
+    // Both fetched in bulk, ONE round-trip each for every unit in the lote —
+    // the loop below used to `await` a `terceros.findOne` and a
+    // `saldos.find` PER unit, sequentially (a `for...of` with `await`
+    // inside never overlaps iterations), so a building of a few hundred
+    // units turned into a few hundred sequential round-trips to Atlas
+    // before the loop's own work even started. Same "fetch once outside
+    // the loop, index by id" shape already used above for `conceptoPorId`.
+    const holderIds = unidades
+      .map((u) => u.holderId)
+      .filter((id): id is Types.ObjectId => id !== null);
+    const terceros = holderIds.length
+      ? await this.terceros
+          .find({ _id: { $in: holderIds }, coPropertyId })
+          .exec()
+      : [];
+    const terceroPorId = new Map(terceros.map((t) => [t._id.toString(), t]));
+
+    // `unidad._id` kept as the real ObjectId instance in this `$in`, never
+    // `.toString()`'d: `SaldoCartera`'s `inmuebleId`/`coPropertyId` paths
+    // compile as `Mixed` rather than a real ObjectId SchemaType under the
+    // installed mongoose/@nestjs-mongoose pair (`@nestjs/mongoose`'s
+    // `isMongooseSchemaType()` doesn't recognize `Types.ObjectId` — the BSON
+    // value class — as a mongoose SchemaType, so `SchemaFactory` falls back
+    // to Mixed for every `@Prop({ type: Types.ObjectId })` field
+    // project-wide). A `Mixed` path never auto-casts a query value, so a
+    // STRING id here would silently match nothing against the real
+    // ObjectIds stored in the collection — this is what made mora silently
+    // vanish once before (a whole unit's prior balance read back as empty).
+    // Passing real `ObjectId` instances sidesteps the cast entirely: Mongo
+    // compares the raw BSON value either way.
+    const unidadIds = unidades.map((u) => u._id);
+    const saldos = unidadIds.length
+      ? await this.saldos
+          .find({ coPropertyId, inmuebleId: { $in: unidadIds } })
+          .exec()
+      : [];
+    const saldosPorUnidad = new Map<string, (typeof saldos)[number][]>();
+    for (const saldo of saldos) {
+      const clave = saldo.inmuebleId.toString();
+      const existentes = saldosPorUnidad.get(clave);
+      if (existentes) existentes.push(saldo);
+      else saldosPorUnidad.set(clave, [saldo]);
+    }
+
     const preview: Record<string, unknown>[] = [];
 
     for (const unidad of unidades) {
       if (!unidad.holderId) continue;
 
-      const tercero = await this.terceros
-        .findOne({ _id: unidad.holderId, coPropertyId })
-        .exec();
+      const tercero = terceroPorId.get(unidad.holderId.toString()) ?? null;
       const lines: Record<string, unknown>[] = [];
 
-      // Fetched once per unit, before any line is built, so every line's
-      // `balanceBefore` reflects the same instant — including the mora
-      // calculation below, which used to re-fetch this same data later in
-      // the loop for no reason (nothing between here and there writes to
-      // SaldoCartera; construirPreview never does).
-      //
-      // `unidad._id` passed as-is, NOT `.toString()`'d: `SaldoCartera`'s
-      // `inmuebleId`/`coPropertyId` paths compile as `Mixed` rather than a
-      // real ObjectId SchemaType under the installed mongoose/@nestjs-mongoose
-      // pair (`@nestjs/mongoose`'s `isMongooseSchemaType()` doesn't recognize
-      // `Types.ObjectId` — the BSON value class — as a mongoose SchemaType,
-      // so `SchemaFactory` falls back to Mixed for every `@Prop({ type:
-      // Types.ObjectId })` field project-wide). A `Mixed` path never
-      // auto-casts a query value, so a STRING id silently matches nothing
-      // against the real ObjectIds stored in the collection — this is what
-      // made mora silently vanish (a whole unit's prior balance read back as
-      // empty). Passing the real `ObjectId` instance sidesteps the cast
-      // entirely: Mongo compares the raw BSON value either way.
-      const saldosUnidad = await this.saldos
-        .find({ coPropertyId, inmuebleId: unidad._id })
-        .exec();
+      // Every line's `balanceBefore` below reads from this same
+      // per-unit snapshot — including the mora calculation further down,
+      // which used to re-fetch this same data later in the loop for no
+      // reason (nothing between here and there writes to SaldoCartera;
+      // construirPreview never does).
+      const saldosUnidad = saldosPorUnidad.get(unidad._id.toString()) ?? [];
       const saldoCorrientePorConcepto = new Map(
         saldosUnidad.map((s) => [s.conceptoId.toString(), s.balance]),
       );

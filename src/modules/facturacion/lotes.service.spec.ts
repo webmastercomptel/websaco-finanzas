@@ -789,6 +789,17 @@ describe('LotesFacturacionService.liquidar', () => {
             opts.terceros === undefined ? tercero() : opts.terceros,
           ),
       })),
+      // construirPreview() now batches this via `find({ _id: { $in } })`
+      // instead of a per-unit `findOne` — `opts.terceros` stays a single
+      // nullable object (every existing test here only ever cares about one
+      // unit's tercero), just wrapped into the array `find()` returns.
+      find: jest.fn(() => ({
+        exec: () => {
+          const resultado =
+            opts.terceros === undefined ? tercero() : opts.terceros;
+          return Promise.resolve(resultado ? [resultado] : []);
+        },
+      })),
     };
     const conceptos = {
       find: jest.fn(() => {
