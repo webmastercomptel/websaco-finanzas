@@ -33,11 +33,19 @@ export interface ModelosDatosImpresionRecibo {
  *
  * `aplicaciones` must be exactly what `findAplicacionesForSource('RC',
  * recibo._id)` returns — every application THIS Recibo made, active only.
- * The anticipo row is derived from `receivedAmount - sum(amountApplied)`,
- * never from `recibo.unappliedAmount`: a later Nota de Anticipo can reduce
- * that live balance further, but this Recibo's own printed receipt must
- * always show what IT posted at creation, unaffected by what happened to
- * the leftover afterward (that belongs on the Nota de Anticipo's own PDF).
+ * The anticipo row is derived from `receivedAmount - sum(amountApplied -
+ * discountApplied)` — cash only, never from `recibo.unappliedAmount`: a
+ * later Nota de Anticipo can reduce that live balance further, but this
+ * Recibo's own printed receipt must always show what IT posted at creation,
+ * unaffected by what happened to the leftover afterward (that belongs on
+ * the Nota de Anticipo's own PDF). `discountApplied` must be subtracted
+ * back out of `sum(amountApplied)` before deriving anticipo — that sum is
+ * the GROSS amount credited to cartera (real cash plus any early-payment
+ * discount, see `evaluarAplicacionConDescuento` in `cruce.util.ts`), so
+ * leaving the discount in would understate the anticipo by exactly that
+ * amount. A balancing débito line for the discount (mirroring
+ * `construirAsientoCruce`'s own `descuento` debit) is added when this
+ * Recibo absorbed one.
  */
 export async function construirDatosImpresionRecibo(
   recibo: ReciboDocument,
@@ -48,6 +56,8 @@ export async function construirDatosImpresionRecibo(
 ): Promise<DatosReciboImpresion> {
   const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaDescuentos =
+    copropiedad.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
 
   const facturaIds = aplicaciones
     .filter((a) => a.documentType === 'FV')
@@ -122,11 +132,21 @@ export async function construirDatosImpresionRecibo(
     }
   }
 
+  // `amountApplied` is the FULL amount credited to cartera — real cash plus
+  // any early-payment discount it absorbed (`discountApplied`), same
+  // "gross" figure `construirAsientoCruce` credits to `cuentaCartera` — see
+  // `evaluarAplicacionConDescuento` (cruce.util.ts). The leftover anticipo
+  // is real CASH only, so the discount portion must come back out here too,
+  // or it silently understates the anticipo by exactly the discount amount.
   const totalAplicado = aplicaciones.reduce(
     (acc, a) => acc + a.amountApplied,
     0,
   );
-  const anticipo = recibo.receivedAmount - totalAplicado;
+  const totalDescuento = aplicaciones.reduce(
+    (acc, a) => acc + (a.discountApplied ?? 0),
+    0,
+  );
+  const anticipo = recibo.receivedAmount - (totalAplicado - totalDescuento);
   if (anticipo > 0) {
     codigosUsados.add(cuentaAnticipos);
     lineas.push({
@@ -136,6 +156,23 @@ export async function construirDatosImpresionRecibo(
       numeroDocumento: null,
       debito: 0,
       credito: anticipo,
+    });
+  }
+
+  // Balancing débito for the discount credited to cartera above — the real
+  // posted asiento always carries this line (`construirAsientoCruce`'s own
+  // `descuento` debit); the printed receipt must show it too, both to
+  // explain why the anticipo isn't larger and to keep this table's own
+  // débito/crédito totals meaningful.
+  if (totalDescuento > 0) {
+    codigosUsados.add(cuentaDescuentos);
+    lineas.push({
+      cuentaCodigo: cuentaDescuentos,
+      cuentaNombre: '',
+      tipoDocumento: null,
+      numeroDocumento: null,
+      debito: totalDescuento,
+      credito: 0,
     });
   }
 
@@ -158,6 +195,7 @@ export async function construirDatosImpresionRecibo(
   }
 
   return {
+    tituloDocumento: 'Recibo de Caja',
     numeroCompleto: recibo.fullNumber,
     fecha: recibo.receivedDate,
     inmuebleCodigo: inmueble?.code ?? '—',

@@ -207,6 +207,35 @@ describe('construirDatosImpresionRecibo', () => {
     expect(filaAnticipo?.credito).toBe(200000);
   });
 
+  it('el anticipo descuenta el efectivo, no lo bruto aplicado — el descuento por pronto pago debe sumarse al anticipo, no restarlo', async () => {
+    // Recibo de 1.000.000, factura con saldo de 1.000.000 y 50.000 de
+    // descuento por pronto pago: la factura queda cancelada (amountApplied
+    // 1.000.000 bruto, discountApplied 50.000), pero el efectivo real usado
+    // fue solo 950.000 (1.000.000 - 50.000 de descuento) — el resto
+    // (50.000) es anticipo, no dinero que "desapareció" en la factura.
+    const aplicacion = aplicacionFV({
+      amountApplied: 1000000,
+      discountApplied: 50000,
+    });
+    const datos = await construirDatosImpresionRecibo(
+      reciboBase({ receivedAmount: 1000000 }),
+      [aplicacion],
+      copropiedadBase({ discountsDebitAccount: '530525' }),
+      COP,
+      modelosVacios() as never,
+    );
+
+    const filaAnticipo = datos.lineas.find((l) => l.cuentaCodigo === '210505');
+    expect(filaAnticipo?.credito).toBe(50000);
+
+    const filaDescuento = datos.lineas.find((l) => l.cuentaCodigo === '530525');
+    expect(filaDescuento).toMatchObject({ debito: 50000, credito: 0 });
+
+    const totalDebito = datos.lineas.reduce((acc, l) => acc + l.debito, 0);
+    const totalCredito = datos.lineas.reduce((acc, l) => acc + l.credito, 0);
+    expect(totalDebito).toBe(totalCredito);
+  });
+
   it('no agrega línea de anticipo cuando el recibo se aplicó por completo', async () => {
     const aplicacion = aplicacionFV({ amountApplied: 500000 });
     const datos = await construirDatosImpresionRecibo(
