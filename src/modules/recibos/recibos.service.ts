@@ -45,6 +45,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
+import { periodoCalendarioDe } from '../../common/contabilidad/periodo-calendario.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
@@ -73,24 +74,6 @@ import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
-
-/**
- * The `{year, month}` of a bare calendar date (`fechaRecibo`,
- * `LoteFacturacion.billingDate`) — both always a plain "YYYY-MM-DD" parsed
- * as UTC midnight, never a real wall-clock timestamp. Deliberately reads
- * UTC, NOT `periodoDe()`'s local-time reading (`common/contabilidad/
- * periodo.service.ts`): `periodoDe` exists for a genuine local timestamp
- * close to midnight, but applying it to a UTC-midnight calendar date on a
- * host running a negative UTC offset (Colombia, UTC-5 — this backend's own
- * users) rolls day 1 of the month back into the previous month entirely,
- * which is exactly the bug a user hit in production comparing a lote
- * `billingDate` of "2026-08-01" against a Recibo dated "2026-08-31" — both
- * clearly August, but `periodoDe` read the lote as July.
- */
-const periodoCalendarioDe = (fecha: Date): { year: number; month: number } => ({
-  year: fecha.getUTCFullYear(),
-  month: fecha.getUTCMonth() + 1,
-});
 
 /**
  * Redacts "Cancela facturas 6, 173, 340 y genera anticipo" / "Abona a

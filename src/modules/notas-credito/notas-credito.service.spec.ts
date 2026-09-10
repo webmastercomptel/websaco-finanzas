@@ -33,10 +33,16 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
-/** No open Lote in any test here — the guard always passes. */
-const lotesFacturacionFalso = () =>
+/** No open Lote in any test here — the guard always passes. No consolidated
+ *  Lote either, by default — `obtenerUltimoConsolidado` returning `null`
+ *  means "nothing to validate the note's own `fecha` period against", same
+ *  default `RecibosService.crear()`'s own spec uses for the identical check
+ *  on `fechaRecibo`. Tests exercising the period-match validation pass their
+ *  own `lotes` override. */
+const lotesFacturacionFalso = (ultimoConsolidado: unknown = null) =>
   ({
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(ultimoConsolidado)),
   }) as never;
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
@@ -56,6 +62,10 @@ const modeloFacturas = (factura: Record<string, unknown>) => ({
   findOne: jest.fn(() => ({
     session: () => ({ exec: () => Promise.resolve(factura) }),
   })),
+  // Used by `findOne()`'s batch `numerosPorDocumento` resolution — never by
+  // `crear()`/`aplicar()`, which only ever read one Factura at a time via
+  // `findOne`/`findOneAndUpdate` above.
+  find: jest.fn(() => ({ exec: () => Promise.resolve([factura]) })),
   findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
     exec: () => {
       const expr = filtro.$expr as { $gte: [string, number] } | undefined;
@@ -112,6 +122,10 @@ const construirServicio = (opts: {
   copropiedades?: { findById: jest.Mock };
   cuentasContables?: Record<string, unknown>[];
   inmueble?: Record<string, unknown> | null;
+  /** Same default as `lotesFacturacionFalso()`'s own: `null` means "never
+   *  consolidated", so `crear()`'s period-match check on `dto.fecha` is a
+   *  no-op — mirrors `recibos.service.spec.ts`'s identical override. */
+  ultimoLoteConsolidado?: unknown;
 }) => {
   const session = sesionFalsa();
   const notasCredito = modeloNotasCredito(opts.notaCreada);
@@ -144,7 +158,7 @@ const construirServicio = (opts: {
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NC-1'),
     conexionCon(session),
-    lotesFacturacionFalso(),
+    lotesFacturacionFalso(opts.ultimoLoteConsolidado ?? null),
     cuentasContables as never,
     inmuebles as never,
   );
@@ -172,6 +186,7 @@ const notaCreditoCreada = (over: Record<string, unknown> = {}) => ({
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
   facturaId: new Types.ObjectId(),
+  issueDate: new Date('2026-01-15'),
   prefix: 'NC',
   number: 1,
   fullNumber: 'NC-1',
@@ -192,6 +207,7 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
   codigo: 'NC',
   inmuebleId: INMUEBLE.toString(),
   facturaId: new Types.ObjectId().toString(),
+  fecha: '2026-01-15',
   motivo: 'error_facturacion' as const,
   montoTotal: 200000,
   distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 200000 }],
@@ -214,6 +230,13 @@ describe('NotasCreditoService.crear', () => {
       documentType: 'FV',
       amountApplied: 200000,
     });
+    // Persisted for printing (Nota Crédito's own PDF, styled after Recibo's
+    // — needs the same per-concepto breakdown a Recibo application already
+    // carries). Never reconstructable after the fact otherwise: this is the
+    // only point `dto.distribucion` scaled against `montoAAplicar` exists.
+    expect(filas[0].detalleConceptos).toEqual([
+      { conceptoId: CONCEPTO, conceptName: 'Concepto', monto: 200000 },
+    ]);
     expect(notasCredito.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({}),
       { $inc: { appliedAmount: 200000, unappliedAmount: -200000 } },
@@ -476,6 +499,122 @@ describe('NotasCreditoService.crear', () => {
       type: 'debito',
     });
   });
+
+  it('debita la cuenta de ingreso PROPIA de cada concepto (accountingIncomeAccount de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
+    // Reportado en producción: el PDF salía con "Sin cuenta asignada" en el
+    // débito porque copropiedad.creditNotesAccount no estaba configurada —
+    // pero además, aun configurada, una sola cuenta para TODA la nota es
+    // incorrecto: debe reversar el ingreso de cada concepto en la MISMA
+    // cuenta que se acreditó al facturarlo (ConceptoCobro.cuentaCreditoId,
+    // congelada como FacturaLinea.accountingIncomeAccount).
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      outstandingBalance: 130000,
+      total: 130000,
+      lines: [
+        {
+          conceptoId: conceptoAdmin,
+          totalAmount: 100000,
+          accountingIncomeAccount: '413501',
+        },
+        {
+          conceptoId: conceptoMora,
+          totalAmount: 30000,
+          accountingIncomeAccount: '413502',
+        },
+      ],
+    });
+    const { service, asientos } = construirServicio({
+      notaCreada: notaCreditoCreada({ totalAmount: 130000 }),
+      factura,
+    });
+
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        montoTotal: 130000,
+        distribucion: [
+          { conceptoId: conceptoAdmin.toString(), monto: 100000 },
+          { conceptoId: conceptoMora.toString(), monto: 30000 },
+        ],
+      }),
+    );
+
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
+    const [entrada] = creado as [{ entries: Record<string, unknown>[] }];
+    const debitos = entrada.entries.filter((e) => e.type === 'debito');
+    expect(debitos).toEqual([
+      expect.objectContaining({ account: '413501', amount: 100000 }),
+      expect.objectContaining({ account: '413502', amount: 30000 }),
+    ]);
+  });
+});
+
+describe('NotasCreditoService.crear — fecha de la nota', () => {
+  it('guarda dto.fecha como issueDate del documento creado', async () => {
+    const { service, notasCredito } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+    });
+
+    await service.crear('acc-1', dtoBase({ fecha: '2026-01-20' }));
+
+    const [filas] = notasCredito.create.mock.calls[0] as unknown as [
+      Record<string, unknown>[],
+    ];
+    expect(filas[0]).toMatchObject({ issueDate: new Date('2026-01-20') });
+  });
+
+  it('rechaza una fecha de un mes distinto al del último lote consolidado', async () => {
+    const { service, notasCredito, asientos } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ fecha: '2026-07-15' })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(notasCredito.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
+  });
+
+  it('deja pasar una fecha del mismo mes y año del último lote consolidado', async () => {
+    const { service, asientos } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ fecha: '2026-08-27' })),
+    ).resolves.toBeDefined();
+    expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('no valida nada cuando la copropiedad nunca ha consolidado un lote', async () => {
+    const { service } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+      ultimoLoteConsolidado: null,
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ fecha: '2020-01-01' })),
+    ).resolves.toBeDefined();
+  });
+
+  it('un lote facturado el día 1 del mes no corre el período un mes hacia atrás (mismo bug real de Recibos)', async () => {
+    // Ver `periodoCalendarioDe`'s own docblock (common/contabilidad/
+    // periodo-calendario.util.ts) y el test gemelo en recibos.service.spec.ts.
+    const { service, asientos } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ fecha: '2026-08-31' })),
+    ).resolves.toBeDefined();
+    expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
@@ -560,6 +699,13 @@ describe('NotasCreditoService.aplicar', () => {
     expect(aplicaciones.create).toHaveBeenCalledTimes(1);
     const [[filas]] = aplicaciones.create.mock.calls;
     expect(filas[0]).toMatchObject({ sourceType: 'NC', sourceId: nota._id });
+    // Same reasoning as `crear()`'s own assertion: needed for the PDF's
+    // débito/crédito table, and only reconstructable right here — this is a
+    // DEFERRED application (`aplicarManual`), so it must capture
+    // `ajustarSaldosCartera`'s own return, not `dto.distribucion`.
+    expect(filas[0].detalleConceptos).toEqual([
+      { conceptoId: CONCEPTO, conceptName: 'Concepto', monto: 80000 },
+    ]);
   });
 
   it('al aplicar contra OTRA factura, sigue usando el split proporcional de esa factura (ajustarSaldosCartera, sin cambios) — nunca la distribución original de la NC', async () => {
@@ -767,6 +913,12 @@ describe('NotasCreditoService.anular', () => {
       lines: [],
     };
     const facturas = {
+      // Resolves `desgloseOrigen`'s per-concepto débito accounts — `null`
+      // here just means the reversal falls back to `cuentaDevoluciones`,
+      // which this test doesn't assert on.
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(null) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(facturaRestaurada),
       })),
@@ -823,6 +975,102 @@ describe('NotasCreditoService.anular', () => {
     expect(resultado.montoSinAplicar).toBe(0);
   });
 
+  it('reversa el débito por la cuenta de ingreso PROPIA de cada concepto (nota.distribution + accountingIncomeAccount de la factura ancla) — nunca cuentaDevoluciones sola', async () => {
+    const facturaId = new Types.ObjectId();
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const nota = notaActivaDoc({
+      facturaId,
+      distribution: [
+        { conceptoId: conceptoAdmin, amount: 100000 },
+        { conceptoId: conceptoMora, amount: 30000 },
+      ],
+      appliedAmount: 130000,
+      unappliedAmount: 0,
+      totalAmount: 130000,
+    });
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 130000,
+      status: 'activa',
+    };
+    const facturaAncla = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 130000,
+      lines: [
+        {
+          conceptoId: conceptoAdmin,
+          totalAmount: 100000,
+          accountingIncomeAccount: '413501',
+        },
+        {
+          conceptoId: conceptoMora,
+          totalAmount: 30000,
+          accountingIncomeAccount: '413502',
+        },
+      ],
+    };
+    const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(facturaAncla) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaAncla),
+      })),
+    };
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+    );
+
+    await service.anular(
+      nota._id.toString(),
+      {
+        motivo: 'otro',
+        detalle: 'Anula la nota crédito por error de digitación',
+      },
+      'acc-1',
+    );
+
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
+    const [entrada] = creado as [{ entries: Record<string, unknown>[] }];
+    const creditos = entrada.entries.filter((e) => e.type === 'credito');
+    expect(creditos).toEqual([
+      expect.objectContaining({ account: '413501', amount: 100000 }),
+      expect.objectContaining({ account: '413502', amount: 30000 }),
+    ]);
+  });
+
   // Mirrors `recibos.service.spec.ts`'s
   // 'restaura el saldo aunque la factura afectada ya esté anulada por otra
   // vía' — added per code-review finding on this task (test-coverage gap
@@ -844,6 +1092,9 @@ describe('NotasCreditoService.anular', () => {
     // La factura ya no existe bajo esas condiciones (anulada por otra vía) —
     // el findOneAndUpdate devuelve null, y el cascade sigue sin lanzar.
     const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(null) }),
+      })),
       findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const notasCredito = {
@@ -941,6 +1192,15 @@ describe('NotasCreditoService.anular', () => {
     };
 
     const facturas = {
+      // Resolves `desgloseOrigen`'s per-concepto débito accounts from the
+      // anchor Factura's own `lines` — no `accountingIncomeAccount` set on
+      // them here, so the reversal falls back to `cuentaDevoluciones`, which
+      // this test doesn't assert on (it only checks the SaldoCartera math).
+      findOne: jest.fn(() => ({
+        session: () => ({
+          exec: () => Promise.resolve(facturaAnclaRestaurada),
+        }),
+      })),
       findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
         exec: () => {
           const id = filtro._id as Types.ObjectId;
@@ -1113,7 +1373,7 @@ describe('NotasCreditoService.anular', () => {
 });
 
 describe('NotasCreditoService.findAll', () => {
-  it('filtra por copropiedad activa, inmueble, estado y rango de fecha (createdAt)', async () => {
+  it('filtra por copropiedad activa, inmueble, estado y rango de fecha (issueDate, con fallback a createdAt para notas sin issueDate)', async () => {
     const documentos: unknown[] = [];
     const notasCredito = {
       find: jest.fn((filtro: Record<string, unknown>) => {
@@ -1149,6 +1409,10 @@ describe('NotasCreditoService.findAll', () => {
       hasta: '2026-08-31',
     });
 
+    const rango = {
+      $gte: new Date('2026-08-01'),
+      $lte: new Date('2026-08-31'),
+    };
     expect(
       (notasCredito as unknown as { filtroUsado: Record<string, unknown> })
         .filtroUsado,
@@ -1156,7 +1420,7 @@ describe('NotasCreditoService.findAll', () => {
       coPropertyId: COP,
       inmuebleId: INMUEBLE.toString(),
       status: 'activo',
-      createdAt: { $gte: new Date('2026-08-01'), $lte: new Date('2026-08-31') },
+      $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
     });
   });
 
@@ -1226,6 +1490,63 @@ describe('NotasCreditoService.findOne', () => {
 
     expect(detalle.id).toBe(nota._id.toString());
     expect(detalle.aplicaciones).toEqual([]);
+  });
+
+  it('resuelve numeroFactura de la ancla y de cada aplicación, aun cuando aplicó contra OTRA factura', async () => {
+    // El excedente de una nota crédito puede aplicarse después contra
+    // cualquier factura abierta del inmueble, no solo la ancla — igual que
+    // el anticipo de un Recibo (ver `aplicarManual`/`aplicarFifo`). El mapa
+    // de números debe resolver ambas, no solo `nota.facturaId`.
+    const facturaAncla = new Types.ObjectId();
+    const facturaOtra = new Types.ObjectId();
+    const nota = notaActivaDoc({ facturaId: facturaAncla });
+    const notasCredito = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(nota) })),
+    };
+    const aplicacion = {
+      _id: new Types.ObjectId(),
+      sourceType: 'NC',
+      sourceId: nota._id,
+      documentType: 'FV',
+      documentId: facturaOtra,
+      amountApplied: 50000,
+      status: 'activa',
+      appliedAt: new Date('2026-08-30'),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        sort: () => ({ exec: () => Promise.resolve([aplicacion]) }),
+      })),
+    };
+    const facturas = {
+      find: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve([
+            { _id: facturaAncla, fullNumber: 'FV-0001' },
+            { _id: facturaOtra, fullNumber: 'FV-0042' },
+          ]),
+      })),
+    };
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+    );
+
+    const detalle = await service.findOne(nota._id.toString());
+
+    expect(detalle.numeroFactura).toBe('FV-0001');
+    expect(detalle.aplicaciones[0]).toMatchObject({
+      documentoId: facturaOtra.toString(),
+      numeroDocumento: 'FV-0042',
+    });
   });
 
   it('lanza NotFoundException cuando la nota crédito no existe bajo este tenant', async () => {

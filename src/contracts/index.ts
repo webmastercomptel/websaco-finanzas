@@ -564,9 +564,18 @@ export interface NotaCredito {
   inmuebleId: string;
   terceroId: string | null;
   facturaId: string;
+  /** The anchor Factura's own printed number ("FV-1") — `null` on the lean
+   *  listing (`GET /notas-credito`), which never resolves it; always set on
+   *  the detail view (`GET /notas-credito/:id`). */
+  numeroFactura: string | null;
   prefijo: string;
   numero: number;
   numeroCompleto: string;
+  /** The date the user declared for this note at creation, validated then
+   *  against the coproperty's current billing period — see
+   *  `NotaCredito.issueDate` (schema). Falls back to the document's own
+   *  `createdAt` for notes created before this field existed. */
+  fecha: IsoDate;
   motivo: MotivoNotaCredito;
   montoTotal: Monto;
   distribucion: DistribucionNotaCredito[];
@@ -850,6 +859,18 @@ export interface MovimientoEstadoCuenta {
   categoria: 'pago' | 'descuento' | null;
 }
 
+/** One Recibo of this inmueble still carrying a pending anticipo
+ *  (`unappliedAmount > 0`) — same "pending anticipo" definition the
+ *  Anticipos bandeja uses (`GET /recibos?conAnticipoDisponible=true`), here
+ *  scoped to just this inmueble and shown alongside its statement. `monto`
+ *  is the Recibo's LIVE `unappliedAmount`, not what it printed at creation
+ *  — a later Nota de Anticipo may have already consumed part of it. */
+export interface AnticipoPendienteEstadoCuenta {
+  numeroCompleto: string;
+  fecha: string;
+  monto: number;
+}
+
 /** Response shape for GET /consultas/estado-cuenta. */
 export interface RespuestaEstadoCuenta {
   inmuebleCodigo: string;
@@ -867,6 +888,69 @@ export interface RespuestaEstadoCuenta {
   saldoActual: number;
   estado: 'al_dia' | 'pendiente' | 'vencido';
   movimientos: MovimientoEstadoCuenta[];
+  /** Anticipos pendientes por aplicar de este inmueble, sin importar el
+   *  período consultado — un anticipo vivo es un saldo actual, no un
+   *  movimiento de un período específico. Vacío cuando no tiene ninguno. */
+  anticipos: AnticipoPendienteEstadoCuenta[];
+}
+
+/* ── Conciliación de Cartera (coproperty-wide) ──────────────────── */
+
+/**
+ * Which of the ten fixed kardex concepts a conciliación row summarizes.
+ * Unlike `TipoDocumentoKardex`, a void/reversal is its own concept rather
+ * than a flag on the original one — the printed reconciliation needs both
+ * directions visible as separate rows, in the fixed order the format has
+ * always used.
+ */
+export type ConceptoConciliacionCartera =
+  | 'facturacion'
+  | 'recibos_caja'
+  | 'anulacion_recibos_caja'
+  | 'notas_credito'
+  | 'anulacion_notas_credito'
+  | 'notas_debito'
+  | 'anulacion_notas_debito'
+  | 'notas_anticipo'
+  | 'anulacion_notas_anticipo'
+  | 'notas_contables';
+
+/**
+ * One row of the reconciliation table: one fixed concept's contribution to
+ * cartera during the period, plus the first/last document number involved
+ * (`desde`/`hasta`) so a mismatch can be traced back to specific documents.
+ * `desde`/`hasta` are `null` when the concept had no movement in the period.
+ */
+export interface FilaConciliacionCartera {
+  concepto: ConceptoConciliacionCartera;
+  etiqueta: string;
+  desde: string | null;
+  hasta: string | null;
+  valorDebito: number;
+  valorCredito: number;
+}
+
+/**
+ * Response shape for GET /consultas/conciliacion-cartera — a coproperty-wide
+ * control report, not per-inmueble (contrast Estado de Cuenta): it compares
+ * a balance CALCULATED from the period's own movements — pure arithmetic,
+ * `saldoAnterior + totalDebito - totalCredito` — against `saldoCarteraReal`,
+ * read straight from the `SaldoCartera` table (the maintained running-balance
+ * cache every other cartera screen trusts, NOT re-derived from documents).
+ * `diferencia` is `saldoCarteraCalculado - saldoCarteraReal` and should read
+ * 0 — anything else means the cache has drifted from the documents that are
+ * supposed to maintain it (see `SaldoCartera`'s own schema docblock).
+ */
+export interface RespuestaConciliacionCartera {
+  periodStart: string;
+  periodEnd: string;
+  saldoAnterior: number;
+  conceptos: FilaConciliacionCartera[];
+  totalDebito: number;
+  totalCredito: number;
+  saldoCarteraCalculado: number;
+  saldoCarteraReal: number;
+  diferencia: number;
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */

@@ -440,6 +440,21 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * balances exactly, since debits (`cuentaOrigen` reduced + `descuento.cuenta`)
  * still sum to `montoAplicado + montoSinAplicar`, unchanged from before this
  * parameter existed.
+ *
+ * `desgloseOrigen`, when given (non-empty), REPLACES the single `cuentaOrigen`
+ * debit with one debit per distinct account in it — mirrors `desgloseCartera`
+ * on the credit side, same reasoning, opposite side. A Nota Crédito reverses
+ * REVENUE, not cash like a Recibo's bank debit — the correct account to debit
+ * is each concepto's own `accountingIncomeAccount` (frozen on the anchor
+ * Factura's line, `ConceptoCobro.cuentaCreditoId` — the SAME account that was
+ * credited when the concept was originally billed), never a single
+ * coproperty-wide "cuenta de devoluciones" lumping every concept together.
+ * `cuentaOrigen` remains the fallback for whatever `desgloseOrigen` couldn't
+ * attribute (an unconfigured concept), same role `cuentaCartera` plays for
+ * `desgloseCartera`. Never combined with `descuento` today (a Nota Crédito
+ * never carries one) — if it ever is, `desgloseOrigen`'s own sum must already
+ * equal `montoAplicado + montoSinAplicar - descuento.monto`, the same
+ * invariant the single-account branch enforces.
  */
 export function construirAsientoCruce(
   cuentaOrigen: string,
@@ -452,16 +467,32 @@ export function construirAsientoCruce(
   desgloseCartera?: { account: string; monto: number }[],
   montoCuentasOrden?: number,
   descuento?: { cuenta: string; monto: number },
+  desgloseOrigen?: { account: string; monto: number }[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
-  const movimientos: Movimiento[] = [
-    {
+  const movimientos: Movimiento[] = [];
+  if (desgloseOrigen && desgloseOrigen.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseOrigen) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'debito',
+        amount: monto,
+        description: d.creacionDebito,
+      });
+    }
+  } else {
+    movimientos.push({
       account: cuentaOrigen,
       type: 'debito',
       amount: montoAplicado + montoSinAplicar - (descuento?.monto ?? 0),
       description: d.creacionDebito,
-    },
-  ];
+    });
+  }
   if (descuento && descuento.monto > 0) {
     movimientos.push({
       account: descuento.cuenta,
@@ -716,6 +747,12 @@ export function construirContraAsientoCruce(
   desgloseCartera?: { account: string; monto: number }[],
   montoCuentasOrden?: number,
   descuento?: { cuenta: string; monto: number },
+  // Mirrors `construirAsientoCruce`'s own `desgloseOrigen` — restores the
+  // SAME per-concepto income accounts the creation entry actually debited,
+  // not the shared `cuentaOrigen`, for the same "a void must debit back
+  // exactly what was credited" reasoning `desgloseCartera`'s own docblock
+  // gives.
+  desgloseOrigen?: { account: string; monto: number }[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
@@ -753,12 +790,28 @@ export function construirContraAsientoCruce(
     });
   }
 
-  movimientos.push({
-    account: cuentaOrigen,
-    type: 'credito',
-    amount: montoOrigen,
-    description: d.contraCredito,
-  });
+  if (desgloseOrigen && desgloseOrigen.length > 0) {
+    const porCuentaOrigen = new Map<string, number>();
+    for (const { account, monto } of desgloseOrigen) {
+      if (monto === 0) continue;
+      porCuentaOrigen.set(account, (porCuentaOrigen.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuentaOrigen) {
+      movimientos.push({
+        account,
+        type: 'credito',
+        amount: monto,
+        description: d.contraCredito,
+      });
+    }
+  } else {
+    movimientos.push({
+      account: cuentaOrigen,
+      type: 'credito',
+      amount: montoOrigen,
+      description: d.contraCredito,
+    });
+  }
 
   if (descuento && descuento.monto > 0) {
     movimientos.push({

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsIn,
   IsMongoId,
   IsNumber,
@@ -38,6 +39,12 @@ export class CrearNotaCreditoDto {
 
   @IsMongoId()
   facturaId: string;
+
+  /** The date the user declares for this note — validated in the service
+   *  against the coproperty's current billing period, mirroring
+   *  `CrearReciboDto.fechaRecibo`. */
+  @IsDateString()
+  fecha: string;
 
   @IsIn(MOTIVOS_NOTA_CREDITO)
   motivo: (typeof MOTIVOS_NOTA_CREDITO)[number];

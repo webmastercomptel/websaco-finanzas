@@ -725,6 +725,52 @@ describe('construirAsientoCruce', () => {
     ]);
   });
 
+  it('con desgloseOrigen, debita cada cuenta propia en vez de la cuenta plana de origen (Nota Crédito reversando ingreso por concepto)', () => {
+    const movimientos = construirAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { account: '413501', monto: 70000 },
+        { account: '413502', monto: 30000 },
+      ],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toHaveLength(2);
+    expect(debitos.find((d) => d.account === '413501')?.amount).toBe(70000);
+    expect(debitos.find((d) => d.account === '413502')?.amount).toBe(30000);
+    expect(debitos.some((d) => d.account === '413595')).toBe(false);
+  });
+
+  it('un desgloseOrigen vacío cae a la cuenta plana de origen', () => {
+    const movimientos = construirAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toEqual([
+      expect.objectContaining({ account: '413595', amount: 100000 }),
+    ]);
+  });
+
   it('siempre balanceado: el débito iguala la suma de los créditos', () => {
     const movimientos = construirAsientoCruce(
       '111005',
@@ -970,6 +1016,54 @@ describe('construirContraAsientoCruce', () => {
         amount: 500000,
         description: expect.any(String),
       },
+    ]);
+  });
+
+  it('con desgloseOrigen, acredita cada cuenta propia en vez de la cuenta plana de origen (reversa cada ingreso de la Nota Crédito que lo debitó)', () => {
+    const movimientos = construirContraAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      100000,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { account: '413501', monto: 70000 },
+        { account: '413502', monto: 30000 },
+      ],
+    );
+
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toHaveLength(2);
+    expect(creditos.find((c) => c.account === '413501')?.amount).toBe(70000);
+    expect(creditos.find((c) => c.account === '413502')?.amount).toBe(30000);
+    expect(creditos.some((c) => c.account === '413595')).toBe(false);
+  });
+
+  it('un desgloseOrigen vacío cae a la cuenta plana de origen', () => {
+    const movimientos = construirContraAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      100000,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [],
+    );
+
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toEqual([
+      expect.objectContaining({ account: '413595', amount: 100000 }),
     ]);
   });
 

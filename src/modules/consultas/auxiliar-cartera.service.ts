@@ -38,6 +38,7 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { finDelDiaCorte } from './cartera-historica.util';
 import type {
   MovimientoKardex,
@@ -171,13 +172,7 @@ export class AuxiliarCarteraService {
     const ncMap = new Map(
       notasCredito.map((nc) => [
         nc._id.toString(),
-        {
-          fullNumber: nc.fullNumber,
-          // NotaCredito has no declared business date field of its own —
-          // `createdAt` is its issue date, same as the NotaContable rows
-          // below.
-          fecha: (nc as unknown as { createdAt: Date }).createdAt,
-        },
+        { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
       ]),
     );
     const naMap = new Map(

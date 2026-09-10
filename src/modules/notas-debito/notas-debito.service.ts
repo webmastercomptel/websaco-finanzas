@@ -54,6 +54,7 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
@@ -324,7 +325,7 @@ export class NotasDebitoService {
       ]),
       ...notasCreditoOrigen.map((nc): [string, Date] => [
         nc._id.toString(),
-        (nc as unknown as { createdAt: Date }).createdAt,
+        fechaNotaCredito(nc),
       ]),
       ...notasAnticipoOrigen.map((na): [string, Date] => [
         na._id.toString(),

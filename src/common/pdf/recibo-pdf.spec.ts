@@ -20,6 +20,7 @@ function makeDatos(
   overrides?: Partial<DatosReciboImpresion>,
 ): DatosReciboImpresion {
   return {
+    tituloDocumento: 'Recibo de Caja',
     numeroCompleto: 'RC-001-0001',
     fecha: new Date('2026-08-05'),
     inmuebleCodigo: '1201',
@@ -68,6 +69,23 @@ describe('generarPdfRecibo', () => {
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(0);
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
+  });
+
+  it('dibuja tituloDocumento en el encabezado — reutilizado por Nota Crédito, no hardcodeado a "Recibo de Caja"', async () => {
+    const comoRecibo = await generarPdfRecibo(
+      makeDatos({ tituloDocumento: 'Recibo de Caja' }),
+      makeCopropiedad(),
+    );
+    const comoNotaCredito = await generarPdfRecibo(
+      makeDatos({ tituloDocumento: 'Nota de Crédito' }),
+      makeCopropiedad(),
+    );
+    // Confirma que el valor realmente se dibuja, no un texto fijo — el
+    // largo total puede coincidir por casualidad (compresión del stream),
+    // así que se compara el contenido completo, no solo el tamaño.
+    expect(Buffer.from(comoRecibo).equals(Buffer.from(comoNotaCredito))).toBe(
+      false,
+    );
   });
 
   it('no lanza cuando lineas está vacío (recibo sin aplicaciones ni anticipo)', async () => {

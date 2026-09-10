@@ -571,5 +571,51 @@ describe('EstadoCuentaService', () => {
         expect.objectContaining({ coPropertyId: COP }),
       );
     });
+
+    it('anticipos lista los Recibos activos con unappliedAmount > 0, sin importar el período consultado', async () => {
+      const inmId = id();
+      // Con anticipo, dentro de otro mes — debe salir igual: es un saldo
+      // vivo, no un movimiento del período.
+      const rConAnticipo = reciboDoc({
+        fullNumber: 'RC-0011',
+        status: 'activo',
+        receivedDate: new Date('2026-06-02'),
+        unappliedAmount: 180200,
+      });
+      // Sin saldo pendiente — no debe salir.
+      const rSinAnticipo = reciboDoc({
+        fullNumber: 'RC-0009',
+        status: 'activo',
+        receivedDate: new Date('2026-05-01'),
+        unappliedAmount: 0,
+      });
+      // Anulado — nunca es un anticipo disponible, aunque quedara
+      // unappliedAmount > 0 sin limpiar.
+      const rAnulado = reciboDoc({
+        fullNumber: 'RC-0007',
+        status: 'anulado',
+        receivedDate: new Date('2026-04-01'),
+        unappliedAmount: 50000,
+      });
+
+      const svc = servicio({
+        recibos: mockFind([rConAnticipo, rSinAnticipo, rAnulado]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.anticipos).toEqual([
+        {
+          numeroCompleto: 'RC-0011',
+          fecha: '2026-06-02T00:00:00.000Z',
+          monto: 180200,
+        },
+      ]);
+    });
   });
 });

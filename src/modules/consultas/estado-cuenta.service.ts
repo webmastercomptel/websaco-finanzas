@@ -38,6 +38,7 @@ import {
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import type {
   MovimientoEstadoCuenta,
   PeriodoFacturado,
@@ -207,12 +208,7 @@ export class EstadoCuentaService {
     const ncMap = new Map(
       notasCredito.map((nc) => [
         nc._id.toString(),
-        // NotaCredito has no declared business date field of its own —
-        // `createdAt` is its issue date, same as NotaContable rows below.
-        {
-          fullNumber: nc.fullNumber,
-          fecha: (nc as unknown as { createdAt: Date }).createdAt,
-        },
+        { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
       ]),
     );
 
@@ -344,6 +340,22 @@ export class EstadoCuentaService {
     const saldoActual =
       saldoAnterior + cargosDelMes - pagosRecibidos - descuentosAjustes;
 
+    // Step 8b: anticipos pendientes — a live snapshot of this inmueble's own
+    // Recibos still carrying `unappliedAmount > 0`, same "pending anticipo"
+    // definition the Anticipos bandeja uses. Never period-filtered: an
+    // anticipo is a CURRENT balance, not a movement that happened during
+    // the period being printed, so it stays visible regardless of which
+    // period the caller picked. `recibos` here is the same fetch from Step
+    // 1 (already scoped to this inmueble) — no extra query needed.
+    const anticipos = recibos
+      .filter((r) => r.status === 'activo' && r.unappliedAmount > 0)
+      .sort((a, b) => a.receivedDate.getTime() - b.receivedDate.getTime())
+      .map((r) => ({
+        numeroCompleto: r.fullNumber,
+        fecha: r.receivedDate.toISOString(),
+        monto: r.unappliedAmount,
+      }));
+
     // Step 9: estado derivation (three-state)
     let estado: 'al_dia' | 'pendiente' | 'vencido';
     if (saldoActual <= 0) {
@@ -381,6 +393,7 @@ export class EstadoCuentaService {
       saldoActual,
       estado,
       movimientos,
+      anticipos,
     };
   }
 }

@@ -29,31 +29,41 @@ export interface LineaAsientoImpresion {
   credito: number;
 }
 
-/** Everything the Recibo print needs, already resolved to display strings —
- *  the PDF renderer below does no database access and no business logic, it
- *  only draws. */
+/** Everything this print needs, already resolved to display strings — the
+ *  PDF renderer below does no database access and no business logic, it
+ *  only draws. Shared by both a Recibo and a Nota Crédito print (see
+ *  `tituloDocumento`) — despite the type's name, nothing else here is
+ *  Recibo-specific: a débito/crédito journal table, an amount, a date and an
+ *  inmueble/titular/concepto block are exactly what a Nota Crédito needs
+ *  too, and printing it any differently would defeat the point of using the
+ *  same layout. */
 export interface DatosReciboImpresion {
+  /** "Recibo de Caja" / "Nota de Crédito" — printed before `numeroCompleto`
+   *  in the header, right-aligned next to the NIT. */
+  tituloDocumento: string;
   numeroCompleto: string;
   fecha: Date;
   inmuebleCodigo: string;
   titularNombre: string;
-  /** "Por Concepto de" — the Recibo's own `notes` (see
-   *  `redactarObservaciones` in `recibos.service.ts`), or a generic fallback
-   *  when none was recorded. */
+  /** "Por Concepto de" — the document's own `notes` (see
+   *  `redactarObservaciones` in `recibos.service.ts` for a Recibo, or the
+   *  motivo label for a Nota Crédito with no notes of its own), or a
+   *  generic fallback when none was recorded. */
   concepto: string;
   monto: number;
   lineas: LineaAsientoImpresion[];
 }
 
 /**
- * Generates a real PDF for a Recibo (cash receipt), styled after the
- * predecessor system's own printed layout: a gray banner with the
- * copropiedad name, the receipt number top-right, a two-column info block
- * (inmueble/titular/concepto on the left, the amount and date on the right),
- * and the actual journal entry as a débito/crédito table — not a generic
- * "aplicaciones" list, since what a resident wants to see on a receipt is
- * exactly what the old system showed: which account absorbed the money,
- * against which document.
+ * Generates a real PDF for a Recibo (cash receipt) or a Nota Crédito
+ * (`datos.tituloDocumento` picks which), styled after the predecessor
+ * system's own printed layout: a gray banner with the copropiedad name, the
+ * document number top-right, a two-column info block (inmueble/titular/
+ * concepto on the left, the amount and date on the right), and the actual
+ * journal entry as a débito/crédito table — not a generic "aplicaciones"
+ * list, since what a resident wants to see on either document is exactly
+ * what the old system showed: which account absorbed the money, against
+ * which document.
  */
 export async function generarPdfRecibo(
   datos: DatosReciboImpresion,
@@ -62,7 +72,12 @@ export async function generarPdfRecibo(
 ): Promise<Uint8Array> {
   const ctx = await crearContexto();
 
-  dibujarEncabezadoRecibo(ctx, copropiedad, datos.numeroCompleto);
+  dibujarEncabezadoRecibo(
+    ctx,
+    copropiedad,
+    datos.tituloDocumento,
+    datos.numeroCompleto,
+  );
   dibujarBloqueRecibo(ctx, datos);
   dibujarTablaAsiento(ctx, datos.lineas);
 
@@ -73,12 +88,13 @@ export async function generarPdfRecibo(
   return ctx.doc.save();
 }
 
-/** Gray banner with the copropiedad name, NIT below it, and "Recibo de Caja
- *  {numeroCompleto}" bold and right-aligned on the same row as the NIT —
- *  mirrors the predecessor system's own header exactly. */
+/** Gray banner with the copropiedad name, NIT below it, and
+ *  "{tituloDocumento} {numeroCompleto}" bold and right-aligned on the same
+ *  row as the NIT — mirrors the predecessor system's own header exactly. */
 function dibujarEncabezadoRecibo(
   ctx: PdfContext,
   copropiedad: CopropiedadDocument,
+  tituloDocumento: string,
   numeroCompleto: string,
 ): void {
   const bannerAltura = 34;
@@ -119,7 +135,7 @@ function dibujarEncabezadoRecibo(
     color: rgb(0, 0, 0),
   });
 
-  const titulo = `Recibo de Caja ${numeroCompleto}`;
+  const titulo = `${tituloDocumento} ${numeroCompleto}`;
   const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 16);
   ctx.page.drawText(titulo, {
     x: MARGIN_LEFT + ctx.contentWidth - tituloAncho,
