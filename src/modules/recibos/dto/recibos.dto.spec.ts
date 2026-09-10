@@ -73,6 +73,7 @@ describe('AnularReciboDto', () => {
     const dto = plainToInstance(AnularReciboDto, {
       motivo: 'duplicado',
       detalle: 'Se cargó el mismo comprobante dos veces por error',
+      fecha: '2026-09-01',
     });
     expect(await validate(dto)).toHaveLength(0);
   });

@@ -2118,6 +2118,7 @@ describe('RecibosService.anular', () => {
       {
         motivo: 'duplicado',
         detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
+        fecha: '2026-09-01',
       },
       CUENTA.toString(),
     );
@@ -2253,7 +2254,11 @@ describe('RecibosService.anular', () => {
 
     await service.anular(
       recibo._id.toString(),
-      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de prueba con longitud suficiente',
+        fecha: '2026-09-01',
+      },
       CUENTA.toString(),
     );
 
@@ -2341,7 +2346,11 @@ describe('RecibosService.anular', () => {
 
     await service.anular(
       recibo._id.toString(),
-      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de prueba con longitud suficiente',
+        fecha: '2026-09-01',
+      },
       CUENTA.toString(),
     );
 
@@ -2432,7 +2441,11 @@ describe('RecibosService.anular', () => {
 
     await service.anular(
       recibo._id.toString(),
-      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de prueba con longitud suficiente',
+        fecha: '2026-09-01',
+      },
       CUENTA.toString(),
     );
 
@@ -2501,6 +2514,7 @@ describe('RecibosService.anular', () => {
         {
           motivo: 'otro',
           detalle: 'La factura ya fue anulada por otra vía',
+          fecha: '2026-09-01',
         },
         CUENTA.toString(),
       ),
@@ -2540,6 +2554,7 @@ describe('RecibosService.anular', () => {
         {
           motivo: 'otro',
           detalle: 'Un detalle de más de veinte caracteres',
+          fecha: '2026-09-01',
         },
         CUENTA.toString(),
       ),
@@ -2998,6 +3013,7 @@ describe('RecibosService — ciclo de vida completo', () => {
       {
         motivo: 'error_digitacion',
         detalle: 'El cajero cargó el comprobante con el monto equivocado',
+        fecha: '2026-09-01',
       },
       CUENTA.toString(),
     );

@@ -107,6 +107,7 @@ describe('NotasCreditoController.anular', () => {
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
+      fecha: '2026-01-20',
     };
     const user: IRequestUser = {
       uid: 'uid-1',

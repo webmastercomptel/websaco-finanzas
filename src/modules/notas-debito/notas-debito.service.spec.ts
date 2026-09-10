@@ -125,8 +125,12 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
       ),
     },
     connection: conexionCon(session),
-    // No open Lote in any test here — the guard always passes.
-    lotes: { exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)) },
+    // No open Lote and no consolidated run in any test here — both guards
+    // always pass.
+    lotes: {
+      exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+      obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(null)),
+    },
   };
 
   const merged = { ...defaults, ...overrides };
@@ -274,6 +278,7 @@ describe('NotasDebitoService', () => {
         {
           motivo: 'error_digitacion',
           detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       );
@@ -316,6 +321,7 @@ describe('NotasDebitoService', () => {
         {
           motivo: 'otro',
           detalle: 'Se anula porque el cargo fue generado por error',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       );
@@ -369,6 +375,7 @@ describe('NotasDebitoService', () => {
         {
           motivo: 'error_facturacion',
           detalle: 'La nota débito fue emitida por error de facturación',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       );
@@ -430,6 +437,7 @@ describe('NotasDebitoService', () => {
         {
           motivo: 'error_facturacion',
           detalle: 'La nota débito fue emitida por error de facturación',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       );
@@ -491,6 +499,7 @@ describe('NotasDebitoService', () => {
         {
           motivo: 'duplicado',
           detalle: 'Se anula la nota débito duplicada generada por error',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       );
@@ -520,6 +529,7 @@ describe('NotasDebitoService', () => {
           {
             motivo: 'otro',
             detalle: 'Segundo intento de anulación de nota débito',
+            fecha: '2026-09-05',
           },
           CUENTA.toString(),
         ),

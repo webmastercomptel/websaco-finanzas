@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+
 /**
  * The `{year, month}` of a bare calendar date (`fechaRecibo`, a Nota
  * Crédito's `fecha`, `LoteFacturacion.billingDate`) — all always a plain
@@ -22,3 +24,40 @@ export const periodoCalendarioDe = (
   year: fecha.getUTCFullYear(),
   month: fecha.getUTCMonth() + 1,
 });
+
+/**
+ * The one check every document-dating call site in this backend needs
+ * before trusting a caller-supplied business date: it must fall in the same
+ * month/year as the coproperty's last consolidated billing run. Shared so
+ * the rule — and its exact wording — can never drift between a document's
+ * own creation (`fechaRecibo`, a Nota Crédito's `fecha`, …) and its
+ * anulación (which now takes its own `fecha` too, for the same reason: the
+ * reversing asiento must be dated by the user, never by the server clock).
+ *
+ * `ultimoLote` is `null` exactly when the coproperty has never consolidated
+ * a lote — nothing to validate against yet, so this is a no-op, same
+ * precedent every caller already established individually before this was
+ * extracted.
+ *
+ * `etiqueta` names the field in the error message (e.g. "La fecha de la
+ * nota", "La fecha de la anulación") — the check is identical either way,
+ * only what the user needs to recognize differs.
+ */
+export function exigirPeriodoFacturacionActual(
+  fecha: Date,
+  ultimoLote: { billingDate: Date } | null,
+  etiqueta: string,
+): void {
+  if (!ultimoLote) return;
+  const periodoLote = periodoCalendarioDe(ultimoLote.billingDate);
+  const periodoFecha = periodoCalendarioDe(fecha);
+  if (
+    periodoLote.year !== periodoFecha.year ||
+    periodoLote.month !== periodoFecha.month
+  ) {
+    throw new BadRequestException(
+      `${etiqueta} debe corresponder al período de facturación actual ` +
+        `(${String(periodoLote.month).padStart(2, '0')}/${periodoLote.year})`,
+    );
+  }
+}

@@ -40,7 +40,7 @@ import {
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
-import { periodoCalendarioDe } from '../../common/contabilidad/periodo-calendario.util';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   AplicacionInvalidaError,
@@ -179,26 +179,17 @@ export class NotasCreditoService {
 
     // The note's own date must fall in the same month/year as the last
     // consolidated billing run — same rule, same reasoning, same helper as
-    // `RecibosService.crear()`'s identical check on `fechaRecibo` (see
-    // `periodoCalendarioDe`'s own docblock on why it reads UTC). A
+    // `RecibosService.crear()`'s identical check on `fechaRecibo`. A
     // coproperty that has never consolidated a lote has no "current period"
     // yet, so nothing to validate against.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
       coPropertyId.toString(),
     );
-    if (ultimoLote) {
-      const periodoLote = periodoCalendarioDe(ultimoLote.billingDate);
-      const periodoNota = periodoCalendarioDe(new Date(dto.fecha));
-      if (
-        periodoLote.year !== periodoNota.year ||
-        periodoLote.month !== periodoNota.month
-      ) {
-        throw new BadRequestException(
-          `La fecha de la nota debe corresponder al período de facturación actual ` +
-            `(${String(periodoLote.month).padStart(2, '0')}/${periodoLote.year})`,
-        );
-      }
-    }
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la nota',
+    );
     // A refusal costs no session — same placement as
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
@@ -740,6 +731,19 @@ export class NotasCreditoService {
   ): Promise<NotaCreditoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as creation, same reasoning: the accountant controls
+    // every document date in the ledger, this system never assumes "today".
+    // A refusal costs no session — same placement as `crear()`'s own check.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
+
     return this.transaccion(async (session) => {
       const nota = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
@@ -883,7 +887,13 @@ export class NotasCreditoService {
             facturaId: null,
             reciboId: null,
             notaCreditoId: nota._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` below stays the real audit instant on purpose (see
+            // its own field comment): this is the business date, that is
+            // the "when it was actually recorded" trail — never the same
+            // field, never conflated.
+            date: new Date(dto.fecha),
             entries,
           },
         ],

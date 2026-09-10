@@ -86,6 +86,7 @@ describe('RecibosController.anular', () => {
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
+      fecha: '2026-09-01',
     };
     const user: IRequestUser = {
       uid: 'uid-1',

@@ -678,6 +678,7 @@ export interface NotaContable {
   inmuebleId: string;
   conceptoOrigenId: string;
   conceptoDestinoId: string;
+  fecha: IsoDate;
   monto: Monto;
   descripcion: string;
   prefijo: string;

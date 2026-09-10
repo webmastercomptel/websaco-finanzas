@@ -48,6 +48,7 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
@@ -397,6 +398,18 @@ export class NotasAnticipoService {
   ): Promise<NotaAnticipoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule Recibos/Notas Crédito apply to their own anulación. A
+    // refusal costs no session.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
+
     return this.transaccion(async (session) => {
       const nota = await this.notasAnticipo
         .findOne({ _id: id, coPropertyId })
@@ -561,7 +574,11 @@ export class NotasAnticipoService {
             notaDebitoId: null,
             notaContableId: null,
             notaAnticipoId: nota._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` stays the real audit instant, a separate field on
+            // purpose (same split every other module's anulación now uses).
+            date: new Date(dto.fecha),
             entries,
           },
         ],

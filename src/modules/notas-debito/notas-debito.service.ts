@@ -54,6 +54,7 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
@@ -368,6 +369,18 @@ export class NotasDebitoService {
   ): Promise<NotaDebitoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as `crear()`'s own `dto.fecha` check. A refusal costs no
+    // session.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
+
     return this.transaccion(async (session) => {
       const nota = await this.notasDebito
         .findOne({ _id: id, coPropertyId })
@@ -437,7 +450,11 @@ export class NotasDebitoService {
             reciboId: null,
             notaCreditoId: null,
             notaDebitoId: nota._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` stays the real audit instant, a separate field on
+            // purpose (see the creation entry's own note on this split).
+            date: new Date(dto.fecha),
             entries,
           },
         ],

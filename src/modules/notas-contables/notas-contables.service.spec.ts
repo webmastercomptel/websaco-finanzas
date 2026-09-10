@@ -27,10 +27,12 @@ const numeracionQueEntrega = (completo: string): NumeracionService =>
     ),
   }) as unknown as NumeracionService;
 
-/** No open Lote in any test here — the guard always passes. */
+/** No open Lote and no consolidated run in any test here — both guards
+ *  always pass, same pattern as `NotasCreditoService`'s own spec. */
 const lotesFacturacionFalso = () =>
   ({
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(null)),
   }) as never;
 
 /** A coproperty that does not use "cuentas de orden" — the default for
@@ -56,6 +58,7 @@ const notaContableCreada = (over: Record<string, unknown> = {}) => ({
   inmuebleId: INMUEBLE,
   conceptoOrigenId: CONCEPTO_ORIGEN,
   conceptoDestinoId: CONCEPTO_DESTINO,
+  issueDate: new Date('2026-08-15'),
   monto: 100000,
   description: 'Reclasificación de prueba',
   prefix: 'NT',
@@ -167,6 +170,7 @@ const construirServicio = (opts: {
 const dtoBase = (over: Record<string, unknown> = {}) => ({
   codigo: 'NT',
   inmuebleId: INMUEBLE.toString(),
+  fecha: '2026-08-15',
   conceptoOrigenId: CONCEPTO_ORIGEN.toString(),
   conceptoDestinoId: CONCEPTO_DESTINO.toString(),
   monto: 100000,
@@ -422,6 +426,7 @@ describe('NotasContablesService.anular', () => {
       {
         motivo: 'error_digitacion',
         detalle: 'Error en la reclasificación, se anula',
+        fecha: '2026-08-20',
       },
       'acc-1',
     );
@@ -447,7 +452,11 @@ describe('NotasContablesService.anular', () => {
     await expect(
       service.anular(
         nota._id.toString(),
-        { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+        {
+          motivo: 'otro',
+          detalle: 'Detalle de más de veinte caracteres',
+          fecha: '2026-08-20',
+        },
         'acc-1',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -474,7 +483,11 @@ describe('NotasContablesService.anular', () => {
     await expect(
       service.anular(
         'no-existe',
-        { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+        {
+          motivo: 'otro',
+          detalle: 'Detalle de más de veinte caracteres',
+          fecha: '2026-08-20',
+        },
         'acc-1',
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -526,7 +539,11 @@ describe('NotasContablesService.anular', () => {
 
     await service.anular(
       nota._id.toString(),
-      { motivo: 'otro', detalle: 'Anulación de prueba con detalle largo' },
+      {
+        motivo: 'otro',
+        detalle: 'Anulación de prueba con detalle largo',
+        fecha: '2026-08-20',
+      },
       'acc-1',
     );
 

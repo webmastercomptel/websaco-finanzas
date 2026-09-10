@@ -977,6 +977,7 @@ describe('NotasCreditoService.anular', () => {
       {
         motivo: 'error_facturacion',
         detalle: 'Nota crédito emitida por error, se anula',
+        fecha: '2026-01-20',
       },
       'acc-1',
     );
@@ -1074,6 +1075,7 @@ describe('NotasCreditoService.anular', () => {
       {
         motivo: 'otro',
         detalle: 'Anula la nota crédito por error de digitación',
+        fecha: '2026-01-20',
       },
       'acc-1',
     );
@@ -1148,7 +1150,11 @@ describe('NotasCreditoService.anular', () => {
     await expect(
       service.anular(
         nota._id.toString(),
-        { motivo: 'otro', detalle: 'La factura ya fue anulada por otra vía' },
+        {
+          motivo: 'otro',
+          detalle: 'La factura ya fue anulada por otra vía',
+          fecha: '2026-01-20',
+        },
         'acc-1',
       ),
     ).resolves.toBeDefined();
@@ -1275,7 +1281,11 @@ describe('NotasCreditoService.anular', () => {
 
     await service.anular(
       nota._id.toString(),
-      { motivo: 'otro', detalle: 'Anula ambas aplicaciones, ancla y no-ancla' },
+      {
+        motivo: 'otro',
+        detalle: 'Anula ambas aplicaciones, ancla y no-ancla',
+        fecha: '2026-01-20',
+      },
       'acc-1',
     );
 
@@ -1337,7 +1347,11 @@ describe('NotasCreditoService.anular', () => {
 
     await service.anular(
       nota._id.toString(),
-      { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de más de veinte caracteres',
+        fecha: '2026-01-20',
+      },
       'acc-1',
     );
 
@@ -1381,7 +1395,11 @@ describe('NotasCreditoService.anular', () => {
     await expect(
       service.anular(
         nota._id.toString(),
-        { motivo: 'otro', detalle: 'Detalle de más de veinte caracteres' },
+        {
+          motivo: 'otro',
+          detalle: 'Detalle de más de veinte caracteres',
+          fecha: '2026-01-20',
+        },
         'acc-1',
       ),
     ).rejects.toBeInstanceOf(ConflictException);

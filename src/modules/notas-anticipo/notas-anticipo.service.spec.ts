@@ -22,6 +22,7 @@ const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
 const lotesFacturacionFalso = () =>
   ({
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(null)),
   }) as never;
 
 type ReciboFixture = {
@@ -505,6 +506,7 @@ describe('NotasAnticipoService.anular', () => {
       {
         motivo: 'error_digitacion',
         detalle: 'Se aplicó contra la factura equivocada por error',
+        fecha: '2026-09-05',
       },
       CUENTA.toString(),
     );
@@ -536,7 +538,11 @@ describe('NotasAnticipoService.anular', () => {
 
     await service.anular(
       creada.id,
-      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de prueba con longitud suficiente',
+        fecha: '2026-09-05',
+      },
       CUENTA.toString(),
     );
 
@@ -546,6 +552,7 @@ describe('NotasAnticipoService.anular', () => {
         {
           motivo: 'otro',
           detalle: 'Detalle de prueba con longitud suficiente',
+          fecha: '2026-09-05',
         },
         CUENTA.toString(),
       ),

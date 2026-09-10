@@ -45,7 +45,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
-import { periodoCalendarioDe } from '../../common/contabilidad/periodo-calendario.util';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
@@ -266,19 +266,11 @@ export class RecibosService {
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
       coPropertyId.toString(),
     );
-    if (ultimoLote) {
-      const periodoLote = periodoCalendarioDe(ultimoLote.billingDate);
-      const periodoRecibo = periodoCalendarioDe(new Date(dto.fechaRecibo));
-      if (
-        periodoLote.year !== periodoRecibo.year ||
-        periodoLote.month !== periodoRecibo.month
-      ) {
-        throw new BadRequestException(
-          `La fecha de pago debe corresponder al período de facturación actual ` +
-            `(${String(periodoLote.month).padStart(2, '0')}/${periodoLote.year})`,
-        );
-      }
-    }
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fechaRecibo),
+      ultimoLote,
+      'La fecha de pago',
+    );
     // Same "a refusal costs no session" placement: SaldoCartera and every
     // FacturaPreliminar total can still move while a billing run is open, so
     // a Recibo applied against them mid-run would settle against numbers
@@ -443,6 +435,19 @@ export class RecibosService {
     accountId: string,
   ): Promise<ReciboContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as `crear()`'s own `fechaRecibo` check, same reasoning: an
+    // accountant here never works off "today", every document date in the
+    // ledger is theirs to declare. A refusal costs no session.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
 
     return this.transaccion(async (session) => {
       const recibo = await this.recibos
@@ -626,7 +631,12 @@ export class RecibosService {
             loteId: null,
             facturaId: null,
             reciboId: recibo._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` below stays the real audit instant on purpose: the
+            // business date and the "when it was actually recorded" trail
+            // are never the same field.
+            date: new Date(dto.fecha),
             entries,
           },
         ],

@@ -57,6 +57,7 @@ describe('NotasDebitoController.anular', () => {
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres para la anulación',
+      fecha: '2026-09-05',
     };
     const user: IRequestUser = {
       uid: 'uid-1',
