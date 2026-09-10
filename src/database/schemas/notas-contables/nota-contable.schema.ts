@@ -64,6 +64,15 @@ export class NotaContable {
   @Prop({ required: true, trim: true })
   description: string;
 
+  /** The date the user declared for this note — validated at creation
+   *  against the coproperty's current billing period, same role
+   *  `NotaCredito.issueDate` plays. Nullable ONLY for documents created
+   *  before this field existed, which used `createdAt` instead — see
+   *  `fechaNotaContable` (`notas-contables.mapper.ts`) for the fallback
+   *  every reader must use. Every new write always sets it. */
+  @Prop({ type: Date, default: null })
+  issueDate: Date | null;
+
   @Prop({ type: String, trim: true, default: '' })
   prefix: string;
 

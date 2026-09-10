@@ -95,6 +95,77 @@ describe('VencimientosCarteraService', () => {
     expect(result.filas[0].diasMora).toBeGreaterThan(0);
   });
 
+  it('diasMora con fecha de corte explicita usa el dia calendario exacto, no el instante extendido a Colombia', async () => {
+    const inmId = id();
+    const f = facturaDoc({
+      inmuebleId: inmId,
+      dueDate: new Date('2026-08-01'),
+      total: 200000,
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+    });
+
+    const result = await svc.findAll({ fecha: '2026-09-06' });
+
+    // Aug 1 -> Sep 6 = 36 days. Extending the corte to Colombia end-of-day
+    // (Sep 7, 04:59:59.999 UTC) must not leak into this count.
+    expect(result.filas[0].diasMora).toBe(36);
+  });
+
+  it('con fecha de corte = hoy: cuenta un Recibo aplicado esta noche en Colombia sin correr diasMora un dia (bug real reportado)', async () => {
+    // Same bug as CarteraPorInmuebleService: a Recibo applied at 8pm
+    // Colombia time carries a UTC `appliedAt` that already reads "tomorrow".
+    // Fixing that must NOT shift `diasMora`/the sinVencer split by a day —
+    // those still compare against the RAW picked calendar day.
+    const inmId = id();
+    const fId = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      dueDate: new Date('2026-08-01'),
+      total: 200000,
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const appEstaNoche = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 200000,
+      status: 'activa',
+      appliedAt: new Date('2026-09-07T01:00:00.000Z'), // 8pm Colombia, Sep 6
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([appEstaNoche]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+    });
+
+    const result = await svc.findAll({ fecha: '2026-09-06' });
+
+    expect(result.filas).toHaveLength(0);
+    expect(result.totalCartera).toBe(0);
+  });
+
   it('una Factura aun no vencida cae en el rango sinVencer', async () => {
     const inmId = id();
     const futureDate = new Date();

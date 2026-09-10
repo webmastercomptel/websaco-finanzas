@@ -39,6 +39,16 @@ export class CrearLoteDto {
   @Min(0)
   descuentoProntoPago?: number;
 
+  /** Mutually exclusive with `descuentoProntoPago` in practice (Parámetros
+   *  de Facturación's own rule: a fixed value only applies when there is no
+   *  percentage) — see `LotesFacturacionService.crear()`'s inheritance and
+   *  `calcularDescuentoProntoPago`'s own precedence. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  valorFijoDescuentoProntoPago?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

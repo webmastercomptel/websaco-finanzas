@@ -1,4 +1,4 @@
-import { IsIn, IsString, MinLength } from 'class-validator';
+import { IsDateString, IsIn, IsString, MinLength } from 'class-validator';
 
 export const MOTIVOS_ANULACION_RECIBO = [
   'error_digitacion',
@@ -16,4 +16,10 @@ export class AnularReciboDto {
   @IsString()
   @MinLength(20)
   detalle: string;
+
+  /** The date the user declares for THIS anulación — validated against the
+   *  current billing period exactly like `CrearReciboDto.fechaRecibo`.
+   *  Dates the reversing asiento; never `new Date()`. */
+  @IsDateString()
+  fecha: string;
 }

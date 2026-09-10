@@ -64,6 +64,18 @@ describe('NotaCreditoSchema — forma', () => {
     expect(doc.voidedAt).toBeNull();
   });
 
+  it('issueDate arranca null — solo una nota creada antes de este campo lo deja así', () => {
+    const doc = new NotaCreditoModel(base());
+    expect(doc.issueDate).toBeNull();
+  });
+
+  it('acepta issueDate — la fecha que el usuario declaró al crearla', async () => {
+    const fecha = new Date('2026-08-15');
+    const doc = new NotaCreditoModel(base({ issueDate: fecha }));
+    await expect(doc.validate()).resolves.toBeUndefined();
+    expect(doc.issueDate).toEqual(fecha);
+  });
+
   it('rechaza un motivo fuera del catálogo', async () => {
     await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(
       Error,

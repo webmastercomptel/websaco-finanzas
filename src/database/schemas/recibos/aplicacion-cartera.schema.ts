@@ -5,18 +5,51 @@ import { Account } from '../cuentas/account.schema';
 
 export type AplicacionCarteraDocument = HydratedDocument<AplicacionCartera>;
 
-export const SOURCE_TYPES = ['RC', 'NC'] as const;
+export const SOURCE_TYPES = ['RC', 'NC', 'NA'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
 export const DOCUMENT_TYPES = ['FV', 'ND'] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 /**
- * One cruce: one row per application of a Recibo OR a Nota Crédito against a
- * document. `sourceType` discriminates which kind of document made the
- * application — the source-of-truth event log both modules share (design
- * §3.1). `Factura.outstandingBalance` and `SaldoCartera.balance` are
- * reconcilable caches derived from these rows.
+ * This application's own share of one concepto — frozen at application
+ * time from `ajustarSaldosCartera`'s/`ajustarSaldosCarteraPorDistribucion`'s
+ * own per-concepto split, the SAME numbers the accounting ledger's per-line
+ * credit already uses (`RecibosService.aplicarManual`/`aplicarFifo`). Stored
+ * here, not re-derived later from `AsientoContable.entries` by account code:
+ * two concepts can share one account, which would make that reconstruction
+ * ambiguous — this is the one place "how much of THIS payment went to THIS
+ * cargo" is unambiguous and named.
+ */
+@Schema({ _id: false })
+export class DetalleConceptoAplicacion {
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
+  conceptoId: Types.ObjectId;
+
+  /** `ConceptoCobro.name`/`FacturaLinea.conceptName` at application time —
+   *  frozen, same reasoning as `FacturaLinea.conceptName` itself: a later
+   *  rename of the concepto must not reword history. */
+  @Prop({ required: true, trim: true })
+  conceptName: string;
+
+  @Prop({ required: true })
+  monto: number;
+}
+
+export const DetalleConceptoAplicacionSchema = SchemaFactory.createForClass(
+  DetalleConceptoAplicacion,
+);
+
+/**
+ * One cruce: one row per application of a Recibo, a Nota Crédito, or a Nota
+ * de Anticipo against a document. `sourceType` discriminates which kind of
+ * document made the application — the source-of-truth event log all three
+ * modules share (design §3.1). A Nota de Anticipo (`'NA'`) always draws
+ * against a Recibo's own `unappliedAmount` — it exists specifically for
+ * applying a Recibo's leftover anticipo LATER, as its own auditable
+ * document, instead of a second call mutating the Recibo directly.
+ * `Factura.outstandingBalance` and `SaldoCartera.balance` are reconcilable
+ * caches derived from these rows.
  *
  * GENERALIZED FROM `AplicacionRecibo` (Recibos de Caja, merged earlier this
  * session): that schema hard-coded `reciboId`, with no discriminator for the
@@ -62,6 +95,22 @@ export class AplicacionCartera {
 
   @Prop({ required: true })
   amountApplied: number;
+
+  /** Portion of `amountApplied` that is early-payment discount, not real
+   *  money drawn from the source's own balance — 0 in the normal case (no
+   *  discount, or the discount didn't activate) and always 0 for a Nota
+   *  Débito target (never carries a discount). `amountApplied -
+   *  discountApplied` is the real cash this application drew down. See
+   *  `evaluarAplicacionConDescuento` (`cruce.util.ts`). */
+  @Prop({ required: true, default: 0 })
+  discountApplied: number;
+
+  /** How `amountApplied` breaks down across the target document's own
+   *  conceptos — empty on documents predating this field (a Nota Débito
+   *  application from before it always had exactly one concepto anyway, so
+   *  the frontend falls back to a single generic row for those). */
+  @Prop({ type: [DetalleConceptoAplicacionSchema], default: [] })
+  detalleConceptos: DetalleConceptoAplicacion[];
 
   @Prop({ required: true, enum: ['activa', 'revertida'], default: 'activa' })
   status: 'activa' | 'revertida';

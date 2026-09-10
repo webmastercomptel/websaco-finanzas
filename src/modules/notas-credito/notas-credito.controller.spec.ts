@@ -14,11 +14,32 @@ function makeController(
     })),
   },
 ) {
+  // `facturas`/`inmuebles`/`terceros`/`cuentasContables` back
+  // `construirDatosImpresionNotaCredito` (`generarPdf`'s own assembly step)
+  // — every test here that never calls `generarPdf` never touches them, so
+  // an empty-result stub is enough.
+  const facturas = {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+  const inmuebles = {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const terceros = {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const cuentasContables = {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+
   return new NotasCreditoController(
     notasCredito as never,
     recibos as never,
     { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
     copropiedades as never,
+    facturas as never,
+    inmuebles as never,
+    terceros as never,
+    cuentasContables as never,
   );
 }
 
@@ -38,6 +59,7 @@ describe('NotasCreditoController.crear', () => {
       codigo: 'NC',
       inmuebleId: new Types.ObjectId().toString(),
       facturaId: new Types.ObjectId().toString(),
+      fecha: '2026-01-15',
       motivo: 'error_facturacion',
       montoTotal: 200000,
       distribucion: [
@@ -85,6 +107,7 @@ describe('NotasCreditoController.anular', () => {
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
+      fecha: '2026-01-20',
     };
     const user: IRequestUser = {
       uid: 'uid-1',
@@ -133,8 +156,11 @@ describe('NotasCreditoController.findAll / findOne', () => {
 describe('NotasCreditoController.generarPdf', () => {
   const notaFixture = () => ({
     _id: new Types.ObjectId(),
+    inmuebleId: new Types.ObjectId(),
+    terceroId: new Types.ObjectId(),
+    facturaId: new Types.ObjectId(),
     fullNumber: 'NC-001-0001',
-    createdAt: new Date('2026-08-10'),
+    issueDate: new Date('2026-08-10'),
     totalAmount: 100000,
     reason: 'error_facturacion',
     notes: null,

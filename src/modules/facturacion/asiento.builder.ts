@@ -87,7 +87,10 @@ export function cuentasOrdenDe(
 /**
  * One shared self-balancing debit/credit pair for `cuentasOrden`, at `monto`
  * — appended by every builder below when the coproperty uses them. `[]` when
- * `cuentasOrden` is null, so callers can always splice the result in.
+ * `cuentasOrden` is null, so callers can always splice the result in. Also
+ * `[]` at `monto === 0` — callers that scope this to a mora-specific portion
+ * (a cruce document that never touched an `intereses` concept) must not
+ * leave a zero-amount debit/credit pair sitting in the ledger.
  *
  * `invertido` swaps which side is debited/credited — a void/reversal entry
  * undoing what the original posting added, the same "same shape, accounts
@@ -100,7 +103,7 @@ function movimientosCuentasOrden(
   descripcion: string,
   invertido = false,
 ): Movimiento[] {
-  if (!cuentasOrden) return [];
+  if (!cuentasOrden || monto === 0) return [];
   const debito = invertido ? cuentasOrden.credito : cuentasOrden.debito;
   const credito = invertido ? cuentasOrden.debito : cuentasOrden.credito;
   return [
@@ -290,13 +293,14 @@ export function enriquecerMovimientosConAuxiliares(
 }
 
 /**
- * Which document produced a cruce entry — Recibos ('RC') or Notas Crédito
- * ('NC'). The ONLY thing this selects is which description strings a journal
- * line gets; every account, amount and debit/credit side is computed
- * identically regardless of `origen` (design §7: "the arithmetic and shape
- * are identical, only the account and description text differ").
+ * Which document produced a cruce entry — Recibos ('RC'), Notas Crédito
+ * ('NC'), Notas Débito ('ND'), or a Nota de Anticipo ('NA'). The ONLY thing
+ * this selects is which description strings a journal line gets; every
+ * account, amount and debit/credit side is computed identically regardless
+ * of `origen` (design §7: "the arithmetic and shape are identical, only the
+ * account and description text differ").
  */
-export type OrigenAsiento = 'RC' | 'NC' | 'ND';
+export type OrigenAsiento = 'RC' | 'NC' | 'ND' | 'NA';
 
 interface DescripcionesAsiento {
   creacionDebito: string;
@@ -307,6 +311,12 @@ interface DescripcionesAsiento {
   contraDebitoCartera: string;
   contraDebitoAnticipo: string;
   contraCredito: string;
+  /** Reversal CREDIT back to `cuentaAnticipos` — only a Nota de Anticipo's
+   *  void needs this: its creation DEBITS anticipos (the opposite of RC/NC,
+   *  whose creation CREDITS it), so undoing it credits anticipos back
+   *  instead of debiting it (`contraDebitoAnticipo`, above). Empty for
+   *  every other origin, same convention as ND's unused fields. */
+  contraCreditoAnticipo: string;
   cuentaOrden: string;
   cuentaOrdenContra: string;
 }
@@ -321,6 +331,7 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de cartera — anulación de recibo de caja',
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de recibo de caja',
     contraCredito: 'Reversión de recaudo — anulación de recibo de caja',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — recibo de caja',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de recibo de caja',
@@ -336,6 +347,7 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoAnticipo: 'Reversión de anticipo — anulación de nota crédito',
     contraCredito:
       'Reversión de corrección de ingreso — anulación de nota crédito',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — nota crédito',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de nota crédito',
@@ -349,9 +361,26 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
     contraDebitoCartera: 'Reversión de ingreso — anulación de nota débito',
     contraDebitoAnticipo: '',
     contraCredito: 'Reversión de cartera — anulación de nota débito',
+    contraCreditoAnticipo: '',
     cuentaOrden: 'Cuenta de orden — nota débito',
     cuentaOrdenContra:
       'Reversión de cuenta de orden — anulación de nota débito',
+  },
+  NA: {
+    creacionDebito: '',
+    creacionCreditoCartera: '',
+    creacionCreditoAnticipo: '',
+    aplicacionDebitoAnticipo: 'Anticipo aplicado a cartera — nota de anticipo',
+    aplicacionCreditoCartera:
+      'Cartera por cobrar — aplicación de nota de anticipo',
+    contraDebitoCartera: 'Reversión de cartera — anulación de nota de anticipo',
+    contraDebitoAnticipo: '',
+    contraCredito: '',
+    contraCreditoAnticipo:
+      'Reversión de anticipo — anulación de nota de anticipo',
+    cuentaOrden: 'Cuenta de orden — nota de anticipo',
+    cuentaOrdenContra:
+      'Reversión de cuenta de orden — anulación de nota de anticipo',
   },
 };
 
@@ -385,9 +414,47 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  * sum of the credits, since callers pass the same split that adds up to the
  * document's own total everywhere else in each service.
  *
- * `cuentasOrden`, when given, appends the same self-balancing memo pair
- * `construirMovimientos` posts for facturación — debit/credit, both for the
- * document's full `montoAplicado + montoSinAplicar`.
+ * `cuentasOrden`, when given, appends the memo pair `construirMovimientos`
+ * posts for facturación — SAME accounts, sides SWAPPED (`invertido: true`) —
+ * for `montoCuentasOrden`: the portion of THIS call that was actually
+ * applied against an `intereses` (mora) concept, never the document's whole
+ * amount. Facturación opens the memo pair when the mora is invoiced (debit
+ * `cuentasOrden.debito`, credit `cuentasOrden.credito`); a cruce document
+ * closes it when that same mora is actually collected — reversed sides, so
+ * the pair nets to zero across the two events instead of doubling. Scoped
+ * the same way facturación scopes it: only a line whose own `conceptKind` is
+ * `intereses` opens the pair (see `construirMovimientos`), so a cruce
+ * document must mirror that scoping too, or a receipt that never touched a
+ * mora charge (e.g. one paying only Administración) would still post a
+ * memo entry, and one that pays BOTH mora and other concepts would post the
+ * memo for more than what was actually mora. Defaults to
+ * `montoAplicado + montoSinAplicar` when omitted, preserving prior callers'
+ * exact behavior.
+ *
+ * `descuento`, when given, is an early-payment discount THIS call absorbed
+ * (Recibos de Caja only, today): `montoAplicado` already carries the
+ * discount summed in — it is the FULL amount credited to cartera, real cash
+ * plus discount alike (see `evaluarAplicacionConDescuento`, cruce.util.ts).
+ * So `cuentaOrigen`'s debit is reduced by `descuento.monto` (the real cash
+ * that actually arrived), and a second debit line picks up the difference —
+ * balances exactly, since debits (`cuentaOrigen` reduced + `descuento.cuenta`)
+ * still sum to `montoAplicado + montoSinAplicar`, unchanged from before this
+ * parameter existed.
+ *
+ * `desgloseOrigen`, when given (non-empty), REPLACES the single `cuentaOrigen`
+ * debit with one debit per distinct account in it — mirrors `desgloseCartera`
+ * on the credit side, same reasoning, opposite side. A Nota Crédito reverses
+ * REVENUE, not cash like a Recibo's bank debit — the correct account to debit
+ * is each concepto's own `accountingIncomeAccount` (frozen on the anchor
+ * Factura's line, `ConceptoCobro.cuentaCreditoId` — the SAME account that was
+ * credited when the concept was originally billed), never a single
+ * coproperty-wide "cuenta de devoluciones" lumping every concept together.
+ * `cuentaOrigen` remains the fallback for whatever `desgloseOrigen` couldn't
+ * attribute (an unconfigured concept), same role `cuentaCartera` plays for
+ * `desgloseCartera`. Never combined with `descuento` today (a Nota Crédito
+ * never carries one) — if it ever is, `desgloseOrigen`'s own sum must already
+ * equal `montoAplicado + montoSinAplicar - descuento.monto`, the same
+ * invariant the single-account branch enforces.
  */
 export function construirAsientoCruce(
   cuentaOrigen: string,
@@ -398,16 +465,42 @@ export function construirAsientoCruce(
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
   desgloseCartera?: { account: string; monto: number }[],
+  montoCuentasOrden?: number,
+  descuento?: { cuenta: string; monto: number },
+  desgloseOrigen?: { account: string; monto: number }[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
-  const movimientos: Movimiento[] = [
-    {
+  const movimientos: Movimiento[] = [];
+  if (desgloseOrigen && desgloseOrigen.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseOrigen) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'debito',
+        amount: monto,
+        description: d.creacionDebito,
+      });
+    }
+  } else {
+    movimientos.push({
       account: cuentaOrigen,
       type: 'debito',
-      amount: montoAplicado + montoSinAplicar,
+      amount: montoAplicado + montoSinAplicar - (descuento?.monto ?? 0),
       description: d.creacionDebito,
-    },
-  ];
+    });
+  }
+  if (descuento && descuento.monto > 0) {
+    movimientos.push({
+      account: descuento.cuenta,
+      type: 'debito',
+      amount: descuento.monto,
+      description: 'Descuento por pronto pago — recibo de caja',
+    });
+  }
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
@@ -445,8 +538,9 @@ export function construirAsientoCruce(
   movimientos.push(
     ...movimientosCuentasOrden(
       cuentasOrden,
-      montoAplicado + montoSinAplicar,
+      montoCuentasOrden ?? montoAplicado + montoSinAplicar,
       d.cuentaOrden,
+      true,
     ),
   );
 
@@ -462,28 +556,138 @@ export function construirAsientoCruce(
  *
  * UNCHANGED name from before Task 2 (it never had an account parameter tied
  * to one side, so there was nothing to rename) — only `origen` is new.
+ *
+ * `desgloseCartera` and `cuentasOrden`/`montoCuentasOrden` work exactly as
+ * they do on `construirAsientoCruce` (same swapped-sides memo pair) — this is
+ * the same cartera credit, only booked later instead of at creation, so a
+ * deferred application against a per-concepto-coded or mora-carrying
+ * document must be coded identically to an immediate one.
  */
 export function construirMovimientosAplicacionAnticipo(
   cuentaAnticipos: string,
   cuentaCartera: string,
   montoAplicado: number,
   origen: OrigenAsiento,
+  desgloseCartera?: { account: string; monto: number }[],
+  cuentasOrden?: CuentasOrden | null,
+  montoCuentasOrden?: number,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
-  return [
+  const movimientos: Movimiento[] = [
     {
       account: cuentaAnticipos,
       type: 'debito',
       amount: montoAplicado,
       description: d.aplicacionDebitoAnticipo,
     },
-    {
+  ];
+
+  if (desgloseCartera && desgloseCartera.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseCartera) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'credito',
+        amount: monto,
+        description: d.aplicacionCreditoCartera,
+      });
+    }
+  } else {
+    movimientos.push({
       account: cuentaCartera,
       type: 'credito',
       amount: montoAplicado,
       description: d.aplicacionCreditoCartera,
-    },
-  ];
+    });
+  }
+
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoCuentasOrden ?? 0,
+      d.cuentaOrden,
+      true,
+    ),
+  );
+
+  return movimientos;
+}
+
+/**
+ * Builds the ONE reversing entry a Nota de Anticipo's void posts — the
+ * mirror image of `construirMovimientosAplicacionAnticipo`'s own posting,
+ * sides swapped: credit `cuentaAnticipos` (undoes the debit that moved the
+ * anticipo out), debit each `desgloseCartera` account (undoes the credit
+ * that landed on cartera), both for `montoAplicado`. Never touches a bank
+ * account — a Nota de Anticipo only ever reassigns money already sitting in
+ * `cuentaAnticipos`, exactly like its own creation did.
+ *
+ * Distinct from `construirContraAsientoCruce` (which reverses a Recibo/Nota
+ * Crédito's OWN creation, always crediting back `cuentaOrigen`) because a
+ * Nota de Anticipo has no `cuentaOrigen` leg to give back — undoing it only
+ * ever involves the anticipo and cartera accounts.
+ *
+ * `cuentasOrden`, when given, reverses the memo pair the creation posted —
+ * `construirMovimientosAplicacionAnticipo` already posts it INVERTED
+ * relative to facturación (`invertido: true`), so undoing it goes back to
+ * facturación's plain sides (`invertido: false`, the default) — same
+ * reasoning as `construirContraAsientoCruce`'s own note.
+ */
+export function construirContraAsientoAplicacionAnticipo(
+  cuentaAnticipos: string,
+  cuentaCartera: string,
+  montoAplicado: number,
+  origen: OrigenAsiento,
+  desgloseCartera?: { account: string; monto: number }[],
+  cuentasOrden?: CuentasOrden | null,
+  montoCuentasOrden?: number,
+): Movimiento[] {
+  const d = DESCRIPCIONES[origen];
+  const movimientos: Movimiento[] = [];
+
+  if (desgloseCartera && desgloseCartera.length > 0) {
+    const porCuenta = new Map<string, number>();
+    for (const { account, monto } of desgloseCartera) {
+      if (monto === 0) continue;
+      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuenta) {
+      movimientos.push({
+        account,
+        type: 'debito',
+        amount: monto,
+        description: d.contraDebitoCartera,
+      });
+    }
+  } else {
+    movimientos.push({
+      account: cuentaCartera,
+      type: 'debito',
+      amount: montoAplicado,
+      description: d.contraDebitoCartera,
+    });
+  }
+
+  movimientos.push({
+    account: cuentaAnticipos,
+    type: 'credito',
+    amount: montoAplicado,
+    description: d.contraCreditoAnticipo,
+  });
+
+  movimientos.push(
+    ...movimientosCuentasOrden(
+      cuentasOrden,
+      montoCuentasOrden ?? montoAplicado,
+      d.cuentaOrdenContra,
+    ),
+  );
+
+  return movimientos;
 }
 
 /**
@@ -501,10 +705,35 @@ export function construirMovimientosAplicacionAnticipo(
  * → `cuentaOrigen`, `montoRecibido` → `montoOrigen` (a Nota Crédito's
  * `montoTotal`, not anything "received").
  *
+ * The `cuentaCartera` debit is, by default, one line for the coproperty's
+ * shared receivables account — same default `construirAsientoCruce` uses.
+ * When `desgloseCartera` is given (non-empty), it REPLACES that single line
+ * with one debit per distinct account in it, restoring the SAME per-concepto
+ * accounts the original creation/application actually credited, not the
+ * shared one — otherwise a void would debit back an account the original
+ * entry never touched, leaving both permanently unbalanced.
+ *
  * `cuentasOrden`, when given, appends the reversal of the memo pair the
- * creation-time entry posted — same accounts, sides swapped (`invertido`),
- * for the full `montoOrigen` — zeroing out what `construirAsientoCruce` added
- * rather than doubling it.
+ * creation-time entry posted. The creation entry itself already posts
+ * SWAPPED sides relative to facturación (see `construirAsientoCruce`'s own
+ * note) — so undoing it must go back to facturación's original sides
+ * (`invertido: false`, the plain pair), not swap them a second time. For
+ * `montoCuentasOrden` (defaults to the full `montoOrigen` when omitted,
+ * preserving prior callers' exact behavior) — see `construirAsientoCruce`'s
+ * own note on why this must be the mora-specific portion, not the whole
+ * document, whenever the caller can tell the two apart.
+ *
+ * `descuento`, when given, reverses the discount debit `construirAsientoCruce`
+ * posted at creation: a credit back to `descuento.cuenta` for `descuento.monto`
+ * (Copropiedad's `discountsCreditAccount` — the "give-back" side, distinct
+ * from the debit-side account creation used). `montoAplicado` here is
+ * already the full cartera amount (cash plus discount, same convention as
+ * `construirAsientoCruce`), and `montoOrigen` is the Recibo's own cached
+ * `receivedAmount` (real cash only) — the balance holds without any other
+ * change: debits (`cuentaCartera`/`desgloseCartera` restore + `cuentaAnticipos`
+ * restore) equal credits (`cuentaOrigen` for `montoOrigen` + `descuento.cuenta`
+ * for `descuento.monto`), since `montoAplicado + montoSinAplicar ===
+ * montoOrigen + descuento.monto` by construction.
  */
 export function construirContraAsientoCruce(
   cuentaOrigen: string,
@@ -515,17 +744,42 @@ export function construirContraAsientoCruce(
   montoOrigen: number,
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
+  desgloseCartera?: { account: string; monto: number }[],
+  montoCuentasOrden?: number,
+  descuento?: { cuenta: string; monto: number },
+  // Mirrors `construirAsientoCruce`'s own `desgloseOrigen` — restores the
+  // SAME per-concepto income accounts the creation entry actually debited,
+  // not the shared `cuentaOrigen`, for the same "a void must debit back
+  // exactly what was credited" reasoning `desgloseCartera`'s own docblock
+  // gives.
+  desgloseOrigen?: { account: string; monto: number }[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
 
   if (montoAplicado > 0) {
-    movimientos.push({
-      account: cuentaCartera,
-      type: 'debito',
-      amount: montoAplicado,
-      description: d.contraDebitoCartera,
-    });
+    if (desgloseCartera && desgloseCartera.length > 0) {
+      const porCuenta = new Map<string, number>();
+      for (const { account, monto } of desgloseCartera) {
+        if (monto === 0) continue;
+        porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
+      }
+      for (const [account, monto] of porCuenta) {
+        movimientos.push({
+          account,
+          type: 'debito',
+          amount: monto,
+          description: d.contraDebitoCartera,
+        });
+      }
+    } else {
+      movimientos.push({
+        account: cuentaCartera,
+        type: 'debito',
+        amount: montoAplicado,
+        description: d.contraDebitoCartera,
+      });
+    }
   }
   if (montoSinAplicar > 0) {
     movimientos.push({
@@ -536,19 +790,44 @@ export function construirContraAsientoCruce(
     });
   }
 
-  movimientos.push({
-    account: cuentaOrigen,
-    type: 'credito',
-    amount: montoOrigen,
-    description: d.contraCredito,
-  });
+  if (desgloseOrigen && desgloseOrigen.length > 0) {
+    const porCuentaOrigen = new Map<string, number>();
+    for (const { account, monto } of desgloseOrigen) {
+      if (monto === 0) continue;
+      porCuentaOrigen.set(account, (porCuentaOrigen.get(account) ?? 0) + monto);
+    }
+    for (const [account, monto] of porCuentaOrigen) {
+      movimientos.push({
+        account,
+        type: 'credito',
+        amount: monto,
+        description: d.contraCredito,
+      });
+    }
+  } else {
+    movimientos.push({
+      account: cuentaOrigen,
+      type: 'credito',
+      amount: montoOrigen,
+      description: d.contraCredito,
+    });
+  }
+
+  if (descuento && descuento.monto > 0) {
+    movimientos.push({
+      account: descuento.cuenta,
+      type: 'credito',
+      amount: descuento.monto,
+      description:
+        'Reversión de descuento por pronto pago — anulación de recibo de caja',
+    });
+  }
 
   movimientos.push(
     ...movimientosCuentasOrden(
       cuentasOrden,
-      montoOrigen,
+      montoCuentasOrden ?? montoOrigen,
       d.cuentaOrdenContra,
-      true,
     ),
   );
 

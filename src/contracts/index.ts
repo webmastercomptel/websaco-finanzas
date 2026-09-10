@@ -191,6 +191,11 @@ export interface FacturaLinea {
    *  frozen at the moment the line was built, never recomputed later. */
   saldoAnterior: Monto;
   nuevoSaldo: Monto;
+  /** How much of THIS line is still pending today — unlike
+   *  saldoAnterior/nuevoSaldo above, this is live, not a frozen snapshot.
+   *  What a Recibo's manual per-concepto distribution is validated and
+   *  capped against. */
+  saldoPendiente: Monto;
 }
 
 /** A sales invoice ("FV"), only ever created already numbered. */
@@ -213,6 +218,12 @@ export interface Factura {
   totalImpuestos: Monto;
   total: Monto;
   saldoPendiente: Monto;
+  /** Early-payment discount this invoice offers — 0 when it has none (mora,
+   *  or nothing configured on the lote). See `Factura.discountAmount`. */
+  montoDescuento: Monto;
+  /** Last date a Recibo still earns `montoDescuento` — null exactly when
+   *  `montoDescuento` is 0. */
+  fechaLimiteDescuento: IsoDate | null;
   estado: 'emitida' | 'anulada';
 }
 
@@ -233,6 +244,9 @@ export interface LoteFacturacion {
   periodoDesde: IsoDate;
   periodoHasta: IsoDate;
   descuentoProntoPago: number;
+  /** Mutually exclusive with `descuentoProntoPago` in practice — only used
+   *  when the percentage is 0. See Parámetros de Facturación §4's rule. */
+  valorFijoDescuentoProntoPago: number;
   diasGraciaDescuento: number;
   interesMora: number;
   /** Not a ceiling on the mora amount — the minimum overdue balance before
@@ -284,13 +298,20 @@ export interface ErrorConsolidacion {
 }
 
 /**
- * Result of wiping every Lote/Factura (and their derived asientos/saldos)
- * of the one hardcoded test coproperty, so its billing cycle can be
- * replayed from zero. See `ReiniciarCicloService` for the safety checks.
+ * Result of wiping every financial document (Lotes/Facturas, Recibos, Notas
+ * Crédito/Débito/Anticipo/Contables, and their derived asientos/saldos) of
+ * the one hardcoded test coproperty, so its billing cycle can be replayed
+ * from a blank slate. See `ReiniciarCicloService` for the safety checks.
  */
 export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
   facturasEliminadas: number;
+  recibosEliminados: number;
+  notasCreditoEliminadas: number;
+  notasDebitoEliminadas: number;
+  notasAnticipoEliminadas: number;
+  notasContablesEliminadas: number;
+  aplicacionesEliminadas: number;
   asientosEliminados: number;
   saldosEliminados: number;
 }
@@ -404,13 +425,32 @@ export interface Recibo {
  * (future) Confirmación y Cruce screen list them side by side (design §3.1).
  * Only `'FV'` (Factura) and `'ND'` (Nota Débito) are implemented as targets.
  */
+/** This application's own share of one concepto of the target document —
+ *  same breakdown the accounting ledger's per-line credit already uses, so
+ *  a Recibo/Nota Crédito detail screen can show "cargo por cargo" exactly
+ *  like a Factura's own line table does. */
+export interface DetalleConceptoAplicacion {
+  conceptoId: string;
+  nombreConcepto: string;
+  monto: Monto;
+}
+
 export interface AplicacionCartera {
   id: string;
-  sourceType: 'RC' | 'NC';
+  sourceType: 'RC' | 'NC' | 'NA';
   sourceId: string;
   tipoDocumento: 'FV' | 'ND';
   documentoId: string;
+  /** The target document's own printed number (e.g. "FV-1") — resolved for
+   *  display, never stored on this row itself. `null` when the document
+   *  can no longer be resolved (in practice never expected, since financial
+   *  documents are never deleted). */
+  numeroDocumento: string | null;
   montoAplicado: Monto;
+  /** Portion of `montoAplicado` that is early-payment discount, not real
+   *  money — 0 in the normal case. See `AplicacionCartera.discountApplied`. */
+  montoDescuento: Monto;
+  detalleConceptos: DetalleConceptoAplicacion[];
   estado: 'activa' | 'revertida';
   fecha: IsoDate;
 }
@@ -422,6 +462,50 @@ export interface AplicacionCartera {
  */
 export interface ReciboDetalle extends Recibo {
   aplicaciones: AplicacionCartera[];
+}
+
+/** One row of a Recibos-por-lote upload. */
+export interface LoteRecibosFila {
+  inmuebleCodigo: string;
+  /** The código de copropiedad the file's own row carried, if any — a pure
+   *  cross-check display value, never what resolves the tenant. */
+  copropiedadCodigo: string | null;
+  inmuebleId: string | null;
+  fechaPago: IsoDate;
+  valorRecibido: Monto;
+  reciboId: string | null;
+  /** Resolved for display once this row becomes a real Recibo. */
+  reciboNumeroCompleto: string | null;
+  error: string | null;
+}
+
+/**
+ * A batch of Recibos de Caja uploaded from a flat file — `borrador`
+ * (created, nothing uploaded yet) → `cargado` (file parsed, rows validated,
+ * waiting for the totalDigitado check to pass) → `aplicado` (every row
+ * without an error became its own real Recibo). See `LoteRecibosService`.
+ */
+export interface LoteRecibos {
+  id: string;
+  numero: number;
+  estado: 'borrador' | 'cargado' | 'aplicado';
+  codigo: string;
+  medioPago: 'transferencia' | 'cheque' | 'pse' | 'efectivo';
+  cuentaDestino: string | null;
+  totalDigitado: Monto;
+  /** Sum of `valorRecibido` across every row WITHOUT an error — what the
+   *  frontend compares against `totalDigitado` to enable "Actualizar
+   *  Cartera". */
+  totalFilas: Monto;
+  filas: LoteRecibosFila[];
+}
+
+/** One row's outcome from `aplicar()`ing a LoteRecibos — mirrors
+ *  `ErrorConsolidacion`'s own "best-effort, report per row" shape. */
+export interface ErrorAplicacionLoteRecibos {
+  fila: number;
+  inmuebleCodigo: string;
+  mensaje: string;
 }
 
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
@@ -483,9 +567,18 @@ export interface NotaCredito {
   inmuebleId: string;
   terceroId: string | null;
   facturaId: string;
+  /** The anchor Factura's own printed number ("FV-1") — `null` on the lean
+   *  listing (`GET /notas-credito`), which never resolves it; always set on
+   *  the detail view (`GET /notas-credito/:id`). */
+  numeroFactura: string | null;
   prefijo: string;
   numero: number;
   numeroCompleto: string;
+  /** The date the user declared for this note at creation, validated then
+   *  against the coproperty's current billing period — see
+   *  `NotaCredito.issueDate` (schema). Falls back to the document's own
+   *  `createdAt` for notes created before this field existed. */
+  fecha: IsoDate;
   motivo: MotivoNotaCredito;
   montoTotal: Monto;
   distribucion: DistribucionNotaCredito[];
@@ -538,6 +631,44 @@ export interface NotaDebitoDetalle extends NotaDebito {
   aplicaciones: AplicacionCartera[];
 }
 
+/* ── Notas de Anticipo ────────────────────────────────────────── */
+
+/** Why a Nota de Anticipo was voided — same shape as the other documents'
+ *  void catalogs (design consistency, no domain-specific list requested). */
+export type MotivoAnulacionNotaAnticipo =
+  'error_digitacion' | 'ajuste_contrato' | 'otro';
+
+/**
+ * A "Nota de Anticipo" ("NA") — applies a Recibo's leftover
+ * `montoSinAplicar` against open cartera LATER, as its own auditable
+ * document, from the Anticipos module (never from the Recibo itself — see
+ * `Recibo`'s own note on why there is no `/recibos/:id/aplicar`).
+ */
+export interface NotaAnticipo {
+  id: string;
+  inmuebleId: string;
+  terceroId: string | null;
+  reciboOrigenId: string;
+  prefijo: string;
+  numero: number;
+  numeroCompleto: string;
+  fechaEmision: IsoDate;
+  montoAplicado: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionNotaAnticipo | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * `NotaAnticipo` plus the cargo-por-cargo breakdown of what it applied —
+ * what `GET /notas-anticipo/:id` returns, same pattern as
+ * `NotaDebitoDetalle`.
+ */
+export interface NotaAnticipoDetalle extends NotaAnticipo {
+  aplicaciones: AplicacionCartera[];
+}
+
 /* ── Notas Contables ──────────────────────────────────────────── */
 
 /**
@@ -550,6 +681,7 @@ export interface NotaContable {
   inmuebleId: string;
   conceptoOrigenId: string;
   conceptoDestinoId: string;
+  fecha: IsoDate;
   monto: Monto;
   descripcion: string;
   prefijo: string;
@@ -563,7 +695,7 @@ export interface NotaContable {
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
 
-export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
 
 /** One row in the chronological ledger for an inmueble. */
 export interface MovimientoKardex {
@@ -731,6 +863,18 @@ export interface MovimientoEstadoCuenta {
   categoria: 'pago' | 'descuento' | null;
 }
 
+/** One Recibo of this inmueble still carrying a pending anticipo
+ *  (`unappliedAmount > 0`) — same "pending anticipo" definition the
+ *  Anticipos bandeja uses (`GET /recibos?conAnticipoDisponible=true`), here
+ *  scoped to just this inmueble and shown alongside its statement. `monto`
+ *  is the Recibo's LIVE `unappliedAmount`, not what it printed at creation
+ *  — a later Nota de Anticipo may have already consumed part of it. */
+export interface AnticipoPendienteEstadoCuenta {
+  numeroCompleto: string;
+  fecha: string;
+  monto: number;
+}
+
 /** Response shape for GET /consultas/estado-cuenta. */
 export interface RespuestaEstadoCuenta {
   inmuebleCodigo: string;
@@ -748,6 +892,69 @@ export interface RespuestaEstadoCuenta {
   saldoActual: number;
   estado: 'al_dia' | 'pendiente' | 'vencido';
   movimientos: MovimientoEstadoCuenta[];
+  /** Anticipos pendientes por aplicar de este inmueble, sin importar el
+   *  período consultado — un anticipo vivo es un saldo actual, no un
+   *  movimiento de un período específico. Vacío cuando no tiene ninguno. */
+  anticipos: AnticipoPendienteEstadoCuenta[];
+}
+
+/* ── Conciliación de Cartera (coproperty-wide) ──────────────────── */
+
+/**
+ * Which of the ten fixed kardex concepts a conciliación row summarizes.
+ * Unlike `TipoDocumentoKardex`, a void/reversal is its own concept rather
+ * than a flag on the original one — the printed reconciliation needs both
+ * directions visible as separate rows, in the fixed order the format has
+ * always used.
+ */
+export type ConceptoConciliacionCartera =
+  | 'facturacion'
+  | 'recibos_caja'
+  | 'anulacion_recibos_caja'
+  | 'notas_credito'
+  | 'anulacion_notas_credito'
+  | 'notas_debito'
+  | 'anulacion_notas_debito'
+  | 'notas_anticipo'
+  | 'anulacion_notas_anticipo'
+  | 'notas_contables';
+
+/**
+ * One row of the reconciliation table: one fixed concept's contribution to
+ * cartera during the period, plus the first/last document number involved
+ * (`desde`/`hasta`) so a mismatch can be traced back to specific documents.
+ * `desde`/`hasta` are `null` when the concept had no movement in the period.
+ */
+export interface FilaConciliacionCartera {
+  concepto: ConceptoConciliacionCartera;
+  etiqueta: string;
+  desde: string | null;
+  hasta: string | null;
+  valorDebito: number;
+  valorCredito: number;
+}
+
+/**
+ * Response shape for GET /consultas/conciliacion-cartera — a coproperty-wide
+ * control report, not per-inmueble (contrast Estado de Cuenta): it compares
+ * a balance CALCULATED from the period's own movements — pure arithmetic,
+ * `saldoAnterior + totalDebito - totalCredito` — against `saldoCarteraReal`,
+ * read straight from the `SaldoCartera` table (the maintained running-balance
+ * cache every other cartera screen trusts, NOT re-derived from documents).
+ * `diferencia` is `saldoCarteraCalculado - saldoCarteraReal` and should read
+ * 0 — anything else means the cache has drifted from the documents that are
+ * supposed to maintain it (see `SaldoCartera`'s own schema docblock).
+ */
+export interface RespuestaConciliacionCartera {
+  periodStart: string;
+  periodEnd: string;
+  saldoAnterior: number;
+  conceptos: FilaConciliacionCartera[];
+  totalDebito: number;
+  totalCredito: number;
+  saldoCarteraCalculado: number;
+  saldoCarteraReal: number;
+  diferencia: number;
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */
@@ -1001,7 +1208,7 @@ export interface LineaMovimientoContable {
 export interface MovimientoContable {
   id: string;
   fecha: string;
-  tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT';
+  tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
   /** The anchor document's own _id — links to its detail page. */
   documentoId: string;
   numeroDocumento: string;

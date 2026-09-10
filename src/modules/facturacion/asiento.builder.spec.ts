@@ -4,6 +4,7 @@ import {
   construirAsientoCruce,
   construirMovimientosAplicacionAnticipo,
   construirContraAsientoCruce,
+  construirContraAsientoAplicacionAnticipo,
   construirMovimientosReclasificacion,
   construirContraAsientoNotaDebito,
   cuentasOrdenDe,
@@ -724,6 +725,52 @@ describe('construirAsientoCruce', () => {
     ]);
   });
 
+  it('con desgloseOrigen, debita cada cuenta propia en vez de la cuenta plana de origen (Nota Crédito reversando ingreso por concepto)', () => {
+    const movimientos = construirAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { account: '413501', monto: 70000 },
+        { account: '413502', monto: 30000 },
+      ],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toHaveLength(2);
+    expect(debitos.find((d) => d.account === '413501')?.amount).toBe(70000);
+    expect(debitos.find((d) => d.account === '413502')?.amount).toBe(30000);
+    expect(debitos.some((d) => d.account === '413595')).toBe(false);
+  });
+
+  it('un desgloseOrigen vacío cae a la cuenta plana de origen', () => {
+    const movimientos = construirAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toEqual([
+      expect.objectContaining({ account: '413595', amount: 100000 }),
+    ]);
+  });
+
   it('siempre balanceado: el débito iguala la suma de los créditos', () => {
     const movimientos = construirAsientoCruce(
       '111005',
@@ -766,6 +813,75 @@ describe('construirAsientoCruce', () => {
       })),
     );
     expect(nc[0].description).not.toBe(rc[0].description);
+  });
+
+  it('con descuento, reduce el débito de origen y agrega un débito a la cuenta de descuentos — sigue cuadrando', () => {
+    // Factura de 400000: el cliente consignó 360000, el descuento (40000) la
+    // salda completa — montoAplicado ya viene con el descuento sumado.
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      400000,
+      0,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540501', monto: 40000 },
+    );
+
+    expect(movimientos).toEqual([
+      {
+        account: '111005',
+        type: 'debito',
+        amount: 360000,
+        description: expect.any(String),
+      },
+      {
+        account: '540501',
+        type: 'debito',
+        amount: 40000,
+        description: expect.any(String),
+      },
+      {
+        account: '130501',
+        type: 'credito',
+        amount: 400000,
+        description: expect.any(String),
+      },
+    ]);
+    const debitos = movimientos
+      .filter((m) => m.type === 'debito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    const creditos = movimientos
+      .filter((m) => m.type === 'credito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    expect(debitos).toBe(creditos);
+  });
+
+  it('sin descuento (parámetro omitido), el comportamiento es idéntico al de antes de este parámetro', () => {
+    const conParametroEnCero = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540501', monto: 0 },
+    );
+    const sinParametro = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+    );
+    expect(conParametroEnCero).toEqual(sinParametro);
   });
 });
 
@@ -903,6 +1019,54 @@ describe('construirContraAsientoCruce', () => {
     ]);
   });
 
+  it('con desgloseOrigen, acredita cada cuenta propia en vez de la cuenta plana de origen (reversa cada ingreso de la Nota Crédito que lo debitó)', () => {
+    const movimientos = construirContraAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      100000,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { account: '413501', monto: 70000 },
+        { account: '413502', monto: 30000 },
+      ],
+    );
+
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toHaveLength(2);
+    expect(creditos.find((c) => c.account === '413501')?.amount).toBe(70000);
+    expect(creditos.find((c) => c.account === '413502')?.amount).toBe(30000);
+    expect(creditos.some((c) => c.account === '413595')).toBe(false);
+  });
+
+  it('un desgloseOrigen vacío cae a la cuenta plana de origen', () => {
+    const movimientos = construirContraAsientoCruce(
+      '413595',
+      '130501',
+      '210505',
+      100000,
+      0,
+      100000,
+      'NC',
+      null,
+      undefined,
+      undefined,
+      undefined,
+      [],
+    );
+
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toEqual([
+      expect.objectContaining({ account: '413595', amount: 100000 }),
+    ]);
+  });
+
   it('siempre balanceado: los débitos igualan el crédito', () => {
     const movimientos = construirContraAsientoCruce(
       '111005',
@@ -947,6 +1111,53 @@ describe('construirContraAsientoCruce', () => {
       })),
     );
     expect(nc[2].description).not.toBe(rc[2].description);
+  });
+
+  it('con descuento, agrega un crédito de reversión a la cuenta de descuentos — sigue cuadrando', () => {
+    // Espejo del ejemplo de construirAsientoCruce: 400000 se habían
+    // acreditado a cartera (360000 cash + 40000 descuento); montoOrigen
+    // (receivedAmount cacheado) es 360000, el dinero real.
+    const movimientos = construirContraAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      400000,
+      0,
+      360000,
+      'RC',
+      undefined,
+      undefined,
+      undefined,
+      { cuenta: '540502', monto: 40000 },
+    );
+
+    expect(movimientos).toEqual([
+      {
+        account: '130501',
+        type: 'debito',
+        amount: 400000,
+        description: expect.any(String),
+      },
+      {
+        account: '111005',
+        type: 'credito',
+        amount: 360000,
+        description: expect.any(String),
+      },
+      {
+        account: '540502',
+        type: 'credito',
+        amount: 40000,
+        description: expect.any(String),
+      },
+    ]);
+    const debitos = movimientos
+      .filter((m) => m.type === 'debito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    const creditos = movimientos
+      .filter((m) => m.type === 'credito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    expect(debitos).toBe(creditos);
   });
 });
 
@@ -1021,10 +1232,73 @@ describe('construirAsientoCruce con cuentasOrden', () => {
     );
     expect(movimientos).toHaveLength(3);
   });
+
+  it('con montoCuentasOrden, escala el par al monto explícito en vez del total del documento', () => {
+    // Un recibo de 300.000 donde solo 40.000 tocaron un cargo de mora — el
+    // par de cuentas de orden debe reflejar ESE monto, no los 300.000
+    // completos (el bug que este cambio corrige).
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+      { debito: '831505', credito: '831510' },
+      undefined,
+      40000,
+    );
+
+    expect(movimientos.find((m) => m.account === '831505')?.amount).toBe(40000);
+    expect(movimientos.find((m) => m.account === '831510')?.amount).toBe(40000);
+  });
+
+  it('con montoCuentasOrden en 0, no agrega el par aunque cuentasOrden esté configurado', () => {
+    // Un recibo que nunca tocó un cargo de mora no debe dejar un par de
+    // cuentas de orden en cero sentado en el libro.
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      'RC',
+      { debito: '831505', credito: '831510' },
+      undefined,
+      0,
+    );
+
+    expect(movimientos.some((m) => m.account === '831505')).toBe(false);
+    expect(movimientos.some((m) => m.account === '831510')).toBe(false);
+  });
+
+  it('postea el par con los lados INVERTIDOS respecto a facturacion — cobrar la mora cierra el memo que invoicing abrio', () => {
+    // Facturación abre el par al invoicing la mora: debito en `debito`,
+    // credito en `credito` (ver `construirMovimientos`). Un recibo que
+    // cobra esa misma mora debe cerrarlo, no repetirlo — de lo contrario
+    // el par se dobla en vez de quedar en cero quando ambos eventos ya
+    // ocurrieron. Reportado por el usuario tras confirmar en producción.
+    const movimientos = construirAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      0,
+      'RC',
+      { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos.find((m) => m.account === '831505')?.type).toBe(
+      'credito',
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.type).toBe(
+      'debito',
+    );
+  });
 });
 
 describe('construirContraAsientoCruce con cuentasOrden', () => {
-  it('revierte el par (lados invertidos) por el monto de origen', () => {
+  it('revierte el par de vuelta a los lados planos de facturacion (la creacion ya los invirtio) por el monto de origen', () => {
     const movimientos = construirContraAsientoCruce(
       '111005',
       '130501',
@@ -1037,16 +1311,225 @@ describe('construirContraAsientoCruce con cuentasOrden', () => {
     );
 
     expect(
-      movimientos.find((m) => m.account === '831510' && m.type === 'debito')
+      movimientos.find((m) => m.account === '831505' && m.type === 'debito')
         ?.amount,
     ).toBe(300000);
     expect(
-      movimientos.find((m) => m.account === '831505' && m.type === 'credito')
+      movimientos.find((m) => m.account === '831510' && m.type === 'credito')
         ?.amount,
     ).toBe(300000);
     const suma = (t: 'debito' | 'credito') =>
       movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
     expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('con montoCuentasOrden, revierte solo la porción de mora, no el monto de origen completo', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      200000,
+      100000,
+      300000,
+      'RC',
+      { debito: '831505', credito: '831510' },
+      undefined,
+      40000,
+    );
+
+    expect(
+      movimientos.find((m) => m.account === '831505' && m.type === 'debito')
+        ?.amount,
+    ).toBe(40000);
+    expect(
+      movimientos.find((m) => m.account === '831510' && m.type === 'credito')
+        ?.amount,
+    ).toBe(40000);
+  });
+
+  it('con desgloseCartera, debita cada cuenta propia en vez de la cuenta plana de cartera', () => {
+    const movimientos = construirContraAsientoCruce(
+      '111005',
+      '130501',
+      '210505',
+      500000,
+      0,
+      500000,
+      'RC',
+      null,
+      [
+        { account: '130510', monto: 300000 },
+        { account: '130520', monto: 200000 },
+      ],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toHaveLength(2);
+    expect(debitos.find((d) => d.account === '130510')?.amount).toBe(300000);
+    expect(debitos.find((d) => d.account === '130520')?.amount).toBe(200000);
+    expect(debitos.some((d) => d.account === '130501')).toBe(false);
+  });
+});
+
+describe('construirMovimientosAplicacionAnticipo con desglose y cuentasOrden', () => {
+  it('sin desglose ni cuentasOrden, mantiene el comportamiento plano de siempre', () => {
+    const movimientos = construirMovimientosAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'RC',
+    );
+    expect(movimientos).toEqual([
+      {
+        account: '210505',
+        type: 'debito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+      {
+        account: '130501',
+        type: 'credito',
+        amount: 200000,
+        description: expect.any(String),
+      },
+    ]);
+  });
+
+  it('con desgloseCartera, acredita cada cuenta propia del concepto', () => {
+    const movimientos = construirMovimientosAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'RC',
+      [{ account: '130599', monto: 200000 }],
+    );
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toEqual([
+      expect.objectContaining({ account: '130599', amount: 200000 }),
+    ]);
+  });
+
+  it('con montoCuentasOrden, agrega el par memo por la porción de mora aplicada después', () => {
+    const movimientos = construirMovimientosAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'RC',
+      [{ account: '130599', monto: 200000 }],
+      { debito: '831505', credito: '831510' },
+      50000,
+    );
+
+    expect(movimientos.find((m) => m.account === '831505')?.amount).toBe(50000);
+    expect(movimientos.find((m) => m.account === '831510')?.amount).toBe(50000);
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+    // Same swapped-sides direction as `construirAsientoCruce` — a deferred
+    // application closing mora is the same kind of event as an immediate one.
+    expect(movimientos.find((m) => m.account === '831505')?.type).toBe(
+      'credito',
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.type).toBe(
+      'debito',
+    );
+  });
+
+  it('sin montoCuentasOrden, no agrega ningún par memo aunque cuentasOrden esté configurado', () => {
+    const movimientos = construirMovimientosAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'RC',
+      undefined,
+      { debito: '831505', credito: '831510' },
+    );
+    expect(movimientos).toHaveLength(2);
+  });
+
+  it("con origen 'NA', usa las descripciones de Nota de Anticipo", () => {
+    const movimientos = construirMovimientosAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'NA',
+    );
+    expect(movimientos[0].description).toBe(
+      'Anticipo aplicado a cartera — nota de anticipo',
+    );
+    expect(movimientos[1].description).toBe(
+      'Cartera por cobrar — aplicación de nota de anticipo',
+    );
+  });
+});
+
+describe('construirContraAsientoAplicacionAnticipo', () => {
+  it('revierte los lados planos: debito cartera (por desglose), credito anticipos, por el monto total', () => {
+    const movimientos = construirContraAsientoAplicacionAnticipo(
+      '210505',
+      '130501',
+      200000,
+      'NA',
+      [
+        { account: '130510', monto: 120000 },
+        { account: '130520', monto: 80000 },
+      ],
+    );
+
+    const debitos = movimientos.filter((m) => m.type === 'debito');
+    expect(debitos).toHaveLength(2);
+    expect(debitos.find((d) => d.account === '130510')?.amount).toBe(120000);
+    expect(debitos.find((d) => d.account === '130520')?.amount).toBe(80000);
+
+    const creditos = movimientos.filter((m) => m.type === 'credito');
+    expect(creditos).toHaveLength(1);
+    expect(creditos[0]).toMatchObject({ account: '210505', amount: 200000 });
+
+    const suma = (t: 'debito' | 'credito') =>
+      movimientos.filter((m) => m.type === t).reduce((a, m) => a + m.amount, 0);
+    expect(suma('debito')).toBe(suma('credito'));
+  });
+
+  it('sin desgloseCartera, debita la cuenta de cartera compartida', () => {
+    const movimientos = construirContraAsientoAplicacionAnticipo(
+      '210505',
+      '130501',
+      100000,
+      'NA',
+    );
+    expect(
+      movimientos.find((m) => m.type === 'debito' && m.account === '130501')
+        ?.amount,
+    ).toBe(100000);
+  });
+
+  it('con cuentasOrden, revierte el par de vuelta a los lados planos de facturacion (la creacion ya los invirtio)', () => {
+    const movimientos = construirContraAsientoAplicacionAnticipo(
+      '210505',
+      '130501',
+      100000,
+      'NA',
+      undefined,
+      { debito: '831505', credito: '831510' },
+      40000,
+    );
+    expect(movimientos.find((m) => m.account === '831505')?.type).toBe(
+      'debito',
+    );
+    expect(movimientos.find((m) => m.account === '831510')?.type).toBe(
+      'credito',
+    );
+    expect(movimientos.find((m) => m.account === '831505')?.amount).toBe(40000);
+  });
+
+  it('sin cuentasOrden no agrega ningún par memo', () => {
+    const movimientos = construirContraAsientoAplicacionAnticipo(
+      '210505',
+      '130501',
+      100000,
+      'NA',
+    );
+    expect(movimientos).toHaveLength(2);
   });
 });
 

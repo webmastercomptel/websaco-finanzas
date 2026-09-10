@@ -1,5 +1,21 @@
 import { Types } from 'mongoose';
-import { calcularDocumentosConSaldoAFecha } from './cartera-historica.util';
+import {
+  calcularDocumentosConSaldoAFecha,
+  finDelDiaCorte,
+} from './cartera-historica.util';
+
+describe('finDelDiaCorte', () => {
+  it('extiende hasta 04:59:59.999 UTC del dia calendario siguiente (fin de dia en Colombia, UTC-5)', () => {
+    const r = finDelDiaCorte(new Date('2026-08-15'));
+    expect(r.toISOString()).toBe('2026-08-16T04:59:59.999Z');
+  });
+
+  it('un appliedAt de la noche en Colombia (ya "manana" en UTC) queda antes del corte', () => {
+    const corte = finDelDiaCorte(new Date('2026-08-15'));
+    const appliedAt8pmColombia = new Date('2026-08-16T01:00:00.000Z');
+    expect(appliedAt8pmColombia.getTime()).toBeLessThanOrEqual(corte.getTime());
+  });
+});
 
 const COP = new Types.ObjectId();
 const id = () => new Types.ObjectId();

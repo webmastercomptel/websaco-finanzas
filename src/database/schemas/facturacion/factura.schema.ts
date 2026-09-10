@@ -108,6 +108,27 @@ export class Factura {
   @Prop({ required: true })
   outstandingBalance: number;
 
+  /**
+   * Early-payment discount this invoice offers — computed ONCE at
+   * `consolidar()` time from the lote's own `earlyPaymentDiscount`/
+   * `earlyPaymentDiscountFixedValue` against this invoice's own
+   * Administración cargo, and frozen here forever after, same immutability
+   * as every other field above (`total`, `lines`, …) — an invoice's terms
+   * never change after it is issued. 0 when the invoice carries any mora
+   * line and `Copropiedad.discountAppliesWithLateFee` is false (the
+   * default), or when the lote had no discount configured at all. See
+   * `calcularDescuentoProntoPago` (`common/facturacion/descuento-pronto-
+   * pago.util.ts`) for the exact rule.
+   */
+  @Prop({ required: true, default: 0 })
+  discountAmount: number;
+
+  /** Last date a Recibo still earns `discountAmount` — copied verbatim from
+   *  `LoteFacturacion.discountDeadline` at `consolidar()` time. Always null
+   *  exactly when `discountAmount` is 0 — never read on its own. */
+  @Prop({ type: Date, default: null })
+  discountDeadline: Date | null;
+
   @Prop({ required: true, enum: ['emitida', 'anulada'], default: 'emitida' })
   status: 'emitida' | 'anulada';
 

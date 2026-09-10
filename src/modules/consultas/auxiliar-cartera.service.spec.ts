@@ -49,6 +49,14 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
+  _id: id(),
+  coPropertyId: COP,
+  inmuebleId: INMUEBLE,
+  fullNumber: 'NA-001',
+  ...over,
+});
+
 const aplicacionDoc = (
   sourceId: Types.ObjectId,
   documentId: Types.ObjectId,
@@ -81,6 +89,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     notasCredito: find(),
     notasDebito: find(),
     notasContables: find(),
+    notasAnticipo: find(),
     aplicaciones: find(),
     inmuebles: find(),
     terceros: find(),
@@ -93,6 +102,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.notasCredito as never,
     m.notasDebito as never,
     m.notasContables as never,
+    m.notasAnticipo as never,
     m.aplicaciones as never,
     m.inmuebles as never,
     m.terceros as never,
@@ -187,6 +197,82 @@ describe('AuxiliarCarteraService', () => {
         'FV-002',
         'FV-003',
       ]);
+    });
+
+    it('usa Recibo.receivedDate como fecha del movimiento, no AplicacionCartera.appliedAt', async () => {
+      // Bug real reportado: un Recibo digitado con fecha 02/06/2026 (mucho
+      // antes del instante real del servidor) mostraba su cruce con la
+      // fecha de HOY en el Auxiliar de Cartera — porque el cruce corre en
+      // el instante real (`appliedAt`), nunca en la fecha que el usuario
+      // declaró para el pago.
+      const rec = reciboDoc({ receivedDate: new Date('2026-06-02') });
+      const f = facturaDoc();
+      const app = aplicacionDoc(rec._id, f._id, {
+        appliedAt: new Date('2026-09-09'),
+      });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        recibos: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([rec]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([app]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-06-01',
+        hasta: '2026-06-30',
+      });
+
+      const fila = result.movimientos.find((m) => m.tipo === 'RC');
+      expect(fila).toBeDefined();
+      expect(fila!.fecha).toBe('2026-06-02T00:00:00.000Z');
+    });
+
+    it('una Nota de Anticipo aplicando a una factura produce una fila Crédito NA (el anticipo se aplicó después del recibo, no desde el propio recibo)', async () => {
+      const na = notaAnticipoDoc();
+      const f = facturaDoc();
+      const app = aplicacionDoc(na._id, f._id, {
+        sourceType: 'NA',
+        amountApplied: 75000,
+      });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasAnticipo: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([na]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([app]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      const fila = result.movimientos.find((m) => m.tipo === 'NA');
+      expect(fila).toMatchObject({
+        numeroCompleto: 'NA-001',
+        concepto: 'Nota de Anticipo NA-001',
+        refCruce: 'FV-001',
+        credito: 75000,
+      });
     });
 
     it('una Nota Contable produce exactamente 2 filas (débito destino, crédito origen), net zero', async () => {

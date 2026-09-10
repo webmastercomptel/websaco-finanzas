@@ -36,6 +36,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import { ajustarSaldosCarteraPorDistribucion } from '../recibos/cruce.util';
 import {
@@ -46,7 +47,7 @@ import {
   CUENTA_SIN_ASIGNAR,
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
-import { toNotaContable } from './notas-contables.mapper';
+import { toNotaContable, fechaNotaContable } from './notas-contables.mapper';
 import type {
   NotaContable as NotaContableContract,
   Paginado,
@@ -166,8 +167,20 @@ export class NotasContablesService {
       throw new ConflictException('El monto debe ser mayor que cero');
     }
 
-    // A refusal costs no session — same placement as
-    // RecibosService.crear()'s own periodo/lotes checks.
+    // The note's own date must fall in the same month/year as the last
+    // consolidated billing run — same rule, same reasoning as
+    // `NotasCreditoService.crear()`'s identical check on `dto.fecha`. A
+    // coproperty that has never consolidated a lote has no "current period"
+    // yet, so nothing to validate against. A refusal costs no session —
+    // same placement as `RecibosService.crear()`'s own periodo/lotes checks.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la nota',
+    );
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     return this.transaccion(async (session) => {
@@ -205,6 +218,7 @@ export class NotasContablesService {
             conceptoDestinoId,
             monto: dto.monto,
             description: dto.descripcion,
+            issueDate: new Date(dto.fecha),
             prefix: numero.prefijo,
             number: numero.numero,
             fullNumber: numero.completo,
@@ -237,13 +251,16 @@ export class NotasContablesService {
         +1,
       );
 
-      // Post 2-leg accounting entry.
+      // Post 2-leg accounting entry, dated with the note's OWN declared
+      // date — never `new Date()`.
       await this.postearAsiento(
         session,
         coPropertyId,
         creada,
         conceptoOrigenId,
         conceptoDestinoId,
+        fechaNotaContable(creada),
+        false,
       );
 
       const final = await this.notasContables
@@ -334,6 +351,19 @@ export class NotasContablesService {
   ): Promise<NotaContableContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as creation, same reasoning: the accountant controls
+    // every document date in the ledger, this system never assumes "today".
+    // A refusal costs no session — same placement as `crear()`'s own check.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
+
     return this.transaccion(async (session) => {
       const nota = await this.notasContables
         .findOne({ _id: id, coPropertyId })
@@ -368,13 +398,15 @@ export class NotasContablesService {
         -1,
       );
 
-      // Post mirrored entry: swap accounts (design §7).
+      // Post mirrored entry: swap accounts (design §7). Dated with THIS
+      // anulación's own declared date, never the note's original date.
       await this.postearAsiento(
         session,
         coPropertyId,
         nota,
         nota.conceptoDestinoId,
         nota.conceptoOrigenId,
+        new Date(dto.fecha),
         true,
       );
 
@@ -413,7 +445,9 @@ export class NotasContablesService {
    * mirrors that same swap onto `cuentasOrden` (`invertirCuentasOrden`) so the
    * memo pair nets to zero on void instead of doubling — the real accounts
    * already get this for free from the swapped ids, but `cuentasOrden` is
-   * fixed per coproperty and needs telling explicitly.
+   * fixed per coproperty and needs telling explicitly. `fecha` is the note's
+   * own declared date at creation, or the anulación's own declared date at
+   * void — never `new Date()`, same rule as every other document.
    */
   private async postearAsiento(
     session: ClientSession,
@@ -421,6 +455,7 @@ export class NotasContablesService {
     nota: NotaContableDocument,
     cuentaOrigenConceptoId: Types.ObjectId,
     cuentaDestinoConceptoId: Types.ObjectId,
+    fecha: Date,
     esAnulacion = false,
   ): Promise<void> {
     const [cuentaOrigenDoc, cuentaDestinoDoc, copropiedad] = await Promise.all([
@@ -469,7 +504,7 @@ export class NotasContablesService {
           notaCreditoId: null,
           notaDebitoId: null,
           notaContableId: nota._id,
-          date: new Date(),
+          date: fecha,
           entries,
         },
       ],

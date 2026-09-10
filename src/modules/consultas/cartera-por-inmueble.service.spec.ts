@@ -390,9 +390,11 @@ describe('CarteraPorInmuebleService', () => {
 
     await svc.findOne({ inmuebleId: inmId.toString(), fecha: '2026-08-01' });
 
+    // End of "2026-08-01" in Colombia local time (UTC-5) is
+    // 2026-08-02T04:59:59.999Z — see `finDelDiaCorte`.
     expect(facturasFind).toHaveBeenCalledWith(
       expect.objectContaining({
-        issueDate: { $lte: new Date('2026-08-01T23:59:59.999Z') },
+        issueDate: { $lte: new Date('2026-08-02T04:59:59.999Z') },
       }),
     );
   });
@@ -426,6 +428,52 @@ describe('CarteraPorInmuebleService', () => {
       aplicaciones: {
         find: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([appEstaTarde]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+    });
+
+    const result = await svc.findOne({
+      inmuebleId: inmId.toString(),
+      fecha: hoyIso,
+    });
+
+    expect(result.documentos).toHaveLength(0);
+  });
+
+  it('con fecha de corte = hoy: cuenta un Recibo aplicado esta noche en Colombia aunque su timestamp UTC ya sea "manana" (bug real reportado)', async () => {
+    // Colombia is UTC-5: a Recibo applied at 8pm local time on "today" is
+    // stored with a UTC `appliedAt` that already reads 1am the NEXT
+    // calendar day. Picking "today" (Colombia) as Fecha Corte must still
+    // count it — this is the exact scenario the user hit with RC-4.
+    const inmId = id();
+    const fId = id();
+    const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    // "today" in Colombia, expressed as the UTC instant for 8pm local
+    // (UTC-5) — i.e. 01:00 UTC the following calendar day.
+    const hoyColombia = new Date('2026-08-15T00:00:00.000Z');
+    const hoyIso = '2026-08-15';
+    const appEstaNoche = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 100000,
+      status: 'activa',
+      appliedAt: new Date(hoyColombia.getTime() + 25 * 60 * 60 * 1000), // next-day 01:00 UTC
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([appEstaNoche]),
       },
       inmuebles: {
         find: jest.fn().mockReturnThis(),

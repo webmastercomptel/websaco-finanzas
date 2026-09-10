@@ -4,6 +4,25 @@ import { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-deb
 import { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 
 /**
+ * Turns a bare "fecha de corte" (a calendar day picked by the user, or
+ * `query.fecha` parsed as that day's UTC midnight) into the actual instant
+ * that day ends for this product's users — all of them in Colombia
+ * (UTC-5), never the server's own timezone (Cloud Run runs UTC).
+ *
+ * 23:59:59.999 local in Bogotá is 04:59:59.999 UTC the FOLLOWING calendar
+ * day — `setUTCHours(28, ...)` rolls over on purpose. Without this, a
+ * Recibo applied this evening in Colombia (which lands after UTC midnight,
+ * so "tomorrow" in raw UTC) reads as `appliedAt > fecha` in `activeAsOf`
+ * and silently drops out of every point-in-time report for the rest of
+ * the same local day — the exact bug reported for Cartera por Inmueble.
+ */
+export function finDelDiaCorte(d: Date): Date {
+  const r = new Date(d);
+  r.setUTCHours(23 + 5, 59, 59, 999);
+  return r;
+}
+
+/**
  * A document (Factura or NotaDebito) with a positive outstanding balance
  * as of a historical date. Returned by `calcularDocumentosConSaldoAFecha`.
  */

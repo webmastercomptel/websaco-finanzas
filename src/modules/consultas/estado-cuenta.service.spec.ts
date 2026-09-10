@@ -15,6 +15,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   fullNumber: 'FV-001-001',
   total: 200000,
   status: 'emitida',
+  lines: [{}],
   ...over,
 });
 
@@ -175,6 +176,70 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoAnterior).toBe(150000);
     });
 
+    it("el concepto de una Factura es 'N Cargos del mes FV-xxx', N según la cantidad de líneas", async () => {
+      const inmId = id();
+      const f = facturaDoc({
+        inmuebleId: inmId,
+        fullNumber: 'FV-0012',
+        total: 300000,
+        lines: [{}, {}, {}],
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.movimientos[0].concepto).toBe('3 Cargos del mes FV-0012');
+    });
+
+    it('el descuento por pronto pago de un Recibo va a descuentosAjustes, NUNCA a pagosRecibidos', async () => {
+      // Bug real reportado: un Recibo con descuento por pronto pago activo
+      // (amountApplied 400000 = 360000 de efectivo real + 40000 de
+      // descuento) sumaba el descuento completo a "Pagos Recibidos" — el
+      // propietario nunca pagó esos 40000, así que deben verse como
+      // descuento, no como plata recibida.
+      const inmId = id();
+      const fId = id();
+      const rId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 400000 });
+      const r = reciboDoc({ _id: rId });
+      const app = appDoc(rId, 'RC', {
+        amountApplied: 400000,
+        discountApplied: 40000,
+        appliedAt: new Date('2026-01-20'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.pagosRecibidos).toBe(360000);
+      expect(result.descuentosAjustes).toBe(40000);
+      const filaDescuento = result.movimientos.find((m) =>
+        m.concepto.includes('Descuento Pronto Pago'),
+      );
+      expect(filaDescuento).toMatchObject({
+        abono: 40000,
+        categoria: 'descuento',
+      });
+    });
+
     it('Recibo application produces categoria pago', async () => {
       const inmId = id();
       const fId = id();
@@ -204,6 +269,41 @@ describe('EstadoCuentaService', () => {
       expect(pagoRow!.abono).toBe(30000);
       expect(result.pagosRecibidos).toBe(30000);
       expect(result.descuentosAjustes).toBe(0);
+    });
+
+    it('usa Recibo.receivedDate como fecha del movimiento, no AplicacionCartera.appliedAt', async () => {
+      // Bug real reportado: se liquida un lote de octubre y se elabora un
+      // Recibo #12 con receivedDate en octubre, pero el cruce corre en el
+      // instante real del servidor (appliedAt en septiembre) — el Estado de
+      // Cuenta de octubre debía mostrar el pago y no lo hacía porque
+      // filtraba/mostraba por appliedAt en vez de la fecha del Recibo.
+      const inmId = id();
+      const fId = id();
+      const rId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
+      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-10-01') });
+      const app = appDoc(rId, 'RC', {
+        amountApplied: 100000,
+        appliedAt: new Date('2026-09-09'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-10-01T00:00:00.000Z',
+        periodEnd: '2026-10-31T23:59:59.999Z',
+      });
+
+      const pagoRow = result.movimientos.find((m) => m.categoria === 'pago');
+      expect(pagoRow).toBeDefined();
+      expect(pagoRow!.fecha).toBe('2026-10-01T00:00:00.000Z');
+      expect(result.pagosRecibidos).toBe(100000);
     });
 
     it('NC application produces categoria descuento', async () => {
@@ -470,6 +570,52 @@ describe('EstadoCuentaService', () => {
       expect(tercerosFindOne).toHaveBeenCalledWith(
         expect.objectContaining({ coPropertyId: COP }),
       );
+    });
+
+    it('anticipos lista los Recibos activos con unappliedAmount > 0, sin importar el período consultado', async () => {
+      const inmId = id();
+      // Con anticipo, dentro de otro mes — debe salir igual: es un saldo
+      // vivo, no un movimiento del período.
+      const rConAnticipo = reciboDoc({
+        fullNumber: 'RC-0011',
+        status: 'activo',
+        receivedDate: new Date('2026-06-02'),
+        unappliedAmount: 180200,
+      });
+      // Sin saldo pendiente — no debe salir.
+      const rSinAnticipo = reciboDoc({
+        fullNumber: 'RC-0009',
+        status: 'activo',
+        receivedDate: new Date('2026-05-01'),
+        unappliedAmount: 0,
+      });
+      // Anulado — nunca es un anticipo disponible, aunque quedara
+      // unappliedAmount > 0 sin limpiar.
+      const rAnulado = reciboDoc({
+        fullNumber: 'RC-0007',
+        status: 'anulado',
+        receivedDate: new Date('2026-04-01'),
+        unappliedAmount: 50000,
+      });
+
+      const svc = servicio({
+        recibos: mockFind([rConAnticipo, rSinAnticipo, rAnulado]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.anticipos).toEqual([
+        {
+          numeroCompleto: 'RC-0011',
+          fecha: '2026-06-02T00:00:00.000Z',
+          monto: 180200,
+        },
+      ]);
     });
   });
 });

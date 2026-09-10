@@ -42,6 +42,10 @@ import {
   NotaCreditoDocument,
 } from '../../database/schemas/notas-credito/nota-credito.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -50,6 +54,8 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
+import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
@@ -97,6 +103,8 @@ export class NotasDebitoService {
     private readonly recibos: Model<ReciboDocument>,
     @InjectModel(NotaCredito.name)
     private readonly notasCredito: Model<NotaCreditoDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     private readonly tenant: TenantContextService,
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
@@ -280,7 +288,53 @@ export class NotasDebitoService {
       .find({ coPropertyId, documentType: 'ND', documentId: nota._id })
       .sort({ appliedAt: 1 })
       .exec();
-    return toNotaDebitoDetalle(nota, aplicaciones);
+
+    // Each aplicación's source (who paid this nota) can be a different
+    // Recibo/Nota Crédito/Nota de Anticipo — batch-resolve their own
+    // business dates instead of showing the real cruce instant
+    // (`appliedAt`), same reasoning as every other `appliedAt` fix this
+    // session.
+    const idsPorTipo = {
+      RC: [] as string[],
+      NC: [] as string[],
+      NA: [] as string[],
+    };
+    for (const a of aplicaciones)
+      idsPorTipo[a.sourceType].push(a.sourceId.toString());
+    const [recibosOrigen, notasCreditoOrigen, notasAnticipoOrigen] =
+      await Promise.all([
+        idsPorTipo.RC.length
+          ? this.recibos
+              .find({ coPropertyId, _id: { $in: idsPorTipo.RC } })
+              .exec()
+          : [],
+        idsPorTipo.NC.length
+          ? this.notasCredito
+              .find({ coPropertyId, _id: { $in: idsPorTipo.NC } })
+              .exec()
+          : [],
+        idsPorTipo.NA.length
+          ? this.notasAnticipo
+              .find({ coPropertyId, _id: { $in: idsPorTipo.NA } })
+              .exec()
+          : [],
+      ]);
+    const fechasPorSourceId = new Map<string, Date>([
+      ...recibosOrigen.map((r): [string, Date] => [
+        r._id.toString(),
+        r.receivedDate,
+      ]),
+      ...notasCreditoOrigen.map((nc): [string, Date] => [
+        nc._id.toString(),
+        fechaNotaCredito(nc),
+      ]),
+      ...notasAnticipoOrigen.map((na): [string, Date] => [
+        na._id.toString(),
+        na.issueDate,
+      ]),
+    ]);
+
+    return toNotaDebitoDetalle(nota, aplicaciones, fechasPorSourceId);
   }
 
   /**
@@ -314,6 +368,18 @@ export class NotasDebitoService {
     accountId: string,
   ): Promise<NotaDebitoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as `crear()`'s own `dto.fecha` check. A refusal costs no
+    // session.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
 
     return this.transaccion(async (session) => {
       const nota = await this.notasDebito
@@ -384,7 +450,11 @@ export class NotasDebitoService {
             reciboId: null,
             notaCreditoId: null,
             notaDebitoId: nota._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` stays the real audit instant, a separate field on
+            // purpose (see the creation entry's own note on this split).
+            date: new Date(dto.fecha),
             entries,
           },
         ],
@@ -419,8 +489,14 @@ export class NotasDebitoService {
 
   /**
    * Restores the source document's unappliedAmount when voiding a Nota
-   * Débito application. The source is either a Recibo or a Nota Crédito —
-   * dispatched by `aplicacion.sourceType`.
+   * Débito application. The source is a Recibo, a Nota Crédito, or a Nota
+   * de Anticipo — dispatched by `aplicacion.sourceType`.
+   *
+   * A Nota de Anticipo has no `unappliedAmount` of its own (see its schema
+   * docblock) — undoing one of its applications reduces ITS OWN
+   * `appliedAmount` (this document applied less than it thought) and gives
+   * the money back to the RECIBO it drew from, exactly like voiding the
+   * Nota de Anticipo directly would.
    */
   private async restaurarMontoFuente(
     session: ClientSession,
@@ -453,6 +529,28 @@ export class NotasDebitoService {
           { session },
         )
         .exec();
+    } else if (aplicacion.sourceType === 'NA') {
+      const notaAnticipo = await this.notasAnticipo
+        .findOneAndUpdate(
+          { _id: aplicacion.sourceId, coPropertyId },
+          { $inc: { appliedAmount: -aplicacion.amountApplied } },
+          { session },
+        )
+        .exec();
+      if (notaAnticipo) {
+        await this.recibos
+          .findOneAndUpdate(
+            { _id: notaAnticipo.reciboOrigenId, coPropertyId },
+            {
+              $inc: {
+                unappliedAmount: aplicacion.amountApplied,
+                appliedAmount: -aplicacion.amountApplied,
+              },
+            },
+            { session },
+          )
+          .exec();
+      }
     }
   }
 
@@ -501,7 +599,11 @@ export class NotasDebitoService {
           reciboId: null,
           notaCreditoId: null,
           notaDebitoId: nota._id,
-          date: new Date(),
+          // The nota's own declared business date (`dto.fechaCargo`), not
+          // the real instant of posting — same reasoning as Factura's
+          // `lote.billingDate`/Recibo's `receivedDate`: this document can be
+          // keyed in days after the date it actually charges.
+          date: nota.issueDate,
           entries,
         },
       ],

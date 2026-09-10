@@ -40,6 +40,7 @@ import {
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   AplicacionInvalidaError,
@@ -57,7 +58,11 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
-import { toNotaCredito, toNotaCreditoDetalle } from './notas-credito.mapper';
+import {
+  toNotaCredito,
+  toNotaCreditoDetalle,
+  fechaNotaCredito,
+} from './notas-credito.mapper';
 import { toAplicacionCartera } from '../recibos/recibos.mapper';
 import type {
   NotaCredito as NotaCreditoContract,
@@ -74,8 +79,12 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned in Task 3, unchanged here. NO
- * `PeriodoService` argument — see Task 3's own note on why `crear()` needs
- * no period check (a Nota Crédito is always dated `new Date()`).
+ * `PeriodoService` argument: unlike `RecibosService`, `crear()` never checks
+ * the accounting-period LOCK (`PeriodoService.exigirAbierto`) — only that
+ * the caller-supplied `dto.fecha` falls in the CURRENT billing period, via
+ * `lotes.obtenerUltimoConsolidado()` (already needed here for the
+ * no-open-lote rule below), same as `RecibosService.crear()`'s own
+ * `fechaRecibo` check.
  *
  * `lotes` was APPENDED for the "no Nota Crédito while a billing run is open"
  * rule — same reasoning as `RecibosService`'s own `lotes` argument.
@@ -168,6 +177,19 @@ export class NotasCreditoService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const facturaId = new Types.ObjectId(dto.facturaId);
 
+    // The note's own date must fall in the same month/year as the last
+    // consolidated billing run — same rule, same reasoning, same helper as
+    // `RecibosService.crear()`'s identical check on `fechaRecibo`. A
+    // coproperty that has never consolidated a lote has no "current period"
+    // yet, so nothing to validate against.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la nota',
+    );
     // A refusal costs no session — same placement as
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
@@ -223,6 +245,7 @@ export class NotasCreditoService {
             inmuebleId,
             terceroId: factura.terceroId,
             facturaId,
+            issueDate: new Date(dto.fecha),
             prefix: numero.prefijo,
             number: numero.numero,
             fullNumber: numero.completo,
@@ -241,6 +264,29 @@ export class NotasCreditoService {
         ],
         { session },
       );
+
+      // The débito side of the creation entry, per concepto's own
+      // `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`, frozen on
+      // the anchor Factura's line) — the SAME account originally credited
+      // when this concept was billed, so a credit note correctly reverses
+      // THAT revenue instead of lumping every concept into one shared
+      // "devoluciones" account (see `construirAsientoCruce`'s own
+      // `desgloseOrigen` docblock). Built from `dto.distribucion` directly
+      // (the user's FULL declared split, always summing to `dto.montoTotal`)
+      // — never scaled to `montoAAplicar` below: even the portion that
+      // becomes anticipo still reverses revenue for those same concepts, it
+      // just hasn't been applied against a specific invoice balance yet.
+      const debitosPorCuenta = new Map<string | null, number>();
+      for (const linea of dto.distribucion) {
+        const facturaLinea = factura.lines.find((l) =>
+          l.conceptoId.equals(linea.conceptoId),
+        );
+        const cuenta = facturaLinea?.accountingIncomeAccount ?? null;
+        debitosPorCuenta.set(
+          cuenta,
+          (debitosPorCuenta.get(cuenta) ?? 0) + linea.monto,
+        );
+      }
 
       // Always exactly one target: the anchor invoice itself — never a
       // manual/FIFO choice like Recibos' crear() (design §5).
@@ -277,6 +323,16 @@ export class NotasCreditoService {
           montoAAplicar,
           -1,
         );
+        const detalleConceptos = partes.map((parte) => {
+          const linea = factura.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          return {
+            conceptoId: parte.conceptoId,
+            conceptName: linea?.conceptName ?? 'Concepto',
+            monto: parte.parte,
+          };
+        });
         for (const parte of partes) {
           const linea = factura.lines.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
@@ -296,6 +352,12 @@ export class NotasCreditoService {
               documentType: 'FV',
               documentId: facturaId,
               amountApplied: montoAAplicar,
+              // Same "per-concepto breakdown, for printing" purpose as
+              // `ejecutarAplicacionManual`'s identical field (cruce.util.ts)
+              // — the ONLY point this split is ever reconstructable: `partes`
+              // is computed once, here, from `dto.distribucion` scaled to
+              // `montoAAplicar`, and never persisted anywhere else.
+              detalleConceptos,
               status: 'activa',
               appliedAt: new Date(),
               appliedBy: accountId,
@@ -329,6 +391,7 @@ export class NotasCreditoService {
         totalAplicadoAhora,
         dto.montoTotal - totalAplicadoAhora,
         creditosPorCuenta,
+        debitosPorCuenta,
       );
 
       const final = await this.notasCredito
@@ -403,8 +466,11 @@ export class NotasCreditoService {
           .findOne({ _id: id, coPropertyId })
           .session(session)
           .exec();
+        const fechaNota = fechaNotaCredito(nota);
         return {
-          aplicadas: creadas.map(toAplicacionCartera),
+          aplicadas: creadas.map((a) =>
+            toAplicacionCartera(a, null, fechaNota),
+          ),
           montoSinAplicar: notaFinal!.unappliedAmount,
           errores: [],
         };
@@ -429,8 +495,11 @@ export class NotasCreditoService {
           totalAplicado,
         );
       }
+      const fechaNota = fechaNotaCredito(nota);
       return {
-        aplicadas: resultado.aplicadas.map(toAplicacionCartera),
+        aplicadas: resultado.aplicadas.map((a) =>
+          toAplicacionCartera(a, null, fechaNota),
+        ),
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };
@@ -478,7 +547,7 @@ export class NotasCreditoService {
         );
       }
 
-      await ajustarSaldosCartera(
+      const partes = await ajustarSaldosCartera(
         this.saldos,
         session,
         coPropertyId,
@@ -486,6 +555,16 @@ export class NotasCreditoService {
         solicitada.montoAplicado,
         -1,
       );
+      const detalleConceptos = partes.map((parte) => {
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        return {
+          conceptoId: parte.conceptoId,
+          conceptName: linea?.conceptName ?? 'Concepto',
+          monto: parte.parte,
+        };
+      });
 
       const [creada] = await this.aplicaciones.create(
         [
@@ -496,6 +575,7 @@ export class NotasCreditoService {
             documentType: 'FV',
             documentId: facturaId,
             amountApplied: solicitada.montoAplicado,
+            detalleConceptos,
             status: 'activa',
             appliedAt: new Date(),
             appliedBy: accountId,
@@ -566,7 +646,7 @@ export class NotasCreditoService {
           factura._id,
           monto,
         );
-        await ajustarSaldosCartera(
+        const partes = await ajustarSaldosCartera(
           this.saldos,
           session,
           coPropertyId,
@@ -574,6 +654,16 @@ export class NotasCreditoService {
           monto,
           -1,
         );
+        const detalleConceptos = partes.map((parte) => {
+          const linea = facturaActualizada.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          return {
+            conceptoId: parte.conceptoId,
+            conceptName: linea?.conceptName ?? 'Concepto',
+            monto: parte.parte,
+          };
+        });
 
         const [creada] = await this.aplicaciones.create(
           [
@@ -584,6 +674,7 @@ export class NotasCreditoService {
               documentType: 'FV',
               documentId: factura._id,
               amountApplied: monto,
+              detalleConceptos,
               status: 'activa',
               appliedAt: new Date(),
               appliedBy: accountId,
@@ -639,6 +730,19 @@ export class NotasCreditoService {
     accountId: string,
   ): Promise<NotaCreditoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // The reversing asiento is dated by the user, never by the server clock
+    // — same rule as creation, same reasoning: the accountant controls
+    // every document date in the ledger, this system never assumes "today".
+    // A refusal costs no session — same placement as `crear()`'s own check.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fecha),
+      ultimoLote,
+      'La fecha de la anulación',
+    );
 
     return this.transaccion(async (session) => {
       const nota = await this.notasCredito
@@ -735,6 +839,25 @@ export class NotasCreditoService {
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaDevoluciones =
         copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+      // Restores the SAME per-concepto income accounts `postearAsientoCreacion`
+      // actually debited — read fresh rather than reused from the loop above,
+      // since the anchor Factura is only touched there when an ACTIVE
+      // application against it exists (never true when its outstandingBalance
+      // was already 0 at creation), while this débito reversal always covers
+      // the note's FULL `totalAmount`/`distribution`, applied or not.
+      const facturaAncla = await this.facturas
+        .findOne({ _id: nota.facturaId, coPropertyId })
+        .session(session)
+        .exec();
+      const desgloseOrigen = nota.distribution.map((linea) => {
+        const lineaFactura = facturaAncla?.lines.find((l) =>
+          l.conceptoId.equals(linea.conceptoId),
+        );
+        return {
+          account: lineaFactura?.accountingIncomeAccount ?? cuentaDevoluciones,
+          monto: linea.amount,
+        };
+      });
       let entries = construirContraAsientoCruce(
         cuentaDevoluciones,
         cuentaCartera,
@@ -744,6 +867,10 @@ export class NotasCreditoService {
         nota.totalAmount,
         'NC',
         cuentasOrdenDe(copropiedad),
+        undefined,
+        undefined,
+        undefined,
+        desgloseOrigen,
       );
       entries = await this.conAuxiliares(
         session,
@@ -760,7 +887,13 @@ export class NotasCreditoService {
             facturaId: null,
             reciboId: null,
             notaCreditoId: nota._id,
-            date: new Date(),
+            // The date the user declared for THIS anulación (validated
+            // above, before the transaction opened) — never `new Date()`.
+            // `voidedAt` below stays the real audit instant on purpose (see
+            // its own field comment): this is the business date, that is
+            // the "when it was actually recorded" trail — never the same
+            // field, never conflated.
+            date: new Date(dto.fecha),
             entries,
           },
         ],
@@ -798,7 +931,7 @@ export class NotasCreditoService {
   /**
    * Lean listing (design §5, `GET /notas-credito`) — always scoped to the
    * active copropiedad, honoring `ListarNotasCreditoDto`'s filters
-   * (`inmuebleId`, `estado`, date range on `createdAt`). Uses `toNotaCredito`,
+   * (`inmuebleId`, `estado`, date range on `issueDate`). Uses `toNotaCredito`,
    * never `toNotaCreditoDetalle` — no per-row `AplicacionCartera` lookup
    * here, unlike `findOne` below. Mirrors `RecibosService.findAll`.
    */
@@ -811,10 +944,19 @@ export class NotasCreditoService {
     if (query.estado) filtro.status = query.estado;
     if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
     if (query.desde || query.hasta) {
-      filtro.createdAt = {
+      const rango = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
         ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
       };
+      // A note carries a real `issueDate` from this feature onward; one
+      // created before it existed has `issueDate: null` and must fall back
+      // to `createdAt` — same fallback `fechaNotaCredito` applies when
+      // reading a single document, expressed as a query since Mongo can't
+      // run that function per-row.
+      filtro.$or = [
+        { issueDate: rango },
+        { issueDate: null, createdAt: rango },
+      ];
     }
 
     const pagina = query.pagina ?? 1;
@@ -830,7 +972,12 @@ export class NotasCreditoService {
       this.notasCredito.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toNotaCredito), total, pagina, porPagina };
+    return {
+      items: documentos.map((doc) => toNotaCredito(doc)),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   /**
@@ -850,7 +997,28 @@ export class NotasCreditoService {
       .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
       .sort({ appliedAt: 1 })
       .exec();
-    return toNotaCreditoDetalle(nota, aplicaciones);
+
+    // Batch-resolve every Factura's own printed number ("FV-1") this note
+    // needs for display: its own anchor (`nota.facturaId`, always — a
+    // deferred application may have never touched it, e.g. its
+    // outstandingBalance was already 0 at creation) plus every distinct
+    // Factura an `aplicacion` actually targeted (never necessarily the
+    // anchor — see `toNotaCreditoDetalle`'s own docblock). Same reasoning as
+    // `RecibosService.findOne`'s identical `numerosPorDocumento`.
+    const facturaIdsPorClave = new Map<string, Types.ObjectId>(
+      [nota.facturaId, ...aplicaciones.map((a) => a.documentId)].map((id) => [
+        id.toString(),
+        id,
+      ]),
+    );
+    const facturasDoc = await this.facturas
+      .find({ coPropertyId, _id: { $in: [...facturaIdsPorClave.values()] } })
+      .exec();
+    const numerosPorDocumento = new Map(
+      facturasDoc.map((f) => [f._id.toString(), f.fullNumber]),
+    );
+
+    return toNotaCreditoDetalle(nota, aplicaciones, numerosPorDocumento);
   }
 
   /**
@@ -928,6 +1096,7 @@ export class NotasCreditoService {
     montoAplicado: number,
     montoSinAplicar: number,
     creditosPorCuenta: Map<string | null, number>,
+    debitosPorCuenta: Map<string | null, number>,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -940,6 +1109,14 @@ export class NotasCreditoService {
     const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
       ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
     );
+    // Per-concepto income accounts for the débito side — see
+    // `construirAsientoCruce`'s own `desgloseOrigen` docblock. Falls back to
+    // `cuentaDevoluciones` (never a bare `null` account) for a concept with
+    // no `accountingIncomeAccount` configured, same fallback role
+    // `cuentaCartera` plays for `desgloseCartera` above.
+    const desgloseOrigen = Array.from(debitosPorCuenta.entries()).map(
+      ([cuenta, monto]) => ({ account: cuenta ?? cuentaDevoluciones, monto }),
+    );
     let entries = construirAsientoCruce(
       cuentaDevoluciones,
       cuentaCartera,
@@ -949,6 +1126,9 @@ export class NotasCreditoService {
       'NC',
       cuentasOrdenDe(copropiedad),
       desgloseCartera,
+      undefined,
+      undefined,
+      desgloseOrigen,
     );
     entries = await this.conAuxiliares(
       session,
@@ -966,7 +1146,14 @@ export class NotasCreditoService {
           facturaId: null,
           reciboId: null,
           notaCreditoId: nota._id,
-          date: new Date(),
+          // The note's OWN declared date, never `new Date()` — same
+          // reasoning as `postearAsientoRecibo`'s `recibo.receivedDate`.
+          // `aplicar()`/`anular()` stay dated `new Date()` (the real cruce
+          // instant, no caller-supplied date to prefer) — this is creation,
+          // which does have one. Getting this wrong is exactly why a
+          // backdated Nota Crédito could silently vanish from Consulta de
+          // Movimientos when queried by its own declared period.
+          date: fechaNotaCredito(nota),
           entries,
         },
       ],

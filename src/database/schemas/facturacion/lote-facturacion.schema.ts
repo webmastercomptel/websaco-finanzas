@@ -129,11 +129,20 @@ export class LoteFacturacion {
   @Prop({ required: true })
   periodEnd: Date;
 
-  // Captured and returned as-is; not yet applied anywhere — applying a
-  // discount belongs to the future Recibo (payment application) work, out
-  // of this plan's scope.
+  // Percentage form of the discount — mutually exclusive with
+  // `earlyPaymentDiscountFixedValue` below (Parámetros de Facturación §4's
+  // own rule: a fixed value only applies when there is no percentage).
+  // Applied per-invoice at `consolidar()` time, frozen onto each
+  // `Factura.discountAmount` — see that field's own comment.
   @Prop({ required: true, default: 0 })
   earlyPaymentDiscount: number;
+
+  // Fixed-value form of the discount, used INSTEAD of `earlyPaymentDiscount`
+  // when that percentage is 0 — same exclusion rule as
+  // `Copropiedad.discountFixedValue`, which this defaults from at `crear()`
+  // time (same pattern as `discountGraceDays` below).
+  @Prop({ required: true, default: 0 })
+  earlyPaymentDiscountFixedValue: number;
 
   @Prop({ required: true, default: 0 })
   discountGraceDays: number;
@@ -155,7 +164,8 @@ export class LoteFacturacion {
    * early-payment discount. Defaults at `crear()` time to
    * `billingDate + discountGraceDays - 1 día`, editable per-lote same as
    * every other field on this screen (design note in `crear-lote.dto.ts`).
-   * Not yet read anywhere — applying it belongs to the Recibo work.
+   * Frozen onto each `Factura.discountDeadline` at `consolidar()` time — see
+   * that field's own comment.
    */
   @Prop({ required: true })
   discountDeadline: Date;

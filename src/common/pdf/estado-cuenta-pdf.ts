@@ -261,6 +261,20 @@ export async function generarPdfEstadoCuenta(
     }
   }
 
+  // ── Anticipos pendientes ── (live balance, not period-scoped — see the
+  // service's own docblock on `anticipos`)
+  if (estado.anticipos.length > 0) {
+    ctx.y -= 10;
+    escribirLinea(ctx, 'Anticipos Pendientes', { bold: true });
+    const columnas = ['Recibo', 'Fecha', 'Saldo Disponible'];
+    const filas = estado.anticipos.map((a) => [
+      a.numeroCompleto,
+      formatoFecha(a.fecha),
+      formatoPeso(a.monto),
+    ]);
+    escribirTabla(ctx, columnas, filas, { columnasNumericas: 1 });
+  }
+
   if (opciones?.duplicado) {
     escribirMarcaDuplicado(ctx, estado.fechaEmision);
   }

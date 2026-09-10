@@ -70,16 +70,72 @@ describe('toRecibo', () => {
 
 describe('toAplicacionCartera', () => {
   it('mapea una aplicación, con su sourceType/sourceId', () => {
-    expect(toAplicacionCartera(aplicacionDoc() as never)).toEqual({
+    expect(
+      toAplicacionCartera(
+        aplicacionDoc() as never,
+        null,
+        new Date('2026-08-27'),
+      ),
+    ).toEqual({
       id: 'apl-1',
       sourceType: 'RC',
       sourceId: 'rec-1',
       tipoDocumento: 'FV',
       documentoId: 'fac-1',
+      numeroDocumento: null,
       montoAplicado: 200000,
+      detalleConceptos: [],
       estado: 'activa',
       fecha: '2026-08-27T00:00:00.000Z',
     });
+  });
+
+  it('usa la fecha que el caller pasa explícitamente, NUNCA appliedAt (el instante real del cruce)', () => {
+    // `appliedAt` en la fixture es 2026-08-27, pero el caller declara que la
+    // fecha de negocio real es otra — si la función leyera `doc.appliedAt`
+    // por su cuenta, este test lo detectaría.
+    const resultado = toAplicacionCartera(
+      aplicacionDoc({ appliedAt: new Date('2026-08-27') }) as never,
+      null,
+      new Date('2026-06-02'),
+    );
+    expect(resultado.fecha).toBe('2026-06-02T00:00:00.000Z');
+  });
+
+  it('recibe numeroDocumento como segundo parámetro explícito, nunca posicional vía .map', () => {
+    expect(
+      toAplicacionCartera(
+        aplicacionDoc() as never,
+        'FV-1',
+        new Date('2026-08-27'),
+      ),
+    ).toMatchObject({ numeroDocumento: 'FV-1' });
+  });
+
+  it('mapea detalleConceptos, congelando el nombre del concepto', () => {
+    const conceptoId = new Types.ObjectId();
+    const doc = aplicacionDoc({
+      detalleConceptos: [
+        { conceptoId, conceptName: 'Administración', monto: 150000 },
+        {
+          conceptoId: new Types.ObjectId(),
+          conceptName: 'Pintura',
+          monto: 50000,
+        },
+      ],
+    });
+
+    expect(
+      toAplicacionCartera(doc as never, null, new Date('2026-08-27'))
+        .detalleConceptos,
+    ).toEqual([
+      {
+        conceptoId: conceptoId.toString(),
+        nombreConcepto: 'Administración',
+        monto: 150000,
+      },
+      expect.objectContaining({ nombreConcepto: 'Pintura', monto: 50000 }),
+    ]);
   });
 });
 
@@ -92,5 +148,18 @@ describe('toReciboDetalle', () => {
     expect(detalle.id).toBe('rec-1');
     expect(detalle.aplicaciones).toHaveLength(1);
     expect(detalle.aplicaciones[0]).toMatchObject({ id: 'apl-1' });
+  });
+
+  it('resuelve numeroDocumento de cada aplicación desde el mapa del caller', () => {
+    const detalle = toReciboDetalle(
+      reciboDoc() as never,
+      [aplicacionDoc() as never],
+      new Map([['fac-1', 'FV-1']]),
+    );
+
+    expect(detalle.aplicaciones[0]).toMatchObject({
+      documentoId: 'fac-1',
+      numeroDocumento: 'FV-1',
+    });
   });
 });

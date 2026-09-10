@@ -38,6 +38,7 @@ import {
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import type {
   MovimientoEstadoCuenta,
   PeriodoFacturado,
@@ -193,12 +194,22 @@ export class EstadoCuentaService {
           .exec()
       : [];
 
-    // Step 3: build lookup maps
+    // Step 3: build lookup maps. Each carries the source document's own
+    // business date — never `AplicacionCartera.appliedAt`, which is always
+    // `new Date()` at cruce time (needed for the accounting entry, which
+    // posts at the real instant) and can land in a different period than
+    // the date the user actually declared for the payment.
     const reciboMap = new Map(
-      recibos.map((r) => [r._id.toString(), r.fullNumber]),
+      recibos.map((r) => [
+        r._id.toString(),
+        { fullNumber: r.fullNumber, fecha: r.receivedDate },
+      ]),
     );
     const ncMap = new Map(
-      notasCredito.map((nc) => [nc._id.toString(), nc.fullNumber]),
+      notasCredito.map((nc) => [
+        nc._id.toString(),
+        { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
+      ]),
     );
 
     // Step 4: build raw rows
@@ -210,7 +221,7 @@ export class EstadoCuentaService {
         fecha: f.issueDate,
         tipo: 'FC',
         numeroCompleto: f.fullNumber,
-        concepto: 'Factura de Venta',
+        concepto: `${f.lines.length} Cargos del mes ${f.fullNumber}`,
         cargo: f.total,
         abono: null,
         categoria: null,
@@ -233,20 +244,47 @@ export class EstadoCuentaService {
     // AplicacionCartera → crédito with categoria
     for (const app of aplicaciones) {
       const sourceType = app.sourceType as TipoDocumentoKardex;
-      const sourceNumber =
+      const origen =
         sourceType === 'RC'
-          ? (reciboMap.get(app.sourceId.toString()) ?? app.sourceId.toString())
-          : (ncMap.get(app.sourceId.toString()) ?? app.sourceId.toString());
+          ? reciboMap.get(app.sourceId.toString())
+          : ncMap.get(app.sourceId.toString());
+      const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
+      const fecha = origen?.fecha ?? app.appliedAt;
 
-      rows.push({
-        fecha: app.appliedAt,
-        tipo: sourceType,
-        numeroCompleto: sourceNumber,
-        concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
-        cargo: null,
-        abono: app.amountApplied,
-        categoria: sourceType === 'RC' ? 'pago' : 'descuento',
-      });
+      // `amountApplied` on an RC application is cash PLUS whatever early-
+      // payment discount it absorbed (`discountApplied`) — see the Descuento
+      // por Pronto Pago plan's own design: the factura is credited the full
+      // amount, the Recibo's cash side is smaller. Counting the whole thing
+      // as "pago" would overstate what the propietario actually paid, so the
+      // discount portion gets its own row/categoria — same bucket a Nota
+      // Crédito's own discount already uses — leaving only real cash under
+      // "pago".
+      const montoDescuento =
+        sourceType === 'RC' ? (app.discountApplied ?? 0) : 0;
+      const montoCash = app.amountApplied - montoDescuento;
+
+      if (montoCash > 0) {
+        rows.push({
+          fecha,
+          tipo: sourceType,
+          numeroCompleto: sourceNumber,
+          concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
+          cargo: null,
+          abono: montoCash,
+          categoria: sourceType === 'RC' ? 'pago' : 'descuento',
+        });
+      }
+      if (montoDescuento > 0) {
+        rows.push({
+          fecha,
+          tipo: sourceType,
+          numeroCompleto: sourceNumber,
+          concepto: `Descuento Pronto Pago Recibo ${sourceNumber}`,
+          cargo: null,
+          abono: montoDescuento,
+          categoria: 'descuento',
+        });
+      }
     }
 
     // Notas Contables → TWO rows each (débito + crédito, net zero)
@@ -302,6 +340,22 @@ export class EstadoCuentaService {
     const saldoActual =
       saldoAnterior + cargosDelMes - pagosRecibidos - descuentosAjustes;
 
+    // Step 8b: anticipos pendientes — a live snapshot of this inmueble's own
+    // Recibos still carrying `unappliedAmount > 0`, same "pending anticipo"
+    // definition the Anticipos bandeja uses. Never period-filtered: an
+    // anticipo is a CURRENT balance, not a movement that happened during
+    // the period being printed, so it stays visible regardless of which
+    // period the caller picked. `recibos` here is the same fetch from Step
+    // 1 (already scoped to this inmueble) — no extra query needed.
+    const anticipos = recibos
+      .filter((r) => r.status === 'activo' && r.unappliedAmount > 0)
+      .sort((a, b) => a.receivedDate.getTime() - b.receivedDate.getTime())
+      .map((r) => ({
+        numeroCompleto: r.fullNumber,
+        fecha: r.receivedDate.toISOString(),
+        monto: r.unappliedAmount,
+      }));
+
     // Step 9: estado derivation (three-state)
     let estado: 'al_dia' | 'pendiente' | 'vencido';
     if (saldoActual <= 0) {
@@ -339,6 +393,7 @@ export class EstadoCuentaService {
       saldoActual,
       estado,
       movimientos,
+      anticipos,
     };
   }
 }

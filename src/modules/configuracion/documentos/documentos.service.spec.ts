@@ -121,6 +121,7 @@ const construir = (opts: {
   resoluciones?: ReturnType<typeof modeloResoluciones>;
   recibos?: ReturnType<typeof modeloDocumentos>;
   facturas?: ReturnType<typeof modeloDocumentos>;
+  notasAnticipo?: ReturnType<typeof modeloDocumentos>;
   session?: ReturnType<typeof sesionFalsa>;
 }) => {
   const session = opts.session ?? sesionFalsa();
@@ -131,6 +132,7 @@ const construir = (opts: {
     modeloDocumentos([]) as never, // notasCredito
     modeloDocumentos([]) as never, // notasDebito
     modeloDocumentos([]) as never, // notasContables
+    (opts.notasAnticipo ?? modeloDocumentos([])) as never,
     (opts.facturas ?? modeloDocumentos([])) as never,
     tenantQueDevuelve(),
     conexionCon(session),
@@ -336,6 +338,39 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
       displayName: 'Recibo de Caja General',
       accountingVoucherCode: '09',
     });
+  });
+
+  it('el código NA revisa la colección de Notas de Anticipo, no la de Notas Contables — aunque comparta categoría NT', async () => {
+    // NA-5 ya existe como Nota de Anticipo real — bajar el contador a 3
+    // debe rechazarse. Si el guardrail mirara `notas_contables` (la
+    // colección genérica de la categoría NT) en vez de `notas_anticipo`,
+    // nunca vería este documento y dejaría pasar el pisado.
+    const notasAnticipo = modeloDocumentos([{ fullNumber: 'NA-5' }]);
+    const notasContablesVacia = modeloDocumentos([]);
+    const consecutivos = modeloConsecutivos([
+      consecutivoDoc({
+        category: 'NT',
+        code: 'NA',
+        prefix: 'NA',
+        nextNumber: 10,
+      }),
+    ]);
+    const service = new DocumentosService(
+      consecutivos as never,
+      modeloResoluciones(null) as never,
+      modeloDocumentos([]) as never, // recibos
+      modeloDocumentos([]) as never, // notasCredito
+      modeloDocumentos([]) as never, // notasDebito
+      notasContablesVacia as never,
+      notasAnticipo as never,
+      modeloDocumentos([]) as never, // facturas
+      tenantQueDevuelve(),
+      conexionCon(sesionFalsa()),
+    );
+
+    await expect(
+      service.updateConsecutivo('NA', { numeroSiguiente: 3 }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

@@ -77,6 +77,16 @@ export class NotaCredito {
   })
   facturaId: Types.ObjectId;
 
+  /** The date the user declared for this note — validated at creation
+   *  against the coproperty's current billing period, same role
+   *  `Recibo.receivedDate` plays for a Recibo (`RecibosService.crear()`).
+   *  Nullable ONLY for documents created before this field existed, which
+   *  used `createdAt` (the Mongoose timestamp) as their date instead — see
+   *  `fechaNotaCredito` (`notas-credito.mapper.ts`) for the fallback every
+   *  reader must use. Every new write always sets it. */
+  @Prop({ type: Date, default: null })
+  issueDate: Date | null;
+
   @Prop({ type: String, trim: true, default: '' })
   prefix: string;
 

@@ -5,6 +5,9 @@ import {
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoFactura,
   decrementarSaldoNotaDebito,
+  evaluarAplicacionConDescuento,
+  remanentesPorLinea,
+  validarDistribucionManual,
 } from './cruce.util';
 
 const SESSION = { id: 'fake-session' } as never;
@@ -218,7 +221,12 @@ describe('ajustarSaldosCartera', () => {
       { $set: { balance: { $max: [0, { $add: ['$balance', -100000] }] } } },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
-    expect(opciones).toMatchObject({ session: SESSION });
+    // `updatePipeline: true` es obligatorio en Mongoose 9 para pasar un
+    // array (pipeline de agregación, necesario acá para $max/$add contra el
+    // propio valor del documento) como update — sin esto, Mongoose lanza
+    // "Cannot pass an array to query updates..." en tiempo de ejecución, algo
+    // que un mock de findOneAndUpdate nunca detecta por su cuenta.
+    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
@@ -395,7 +403,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
       { $set: { balance: { $max: [0, { $add: ['$balance', -40000] }] } } },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
-    expect(opciones).toMatchObject({ session: SESSION });
+    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
@@ -622,5 +630,165 @@ describe('decrementarSaldoNotaDebito', () => {
     const cumplidas = resultados.filter((r) => r.status === 'fulfilled');
     expect(cumplidas).toHaveLength(1);
     expect(saldo).toBe(10000);
+  });
+});
+
+describe('evaluarAplicacionConDescuento', () => {
+  const deadline = new Date('2026-08-10');
+  const facturaConDescuento = (over: Record<string, unknown> = {}) => ({
+    outstandingBalance: 400000,
+    discountAmount: 40000,
+    discountDeadline: deadline,
+    ...over,
+  });
+
+  it('activa el descuento cuando el dinero disponible más el descuento saldan la factura exacto', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento(),
+      new Date('2026-08-05'),
+      360000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 400000, montoDescuento: 40000 });
+  });
+
+  it('activa el descuento cuando el dinero disponible sobra respecto a lo que hace falta', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento(),
+      new Date('2026-08-05'),
+      500000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 400000, montoDescuento: 40000 });
+  });
+
+  it('no activa el descuento cuando ni con él alcanza a saldar la factura (abono parcial normal)', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento(),
+      new Date('2026-08-05'),
+      300000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 300000, montoDescuento: 0 });
+  });
+
+  it('no activa el descuento cuando la fecha del recibo ya pasó la fecha límite, aunque el dinero alcance', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento(),
+      new Date('2026-08-11'),
+      360000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 360000, montoDescuento: 0 });
+  });
+
+  it('no ofrece descuento cuando la factura no tiene uno configurado', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento({ discountAmount: 0, discountDeadline: null }),
+      new Date('2026-08-05'),
+      360000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 360000, montoDescuento: 0 });
+  });
+
+  it('capa el descuento al saldo de la factura cuando el configurado es mayor (Parámetros mal configurado)', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento({
+        outstandingBalance: 100000,
+        discountAmount: 999999,
+      }),
+      new Date('2026-08-05'),
+      0,
+    );
+    // El descuento nunca puede exceder el propio saldo — la caja nunca queda
+    // "recibiendo" un monto negativo.
+    expect(resultado).toEqual({
+      montoAFactura: 100000,
+      montoDescuento: 100000,
+    });
+  });
+
+  it('no capa el monto cuando el descuento no se activa — deja que decrementarSaldoFactura rechace si excede (modo manual)', () => {
+    const resultado = evaluarAplicacionConDescuento(
+      facturaConDescuento({
+        outstandingBalance: 100000,
+        discountAmount: 0,
+        discountDeadline: null,
+      }),
+      new Date('2026-08-05'),
+      200000,
+    );
+    expect(resultado).toEqual({ montoAFactura: 200000, montoDescuento: 0 });
+  });
+});
+
+describe('remanentesPorLinea', () => {
+  const conceptoAdmin = new Types.ObjectId();
+  const conceptoIntereses = new Types.ObjectId();
+
+  it('sin ningún remainingAmount rastreado (factura nunca tocada por un reparto elegido), lo deriva de la cascada — mismo orden que ajustarSaldosCartera', () => {
+    // Factura de 500000 (Admin 300000 + Intereses 200000, Intereses de
+    // último en el arreglo → primero en la cascada); 150000 ya aplicados.
+    const remanentes = remanentesPorLinea({
+      total: 500000,
+      outstandingBalance: 350000,
+      lines: [
+        { conceptoId: conceptoAdmin, totalAmount: 300000 },
+        { conceptoId: conceptoIntereses, totalAmount: 200000 },
+      ],
+    });
+
+    expect(remanentes.get(conceptoIntereses.toString())).toBe(50000);
+    expect(remanentes.get(conceptoAdmin.toString())).toBe(300000);
+  });
+
+  it('con remainingAmount ya rastreado en una línea, lo reporta tal cual — sin importar el estado de las demás', () => {
+    const remanentes = remanentesPorLinea({
+      total: 500000,
+      outstandingBalance: 350000,
+      lines: [
+        { conceptoId: conceptoAdmin, totalAmount: 300000 }, // sin rastrear
+        {
+          conceptoId: conceptoIntereses,
+          totalAmount: 200000,
+          remainingAmount: 50000, // ya rastreado por un reparto anterior
+        },
+      ],
+    });
+
+    expect(remanentes.get(conceptoIntereses.toString())).toBe(50000);
+    // La línea sin rastrear sigue derivándose de la cascada, sin verse
+    // afectada por que la otra ya esté migrada.
+    expect(remanentes.get(conceptoAdmin.toString())).toBe(300000);
+  });
+});
+
+describe('validarDistribucionManual', () => {
+  const concepto = new Types.ObjectId().toString();
+
+  it('acepta un reparto que suma exacto y no supera el remanente', () => {
+    expect(() =>
+      validarDistribucionManual(
+        [{ conceptoId: concepto, monto: 100000 }],
+        100000,
+        new Map([[concepto, 150000]]),
+      ),
+    ).not.toThrow();
+  });
+
+  it('rechaza cuando la suma no coincide con el monto a aplicar', () => {
+    expect(() =>
+      validarDistribucionManual(
+        [{ conceptoId: concepto, monto: 90000 }],
+        100000,
+        new Map([[concepto, 150000]]),
+      ),
+    ).toThrow(ConflictException);
+  });
+
+  it('rechaza cuando un concepto pide más de lo que le queda pendiente', () => {
+    expect(() =>
+      validarDistribucionManual(
+        [{ conceptoId: concepto, monto: 100000 }],
+        100000,
+        new Map([[concepto, 50000]]),
+      ),
+    ).toThrow(ConflictException);
   });
 });

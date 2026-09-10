@@ -26,26 +26,13 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { activeAsOf } from './cartera-historica.util';
+import { activeAsOf, finDelDiaCorte } from './cartera-historica.util';
 import type {
   CargoCarteraPorConcepto,
   DocumentoCarteraPorInmueble,
   RespuestaCarteraPorInmueble,
 } from '../../contracts';
 import type { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por-inmueble.dto';
-
-/**
- * A bare "YYYY-MM-DD" always parses as UTC midnight (ECMA-262). Extending
- * it to 23:59:59.999 must stay in UTC too — `setHours` (local time) would
- * shift the result onto the wrong calendar day for any host running a
- * negative UTC offset (this backend runs as plain Node on the developer's
- * own machine, not always UTC like a Cloud Run container).
- */
-const finDelDia = (d: Date): Date => {
-  const r = new Date(d);
-  r.setUTCHours(23, 59, 59, 999);
-  return r;
-};
 
 /**
  * Read-only single-unit snapshot: every pending Factura/Nota Débito for one
@@ -84,7 +71,9 @@ export class CarteraPorInmuebleService {
     // Running the cut-off through the end of the day makes "hoy" actually
     // mean "everything up to right now, today" — omitted `fecha` already
     // gets that for free via `new Date()`.
-    const fecha = query.fecha ? finDelDia(new Date(query.fecha)) : new Date();
+    const fecha = query.fecha
+      ? finDelDiaCorte(new Date(query.fecha))
+      : new Date();
 
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })

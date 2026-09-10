@@ -27,6 +27,10 @@ import {
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -45,7 +49,7 @@ import {
 import type { RespuestaMovimientoContable } from '../../contracts';
 
 /** One anchor document's identity — enough to resolve `numeroDocumento` and
- *  which inmueble it belongs to, across all five document types. */
+ *  which inmueble it belongs to, across all six document types. */
 type AnchorInfo = { fullNumber: string; inmuebleId: Types.ObjectId };
 
 type InmuebleMeta = {
@@ -74,6 +78,8 @@ export class MovimientoContableService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -221,7 +227,9 @@ export class MovimientoContableService {
             ? 'NC'
             : a.notaDebitoId
               ? 'ND'
-              : 'NT';
+              : a.notaContableId
+                ? 'NT'
+                : 'NA';
       const list = idsByType.get(key) ?? [];
       list.push(anchorId);
       idsByType.set(key, list);
@@ -242,6 +250,7 @@ export class MovimientoContableService {
       ['NC', this.notasCredito as never],
       ['ND', this.notasDebito as never],
       ['NT', this.notasContables as never],
+      ['NA', this.notasAnticipo as never],
     ];
 
     for (const [tipo, model] of fetchers) {

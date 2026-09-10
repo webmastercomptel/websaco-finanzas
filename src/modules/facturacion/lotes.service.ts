@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -74,6 +75,7 @@ import {
   CUENTA_SIN_ASIGNAR,
   type MarcasCuentaContable,
 } from './asiento.builder';
+import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -145,12 +147,67 @@ export class LotesFacturacionService {
       );
     }
 
+    // Catches exactly the real bug this guards against: a typo in
+    // `fechaFacturacion` (an extra/wrong digit in the year, e.g. "9202"
+    // instead of "2026") is still a syntactically valid ISO date — nothing
+    // in `CrearLoteDto` catches it. A new cycle must always pick up where
+    // the last CONSOLIDATED one left off, one calendar month later; no
+    // validation at all when the coproperty has never consolidated a lote
+    // (first cycle ever is free to land anywhere). Placed before
+    // `numeracion.siguienteLote()` — a refusal here must cost no consumed
+    // consecutivo, same "a refusal costs no session" discipline as every
+    // other pre-transaction guard in this codebase.
+    const ultimoConsolidado = await this.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    if (ultimoConsolidado) {
+      const fechaFacturacion = new Date(dto.fechaFacturacion);
+      const periodoEsperado = new Date(
+        Date.UTC(
+          ultimoConsolidado.billingDate.getUTCFullYear(),
+          ultimoConsolidado.billingDate.getUTCMonth() + 1,
+          1,
+        ),
+      );
+      const mismoPeriodo =
+        fechaFacturacion.getUTCFullYear() ===
+          periodoEsperado.getUTCFullYear() &&
+        fechaFacturacion.getUTCMonth() === periodoEsperado.getUTCMonth();
+      if (!mismoPeriodo) {
+        throw new BadRequestException(
+          'La fecha de facturación debe corresponder al período siguiente ' +
+            `al último ciclo generado (${String(periodoEsperado.getUTCMonth() + 1).padStart(2, '0')}/${periodoEsperado.getUTCFullYear()})`,
+        );
+      }
+    }
+
     const numero = await this.numeracion.siguienteLote(coPropertyId.toString());
 
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
 
     const discountGraceDays =
       dto.diasGraciaDescuento ?? copropiedad?.discountGraceDays ?? 0;
+
+    // The percentage and the fixed value are mutually exclusive at the
+    // Parámetros de Facturación level (Copropiedad's own rule): only
+    // inherit from there when the caller sent NEITHER explicitly — same
+    // "caller wins, else inherit" pattern as `discountGraceDays` above and
+    // `lateInterestRate` below. `discountPercentage` wins whenever it is
+    // `> 0`; `discountFixedValue` is the fallback, taken only when the
+    // percentage is absent.
+    let earlyPaymentDiscount = dto.descuentoProntoPago;
+    let earlyPaymentDiscountFixedValue = dto.valorFijoDescuentoProntoPago;
+    if (
+      earlyPaymentDiscount === undefined &&
+      earlyPaymentDiscountFixedValue === undefined &&
+      copropiedad?.discountEnabled
+    ) {
+      if (copropiedad.discountPercentage > 0) {
+        earlyPaymentDiscount = copropiedad.discountPercentage;
+      } else if (copropiedad.discountFixedValue > 0) {
+        earlyPaymentDiscountFixedValue = copropiedad.discountFixedValue;
+      }
+    }
 
     // "Fecha límite para descuento": last day a payment still earns the
     // early-payment discount. The screen pre-fills this and lets the admin
@@ -173,7 +230,8 @@ export class LotesFacturacionService {
       dueDate: new Date(dto.fechaVencimiento),
       periodStart: new Date(dto.periodoDesde),
       periodEnd: new Date(dto.periodoHasta),
-      earlyPaymentDiscount: dto.descuentoProntoPago ?? 0,
+      earlyPaymentDiscount: earlyPaymentDiscount ?? 0,
+      earlyPaymentDiscountFixedValue: earlyPaymentDiscountFixedValue ?? 0,
       discountGraceDays,
       lateInterestRate:
         dto.interesMora ??
@@ -240,6 +298,7 @@ export class LotesFacturacionService {
       dto.fechaSuspension ? new Date(dto.fechaSuspension) : undefined,
     );
     set('earlyPaymentDiscount', dto.descuentoProntoPago);
+    set('earlyPaymentDiscountFixedValue', dto.valorFijoDescuentoProntoPago);
     set('discountGraceDays', dto.diasGraciaDescuento);
     set('lateInterestRate', dto.interesMora);
     set('lateInterestCap', dto.topeInteresMora);
@@ -507,6 +566,24 @@ export class LotesFacturacionService {
           'No se pueden registrar recibos ni notas mientras el proceso de facturación no termine.',
       );
     }
+  }
+
+  /**
+   * The most recently consolidated billing run for a coproperty — the
+   * closest thing this system has to "the current billing period". `number`
+   * is a strictly increasing per-coproperty sequence assigned at `crear()`
+   * time, so it orders runs correctly even if `billingDate` were ever
+   * backdated. Returns `null` for a coproperty that has never consolidated a
+   * lote — callers must treat that as "nothing to validate against", not an
+   * error.
+   */
+  async obtenerUltimoConsolidado(
+    coPropertyId: string,
+  ): Promise<LoteFacturacionDocument | null> {
+    return this.lotes
+      .findOne({ coPropertyId, status: 'consolidado' })
+      .sort({ number: -1 })
+      .exec();
   }
 
   /** Rejects a second override of the same kind for the same inmueble+concepto
@@ -1124,6 +1201,15 @@ export class LotesFacturacionService {
           saldoCorrientePorConcepto.set(key, balanceAfter);
         }
 
+        const { discountAmount, discountDeadline } =
+          calcularDescuentoProntoPago(
+            preliminar.lines,
+            lote.earlyPaymentDiscount,
+            lote.earlyPaymentDiscountFixedValue,
+            lote.discountDeadline,
+            copropiedad?.discountAppliesWithLateFee ?? false,
+          );
+
         // Factura + saldos + asiento run in one Mongo transaction, scoped to
         // THIS row only (never the whole batch — a long-running multi-row
         // transaction risks the driver's default transaction lifetime limit
@@ -1169,6 +1255,8 @@ export class LotesFacturacionService {
                   totalTax: preliminar.totalTax,
                   total: preliminar.total,
                   outstandingBalance: preliminar.total,
+                  discountAmount,
+                  discountDeadline,
                   status: 'emitida',
                 },
               ],
@@ -1428,6 +1516,11 @@ export class LotesFacturacionService {
       taxRate: concepto.taxRate,
       taxAmount,
       totalAmount,
+      // Seeds this line's own pending-balance tracker — see
+      // `FacturaLinea.remainingAmount`'s own comment. Harmless on a
+      // FacturaPreliminar (never persisted); on the real Factura this is
+      // what every future application against this concepto decrements.
+      remainingAmount: totalAmount,
       balanceBefore,
       balanceAfter,
     };

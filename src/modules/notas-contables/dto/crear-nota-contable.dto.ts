@@ -1,4 +1,5 @@
 import {
+  IsDateString,
   IsMongoId,
   IsPositive,
   IsString,
@@ -17,6 +18,12 @@ export class CrearNotaContableDto {
 
   @IsMongoId()
   inmuebleId: string;
+
+  /** The date the user declares for this note — validated in the service
+   *  against the coproperty's current billing period, mirroring
+   *  `CrearNotaCreditoDto.fecha`. */
+  @IsDateString()
+  fecha: string;
 
   @IsMongoId()
   conceptoOrigenId: string;

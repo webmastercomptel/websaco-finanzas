@@ -7,6 +7,7 @@ import { Recibo } from '../recibos/recibo.schema';
 import { NotaCredito } from '../notas-credito/nota-credito.schema';
 import { NotaDebito } from '../notas-debito/nota-debito.schema';
 import { NotaContable } from '../notas-contables/nota-contable.schema';
+import { NotaAnticipo } from '../notas-anticipo/nota-anticipo.schema';
 
 export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 
@@ -68,7 +69,9 @@ export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);
  *
  * A facturación entry sets `loteId`+`facturaId`; a Recibo entry sets
  * `reciboId`; a Nota Crédito entry sets `notaCreditoId`; a Nota Débito entry
- * sets `notaDebitoId` — all five mutually exclusive, all default null.
+ * sets `notaDebitoId`; a Nota Contable entry sets `notaContableId`; a Nota
+ * de Anticipo entry sets `notaAnticipoId` — all six mutually exclusive, all
+ * default null.
  *
  * Invariant this schema does not itself enforce (the caller does, before
  * ever calling `.create()`): sum(debito) === sum(credito).
@@ -104,6 +107,9 @@ export class AsientoContable {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: NotaContable.name, default: null })
   notaContableId: Types.ObjectId | null;
+
+  @Prop({ type: SchemaTypes.ObjectId, ref: NotaAnticipo.name, default: null })
+  notaAnticipoId: Types.ObjectId | null;
 
   @Prop({ required: true })
   date: Date;
@@ -171,3 +177,7 @@ AsientoContableSchema.index({ notaDebitoId: 1 });
 // Every entry a given Nota Contable ever produced (creation and /anular) —
 // not unique, same reasoning as the reciboId index.
 AsientoContableSchema.index({ notaContableId: 1 });
+
+// Every entry a given Nota de Anticipo ever produced (creation and
+// /anular) — not unique, same reasoning as the reciboId index.
+AsientoContableSchema.index({ notaAnticipoId: 1 });

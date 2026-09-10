@@ -22,7 +22,7 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { activeAsOf } from './cartera-historica.util';
+import { activeAsOf, finDelDiaCorte } from './cartera-historica.util';
 import type {
   FilaVencimientoCartera,
   RangoVencimiento,
@@ -86,7 +86,17 @@ export class VencimientosCarteraService {
     query: ConsultarVencimientosCarteraDto,
   ): Promise<RespuestaVencimientosCartera> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+    // `fecha` stays the raw calendar day — `calcularDiasMora` and the
+    // sinVencer/vencido split below truncate it with LOCAL `setHours`, so
+    // it must still fall on the picked calendar day once truncated.
+    // `fechaCorte` is the Colombia-local end-of-day INSTANT, used only to
+    // decide whether a Recibo/aplicación counts as already active (see
+    // `finDelDiaCorte`) — passing the extended value into `calcularDiasMora`
+    // would shift every dias-mora count by a full day.
     const fecha = query.fecha ? new Date(query.fecha) : new Date();
+    const fechaCorte = query.fecha
+      ? finDelDiaCorte(new Date(query.fecha))
+      : fecha;
 
     const [facturas, notasDebito] = await Promise.all([
       this.facturas
@@ -129,7 +139,7 @@ export class VencimientosCarteraService {
     for (const f of facturas) {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
       const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
+        .filter((a) => activeAsOf(a, fechaCorte))
         .reduce((sum, a) => sum + a.amountApplied, 0);
       const saldo = Math.max(0, f.total - aplicadoActivo);
       if (saldo <= 0) continue;
@@ -147,7 +157,7 @@ export class VencimientosCarteraService {
     for (const nd of notasDebito) {
       const apps = appsByDoc.get(nd._id.toString()) ?? [];
       const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
+        .filter((a) => activeAsOf(a, fechaCorte))
         .reduce((sum, a) => sum + a.amountApplied, 0);
       const saldo = Math.max(0, nd.total - aplicadoActivo);
       if (saldo <= 0) continue;

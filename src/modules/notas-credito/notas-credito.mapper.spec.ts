@@ -18,6 +18,10 @@ const notaDoc = (over: Record<string, unknown> = {}) => ({
   voidedReason: null,
   voidedDetail: null,
   voidedAt: null,
+  issueDate: new Date('2026-08-15'),
+  // Legacy fallback only — see `fechaNotaCredito`'s own docblock. A note
+  // created with this feature always has `issueDate` set.
+  createdAt: new Date('2026-07-01'),
   ...over,
 });
 
@@ -40,9 +44,11 @@ describe('toNotaCredito', () => {
       inmuebleId: 'inm-1',
       terceroId: 'ter-1',
       facturaId: 'fac-1',
+      numeroFactura: null,
       prefijo: 'NC',
       numero: 12,
       numeroCompleto: 'NC-12',
+      fecha: '2026-08-15T00:00:00.000Z',
       motivo: 'error_facturacion',
       montoTotal: 200000,
       distribucion: [{ conceptoId: 'con-1', monto: 200000 }],
@@ -54,6 +60,12 @@ describe('toNotaCredito', () => {
       detalleAnulacion: null,
       fechaAnulacion: null,
     });
+  });
+
+  it('cae a createdAt cuando issueDate es null (nota creada antes de este campo)', () => {
+    expect(toNotaCredito(notaDoc({ issueDate: null }) as never).fecha).toBe(
+      '2026-07-01T00:00:00.000Z',
+    );
   });
 
   it('mapea terceroId null cuando la factura ancla no tiene Tercero vinculado', () => {
@@ -79,6 +91,20 @@ describe('toNotaCredito', () => {
 });
 
 describe('toNotaCreditoDetalle', () => {
+  it('resuelve numeroFactura (la ancla) y numeroDocumento de cada aplicación desde numerosPorDocumento', () => {
+    // `notaDoc().facturaId` y `aplicacionDoc().documentId` resuelven ambos a
+    // "fac-1" en estos fixtures — una sola entrada cubre las dos lecturas.
+    const numerosPorDocumento = new Map([['fac-1', 'FV-0001']]);
+    const detalle = toNotaCreditoDetalle(
+      notaDoc() as never,
+      [aplicacionDoc() as never],
+      numerosPorDocumento,
+    );
+
+    expect(detalle.numeroFactura).toBe('FV-0001');
+    expect(detalle.aplicaciones[0].numeroDocumento).toBe('FV-0001');
+  });
+
   it('agrega el arreglo de aplicaciones a la nota crédito', () => {
     const detalle = toNotaCreditoDetalle(notaDoc() as never, [
       aplicacionDoc() as never,

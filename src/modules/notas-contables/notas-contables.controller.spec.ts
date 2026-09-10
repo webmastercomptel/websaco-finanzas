@@ -35,6 +35,7 @@ describe('NotasContablesController.crear', () => {
     await controller.crear(user, {
       codigo: 'NT',
       inmuebleId: new Types.ObjectId().toString(),
+      fecha: '2026-08-15',
       conceptoOrigenId: new Types.ObjectId().toString(),
       conceptoDestinoId: new Types.ObjectId().toString(),
       monto: 100000,
@@ -57,6 +58,7 @@ describe('NotasContablesController.anular', () => {
     const dto = {
       motivo: 'otro' as const,
       detalle: 'Un detalle de más de veinte caracteres',
+      fecha: '2026-08-20',
     };
     const user: IRequestUser = {
       uid: 'uid-1',

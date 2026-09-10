@@ -54,6 +54,7 @@ function makeEstadoCuenta(
         categoria: null,
       },
     ],
+    anticipos: [],
     ...overrides,
   };
 }
@@ -116,6 +117,22 @@ describe('generarPdfEstadoCuenta', () => {
       { duplicado: true },
     );
     expect(conFecha.length).toBeGreaterThan(sinFecha.length);
+  });
+
+  it('agrega bytes de más cuando hay anticipos pendientes que imprimir', async () => {
+    const sinAnticipos = await generarPdfEstadoCuenta(
+      makeEstadoCuenta({ anticipos: [] }),
+      makeCopropiedad(),
+    );
+    const conAnticipos = await generarPdfEstadoCuenta(
+      makeEstadoCuenta({
+        anticipos: [
+          { numeroCompleto: 'RC-0011', fecha: '2026-06-02', monto: 180200 },
+        ],
+      }),
+      makeCopropiedad(),
+    );
+    expect(conAnticipos.length).toBeGreaterThan(sinAnticipos.length);
   });
 
   it('el encabezado incluye el nombre de la copropiedad y su NIT', async () => {

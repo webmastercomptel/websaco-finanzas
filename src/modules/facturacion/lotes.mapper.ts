@@ -23,6 +23,7 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
   periodoDesde: doc.periodStart.toISOString(),
   periodoHasta: doc.periodEnd.toISOString(),
   descuentoProntoPago: doc.earlyPaymentDiscount,
+  valorFijoDescuentoProntoPago: doc.earlyPaymentDiscountFixedValue,
   diasGraciaDescuento: doc.discountGraceDays,
   interesMora: doc.lateInterestRate,
   topeInteresMora: doc.lateInterestCap,
@@ -53,7 +54,10 @@ const preliminarDe = (p: FacturaPreliminar): FacturaPreliminarContract => ({
   inmuebleCodigo: p.unitCode,
   terceroId: p.terceroId ? p.terceroId.toString() : null,
   titular: titularDe(p.holder),
-  lineas: p.lines.map(lineaDe),
+  // Nothing has been issued yet — every línea's own total is entirely
+  // pending. NOT `p.lines.map(lineaDe)`: `.map` would silently pass the
+  // array INDEX as `lineaDe`'s second (`saldoPendiente`) argument instead.
+  lineas: p.lines.map((linea) => lineaDe(linea, linea.totalAmount)),
   subtotal: p.subtotal,
   totalImpuestos: p.totalTax,
   total: p.total,

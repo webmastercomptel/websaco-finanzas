@@ -27,11 +27,28 @@ import type {
   ResultadoAplicacion,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfNotaCredito } from '../../common/pdf/nota-credito-pdf';
+import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
+import { construirDatosImpresionNotaCredito } from './nota-credito-pdf-datos.util';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  Factura,
+  FacturaDocument,
+} from '../../database/schemas/facturacion/factura.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { RecibosService } from '../recibos/recibos.service';
 
@@ -51,6 +68,14 @@ export class NotasCreditoController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Factura.name)
+    private readonly facturas: Model<FacturaDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
   ) {}
 
   @Get()
@@ -120,7 +145,20 @@ export class NotasCreditoController {
       );
     }
 
-    const bytes = await generarPdfNotaCredito(nota, aplicaciones, copropiedad, {
+    const datos = await construirDatosImpresionNotaCredito(
+      nota,
+      aplicaciones,
+      copropiedad,
+      coPropertyId,
+      {
+        facturas: this.facturas,
+        inmuebles: this.inmuebles,
+        terceros: this.terceros,
+        cuentasContables: this.cuentasContables,
+      },
+    );
+
+    const bytes = await generarPdfRecibo(datos, copropiedad, {
       duplicado: duplicado === 'true',
     });
 

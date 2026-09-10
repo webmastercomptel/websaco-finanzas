@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
@@ -42,6 +38,22 @@ import {
   NotaCreditoDocument,
 } from '../../database/schemas/notas-credito/nota-credito.schema';
 import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
+  NotaContable,
+  NotaContableDocument,
+} from '../../database/schemas/notas-contables/nota-contable.schema';
+import {
+  Recibo,
+  ReciboDocument,
+} from '../../database/schemas/recibos/recibo.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -57,10 +69,15 @@ import type { ResultadoReinicioCiclo } from '../../contracts';
 const CODIGO_COPROPIEDAD_PRUEBA = '0001';
 
 /**
- * Wipes every Lote/Factura (and what facturación itself derived from them —
- * asientos contables, saldos de cartera) for the one hardcoded test
- * coproperty, and rewinds its FV/Lote numbering back to the start, so the
- * billing cycle can be demoed from zero as many times as needed.
+ * Wipes EVERY financial document of the one hardcoded test coproperty —
+ * Lotes/Facturas, Recibos, Notas Crédito/Débito/Anticipo/Contables, and
+ * everything they moved (AplicacionCartera, asientos contables, saldos de
+ * cartera) — and rewinds every document's numbering back to zero, so the
+ * whole billing cycle can be replayed from a blank slate as many times as
+ * needed. Nothing is left half-deleted for a caller to clean up by hand:
+ * every document type this system knows how to issue is wiped together, so
+ * there is never a leftover Recibo/Nota pointing at a Factura that no
+ * longer exists.
  *
  * This is a deliberate, narrow exception to "nothing financial is ever
  * deleted" (see backend/CLAUDE.md's audit law) — never a template for
@@ -95,6 +112,14 @@ export class ReiniciarCicloService {
     private readonly notasCredito: Model<NotaCreditoDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
+    @InjectModel(Recibo.name)
+    private readonly recibos: Model<ReciboDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
+    @InjectModel(NotaContable.name)
+    private readonly notasContables: Model<NotaContableDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -109,31 +134,29 @@ export class ReiniciarCicloService {
       );
     }
 
-    const facturaIds = await this.facturas
-      .find({ coPropertyId })
-      .distinct('_id')
-      .exec();
-
-    if (facturaIds.length > 0) {
-      const [notaCreditoRef, aplicacionRef] = await Promise.all([
-        this.notasCredito.exists({ facturaId: { $in: facturaIds } }),
-        this.aplicaciones.exists({
-          documentType: 'FV',
-          documentId: { $in: facturaIds },
-        }),
-      ]);
-      if (notaCreditoRef || aplicacionRef) {
-        throw new ConflictException(
-          'No se puede reiniciar: hay notas crédito o recibos aplicados ' +
-            'contra facturas de esta copropiedad. Anúlalos primero.',
-        );
-      }
-    }
+    // Every financial document type wiped together — no cross-reference
+    // guard needed anymore, since nothing survives that could point at a
+    // deleted Factura/Recibo.
+    const [
+      aplicacionesEliminadas,
+      notasCreditoEliminadas,
+      notasDebitoEliminadas,
+      notasAnticipoEliminadas,
+      notasContablesEliminadas,
+      recibosEliminados,
+    ] = await Promise.all([
+      this.aplicaciones.deleteMany({ coPropertyId }).exec(),
+      this.notasCredito.deleteMany({ coPropertyId }).exec(),
+      this.notasDebito.deleteMany({ coPropertyId }).exec(),
+      this.notasAnticipo.deleteMany({ coPropertyId }).exec(),
+      this.notasContables.deleteMany({ coPropertyId }).exec(),
+      this.recibos.deleteMany({ coPropertyId }).exec(),
+    ]);
 
     const [asientosEliminados, saldosEliminados] = await Promise.all([
-      this.asientos
-        .deleteMany({ coPropertyId, facturaId: { $ne: null } })
-        .exec(),
+      // Every asiento, regardless of anchor (Factura/Recibo/NC/ND/NT/NA) —
+      // every one of those anchors is wiped above too.
+      this.asientos.deleteMany({ coPropertyId }).exec(),
       this.saldos.deleteMany({ coPropertyId }).exec(),
     ]);
 
@@ -151,8 +174,11 @@ export class ReiniciarCicloService {
     await this.consecutivoLote
       .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
       .exec();
+    // Every code this coproperty has configured (RC, NC, ND, NA, ...), not
+    // just one — every document type is wiped above, so every counter must
+    // restart together.
     await this.consecutivoDocumento
-      .updateOne({ coPropertyId, category: 'FV' }, { $set: { nextNumber: 0 } })
+      .updateMany({ coPropertyId }, { $set: { nextNumber: 0 } })
       .exec();
     const resolucionActiva = await this.resoluciones
       .findOne({ coPropertyId, status: 'active' })
@@ -169,6 +195,12 @@ export class ReiniciarCicloService {
     return {
       lotesEliminados: lotesEliminados.deletedCount,
       facturasEliminadas: facturasEliminadas.deletedCount,
+      recibosEliminados: recibosEliminados.deletedCount,
+      notasCreditoEliminadas: notasCreditoEliminadas.deletedCount,
+      notasDebitoEliminadas: notasDebitoEliminadas.deletedCount,
+      notasAnticipoEliminadas: notasAnticipoEliminadas.deletedCount,
+      notasContablesEliminadas: notasContablesEliminadas.deletedCount,
+      aplicacionesEliminadas: aplicacionesEliminadas.deletedCount,
       asientosEliminados: asientosEliminados.deletedCount,
       saldosEliminados: saldosEliminados.deletedCount,
     };

@@ -15,13 +15,15 @@ export function deriveTipoDocumento(
     | 'notaCreditoId'
     | 'notaDebitoId'
     | 'notaContableId'
+    | 'notaAnticipoId'
   >,
-): 'FC' | 'RC' | 'NC' | 'ND' | 'NT' {
+): 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA' {
   if (asiento.facturaId) return 'FC';
   if (asiento.reciboId) return 'RC';
   if (asiento.notaCreditoId) return 'NC';
   if (asiento.notaDebitoId) return 'ND';
   if (asiento.notaContableId) return 'NT';
+  if (asiento.notaAnticipoId) return 'NA';
   // Should never happen — every asiento has exactly one anchor.
   return 'FC';
 }
@@ -37,6 +39,7 @@ export function resolveAnchorId(
     | 'notaCreditoId'
     | 'notaDebitoId'
     | 'notaContableId'
+    | 'notaAnticipoId'
   >,
 ): Types.ObjectId {
   if (asiento.facturaId) return asiento.facturaId;
@@ -44,6 +47,7 @@ export function resolveAnchorId(
   if (asiento.notaCreditoId) return asiento.notaCreditoId;
   if (asiento.notaDebitoId) return asiento.notaDebitoId;
   if (asiento.notaContableId) return asiento.notaContableId;
+  if (asiento.notaAnticipoId) return asiento.notaAnticipoId;
   throw new Error('AsientoContable has no anchor document');
 }
 
