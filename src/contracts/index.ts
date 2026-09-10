@@ -461,6 +461,50 @@ export interface ReciboDetalle extends Recibo {
   aplicaciones: AplicacionCartera[];
 }
 
+/** One row of a Recibos-por-lote upload. */
+export interface LoteRecibosFila {
+  inmuebleCodigo: string;
+  /** The código de copropiedad the file's own row carried, if any — a pure
+   *  cross-check display value, never what resolves the tenant. */
+  copropiedadCodigo: string | null;
+  inmuebleId: string | null;
+  fechaPago: IsoDate;
+  valorRecibido: Monto;
+  reciboId: string | null;
+  /** Resolved for display once this row becomes a real Recibo. */
+  reciboNumeroCompleto: string | null;
+  error: string | null;
+}
+
+/**
+ * A batch of Recibos de Caja uploaded from a flat file — `borrador`
+ * (created, nothing uploaded yet) → `cargado` (file parsed, rows validated,
+ * waiting for the totalDigitado check to pass) → `aplicado` (every row
+ * without an error became its own real Recibo). See `LoteRecibosService`.
+ */
+export interface LoteRecibos {
+  id: string;
+  numero: number;
+  estado: 'borrador' | 'cargado' | 'aplicado';
+  codigo: string;
+  medioPago: 'transferencia' | 'cheque' | 'pse' | 'efectivo';
+  cuentaDestino: string | null;
+  totalDigitado: Monto;
+  /** Sum of `valorRecibido` across every row WITHOUT an error — what the
+   *  frontend compares against `totalDigitado` to enable "Actualizar
+   *  Cartera". */
+  totalFilas: Monto;
+  filas: LoteRecibosFila[];
+}
+
+/** One row's outcome from `aplicar()`ing a LoteRecibos — mirrors
+ *  `ErrorConsolidacion`'s own "best-effort, report per row" shape. */
+export interface ErrorAplicacionLoteRecibos {
+  fila: number;
+  inmuebleCodigo: string;
+  mensaje: string;
+}
+
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
  *  caller's requested cruce against one document. */
 export interface AplicacionSolicitada {

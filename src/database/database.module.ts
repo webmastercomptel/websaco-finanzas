@@ -89,6 +89,14 @@ import {
   CuentaContable,
   CuentaContableSchema,
 } from './schemas/contabilidad/cuenta-contable.schema';
+import {
+  LoteRecibos,
+  LoteRecibosSchema,
+} from './schemas/recibos/lote-recibos.schema';
+import {
+  ConsecutivoLoteRecibos,
+  ConsecutivoLoteRecibosSchema,
+} from './schemas/recibos/consecutivo-lote-recibos.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -119,6 +127,8 @@ const models = [
   { name: NotaContable.name, schema: NotaContableSchema },
   { name: NotaAnticipo.name, schema: NotaAnticipoSchema },
   { name: CuentaContable.name, schema: CuentaContableSchema },
+  { name: LoteRecibos.name, schema: LoteRecibosSchema },
+  { name: ConsecutivoLoteRecibos.name, schema: ConsecutivoLoteRecibosSchema },
 ];
 
 /**
