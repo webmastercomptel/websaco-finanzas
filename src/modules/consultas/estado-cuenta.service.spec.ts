@@ -199,6 +199,47 @@ describe('EstadoCuentaService', () => {
       expect(result.movimientos[0].concepto).toBe('3 Cargos del mes FV-0012');
     });
 
+    it('el descuento por pronto pago de un Recibo va a descuentosAjustes, NUNCA a pagosRecibidos', async () => {
+      // Bug real reportado: un Recibo con descuento por pronto pago activo
+      // (amountApplied 400000 = 360000 de efectivo real + 40000 de
+      // descuento) sumaba el descuento completo a "Pagos Recibidos" — el
+      // propietario nunca pagó esos 40000, así que deben verse como
+      // descuento, no como plata recibida.
+      const inmId = id();
+      const fId = id();
+      const rId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 400000 });
+      const r = reciboDoc({ _id: rId });
+      const app = appDoc(rId, 'RC', {
+        amountApplied: 400000,
+        discountApplied: 40000,
+        appliedAt: new Date('2026-01-20'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.pagosRecibidos).toBe(360000);
+      expect(result.descuentosAjustes).toBe(40000);
+      const filaDescuento = result.movimientos.find((m) =>
+        m.concepto.includes('Descuento Pronto Pago'),
+      );
+      expect(filaDescuento).toMatchObject({
+        abono: 40000,
+        categoria: 'descuento',
+      });
+    });
+
     it('Recibo application produces categoria pago', async () => {
       const inmId = id();
       const fId = id();

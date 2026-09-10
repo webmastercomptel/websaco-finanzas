@@ -253,16 +253,42 @@ export class EstadoCuentaService {
           ? reciboMap.get(app.sourceId.toString())
           : ncMap.get(app.sourceId.toString());
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
+      const fecha = origen?.fecha ?? app.appliedAt;
 
-      rows.push({
-        fecha: origen?.fecha ?? app.appliedAt,
-        tipo: sourceType,
-        numeroCompleto: sourceNumber,
-        concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
-        cargo: null,
-        abono: app.amountApplied,
-        categoria: sourceType === 'RC' ? 'pago' : 'descuento',
-      });
+      // `amountApplied` on an RC application is cash PLUS whatever early-
+      // payment discount it absorbed (`discountApplied`) — see the Descuento
+      // por Pronto Pago plan's own design: the factura is credited the full
+      // amount, the Recibo's cash side is smaller. Counting the whole thing
+      // as "pago" would overstate what the propietario actually paid, so the
+      // discount portion gets its own row/categoria — same bucket a Nota
+      // Crédito's own discount already uses — leaving only real cash under
+      // "pago".
+      const montoDescuento =
+        sourceType === 'RC' ? (app.discountApplied ?? 0) : 0;
+      const montoCash = app.amountApplied - montoDescuento;
+
+      if (montoCash > 0) {
+        rows.push({
+          fecha,
+          tipo: sourceType,
+          numeroCompleto: sourceNumber,
+          concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
+          cargo: null,
+          abono: montoCash,
+          categoria: sourceType === 'RC' ? 'pago' : 'descuento',
+        });
+      }
+      if (montoDescuento > 0) {
+        rows.push({
+          fecha,
+          tipo: sourceType,
+          numeroCompleto: sourceNumber,
+          concepto: `Descuento Pronto Pago Recibo ${sourceNumber}`,
+          cargo: null,
+          abono: montoDescuento,
+          categoria: 'descuento',
+        });
+      }
     }
 
     // Notas Contables → TWO rows each (débito + crédito, net zero)
