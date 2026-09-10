@@ -387,10 +387,13 @@ describe('NotasContablesService.crear', () => {
     const creado = calls[0][0][0] as {
       entries: { type: string; account: string }[];
     };
+    // Vista de cartera, no de ingreso: origen se acredita (se le quita el
+    // saldo), destino se debita (se le agrega) — ver el docblock de
+    // `construirMovimientosReclasificacion`.
     const debit = creado.entries.find((m) => m.type === 'debito');
     const credit = creado.entries.find((m) => m.type === 'credito');
-    expect(debit!.account).toBe('413501');
-    expect(credit!.account).toBe('413502');
+    expect(debit!.account).toBe('413502');
+    expect(credit!.account).toBe('413501');
   });
 });
 
@@ -553,11 +556,12 @@ describe('NotasContablesService.anular', () => {
     const creado = calls[0][0][0] as {
       entries: { type: string; account: string }[];
     };
-    // Swapped: destino account is debited, origen account is credited.
+    // Reversal of creation's origen=crédito/destino=débito: origen is
+    // debited back, destino is credited back.
     const debito = creado.entries.find((m) => m.type === 'debito');
     const credito = creado.entries.find((m) => m.type === 'credito');
-    expect(debito!.account).toBe('413502');
-    expect(credito!.account).toBe('413501');
+    expect(debito!.account).toBe('413501');
+    expect(credito!.account).toBe('413502');
   });
 });
 

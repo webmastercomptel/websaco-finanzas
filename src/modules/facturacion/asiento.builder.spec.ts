@@ -1530,6 +1530,27 @@ describe('construirContraAsientoAplicacionAnticipo', () => {
 });
 
 describe('construirMovimientosReclasificacion', () => {
+  it('acredita la cuenta origen y debita la cuenta destino — vista de cartera, no de ingreso', () => {
+    const movimientos = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+    );
+
+    expect(movimientos).toEqual([
+      expect.objectContaining({
+        account: '413501',
+        type: 'credito',
+        amount: 100000,
+      }),
+      expect.objectContaining({
+        account: '413502',
+        type: 'debito',
+        amount: 100000,
+      }),
+    ]);
+  });
+
   it('sin cuentasOrden produce solo el par de reclasificación', () => {
     const movimientos = construirMovimientosReclasificacion(
       '413501',
