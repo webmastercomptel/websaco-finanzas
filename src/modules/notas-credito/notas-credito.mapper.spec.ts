@@ -18,6 +18,9 @@ const notaDoc = (over: Record<string, unknown> = {}) => ({
   voidedReason: null,
   voidedDetail: null,
   voidedAt: null,
+  // NotaCredito has no declared business date field of its own —
+  // `createdAt` is its issue date, read by `toAplicacionCartera` via a cast.
+  createdAt: new Date('2026-08-15'),
   ...over,
 });
 

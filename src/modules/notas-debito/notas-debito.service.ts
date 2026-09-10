@@ -286,7 +286,53 @@ export class NotasDebitoService {
       .find({ coPropertyId, documentType: 'ND', documentId: nota._id })
       .sort({ appliedAt: 1 })
       .exec();
-    return toNotaDebitoDetalle(nota, aplicaciones);
+
+    // Each aplicación's source (who paid this nota) can be a different
+    // Recibo/Nota Crédito/Nota de Anticipo — batch-resolve their own
+    // business dates instead of showing the real cruce instant
+    // (`appliedAt`), same reasoning as every other `appliedAt` fix this
+    // session.
+    const idsPorTipo = {
+      RC: [] as string[],
+      NC: [] as string[],
+      NA: [] as string[],
+    };
+    for (const a of aplicaciones)
+      idsPorTipo[a.sourceType].push(a.sourceId.toString());
+    const [recibosOrigen, notasCreditoOrigen, notasAnticipoOrigen] =
+      await Promise.all([
+        idsPorTipo.RC.length
+          ? this.recibos
+              .find({ coPropertyId, _id: { $in: idsPorTipo.RC } })
+              .exec()
+          : [],
+        idsPorTipo.NC.length
+          ? this.notasCredito
+              .find({ coPropertyId, _id: { $in: idsPorTipo.NC } })
+              .exec()
+          : [],
+        idsPorTipo.NA.length
+          ? this.notasAnticipo
+              .find({ coPropertyId, _id: { $in: idsPorTipo.NA } })
+              .exec()
+          : [],
+      ]);
+    const fechasPorSourceId = new Map<string, Date>([
+      ...recibosOrigen.map((r): [string, Date] => [
+        r._id.toString(),
+        r.receivedDate,
+      ]),
+      ...notasCreditoOrigen.map((nc): [string, Date] => [
+        nc._id.toString(),
+        (nc as unknown as { createdAt: Date }).createdAt,
+      ]),
+      ...notasAnticipoOrigen.map((na): [string, Date] => [
+        na._id.toString(),
+        na.issueDate,
+      ]),
+    ]);
+
+    return toNotaDebitoDetalle(nota, aplicaciones, fechasPorSourceId);
   }
 
   /**

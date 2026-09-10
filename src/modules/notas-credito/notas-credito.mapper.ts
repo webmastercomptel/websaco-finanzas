@@ -49,5 +49,14 @@ export const toNotaCreditoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
 ): NotaCreditoDetalle => ({
   ...toNotaCredito(doc),
-  aplicaciones: aplicaciones.map((a) => toAplicacionCartera(a)),
+  // Self-sourced: every `aplicacion` here was made BY this Nota Crédito.
+  // It has no declared business date field of its own — `createdAt` is its
+  // issue date — never `appliedAt`, the real cruce instant.
+  aplicaciones: aplicaciones.map((a) =>
+    toAplicacionCartera(
+      a,
+      null,
+      (doc as unknown as { createdAt: Date }).createdAt,
+    ),
+  ),
 });

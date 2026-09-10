@@ -33,11 +33,26 @@ export const toNotaDebito = (doc: NotaDebitoDocument): NotaDebitoContract => ({
  * `toNotaDebito` plus the full applications array — what
  * `GET /notas-debito/:id` returns. `GET /notas-debito` (the listing) keeps
  * using lean `toNotaDebito`, same pattern as `toNotaCreditoDetalle`.
+ *
+ * Unlike `toReciboDetalle`/`toNotaCreditoDetalle`/`toNotaAnticipoDetalle`
+ * (self-sourced: every `aplicacion.sourceId` IS `doc._id`, the document
+ * being viewed), a Nota Débito's own `aplicaciones` are "who paid ME" — each
+ * one's source can be a DIFFERENT Recibo/Nota Crédito/Nota de Anticipo, each
+ * with its own business date. `fechasPorSourceId` is the caller's own
+ * batch-resolved `sourceId.toString() -> fecha` lookup across all three
+ * source collections (this module has no direct query of its own for them).
  */
 export const toNotaDebitoDetalle = (
   doc: NotaDebitoDocument,
   aplicaciones: AplicacionCarteraDocument[],
+  fechasPorSourceId: Map<string, Date> = new Map(),
 ): NotaDebitoDetalle => ({
   ...toNotaDebito(doc),
-  aplicaciones: aplicaciones.map((a) => toAplicacionCartera(a)),
+  aplicaciones: aplicaciones.map((a) =>
+    toAplicacionCartera(
+      a,
+      null,
+      fechasPorSourceId.get(a.sourceId.toString()) ?? a.appliedAt,
+    ),
+  ),
 });

@@ -496,6 +496,10 @@ const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
   appliedAmount: 120000,
   unappliedAmount: 80000,
   status: 'activo',
+  // NotaCredito has no declared business date field of its own —
+  // `createdAt` is its issue date, read by `toAplicacionCartera` via a cast
+  // (see `notas-credito.service.ts`'s own `fechaNota`).
+  createdAt: new Date('2026-08-15'),
   ...over,
 });
 

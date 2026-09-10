@@ -70,7 +70,13 @@ describe('toRecibo', () => {
 
 describe('toAplicacionCartera', () => {
   it('mapea una aplicación, con su sourceType/sourceId', () => {
-    expect(toAplicacionCartera(aplicacionDoc() as never)).toEqual({
+    expect(
+      toAplicacionCartera(
+        aplicacionDoc() as never,
+        null,
+        new Date('2026-08-27'),
+      ),
+    ).toEqual({
       id: 'apl-1',
       sourceType: 'RC',
       sourceId: 'rec-1',
@@ -84,10 +90,26 @@ describe('toAplicacionCartera', () => {
     });
   });
 
-  it('recibe numeroDocumento como segundo parámetro explícito, nunca posicional vía .map', () => {
-    expect(toAplicacionCartera(aplicacionDoc() as never, 'FV-1')).toMatchObject(
-      { numeroDocumento: 'FV-1' },
+  it('usa la fecha que el caller pasa explícitamente, NUNCA appliedAt (el instante real del cruce)', () => {
+    // `appliedAt` en la fixture es 2026-08-27, pero el caller declara que la
+    // fecha de negocio real es otra — si la función leyera `doc.appliedAt`
+    // por su cuenta, este test lo detectaría.
+    const resultado = toAplicacionCartera(
+      aplicacionDoc({ appliedAt: new Date('2026-08-27') }) as never,
+      null,
+      new Date('2026-06-02'),
     );
+    expect(resultado.fecha).toBe('2026-06-02T00:00:00.000Z');
+  });
+
+  it('recibe numeroDocumento como segundo parámetro explícito, nunca posicional vía .map', () => {
+    expect(
+      toAplicacionCartera(
+        aplicacionDoc() as never,
+        'FV-1',
+        new Date('2026-08-27'),
+      ),
+    ).toMatchObject({ numeroDocumento: 'FV-1' });
   });
 
   it('mapea detalleConceptos, congelando el nombre del concepto', () => {
@@ -103,7 +125,10 @@ describe('toAplicacionCartera', () => {
       ],
     });
 
-    expect(toAplicacionCartera(doc as never).detalleConceptos).toEqual([
+    expect(
+      toAplicacionCartera(doc as never, null, new Date('2026-08-27'))
+        .detalleConceptos,
+    ).toEqual([
       {
         conceptoId: conceptoId.toString(),
         nombreConcepto: 'Administración',

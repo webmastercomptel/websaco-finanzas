@@ -403,8 +403,11 @@ export class NotasCreditoService {
           .findOne({ _id: id, coPropertyId })
           .session(session)
           .exec();
+        const fechaNota = (nota as unknown as { createdAt: Date }).createdAt;
         return {
-          aplicadas: creadas.map((a) => toAplicacionCartera(a)),
+          aplicadas: creadas.map((a) =>
+            toAplicacionCartera(a, null, fechaNota),
+          ),
           montoSinAplicar: notaFinal!.unappliedAmount,
           errores: [],
         };
@@ -429,8 +432,11 @@ export class NotasCreditoService {
           totalAplicado,
         );
       }
+      const fechaNota = (nota as unknown as { createdAt: Date }).createdAt;
       return {
-        aplicadas: resultado.aplicadas.map((a) => toAplicacionCartera(a)),
+        aplicadas: resultado.aplicadas.map((a) =>
+          toAplicacionCartera(a, null, fechaNota),
+        ),
         montoSinAplicar: resultado.montoSinAplicar,
         errores: resultado.errores,
       };

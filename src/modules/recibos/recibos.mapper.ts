@@ -44,10 +44,20 @@ export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
  * via a bare `.map(toAplicacionCartera)`, which would leak `Array.map`'s own
  * index into it) — every call site below uses `.map((doc) => ...)` for
  * exactly this reason.
+ *
+ * `fecha` is a third, REQUIRED parameter — deliberately never `doc.appliedAt`
+ * (always the real server instant the cruce ran, needed for the accounting
+ * entry, but not what a person means by "the date of this movement"). The
+ * caller supplies the SOURCE document's own business date instead — a
+ * Recibo's `receivedDate`, a Nota Crédito's `createdAt` (its closest
+ * equivalent — see its own schema comment), a Nota de Anticipo's
+ * `issueDate`. No default: a call site that forgets this parameter should
+ * fail to compile, not silently reintroduce the appliedAt bug.
  */
 export const toAplicacionCartera = (
   doc: AplicacionCarteraDocument,
-  numeroDocumento: string | null = null,
+  numeroDocumento: string | null,
+  fecha: Date,
 ): AplicacionCarteraContract => ({
   id: doc._id.toString(),
   sourceType: doc.sourceType,
@@ -63,7 +73,7 @@ export const toAplicacionCartera = (
     monto: d.monto,
   })),
   estado: doc.status,
-  fecha: doc.appliedAt.toISOString(),
+  fecha: fecha.toISOString(),
 });
 
 /**
@@ -81,10 +91,14 @@ export const toReciboDetalle = (
   numerosPorDocumento: Map<string, string> = new Map(),
 ): ReciboDetalle => ({
   ...toRecibo(doc),
+  // Self-sourced: every `aplicacion` here was made BY this Recibo, so its
+  // own `receivedDate` — never `appliedAt` — is what a person means by "the
+  // date of this movement".
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,
       numerosPorDocumento.get(a.documentId.toString()) ?? null,
+      doc.receivedDate,
     ),
   ),
 });

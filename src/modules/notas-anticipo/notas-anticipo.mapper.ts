@@ -41,10 +41,14 @@ export const toNotaAnticipoDetalle = (
   numerosPorDocumento: Map<string, string> = new Map(),
 ): NotaAnticipoDetalle => ({
   ...toNotaAnticipo(doc),
+  // Self-sourced: every `aplicacion` here was made BY this Nota de
+  // Anticipo, so its own `issueDate` — never `appliedAt` — is what a person
+  // means by "the date of this movement".
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,
       numerosPorDocumento.get(a.documentId.toString()) ?? null,
+      doc.issueDate,
     ),
   ),
 });

@@ -156,14 +156,35 @@ export class AuxiliarCarteraService {
     const ndMap = new Map(
       notasDebito.map((nd) => [nd._id.toString(), nd.fullNumber]),
     );
+    // Each carries the source document's own business date — never
+    // `AplicacionCartera.appliedAt`, which is always `new Date()` at cruce
+    // time (needed for the accounting entry, posted at the real instant)
+    // and can land in a completely different period than the date the user
+    // actually declared for the payment. Same reasoning/fix as
+    // `estado-cuenta.service.ts`'s own `reciboMap`/`ncMap`.
     const reciboMap = new Map(
-      recibos.map((r) => [r._id.toString(), r.fullNumber]),
+      recibos.map((r) => [
+        r._id.toString(),
+        { fullNumber: r.fullNumber, fecha: r.receivedDate },
+      ]),
     );
     const ncMap = new Map(
-      notasCredito.map((nc) => [nc._id.toString(), nc.fullNumber]),
+      notasCredito.map((nc) => [
+        nc._id.toString(),
+        {
+          fullNumber: nc.fullNumber,
+          // NotaCredito has no declared business date field of its own —
+          // `createdAt` is its issue date, same as the NotaContable rows
+          // below.
+          fecha: (nc as unknown as { createdAt: Date }).createdAt,
+        },
+      ]),
     );
     const naMap = new Map(
-      notasAnticipo.map((na) => [na._id.toString(), na.fullNumber]),
+      notasAnticipo.map((na) => [
+        na._id.toString(),
+        { fullNumber: na.fullNumber, fecha: na.issueDate },
+      ]),
     );
 
     // Step 4: build raw rows
@@ -198,7 +219,10 @@ export class AuxiliarCarteraService {
     // AplicacionCartera → Crédito
     const mapaPorTipo: Record<
       'RC' | 'NC' | 'NA',
-      { mapa: Map<string, string>; etiqueta: string }
+      {
+        mapa: Map<string, { fullNumber: string; fecha: Date }>;
+        etiqueta: string;
+      }
     > = {
       RC: { mapa: reciboMap, etiqueta: 'Recibo' },
       NC: { mapa: ncMap, etiqueta: 'Nota Crédito' },
@@ -207,14 +231,14 @@ export class AuxiliarCarteraService {
     for (const app of aplicaciones) {
       const sourceType = app.sourceType;
       const { mapa, etiqueta } = mapaPorTipo[sourceType];
-      const sourceNumber =
-        mapa.get(app.sourceId.toString()) ?? app.sourceId.toString();
+      const origen = mapa.get(app.sourceId.toString());
+      const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
 
       const targetMap = app.documentType === 'FV' ? facturaMap : ndMap;
       const refCruce = targetMap.get(app.documentId.toString()) ?? null;
 
       rows.push({
-        fecha: app.appliedAt,
+        fecha: origen?.fecha ?? app.appliedAt,
         tipo: sourceType,
         numeroCompleto: sourceNumber,
         concepto: `${etiqueta} ${sourceNumber}`,

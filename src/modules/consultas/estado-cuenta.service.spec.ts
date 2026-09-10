@@ -15,6 +15,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   fullNumber: 'FV-001-001',
   total: 200000,
   status: 'emitida',
+  lines: [{}],
   ...over,
 });
 
@@ -173,6 +174,29 @@ describe('EstadoCuentaService', () => {
 
       // Before 2026-01-01: FC 200k - RC 50k = 150k
       expect(result.saldoAnterior).toBe(150000);
+    });
+
+    it("el concepto de una Factura es 'N Cargos del mes FV-xxx', N según la cantidad de líneas", async () => {
+      const inmId = id();
+      const f = facturaDoc({
+        inmuebleId: inmId,
+        fullNumber: 'FV-0012',
+        total: 300000,
+        lines: [{}, {}, {}],
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.movimientos[0].concepto).toBe('3 Cargos del mes FV-0012');
     });
 
     it('Recibo application produces categoria pago', async () => {

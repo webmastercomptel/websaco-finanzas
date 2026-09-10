@@ -225,7 +225,7 @@ export class EstadoCuentaService {
         fecha: f.issueDate,
         tipo: 'FC',
         numeroCompleto: f.fullNumber,
-        concepto: 'Factura de Venta',
+        concepto: `${f.lines.length} Cargos del mes ${f.fullNumber}`,
         cargo: f.total,
         abono: null,
         categoria: null,

@@ -199,6 +199,44 @@ describe('AuxiliarCarteraService', () => {
       ]);
     });
 
+    it('usa Recibo.receivedDate como fecha del movimiento, no AplicacionCartera.appliedAt', async () => {
+      // Bug real reportado: un Recibo digitado con fecha 02/06/2026 (mucho
+      // antes del instante real del servidor) mostraba su cruce con la
+      // fecha de HOY en el Auxiliar de Cartera — porque el cruce corre en
+      // el instante real (`appliedAt`), nunca en la fecha que el usuario
+      // declaró para el pago.
+      const rec = reciboDoc({ receivedDate: new Date('2026-06-02') });
+      const f = facturaDoc();
+      const app = aplicacionDoc(rec._id, f._id, {
+        appliedAt: new Date('2026-09-09'),
+      });
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        recibos: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([rec]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([app]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-06-01',
+        hasta: '2026-06-30',
+      });
+
+      const fila = result.movimientos.find((m) => m.tipo === 'RC');
+      expect(fila).toBeDefined();
+      expect(fila!.fecha).toBe('2026-06-02T00:00:00.000Z');
+    });
+
     it('una Nota de Anticipo aplicando a una factura produce una fila Crédito NA (el anticipo se aplicó después del recibo, no desde el propio recibo)', async () => {
       const na = notaAnticipoDoc();
       const f = facturaDoc();
