@@ -373,6 +373,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, dtoBase());
@@ -407,6 +408,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, dtoBase());
@@ -441,6 +443,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, dtoBase());
@@ -476,6 +479,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
     await service.crear(CUENTA, { ...dtoBase(), descuentoProntoPago: 8 });
@@ -502,6 +506,7 @@ describe('LotesFacturacionService.crear', () => {
       tenantQueDevuelve(COP),
       {} as never,
       numeracionCon(),
+      {} as never, // connection
     );
 
   it('rechaza una fecha de facturación que no cae en el mes siguiente al último ciclo consolidado — el bug real reportado (typo de año)', async () => {
@@ -2263,11 +2268,16 @@ describe('LotesFacturacionService.consolidar', () => {
   const numeracionParaConsolidar = (completo = 'FV-1') =>
     ({
       siguienteLote: jest.fn().mockResolvedValue(1),
-      siguienteFactura: jest.fn().mockResolvedValue({
-        prefijo: 'FV',
-        numero: 1,
-        completo,
-      }),
+      reservarBloqueFacturas: jest.fn(
+        (_coPropertyId: string, cantidad: number) =>
+          Promise.resolve({
+            numeros: Array.from({ length: cantidad }, (_, i) => ({
+              prefijo: 'FV',
+              numero: 1 + i,
+              completo: i === 0 ? completo : `FV-${1 + i}`,
+            })),
+          }),
+      ),
     }) as unknown as NumeracionService;
 
   const servicioConsolidar = (m: ReturnType<typeof construirModelos>) =>
@@ -2284,6 +2294,7 @@ describe('LotesFacturacionService.consolidar', () => {
       tenantQueDevuelve(COP),
       periodoAbierto(),
       numeracionParaConsolidar(),
+      conexionCon(sesionFalsa()),
     );
 
   it('calcula y guarda el descuento por pronto pago en cada factura, a partir del % del lote', async () => {

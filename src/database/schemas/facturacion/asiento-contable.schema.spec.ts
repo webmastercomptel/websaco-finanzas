@@ -71,8 +71,7 @@ describe('AsientoContableSchema — índices', () => {
     // Sin el filtro parcial, todo asiento de recibo (facturaId: null) chocaría
     // contra los demás asientos de recibo en un índice único común.
     const indice = indices().find(
-      ([campos], i, arr) =>
-        campos.facturaId === 1 && Object.keys(campos).length === 1,
+      ([campos]) => campos.facturaId === 1 && Object.keys(campos).length === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });

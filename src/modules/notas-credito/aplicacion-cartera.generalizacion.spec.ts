@@ -1,7 +1,10 @@
 import mongoose, { Types } from 'mongoose';
-import { AplicacionCarteraSchema } from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import {
+  AplicacionCarteraDocument,
+  AplicacionCarteraSchema,
+} from '../../database/schemas/recibos/aplicacion-cartera.schema';
 
-const AplicacionModel = mongoose.model(
+const AplicacionModel = mongoose.model<AplicacionCarteraDocument>(
   'AplicacionCarteraGeneralizacionSpec',
   AplicacionCarteraSchema,
 );
@@ -12,7 +15,7 @@ const AplicacionModel = mongoose.model(
  *  proving the schema's OWN declared shape discriminates and combines
  *  correctly, independent of any one service's mocked model. */
 const filtrar = (
-  filas: (typeof AplicacionModel.prototype)[],
+  filas: AplicacionCarteraDocument[],
   criterio: Record<string, unknown>,
 ) =>
   filas.filter((fila) =>

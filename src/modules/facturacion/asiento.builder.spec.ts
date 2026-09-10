@@ -26,15 +26,13 @@ describe('construirMovimientos', () => {
         account: '130501',
         type: 'debito',
         amount: 520000,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '413501',
         type: 'credito',
         amount: 520000,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -267,15 +265,13 @@ describe('construirMovimientos', () => {
         account: '130599',
         type: 'debito',
         amount: 200000,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '413599',
         type: 'credito',
         amount: 200000,
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -596,19 +592,19 @@ describe('construirAsientoCruce', () => {
         account: '111005',
         type: 'debito',
         amount: 300000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'credito',
         amount: 100000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -628,13 +624,13 @@ describe('construirAsientoCruce', () => {
         account: '111005',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'credito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -654,13 +650,13 @@ describe('construirAsientoCruce', () => {
         account: '111005',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -836,19 +832,19 @@ describe('construirAsientoCruce', () => {
         account: '111005',
         type: 'debito',
         amount: 360000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '540501',
         type: 'debito',
         amount: 40000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 400000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
     const debitos = movimientos
@@ -899,13 +895,13 @@ describe('construirMovimientosAplicacionAnticipo', () => {
         account: '210505',
         type: 'debito',
         amount: 150000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 150000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -948,19 +944,19 @@ describe('construirContraAsientoCruce', () => {
         account: '130501',
         type: 'debito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'debito',
         amount: 100000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '111005',
         type: 'credito',
         amount: 300000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -981,13 +977,13 @@ describe('construirContraAsientoCruce', () => {
         account: '210505',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '111005',
         type: 'credito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -1008,13 +1004,13 @@ describe('construirContraAsientoCruce', () => {
         account: '130501',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '111005',
         type: 'credito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -1136,19 +1132,19 @@ describe('construirContraAsientoCruce', () => {
         account: '130501',
         type: 'debito',
         amount: 400000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '111005',
         type: 'credito',
         amount: 360000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '540502',
         type: 'credito',
         amount: 40000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
     const debitos = movimientos
@@ -1384,13 +1380,13 @@ describe('construirMovimientosAplicacionAnticipo con desglose y cuentasOrden', (
         account: '210505',
         type: 'debito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });

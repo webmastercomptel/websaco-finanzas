@@ -18,11 +18,11 @@ const CUENTA = new Types.ObjectId();
  *  repo's tests stub Mongoose (see the header note on this plan). */
 const sesionFalsa = () => ({
   withTransaction: async (fn: () => Promise<unknown>) => fn(),
-  endSession: jest.fn(async () => undefined),
+  endSession: jest.fn(() => Promise.resolve(undefined)),
 });
 
 const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
-  ({ startSession: jest.fn(async () => session) }) as never;
+  ({ startSession: jest.fn(() => Promise.resolve(session)) }) as never;
 
 const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
   ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
@@ -337,7 +337,9 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
     expect(resultado.montoSinAplicar).toBe(500000);
     expect(resultado.montoAplicado).toBe(0);
     expect(asientos.create).toHaveBeenCalledTimes(1);
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -348,13 +350,13 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
         account: '111005',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'credito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -412,7 +414,9 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
       aplicacionAutomatica: true,
     });
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       flujoCaja?: string | null;
@@ -751,7 +755,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     expect(resultado.montoAplicado).toBe(200000);
     expect(facturas.findOneAndUpdate).toHaveBeenCalled();
     expect(asientos.create).toHaveBeenCalledTimes(1);
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -765,19 +771,19 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         account: '111005',
         type: 'debito',
         amount: 500000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'credito',
         amount: 300000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -835,16 +841,19 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     // congelado en la propia fila de AplicacionCartera, no re-derivado más
     // tarde desde las cuentas del asiento (dos conceptos podrían compartir
     // una cuenta, lo que haría esa reconstrucción ambigua).
-    const [[filaAplicacion]] = (aplicaciones.create as jest.Mock).mock.calls;
+    const [[filaAplicacion]] = (aplicaciones.create as jest.Mock).mock
+      .calls as Array<[Record<string, unknown>[]]>;
     expect(filaAplicacion[0].detalleConceptos).toEqual([
       {
         conceptoId: conceptoMora,
-        conceptName: expect.any(String),
+        conceptName: expect.any(String) as string,
         monto: 200000,
       },
     ]);
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -859,13 +868,13 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         account: '130599',
         type: 'credito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'credito',
         amount: 300000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -945,7 +954,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       ],
     });
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -1023,7 +1034,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       ],
     });
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{ account: string }>;
     expect(entries.some((m) => m.account === '831505')).toBe(false);
     expect(entries.some((m) => m.account === '831510')).toBe(false);
@@ -1152,7 +1165,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
 
     expect(resultado.montoAplicado).toBe(100000);
     expect(notasDebito.findOneAndUpdate).toHaveBeenCalled();
-    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls;
+    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     expect(fila[0]).toMatchObject({
       documentType: 'ND',
       documentId: notaDebitoId,
@@ -1362,7 +1377,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       ],
     });
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -1373,19 +1390,19 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         account: '111005',
         type: 'debito',
         amount: 360000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '540501',
         type: 'debito',
         amount: 40000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '130501',
         type: 'credito',
         amount: 400000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -1459,18 +1476,21 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     // cascada (que habría llenado Intereses igual en este caso particular,
     // pero por casualidad — el punto es que vino del usuario, no de
     // recalcularlo).
-    const [[filaAplicacion]] = (aplicaciones.create as jest.Mock).mock.calls;
+    const [[filaAplicacion]] = (aplicaciones.create as jest.Mock).mock
+      .calls as Array<[Record<string, unknown>[]]>;
     expect(filaAplicacion[0].detalleConceptos).toEqual([
       {
         conceptoId: conceptoIntereses,
-        conceptName: expect.any(String),
+        conceptName: expect.any(String) as string,
         monto: 150000,
       },
     ]);
     expect(filaAplicacion[0].discountApplied).toBe(0);
 
     // El asiento acredita la cuenta de Intereses, nunca la de Administración.
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -1780,7 +1800,9 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // sin tocar la Factura.
     expect(ordenAplicado).toEqual([notaMasVieja._id.toString()]);
     expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
-    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls;
+    const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     expect(fila[0]).toMatchObject({
       documentType: 'ND',
       documentId: notaMasVieja._id,
@@ -2130,8 +2152,8 @@ describe('RecibosService.anular', () => {
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: aplicacionActiva._id, coPropertyId: COP },
-      { $set: { status: 'revertida', revertedAt: expect.any(Date) } },
-      expect.objectContaining({ session: expect.anything() }),
+      { $set: { status: 'revertida', revertedAt: expect.any(Date) as Date } },
+      expect.objectContaining({ session: expect.anything() as unknown }),
     );
     expect(asientos.create).toHaveBeenCalledTimes(1);
     // El propio Recibo transiciona de estado — este endpoint responde con el
@@ -2147,7 +2169,7 @@ describe('RecibosService.anular', () => {
           voidedReason: 'duplicado',
           voidedDetail:
             'Se cargó el mismo comprobante dos veces por error del cajero',
-          voidedAt: expect.any(Date),
+          voidedAt: expect.any(Date) as Date,
           // El actor de la anulación sale del caller autenticado y se escribe
           // en el MISMO $set que la transición de estado — nunca uno sin el
           // otro. Es la operación más auditada del módulo y era la única
@@ -2157,18 +2179,20 @@ describe('RecibosService.anular', () => {
           unappliedAmount: 0,
         },
       },
-      expect.objectContaining({ session: expect.anything() }),
+      expect.objectContaining({ session: expect.anything() as unknown }),
     );
     expect(resultado.estado).toBe('anulado');
     expect(resultado.motivoAnulacion).toBe('duplicado');
     expect(resultado.detalleAnulacion).toBe(
       'Se cargó el mismo comprobante dos veces por error del cajero',
     );
-    expect(resultado.fechaAnulacion).toEqual(expect.any(String));
+    expect(resultado.fechaAnulacion).toEqual(expect.any(String) as string);
     // Usa los totales CACHEADOS del recibo (appliedAmount/unappliedAmount/
     // receivedAmount), no una suma recalculada del loop de arriba — no hace
     // falta "reproducir" la historia para saber cuánto revertir.
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -2179,19 +2203,19 @@ describe('RecibosService.anular', () => {
         account: '130501',
         type: 'debito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '210505',
         type: 'debito',
         amount: 100000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
       {
         account: '111005',
         type: 'credito',
         amount: 300000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -2262,7 +2286,9 @@ describe('RecibosService.anular', () => {
       CUENTA.toString(),
     );
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -2354,7 +2380,9 @@ describe('RecibosService.anular', () => {
       CUENTA.toString(),
     );
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -2449,7 +2477,9 @@ describe('RecibosService.anular', () => {
       CUENTA.toString(),
     );
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;

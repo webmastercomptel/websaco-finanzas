@@ -237,7 +237,9 @@ describe('NotasContablesService.crear', () => {
 
     await service.crear('acc-1', dtoBase());
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       tercero?: string | null;

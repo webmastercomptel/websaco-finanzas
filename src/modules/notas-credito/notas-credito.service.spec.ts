@@ -17,11 +17,11 @@ const CONCEPTO = new Types.ObjectId();
  *  repo's tests stub Mongoose (see recibos.service.spec.ts's own header). */
 const sesionFalsa = () => ({
   withTransaction: async (fn: () => Promise<unknown>) => fn(),
-  endSession: jest.fn(async () => undefined),
+  endSession: jest.fn(() => Promise.resolve(undefined)),
 });
 
 const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
-  ({ startSession: jest.fn(async () => session) }) as never;
+  ({ startSession: jest.fn(() => Promise.resolve(session)) }) as never;
 
 const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
   ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
@@ -276,7 +276,9 @@ describe('NotasCreditoService.crear', () => {
 
     await service.crear('acc-1', dtoBase());
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       tercero?: string | null;
@@ -302,7 +304,9 @@ describe('NotasCreditoService.crear', () => {
 
     await service.crear('acc-1', dtoBase());
 
-    const [[fila]] = (asientos.create as jest.Mock).mock.calls;
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
     const entries = fila[0].entries as Array<{
       account: string;
       type: string;
@@ -316,7 +320,7 @@ describe('NotasCreditoService.crear', () => {
         account: '130599',
         type: 'credito',
         amount: 200000,
-        description: expect.any(String),
+        description: expect.any(String) as string,
       },
     ]);
   });
@@ -388,7 +392,10 @@ describe('NotasCreditoService.crear', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(numeracion.siguienteDocumento).not.toHaveBeenCalled();
+    expect(
+      (numeracion as unknown as { siguienteDocumento: jest.Mock })
+        .siguienteDocumento,
+    ).not.toHaveBeenCalled();
   });
 
   it('rechaza cuando dto.inmuebleId no coincide con factura.inmuebleId — no debe permitir emparejar una unidad con la factura de otra', async () => {
@@ -491,8 +498,12 @@ describe('NotasCreditoService.crear', () => {
 
     await service.crear('acc-1', dtoBase());
 
-    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
-    const [entrada] = creado;
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as [
+      { notaCreditoId: unknown; entries: Record<string, unknown>[] },
+    ];
     expect(entrada.notaCreditoId).toEqual(notaCreada._id);
     expect(entrada.entries[0]).toMatchObject({
       account: '413595',
@@ -511,8 +522,10 @@ describe('NotasCreditoService.crear', () => {
 
     await service.crear('acc-1', dtoBase({ fecha: '2026-01-05' }));
 
-    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
-    const [entrada] = creado as [{ date: Date }];
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [{ date: Date }];
     expect(entrada.date).toEqual(new Date('2026-01-05'));
   });
 
@@ -557,8 +570,12 @@ describe('NotasCreditoService.crear', () => {
       }),
     );
 
-    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
-    const [entrada] = creado as [{ entries: Record<string, unknown>[] }];
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { entries: Record<string, unknown>[] },
+    ];
     const debitos = entrada.entries.filter((e) => e.type === 'debito');
     expect(debitos).toEqual([
       expect.objectContaining({ account: '413501', amount: 100000 }),
@@ -985,7 +1002,7 @@ describe('NotasCreditoService.anular', () => {
     expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: facturaId, coPropertyId: COP },
       { $inc: { outstandingBalance: 120000 } },
-      { returnDocument: 'after', session: expect.anything() },
+      { returnDocument: 'after', session: expect.anything() as unknown },
     );
     expect(resultado.estado).toBe('anulado');
     expect(resultado.montoAplicado).toBe(0);
@@ -1080,8 +1097,12 @@ describe('NotasCreditoService.anular', () => {
       'acc-1',
     );
 
-    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
-    const [entrada] = creado as [{ entries: Record<string, unknown>[] }];
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { entries: Record<string, unknown>[] },
+    ];
     const creditos = entrada.entries.filter((e) => e.type === 'credito');
     expect(creditos).toEqual([
       expect.objectContaining({ account: '413501', amount: 100000 }),
@@ -1362,11 +1383,13 @@ describe('NotasCreditoService.anular', () => {
     // (`Tuple type '[]' of length '0' has no element at index '0'`) even
     // though it runs fine under ts-jest. Fixed additively — the assertion
     // itself is unchanged.
-    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
-    const [entrada] = creado;
-    expect(
-      entrada.entries.find((m: { type: string }) => m.type === 'credito'),
-    ).toMatchObject({
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { entries: Record<string, unknown>[] },
+    ];
+    expect(entrada.entries.find((m) => m.type === 'credito')).toMatchObject({
       account: '413595',
       amount: 200000,
     });

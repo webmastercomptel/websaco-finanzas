@@ -40,7 +40,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log(`Copropiedad: ${cop.name} (${cop._id})`);
+  console.log(`Copropiedad: ${cop.name} (${cop._id.toString()})`);
 
   const existentes = await conceptos.find({ coPropertyId: cop._id }).exec();
   console.log(`Conceptos existentes: ${existentes.length}`);

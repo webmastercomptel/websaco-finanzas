@@ -9,11 +9,11 @@ const CUENTA = new Types.ObjectId();
 
 const sesionFalsa = () => ({
   withTransaction: async (fn: () => Promise<unknown>) => fn(),
-  endSession: jest.fn(async () => undefined),
+  endSession: jest.fn(() => Promise.resolve(undefined)),
 });
 
 const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
-  ({ startSession: jest.fn(async () => session) }) as never;
+  ({ startSession: jest.fn(() => Promise.resolve(session)) }) as never;
 
 const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
