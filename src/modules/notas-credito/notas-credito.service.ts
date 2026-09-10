@@ -1136,7 +1136,14 @@ export class NotasCreditoService {
           facturaId: null,
           reciboId: null,
           notaCreditoId: nota._id,
-          date: new Date(),
+          // The note's OWN declared date, never `new Date()` — same
+          // reasoning as `postearAsientoRecibo`'s `recibo.receivedDate`.
+          // `aplicar()`/`anular()` stay dated `new Date()` (the real cruce
+          // instant, no caller-supplied date to prefer) — this is creation,
+          // which does have one. Getting this wrong is exactly why a
+          // backdated Nota Crédito could silently vanish from Consulta de
+          // Movimientos when queried by its own declared period.
+          date: fechaNotaCredito(nota),
           entries,
         },
       ],

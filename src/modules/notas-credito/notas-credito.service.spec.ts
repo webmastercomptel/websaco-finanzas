@@ -500,6 +500,22 @@ describe('NotasCreditoService.crear', () => {
     });
   });
 
+  it('fecha el asiento de creación con la fecha PROPIA de la nota (issueDate), nunca new Date() — o desaparece de Consulta de Movimientos al filtrar por su período real', async () => {
+    // Bug real reportado: una nota creada "hoy" con una fecha declarada de
+    // otro día del mismo período de facturación quedaba con el asiento
+    // fechado "hoy" (el instante del servidor) en vez de la fecha que el
+    // usuario eligió — Consulta de Movimientos filtra por AsientoContable.date,
+    // así que la nota no aparecía al buscar por su propio período.
+    const notaCreada = notaCreditoCreada({ issueDate: new Date('2026-01-05') });
+    const { service, asientos } = construirServicio({ notaCreada });
+
+    await service.crear('acc-1', dtoBase({ fecha: '2026-01-05' }));
+
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls;
+    const [entrada] = creado as [{ date: Date }];
+    expect(entrada.date).toEqual(new Date('2026-01-05'));
+  });
+
   it('debita la cuenta de ingreso PROPIA de cada concepto (accountingIncomeAccount de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
     // Reportado en producción: el PDF salía con "Sin cuenta asignada" en el
     // débito porque copropiedad.creditNotesAccount no estaba configurada —
