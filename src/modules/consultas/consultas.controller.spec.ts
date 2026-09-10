@@ -9,6 +9,8 @@ const makeController = () => {
   const findAllEstadoCuenta = jest.fn();
   const generarPdfEstadoCuenta = jest.fn();
   const findAllMovimiento = jest.fn();
+  const findPeriodosConciliacionCartera = jest.fn();
+  const findAllConciliacionCartera = jest.fn();
   const resolveCoPropertyId = jest.fn();
   const findByIdCopropiedad = jest.fn();
 
@@ -22,6 +24,10 @@ const makeController = () => {
       findAll: findAllEstadoCuenta,
     } as never,
     { findAll: findAllMovimiento } as never,
+    {
+      findPeriodos: findPeriodosConciliacionCartera,
+      findAll: findAllConciliacionCartera,
+    } as never,
     { resolveCoPropertyId } as never,
     {
       findById: () => ({ exec: findByIdCopropiedad }),
@@ -38,6 +44,8 @@ const makeController = () => {
     findAllEstadoCuenta,
     generarPdfEstadoCuenta,
     findAllMovimiento,
+    findPeriodosConciliacionCartera,
+    findAllConciliacionCartera,
     resolveCoPropertyId,
     findByIdCopropiedad,
   };

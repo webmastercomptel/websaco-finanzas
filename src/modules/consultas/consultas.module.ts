@@ -7,6 +7,7 @@ import { CarteraGeneralService } from './cartera-general.service';
 import { CarteraPorInmuebleService } from './cartera-por-inmueble.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
+import { ConciliacionCarteraService } from './conciliacion-cartera.service';
 import {
   Factura,
   FacturaSchema,
@@ -56,6 +57,10 @@ import {
   AsientoContableSchema,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoSchema,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   CuentaContable,
   CuentaContableSchema,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -68,6 +73,7 @@ import {
       { name: NotaCredito.name, schema: NotaCreditoSchema },
       { name: NotaDebito.name, schema: NotaDebitoSchema },
       { name: NotaContable.name, schema: NotaContableSchema },
+      { name: NotaAnticipo.name, schema: NotaAnticipoSchema },
       { name: AplicacionCartera.name, schema: AplicacionCarteraSchema },
       { name: SaldoCartera.name, schema: SaldoCarteraSchema },
       { name: ConceptoCobro.name, schema: ConceptoCobroSchema },
@@ -86,6 +92,7 @@ import {
     CarteraPorInmuebleService,
     EstadoCuentaService,
     MovimientoContableService,
+    ConciliacionCarteraService,
   ],
 })
 export class ConsultasModule {}
