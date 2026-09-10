@@ -54,6 +54,14 @@ import {
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
 import {
+  LoteRecibos,
+  LoteRecibosDocument,
+} from '../../database/schemas/recibos/lote-recibos.schema';
+import {
+  ConsecutivoLoteRecibos,
+  ConsecutivoLoteRecibosDocument,
+} from '../../database/schemas/recibos/consecutivo-lote-recibos.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -70,14 +78,20 @@ const CODIGO_COPROPIEDAD_PRUEBA = '0001';
 
 /**
  * Wipes EVERY financial document of the one hardcoded test coproperty —
- * Lotes/Facturas, Recibos, Notas Crédito/Débito/Anticipo/Contables, and
- * everything they moved (AplicacionCartera, asientos contables, saldos de
- * cartera) — and rewinds every document's numbering back to zero, so the
- * whole billing cycle can be replayed from a blank slate as many times as
- * needed. Nothing is left half-deleted for a caller to clean up by hand:
- * every document type this system knows how to issue is wiped together, so
- * there is never a leftover Recibo/Nota pointing at a Factura that no
- * longer exists.
+ * Lotes/Facturas, Recibos (and their own Lotes de Recibos batch uploads),
+ * Notas Crédito/Débito/Anticipo/Contables, and everything they moved
+ * (AplicacionCartera, asientos contables, saldos de cartera) — and rewinds
+ * every document's numbering back to zero, so the whole billing cycle can be
+ * replayed from a blank slate as many times as needed. Nothing is left
+ * half-deleted for a caller to clean up by hand: every document type this
+ * system knows how to issue is wiped together, so there is never a leftover
+ * Recibo/Nota pointing at a Factura that no longer exists.
+ *
+ * A stray `LoteRecibos` left in `borrador`/`cargado` state is not merely
+ * clutter: `LoteRecibosSchema`'s own partial unique index allows at most one
+ * such batch per coproperty, so leaving one behind blocks starting a new
+ * Recibos-por-lote upload after the reset — the exact bug this reset exists
+ * to prevent.
  *
  * This is a deliberate, narrow exception to "nothing financial is ever
  * deleted" (see backend/CLAUDE.md's audit law) — never a template for
@@ -114,6 +128,10 @@ export class ReiniciarCicloService {
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
+    @InjectModel(LoteRecibos.name)
+    private readonly loteRecibos: Model<LoteRecibosDocument>,
+    @InjectModel(ConsecutivoLoteRecibos.name)
+    private readonly consecutivoLoteRecibos: Model<ConsecutivoLoteRecibosDocument>,
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaAnticipo.name)
@@ -144,6 +162,7 @@ export class ReiniciarCicloService {
       notasAnticipoEliminadas,
       notasContablesEliminadas,
       recibosEliminados,
+      loteRecibosEliminados,
     ] = await Promise.all([
       this.aplicaciones.deleteMany({ coPropertyId }).exec(),
       this.notasCredito.deleteMany({ coPropertyId }).exec(),
@@ -151,6 +170,7 @@ export class ReiniciarCicloService {
       this.notasAnticipo.deleteMany({ coPropertyId }).exec(),
       this.notasContables.deleteMany({ coPropertyId }).exec(),
       this.recibos.deleteMany({ coPropertyId }).exec(),
+      this.loteRecibos.deleteMany({ coPropertyId }).exec(),
     ]);
 
     const [asientosEliminados, saldosEliminados] = await Promise.all([
@@ -180,6 +200,11 @@ export class ReiniciarCicloService {
     await this.consecutivoDocumento
       .updateMany({ coPropertyId }, { $set: { nextNumber: 0 } })
       .exec();
+    // LoteRecibos has its own consecutivo, separate from consecutivoDocumento
+    // (its numbers are internal to the batch, never a document type code).
+    await this.consecutivoLoteRecibos
+      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .exec();
     const resolucionActiva = await this.resoluciones
       .findOne({ coPropertyId, status: 'active' })
       .exec();
@@ -196,6 +221,7 @@ export class ReiniciarCicloService {
       lotesEliminados: lotesEliminados.deletedCount,
       facturasEliminadas: facturasEliminadas.deletedCount,
       recibosEliminados: recibosEliminados.deletedCount,
+      loteRecibosEliminados: loteRecibosEliminados.deletedCount,
       notasCreditoEliminadas: notasCreditoEliminadas.deletedCount,
       notasDebitoEliminadas: notasDebitoEliminadas.deletedCount,
       notasAnticipoEliminadas: notasAnticipoEliminadas.deletedCount,

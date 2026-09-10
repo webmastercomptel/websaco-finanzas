@@ -1560,12 +1560,29 @@ describe('construirMovimientosReclasificacion', () => {
     expect(movimientos).toHaveLength(2);
   });
 
-  it('con cuentasOrden agrega el par memo por el mismo monto', () => {
+  it('sin origen/destino de intereses, NO mueve cuentasOrden aunque esté configurado', () => {
+    // Regresión: antes de recibir `origenEsIntereses`/`destinoEsIntereses`,
+    // esta función movía el par memo por el monto completo cada vez que
+    // `cuentasOrden` estaba configurado, sin importar el concepto —
+    // Administración → Otro nunca debe tocar el par memo.
     const movimientos = construirMovimientosReclasificacion(
       '413501',
       '413502',
       100000,
       { debito: '831505', credito: '831510' },
+    );
+
+    expect(movimientos).toHaveLength(2);
+  });
+
+  it('con destino de intereses, agrega el par memo por el mismo monto (abre el par, como facturación)', () => {
+    const movimientos = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+      { debito: '831505', credito: '831510' },
+      false,
+      true,
     );
 
     expect(movimientos).toHaveLength(4);
@@ -1574,18 +1591,44 @@ describe('construirMovimientosReclasificacion', () => {
     expect(suma('debito')).toBe(suma('credito'));
   });
 
-  it('con cuentasOrden invertido (voiding) queda en la dirección contraria', () => {
+  it('con origen de intereses, cierra el par memo en la dirección contraria (como un cruce cobrando mora)', () => {
+    const movimientos = construirMovimientosReclasificacion(
+      '413501',
+      '413502',
+      100000,
+      { debito: '831505', credito: '831510' },
+      true,
+      false,
+    );
+
+    // Dirección invertida respecto a "destino de intereses": la cuenta que
+    // ahí quedaba en débito ('831505') aquí queda en crédito, y viceversa.
+    const memo831505 = movimientos.find((m) => m.account === '831505');
+    const memo831510 = movimientos.find((m) => m.account === '831510');
+    expect(memo831505?.type).toBe('credito');
+    expect(memo831510?.type).toBe('debito');
+  });
+
+  it('anular una reclasificación que abrió el par memo lo revierte, sin invertir cuentasOrden manualmente', () => {
+    // El swap de roles (origen/destino, y sus banderas de intereses) al
+    // anular ya reversa el par memo por sí solo — pasar `cuentasOrden`
+    // pre-invertido encima (como hacía la primera versión de este builder)
+    // lo revertiría dos veces, dejándolo apuntando otra vez mal.
     const creacion = construirMovimientosReclasificacion(
       '413501',
       '413502',
       100000,
       { debito: '831505', credito: '831510' },
+      false,
+      true,
     );
     const anulacion = construirMovimientosReclasificacion(
       '413502',
       '413501',
       100000,
-      invertirCuentasOrden({ debito: '831505', credito: '831510' }),
+      { debito: '831505', credito: '831510' },
+      true,
+      false,
     );
 
     const memoDe = (mov: typeof creacion) =>

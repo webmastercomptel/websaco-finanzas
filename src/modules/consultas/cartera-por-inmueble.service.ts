@@ -18,6 +18,10 @@ import {
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import {
+  SaldoCartera,
+  SaldoCarteraDocument,
+} from '../../database/schemas/facturacion/saldo-cartera.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -41,6 +45,18 @@ import type { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por
  * schema comment on why this codebase replaced the old system's fixed
  * twelve-column design; this report keeps that even though its old-system
  * equivalent used one column per concept.
+ *
+ * The per-document `cargosPorConcepto` (each Factura/Nota Débito's own row)
+ * is, and must stay, a plain read of that document's own frozen lines — a
+ * Factura is never modified after issue, full stop. The AGGREGATE
+ * `cargosPorConcepto` (the per-inmueble totals row) is a different question:
+ * it reads `SaldoCartera` instead of summing those same frozen lines, so a
+ * Nota Contable reclassification between two conceptos (e.g. moving 100 from
+ * "TV" to "Pintura") shows up there — TV drops, Pintura rises, the inmueble's
+ * grand total is unchanged — even though no individual invoice's own row
+ * moved even one peso. Before this, the totals row silently re-derived from
+ * the same immutable lines as the per-document rows, so a reclassification
+ * was invisible everywhere on this screen.
  */
 @Injectable()
 export class CarteraPorInmuebleService {
@@ -53,6 +69,8 @@ export class CarteraPorInmuebleService {
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(ConceptoCobro.name)
     private readonly conceptosCobro: Model<ConceptoCobroDocument>,
+    @InjectModel(SaldoCartera.name)
+    private readonly saldosCartera: Model<SaldoCarteraDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -126,7 +144,6 @@ export class CarteraPorInmuebleService {
     }
 
     const documentos: DocumentoCarteraPorInmueble[] = [];
-    const conceptoTotales = new Map<string, number>();
 
     for (const f of facturas) {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
@@ -145,7 +162,6 @@ export class CarteraPorInmuebleService {
         const key = line.conceptoId.toString();
         const monto = line.totalAmount * factor;
         cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
-        conceptoTotales.set(key, (conceptoTotales.get(key) ?? 0) + monto);
       }
 
       documentos.push({
@@ -167,7 +183,6 @@ export class CarteraPorInmuebleService {
       if (saldo <= 0) continue;
 
       const key = nd.conceptoId.toString();
-      conceptoTotales.set(key, (conceptoTotales.get(key) ?? 0) + saldo);
 
       documentos.push({
         tipo: 'ND',
@@ -183,10 +198,14 @@ export class CarteraPorInmuebleService {
       (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime(),
     );
 
-    const conceptos = await this.conceptosCobro
-      .find({ coPropertyId })
-      .sort({ sortOrder: 1 })
-      .exec();
+    const [conceptos, saldos] = await Promise.all([
+      this.conceptosCobro.find({ coPropertyId }).sort({ sortOrder: 1 }).exec(),
+      this.saldosCartera.find({ coPropertyId, inmuebleId }).exec(),
+    ]);
+    const conceptoTotales = new Map<string, number>();
+    for (const s of saldos) {
+      conceptoTotales.set(s.conceptoId.toString(), s.balance);
+    }
 
     const cargosPorConcepto: CargoCarteraPorConcepto[] = conceptos.map((c) => ({
       conceptoId: c._id.toString(),

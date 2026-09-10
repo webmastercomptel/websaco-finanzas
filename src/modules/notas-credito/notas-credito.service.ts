@@ -295,6 +295,12 @@ export class NotasCreditoService {
         factura.outstandingBalance,
       );
       let totalAplicadoAhora = 0;
+      // How much of THIS application landed on an `intereses` (mora) line —
+      // the ONLY portion `cuentasOrden` may move (design §7 / see
+      // `construirAsientoCruce`'s own note). Omitting it entirely, as this
+      // call used to, defaults the builder to the note's FULL amount,
+      // moving the memo pair even when the note never touched mora.
+      let montoAplicadoMora = 0;
       const creditosPorCuenta = new Map<string | null, number>();
       if (montoAAplicar > 0) {
         // Needed now (unlike before per-concepto coding): each distribution
@@ -342,6 +348,9 @@ export class NotasCreditoService {
             cuenta,
             (creditosPorCuenta.get(cuenta) ?? 0) + parte.parte,
           );
+          if (linea?.conceptKind === 'intereses') {
+            montoAplicadoMora += parte.parte;
+          }
         }
         await this.aplicaciones.create(
           [
@@ -392,6 +401,7 @@ export class NotasCreditoService {
         dto.montoTotal - totalAplicadoAhora,
         creditosPorCuenta,
         debitosPorCuenta,
+        montoAplicadoMora,
       );
 
       const final = await this.notasCredito
@@ -768,6 +778,12 @@ export class NotasCreditoService {
         .session(session)
         .exec();
 
+      // Mora-specific slice of everything being reversed here, accumulated
+      // across every aplicación (there can be more than one anchor + later
+      // `aplicar()` calls against other invoices) — the ONLY portion
+      // `cuentasOrden` may move on the way back too (mirrors `crear()`'s own
+      // `montoAplicadoMora`, see `construirContraAsientoCruce`'s note).
+      let montoAplicadoMoraTotal = 0;
       for (const aplicacion of aplicacionesActivas) {
         const factura = await this.facturas
           .findOneAndUpdate(
@@ -778,6 +794,18 @@ export class NotasCreditoService {
           .exec();
 
         if (factura) {
+          // `detalleConceptos` is empty on an application predating that
+          // field (schema's own note) — contributes nothing to
+          // `montoAplicadoMoraTotal`, same "no known split" fallback the
+          // frontend already uses for those.
+          for (const detalle of aplicacion.detalleConceptos ?? []) {
+            const linea = factura.lines.find((l) =>
+              l.conceptoId.equals(detalle.conceptoId),
+            );
+            if (linea?.conceptKind === 'intereses') {
+              montoAplicadoMoraTotal += detalle.monto;
+            }
+          }
           // The ANCHOR application — the one `crear()` made against
           // `nota.facturaId` using distribution math — must be reversed with
           // the SAME distribution math, or `SaldoCartera` drifts permanently
@@ -868,7 +896,7 @@ export class NotasCreditoService {
         'NC',
         cuentasOrdenDe(copropiedad),
         undefined,
-        undefined,
+        montoAplicadoMoraTotal,
         undefined,
         desgloseOrigen,
       );
@@ -1088,6 +1116,12 @@ export class NotasCreditoService {
    * `construirAsientoCruce`), credit `cuentaAnticipos` for whatever remains
    * unapplied (design §7). Shares `construirAsientoCruce` with Recibos —
    * only `origen: 'NC'` differs.
+   *
+   * `montoAplicadoMora` is the mora-specific slice of `montoAplicado` (the
+   * ONLY portion `cuentasOrden` may move — same rule Recibos' own
+   * `montoAplicadoMora` enforces) — never omitted, or `construirAsientoCruce`
+   * defaults to moving the memo pair for the note's WHOLE amount, even one
+   * that never touched an `intereses` concept.
    */
   private async postearAsientoCreacion(
     session: ClientSession,
@@ -1097,6 +1131,7 @@ export class NotasCreditoService {
     montoSinAplicar: number,
     creditosPorCuenta: Map<string | null, number>,
     debitosPorCuenta: Map<string | null, number>,
+    montoAplicadoMora: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1126,7 +1161,7 @@ export class NotasCreditoService {
       'NC',
       cuentasOrdenDe(copropiedad),
       desgloseCartera,
-      undefined,
+      montoAplicadoMora,
       undefined,
       desgloseOrigen,
     );

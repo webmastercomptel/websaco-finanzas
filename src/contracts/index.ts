@@ -307,6 +307,7 @@ export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
   facturasEliminadas: number;
   recibosEliminados: number;
+  loteRecibosEliminados: number;
   notasCreditoEliminadas: number;
   notasDebitoEliminadas: number;
   notasAnticipoEliminadas: number;

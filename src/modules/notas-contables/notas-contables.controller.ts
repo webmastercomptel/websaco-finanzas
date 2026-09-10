@@ -21,11 +21,28 @@ import { AnularNotaContableDto } from './dto/anular-nota-contable.dto';
 import { ListarNotaContableDto } from './dto/listar-nota-contable.dto';
 import type { NotaContable, Paginado } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfNotaContable } from '../../common/pdf/nota-contable-pdf';
+import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
+import { construirDatosImpresionNotaContable } from './nota-contable-pdf-datos.util';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 @Controller('notas-contables')
@@ -36,6 +53,14 @@ export class NotasContablesController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
   ) {}
 
   @Get()
@@ -89,7 +114,19 @@ export class NotasContablesController {
       );
     }
 
-    const bytes = await generarPdfNotaContable(nota, copropiedad, {
+    const datos = await construirDatosImpresionNotaContable(
+      nota,
+      copropiedad,
+      coPropertyId,
+      {
+        conceptos: this.conceptos,
+        inmuebles: this.inmuebles,
+        terceros: this.terceros,
+        cuentasContables: this.cuentasContables,
+      },
+    );
+
+    const bytes = await generarPdfRecibo(datos, copropiedad, {
       duplicado: duplicado === 'true',
     });
 

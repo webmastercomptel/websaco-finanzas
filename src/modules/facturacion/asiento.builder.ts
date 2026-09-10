@@ -849,19 +849,44 @@ export function construirContraAsientoCruce(
  * here: the double-entry invariant (debits equal credits) must be
  * verifiable before anything touches the database.
  *
- * `cuentasOrden`, when given, appends the same self-balancing memo pair as
- * every other document. There is no separate "contra" builder for a Nota
- * Contable — void calls this SAME function with `cuentaOrigen`/`cuentaDestino`
- * swapped (design §7) — so a caller voiding one must pass `cuentasOrden` with
- * `debito`/`credito` swapped too, the same way, for the memo pair to net to
- * zero instead of doubling.
+ * `cuentasOrden` tracks `intereses` (mora) ONLY — same rule facturación and
+ * every cruce builder already enforces (`construirMovimientos`'s own
+ * `usaCuentasOrden` check, `construirAsientoCruce`'s `montoCuentasOrden`).
+ * `origenEsIntereses`/`destinoEsIntereses` tell this builder which side (if
+ * either) is that concept, so it can move the memo pair by the right amount
+ * in the right direction instead of always moving it by the FULL `monto`
+ * whenever `cuentasOrden` happens to be configured — the bug this signature
+ * replaces (regression: a reclassification between two non-intereses
+ * concepts, e.g. Administración → Otro, was moving the memo pair anyway).
+ *
+ * Net effect, `netoHaciaIntereses = (destinoEsIntereses ? monto : 0) -
+ * (origenEsIntereses ? monto : 0)`:
+ *  - Reclassifying INTO intereses (destino only) OPENS the memo pair for
+ *    `monto` — same direction `construirMovimientos` uses when mora is
+ *    first invoiced (debit `cuentasOrden.debito`, credit `.credito`).
+ *  - Reclassifying OUT of intereses (origen only) CLOSES it for `monto` —
+ *    same reversed direction a cruce uses when mora is actually collected.
+ *  - Neither side (or, degenerately, both) nets to zero: no memo movement.
+ *
+ * `cuentasOrden` itself is never pre-swapped by the caller: void calls this
+ * SAME function with `cuentaOrigen`/`cuentaDestino` (and correspondingly
+ * `origenEsIntereses`/`destinoEsIntereses`) swapped (design §7) — the sign
+ * flip that produces falls straight out of `netoHaciaIntereses`, so the
+ * memo pair reverses for free from the swapped roles alone. Passing an
+ * already-inverted `cuentasOrden` on top (as this builder's very first
+ * version required) would double-flip it back to the wrong direction.
  */
 export function construirMovimientosReclasificacion(
   cuentaOrigen: string,
   cuentaDestino: string,
   monto: number,
   cuentasOrden?: CuentasOrden | null,
+  origenEsIntereses = false,
+  destinoEsIntereses = false,
 ): Movimiento[] {
+  const netoHaciaIntereses =
+    (destinoEsIntereses ? monto : 0) - (origenEsIntereses ? monto : 0);
+
   return [
     {
       account: cuentaOrigen,
@@ -875,11 +900,14 @@ export function construirMovimientosReclasificacion(
       amount: monto,
       description: 'Reclasificación de ingreso — nota contable',
     },
-    ...movimientosCuentasOrden(
-      cuentasOrden,
-      monto,
-      'Cuenta de orden — nota contable',
-    ),
+    ...(netoHaciaIntereses !== 0
+      ? movimientosCuentasOrden(
+          cuentasOrden,
+          Math.abs(netoHaciaIntereses),
+          'Cuenta de orden — nota contable',
+          netoHaciaIntereses < 0,
+        )
+      : []),
   ];
 }
 

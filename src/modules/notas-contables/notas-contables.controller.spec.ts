@@ -5,18 +5,49 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 
 const COP = new Types.ObjectId();
 
+const conceptoDocStub = (code = '413501') => ({
+  findOne: jest.fn(() => ({
+    populate: jest.fn().mockReturnThis(),
+    exec: () => Promise.resolve({ cuentaCreditoId: { code } }),
+  })),
+});
+
 function makeController(
   notasContables: Record<string, unknown>,
-  copropiedades: Record<string, unknown> = {
+  overrides: {
+    copropiedades?: Record<string, unknown>;
+    conceptos?: Record<string, unknown>;
+    inmuebles?: Record<string, unknown>;
+    terceros?: Record<string, unknown>;
+    cuentasContables?: Record<string, unknown>;
+  } = {},
+) {
+  const copropiedades = overrides.copropiedades ?? {
     findById: jest.fn(() => ({
       exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
     })),
-  },
-) {
+  };
+  const conceptos = overrides.conceptos ?? conceptoDocStub();
+  const inmuebles = overrides.inmuebles ?? {
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: '301', holderId: null }),
+    })),
+  };
+  const terceros = overrides.terceros ?? {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const cuentasContables = overrides.cuentasContables ?? {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+
   return new NotasContablesController(
     notasContables as never,
     { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
     copropiedades as never,
+    conceptos as never,
+    inmuebles as never,
+    terceros as never,
+    cuentasContables as never,
   );
 }
 
