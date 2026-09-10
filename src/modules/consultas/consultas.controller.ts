@@ -23,6 +23,7 @@ import { CarteraGeneralService } from './cartera-general.service';
 import { CarteraPorInmuebleService } from './cartera-por-inmueble.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
+import { ConciliacionCarteraService } from './conciliacion-cartera.service';
 import { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto';
 import { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 import { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
@@ -30,6 +31,7 @@ import { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por-inmu
 import { ConsultarPeriodosEstadoCuentaDto } from './dto/consultar-periodos-estado-cuenta.dto';
 import { ConsultarEstadoCuentaDto } from './dto/consultar-estado-cuenta.dto';
 import { ConsultarMovimientoContableDto } from './dto/consultar-movimiento-contable.dto';
+import { ConsultarConciliacionCarteraDto } from './dto/consultar-conciliacion-cartera.dto';
 import type {
   RespuestaAuxiliarCartera,
   RespuestaVencimientosCartera,
@@ -38,9 +40,11 @@ import type {
   PeriodoFacturado,
   RespuestaEstadoCuenta,
   RespuestaMovimientoContable,
+  RespuestaConciliacionCartera,
 } from '../../contracts';
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 import { generarPdfAuxiliarCartera } from '../../common/pdf/auxiliar-cartera-pdf';
+import { generarPdfConciliacionCartera } from '../../common/pdf/conciliacion-cartera-pdf';
 
 /**
  * Read-only reporting endpoint. Reuses the already-stubbed 'Consulta'
@@ -56,6 +60,7 @@ export class ConsultasController {
     private readonly carteraPorInmueble: CarteraPorInmuebleService,
     private readonly estadoCuenta: EstadoCuentaService,
     private readonly movimientoContable: MovimientoContableService,
+    private readonly conciliacionCartera: ConciliacionCarteraService,
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
@@ -156,6 +161,48 @@ export class ConsultasController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="estado-cuenta-${estado.inmuebleCodigo}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
+  /* ── Conciliación de Cartera ────────────────────────────────────── */
+
+  /** Coproperty-wide, unlike Estado de Cuenta's own periodos — no
+   *  `inmuebleId` to filter by. */
+  @Get('conciliacion-cartera/periodos')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findPeriodosConciliacionCartera(): Promise<PeriodoFacturado[]> {
+    return this.conciliacionCartera.findPeriodos();
+  }
+
+  @Get('conciliacion-cartera')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findConciliacionCartera(
+    @Query() query: ConsultarConciliacionCarteraDto,
+  ): Promise<RespuestaConciliacionCartera> {
+    return this.conciliacionCartera.findAll(query);
+  }
+
+  @Get('conciliacion-cartera/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfConciliacionCartera(
+    @Query() query: ConsultarConciliacionCarteraDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.conciliacionCartera.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfConciliacionCartera(reporte, copropiedad);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="conciliacion-cartera-${reporte.periodStart.slice(0, 10)}.pdf"`,
     });
     res.send(Buffer.from(bytes));
   }
