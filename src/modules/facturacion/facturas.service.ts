@@ -34,6 +34,12 @@ export class FacturasService {
       filtro.outstandingBalance = { $gt: 0 };
       filtro.status = 'emitida';
     }
+    if (query.fechaDesde || query.fechaHasta) {
+      filtro.issueDate = {
+        ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
+        ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
+      };
+    }
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;

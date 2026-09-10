@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -33,6 +34,14 @@ export class ListarFacturasDto {
   @Transform(aBooleano)
   @IsBoolean()
   conSaldoPendiente?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  fechaDesde?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fechaHasta?: string;
 
   @IsOptional()
   @Type(() => Number)
