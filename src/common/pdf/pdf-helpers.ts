@@ -155,16 +155,29 @@ export function escribirLabelValor(
  * the last `columnasNumericas` columns are right-aligned (default 2, the
  * original "last 2 columns are numeric" heuristic — every existing caller
  * omits the option and sees no behavior change).
+ *
+ * `colorLineas`/`grosorLineas` restyle the header underline and bottom rule
+ * (default black/0.5, unchanged for every caller that omits them);
+ * `espacioAntesDatos` widens the gap between the header underline and the
+ * first data row (default 0.5 line, unchanged unless passed) — Factura uses
+ * both to match its own header-line styling.
  */
 export function escribirTabla(
   ctx: PdfContext,
   columnas: string[],
   filas: string[][],
-  opciones?: { columnasNumericas?: number },
+  opciones?: {
+    columnasNumericas?: number;
+    colorLineas?: ReturnType<typeof rgb>;
+    grosorLineas?: number;
+    espacioAntesDatos?: number;
+  },
 ): void {
   const colCount = columnas.length;
   const colWidth = ctx.contentWidth / colCount;
   const primeraNumerica = colCount - (opciones?.columnasNumericas ?? 2);
+  const colorLineas = opciones?.colorLineas ?? rgb(0, 0, 0);
+  const grosorLineas = opciones?.grosorLineas ?? 0.5;
 
   // Header row
   for (let i = 0; i < colCount; i++) {
@@ -187,10 +200,10 @@ export function escribirTabla(
   ctx.page.drawLine({
     start: { x: MARGIN_LEFT, y: ctx.y + 4 },
     end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 4 },
-    thickness: 0.5,
-    color: rgb(0, 0, 0),
+    thickness: grosorLineas,
+    color: colorLineas,
   });
-  saltarLinea(ctx, 0.5);
+  saltarLinea(ctx, opciones?.espacioAntesDatos ?? 0.5);
 
   // Data rows
   for (const fila of filas) {
@@ -222,8 +235,8 @@ export function escribirTabla(
   ctx.page.drawLine({
     start: { x: MARGIN_LEFT, y: ctx.y + 4 },
     end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 4 },
-    thickness: 0.5,
-    color: rgb(0, 0, 0),
+    thickness: grosorLineas,
+    color: colorLineas,
   });
   saltarLinea(ctx);
 }
@@ -353,18 +366,31 @@ export async function embebirLogoWebsaco(doc: PDFDocument): Promise<{
   return { image, width: LOGO_WIDTH, height };
 }
 
-/** Formats a number as Colombian peso currency: $ 1.234.567 */
+/** Formats a number as Colombian peso currency: $ 1.234.567 — thousands
+ *  separated by ".", never a decimal (`maximumFractionDigits: 0` pinned
+ *  explicitly rather than left to the locale default, so a float-rounding
+ *  artifact upstream can never sneak stray cents onto a printed document). */
 export function formatoPeso(valor: number): string {
-  return `$ ${valor.toLocaleString('es-CO')}`;
+  return `$ ${valor.toLocaleString('es-CO', { maximumFractionDigits: 0 })}`;
 }
 
-/** Formats a Date as dd/mm/yyyy. Pinned to UTC — every date-only business
- *  date this app stores is midnight UTC to begin with (see the note in
- *  frontend's lote-definicion.tsx), so formatting in the server's local
- *  timezone would show the day before whenever that offset is negative
- *  (e.g. Cloud Run running in America/Bogota, UTC-5). */
+const FORMATO_FECHA = new Intl.DateTimeFormat('es-CO', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+/** Formats a Date as dd/mm/yyyy, day and month always 2 digits (`05/01/2026`,
+ *  never `5/1/2026`) — `Date#toLocaleDateString` doesn't zero-pad, which
+ *  ragged a column of stacked dates whenever one had a single-digit day/month.
+ *  Pinned to UTC — every date-only business date this app stores is midnight
+ *  UTC to begin with (see the note in frontend's lote-definicion.tsx), so
+ *  formatting in the server's local timezone would show the day before
+ *  whenever that offset is negative (e.g. Cloud Run running in
+ *  America/Bogota, UTC-5). */
 export function formatoFecha(fecha: Date | string): string {
-  return new Date(fecha).toLocaleDateString('es-CO', { timeZone: 'UTC' });
+  return FORMATO_FECHA.format(new Date(fecha));
 }
 
 // ── internal helpers ──

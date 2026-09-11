@@ -188,7 +188,15 @@ async function dibujarEncabezadoFactura(
           : copropiedad.taxId
         : null,
     ],
-    ['Dirección :', copropiedad.address],
+    // City rides on the same row as the address, "{address} - {city}" — not
+    // its own row, which would push this block taller than the "Codigo del
+    // Inmueble" block right after it.
+    [
+      'Dirección :',
+      copropiedad.address && copropiedad.city
+        ? `${copropiedad.address} - ${copropiedad.city}`
+        : (copropiedad.address ?? copropiedad.city),
+    ],
     ['Celular :', copropiedad.phone],
     ['Email :', copropiedad.email],
   ];
@@ -435,7 +443,7 @@ function dibujarDescuentoProntoPago(
   const lineHeight = 12;
   const lineas = [
     `Si cancela antes del ${formatoFecha(descuento.fechaLimite)}`,
-    `Cancele $: ${cancele.toLocaleString('es-CO')}`,
+    `Cancele $: ${cancele.toLocaleString('es-CO', { maximumFractionDigits: 0 })}`,
   ];
 
   const bloqueAltura = lineas.length * lineHeight;
@@ -454,9 +462,9 @@ function dibujarDescuentoProntoPago(
 }
 
 /** "Nombre del Cargo / Saldo Anterior / Cargos del Mes / Nuevo Saldo" —
- *  the per-concept running-balance table. No "Totales" row here anymore —
- *  `dibujarSubtotal` draws that same total, aligned to these same four
- *  columns, right below the table (labeled "Subtotal" and always shown,
+ *  the per-concept running-balance table. No totals row inside the table
+ *  itself — `dibujarSubtotal` draws that same total, aligned to these same
+ *  four columns, right below the table (labeled "Totales" and always shown,
  *  not just a table footer) so it reads as one continuous summary with the
  *  IVA/Total a Pagar lines that follow it, instead of two separate totals
  *  rows on the page.
@@ -487,18 +495,31 @@ function dibujarTablaConceptos(ctx: PdfContext, lines: FacturaLinea[]): void {
     formatoPeso(l.balanceBefore + l.baseAmount),
   ]);
 
-  escribirTabla(ctx, columnas, filas, { columnasNumericas: 3 });
+  // One extra line of breathing room above these headers before the table
+  // starts — otherwise they sit right against the Codigo del Inmueble/date
+  // box block right above.
+  ctx.y -= 14;
+  escribirTabla(ctx, columnas, filas, {
+    columnasNumericas: 3,
+    // Same gray as the rule above "Codigo del Inmueble" (dibujarEncabezadoFactura),
+    // so the whole page reads as one consistent line color instead of this
+    // table's rules standing out darker/heavier than everything around them.
+    colorLineas: rgb(0.6, 0.6, 0.6),
+    // A hair more room than the default half-line gap — at the default, the
+    // first cargo's text baseline landed close enough to the header
+    // underline to visually touch it.
+    espacioAntesDatos: 0.7,
+  });
 }
 
-/** "Subtotal" — ALWAYS drawn, one row aligned to the SAME four columns as
+/** "Totales" — ALWAYS drawn, one row aligned to the SAME four columns as
  *  `dibujarTablaConceptos`'s table right above it (Nombre del Cargo / Saldo
- *  Anterior / Cargos del Mes / Nuevo Saldo), carrying the totals that used
- *  to live in that table's own "Totales" footer row. Reads as the table's
- *  running continuation rather than a second, separate totals block.
+ *  Anterior / Cargos del Mes / Nuevo Saldo). Reads as the table's running
+ *  continuation rather than a second, separate totals block.
  *
  *  "IVA (tasa%)" — sum of every line's `taxAmount` — is drawn right below,
  *  but ONLY when this invoice actually carries tax (`totalIva > 0`); an
- *  invoice with no taxed cargo shows Subtotal and skips straight to "Total a
+ *  invoice with no taxed cargo shows Totales and skips straight to "Total a
  *  Pagar", same as before this feature. The rate shown is the one common
  *  `taxRate` among the taxed lines when they all agree; a coproperty that
  *  (unusually) mixes different rates on one invoice gets the generic "IVA"
@@ -510,7 +531,7 @@ function dibujarSubtotal(ctx: PdfContext, lines: FacturaLinea[]): void {
 
   const colWidth = ctx.contentWidth / 4;
   const valores = [totalAnterior, totalCargos, totalAnterior + totalCargos];
-  ctx.page.drawText('Subtotal', {
+  ctx.page.drawText('Totales', {
     x: MARGIN_LEFT + 4,
     y: ctx.y,
     size: 10,
@@ -547,7 +568,7 @@ function dibujarSubtotal(ctx: PdfContext, lines: FacturaLinea[]): void {
   const textoIva = formatoPeso(totalIva);
   const anchoIva = ctx.fontBold.widthOfTextAtSize(textoIva, 10);
   ctx.page.drawText(textoIva, {
-    // Right-aligned to the SAME column edge as Subtotal's "Nuevo Saldo"
+    // Right-aligned to the SAME column edge as Totales' "Nuevo Saldo"
     // total right above it — `escribirLabelValor`'s own right margin (flush
     // to `contentWidth`, no padding) put this a few points further right
     // than that column, reading as "corrida a la derecha" against it.

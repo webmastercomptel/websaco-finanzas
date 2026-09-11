@@ -196,13 +196,21 @@ export class LoteFacturacion {
       totalAmount: { type: Number, required: true },
       totalInvoices: { type: Number, required: true },
       totalUnits: { type: Number, required: true },
+      firstInvoiceNumber: { type: String, required: true },
+      lastInvoiceNumber: { type: String, required: true },
     },
     default: null,
   })
+  // `firstInvoiceNumber`/`lastInvoiceNumber` are absent on a lote
+  // consolidado before this field existed — Mongoose enforces `required`
+  // only on save, never on read — so the mapper falls back to `null` for
+  // those two on an old document, same pattern as `discountDeadline` above.
   summary: {
     totalAmount: number;
     totalInvoices: number;
     totalUnits: number;
+    firstInvoiceNumber: string;
+    lastInvoiceNumber: string;
   } | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })

@@ -1030,9 +1030,31 @@ export class LotesFacturacionService {
     let montoTotal = 0;
     const errores: ErrorConsolidacion[] = [];
 
+    // Tracks the lowest/highest invoice `number` seen across both loops
+    // below (resumed-from-a-prior-attempt Facturas here, freshly created
+    // ones further down) so `resumen.primerNumero`/`ultimoNumero` reflects
+    // the real numbering range regardless of Mongo's find() order or which
+    // attempt created which row. Discarded on any error path — summary is
+    // only ever persisted when `consolidadoDelTodo`.
+    let numeroMinimo: number | null = null;
+    let numeroMaximo: number | null = null;
+    let primerNumeroCompleto: string | null = null;
+    let ultimoNumeroCompleto: string | null = null;
+    const registrarNumero = (numero: number, completo: string): void => {
+      if (numeroMinimo === null || numero < numeroMinimo) {
+        numeroMinimo = numero;
+        primerNumeroCompleto = completo;
+      }
+      if (numeroMaximo === null || numero > numeroMaximo) {
+        numeroMaximo = numero;
+        ultimoNumeroCompleto = completo;
+      }
+    };
+
     for (const factura of facturasExistentes) {
       const facturaId = factura._id.toString();
       facturaIds.push(facturaId);
+      registrarNumero(factura.number, factura.fullNumber);
       if (idsConAsiento.has(facturaId)) {
         montoTotal += factura.total;
         continue;
@@ -1315,6 +1337,7 @@ export class LotesFacturacionService {
         // one attempt's writes actually commit.
         facturaIds.push(facturaCreada._id.toString());
         montoTotal += preliminar.total;
+        registrarNumero(facturaCreada.number, facturaCreada.fullNumber);
       } catch (err) {
         errores.push({
           fila: indice + 1,
@@ -1349,13 +1372,16 @@ export class LotesFacturacionService {
           $set: {
             status: consolidadoDelTodo ? 'consolidado' : 'liquidado',
             invoiceIds: facturaIds,
-            summary: consolidadoDelTodo
-              ? {
-                  totalAmount: montoTotal,
-                  totalInvoices: facturaIds.length,
-                  totalUnits: facturaIds.length,
-                }
-              : null,
+            summary:
+              consolidadoDelTodo && primerNumeroCompleto && ultimoNumeroCompleto
+                ? {
+                    totalAmount: montoTotal,
+                    totalInvoices: facturaIds.length,
+                    totalUnits: facturaIds.length,
+                    firstInvoiceNumber: primerNumeroCompleto,
+                    lastInvoiceNumber: ultimoNumeroCompleto,
+                  }
+                : null,
             // The call is over either way (fully consolidado or stopped on
             // an error) — nothing left to poll for.
             progress: null,
