@@ -2084,6 +2084,8 @@ describe('LotesFacturacionService.consolidar', () => {
           _id: { toString: () => 'fac-previo' },
           inmuebleId: { toString: () => 'inm-1' },
           total: 520000,
+          number: 1041,
+          fullNumber: 'CONJ-2026-1041',
         },
       ],
       // fac-previo's AsientoContable was already posted — this row is
@@ -2132,9 +2134,11 @@ describe('LotesFacturacionService.consolidar', () => {
       expect.arrayContaining(['fac-previo', 'fac-1']),
     );
     expect(actualizacion.$set.status).toBe('consolidado');
-    expect(
-      (actualizacion.$set.summary as { totalAmount: number }).totalAmount,
-    ).toBe(1040000);
+    expect(actualizacion.$set.summary).toMatchObject({
+      totalAmount: 1040000,
+      firstInvoiceNumber: 'CONJ-2026-1041',
+      lastInvoiceNumber: 'CONJ-2026-1042',
+    });
     expect(resultado.errores).toEqual([]);
   });
 

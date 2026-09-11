@@ -91,10 +91,12 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     conceptos: {
       findOne: jest.fn(() => ({
         populate: jest.fn().mockReturnThis(),
+        session: jest.fn().mockReturnThis(),
         exec: jest.fn(() =>
           Promise.resolve({
             _id: CONCEPTO,
             coPropertyId: COP,
+            kind: 'administracion',
             cuentaCreditoId: { code: '4105' },
           }),
         ),
@@ -248,6 +250,112 @@ describe('NotasDebitoService', () => {
       expect(credito?.flujoCaja).toBe('FC-OPER');
     });
 
+    it('NO mueve cuentas de orden cuando el concepto de la nota no es intereses', async () => {
+      // Regresión: antes, la línea sintética armada para
+      // `construirMovimientos` nunca traía `conceptKind`, así que
+      // `cuentasOrden` NUNCA se movía — ni siquiera para una nota que sí
+      // cobraba mora. Con un concepto NO-intereses, confirma que sigue sin
+      // moverse (el comportamiento correcto para este caso).
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'administracion',
+                cuentaCreditoId: { code: '4105' },
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '4105',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string }> }[]],
+      ];
+      const cuentas = documentos[0].entries.map((e) => e.account);
+      expect(cuentas).not.toContain('831505');
+      expect(cuentas).not.toContain('831510');
+    });
+
+    it('mueve cuentas de orden cuando el concepto de la nota SÍ es intereses', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'intereses',
+                cuentaCreditoId: { code: '413599' },
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '4105',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string; amount: number }> }[]],
+      ];
+      const memo = documentos[0].entries.find(
+        (e) => e.account === '831505' || e.account === '831510',
+      );
+      expect(memo?.amount).toBe(50000);
+    });
+
     it('rechaza concepto inexistente', async () => {
       const svc = servicio({
         conceptos: {
@@ -284,6 +392,111 @@ describe('NotasDebitoService', () => {
       );
 
       expect(resultado.estado).toBe('anulada');
+    });
+
+    it('al anular, NO mueve cuentas de orden cuando el concepto de la nota no es intereses', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'administracion',
+                cuentaCreditoId: { code: '4105' },
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '4105',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string }> }[]],
+      ];
+      const cuentas = documentos[0].entries.map((e) => e.account);
+      expect(cuentas).not.toContain('831505');
+      expect(cuentas).not.toContain('831510');
+    });
+
+    it('al anular, revierte cuentas de orden cuando el concepto de la nota SÍ es intereses', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'intereses',
+                cuentaCreditoId: { code: '413599' },
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '4105',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string; amount: number }> }[]],
+      ];
+      const memo = documentos[0].entries.find(
+        (e) => e.account === '831505' || e.account === '831510',
+      );
+      expect(memo?.amount).toBe(50000);
     });
 
     it('anula nota débito con aplicaciones activas, restaurando fuentes RC', async () => {

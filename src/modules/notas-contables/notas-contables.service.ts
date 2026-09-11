@@ -42,7 +42,6 @@ import { ajustarSaldosCarteraPorDistribucion } from '../recibos/cruce.util';
 import {
   construirMovimientosReclasificacion,
   cuentasOrdenDe,
-  invertirCuentasOrden,
   enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
   type MarcasCuentaContable,
@@ -260,7 +259,6 @@ export class NotasContablesService {
         conceptoOrigenId,
         conceptoDestinoId,
         fechaNotaContable(creada),
-        false,
       );
 
       const final = await this.notasContables
@@ -407,7 +405,6 @@ export class NotasContablesService {
         nota.conceptoDestinoId,
         nota.conceptoOrigenId,
         new Date(dto.fecha),
-        true,
       );
 
       await this.notasContables
@@ -441,13 +438,14 @@ export class NotasContablesService {
    * `CUENTA_SIN_ASIGNAR` when unset.
    *
    * Called at creation with (origen, destino) and at void with (destino,
-   * origen) — the same function, accounts swapped (design §7). `esAnulacion`
-   * mirrors that same swap onto `cuentasOrden` (`invertirCuentasOrden`) so the
-   * memo pair nets to zero on void instead of doubling — the real accounts
-   * already get this for free from the swapped ids, but `cuentasOrden` is
-   * fixed per coproperty and needs telling explicitly. `fecha` is the note's
-   * own declared date at creation, or the anulación's own declared date at
-   * void — never `new Date()`, same rule as every other document.
+   * origen) — the same function, accounts AND `kind` swapped together
+   * (design §7): `cuentaOrigenDoc`/`cuentaDestinoDoc` are looked up from
+   * whichever concepto id lands in each param, so `origenEsIntereses`/
+   * `destinoEsIntereses` naturally swap alongside the real accounts, and
+   * `construirMovimientosReclasificacion`'s own sign logic reverses the
+   * memo pair for free — no separate `invertirCuentasOrden` needed here
+   * (an earlier version applied that on top and double-flipped it back to
+   * the wrong direction on every void).
    */
   private async postearAsiento(
     session: ClientSession,
@@ -456,7 +454,6 @@ export class NotasContablesService {
     cuentaOrigenConceptoId: Types.ObjectId,
     cuentaDestinoConceptoId: Types.ObjectId,
     fecha: Date,
-    esAnulacion = false,
   ): Promise<void> {
     const [cuentaOrigenDoc, cuentaDestinoDoc, copropiedad] = await Promise.all([
       this.conceptos
@@ -484,7 +481,9 @@ export class NotasContablesService {
       cuentaOrigen,
       cuentaDestino,
       nota.monto,
-      esAnulacion ? invertirCuentasOrden(cuentasOrden) : cuentasOrden,
+      cuentasOrden,
+      cuentaOrigenDoc?.kind === 'intereses',
+      cuentaDestinoDoc?.kind === 'intereses',
     );
     entries = await this.conAuxiliares(
       session,

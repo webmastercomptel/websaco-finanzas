@@ -32,6 +32,7 @@ const makeModelos = (over: {
     asientos: number;
     saldos: number;
     recibos: number;
+    loteRecibos: number;
     notasCredito: number;
     notasDebito: number;
     notasAnticipo: number;
@@ -45,6 +46,7 @@ const makeModelos = (over: {
     asientos: 0,
     saldos: 0,
     recibos: 0,
+    loteRecibos: 0,
     notasCredito: 0,
     notasDebito: 0,
     notasAnticipo: 0,
@@ -67,6 +69,7 @@ const makeModelos = (over: {
   const asientos = deleteManyMock(counts.asientos);
   const saldos = deleteManyMock(counts.saldos);
   const recibos = deleteManyMock(counts.recibos);
+  const loteRecibos = deleteManyMock(counts.loteRecibos);
   const notasCredito = deleteManyMock(counts.notasCredito);
   const notasDebito = deleteManyMock(counts.notasDebito);
   const notasAnticipo = deleteManyMock(counts.notasAnticipo);
@@ -78,6 +81,9 @@ const makeModelos = (over: {
   };
   const consecutivoDocumento = {
     updateMany: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const consecutivoLoteRecibos = {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const resoluciones = {
     findOne: jest.fn(() => ({
@@ -94,10 +100,12 @@ const makeModelos = (over: {
     saldos,
     consecutivoLote,
     consecutivoDocumento,
+    consecutivoLoteRecibos,
     resoluciones,
     notasCredito,
     aplicaciones,
     recibos,
+    loteRecibos,
     notasDebito,
     notasAnticipo,
     notasContables,
@@ -120,6 +128,8 @@ const makeService = (
     modelos.notasCredito as never,
     modelos.aplicaciones as never,
     modelos.recibos as never,
+    modelos.loteRecibos as never,
+    modelos.consecutivoLoteRecibos as never,
     modelos.notasDebito as never,
     modelos.notasAnticipo as never,
     modelos.notasContables as never,
@@ -156,6 +166,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
         asientos: 12,
         saldos: 8,
         recibos: 3,
+        loteRecibos: 7,
         notasCredito: 1,
         notasDebito: 2,
         notasAnticipo: 1,
@@ -174,6 +185,9 @@ describe('ReiniciarCicloService.reiniciar', () => {
       coPropertyId: COP,
     });
     expect(modelos.recibos.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.loteRecibos.deleteMany).toHaveBeenCalledWith({
       coPropertyId: COP,
     });
     expect(modelos.notasCredito.deleteMany).toHaveBeenCalledWith({
@@ -195,6 +209,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
       lotesEliminados: 2,
       facturasEliminadas: 5,
       recibosEliminados: 3,
+      loteRecibosEliminados: 7,
       notasCreditoEliminadas: 1,
       notasDebitoEliminadas: 2,
       notasAnticipoEliminadas: 1,
@@ -239,6 +254,26 @@ describe('ReiniciarCicloService.reiniciar', () => {
       { coPropertyId: COP },
       { $set: { nextNumber: 0 } },
     );
+  });
+
+  it('borra los lotes de recibos en curso y reinicia su propio consecutivo', async () => {
+    // Regresión: `LoteRecibosSchema` permite a lo sumo un lote en
+    // 'borrador'/'cargado' por copropiedad — dejar uno vivo tras el reinicio
+    // bloqueaba crear uno nuevo (índice único), aunque Recibos/Facturas ya
+    // hubieran sido borrados.
+    const modelos = makeModelos({ deletedCounts: { loteRecibos: 1 } });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.loteRecibos.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.consecutivoLoteRecibos.updateOne).toHaveBeenCalledWith(
+      { coPropertyId: COP },
+      { $set: { nextNumber: 0 } },
+    );
+    expect(resultado.loteRecibosEliminados).toBe(1);
   });
 
   it('si hay una resolución DIAN activa, reinicia su nextNumber al rangeFrom', async () => {

@@ -289,6 +289,116 @@ describe('NotasCreditoService.crear', () => {
     expect(devoluciones?.centroCosto).toBe('CC-01');
   });
 
+  it('NO mueve cuentasOrden cuando la nota nunca toca un concepto de intereses', async () => {
+    // Regresión: `construirAsientoCruce` mueve `cuentasOrden` por el monto
+    // completo cuando `montoCuentasOrden` se omite — antes del fix, esta
+    // llamada siempre lo omitía, moviendo el par memo aunque la nota
+    // corrigiera solo Administración.
+    const factura = facturaDoc({
+      lines: [
+        {
+          conceptoId: CONCEPTO,
+          conceptKind: 'administracion',
+          totalAmount: 200000,
+        },
+      ],
+    });
+    const notaCreada = notaCreditoCreada();
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      factura,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                creditNotesAccount: '413595',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+          }),
+        })),
+      },
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].entries as Array<{ account: string }>;
+    expect(entries.some((e) => e.account === '831505')).toBe(false);
+    expect(entries.some((e) => e.account === '831510')).toBe(false);
+  });
+
+  it('mueve cuentasOrden SOLO por la porción de la nota aplicada contra un concepto de intereses', async () => {
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      outstandingBalance: 200000,
+      total: 200000,
+      lines: [
+        {
+          conceptoId: CONCEPTO,
+          conceptKind: 'administracion',
+          totalAmount: 150000,
+        },
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 50000,
+        },
+      ],
+    });
+    const notaCreada = notaCreditoCreada({ totalAmount: 200000 });
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      factura,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                creditNotesAccount: '413595',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+          }),
+        })),
+      },
+    });
+
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        montoTotal: 200000,
+        distribucion: [
+          { conceptoId: CONCEPTO.toString(), monto: 150000 },
+          { conceptoId: conceptoMora.toString(), monto: 50000 },
+        ],
+      }),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      amount: number;
+    }>;
+    // El par memo debe moverse por 50000 (solo mora) — nunca por los 200000
+    // totales de la nota.
+    expect(
+      entries.find((e) => e.account === '831505' || e.account === '831510')
+        ?.amount,
+    ).toBe(50000);
+  });
+
   it('acredita la cuenta propia del concepto cuando la línea de la factura ancla la trae configurada', async () => {
     const factura = facturaDoc({
       lines: [
@@ -1108,6 +1218,138 @@ describe('NotasCreditoService.anular', () => {
       expect.objectContaining({ account: '413501', amount: 100000 }),
       expect.objectContaining({ account: '413502', amount: 30000 }),
     ]);
+  });
+
+  it('al anular, revierte cuentasOrden SOLO por la porción que era intereses, nunca por el total reversado', async () => {
+    // Regresión: `construirContraAsientoCruce` también omitía
+    // `montoCuentasOrden`, por lo que anular una nota que corrigió mora Y
+    // administración revertía el par memo por el monto COMPLETO en lugar de
+    // solo la porción de mora.
+    const facturaId = new Types.ObjectId();
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoMora = new Types.ObjectId();
+    const nota = notaActivaDoc({
+      facturaId,
+      distribution: [
+        { conceptoId: conceptoAdmin, amount: 100000 },
+        { conceptoId: conceptoMora, amount: 30000 },
+      ],
+      appliedAmount: 130000,
+      unappliedAmount: 0,
+      totalAmount: 130000,
+    });
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: facturaId,
+      amountApplied: 130000,
+      status: 'activa',
+      detalleConceptos: [
+        {
+          conceptoId: conceptoAdmin,
+          conceptName: 'Administración',
+          monto: 100000,
+        },
+        {
+          conceptoId: conceptoMora,
+          conceptName: 'Intereses por mora',
+          monto: 30000,
+        },
+      ],
+    };
+    const facturaAncla = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 130000,
+      lines: [
+        {
+          conceptoId: conceptoAdmin,
+          conceptKind: 'administracion',
+          totalAmount: 100000,
+          accountingIncomeAccount: '413501',
+        },
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 30000,
+          accountingIncomeAccount: '413502',
+        },
+      ],
+    };
+    const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(facturaAncla) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(facturaAncla),
+      })),
+    };
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([aplicacionActiva]) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      asientos as never,
+      {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                creditNotesAccount: '413595',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+          }),
+        })),
+      } as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+    );
+
+    await service.anular(
+      nota._id.toString(),
+      {
+        motivo: 'otro',
+        detalle: 'Anula la nota crédito por error de digitación',
+        fecha: '2026-01-20',
+      },
+      'acc-1',
+    );
+
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { entries: { account: string; amount: number }[] },
+    ];
+    const memo = entrada.entries.find(
+      (e) => e.account === '831505' || e.account === '831510',
+    );
+    expect(memo?.amount).toBe(30000);
   });
 
   // Mirrors `recibos.service.spec.ts`'s

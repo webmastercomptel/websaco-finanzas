@@ -261,6 +261,12 @@ export interface LoteFacturacion {
     montoTotal: Monto;
     totalFacturas: number;
     totalInmuebles: number;
+    tipoDocumento: 'FV';
+    /** Número completo (prefijo + consecutivo) de la primera y la última
+     *  factura emitidas en este lote — `null` en un lote consolidado antes
+     *  de que este campo existiera. */
+    primerNumero: string | null;
+    ultimoNumero: string | null;
   } | null;
   /** Set while consolidar() is running this lote, null otherwise — lets the
    *  frontend poll and show "fila X de Y" instead of a frozen button. */
@@ -307,6 +313,7 @@ export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
   facturasEliminadas: number;
   recibosEliminados: number;
+  loteRecibosEliminados: number;
   notasCreditoEliminadas: number;
   notasDebitoEliminadas: number;
   notasAnticipoEliminadas: number;

@@ -227,6 +227,7 @@ export class NotasDebitoService {
         coPropertyId,
         creada,
         codigoDeCuentaContable(concepto.cuentaCreditoId),
+        concepto.kind,
       );
 
       const final = await this.notasDebito
@@ -420,19 +421,28 @@ export class NotasDebitoService {
       }
 
       // Step 3: Post ONE consolidated reversing journal entry.
-      const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
-        .session(session)
-        .exec();
+      const [copropiedad, concepto] = await Promise.all([
+        this.copropiedades.findById(coPropertyId).session(session).exec(),
+        this.conceptos
+          .findOne({ _id: nota.conceptoId, coPropertyId })
+          .session(session)
+          .exec(),
+      ]);
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaIngreso =
         copropiedad?.debitNotesAccount ?? CUENTA_SIN_ASIGNAR;
+      // `cuentasOrden` tracks `intereses` (mora) only — a Nota Débito has
+      // exactly one concepto for its whole amount, so this is all-or-
+      // nothing (never a partial `montoCuentasOrden` like NC/NT need):
+      // move the memo pair back only if this ND's own concepto is mora.
+      const cuentasOrdenSiAplica =
+        concepto?.kind === 'intereses' ? cuentasOrdenDe(copropiedad) : null;
       let entries = construirContraAsientoNotaDebito(
         cuentaCartera,
         cuentaIngreso,
         nota.total,
-        cuentasOrdenDe(copropiedad),
+        cuentasOrdenSiAplica,
       );
       entries = await this.conAuxiliares(
         session,
@@ -558,12 +568,20 @@ export class NotasDebitoService {
    * Posts the CREATION-time journal entry: debit `cuentaCartera` for the
    * total, credit `cuentaIngreso` for the total. Reuses `construirMovimientos`
    * with a single-line shape built from the conceptoId.
+   *
+   * `conceptoKind` sets that synthetic line's own `conceptKind` — without it,
+   * `construirMovimientos`'s own `usaCuentasOrden` check (`linea.conceptKind
+   * === 'intereses'`) always reads `undefined`, so `cuentasOrden` NEVER
+   * moved even for a Nota Débito genuinely charging mora (the opposite
+   * failure from Notas Contables/Crédito, which moved it unconditionally —
+   * here it silently never did).
    */
   private async postearAsientoCreacion(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     nota: NotaDebitoDocument,
     cuentaIngreso: string | null,
+    conceptoKind: 'administracion' | 'intereses' | 'otro',
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -576,7 +594,11 @@ export class NotasDebitoService {
       {
         total: nota.total,
         lines: [
-          { accountingIncomeAccount: incomeAccount, totalAmount: nota.total },
+          {
+            accountingIncomeAccount: incomeAccount,
+            totalAmount: nota.total,
+            conceptKind: conceptoKind,
+          },
         ],
       },
       cuentaCartera,

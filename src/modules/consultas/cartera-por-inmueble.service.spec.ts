@@ -62,6 +62,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     notasDebito: find(),
     aplicaciones: find(),
     conceptosCobro: find(),
+    saldosCartera: find(),
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
@@ -72,6 +73,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.notasDebito as never,
     m.aplicaciones as never,
     m.conceptosCobro as never,
+    m.saldosCartera as never,
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
@@ -153,6 +155,12 @@ describe('CarteraPorInmuebleService', () => {
         find: jest.fn().mockReturnThis(),
         sort: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([concepto]),
+      },
+      // The aggregate row reads SaldoCartera, never re-derived from the
+      // Factura's own (immutable) lines — see the service's own docblock.
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 120000 }]),
       },
     });
 
@@ -273,6 +281,10 @@ describe('CarteraPorInmuebleService', () => {
         sort: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([concepto]),
       },
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 50000 }]),
+      },
     });
 
     const result = await svc.findOne({ inmuebleId: inmId.toString() });
@@ -326,6 +338,14 @@ describe('CarteraPorInmuebleService', () => {
           }),
         ]),
       },
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([
+            { conceptoId: conceptoConSaldo, balance: 100000 },
+          ]),
+      },
     });
 
     const result = await svc.findOne({ inmuebleId: inmId.toString() });
@@ -337,6 +357,137 @@ describe('CarteraPorInmuebleService', () => {
         monto: 100000,
       },
       { conceptoId: conceptoSinSaldo.toString(), nombre: 'Multas', monto: 0 },
+    ]);
+  });
+
+  it('el agregado por concepto refleja una reclasificación (Nota Contable) aunque la Factura original no cambió', async () => {
+    // Regresión: antes, este total se re-derivaba de las líneas INMUTABLES
+    // de la Factura, así que una Nota Contable (que solo mueve SaldoCartera)
+    // era invisible aquí. Factura: TV 200 + Pintura 0 (nunca se toca). Tras
+    // reclasificar 100 de TV a Pintura, SaldoCartera dice TV 100 / Pintura
+    // 100 — el agregado debe mostrar exactamente eso, aunque la única
+    // Factura siga leyendo "TV 200" en su propia línea.
+    const inmId = id();
+    const conceptoTv = id();
+    const conceptoPintura = id();
+    const f = facturaDoc({
+      inmuebleId: inmId,
+      total: 200000,
+      lines: [
+        { conceptoId: conceptoTv, conceptName: 'TV', totalAmount: 200000 },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      conceptosCobro: {
+        find: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          conceptoDoc({ _id: conceptoTv, name: 'TV', sortOrder: 100 }),
+          conceptoDoc({
+            _id: conceptoPintura,
+            name: 'Pintura',
+            sortOrder: 200,
+          }),
+        ]),
+      },
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          { conceptoId: conceptoTv, balance: 100000 },
+          { conceptoId: conceptoPintura, balance: 100000 },
+        ]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    // El documento sigue mostrando su propia línea original, sin tocar.
+    expect(result.documentos[0].cargosPorConcepto).toEqual({
+      [conceptoTv.toString()]: 200000,
+    });
+    // El agregado, en cambio, ya refleja la reclasificación.
+    expect(result.cargosPorConcepto).toEqual([
+      { conceptoId: conceptoTv.toString(), nombre: 'TV', monto: 100000 },
+      {
+        conceptoId: conceptoPintura.toString(),
+        nombre: 'Pintura',
+        monto: 100000,
+      },
+    ]);
+    // El total de la cartera (lo que la factura realmente debe) no cambia.
+    expect(result.saldoTotalCartera).toBe(200000);
+  });
+
+  it('un concepto que SaldoCartera nunca registró para este inmueble cae al total derivado de los documentos, nunca a 0', async () => {
+    // Caso real: una Factura cargada por una vía que no pasó por el
+    // mantenimiento de SaldoCartera (p. ej. una migración de datos
+    // históricos) — el documento SÍ muestra un pendiente real para el
+    // concepto, pero SaldoCartera no tiene NINGUNA fila para él. El
+    // agregado debe reflejar ese pendiente real, no imprimir 0 solo porque
+    // la caché nunca se pobló para este inmueble/concepto.
+    const inmId = id();
+    const conceptoSinSaldoCartera = id();
+    const f = facturaDoc({
+      inmuebleId: inmId,
+      total: 300000,
+      lines: [
+        {
+          conceptoId: conceptoSinSaldoCartera,
+          conceptName: 'Parqueadero',
+          totalAmount: 300000,
+        },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      conceptosCobro: {
+        find: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          conceptoDoc({
+            _id: conceptoSinSaldoCartera,
+            name: 'Parqueadero',
+            sortOrder: 100,
+          }),
+        ]),
+      },
+      // Sin fila para este concepto — nunca se ha mantenido para este
+      // inmueble, a diferencia de un concepto genuinamente en 0.
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.cargosPorConcepto).toEqual([
+      {
+        conceptoId: conceptoSinSaldoCartera.toString(),
+        nombre: 'Parqueadero',
+        monto: 300000,
+      },
     ]);
   });
 

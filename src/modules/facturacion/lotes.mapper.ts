@@ -42,6 +42,9 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
         montoTotal: doc.summary.totalAmount,
         totalFacturas: doc.summary.totalInvoices,
         totalInmuebles: doc.summary.totalUnits,
+        tipoDocumento: 'FV',
+        primerNumero: doc.summary.firstInvoiceNumber ?? null,
+        ultimoNumero: doc.summary.lastInvoiceNumber ?? null,
       }
     : null,
   progreso: doc.progress
