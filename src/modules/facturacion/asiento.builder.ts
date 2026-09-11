@@ -836,8 +836,14 @@ export function construirContraAsientoCruce(
 
 /**
  * Builds the double-entry posting for a reclassification between two
- * conceptos' income accounts — a Nota Contable. Debit `cuentaOrigen`,
- * credit `cuentaDestino`, both for `monto`.
+ * conceptos' income accounts — a Nota Contable. Credit `cuentaOrigen`
+ * (removing the balance from where it currently sits), debit `cuentaDestino`
+ * (moving it to where the user wants it), both for `monto` — the same
+ * polarity the cartera subsidiary ledger uses (a concepto's pending charge
+ * is a receivable: crediting it reduces what the propietario owes under
+ * that concepto, debiting it increases what's owed under the other one),
+ * not the income-statement polarity a first reading of "cuentaCredito" might
+ * suggest.
  *
  * Pure and synchronous, same discipline as every other builder function
  * here: the double-entry invariant (debits equal credits) must be
@@ -859,13 +865,13 @@ export function construirMovimientosReclasificacion(
   return [
     {
       account: cuentaOrigen,
-      type: 'debito',
+      type: 'credito',
       amount: monto,
       description: 'Reclasificación de ingreso — nota contable',
     },
     {
       account: cuentaDestino,
-      type: 'credito',
+      type: 'debito',
       amount: monto,
       description: 'Reclasificación de ingreso — nota contable',
     },
