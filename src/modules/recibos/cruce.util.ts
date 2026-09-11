@@ -5,6 +5,9 @@ import type { ClientSession, Model } from 'mongoose';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { SaldoCarteraDocument } from '../../database/schemas/facturacion/saldo-cartera.schema';
+import type { CarteraPorDocumentoDocument } from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import type { SaldoTotalDocumentoDocument } from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import type { DocumentType } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
 import type { ErrorAplicacion } from '../../contracts';
@@ -31,14 +34,25 @@ export class AplicacionInvalidaError extends ConflictException {
   }
 }
 
+/** A Factura/NotaDebito Mongoose document, plus its CURRENT total pending
+ *  balance resolved from `SaldoTotalDocumento` — never a real field on the
+ *  document itself anymore (see that schema's own docblock on why the
+ *  atomic guard had to move off the immutable document). Every caller that
+ *  used to read `.outstandingBalance` straight off the Mongoose result
+ *  keeps working unchanged against this shape. */
+type ConSaldoPendiente<T> = T & { outstandingBalance: number };
+
 /**
- * Atomically decrements one Factura's `outstandingBalance` by `amount`,
+ * Atomically decrements one Factura's `SaldoTotalDocumento` row by `amount`,
  * inside `session`, refusing (throwing) if that would push it below zero —
  * the same `$expr`-guarded `findOneAndUpdate` discipline as
  * `NumeracionService.siguienteFactura`, applied to a decrement instead of an
- * increment.
+ * increment. See `SaldoTotalDocumento`'s own docblock for why this guard
+ * lives in its own collection instead of summing `CarteraPorDocumento`'s
+ * per-concepto rows on the fly: only a single atomically-guarded field can
+ * refuse an over-application; N separately-updated rows cannot.
  *
- * AUTHORITATIVE: `outstandingBalance` must never go negative, so unlike
+ * AUTHORITATIVE: this balance must never go negative, so unlike
  * `ajustarSaldosCartera` below this never clamps — a guard failure always
  * means the caller's premise (the document had enough balance) was stale,
  * and the whole transaction must abort, not retry with a smaller amount.
@@ -49,44 +63,60 @@ export class AplicacionInvalidaError extends ConflictException {
  * credit; a NaN amount sorts below every number in BSON comparison order, so
  * the guard would pass and `$inc` would permanently poison the authoritative
  * balance with NaN. Both must be rejected before touching the database.
+ *
+ * Reads the Factura itself (immutable, so a plain `findOne` after the guard
+ * already passed is safe — its `lines`/`total`/`inmuebleId` never change) to
+ * return everything a caller needs in one shape, `outstandingBalance`
+ * included, so `ajustarSaldosCartera`/`resumen` builders elsewhere need no
+ * changes of their own.
  */
 export async function decrementarSaldoFactura(
   facturas: Model<FacturaDocument>,
+  saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
   session: ClientSession,
   coPropertyId: Types.ObjectId,
   facturaId: Types.ObjectId,
   amount: number,
-): Promise<FacturaDocument> {
+): Promise<ConSaldoPendiente<FacturaDocument>> {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new AplicacionInvalidaError(facturaId.toString(), amount);
   }
 
-  const actualizada = await facturas
+  const saldoActualizado = await saldoTotalDocumento
     .findOneAndUpdate(
       {
-        _id: facturaId,
-        coPropertyId,
-        status: 'emitida',
+        documentoId: facturaId,
         // Field-to-field comparison needs $expr, same reasoning as
         // NumeracionService.siguienteFactura's range ceiling.
-        $expr: { $gte: ['$outstandingBalance', amount] },
+        $expr: { $gte: ['$saldoPendiente', amount] },
       },
-      { $inc: { outstandingBalance: -amount } },
+      { $inc: { saldoPendiente: -amount } },
       { returnDocument: 'after', session },
     )
     .exec();
 
-  if (!actualizada) {
+  if (!saldoActualizado) {
     throw new AplicacionInvalidaError(facturaId.toString(), amount);
   }
 
-  return actualizada;
+  const factura = await facturas
+    .findOne({ _id: facturaId, coPropertyId, status: 'emitida' })
+    .session(session)
+    .exec();
+  if (!factura) {
+    throw new AplicacionInvalidaError(facturaId.toString(), amount);
+  }
+
+  return Object.assign(factura, {
+    outstandingBalance: saldoActualizado.saldoPendiente,
+  });
 }
 
 /**
- * Atomically decrements one NotaDebito's `outstandingBalance` by `amount`,
- * inside `session`, refusing (throwing) if that would push it below zero —
- * sibling to `decrementarSaldoFactura`, same discipline, same $expr guard.
+ * Atomically decrements one NotaDebito's `SaldoTotalDocumento` row by
+ * `amount`, inside `session`, refusing (throwing) if that would push it
+ * below zero — sibling to `decrementarSaldoFactura`, same discipline, same
+ * $expr guard, same reason the guard lives off the document itself.
  *
  * A NotaDebito has a single concepto (no line array), so the
  * SaldoCartera adjustment is a single-line call — the same shape
@@ -95,33 +125,102 @@ export async function decrementarSaldoFactura(
  */
 export async function decrementarSaldoNotaDebito(
   notasDebito: Model<NotaDebitoDocument>,
+  saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
   session: ClientSession,
   coPropertyId: Types.ObjectId,
   notaDebitoId: Types.ObjectId,
   amount: number,
-): Promise<NotaDebitoDocument> {
+): Promise<ConSaldoPendiente<NotaDebitoDocument>> {
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new AplicacionInvalidaError(notaDebitoId.toString(), amount);
   }
 
-  const actualizada = await notasDebito
+  const saldoActualizado = await saldoTotalDocumento
     .findOneAndUpdate(
       {
-        _id: notaDebitoId,
-        coPropertyId,
-        status: 'emitida',
-        $expr: { $gte: ['$outstandingBalance', amount] },
+        documentoId: notaDebitoId,
+        $expr: { $gte: ['$saldoPendiente', amount] },
       },
-      { $inc: { outstandingBalance: -amount } },
+      { $inc: { saldoPendiente: -amount } },
       { returnDocument: 'after', session },
     )
     .exec();
 
-  if (!actualizada) {
+  if (!saldoActualizado) {
     throw new AplicacionInvalidaError(notaDebitoId.toString(), amount);
   }
 
-  return actualizada;
+  const notaDebito = await notasDebito
+    .findOne({ _id: notaDebitoId, coPropertyId, status: 'emitida' })
+    .session(session)
+    .exec();
+  if (!notaDebito) {
+    throw new AplicacionInvalidaError(notaDebitoId.toString(), amount);
+  }
+
+  return Object.assign(notaDebito, {
+    outstandingBalance: saldoActualizado.saldoPendiente,
+  });
+}
+
+/**
+ * Atomically restores (increments) one document's `SaldoTotalDocumento` row
+ * by `amount` — the reversal counterpart to `decrementarSaldoFactura`/
+ * `decrementarSaldoNotaDebito`, used by every `anular()` that used to
+ * `$inc: { outstandingBalance: +amount }` straight on the Factura/NotaDebito.
+ * Unconditional, no `$expr` guard: a reversal only ever adds back money that
+ * a prior successful decrement already proved was there — never a floor to
+ * enforce, same reasoning `RecibosService.anular()`'s own comment already
+ * gave for the plain `$inc` it used to do directly.
+ */
+export async function restaurarSaldoTotalDocumento(
+  saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
+  session: ClientSession,
+  documentoId: Types.ObjectId,
+  amount: number,
+): Promise<SaldoTotalDocumentoDocument | null> {
+  return saldoTotalDocumento
+    .findOneAndUpdate(
+      { documentoId },
+      { $inc: { saldoPendiente: amount } },
+      { returnDocument: 'after', session },
+    )
+    .exec();
+}
+
+/**
+ * Adjusts one `CarteraPorDocumento` row's `saldoPendiente` — the per-document
+ * twin of the `$max`/`$add` pipeline update `ajustarSaldosCartera`/
+ * `ajustarSaldosCarteraPorDistribucion` already run against `SaldoCartera`,
+ * extracted so both can call it once per concepto part instead of
+ * duplicating the pipeline shape. Same clamp-at-zero reasoning: fed by the
+ * exact same `parte` these functions just computed for the cross-document
+ * aggregate, so it should never actually hit the floor in practice, but a
+ * per-document row is no less a target for drift than the aggregate is.
+ */
+async function ajustarCarteraPorDocumento(
+  carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+  session: ClientSession,
+  documentoId: Types.ObjectId,
+  conceptoId: Types.ObjectId,
+  parte: number,
+  signo: 1 | -1,
+): Promise<void> {
+  await carteraPorDocumento
+    .findOneAndUpdate(
+      { documentoId, conceptoId },
+      [
+        {
+          $set: {
+            saldoPendiente: {
+              $max: [0, { $add: ['$saldoPendiente', signo * parte] }],
+            },
+          },
+        },
+      ],
+      { session, updatePipeline: true },
+    )
+    .exec();
 }
 
 /**
@@ -162,9 +261,11 @@ export async function decrementarSaldoNotaDebito(
  */
 export async function ajustarSaldosCartera(
   saldos: Model<SaldoCarteraDocument>,
+  carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
   coPropertyId: Types.ObjectId,
   factura: {
+    _id: Types.ObjectId;
     inmuebleId: Types.ObjectId;
     total: number;
     outstandingBalance: number;
@@ -221,6 +322,14 @@ export async function ajustarSaldosCartera(
         { session, updatePipeline: true },
       )
       .exec();
+    await ajustarCarteraPorDocumento(
+      carteraPorDocumento,
+      session,
+      factura._id,
+      linea.conceptoId,
+      parte,
+      signo,
+    );
   }
   return partes;
 }
@@ -378,12 +487,20 @@ export async function actualizarRemanentesLinea(
  */
 export async function ajustarSaldosCarteraPorDistribucion(
   saldos: Model<SaldoCarteraDocument>,
+  carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
   coPropertyId: Types.ObjectId,
   inmuebleId: Types.ObjectId,
   distribucion: { conceptoId: Types.ObjectId; monto: number }[],
   montoAplicado: number,
   signo: 1 | -1,
+  // The document this distribution actually belongs to — omitted only by
+  // `NotasContablesService`, whose reclassification is scoped to a whole
+  // inmueble+concepto, not one document (see `CarteraPorDocumento`'s own
+  // docblock; which specific document(s) a reclasificación should land on
+  // is still an open design question, tracked separately). Every OTHER
+  // caller has a concrete anchor document and must pass this.
+  documento?: { tipoDocumento: DocumentType; documentoId: Types.ObjectId },
 ): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
   if (distribucion.length === 0 || montoAplicado === 0) {
     return [];
@@ -426,6 +543,16 @@ export async function ajustarSaldosCarteraPorDistribucion(
         { session, updatePipeline: true },
       )
       .exec();
+    if (documento) {
+      await ajustarCarteraPorDocumento(
+        carteraPorDocumento,
+        session,
+        documento.documentoId,
+        linea.conceptoId,
+        parte,
+        signo,
+      );
+    }
   }
   return partes;
 }
@@ -530,6 +657,8 @@ export interface ContextoAplicacion {
   notasDebito: Model<NotaDebitoDocument>;
   aplicaciones: Model<AplicacionCarteraDocument>;
   saldos: Model<SaldoCarteraDocument>;
+  carteraPorDocumento: Model<CarteraPorDocumentoDocument>;
+  saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>;
   recibos: Model<ReciboDocument>;
   session: ClientSession;
   coPropertyId: Types.ObjectId;
@@ -566,6 +695,8 @@ export async function ejecutarAplicacionManual(
     notasDebito,
     aplicaciones,
     saldos,
+    carteraPorDocumento,
+    saldoTotalDocumento,
     recibos,
     session,
     coPropertyId,
@@ -609,6 +740,7 @@ export async function ejecutarAplicacionManual(
       }
       const notaDebito = await decrementarSaldoNotaDebito(
         notasDebito,
+        saldoTotalDocumento,
         session,
         coPropertyId,
         documentoId,
@@ -625,12 +757,14 @@ export async function ejecutarAplicacionManual(
 
       await ajustarSaldosCarteraPorDistribucion(
         saldos,
+        carteraPorDocumento,
         session,
         coPropertyId,
         notaDebito.inmuebleId,
         [{ conceptoId: notaDebito.conceptoId, monto: notaDebito.total }],
         solicitada.montoAplicado,
         -1,
+        { tipoDocumento: 'ND', documentoId: notaDebito._id },
       );
       acumular(null, solicitada.montoAplicado);
       sumaCashAplicada += solicitada.montoAplicado;
@@ -715,6 +849,7 @@ export async function ejecutarAplicacionManual(
 
     const factura = await decrementarSaldoFactura(
       facturas,
+      saldoTotalDocumento,
       session,
       coPropertyId,
       documentoId,
@@ -732,6 +867,7 @@ export async function ejecutarAplicacionManual(
     const partes = repartoElegido
       ? await ajustarSaldosCarteraPorDistribucion(
           saldos,
+          carteraPorDocumento,
           session,
           coPropertyId,
           factura.inmuebleId,
@@ -741,9 +877,11 @@ export async function ejecutarAplicacionManual(
           })),
           montoAFactura,
           -1,
+          { tipoDocumento: 'FV', documentoId: factura._id },
         )
       : await ajustarSaldosCartera(
           saldos,
+          carteraPorDocumento,
           session,
           coPropertyId,
           factura,
@@ -866,6 +1004,8 @@ export async function ejecutarAplicacionFifo(
     notasDebito,
     aplicaciones,
     saldos,
+    carteraPorDocumento,
+    saldoTotalDocumento,
     recibos,
     session,
     coPropertyId,
@@ -875,44 +1015,75 @@ export async function ejecutarAplicacionFifo(
     accountId,
   } = ctx;
 
-  const [facturasAbiertas, notasDebitoAbiertas] = await Promise.all([
+  // Candidate documents are bounded to this ONE inmueble (a small set) —
+  // fetched first, THEN cross-referenced against `SaldoTotalDocumento` for
+  // which still have a positive balance, instead of a field filter that no
+  // longer exists on the (now immutable) Factura/NotaDebito documents.
+  const [facturasDelInmueble, notasDebitoDelInmueble] = await Promise.all([
     facturas
-      .find({
-        coPropertyId,
-        inmuebleId: recibo.inmuebleId,
-        status: 'emitida',
-        outstandingBalance: { $gt: 0 },
-      })
-      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+      .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
       .exec(),
     notasDebito
-      .find({
-        coPropertyId,
-        inmuebleId: recibo.inmuebleId,
-        status: 'emitida',
-        outstandingBalance: { $gt: 0 },
-      })
-      .sort({ issueDate: 1, _id: 1 })
+      .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
       .exec(),
   ]);
+  const idsDelInmueble = [
+    ...facturasDelInmueble.map((f) => f._id),
+    ...notasDebitoDelInmueble.map((n) => n._id),
+  ];
+  const saldosTotales = idsDelInmueble.length
+    ? await saldoTotalDocumento
+        .find({ documentoId: { $in: idsDelInmueble }, saldoPendiente: { $gt: 0 } })
+        .session(session)
+        .exec()
+    : [];
+  const saldoPorDocumento = new Map(
+    saldosTotales.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+  );
+  const facturasAbiertas = facturasDelInmueble
+    .filter((f) => saldoPorDocumento.has(f._id.toString()))
+    .sort(
+      (a, b) =>
+        (a.dueDate ?? a.issueDate).getTime() -
+        (b.dueDate ?? b.issueDate).getTime(),
+    );
+  const notasDebitoAbiertas = notasDebitoDelInmueble
+    .filter((n) => saldoPorDocumento.has(n._id.toString()))
+    .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
 
   type Candidato =
-    | { tipo: 'FV'; doc: FacturaDocument; prioridad: Date }
-    | { tipo: 'ND'; doc: NotaDebitoDocument; prioridad: Date };
+    | {
+        tipo: 'FV';
+        doc: FacturaDocument;
+        saldoPendiente: number;
+        prioridad: Date;
+      }
+    | {
+        tipo: 'ND';
+        doc: NotaDebitoDocument;
+        saldoPendiente: number;
+        prioridad: Date;
+      };
 
   const abiertas: Candidato[] = [
-    ...facturasAbiertas.map((factura): Candidato => ({
-      tipo: 'FV',
-      doc: factura,
-      prioridad: factura.dueDate ?? factura.issueDate,
-    })),
-    ...notasDebitoAbiertas.map((nota): Candidato => ({
-      tipo: 'ND',
-      doc: nota,
-      prioridad: nota.issueDate,
-    })),
+    ...facturasAbiertas.map(
+      (factura): Candidato => ({
+        tipo: 'FV',
+        doc: factura,
+        saldoPendiente: saldoPorDocumento.get(factura._id.toString())!,
+        prioridad: factura.dueDate ?? factura.issueDate,
+      }),
+    ),
+    ...notasDebitoAbiertas.map(
+      (nota): Candidato => ({
+        tipo: 'ND',
+        doc: nota,
+        saldoPendiente: saldoPorDocumento.get(nota._id.toString())!,
+        prioridad: nota.issueDate,
+      }),
+    ),
   ].sort((a, b) => {
     const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
     if (porFecha !== 0) return porFecha;
@@ -943,18 +1114,23 @@ export async function ejecutarAplicacionFifo(
     const { montoAFactura: montoSinCapar, montoDescuento } =
       candidato.tipo === 'FV'
         ? evaluarAplicacionConDescuento(
-            candidato.doc,
+            {
+              outstandingBalance: candidato.saldoPendiente,
+              discountAmount: candidato.doc.discountAmount,
+              discountDeadline: candidato.doc.discountDeadline,
+            },
             recibo.receivedDate,
             restante,
           )
         : { montoAFactura: restante, montoDescuento: 0 };
-    const monto = Math.min(montoSinCapar, candidato.doc.outstandingBalance);
+    const monto = Math.min(montoSinCapar, candidato.saldoPendiente);
     const cashUsado = monto - montoDescuento;
 
     try {
       if (candidato.tipo === 'ND') {
         const notaActualizada = await decrementarSaldoNotaDebito(
           notasDebito,
+          saldoTotalDocumento,
           session,
           coPropertyId,
           candidato.doc._id,
@@ -963,6 +1139,7 @@ export async function ejecutarAplicacionFifo(
 
         await ajustarSaldosCarteraPorDistribucion(
           saldos,
+          carteraPorDocumento,
           session,
           coPropertyId,
           notaActualizada.inmuebleId,
@@ -974,6 +1151,7 @@ export async function ejecutarAplicacionFifo(
           ],
           monto,
           -1,
+          { tipoDocumento: 'ND', documentoId: notaActualizada._id },
         );
         acumular(null, monto);
 
@@ -1015,6 +1193,7 @@ export async function ejecutarAplicacionFifo(
 
       const facturaActualizada = await decrementarSaldoFactura(
         facturas,
+        saldoTotalDocumento,
         session,
         coPropertyId,
         candidato.doc._id,
@@ -1022,6 +1201,7 @@ export async function ejecutarAplicacionFifo(
       );
       const partes = await ajustarSaldosCartera(
         saldos,
+        carteraPorDocumento,
         session,
         coPropertyId,
         facturaActualizada,

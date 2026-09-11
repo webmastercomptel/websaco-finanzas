@@ -321,6 +321,8 @@ export interface ResultadoReinicioCiclo {
   aplicacionesEliminadas: number;
   asientosEliminados: number;
   saldosEliminados: number;
+  carteraPorDocumentoEliminada: number;
+  saldosDocumentoOrigenEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -686,6 +688,11 @@ export interface NotaAnticipoDetalle extends NotaAnticipo {
 export interface NotaContable {
   id: string;
   inmuebleId: string;
+  /** The specific Factura/NotaDebito this reclassification's per-document
+   *  cartera effect landed on. Null on a note created before this field
+   *  existed. */
+  tipoDocumento: 'FV' | 'ND' | null;
+  documentoId: string | null;
   conceptoOrigenId: string;
   conceptoDestinoId: string;
   fecha: IsoDate;
@@ -792,6 +799,9 @@ export interface RespuestaVencimientosCartera {
  * has no key, read as 0 on the frontend).
  */
 export interface DocumentoCarteraPorInmueble {
+  /** This document's own `_id` — what a Nota Contable's `documentoId` must
+   *  reference to reclassify against it specifically. */
+  documentoId: string;
   tipo: 'FV' | 'ND';
   numeroCompleto: string;
   fecha: string;

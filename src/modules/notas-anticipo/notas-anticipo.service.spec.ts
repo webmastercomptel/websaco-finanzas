@@ -187,9 +187,7 @@ const construirServicio = (
 
   const facturas = {
     find: jest.fn(() => ({
-      sort: () => ({
-        session: () => ({ exec: () => Promise.resolve(facturasState) }),
-      }),
+      session: () => ({ exec: () => Promise.resolve(facturasState) }),
     })),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: () => ({
@@ -204,16 +202,24 @@ const construirServicio = (
           ),
       }),
     })),
+    // `actualizarRemanentesLinea` (cruce.util.ts) — no test here asserts on
+    // `remainingAmount` itself, only that the call doesn't blow up.
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+
+  // The atomic guard/restore now lives here, not on `facturas` itself — see
+  // `SaldoTotalDocumento`'s own docblock. Reuses `facturasState`'s own
+  // `outstandingBalance` field as the shared backing state (test fixture
+  // convenience, not a real schema shape).
+  const saldoTotalDocumento = {
     findOneAndUpdate: jest.fn(
       (
         filtro: Record<string, unknown>,
-        update: {
-          $inc?: { outstandingBalance: number };
-        },
+        update: { $inc?: { saldoPendiente: number } },
       ) => ({
         exec: () => {
           const factura = facturasState.find(
-            (f) => String(f._id) === String(filtro._id),
+            (f) => String(f._id) === String(filtro.documentoId),
           );
           if (!factura) return Promise.resolve(null);
           if (filtro.$expr) {
@@ -224,20 +230,54 @@ const construirServicio = (
             factura.outstandingBalance = factura.outstandingBalance - monto;
           } else if (update.$inc) {
             factura.outstandingBalance =
-              factura.outstandingBalance + update.$inc.outstandingBalance;
+              factura.outstandingBalance + update.$inc.saldoPendiente;
           }
-          return Promise.resolve({ ...factura });
+          return Promise.resolve({
+            documentoId: factura._id,
+            saldoPendiente: factura.outstandingBalance,
+          });
         },
       }),
     ),
-    // `actualizarRemanentesLinea` (cruce.util.ts) — no test here asserts on
-    // `remainingAmount` itself, only that the call doesn't blow up.
-    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: () => ({
+        exec: () => {
+          const factura = facturasState.find(
+            (f) => String(f._id) === String(filtro.documentoId),
+          );
+          return Promise.resolve(
+            factura
+              ? { documentoId: factura._id, saldoPendiente: factura.outstandingBalance }
+              : null,
+          );
+        },
+      }),
+    })),
+    // The FIFO candidate query — every row with a positive balance among
+    // the requested ids.
+    find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
+      session: () => ({
+        exec: () => {
+          const ids = (filtro.documentoId?.$in ?? []).map(String);
+          return Promise.resolve(
+            facturasState
+              .filter(
+                (f) =>
+                  ids.includes(String(f._id)) && f.outstandingBalance > 0,
+              )
+              .map((f) => ({
+                documentoId: f._id,
+                saldoPendiente: f.outstandingBalance,
+              })),
+          );
+        },
+      }),
+    })),
   };
 
   const notasDebito = {
     find: jest.fn(() => ({
-      sort: () => ({ session: () => ({ exec: () => Promise.resolve([]) }) }),
+      session: () => ({ exec: () => Promise.resolve([]) }),
     })),
     findOneAndUpdate: jest.fn(() => ({
       exec: () => Promise.resolve(null),
@@ -245,6 +285,9 @@ const construirServicio = (
   };
 
   const saldos = {
+    findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const carteraPorDocumento = {
     findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
   const asientosStore: { entries: unknown[] }[] = [];
@@ -278,6 +321,8 @@ const construirServicio = (
     facturas as never,
     notasDebito as never,
     saldos as never,
+    carteraPorDocumento as never,
+    saldoTotalDocumento as never,
     asientos as never,
     copropiedades as never,
     { resolveCoPropertyId: () => COP } as never,

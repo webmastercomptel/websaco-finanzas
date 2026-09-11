@@ -63,6 +63,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     aplicaciones: find(),
     conceptosCobro: find(),
     saldosCartera: find(),
+    carteraPorDocumento: find(),
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
@@ -74,6 +75,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.aplicaciones as never,
     m.conceptosCobro as never,
     m.saldosCartera as never,
+    m.carteraPorDocumento as never,
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
@@ -640,5 +642,62 @@ describe('CarteraPorInmuebleService', () => {
 
     expect(result.documentos).toHaveLength(0);
     expect(result.saldoTotalCartera).toBe(0);
+  });
+
+  it('sin fecha de corte (consulta vigente): el desglose por documento sale de CarteraPorDocumento, reflejando una reclasificación — no del split proporcional de las líneas congeladas', async () => {
+    // El caso que arrancó esta funcionalidad: una Nota Contable reclasificó
+    // 50000 de "TV por Cable" a "Administración" en ESTA factura puntual.
+    // La factura original (`lines`) nunca cambia — pero la fila que el
+    // usuario ve en pantalla para esta factura sí debe reflejarlo.
+    const inmId = id();
+    const fId = id();
+    const conceptoTv = id();
+    const conceptoAdmin = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 200000,
+      lines: [
+        { conceptoId: conceptoTv, conceptName: 'TV', totalAmount: 100000 },
+        {
+          conceptoId: conceptoAdmin,
+          conceptName: 'Administracion',
+          totalAmount: 100000,
+        },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      // Post-reclasificación: TV en 0 (fila presente, valor 0 — se filtra),
+      // Administración con 100000 originales + 50000 recibidos = 150000.
+      carteraPorDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          { documentoId: fId, conceptoId: conceptoTv, saldoPendiente: 0 },
+          {
+            documentoId: fId,
+            conceptoId: conceptoAdmin,
+            saldoPendiente: 150000,
+          },
+        ]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.documentos[0].saldo).toBe(200000);
+    expect(result.documentos[0].cargosPorConcepto).toEqual({
+      [conceptoAdmin.toString()]: 150000,
+    });
   });
 });

@@ -94,6 +94,10 @@ const modeloSaldos = () => ({
   findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
 });
 
+const modeloCarteraPorDocumento = () => ({
+  findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
 const modeloAplicaciones = () => ({
   create: jest.fn((filas: Record<string, unknown>[]) =>
     Promise.resolve(filas.map((f, i) => ({ _id: `apl-${i}`, ...f }))),
@@ -132,6 +136,7 @@ const construirServicio = (opts: {
   const factura = opts.factura ?? facturaDoc();
   const facturas = modeloFacturas(factura);
   const saldos = opts.saldos ?? modeloSaldos();
+  const carteraPorDocumento = modeloCarteraPorDocumento();
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
   const copropiedades = opts.copropiedades ?? modeloCopropiedades();
@@ -153,6 +158,7 @@ const construirServicio = (opts: {
     aplicaciones as never,
     facturas as never,
     saldos as never,
+    carteraPorDocumento as never,
     asientos as never,
     copropiedades as never,
     tenantQueDevuelve(COP),
@@ -486,6 +492,7 @@ describe('NotasCreditoService.crear', () => {
       modeloAplicaciones() as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -815,6 +822,7 @@ describe('NotasCreditoService.aplicar', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -904,6 +912,7 @@ describe('NotasCreditoService.aplicar', () => {
       aplicaciones as never,
       facturas as never,
       saldos as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -993,6 +1002,7 @@ describe('NotasCreditoService.aplicar', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1021,6 +1031,7 @@ describe('NotasCreditoService.aplicar', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1091,6 +1102,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1189,6 +1201,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1308,6 +1321,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       {
         findById: jest.fn(() => ({
@@ -1402,6 +1416,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1534,6 +1549,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       facturas as never,
       saldos as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1600,6 +1616,7 @@ describe('NotasCreditoService.anular', () => {
       aplicaciones as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1649,6 +1666,7 @@ describe('NotasCreditoService.anular', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1693,6 +1711,7 @@ describe('NotasCreditoService.findAll', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1744,6 +1763,7 @@ describe('NotasCreditoService.findAll', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1777,6 +1797,7 @@ describe('NotasCreditoService.findOne', () => {
       aplicaciones as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1831,6 +1852,7 @@ describe('NotasCreditoService.findOne', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1857,6 +1879,7 @@ describe('NotasCreditoService.findOne', () => {
       modeloAplicaciones() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),

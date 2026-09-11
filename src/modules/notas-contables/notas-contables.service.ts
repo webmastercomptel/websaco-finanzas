@@ -14,6 +14,10 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -66,6 +70,8 @@ export class NotasContablesService {
     private readonly notasContables: Model<NotaContableDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(ConceptoCobro.name)
@@ -133,10 +139,16 @@ export class NotasContablesService {
 
   /**
    * Creates a Nota Contable — reclassifies `monto` from one concepto's
-   * SaldoCartera to another's, within the same inmueble.
+   * balance to another's, on ONE specific Factura/NotaDebito within the
+   * inmueble (the document the user picked from "Cartera Pendiente del
+   * Inmueble") — never spread across however many documents happen to
+   * share the origin concepto at this inmueble.
    *
    * Validates: monto > 0, conceptoOrigenId !== conceptoDestinoId, and the
-   * origin concepto's current balance >= monto (design §4).
+   * origin concepto's current balance ON THAT DOCUMENT >= monto (design §4,
+   * updated to read from `CarteraPorDocumento` instead of the cross-document
+   * `SaldoCartera` — a document's own row is also what the check itself
+   * confirms exists, so no separate Factura/NotaDebito lookup is needed).
    */
   async crear(
     accountId: string,
@@ -144,6 +156,7 @@ export class NotasContablesService {
   ): Promise<NotaContableContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(dto.inmuebleId);
+    const documentoId = new Types.ObjectId(dto.documentoId);
     const conceptoOrigenId = new Types.ObjectId(dto.conceptoOrigenId);
     const conceptoDestinoId = new Types.ObjectId(dto.conceptoDestinoId);
 
@@ -183,22 +196,27 @@ export class NotasContablesService {
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     return this.transaccion(async (session) => {
-      // Read origin concepto's current balance — the ONLY authoritative
-      // signal for a reclassification (design §4).
-      const saldoOrigen = await this.saldos
+      // Read origin concepto's current balance ON THIS DOCUMENT — the ONLY
+      // authoritative signal for a reclassification (design §4). Finding no
+      // row here means either the document doesn't belong to this
+      // inmueble/coproperty or it never had a pending balance for this
+      // concepto — both are refused identically, same "no existe, no está
+      // vigente, o su saldo es menor" shape every other cruce guard uses.
+      const filaOrigen = await this.carteraPorDocumento
         .findOne({
           coPropertyId,
           inmuebleId,
+          documentoId,
           conceptoId: conceptoOrigenId,
         })
         .session(session)
         .exec();
 
-      const balanceDisponible = saldoOrigen?.balance ?? 0;
+      const balanceDisponible = filaOrigen?.saldoPendiente ?? 0;
       if (dto.monto > balanceDisponible) {
         throw new ConflictException(
           `El monto solicitado (${dto.monto}) supera el saldo disponible ` +
-            `del concepto de origen (${balanceDisponible})`,
+            `del concepto de origen en ese documento (${balanceDisponible})`,
         );
       }
 
@@ -213,6 +231,8 @@ export class NotasContablesService {
           {
             coPropertyId,
             inmuebleId,
+            tipoDocumento: dto.tipoDocumento,
+            documentoId,
             conceptoOrigenId,
             conceptoDestinoId,
             monto: dto.monto,
@@ -228,26 +248,36 @@ export class NotasContablesService {
         { session },
       );
 
+      const documento = { tipoDocumento: dto.tipoDocumento, documentoId };
+
       // Decrease origin concepto's balance.
       await ajustarSaldosCarteraPorDistribucion(
         this.saldos,
+        this.carteraPorDocumento,
         session,
         coPropertyId,
         inmuebleId,
         [{ conceptoId: conceptoOrigenId, monto: dto.monto }],
         dto.monto,
         -1,
+        documento,
       );
 
-      // Increase destination concepto's balance.
+      // Increase destination concepto's balance. NOTE: same limitation as
+      // `SaldoCartera`'s own increment above — if this document never had a
+      // `CarteraPorDocumento` row for `conceptoDestinoId` (never charged
+      // that concepto), there's nothing for `findOneAndUpdate` to match and
+      // this silently no-ops, pre-existing behavior, not introduced here.
       await ajustarSaldosCarteraPorDistribucion(
         this.saldos,
+        this.carteraPorDocumento,
         session,
         coPropertyId,
         inmuebleId,
         [{ conceptoId: conceptoDestinoId, monto: dto.monto }],
         dto.monto,
         +1,
+        documento,
       );
 
       // Post 2-leg accounting entry, dated with the note's OWN declared
@@ -376,24 +406,37 @@ export class NotasContablesService {
         );
       }
 
+      // `documentoId`/`tipoDocumento` are absent on a Nota Contable created
+      // before this field existed — omitted entirely rather than passed as
+      // `{ documentoId: undefined }`, so `ajustarSaldosCarteraPorDistribucion`
+      // takes its own "no document to touch" branch instead of matching
+      // nothing with an undefined filter value.
+      const documento = nota.documentoId
+        ? { tipoDocumento: nota.tipoDocumento, documentoId: nota.documentoId }
+        : undefined;
+
       // Reverse: increase origin, decrease destination (signs swapped).
       await ajustarSaldosCarteraPorDistribucion(
         this.saldos,
+        this.carteraPorDocumento,
         session,
         coPropertyId,
         nota.inmuebleId,
         [{ conceptoId: nota.conceptoOrigenId, monto: nota.monto }],
         nota.monto,
         +1,
+        documento,
       );
       await ajustarSaldosCarteraPorDistribucion(
         this.saldos,
+        this.carteraPorDocumento,
         session,
         coPropertyId,
         nota.inmuebleId,
         [{ conceptoId: nota.conceptoDestinoId, monto: nota.monto }],
         nota.monto,
         -1,
+        documento,
       );
 
       // Post mirrored entry: swap accounts (design §7). Dated with THIS

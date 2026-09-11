@@ -76,6 +76,30 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         exec: jest.fn(() => Promise.resolve({})),
       })),
     },
+    saldos: {
+      findOne: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve(null)),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({})),
+      })),
+    },
+    carteraPorDocumento: {
+      create: jest.fn(() => Promise.resolve([{}])),
+      updateOne: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({})),
+      })),
+    },
+    saldoTotalDocumento: {
+      create: jest.fn(() => Promise.resolve([{}])),
+      updateOne: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() => Promise.resolve({})),
+      })),
+    },
     asientos: { create: jest.fn(() => Promise.resolve([{}])) },
     copropiedades: {
       findById: jest.fn(() => ({
@@ -139,8 +163,10 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
   return new NotasDebitoService(
     merged.notasDebito as never,
     merged.aplicaciones as never,
-    {} as never,
-    {} as never,
+    {} as never, // facturas
+    merged.saldos as never,
+    merged.carteraPorDocumento as never,
+    merged.saldoTotalDocumento as never,
     merged.asientos as never,
     merged.copropiedades as never,
     merged.conceptos as never,

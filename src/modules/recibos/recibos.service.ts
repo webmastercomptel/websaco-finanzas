@@ -27,6 +27,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -53,6 +61,7 @@ import {
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
+  restaurarSaldoTotalDocumento,
   type ResumenAplicacion,
 } from './cruce.util';
 import {
@@ -170,6 +179,10 @@ export class RecibosService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(Copropiedad.name)
@@ -491,42 +504,43 @@ export class RecibosService {
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
-        // Unconditional, plain $inc — never guarded by
-        // decrementarSaldoFactura's floor (that guard exists to stop
-        // OVER-application, not to gate a reversal). `factura` is null when
-        // the document was removed/voided through another path; the
-        // reversal proceeds regardless (design §6).
-        const factura = await this.facturas
-          .findOneAndUpdate(
-            { _id: aplicacion.documentId, coPropertyId },
-            { $inc: { outstandingBalance: aplicacion.amountApplied } },
-            { returnDocument: 'after', session },
-          )
+        // `facturaDoc` is null when the document was removed/voided through
+        // another path; the reversal proceeds regardless (design §6) — it
+        // just has nothing left to restore beyond crediting an unknown
+        // account below.
+        const facturaDoc = await this.facturas
+          .findOne({ _id: aplicacion.documentId, coPropertyId })
+          .session(session)
           .exec();
 
-        if (factura) {
+        if (facturaDoc) {
+          // Read BEFORE restoring — `remanentesPorLinea` needs the
+          // pre-reversal balance for any línea it still has to legacy-derive
+          // (a línea already carrying a real `remainingAmount` ignores this
+          // and reads its own tracked value regardless).
+          const saldoPrevio = await this.saldoTotalDocumento
+            .findOne({ documentoId: facturaDoc._id })
+            .session(session)
+            .exec();
+          const factura = Object.assign(facturaDoc, {
+            outstandingBalance: saldoPrevio?.saldoPendiente ?? 0,
+          });
           // Replays the EXACT split this application recorded
           // (`detalleConceptos`) instead of re-deriving one via the default
           // cascade — the only way a reversal is correct once the original
           // application could have been a user-chosen manual distribution,
           // not just the cascade (same reasoning `NotaCreditoService.anular()`
           // already applies to its own anchor application's `distribution`).
-          //
-          // `factura` here already reflects the $inc above (outstandingBalance
-          // restored UP) — for a línea `remanentesPorLinea` still has to
-          // legacy-derive (never touched by a manual distribution), that
-          // function needs the state as it stood BEFORE this reversal, so
-          // the aggregate is walked back by exactly what this reversal is
-          // about to give back (a línea already carrying a real
-          // `remainingAmount` ignores this and reads its own tracked value
-          // regardless).
-          const remanentesAntes = remanentesPorLinea({
-            ...factura,
-            outstandingBalance:
-              factura.outstandingBalance - aplicacion.amountApplied,
-          });
+          const remanentesAntes = remanentesPorLinea(factura);
+          await restaurarSaldoTotalDocumento(
+            this.saldoTotalDocumento,
+            session,
+            factura._id,
+            aplicacion.amountApplied,
+          );
           const partes = await ajustarSaldosCarteraPorDistribucion(
             this.saldos,
+            this.carteraPorDocumento,
             session,
             coPropertyId,
             factura.inmuebleId,
@@ -536,6 +550,7 @@ export class RecibosService {
             })),
             aplicacion.amountApplied,
             1,
+            { tipoDocumento: 'FV', documentoId: factura._id },
           );
           await actualizarRemanentesLinea(
             this.facturas,
@@ -812,6 +827,8 @@ export class RecibosService {
         notasDebito: this.notasDebito,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
+        carteraPorDocumento: this.carteraPorDocumento,
+        saldoTotalDocumento: this.saldoTotalDocumento,
         recibos: this.recibos,
         session,
         coPropertyId,
@@ -852,6 +869,8 @@ export class RecibosService {
         notasDebito: this.notasDebito,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
+        carteraPorDocumento: this.carteraPorDocumento,
+        saldoTotalDocumento: this.saldoTotalDocumento,
         recibos: this.recibos,
         session,
         coPropertyId,

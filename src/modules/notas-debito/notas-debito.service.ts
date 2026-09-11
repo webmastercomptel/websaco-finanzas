@@ -22,6 +22,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -93,6 +101,10 @@ export class NotasDebitoService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(Copropiedad.name)
@@ -220,6 +232,64 @@ export class NotasDebitoService {
         { session },
       );
 
+      // A Nota Débito is a chargeable document like a Factura line — it must
+      // increment SaldoCartera the same way (previously missing entirely:
+      // `this.saldos` was injected but never called here, so a ND's charge
+      // was invisible to every SaldoCartera-reading report until a later
+      // Recibo/NC touched it). Read-before-write so the new
+      // CarteraPorDocumento row can freeze `saldoAnterior`/`saldoNuevo`, same
+      // fields `LotesFacturacionService.consolidar()` seeds per Factura line.
+      const saldoPrevio = await this.saldos
+        .findOne({ coPropertyId, inmuebleId, conceptoId })
+        .session(session)
+        .exec();
+      const saldoAnterior = saldoPrevio?.balance ?? 0;
+
+      await this.saldos
+        .findOneAndUpdate(
+          { coPropertyId, inmuebleId, conceptoId },
+          {
+            $inc: { balance: dto.total },
+            $setOnInsert: { coPropertyId, inmuebleId, conceptoId },
+          },
+          { session, upsert: true },
+        )
+        .exec();
+
+      // Seeds this Nota Débito's own atomically-guarded total-balance row —
+      // see `SaldoTotalDocumento`'s own docblock.
+      await this.saldoTotalDocumento.create(
+        [
+          {
+            coPropertyId,
+            tipoDocumento: 'ND' as const,
+            documentoId: creada._id,
+            total: dto.total,
+            saldoPendiente: dto.total,
+          },
+        ],
+        { session },
+      );
+
+      // Seeds this Nota Débito's own row in the per-document cartera ledger
+      // — see `CarteraPorDocumento`'s own docblock.
+      await this.carteraPorDocumento.create(
+        [
+          {
+            coPropertyId,
+            inmuebleId,
+            tipoDocumento: 'ND' as const,
+            documentoId: creada._id,
+            conceptoId,
+            montoOriginal: dto.total,
+            saldoPendiente: dto.total,
+            saldoAnterior,
+            saldoNuevo: saldoAnterior + dto.total,
+          },
+        ],
+        { session },
+      );
+
       // Post creation journal entry: debit cartera, credit income (the
       // concepto's CREDIT account, per construirMovimientos).
       await this.postearAsientoCreacion(
@@ -234,7 +304,8 @@ export class NotasDebitoService {
         .findOne({ _id: creada._id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaDebito(final!);
+      // Just seeded above, still full — no need to re-read SaldoTotalDocumento.
+      return toNotaDebito(final!, dto.total);
     });
   }
 
@@ -249,7 +320,14 @@ export class NotasDebitoService {
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
-    if (query.conSaldoPendiente) filtro.outstandingBalance = { $gt: 0 };
+    if (query.conSaldoPendiente) {
+      // No longer a field on NotaDebito itself — resolve candidate ids from
+      // `SaldoTotalDocumento` first (see that schema's own docblock).
+      const conSaldo = await this.saldoTotalDocumento
+        .find({ coPropertyId, tipoDocumento: 'ND', saldoPendiente: { $gt: 0 } })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
+    }
     if (query.fechaDesde || query.fechaHasta) {
       filtro.issueDate = {
         ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
@@ -270,7 +348,23 @@ export class NotasDebitoService {
       this.notasDebito.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toNotaDebito), total, pagina, porPagina };
+    const saldos = documentos.length
+      ? await this.saldoTotalDocumento
+          .find({ documentoId: { $in: documentos.map((d) => d._id) } })
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
+    return {
+      items: documentos.map((d) =>
+        toNotaDebito(d, saldoPorDocumento.get(d._id.toString()) ?? 0),
+      ),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   /**
@@ -285,6 +379,9 @@ export class NotasDebitoService {
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota débito ${id}`);
     }
+    const saldoTotal = await this.saldoTotalDocumento
+      .findOne({ documentoId: nota._id })
+      .exec();
     const aplicaciones = await this.aplicaciones
       .find({ coPropertyId, documentType: 'ND', documentId: nota._id })
       .sort({ appliedAt: 1 })
@@ -335,7 +432,12 @@ export class NotasDebitoService {
       ]),
     ]);
 
-    return toNotaDebitoDetalle(nota, aplicaciones, fechasPorSourceId);
+    return toNotaDebitoDetalle(
+      nota,
+      saldoTotal?.saldoPendiente ?? 0,
+      aplicaciones,
+      fechasPorSourceId,
+    );
   }
 
   /**
@@ -471,7 +573,54 @@ export class NotasDebitoService {
         { session },
       );
 
-      // Step 4: Update the Nota Débito's own status.
+      // Step 4: reverse this ND's own SaldoCartera/CarteraPorDocumento
+      // contribution. `restaurarMontoFuente` above only restores the PAYER's
+      // side (Recibo/NotaCredito/NotaAnticipo) — that money becomes free to
+      // apply elsewhere, it does NOT come back to this concepto, because this
+      // concepto's charge no longer exists once voided. So the net cartera
+      // effect to remove is exactly `nota.outstandingBalance` (whatever is
+      // STILL pending right now, before it gets forced to 0 below) — not
+      // `nota.total`: the portion already paid off left this concepto's
+      // balance for good the moment it was applied, same reasoning
+      // `decrementarSaldoNotaDebito`'s own docblock gives for never restoring
+      // on a stale guard failure.
+      if (nota.outstandingBalance > 0) {
+        await this.saldos
+          .findOneAndUpdate(
+            {
+              coPropertyId,
+              inmuebleId: nota.inmuebleId,
+              conceptoId: nota.conceptoId,
+            },
+            [
+              {
+                $set: {
+                  balance: {
+                    $max: [0, { $add: ['$balance', -nota.outstandingBalance] }],
+                  },
+                },
+              },
+            ],
+            { session, updatePipeline: true },
+          )
+          .exec();
+      }
+      await this.carteraPorDocumento
+        .updateOne(
+          { documentoId: nota._id, conceptoId: nota.conceptoId },
+          { $set: { saldoPendiente: 0 } },
+          { session },
+        )
+        .exec();
+      await this.saldoTotalDocumento
+        .updateOne(
+          { documentoId: nota._id },
+          { $set: { saldoPendiente: 0 } },
+          { session },
+        )
+        .exec();
+
+      // Step 5: Update the Nota Débito's own status.
       await this.notasDebito
         .findOneAndUpdate(
           { _id: id, coPropertyId },
@@ -493,7 +642,8 @@ export class NotasDebitoService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaDebito(final!);
+      // Just forced to 0 above (Step 4).
+      return toNotaDebito(final!, 0);
     });
   }
 

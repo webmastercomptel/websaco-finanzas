@@ -23,6 +23,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -47,6 +55,7 @@ import {
   ajustarSaldosCartera,
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoFactura,
+  restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
 import {
   construirAsientoCruce,
@@ -100,6 +109,10 @@ export class NotasCreditoService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(Copropiedad.name)
@@ -289,10 +302,16 @@ export class NotasCreditoService {
       }
 
       // Always exactly one target: the anchor invoice itself — never a
-      // manual/FIFO choice like Recibos' crear() (design §5).
+      // manual/FIFO choice like Recibos' crear() (design §5). Read from
+      // `SaldoTotalDocumento` — no longer a field on the (now immutable)
+      // Factura itself, see that schema's own docblock.
+      const saldoAncla = await this.saldoTotalDocumento
+        .findOne({ documentoId: facturaId })
+        .session(session)
+        .exec();
       const montoAAplicar = Math.min(
         dto.montoTotal,
-        factura.outstandingBalance,
+        saldoAncla?.saldoPendiente ?? 0,
       );
       let totalAplicadoAhora = 0;
       // How much of THIS application landed on an `intereses` (mora) line —
@@ -308,6 +327,7 @@ export class NotasCreditoService {
         // Factura's own lines, matched by conceptoId.
         await decrementarSaldoFactura(
           this.facturas,
+          this.saldoTotalDocumento,
           session,
           coPropertyId,
           facturaId,
@@ -319,6 +339,7 @@ export class NotasCreditoService {
         // via `dto.distribucion` (Task 11 / review Finding 3).
         const partes = await ajustarSaldosCarteraPorDistribucion(
           this.saldos,
+          this.carteraPorDocumento,
           session,
           coPropertyId,
           inmuebleId,
@@ -328,6 +349,7 @@ export class NotasCreditoService {
           })),
           montoAAplicar,
           -1,
+          { tipoDocumento: 'FV', documentoId: facturaId },
         );
         const detalleConceptos = partes.map((parte) => {
           const linea = factura.lines.find((l) =>
@@ -543,6 +565,7 @@ export class NotasCreditoService {
       const facturaId = new Types.ObjectId(solicitada.documentoId);
       const factura = await decrementarSaldoFactura(
         this.facturas,
+        this.saldoTotalDocumento,
         session,
         coPropertyId,
         facturaId,
@@ -559,6 +582,7 @@ export class NotasCreditoService {
 
       const partes = await ajustarSaldosCartera(
         this.saldos,
+        this.carteraPorDocumento,
         session,
         coPropertyId,
         factura,
@@ -628,16 +652,34 @@ export class NotasCreditoService {
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
   }> {
-    const abiertas = await this.facturas
-      .find({
-        coPropertyId,
-        inmuebleId: nota.inmuebleId,
-        status: 'emitida',
-        outstandingBalance: { $gt: 0 },
-      })
-      .sort({ dueDate: 1, issueDate: 1, _id: 1 })
+    // Candidates bounded to this ONE inmueble (a small set) — fetched
+    // first, THEN cross-referenced against `SaldoTotalDocumento` for which
+    // still have a positive balance, since that's no longer a field this
+    // query can filter on directly (see `SaldoTotalDocumento`'s docblock).
+    const facturasDelInmueble = await this.facturas
+      .find({ coPropertyId, inmuebleId: nota.inmuebleId, status: 'emitida' })
       .session(session)
       .exec();
+    const idsDelInmueble = facturasDelInmueble.map((f) => f._id);
+    const saldosTotales = idsDelInmueble.length
+      ? await this.saldoTotalDocumento
+          .find({
+            documentoId: { $in: idsDelInmueble },
+            saldoPendiente: { $gt: 0 },
+          })
+          .session(session)
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldosTotales.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+    const abiertas = facturasDelInmueble
+      .filter((f) => saldoPorDocumento.has(f._id.toString()))
+      .sort(
+        (a, b) =>
+          (a.dueDate ?? a.issueDate).getTime() -
+          (b.dueDate ?? b.issueDate).getTime(),
+      );
 
     const aplicadas: AplicacionCarteraDocument[] = [];
     const errores: ErrorAplicacion[] = [];
@@ -646,11 +688,15 @@ export class NotasCreditoService {
 
     for (const factura of abiertas) {
       if (restante <= 0) break;
-      const monto = Math.min(restante, factura.outstandingBalance);
+      const monto = Math.min(
+        restante,
+        saldoPorDocumento.get(factura._id.toString())!,
+      );
 
       try {
         const facturaActualizada = await decrementarSaldoFactura(
           this.facturas,
+          this.saldoTotalDocumento,
           session,
           coPropertyId,
           factura._id,
@@ -658,6 +704,7 @@ export class NotasCreditoService {
         );
         const partes = await ajustarSaldosCartera(
           this.saldos,
+          this.carteraPorDocumento,
           session,
           coPropertyId,
           facturaActualizada,
@@ -785,15 +832,21 @@ export class NotasCreditoService {
       // `montoAplicadoMora`, see `construirContraAsientoCruce`'s note).
       let montoAplicadoMoraTotal = 0;
       for (const aplicacion of aplicacionesActivas) {
-        const factura = await this.facturas
-          .findOneAndUpdate(
-            { _id: aplicacion.documentId, coPropertyId },
-            { $inc: { outstandingBalance: aplicacion.amountApplied } },
-            { returnDocument: 'after', session },
-          )
+        const facturaDoc = await this.facturas
+          .findOne({ _id: aplicacion.documentId, coPropertyId })
+          .session(session)
           .exec();
 
-        if (factura) {
+        if (facturaDoc) {
+          const saldoRestaurado = await restaurarSaldoTotalDocumento(
+            this.saldoTotalDocumento,
+            session,
+            facturaDoc._id,
+            aplicacion.amountApplied,
+          );
+          const factura = Object.assign(facturaDoc, {
+            outstandingBalance: saldoRestaurado?.saldoPendiente ?? 0,
+          });
           // `detalleConceptos` is empty on an application predating that
           // field (schema's own note) — contributes nothing to
           // `montoAplicadoMoraTotal`, same "no known split" fallback the
@@ -826,6 +879,7 @@ export class NotasCreditoService {
           if (aplicacion.documentId.equals(nota.facturaId)) {
             await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
+              this.carteraPorDocumento,
               session,
               coPropertyId,
               nota.inmuebleId,
@@ -835,10 +889,12 @@ export class NotasCreditoService {
               })),
               aplicacion.amountApplied,
               1,
+              { tipoDocumento: 'FV', documentoId: aplicacion.documentId },
             );
           } else {
             await ajustarSaldosCartera(
               this.saldos,
+              this.carteraPorDocumento,
               session,
               coPropertyId,
               factura,

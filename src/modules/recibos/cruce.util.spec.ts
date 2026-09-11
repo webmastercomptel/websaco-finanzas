@@ -13,28 +13,65 @@ import {
 const SESSION = { id: 'fake-session' } as never;
 const COP = new Types.ObjectId();
 
+// Shared no-op mock for `ajustarSaldosCartera`/`ajustarSaldosCarteraPorDistribucion`'s
+// new `CarteraPorDocumento` writes — none of the tests below assert on it,
+// they only care about `SaldoCartera`'s own `saldos` mock.
+const carteraPorDocumentoMock = () => ({
+  findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
+/** A `SaldoTotalDocumento` model mock whose `findOneAndUpdate` replays the
+ *  real `$expr`-guarded atomic decrement against an in-memory `saldo` —
+ *  same simulation style the old tests ran directly against `facturas`,
+ *  moved here since that's where the guard itself now lives. */
+const saldoTotalDocumentoCon = (saldoInicial: number) => {
+  let saldo = saldoInicial;
+  return {
+    mock: {
+      findOneAndUpdate: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          _actualizacion?: unknown,
+          _opciones?: unknown,
+        ) => ({
+          exec: () => {
+            const expr = filtro.$expr as { $gte: [string, number] };
+            const monto = expr.$gte[1];
+            if (saldo < monto) return Promise.resolve(null);
+            saldo -= monto;
+            return Promise.resolve({
+              documentoId: filtro.documentoId,
+              saldoPendiente: saldo,
+            });
+          },
+        }),
+      ),
+    },
+    saldoActual: () => saldo,
+  };
+};
+
 describe('decrementarSaldoFactura', () => {
   const facturaId = new Types.ObjectId();
+  const facturaDoc = {
+    _id: facturaId,
+    inmuebleId: new Types.ObjectId(),
+    total: 500000,
+    lines: [],
+  };
+  const facturasCon = (doc: unknown = facturaDoc) => ({
+    findOne: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(doc) }),
+    })),
+  });
 
   it('descuenta el monto cuando el saldo alcanza', async () => {
-    const facturas = {
-      findOneAndUpdate: jest.fn((_filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const alcanza = 500000 >= 200000;
-          if (!alcanza) return Promise.resolve(null);
-          return Promise.resolve({
-            _id: facturaId,
-            outstandingBalance: 300000,
-            inmuebleId: new Types.ObjectId(),
-            total: 500000,
-            lines: [],
-          });
-        },
-      })),
-    };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(500000);
+    const facturas = facturasCon();
 
     const resultado = await decrementarSaldoFactura(
       facturas as never,
+      saldoTotalDocumento as never,
       SESSION,
       COP,
       facturaId,
@@ -42,16 +79,17 @@ describe('decrementarSaldoFactura', () => {
     );
 
     expect(resultado.outstandingBalance).toBe(300000);
+    expect(resultado._id).toEqual(facturaId);
   });
 
   it('rechaza cuando el monto excede el saldo pendiente — la guarda $expr', async () => {
-    const facturas = {
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
-    };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(500000);
+    const facturas = facturasCon();
 
     await expect(
       decrementarSaldoFactura(
         facturas as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         facturaId,
@@ -60,75 +98,89 @@ describe('decrementarSaldoFactura', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('la condición de descuento es una sola operación atómica ($expr + $inc en el mismo findOneAndUpdate)', async () => {
-    const facturas = {
-      findOneAndUpdate: jest.fn(
-        (
-          _filtro: Record<string, unknown>,
-          _actualizacion?: unknown,
-          _opciones?: unknown,
-        ) => ({
-          exec: () =>
-            Promise.resolve({ _id: facturaId, outstandingBalance: 100 }),
-        }),
-      ),
-    };
+  it('la guarda es una sola operación atómica ($expr + $inc en el mismo findOneAndUpdate, contra SaldoTotalDocumento)', async () => {
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(100);
+    const facturas = facturasCon();
 
     await decrementarSaldoFactura(
       facturas as never,
+      saldoTotalDocumento as never,
       SESSION,
       COP,
       facturaId,
       50,
     );
 
-    expect(facturas.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledTimes(1);
     const [filtro, actualizacion, opciones] =
-      facturas.findOneAndUpdate.mock.calls[0];
+      saldoTotalDocumento.findOneAndUpdate.mock.calls[0];
     expect(filtro).toMatchObject({
-      _id: facturaId,
-      coPropertyId: COP,
-      status: 'emitida',
-      $expr: { $gte: ['$outstandingBalance', 50] },
+      documentoId: facturaId,
+      $expr: { $gte: ['$saldoPendiente', 50] },
     });
-    expect(actualizacion).toEqual({ $inc: { outstandingBalance: -50 } });
+    expect(actualizacion).toEqual({ $inc: { saldoPendiente: -50 } });
     expect(opciones).toMatchObject({ session: SESSION });
   });
 
   it('rechaza un monto negativo sin tocar la base de datos — jamás un crédito disfrazado de descuento', async () => {
-    const facturas = { findOneAndUpdate: jest.fn() };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(500000);
+    const facturas = facturasCon();
 
     await expect(
-      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, -50),
+      decrementarSaldoFactura(
+        facturas as never,
+        saldoTotalDocumento as never,
+        SESSION,
+        COP,
+        facturaId,
+        -50,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('rechaza un monto cero sin tocar la base de datos', async () => {
-    const facturas = { findOneAndUpdate: jest.fn() };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(500000);
+    const facturas = facturasCon();
 
     await expect(
-      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, 0),
+      decrementarSaldoFactura(
+        facturas as never,
+        saldoTotalDocumento as never,
+        SESSION,
+        COP,
+        facturaId,
+        0,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('rechaza NaN e Infinity sin tocar la base de datos — nunca envenenar el saldo autoritativo', async () => {
-    const facturas = { findOneAndUpdate: jest.fn() };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(500000);
+    const facturas = facturasCon();
 
     await expect(
-      decrementarSaldoFactura(facturas as never, SESSION, COP, facturaId, NaN),
+      decrementarSaldoFactura(
+        facturas as never,
+        saldoTotalDocumento as never,
+        SESSION,
+        COP,
+        facturaId,
+        NaN,
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
     await expect(
       decrementarSaldoFactura(
         facturas as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         facturaId,
         Infinity,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('concurrencia: dos aplicaciones simultáneas contra la misma factura nunca la descuentan doble', async () => {
@@ -137,22 +189,14 @@ describe('decrementarSaldoFactura', () => {
     // numeracion.service.spec.ts — JS es de un solo hilo, así que
     // Promise.all no paraleliza de verdad, pero SÍ ejercita el orden en que
     // dos llamadas concurrentes entrelazarían sus `await` reales.
-    let saldo = 300000;
-    const facturas = {
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const expr = filtro.$expr as { $gte: [string, number] };
-          const monto = expr.$gte[1];
-          if (saldo < monto) return Promise.resolve(null);
-          saldo -= monto;
-          return Promise.resolve({ _id: facturaId, outstandingBalance: saldo });
-        },
-      })),
-    };
+    const { mock: saldoTotalDocumento, saldoActual } =
+      saldoTotalDocumentoCon(300000);
+    const facturas = facturasCon();
 
     const resultados = await Promise.allSettled([
       decrementarSaldoFactura(
         facturas as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         facturaId,
@@ -160,6 +204,7 @@ describe('decrementarSaldoFactura', () => {
       ),
       decrementarSaldoFactura(
         facturas as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         facturaId,
@@ -169,7 +214,7 @@ describe('decrementarSaldoFactura', () => {
 
     const cumplidas = resultados.filter((r) => r.status === 'fulfilled');
     expect(cumplidas).toHaveLength(1);
-    expect(saldo).toBe(100000);
+    expect(saldoActual()).toBe(100000);
   });
 });
 
@@ -198,9 +243,11 @@ describe('ajustarSaldosCartera', () => {
     // conceptoB (el último del arreglo) antes de tocar conceptoA siquiera.
     await ajustarSaldosCartera(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       {
+        _id: new Types.ObjectId(),
         inmuebleId,
         total: 500000,
         outstandingBalance: 400000, // primer pago de esta factura: 500000 → 400000
@@ -236,9 +283,11 @@ describe('ajustarSaldosCartera', () => {
 
     const partes = await ajustarSaldosCartera(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       {
+        _id: new Types.ObjectId(),
         inmuebleId,
         total: 500000,
         outstandingBalance: 400000,
@@ -262,6 +311,7 @@ describe('ajustarSaldosCartera', () => {
     const conceptoMultas = new Types.ObjectId();
     const conceptoAdministracion = new Types.ObjectId();
     const factura = {
+      _id: new Types.ObjectId(),
       inmuebleId,
       total: 100000,
       lines: [
@@ -281,6 +331,7 @@ describe('ajustarSaldosCartera', () => {
     };
     const partes1 = await ajustarSaldosCartera(
       saldos1 as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       { ...factura, outstandingBalance: 80000 }, // 100000 → 80000
@@ -300,6 +351,7 @@ describe('ajustarSaldosCartera', () => {
     };
     const partes2 = await ajustarSaldosCartera(
       saldos2 as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       { ...factura, outstandingBalance: 0 }, // 80000 → 0
@@ -322,9 +374,11 @@ describe('ajustarSaldosCartera', () => {
 
     await ajustarSaldosCartera(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       {
+        _id: new Types.ObjectId(),
         inmuebleId,
         total: 100000,
         outstandingBalance: 100000, // restaurado por completo: 0 → 100000
@@ -345,9 +399,16 @@ describe('ajustarSaldosCartera', () => {
 
     await ajustarSaldosCartera(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
-      { inmuebleId, total: 0, outstandingBalance: 0, lines: [] },
+      {
+        _id: new Types.ObjectId(),
+        inmuebleId,
+        total: 0,
+        outstandingBalance: 0,
+        lines: [],
+      },
       0,
       -1,
     );
@@ -382,6 +443,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     // los montos que el usuario eligió.
     await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -413,6 +475,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
 
     const partes = await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -445,6 +508,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     // `ajustarSaldosCartera` de arriba, mismos números, mismo assert style.
     await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -481,6 +545,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
 
     await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -500,6 +565,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
 
     await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -509,6 +575,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     );
     await ajustarSaldosCarteraPorDistribucion(
       saldos as never,
+      carteraPorDocumentoMock() as never,
       SESSION,
       COP,
       inmuebleId,
@@ -523,21 +590,20 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
 
 describe('decrementarSaldoNotaDebito', () => {
   const notaDebitoId = new Types.ObjectId();
+  const notaDebitoDoc = { _id: notaDebitoId, total: 50000 };
+  const notasDebitoCon = (doc: unknown = notaDebitoDoc) => ({
+    findOne: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(doc) }),
+    })),
+  });
 
   it('descuenta el monto cuando el saldo alcanza', async () => {
-    const notasDebito = {
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () =>
-          Promise.resolve({
-            _id: notaDebitoId,
-            outstandingBalance: 30000,
-            total: 50000,
-          }),
-      })),
-    };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(50000);
+    const notasDebito = notasDebitoCon();
 
     const resultado = await decrementarSaldoNotaDebito(
       notasDebito as never,
+      saldoTotalDocumento as never,
       SESSION,
       COP,
       notaDebitoId,
@@ -548,13 +614,13 @@ describe('decrementarSaldoNotaDebito', () => {
   });
 
   it('rechaza cuando el monto excede el saldo pendiente', async () => {
-    const notasDebito = {
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
-    };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(50000);
+    const notasDebito = notasDebitoCon();
 
     await expect(
       decrementarSaldoNotaDebito(
         notasDebito as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         notaDebitoId,
@@ -564,55 +630,48 @@ describe('decrementarSaldoNotaDebito', () => {
   });
 
   it('rechaza un monto negativo sin tocar la base de datos', async () => {
-    const notasDebito = { findOneAndUpdate: jest.fn() };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(50000);
+    const notasDebito = notasDebitoCon();
 
     await expect(
       decrementarSaldoNotaDebito(
         notasDebito as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         notaDebitoId,
         -50,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(notasDebito.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('rechaza un monto cero sin tocar la base de datos', async () => {
-    const notasDebito = { findOneAndUpdate: jest.fn() };
+    const { mock: saldoTotalDocumento } = saldoTotalDocumentoCon(50000);
+    const notasDebito = notasDebitoCon();
 
     await expect(
       decrementarSaldoNotaDebito(
         notasDebito as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         notaDebitoId,
         0,
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(notasDebito.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('concurrencia: dos aplicaciones simultáneas contra la misma nota débito nunca la descuentan doble', async () => {
-    let saldo = 30000;
-    const notasDebito = {
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const expr = filtro.$expr as { $gte: [string, number] };
-          const monto = expr.$gte[1];
-          if (saldo < monto) return Promise.resolve(null);
-          saldo -= monto;
-          return Promise.resolve({
-            _id: notaDebitoId,
-            outstandingBalance: saldo,
-          });
-        },
-      })),
-    };
+    const { mock: saldoTotalDocumento, saldoActual } =
+      saldoTotalDocumentoCon(30000);
+    const notasDebito = notasDebitoCon();
 
     const resultados = await Promise.allSettled([
       decrementarSaldoNotaDebito(
         notasDebito as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         notaDebitoId,
@@ -620,6 +679,7 @@ describe('decrementarSaldoNotaDebito', () => {
       ),
       decrementarSaldoNotaDebito(
         notasDebito as never,
+        saldoTotalDocumento as never,
         SESSION,
         COP,
         notaDebitoId,
@@ -629,7 +689,7 @@ describe('decrementarSaldoNotaDebito', () => {
 
     const cumplidas = resultados.filter((r) => r.status === 'fulfilled');
     expect(cumplidas).toHaveLength(1);
-    expect(saldo).toBe(10000);
+    expect(saldoActual()).toBe(10000);
   });
 });
 

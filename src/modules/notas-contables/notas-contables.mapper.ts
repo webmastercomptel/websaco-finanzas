@@ -23,6 +23,8 @@ export const toNotaContable = (
 ): NotaContableContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
+  tipoDocumento: doc.tipoDocumento ?? null,
+  documentoId: doc.documentoId ? doc.documentoId.toString() : null,
   conceptoOrigenId: doc.conceptoOrigenId.toString(),
   conceptoDestinoId: doc.conceptoDestinoId.toString(),
   fecha: fechaNotaContable(doc).toISOString(),

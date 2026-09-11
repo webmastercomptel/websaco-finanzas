@@ -8,6 +8,7 @@ const COP = new Types.ObjectId();
 const INMUEBLE = new Types.ObjectId();
 const CONCEPTO_ORIGEN = new Types.ObjectId();
 const CONCEPTO_DESTINO = new Types.ObjectId();
+const FACTURA = new Types.ObjectId();
 
 const sesionFalsa = () => ({
   withTransaction: async (fn: () => Promise<unknown>) => fn(),
@@ -56,6 +57,8 @@ const copropiedades = modeloCopropiedad();
 const notaContableCreada = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   inmuebleId: INMUEBLE,
+  tipoDocumento: 'FV' as const,
+  documentoId: FACTURA,
   conceptoOrigenId: CONCEPTO_ORIGEN,
   conceptoDestinoId: CONCEPTO_DESTINO,
   issueDate: new Date('2026-08-15'),
@@ -82,6 +85,14 @@ const modeloNotasContables = (creada: Record<string, unknown>) => ({
 
 const modeloSaldos = () => ({
   findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
+const modeloCarteraPorDocumento = () => ({
+  findOneAndUpdate: jest.fn(
+    (_filtro?: Record<string, unknown>, _pipeline?: unknown) => ({
+      exec: () => Promise.resolve(null),
+    }),
+  ),
 });
 
 const modeloAsientos = () => ({ create: jest.fn(() => Promise.resolve([{}])) });
@@ -112,6 +123,7 @@ const construirServicio = (opts: {
   const session = sesionFalsa();
   const notasContables = modeloNotasContables(opts.notaCreada);
   const saldos = opts.saldos ?? modeloSaldos();
+  const carteraPorDocumento = modeloCarteraPorDocumento();
   const asientos = modeloAsientos();
   const conceptos = modeloConceptos();
   const cuentasContables = opts.cuentasContables && {
@@ -127,14 +139,15 @@ const construirServicio = (opts: {
     })),
   };
 
-  // Mock saldo origin balance for the balance check in crear().
+  // Mock the origin concepto's per-document balance for the balance check
+  // in crear() — reads `CarteraPorDocumento`, not `SaldoCartera`.
   const saldofindOne = jest.fn(() => ({
     session: () => ({
       exec: () =>
         Promise.resolve(
           opts.saldoOrigen !== undefined
-            ? { balance: opts.saldoOrigen }
-            : { balance: 200000 },
+            ? { saldoPendiente: opts.saldoOrigen }
+            : { saldoPendiente: 200000 },
         ),
     }),
   }));
@@ -142,6 +155,7 @@ const construirServicio = (opts: {
   const service = new NotasContablesService(
     notasContables as never,
     saldos as never,
+    carteraPorDocumento as never,
     asientos as never,
     conceptos as never,
     (opts.copropiedades ?? copropiedades) as never,
@@ -153,14 +167,16 @@ const construirServicio = (opts: {
     inmuebles as never,
   );
 
-  // Override saldos.findOne for the balance check.
-  (service as unknown as { saldos: { findOne: jest.Mock } }).saldos.findOne =
-    saldofindOne;
+  // Override carteraPorDocumento.findOne for the balance check.
+  (
+    service as unknown as { carteraPorDocumento: { findOne: jest.Mock } }
+  ).carteraPorDocumento.findOne = saldofindOne;
 
   return {
     service,
     notasContables,
     saldos,
+    carteraPorDocumento,
     asientos,
     conceptos,
     saldofindOne,
@@ -171,6 +187,8 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
   codigo: 'NT',
   inmuebleId: INMUEBLE.toString(),
   fecha: '2026-08-15',
+  tipoDocumento: 'FV' as const,
+  documentoId: FACTURA.toString(),
   conceptoOrigenId: CONCEPTO_ORIGEN.toString(),
   conceptoDestinoId: CONCEPTO_DESTINO.toString(),
   monto: 100000,
@@ -209,6 +227,44 @@ describe('NotasContablesService.crear', () => {
         { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
       ];
       return pipeline[0].$set.balance.$max[1].$add[1];
+    };
+
+    expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(-100000);
+    expect(extraerMonto(CONCEPTO_DESTINO)).toBe(100000);
+  });
+
+  it('mueve el monto exacto en CarteraPorDocumento, anclado al documento elegido — no solo en el agregado SaldoCartera', async () => {
+    // El caso que arrancó esta funcionalidad: la reclasificación debe verse
+    // en la factura/nota débito puntual que el usuario eligió, no solo en
+    // el acumulado cruzado por inmueble.
+    const notaCreada = notaContableCreada();
+    const { service, carteraPorDocumento } = construirServicio({ notaCreada });
+
+    await service.crear('acc-1', dtoBase());
+
+    expect(carteraPorDocumento.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    const llamadas = carteraPorDocumento.findOneAndUpdate.mock.calls as Array<
+      [Record<string, unknown>, unknown]
+    >;
+    const extraerMonto = (conceptoId: Types.ObjectId): number => {
+      const llamada = llamadas.find(
+        ([filtro]) =>
+          (filtro.conceptoId as Types.ObjectId).equals(conceptoId) &&
+          (filtro.documentoId as Types.ObjectId).equals(FACTURA),
+      );
+      if (!llamada) {
+        throw new Error(
+          `No hubo llamada para documentoId=${FACTURA.toString()} conceptoId=${conceptoId.toString()}`,
+        );
+      }
+      const pipeline = llamada[1] as [
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
+      ];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
 
     expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(-100000);
@@ -362,6 +418,7 @@ describe('NotasContablesService.crear', () => {
     const service = new NotasContablesService(
       modeloNotasContables(notaCreada) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       conceptos as never,
       copropiedades as never,
@@ -370,10 +427,13 @@ describe('NotasContablesService.crear', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
     );
-    (service as unknown as { saldos: { findOne: jest.Mock } }).saldos.findOne =
-      jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve({ balance: 200000 }) }),
-      }));
+    (
+      service as unknown as { carteraPorDocumento: { findOne: jest.Mock } }
+    ).carteraPorDocumento.findOne = jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve({ saldoPendiente: 200000 }),
+      }),
+    }));
 
     await service.crear('acc-1', dtoBase());
 
@@ -417,6 +477,7 @@ describe('NotasContablesService.anular', () => {
     const service = new NotasContablesService(
       notasContables as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       modeloConceptos() as never,
       copropiedades as never,
@@ -440,11 +501,74 @@ describe('NotasContablesService.anular', () => {
     expect(asientos.create).toHaveBeenCalledTimes(1);
   });
 
+  it('revierte también CarteraPorDocumento, en el mismo documento que la nota anota', async () => {
+    const nota = notaContableCreada();
+    const notasContables = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(null),
+      })),
+    };
+    const carteraPorDocumento = modeloCarteraPorDocumento();
+    const service = new NotasContablesService(
+      notasContables as never,
+      modeloSaldos() as never,
+      carteraPorDocumento as never,
+      modeloAsientos() as never,
+      modeloConceptos() as never,
+      copropiedades as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NT-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+    );
+
+    await service.anular(
+      nota._id.toString(),
+      {
+        motivo: 'error_digitacion',
+        detalle: 'Error en la reclasificación, se anula',
+        fecha: '2026-08-20',
+      },
+      'acc-1',
+    );
+
+    expect(carteraPorDocumento.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    const llamadas = carteraPorDocumento.findOneAndUpdate.mock.calls as Array<
+      [Record<string, unknown>, unknown]
+    >;
+    for (const [filtro] of llamadas) {
+      expect((filtro.documentoId as Types.ObjectId).equals(FACTURA)).toBe(true);
+    }
+    const extraerMonto = (conceptoId: Types.ObjectId): number => {
+      const llamada = llamadas.find(([filtro]) =>
+        (filtro.conceptoId as Types.ObjectId).equals(conceptoId),
+      );
+      if (!llamada) {
+        throw new Error(`No hubo llamada para ${conceptoId.toString()}`);
+      }
+      const pipeline = llamada[1] as [
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
+      ];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
+    };
+    // Reverso: origen +monto (se le devuelve), destino -monto (se le quita).
+    expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(100000);
+    expect(extraerMonto(CONCEPTO_DESTINO)).toBe(-100000);
+  });
+
   it('rechaza anular una nota contable ya anulada', async () => {
     const nota = notaContableCreada({ status: 'anulado' });
     const service = new NotasContablesService(
       modeloNotasContables(nota) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
       copropiedades as never,
@@ -476,6 +600,7 @@ describe('NotasContablesService.anular', () => {
     const service = new NotasContablesService(
       notasContables as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
       copropiedades as never,
@@ -533,6 +658,7 @@ describe('NotasContablesService.anular', () => {
     const service = new NotasContablesService(
       modeloNotasContables(nota) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       asientos as never,
       conceptos as never,
       copropiedades as never,
@@ -585,6 +711,7 @@ describe('NotasContablesService.findAll', () => {
     const service = new NotasContablesService(
       notasContables as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
       copropiedades as never,
@@ -622,6 +749,7 @@ describe('NotasContablesService.findOne', () => {
     const service = new NotasContablesService(
       modeloNotasContables(nota) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
       copropiedades as never,
@@ -639,6 +767,7 @@ describe('NotasContablesService.findOne', () => {
     const service = new NotasContablesService(
       modeloNotasContables({}) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
       modeloAsientos() as never,
       modeloConceptos() as never,
       copropiedades as never,

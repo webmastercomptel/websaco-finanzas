@@ -20,6 +20,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -106,6 +114,10 @@ export class LotesFacturacionService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(ConceptoCobro.name)
@@ -1286,6 +1298,23 @@ export class LotesFacturacionService {
             );
             facturaCreada = factura;
 
+            // Seeds this Factura's own atomically-guarded total-balance row
+            // — see `SaldoTotalDocumento`'s own docblock for why this can't
+            // just be `sum(CarteraPorDocumento.saldoPendiente)` computed on
+            // demand.
+            await this.saldoTotalDocumento.create(
+              [
+                {
+                  coPropertyId,
+                  tipoDocumento: 'FV' as const,
+                  documentoId: factura._id,
+                  total: preliminar.total,
+                  saldoPendiente: preliminar.total,
+                },
+              ],
+              { session },
+            );
+
             // One bulkWrite instead of one findOneAndUpdate per line — same
             // atomic, commutative $inc per document as before, just as one
             // round trip instead of N. Safe inside a transaction (unlike
@@ -1309,6 +1338,28 @@ export class LotesFacturacionService {
                     },
                     upsert: true,
                   },
+                })),
+                { session },
+              );
+            }
+
+            // Seeds this Factura's own row in the new per-document cartera
+            // ledger — one per line, alongside `SaldoCartera` above (kept as
+            // an independent, redundantly-maintained audit control; see
+            // `CarteraPorDocumento`'s own docblock). `balanceBefore`/
+            // `balanceAfter` were just computed fresh, above.
+            if (preliminar.lines.length) {
+              await this.carteraPorDocumento.insertMany(
+                preliminar.lines.map((linea) => ({
+                  coPropertyId,
+                  inmuebleId: preliminar.inmuebleId,
+                  tipoDocumento: 'FV' as const,
+                  documentoId: factura._id,
+                  conceptoId: linea.conceptoId,
+                  montoOriginal: linea.totalAmount,
+                  saldoPendiente: linea.totalAmount,
+                  saldoAnterior: linea.balanceBefore,
+                  saldoNuevo: linea.balanceAfter,
                 })),
                 { session },
               );
