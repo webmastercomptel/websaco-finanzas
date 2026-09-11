@@ -161,6 +161,93 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
   });
 });
 
+describe('FacturasService.findAll — estado', () => {
+  it('filtra por status cuando se pasa estado', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({ estado: 'anulada' });
+
+    expect(modelo.filtros[0].status).toBe('anulada');
+  });
+
+  it('estado explícito gana por sobre el status implícito de conSaldoPendiente', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({ estado: 'anulada', conSaldoPendiente: true });
+
+    expect(modelo.filtros[0]).toMatchObject({
+      status: 'anulada',
+      outstandingBalance: { $gt: 0 },
+    });
+  });
+
+  it('no aplica el filtro cuando estado está ausente', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({});
+
+    expect(modelo.filtros[0].status).toBeUndefined();
+  });
+});
+
+describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
+  it('filtra issueDate por rango cuando se pasan ambos extremos', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({
+      fechaDesde: '2026-08-01',
+      fechaHasta: '2026-08-31',
+    });
+
+    expect(modelo.filtros[0].issueDate).toEqual({
+      $gte: new Date('2026-08-01'),
+      $lte: new Date('2026-08-31'),
+    });
+  });
+
+  it('filtra con un solo extremo cuando el otro está ausente', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({ fechaDesde: '2026-08-01' });
+
+    expect(modelo.filtros[0].issueDate).toEqual({
+      $gte: new Date('2026-08-01'),
+    });
+  });
+
+  it('no aplica el filtro cuando ambos extremos están ausentes', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new FacturasService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    await service.findAll({});
+
+    expect(modelo.filtros[0].issueDate).toBeUndefined();
+  });
+});
+
 describe('FacturasService.findAll — buscar', () => {
   it('filtra por fullNumber con regex insensible a mayúsculas cuando se pasa buscar', async () => {
     const modelo = modeloCon([documento()]);

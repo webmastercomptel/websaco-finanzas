@@ -69,7 +69,19 @@ export class InmueblesService {
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
       // stray "(" throw, or a crafted one pin the database at 100%.
-      filtro.code = { $regex: escapeRegex(query.buscar), $options: 'i' };
+      const regex = { $regex: escapeRegex(query.buscar), $options: 'i' };
+      // The DTO promises "matches unit code or holder name", but the holder's
+      // name lives on a separate Tercero, not on the Inmueble document — so
+      // matching it means resolving which terceros match first, then OR-ing
+      // that into the unit filter alongside the code match.
+      const terceroIds = await this.terceros
+        .find({ coPropertyId, name: regex })
+        .distinct('_id')
+        .exec();
+      filtro.$or = [
+        { code: regex },
+        ...(terceroIds.length ? [{ holderId: { $in: terceroIds } }] : []),
+      ];
     }
 
     const pagina = query.pagina ?? 1;

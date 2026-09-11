@@ -53,6 +53,21 @@ const modeloCon = (filas: unknown[], total = filas.length) => {
   };
 };
 
+/** Stub for the `terceros` model — only `find(...).distinct('_id')` is ever
+ *  called on it, to resolve which parties match a name search. */
+const terceroModeloCon = (idsQueMatchean: unknown[] = []) => {
+  const filtros: Filtro[] = [];
+  return {
+    filtros,
+    find: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      return {
+        distinct: () => ({ exec: () => Promise.resolve(idsQueMatchean) }),
+      };
+    }),
+  };
+};
+
 const tenantQueDevuelve = (id: Types.ObjectId | null): TenantContextService =>
   ({
     resolveCoPropertyId: () => {
@@ -121,7 +136,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
-      {} as never,
+      terceroModeloCon() as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -130,8 +145,8 @@ describe('InmueblesService.findAll', () => {
 
     await service.findAll({ buscar: 'Torre A (301)' });
 
-    const regex = (modelo.filtros[0].code as { $regex: string }).$regex;
-    expect(regex).toBe('Torre A \\(301\\)');
+    const or = modelo.filtros[0].$or as Array<{ code?: { $regex: string } }>;
+    expect(or[0].code!.$regex).toBe('Torre A \\(301\\)');
   });
 
   it('cuenta con el MISMO filtro que lista', async () => {
@@ -140,7 +155,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([documento()], 137);
     const service = new InmueblesService(
       modelo as never,
-      {} as never,
+      terceroModeloCon() as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -151,6 +166,51 @@ describe('InmueblesService.findAll', () => {
 
     expect(modelo.filtros[0]).toEqual(modelo.filtros[1]);
     expect(resultado.total).toBe(137);
+  });
+
+  describe('buscar por nombre del titular', () => {
+    it('resuelve terceros cuyo nombre matchea y los incluye vía holderId', async () => {
+      const modelo = modeloCon([]);
+      const terceroId = new Types.ObjectId();
+      const terceros = terceroModeloCon([terceroId]);
+      const service = new InmueblesService(
+        modelo as never,
+        terceros as never,
+        tenantQueDevuelve(COP),
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      await service.findAll({ buscar: 'Ana Pérez' });
+
+      expect(terceros.filtros[0]).toMatchObject({
+        coPropertyId: COP,
+        name: { $regex: 'Ana Pérez', $options: 'i' },
+      });
+      const or = modelo.filtros[0].$or as Array<{
+        code?: unknown;
+        holderId?: { $in: unknown[] };
+      }>;
+      expect(or[1].holderId!.$in).toEqual([terceroId]);
+    });
+
+    it('sin terceros que matcheen, el filtro sigue siendo válido (solo busca por código)', async () => {
+      const modelo = modeloCon([]);
+      const service = new InmueblesService(
+        modelo as never,
+        terceroModeloCon([]) as never,
+        tenantQueDevuelve(COP),
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      await service.findAll({ buscar: 'Nadie Así' });
+
+      const or = modelo.filtros[0].$or as unknown[];
+      expect(or).toHaveLength(1);
+    });
   });
 
   it('devuelve el contrato en español', async () => {
