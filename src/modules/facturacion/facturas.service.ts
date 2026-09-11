@@ -30,9 +30,13 @@ export class FacturasService {
       // stray "(" throw, or a crafted one pin the database at 100%.
       filtro.fullNumber = { $regex: escapeRegex(query.buscar), $options: 'i' };
     }
+    if (query.estado) {
+      filtro.status = query.estado;
+    } else if (query.conSaldoPendiente) {
+      filtro.status = 'emitida';
+    }
     if (query.conSaldoPendiente) {
       filtro.outstandingBalance = { $gt: 0 };
-      filtro.status = 'emitida';
     }
     if (query.fechaDesde || query.fechaHasta) {
       filtro.issueDate = {

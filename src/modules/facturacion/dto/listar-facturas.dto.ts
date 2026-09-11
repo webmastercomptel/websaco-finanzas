@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
+  IsIn,
   IsInt,
   IsMongoId,
   IsOptional,
@@ -19,6 +20,10 @@ export class ListarFacturasDto {
   @IsOptional()
   @IsMongoId()
   inmuebleId?: string;
+
+  @IsOptional()
+  @IsIn(['emitida', 'anulada'])
+  estado?: 'emitida' | 'anulada';
 
   /** Matches the invoice's full number (prefix + number), e.g. "CONJ-2026-1041". */
   @IsOptional()
