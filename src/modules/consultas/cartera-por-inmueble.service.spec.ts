@@ -429,6 +429,68 @@ describe('CarteraPorInmuebleService', () => {
     expect(result.saldoTotalCartera).toBe(200000);
   });
 
+  it('un concepto que SaldoCartera nunca registró para este inmueble cae al total derivado de los documentos, nunca a 0', async () => {
+    // Caso real: una Factura cargada por una vía que no pasó por el
+    // mantenimiento de SaldoCartera (p. ej. una migración de datos
+    // históricos) — el documento SÍ muestra un pendiente real para el
+    // concepto, pero SaldoCartera no tiene NINGUNA fila para él. El
+    // agregado debe reflejar ese pendiente real, no imprimir 0 solo porque
+    // la caché nunca se pobló para este inmueble/concepto.
+    const inmId = id();
+    const conceptoSinSaldoCartera = id();
+    const f = facturaDoc({
+      inmuebleId: inmId,
+      total: 300000,
+      lines: [
+        {
+          conceptoId: conceptoSinSaldoCartera,
+          conceptName: 'Parqueadero',
+          totalAmount: 300000,
+        },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      conceptosCobro: {
+        find: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          conceptoDoc({
+            _id: conceptoSinSaldoCartera,
+            name: 'Parqueadero',
+            sortOrder: 100,
+          }),
+        ]),
+      },
+      // Sin fila para este concepto — nunca se ha mantenido para este
+      // inmueble, a diferencia de un concepto genuinamente en 0.
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.cargosPorConcepto).toEqual([
+      {
+        conceptoId: conceptoSinSaldoCartera.toString(),
+        nombre: 'Parqueadero',
+        monto: 300000,
+      },
+    ]);
+  });
+
   it('resuelve inmuebleCodigo y propietario desde Inmueble.holderId -> Tercero.name', async () => {
     const inmId = id();
     const holderId = id();

@@ -50,13 +50,18 @@ import type { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por
  * is, and must stay, a plain read of that document's own frozen lines — a
  * Factura is never modified after issue, full stop. The AGGREGATE
  * `cargosPorConcepto` (the per-inmueble totals row) is a different question:
- * it reads `SaldoCartera` instead of summing those same frozen lines, so a
- * Nota Contable reclassification between two conceptos (e.g. moving 100 from
- * "TV" to "Pintura") shows up there — TV drops, Pintura rises, the inmueble's
+ * it PREFERS `SaldoCartera` over summing those same frozen lines, so a Nota
+ * Contable reclassification between two conceptos (e.g. moving 100 from "TV"
+ * to "Pintura") shows up there — TV drops, Pintura rises, the inmueble's
  * grand total is unchanged — even though no individual invoice's own row
- * moved even one peso. Before this, the totals row silently re-derived from
- * the same immutable lines as the per-document rows, so a reclassification
- * was invisible everywhere on this screen.
+ * moved even one peso.
+ *
+ * "Prefers", not "always": a concepto `SaldoCartera` never tracked for this
+ * inmueble at all (a Factura loaded by a path that predates or bypasses its
+ * maintenance — a historical data import is the real case this guards) falls
+ * back to the document-derived total instead of printing a false 0 — see
+ * the aggregate row's own comment for exactly how presence, not value,
+ * decides the fallback.
  */
 @Injectable()
 export class CarteraPorInmuebleService {
@@ -144,6 +149,9 @@ export class CarteraPorInmuebleService {
     }
 
     const documentos: DocumentoCarteraPorInmueble[] = [];
+    // Fallback source for the aggregate row below — see its own comment on
+    // why SaldoCartera alone isn't always trustworthy.
+    const totalesDocumentos = new Map<string, number>();
 
     for (const f of facturas) {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
@@ -162,6 +170,7 @@ export class CarteraPorInmuebleService {
         const key = line.conceptoId.toString();
         const monto = line.totalAmount * factor;
         cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
+        totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + monto);
       }
 
       documentos.push({
@@ -183,6 +192,7 @@ export class CarteraPorInmuebleService {
       if (saldo <= 0) continue;
 
       const key = nd.conceptoId.toString();
+      totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + saldo);
 
       documentos.push({
         tipo: 'ND',
@@ -202,16 +212,31 @@ export class CarteraPorInmuebleService {
       this.conceptosCobro.find({ coPropertyId }).sort({ sortOrder: 1 }).exec(),
       this.saldosCartera.find({ coPropertyId, inmuebleId }).exec(),
     ]);
-    const conceptoTotales = new Map<string, number>();
+    const saldosPorConcepto = new Map<string, number>();
     for (const s of saldos) {
-      conceptoTotales.set(s.conceptoId.toString(), s.balance);
+      saldosPorConcepto.set(s.conceptoId.toString(), s.balance);
     }
 
-    const cargosPorConcepto: CargoCarteraPorConcepto[] = conceptos.map((c) => ({
-      conceptoId: c._id.toString(),
-      nombre: c.name,
-      monto: conceptoTotales.get(c._id.toString()) ?? 0,
-    }));
+    // Prefer SaldoCartera (reflects a Nota Contable reclassification) — but
+    // only for a concepto it actually TRACKS for this inmueble. A concepto
+    // absent from SaldoCartera entirely (never incremented for it — e.g. a
+    // Factura loaded by a path that predates/bypasses SaldoCartera
+    // maintenance, such as a historical data import) must fall back to the
+    // document-derived total, or it would silently print 0 for a concepto
+    // that documents clearly show a real pending amount for. Presence, not
+    // value, is what decides the fallback — a concepto legitimately
+    // reclassified down to exactly 0 still has a SaldoCartera row and must
+    // show 0, not the stale pre-reclassification document total.
+    const cargosPorConcepto: CargoCarteraPorConcepto[] = conceptos.map((c) => {
+      const id = c._id.toString();
+      return {
+        conceptoId: id,
+        nombre: c.name,
+        monto: saldosPorConcepto.has(id)
+          ? saldosPorConcepto.get(id)!
+          : (totalesDocumentos.get(id) ?? 0),
+      };
+    });
 
     const saldoTotalCartera = documentos.reduce((sum, d) => sum + d.saldo, 0);
 
