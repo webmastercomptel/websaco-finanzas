@@ -36,7 +36,7 @@ export interface DocumentoConSaldoAFecha {
 /**
  * Determine whether an application was active as of a given date.
  *
- * An application is "active as of `fecha`" if it was applied at or before
+ * An application is "active as of `fecha`" if it was effective at or before
  * `fecha` AND either:
  *  - it is still active (`status === 'activa'`), OR
  *  - it was reverted AFTER `fecha` (`status === 'revertida'` AND
@@ -44,12 +44,30 @@ export interface DocumentoConSaldoAFecha {
  *
  * The second condition means: at `fecha` the application had already reduced
  * the balance but its reversal had not yet happened.
+ *
+ * "Effective at or before `fecha`" is judged by `sourceDate` — the SOURCE
+ * document's own declared business date (`Recibo.receivedDate`, etc.) — not
+ * `appliedAt` (the system-entry timestamp). A Recibo dated June but entered
+ * late in July genuinely reduced the balance as of June, from the
+ * accounting period's point of view; keying off `appliedAt` instead made
+ * `calcularDocumentosConSaldoAFecha`'s `saldoAnterior` miss it for exactly
+ * one period (a real drift reported for the July Conciliación de Cartera).
+ * `?? app.appliedAt` is a fallback for a row that predates this field, or a
+ * test fixture that hasn't set it — never for a row created going forward,
+ * every write site now populates `sourceDate`. `revertedAt` stays
+ * system-time on purpose (see its own schema docblock).
  */
 export function activeAsOf(
-  app: { status: string; appliedAt: Date; revertedAt: Date | null },
+  app: {
+    status: string;
+    appliedAt: Date;
+    sourceDate?: Date;
+    revertedAt: Date | null;
+  },
   fecha: Date,
 ): boolean {
-  if (app.appliedAt > fecha) return false;
+  const efectiva = app.sourceDate ?? app.appliedAt;
+  if (efectiva > fecha) return false;
   if (app.status === 'activa') return true;
   if (app.status === 'revertida' && app.revertedAt && app.revertedAt > fecha)
     return true;
@@ -68,6 +86,7 @@ function saldoDocumentoAFecha(
   apps: Array<{
     amountApplied: number;
     appliedAt: Date;
+    sourceDate?: Date;
     status: string;
     revertedAt: Date | null;
   }>,

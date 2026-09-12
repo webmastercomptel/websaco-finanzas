@@ -834,6 +834,13 @@ export interface ContextoAplicacion {
   recibo: ReciboDocument;
   sourceType: 'RC' | 'NA';
   sourceId: Types.ObjectId;
+  /** The source document's own declared business date — `recibo.receivedDate`
+   *  when `sourceType: 'RC'` (the recibo IS the source), or the new Nota de
+   *  Anticipo's own `issueDate` when `sourceType: 'NA'` (a later, separately
+   *  dated document — never the original recibo's date). Frozen onto every
+   *  `AplicacionCartera` this call creates, as `sourceDate` — see that
+   *  field's own schema docblock for why. */
+  sourceDate: Date;
   accountId: string;
 }
 
@@ -873,6 +880,7 @@ export async function ejecutarAplicacionManual(
     recibo,
     sourceType,
     sourceId,
+    sourceDate,
     accountId,
   } = ctx;
 
@@ -971,6 +979,7 @@ export async function ejecutarAplicacionManual(
             ],
             status: 'activa',
             appliedAt: new Date(),
+            sourceDate,
             appliedBy: accountId,
           },
         ],
@@ -1134,6 +1143,7 @@ export async function ejecutarAplicacionManual(
           detalleConceptos,
           status: 'activa',
           appliedAt: new Date(),
+          sourceDate,
           appliedBy: accountId,
         },
       ],
@@ -1207,6 +1217,7 @@ export async function ejecutarAplicacionFifo(
     recibo,
     sourceType,
     sourceId,
+    sourceDate,
     accountId,
   } = ctx;
 
@@ -1368,6 +1379,7 @@ export async function ejecutarAplicacionFifo(
               ],
               status: 'activa',
               appliedAt: new Date(),
+              sourceDate,
               appliedBy: accountId,
             },
           ],
@@ -1435,6 +1447,7 @@ export async function ejecutarAplicacionFifo(
             detalleConceptos,
             status: 'activa',
             appliedAt: new Date(),
+            sourceDate,
             appliedBy: accountId,
           },
         ],

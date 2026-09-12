@@ -474,6 +474,51 @@ describe('ConciliacionCarteraService', () => {
       expect(result.diferencia).toBe(0);
     });
 
+    it('saldoAnterior refleja un Recibo cuya fecha de negocio cae en el período previo aunque se haya digitado tarde (bug real reportado: la conciliación de julio quedó con diferencia)', async () => {
+      // Escenario: Factura de mayo (antes de junio). Un Recibo con
+      // receivedDate 15-jun (dentro de junio, el período ANTERIOR a julio)
+      // paga 30000 de esa factura — pero se digitó tarde: su
+      // AplicacionCartera.appliedAt real es 5-jul, ya cerrado junio.
+      // `calcularDocumentosConSaldoAFecha` (saldoAnterior) usa hoy
+      // `appliedAt`, así que como de fecha de corte (fin de junio)
+      // `appliedAt` (5-jul) es POSTERIOR, el pago no se resta — saldoAnterior
+      // sale 100000 en vez de 70000. La fila "Ingresos por Recibos de Caja"
+      // de julio tampoco lo recoge (su receivedDate es junio, no julio) —
+      // el crédito de 30000 desaparece de la conciliación de julio por
+      // completo, aunque SaldoCartera (real) sí lo tiene aplicado.
+      const fId = id();
+      const rId = id();
+      const fAntes = facturaDoc({
+        _id: fId,
+        issueDate: new Date('2026-05-10'),
+        total: 100000,
+      });
+      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-06-15') });
+      const app = appDoc(rId, 'RC', {
+        documentId: fId,
+        amountApplied: 30000,
+        appliedAt: new Date('2026-07-05'),
+        sourceDate: new Date('2026-06-15'),
+      });
+
+      const svc = servicio({
+        facturas: [fAntes],
+        recibos: [r],
+        aplicaciones: [app],
+        saldosCartera: [saldoCarteraDoc(70000)],
+      });
+
+      const result = await svc.findAll({
+        periodStart: '2026-07-01T00:00:00.000Z',
+        periodEnd: '2026-07-31T23:59:59.999Z',
+      });
+
+      expect(result.saldoAnterior).toBe(70000);
+      expect(result.saldoCarteraCalculado).toBe(70000);
+      expect(result.saldoCarteraReal).toBe(70000);
+      expect(result.diferencia).toBe(0);
+    });
+
     it('surfaces a non-zero diferencia when SaldoCartera has drifted from the documents', async () => {
       // The whole point of the report: if the cache and the ledger disagree,
       // diferencia must say so, not silently average them out.

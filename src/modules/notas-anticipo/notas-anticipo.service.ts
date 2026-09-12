@@ -286,6 +286,11 @@ export class NotasAnticipoService {
         recibo,
         sourceType: 'NA' as const,
         sourceId: creada._id,
+        // The Nota de Anticipo's OWN declared date — never the original
+        // recibo's `receivedDate`, which can be much earlier: this document
+        // is applying the leftover LATER, as its own separately dated event
+        // (see `ContextoAplicacion.sourceDate`'s own docblock).
+        sourceDate: fechaEmision,
         accountId,
       };
 

@@ -24,6 +24,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   documentId: factura,
   amountApplied: 250000,
   appliedAt: new Date('2026-08-27'),
+  sourceDate: new Date('2026-08-27'),
   appliedBy: cuenta,
   ...over,
 });
