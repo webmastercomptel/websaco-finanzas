@@ -265,15 +265,30 @@ describe('ajustarSaldosCartera', () => {
     expect(llamadas).toHaveLength(1);
     expect(llamadas[0][0]).toMatchObject({ conceptoId: conceptoB });
     expect(llamadas[0][1]).toEqual([
-      { $set: { balance: { $max: [0, { $add: ['$balance', -100000] }] } } },
+      {
+        $set: {
+          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
+          conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
+          balance: {
+            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -100000] }],
+          },
+        },
+      },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
     // `updatePipeline: true` es obligatorio en Mongoose 9 para pasar un
     // array (pipeline de agregación, necesario acá para $max/$add contra el
     // propio valor del documento) como update — sin esto, Mongoose lanza
     // "Cannot pass an array to query updates..." en tiempo de ejecución, algo
-    // que un mock de findOneAndUpdate nunca detecta por su cuenta.
-    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
+    // que un mock de findOneAndUpdate nunca detecta por su cuenta. `upsert`
+    // — ver el docblock de `ajustarCarteraPorDocumento` sobre por qué una
+    // fila ausente nunca debe quedar en silencio sin crearse.
+    expect(opciones).toMatchObject({
+      session: SESSION,
+      updatePipeline: true,
+      upsert: true,
+    });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {
@@ -458,14 +473,36 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     expect(llamadas).toHaveLength(2);
     expect(llamadas[0][0]).toMatchObject({ inmuebleId, conceptoId: conceptoA });
     expect(llamadas[0][1]).toEqual([
-      { $set: { balance: { $max: [0, { $add: ['$balance', -60000] }] } } },
+      {
+        $set: {
+          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
+          conceptoId: { $ifNull: ['$conceptoId', conceptoA] },
+          balance: {
+            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -60000] }],
+          },
+        },
+      },
     ]);
     expect(llamadas[1][0]).toMatchObject({ inmuebleId, conceptoId: conceptoB });
     expect(llamadas[1][1]).toEqual([
-      { $set: { balance: { $max: [0, { $add: ['$balance', -40000] }] } } },
+      {
+        $set: {
+          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
+          conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
+          balance: {
+            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -40000] }],
+          },
+        },
+      },
     ]);
     const [, , opciones] = saldos.findOneAndUpdate.mock.calls[0];
-    expect(opciones).toMatchObject({ session: SESSION, updatePipeline: true });
+    expect(opciones).toMatchObject({
+      session: SESSION,
+      updatePipeline: true,
+      upsert: true,
+    });
   });
 
   it('devuelve el mismo desglose por concepto que aplicó — para que el asiento use la misma cuenta', async () => {

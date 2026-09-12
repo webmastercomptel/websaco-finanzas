@@ -26,6 +26,10 @@ import {
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -77,6 +81,8 @@ export class EstadoCuentaService {
     private readonly notasContables: Model<NotaContableDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -341,19 +347,38 @@ export class EstadoCuentaService {
       saldoAnterior + cargosDelMes - pagosRecibidos - descuentosAjustes;
 
     // Step 8b: anticipos pendientes — a live snapshot of this inmueble's own
-    // Recibos still carrying `unappliedAmount > 0`, same "pending anticipo"
+    // Recibos still carrying a pending balance, same "pending anticipo"
     // definition the Anticipos bandeja uses. Never period-filtered: an
     // anticipo is a CURRENT balance, not a movement that happened during
     // the period being printed, so it stays visible regardless of which
     // period the caller picked. `recibos` here is the same fetch from Step
     // 1 (already scoped to this inmueble) — no extra query needed.
-    const anticipos = recibos
-      .filter((r) => r.status === 'activo' && r.unappliedAmount > 0)
-      .sort((a, b) => a.receivedDate.getTime() - b.receivedDate.getTime())
+    // `unappliedAmount` is no longer a live field on the (now immutable)
+    // Recibo — batch-resolved from `SaldoDocumentoOrigen` instead, same
+    // live source the JSON detail view reads.
+    const recibosActivos = recibos.filter((r) => r.status === 'activo');
+    const saldosOrigenRecibos = recibosActivos.length
+      ? await this.saldoDocumentoOrigen
+          .find({ documentoId: { $in: recibosActivos.map((r) => r._id) } })
+          .exec()
+      : [];
+    const saldoDisponiblePorRecibo = new Map(
+      saldosOrigenRecibos.map((s) => [
+        s.documentoId.toString(),
+        s.saldoDisponible,
+      ]),
+    );
+    const anticipos = recibosActivos
       .map((r) => ({
+        r,
+        monto: saldoDisponiblePorRecibo.get(r._id.toString()) ?? 0,
+      }))
+      .filter(({ monto }) => monto > 0)
+      .sort((a, b) => a.r.receivedDate.getTime() - b.r.receivedDate.getTime())
+      .map(({ r, monto }) => ({
         numeroCompleto: r.fullNumber,
         fecha: r.receivedDate.toISOString(),
-        monto: r.unappliedAmount,
+        monto,
       }));
 
     // Step 9: estado derivation (three-state)

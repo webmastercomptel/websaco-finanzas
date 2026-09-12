@@ -39,6 +39,10 @@ import {
   SaldoTotalDocumentoDocument,
 } from '../../database/schemas/facturacion/saldo-total-documento.schema';
 import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
   Movimiento,
@@ -65,6 +69,7 @@ import {
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
+  restaurarSaldoDocumentoOrigen,
   restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
 import {
@@ -119,6 +124,8 @@ export class NotasAnticipoService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -207,7 +214,7 @@ export class NotasAnticipoService {
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     return this.transaccion(async (session) => {
-      const recibo = await this.recibos
+      const reciboDoc = await this.recibos
         .findOne({
           _id: dto.reciboOrigenId,
           coPropertyId,
@@ -215,11 +222,23 @@ export class NotasAnticipoService {
         })
         .session(session)
         .exec();
-      if (!recibo) {
+      if (!reciboDoc) {
         throw new NotFoundException(
           `No se encontró el recibo ${dto.reciboOrigenId}`,
         );
       }
+      // `unappliedAmount` is no longer a live field on the (now immutable)
+      // Recibo — merged in fresh from `SaldoDocumentoOrigen`, same pattern
+      // `decrementarSaldoFactura` uses for its own return value. This Recibo
+      // may have already been drawn down by an earlier Nota de Anticipo, so
+      // the frozen field alone would always read as "fully available".
+      const saldoOrigen = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: reciboDoc._id })
+        .session(session)
+        .exec();
+      const recibo = Object.assign(reciboDoc, {
+        unappliedAmount: saldoOrigen?.saldoDisponible ?? 0,
+      });
       if (recibo.unappliedAmount <= 0) {
         throw new ConflictException(
           `El recibo ${recibo.fullNumber} no tiene anticipo pendiente por aplicar`,
@@ -260,6 +279,7 @@ export class NotasAnticipoService {
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
         saldoTotalDocumento: this.saldoTotalDocumento,
+        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
         coPropertyId,
@@ -547,19 +567,15 @@ export class NotasAnticipoService {
           .exec();
       }
 
-      // Give the money back to the Recibo it was drawn from.
-      await this.recibos
-        .findOneAndUpdate(
-          { _id: nota.reciboOrigenId, coPropertyId },
-          {
-            $inc: {
-              unappliedAmount: nota.appliedAmount,
-              appliedAmount: -nota.appliedAmount,
-            },
-          },
-          { session },
-        )
-        .exec();
+      // Give the money back to the Recibo it was drawn from — the live
+      // balance now lives in `SaldoDocumentoOrigen`, not a field on the
+      // (immutable) Recibo itself.
+      await restaurarSaldoDocumentoOrigen(
+        this.saldoDocumentoOrigen,
+        session,
+        nota.reciboOrigenId,
+        nota.appliedAmount,
+      );
 
       const copropiedad = await this.copropiedades
         .findById(coPropertyId)

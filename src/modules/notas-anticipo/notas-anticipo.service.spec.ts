@@ -32,8 +32,13 @@ type ReciboFixture = {
   terceroId: Types.ObjectId;
   fullNumber: string;
   status: string;
+  // No longer live fields on the Recibo document itself — kept on this
+  // fixture purely as the shared backing state the `saldoDocumentoOrigen`
+  // mock below reads/mutates (test convenience, mirrors `facturasState`'s
+  // own `outstandingBalance` reuse), never read directly by production code.
   unappliedAmount: number;
   appliedAmount: number;
+  montoOriginal: number;
 } & Record<string, unknown>;
 
 type FacturaFixture = {
@@ -65,6 +70,7 @@ const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
   status: 'activo',
   unappliedAmount: 300000,
   appliedAmount: 200000,
+  montoOriginal: 500000,
   ...over,
 });
 
@@ -172,17 +178,59 @@ const construirServicio = (
     findOne: jest.fn(() => ({
       session: () => ({ exec: () => Promise.resolve(recibo) }),
     })),
+  };
+
+  // The atomic guard/restore for the Recibo's own leftover now lives here,
+  // not on `recibos` itself — see `SaldoDocumentoOrigen`'s own docblock.
+  // Reuses `recibo`'s own `unappliedAmount` field as the shared backing
+  // state (test fixture convenience, mirrors `saldoTotalDocumento`'s
+  // identical reuse of `outstandingBalance` below).
+  const saldoDocumentoOrigen = {
     findOneAndUpdate: jest.fn(
-      (_f: unknown, update: { $inc?: Record<string, number> }) => ({
-        session: jest.fn().mockReturnThis(),
+      (
+        filtro: Record<string, unknown>,
+        update: { $inc?: { saldoDisponible: number } },
+      ) => ({
         exec: () => {
-          for (const [campo, delta] of Object.entries(update.$inc ?? {})) {
-            recibo[campo] = ((recibo[campo] as number) ?? 0) + delta;
+          if (String(filtro.documentoId) !== String(recibo._id)) {
+            return Promise.resolve(null);
           }
-          return Promise.resolve(recibo);
+          if (filtro.$expr) {
+            const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+            if (recibo.unappliedAmount < monto) {
+              return Promise.resolve(null);
+            }
+            recibo.unappliedAmount -= monto;
+          } else if (update.$inc) {
+            recibo.unappliedAmount += update.$inc.saldoDisponible;
+          }
+          // Kept in sync purely for this fixture's own convenience — real
+          // production code derives `appliedAmount` on read (see
+          // `decrementarSaldoDocumentoOrigen`'s own `Object.assign`), it
+          // never writes it back onto the (immutable) Recibo.
+          recibo.appliedAmount = recibo.montoOriginal - recibo.unappliedAmount;
+          return Promise.resolve({
+            documentoId: recibo._id,
+            montoOriginal: recibo.montoOriginal,
+            saldoDisponible: recibo.unappliedAmount,
+          });
         },
       }),
     ),
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: () => ({
+        exec: () =>
+          Promise.resolve(
+            String(filtro.documentoId) === String(recibo._id)
+              ? {
+                  documentoId: recibo._id,
+                  montoOriginal: recibo.montoOriginal,
+                  saldoDisponible: recibo.unappliedAmount,
+                }
+              : null,
+          ),
+      }),
+    })),
   };
 
   const facturas = {
@@ -247,7 +295,10 @@ const construirServicio = (
           );
           return Promise.resolve(
             factura
-              ? { documentoId: factura._id, saldoPendiente: factura.outstandingBalance }
+              ? {
+                  documentoId: factura._id,
+                  saldoPendiente: factura.outstandingBalance,
+                }
               : null,
           );
         },
@@ -262,8 +313,7 @@ const construirServicio = (
           return Promise.resolve(
             facturasState
               .filter(
-                (f) =>
-                  ids.includes(String(f._id)) && f.outstandingBalance > 0,
+                (f) => ids.includes(String(f._id)) && f.outstandingBalance > 0,
               )
               .map((f) => ({
                 documentoId: f._id,
@@ -329,6 +379,7 @@ const construirServicio = (
     numeracion as never,
     conexionCon(session),
     lotesFacturacionFalso(),
+    saldoDocumentoOrigen as never,
   );
 
   return {
@@ -338,6 +389,7 @@ const construirServicio = (
     asientosStore,
     notasAnticipo,
     recibos,
+    saldoDocumentoOrigen,
   };
 };
 

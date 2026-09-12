@@ -359,6 +359,9 @@ export interface TotalConceptoLote {
  * `total`.
  */
 export interface FilaConsultaFacturacion {
+  /** The Factura's own id — lets the on-screen table link to `/facturas/:id`
+   *  ("Ver"), the same way the Facturas list itself does. */
+  id: string;
   inmuebleId: string;
   inmuebleCodigo: string;
   tipoDocumento: 'FV';
@@ -367,11 +370,16 @@ export interface FilaConsultaFacturacion {
   numeroCompleto: string;
   fechaFactura: IsoDate;
   fechaVence: IsoDate;
+  titular: TitularFactura | null;
   valoresPorConcepto: Record<string, Monto>;
   valoresIvaPorConcepto: Record<string, Monto>;
   subtotal: Monto;
   totalImpuestos: Monto;
   total: Monto;
+  /** Live balance, same `SaldoTotalDocumento`-sourced figure the Facturas
+   *  list itself shows — never a frozen field on the Factura. */
+  saldoPendiente: Monto;
+  estado: 'emitida' | 'anulada';
 }
 
 /** Response of `GET /lotes/:id/consulta-facturacion`. */

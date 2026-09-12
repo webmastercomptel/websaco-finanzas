@@ -1,6 +1,7 @@
 import { rgb } from 'pdf-lib';
 import {
   crearContexto,
+  embebirLogoWebsaco,
   escribirMarcaDuplicado,
   formatoPeso,
   formatoFecha,
@@ -10,7 +11,6 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 
 const MARGIN_LEFT = 50;
 const GRIS_CLARO = rgb(0.9, 0.9, 0.9);
-const AZUL_NOTA = rgb(0.3, 0.4, 0.6);
 
 /** One débito/crédito line of the Recibo's own journal entry, already
  *  resolved to display-ready values (account code/name, target document
@@ -72,7 +72,7 @@ export async function generarPdfRecibo(
 ): Promise<Uint8Array> {
   const ctx = await crearContexto();
 
-  dibujarEncabezadoRecibo(
+  await dibujarEncabezadoRecibo(
     ctx,
     copropiedad,
     datos.tituloDocumento,
@@ -88,31 +88,48 @@ export async function generarPdfRecibo(
   return ctx.doc.save();
 }
 
-/** Gray banner with the copropiedad name, NIT below it, and
- *  "{tituloDocumento} {numeroCompleto}" bold and right-aligned on the same
- *  row as the NIT — mirrors the predecessor system's own header exactly. */
-function dibujarEncabezadoRecibo(
+/** First two header lines mirror `dibujarEncabezadoFactura` (factura-pdf.ts)
+ *  exactly — same gray banner with the copropiedad name and logo, same
+ *  NIT row with the document title right-aligned beside it, same thin gray
+ *  rule ("rayita") below — so a Recibo/Nota de Crédito prints with the
+ *  identical masthead as a Factura instead of its own heavier banner. */
+async function dibujarEncabezadoRecibo(
   ctx: PdfContext,
   copropiedad: CopropiedadDocument,
   tituloDocumento: string,
   numeroCompleto: string,
-): void {
-  const bannerAltura = 34;
+): Promise<void> {
+  const bannerAltura = 26;
+  const bannerTop = ctx.y + 8;
+  const bannerBottom = bannerTop - bannerAltura;
   ctx.page.drawRectangle({
     x: 0,
-    y: ctx.y - bannerAltura + 10,
+    y: ctx.y - bannerAltura + 8,
     width: ctx.pageWidth,
     height: bannerAltura,
     color: GRIS_CLARO,
   });
   ctx.page.drawText(copropiedad.name, {
     x: MARGIN_LEFT,
-    y: ctx.y - 12,
-    size: 20,
+    y: ctx.y - 10,
+    size: 16,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
   });
-  ctx.y -= bannerAltura + 14;
+
+  const {
+    image: logo,
+    width: logoWidth,
+    height: logoHeight,
+  } = await embebirLogoWebsaco(ctx.doc);
+  ctx.page.drawImage(logo, {
+    x: MARGIN_LEFT + ctx.contentWidth - logoWidth,
+    y: (bannerTop + bannerBottom) / 2 - logoHeight / 2,
+    width: logoWidth,
+    height: logoHeight,
+  });
+
+  ctx.y -= bannerAltura + 6;
 
   const filaTitulo = ctx.y;
   const nit = copropiedad.taxId
@@ -123,42 +140,43 @@ function dibujarEncabezadoRecibo(
   ctx.page.drawText('NIT :', {
     x: MARGIN_LEFT,
     y: filaTitulo,
-    size: 10,
+    size: 9,
     font: ctx.font,
-    color: rgb(0, 0, 0),
+    color: rgb(0.3, 0.3, 0.3),
   });
   ctx.page.drawText(nit, {
     x: MARGIN_LEFT + 35,
     y: filaTitulo,
-    size: 10,
+    size: 9,
     font: ctx.font,
     color: rgb(0, 0, 0),
   });
 
   const titulo = `${tituloDocumento} ${numeroCompleto}`;
-  const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 16);
+  const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 13);
   ctx.page.drawText(titulo, {
     x: MARGIN_LEFT + ctx.contentWidth - tituloAncho,
     y: filaTitulo,
-    size: 16,
+    size: 13,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
   });
 
-  ctx.y -= 22;
-  ctx.page.drawRectangle({
-    x: 0,
-    y: ctx.y,
-    width: ctx.pageWidth,
-    height: 5,
-    color: GRIS_CLARO,
+  ctx.y -= 10;
+  ctx.page.drawLine({
+    start: { x: MARGIN_LEFT, y: ctx.y },
+    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y },
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
   });
-  ctx.y -= 20;
+  ctx.y -= 14;
 }
 
-/** Left column (inmueble / titular / concepto) alongside the amount and
- *  date on the right — the predecessor's own two-column layout, so the
- *  amount reads as the visual anchor of the page, same as the original. */
+/** Left column (inmueble / titular / concepto) alongside "Recibo No.",
+ *  Valor and Fecha on the right — all three right-aligned to the same edge,
+ *  the same convention the asiento table's own "Valor Credito" column uses.
+ *  The amount keeps its large size (the predecessor's own visual anchor for
+ *  this document), Recibo No./Fecha sit above/below it in the same column. */
 function dibujarBloqueRecibo(
   ctx: PdfContext,
   datos: DatosReciboImpresion,
@@ -187,42 +205,41 @@ function dibujarBloqueRecibo(
     ctx.y -= 15;
   }
 
-  // ── Amount + date, right-aligned, anchored to the block's top row ──
+  // ── Recibo No. / Valor / Fecha, all right-aligned to the same edge ──
+  const reciboNoTexto = `Recibo No. ${datos.numeroCompleto}`;
+  const reciboNoAncho = ctx.font.widthOfTextAtSize(reciboNoTexto, 10);
+  ctx.page.drawText(reciboNoTexto, {
+    x: MARGIN_LEFT + ctx.contentWidth - reciboNoAncho,
+    y: inicioBloque,
+    size: 10,
+    font: ctx.font,
+    color: rgb(0, 0, 0),
+  });
+
   const montoTexto = formatoPeso(datos.monto);
   const montoSize = 24;
   const montoAncho = ctx.fontBold.widthOfTextAtSize(montoTexto, montoSize);
   ctx.page.drawText('$', {
     x: MARGIN_LEFT + ctx.contentWidth - montoAncho - 22,
-    y: inicioBloque - 2,
+    y: inicioBloque - 16,
     size: 16,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
   });
   ctx.page.drawText(montoTexto.replace(/^\$\s?/, ''), {
     x: MARGIN_LEFT + ctx.contentWidth - montoAncho,
-    y: inicioBloque - 6,
+    y: inicioBloque - 20,
     size: montoSize,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
   });
 
-  const fechaY = inicioBloque - 34;
-  const etiquetaFecha = '(dd/mm/aaaa)';
-  const etiquetaAncho = ctx.font.widthOfTextAtSize(etiquetaFecha, 7);
-  ctx.page.drawText(etiquetaFecha, {
-    x: MARGIN_LEFT + ctx.contentWidth - etiquetaAncho,
-    y: fechaY,
-    size: 7,
-    font: ctx.font,
-    color: AZUL_NOTA,
-  });
-
   const fechaTexto = formatoFecha(datos.fecha);
-  const filaFecha = `Fecha    ${fechaTexto}`;
+  const filaFecha = `Fecha : ${fechaTexto}`;
   const filaFechaAncho = ctx.font.widthOfTextAtSize(filaFecha, 10);
   ctx.page.drawText(filaFecha, {
     x: MARGIN_LEFT + ctx.contentWidth - filaFechaAncho,
-    y: fechaY - 14,
+    y: inicioBloque - 48,
     size: 10,
     font: ctx.font,
     color: rgb(0, 0, 0),
@@ -312,6 +329,10 @@ function dibujarTablaAsiento(
 
   const totalDebito = lineas.reduce((acc, l) => acc + l.debito, 0);
   const totalCredito = lineas.reduce((acc, l) => acc + l.credito, 0);
+
+  // Totales bajado una línea respecto a la última fila de datos, para que no
+  // quede pegado — un renglón de aire entre el asiento y su total.
+  ctx.y -= 15;
 
   ctx.page.drawRectangle({
     x: MARGIN_LEFT,

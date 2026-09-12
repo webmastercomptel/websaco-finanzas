@@ -66,6 +66,7 @@ describe('construirDatosImpresionNotaCredito', () => {
   it('arma el encabezado a partir del inmueble, el titular y usa "Nota de Crédito" como tituloDocumento', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase(),
+      0,
       [],
       copropiedadBase(),
       COP,
@@ -83,6 +84,7 @@ describe('construirDatosImpresionNotaCredito', () => {
   it('usa la etiqueta del motivo cuando la nota no tiene notes', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ notes: null, reason: 'descuento_comercial' }),
+      0,
       [],
       copropiedadBase(),
       COP,
@@ -95,6 +97,7 @@ describe('construirDatosImpresionNotaCredito', () => {
   it('usa notes cuando la nota sí las tiene, en vez del motivo', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ notes: 'Cancela factura 685' }),
+      0,
       [],
       copropiedadBase(),
       COP,
@@ -142,6 +145,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
     const datos = await construirDatosImpresionNotaCredito(
       notaBase(),
+      0,
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -175,6 +179,7 @@ describe('construirDatosImpresionNotaCredito', () => {
     });
     const datos = await construirDatosImpresionNotaCredito(
       notaBase(),
+      0,
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -192,6 +197,7 @@ describe('construirDatosImpresionNotaCredito', () => {
     const aplicacion = aplicacionFV({ amountApplied: 60000 });
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ totalAmount: 100000, unappliedAmount: 40000 }),
+      40000,
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -206,6 +212,7 @@ describe('construirDatosImpresionNotaCredito', () => {
     const aplicacion = aplicacionFV({ amountApplied: 100000 });
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ totalAmount: 100000, unappliedAmount: 0 }),
+      0,
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -218,6 +225,7 @@ describe('construirDatosImpresionNotaCredito', () => {
   it('cae a cuentaDevoluciones cuando el concepto no tiene accountingIncomeAccount configurado (nunca una cuenta de banco)', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ totalAmount: 100000 }),
+      0,
       [],
       copropiedadBase({ creditNotesAccount: '413595' }),
       COP,
@@ -257,6 +265,7 @@ describe('construirDatosImpresionNotaCredito', () => {
           { conceptoId: conceptoMora, amount: 30000 },
         ],
       }),
+      0,
       [],
       copropiedadBase(),
       COP,
@@ -276,6 +285,7 @@ describe('construirDatosImpresionNotaCredito', () => {
         issueDate: null,
         createdAt: new Date('2026-05-01'),
       }),
+      0,
       [],
       copropiedadBase(),
       COP,

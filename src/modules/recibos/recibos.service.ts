@@ -35,6 +35,10 @@ import {
   SaldoTotalDocumentoDocument,
 } from '../../database/schemas/facturacion/saldo-total-documento.schema';
 import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -167,6 +171,12 @@ const redactarObservaciones = (
  * billing run is open" rule: `crear()` calls
  * `lotes.exigirSinLoteAbierto()` before the transaction opens, same
  * placement as `periodo.exigirAbierto` — a refusal costs no session.
+ *
+ * `saldoDocumentoOrigen` was APPENDED for the same reason `saldoTotalDocumento`
+ * was: `Recibo.appliedAmount`/`unappliedAmount` are no longer live fields on
+ * the (now immutable) document — `SaldoDocumentoOrigen` is where
+ * `decrementarSaldoDocumentoOrigen`/`restaurarSaldoDocumentoOrigen` now read
+ * and write that balance (see that schema's own docblock).
  */
 @Injectable()
 export class RecibosService {
@@ -194,6 +204,8 @@ export class RecibosService {
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -322,10 +334,26 @@ export class RecibosService {
             destinationAccount,
             reference: dto.referencia ?? null,
             notes: dto.observaciones ?? null,
+            // Frozen from here on — the document is immutable once issued.
+            // `SaldoDocumentoOrigen` (seeded right below) is the live source
+            // every application/reversal actually moves from now on.
             appliedAmount: 0,
             unappliedAmount: dto.montoRecibido,
             status: 'activo',
             generatedBy: accountId,
+          },
+        ],
+        { session },
+      );
+
+      await this.saldoDocumentoOrigen.create(
+        [
+          {
+            coPropertyId,
+            tipoDocumento: 'RC',
+            documentoId: creado._id,
+            montoOriginal: dto.montoRecibido,
+            saldoDisponible: dto.montoRecibido,
           },
         ],
         { session },
@@ -425,7 +453,11 @@ export class RecibosService {
         .findOne({ _id: creado._id, coPropertyId })
         .session(session)
         .exec();
-      return toRecibo(final!);
+      return toRecibo(
+        final!,
+        cashAplicadoAhora,
+        dto.montoRecibido - cashAplicadoAhora,
+      );
     });
   }
 
@@ -463,18 +495,33 @@ export class RecibosService {
     );
 
     return this.transaccion(async (session) => {
-      const recibo = await this.recibos
+      const reciboDoc = await this.recibos
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      if (!recibo) {
+      if (!reciboDoc) {
         throw new NotFoundException(`No se encontró el recibo ${id}`);
       }
-      if (recibo.status === 'anulado') {
+      if (reciboDoc.status === 'anulado') {
         throw new ConflictException(
-          `El recibo ${recibo.fullNumber} ya está anulado`,
+          `El recibo ${reciboDoc.fullNumber} ya está anulado`,
         );
       }
+      // `appliedAmount`/`unappliedAmount` are no longer live fields on the
+      // (now immutable) Recibo — merged in fresh from `SaldoDocumentoOrigen`
+      // so the reversing entry below (which reads the Recibo's OWN cached
+      // totals) sees the REAL current split, not the frozen creation-time
+      // values.
+      const saldoOrigenPrevio = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: reciboDoc._id })
+        .session(session)
+        .exec();
+      const recibo = Object.assign(reciboDoc, {
+        unappliedAmount: saldoOrigenPrevio?.saldoDisponible ?? 0,
+        appliedAmount:
+          (saldoOrigenPrevio?.montoOriginal ?? 0) -
+          (saldoOrigenPrevio?.saldoDisponible ?? 0),
+      });
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
@@ -684,12 +731,22 @@ export class RecibosService {
           { session },
         )
         .exec();
+      // The REAL live balance — `SaldoDocumentoOrigen`, per this class's own
+      // constructor docblock — goes to zero too, same "no anticipo, no
+      // applied amount" outcome as the `$set` above.
+      await this.saldoDocumentoOrigen
+        .updateOne(
+          { documentoId: id },
+          { $set: { saldoDisponible: 0 } },
+          { session },
+        )
+        .exec();
 
       const final = await this.recibos
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toRecibo(final!);
+      return toRecibo(final!, 0, 0);
     });
   }
 
@@ -706,7 +763,19 @@ export class RecibosService {
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
-    if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
+    if (query.conAnticipoDisponible) {
+      // No longer a field on Recibo itself — resolve candidate ids from
+      // `SaldoDocumentoOrigen` first (see that schema's own docblock), same
+      // pattern `FacturasService.findAll` already uses on the charge side.
+      const conSaldo = await this.saldoDocumentoOrigen
+        .find({
+          coPropertyId,
+          tipoDocumento: 'RC',
+          saldoDisponible: { $gt: 0 },
+        })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
+    }
     if (query.desde || query.hasta) {
       filtro.receivedDate = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
@@ -727,7 +796,32 @@ export class RecibosService {
       this.recibos.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toRecibo), total, pagina, porPagina };
+    const ids = documentos.map((d) => d._id);
+    const saldos = ids.length
+      ? await this.saldoDocumentoOrigen
+          .find({ documentoId: { $in: ids } })
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [
+        s.documentoId.toString(),
+        { montoOriginal: s.montoOriginal, saldoDisponible: s.saldoDisponible },
+      ]),
+    );
+
+    return {
+      items: documentos.map((doc) => {
+        const saldo = saldoPorDocumento.get(doc._id.toString());
+        const unappliedAmount = saldo?.saldoDisponible ?? 0;
+        const appliedAmount = saldo
+          ? saldo.montoOriginal - saldo.saldoDisponible
+          : 0;
+        return toRecibo(doc, appliedAmount, unappliedAmount);
+      }),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   /**
@@ -741,6 +835,13 @@ export class RecibosService {
     if (!recibo) {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
+    const saldoOrigen = await this.saldoDocumentoOrigen
+      .findOne({ documentoId: recibo._id })
+      .exec();
+    const unappliedAmount = saldoOrigen?.saldoDisponible ?? 0;
+    const appliedAmount = saldoOrigen
+      ? saldoOrigen.montoOriginal - saldoOrigen.saldoDisponible
+      : 0;
     const aplicaciones = await this.aplicaciones
       .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
@@ -771,7 +872,13 @@ export class RecibosService {
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
     }
 
-    return toReciboDetalle(recibo, aplicaciones, numerosPorDocumento);
+    return toReciboDetalle(
+      recibo,
+      appliedAmount,
+      unappliedAmount,
+      aplicaciones,
+      numerosPorDocumento,
+    );
   }
 
   /**
@@ -829,6 +936,7 @@ export class RecibosService {
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
         saldoTotalDocumento: this.saldoTotalDocumento,
+        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
         coPropertyId,
@@ -871,6 +979,7 @@ export class RecibosService {
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
         saldoTotalDocumento: this.saldoTotalDocumento,
+        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
         coPropertyId,

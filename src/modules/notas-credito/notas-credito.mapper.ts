@@ -25,9 +25,17 @@ export const fechaNotaCredito = (doc: {
  * Maps a credit note document to the Spanish API contract. Persistence is
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toRecibo`.
+ *
+ * `montoAplicado`/`montoSinAplicar` are no longer fields on the (now
+ * immutable) document — `NotaCredito.appliedAmount`/`unappliedAmount` are
+ * gone precisely so a Nota Crédito never changes after issuance (see
+ * `SaldoDocumentoOrigen`'s own docblock). The caller resolves them and
+ * passes them in here, same pattern `toRecibo` already uses.
  */
 export const toNotaCredito = (
   doc: NotaCreditoDocument,
+  montoAplicado: number,
+  montoSinAplicar: number,
   // The anchor Factura's own printed number ("FV-1") — this document only
   // stores `facturaId`. Optional: the lean listing (`findAll`) has no
   // reason to pay for this lookup on every row, only `findOne`'s detail
@@ -49,8 +57,8 @@ export const toNotaCredito = (
     conceptoId: linea.conceptoId.toString(),
     monto: linea.amount,
   })),
-  montoAplicado: doc.appliedAmount,
-  montoSinAplicar: doc.unappliedAmount,
+  montoAplicado,
+  montoSinAplicar,
   observaciones: doc.notes,
   estado: doc.status,
   motivoAnulacion: doc.voidedReason,
@@ -77,11 +85,15 @@ export const toNotaCredito = (
  */
 export const toNotaCreditoDetalle = (
   doc: NotaCreditoDocument,
+  montoAplicado: number,
+  montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
   numerosPorDocumento: Map<string, string> = new Map(),
 ): NotaCreditoDetalle => ({
   ...toNotaCredito(
     doc,
+    montoAplicado,
+    montoSinAplicar,
     numerosPorDocumento.get(doc.facturaId.toString()) ?? null,
   ),
   // Self-sourced: every `aplicacion` here was made BY this Nota Crédito, so

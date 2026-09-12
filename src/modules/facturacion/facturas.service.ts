@@ -5,6 +5,14 @@ import {
   Factura,
   FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type { Factura as FacturaContract, Paginado } from '../../contracts';
@@ -18,8 +26,33 @@ export class FacturasService {
   constructor(
     @InjectModel(Factura.name)
     private readonly facturas: Model<FacturaDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
     private readonly tenant: TenantContextService,
   ) {}
+
+  /** Batch-resolves each document's own live per-concepto breakdown from
+   *  `CarteraPorDocumento` — needed by `toFactura`'s per-línea
+   *  `saldoPendiente`, no longer a field the document itself carries. */
+  private async carteraPorConceptoDe(
+    documentoIds: FacturaDocument['_id'][],
+  ): Promise<Map<string, Map<string, number>>> {
+    const filas = documentoIds.length
+      ? await this.carteraPorDocumento
+          .find({ documentoId: { $in: documentoIds } })
+          .exec()
+      : [];
+    const porDocumento = new Map<string, Map<string, number>>();
+    for (const fila of filas) {
+      const docKey = fila.documentoId.toString();
+      const porConcepto = porDocumento.get(docKey) ?? new Map<string, number>();
+      porConcepto.set(fila.conceptoId.toString(), fila.saldoPendiente);
+      porDocumento.set(docKey, porConcepto);
+    }
+    return porDocumento;
+  }
 
   async findAll(query: ListarFacturasDto): Promise<Paginado<FacturaContract>> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -36,7 +69,13 @@ export class FacturasService {
       filtro.status = 'emitida';
     }
     if (query.conSaldoPendiente) {
-      filtro.outstandingBalance = { $gt: 0 };
+      // No longer a field on Factura itself — resolve candidate ids from
+      // `SaldoTotalDocumento` first (see that schema's own docblock), same
+      // pattern `NotasDebitoService.findAll` already uses.
+      const conSaldo = await this.saldoTotalDocumento
+        .find({ coPropertyId, tipoDocumento: 'FV', saldoPendiente: { $gt: 0 } })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
     if (query.fechaDesde || query.fechaHasta) {
       filtro.issueDate = {
@@ -58,7 +97,29 @@ export class FacturasService {
       this.facturas.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toFactura), total, pagina, porPagina };
+    const ids = documentos.map((d) => d._id);
+    const [saldos, carteraPorDoc] = await Promise.all([
+      ids.length
+        ? this.saldoTotalDocumento.find({ documentoId: { $in: ids } }).exec()
+        : Promise.resolve([]),
+      this.carteraPorConceptoDe(ids),
+    ]);
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
+    return {
+      items: documentos.map((doc) =>
+        toFactura(
+          doc,
+          saldoPorDocumento.get(doc._id.toString()) ?? 0,
+          carteraPorDoc.get(doc._id.toString()) ?? new Map<string, number>(),
+        ),
+      ),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   async findOne(id: string): Promise<FacturaContract> {
@@ -69,7 +130,15 @@ export class FacturasService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    return toFactura(documento);
+    const [saldoTotal, carteraPorDoc] = await Promise.all([
+      this.saldoTotalDocumento.findOne({ documentoId: documento._id }).exec(),
+      this.carteraPorConceptoDe([documento._id]),
+    ]);
+    return toFactura(
+      documento,
+      saldoTotal?.saldoPendiente ?? 0,
+      carteraPorDoc.get(documento._id.toString()) ?? new Map<string, number>(),
+    );
   }
 
   /**

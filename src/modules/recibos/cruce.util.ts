@@ -7,6 +7,7 @@ import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/not
 import type { SaldoCarteraDocument } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import type { CarteraPorDocumentoDocument } from '../../database/schemas/facturacion/cartera-por-documento.schema';
 import type { SaldoTotalDocumentoDocument } from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import type { SaldoDocumentoOrigenDocument } from '../../database/schemas/recibos/saldo-documento-origen.schema';
 import type { DocumentType } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
@@ -188,6 +189,110 @@ export async function restaurarSaldoTotalDocumento(
     .exec();
 }
 
+/** A Recibo/NotaCredito Mongoose document, plus its CURRENT unapplied
+ *  balance resolved from `SaldoDocumentoOrigen` — never a real field on the
+ *  document itself anymore (see that schema's own docblock on why the
+ *  atomic guard had to move off the immutable document, same reasoning as
+ *  `ConSaldoPendiente` on the charge side). `appliedAmount` is derived the
+ *  same way `SaldoDocumentoOrigen` itself derives it: `montoOriginal -
+ *  saldoDisponible`. */
+type ConSaldoDisponible<T> = T & {
+  unappliedAmount: number;
+  appliedAmount: number;
+};
+
+/**
+ * Atomically decrements one Recibo's or Nota Crédito's `SaldoDocumentoOrigen`
+ * row by `amount`, inside `session`, refusing (throwing) if that would push
+ * it below zero — the source-side twin of `decrementarSaldoFactura`, same
+ * `$expr`-guarded `findOneAndUpdate` discipline, same reason the guard lives
+ * off the (now immutable) document: two concurrent applications drawing
+ * against the same leftover `unappliedAmount` could otherwise each read
+ * "enough" from a stale value and both proceed, jointly overdrawing it.
+ *
+ * `estadoActivo` is the caller's own "still usable" status literal (`'activo'`
+ * for both Recibo and NotaCredito today) — passed in rather than hardcoded so
+ * this stays generic over both document types without importing either
+ * schema's own status union here.
+ */
+export async function decrementarSaldoDocumentoOrigen<
+  T extends { _id: Types.ObjectId },
+>(
+  documentos: Model<T>,
+  saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  documentoId: Types.ObjectId,
+  amount: number,
+  estadoActivo: string,
+): Promise<ConSaldoDisponible<T>> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new ConflictException(
+      `El documento ${documentoId.toString()} no admite aplicar ${amount}: ` +
+        'monto inválido',
+    );
+  }
+
+  const saldoActualizado = await saldoDocumentoOrigen
+    .findOneAndUpdate(
+      {
+        documentoId,
+        $expr: { $gte: ['$saldoDisponible', amount] },
+      },
+      { $inc: { saldoDisponible: -amount } },
+      { returnDocument: 'after', session },
+    )
+    .exec();
+
+  if (!saldoActualizado) {
+    throw new ConflictException(
+      `El documento ${documentoId.toString()} no admite aplicar ${amount}: ` +
+        'no existe, no está vigente, o su saldo disponible actual es menor',
+    );
+  }
+
+  const doc = await documentos
+    .findOne({ _id: documentoId, coPropertyId, status: estadoActivo })
+    .session(session)
+    .exec();
+  if (!doc) {
+    throw new ConflictException(
+      `El documento ${documentoId.toString()} no admite aplicar ${amount}: ` +
+        'no existe o no está vigente',
+    );
+  }
+
+  return Object.assign(doc, {
+    unappliedAmount: saldoActualizado.saldoDisponible,
+    appliedAmount:
+      saldoActualizado.montoOriginal - saldoActualizado.saldoDisponible,
+  });
+}
+
+/**
+ * Atomically restores (increments) one Recibo's or Nota Crédito's
+ * `SaldoDocumentoOrigen` row by `amount` — the reversal counterpart to
+ * `decrementarSaldoDocumentoOrigen`, used by every `anular()` that used to
+ * `$inc: { unappliedAmount: +amount, appliedAmount: -amount }` straight on
+ * the Recibo/NotaCredito. Unconditional, no `$expr` guard — same reasoning as
+ * `restaurarSaldoTotalDocumento`: a reversal only ever adds back money a
+ * prior successful decrement already proved was there.
+ */
+export async function restaurarSaldoDocumentoOrigen(
+  saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
+  session: ClientSession,
+  documentoId: Types.ObjectId,
+  amount: number,
+): Promise<SaldoDocumentoOrigenDocument | null> {
+  return saldoDocumentoOrigen
+    .findOneAndUpdate(
+      { documentoId },
+      { $inc: { saldoDisponible: amount } },
+      { returnDocument: 'after', session },
+    )
+    .exec();
+}
+
 /**
  * Adjusts one `CarteraPorDocumento` row's `saldoPendiente` — the per-document
  * twin of the `$max`/`$add` pipeline update `ajustarSaldosCartera`/
@@ -197,10 +302,33 @@ export async function restaurarSaldoTotalDocumento(
  * exact same `parte` these functions just computed for the cross-document
  * aggregate, so it should never actually hit the floor in practice, but a
  * per-document row is no less a target for drift than the aggregate is.
+ *
+ * `upsert: true` — every OTHER caller only ever targets a concepto the
+ * document's own lines already seeded a row for at consolidación time, so
+ * this never actually inserts for them. `NotasContablesService`'s
+ * `conceptoDestinoId` is the one caller where the concepto can legitimately
+ * be one this document never had a row for (that's the whole point of a
+ * reclassification: crediting a concepto the document wasn't originally
+ * charged under) — WITHOUT `upsert`, a `findOneAndUpdate` against a
+ * nonexistent row matches nothing and silently no-ops: the origin concepto's
+ * decrement still lands, but the destination's credit vanishes, corrupting
+ * the invariant "money leaving one concepto always lands in another" (a real
+ * bug this fixes). A pipeline-style upsert starts from an EMPTY document —
+ * unlike a classic update, MongoDB does NOT auto-populate the filter's
+ * equality fields into it — so every required field is set explicitly here,
+ * via `$ifNull` against the (possibly absent) current value so an existing
+ * row's other fields are left untouched. `montoOriginal`/`saldoAnterior`/
+ * `saldoNuevo` default to 0 on insert: a row created this way was never an
+ * actual invoice line, so it has no real frozen "charge at issuance" to
+ * record — same honest default `saldoPendiente` itself gets via `$ifNull`
+ * before the `$add`.
  */
 async function ajustarCarteraPorDocumento(
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  inmuebleId: Types.ObjectId,
+  tipoDocumento: DocumentType,
   documentoId: Types.ObjectId,
   conceptoId: Types.ObjectId,
   parte: number,
@@ -212,13 +340,24 @@ async function ajustarCarteraPorDocumento(
       [
         {
           $set: {
+            coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+            inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
+            tipoDocumento: { $ifNull: ['$tipoDocumento', tipoDocumento] },
+            documentoId: { $ifNull: ['$documentoId', documentoId] },
+            conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
+            montoOriginal: { $ifNull: ['$montoOriginal', 0] },
+            saldoAnterior: { $ifNull: ['$saldoAnterior', 0] },
+            saldoNuevo: { $ifNull: ['$saldoNuevo', 0] },
             saldoPendiente: {
-              $max: [0, { $add: ['$saldoPendiente', signo * parte] }],
+              $max: [
+                0,
+                { $add: [{ $ifNull: ['$saldoPendiente', 0] }, signo * parte] },
+              ],
             },
           },
         },
       ],
-      { session, updatePipeline: true },
+      { session, updatePipeline: true, upsert: true },
     )
     .exec();
 }
@@ -311,20 +450,34 @@ export async function ajustarSaldosCartera(
         [
           {
             $set: {
-              balance: { $max: [0, { $add: ['$balance', signo * parte] }] },
+              coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+              inmuebleId: {
+                $ifNull: ['$inmuebleId', factura.inmuebleId],
+              },
+              conceptoId: { $ifNull: ['$conceptoId', linea.conceptoId] },
+              balance: {
+                $max: [
+                  0,
+                  { $add: [{ $ifNull: ['$balance', 0] }, signo * parte] },
+                ],
+              },
             },
           },
         ],
         // Mongoose 9 refuses an array update (an aggregation pipeline, needed
         // here for `$max`/`$add` against the document's OWN current value)
         // unless this is set explicitly — it used to infer this from the
-        // array shape alone.
-        { session, updatePipeline: true },
+        // array shape alone. `upsert` — see `ajustarCarteraPorDocumento`'s
+        // own docblock for why a missing row must never silently no-op.
+        { session, updatePipeline: true, upsert: true },
       )
       .exec();
     await ajustarCarteraPorDocumento(
       carteraPorDocumento,
       session,
+      coPropertyId,
+      factura.inmuebleId,
+      'FV',
       factura._id,
       linea.conceptoId,
       parte,
@@ -535,18 +688,33 @@ export async function ajustarSaldosCarteraPorDistribucion(
         [
           {
             $set: {
-              balance: { $max: [0, { $add: ['$balance', signo * parte] }] },
+              coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+              inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
+              conceptoId: { $ifNull: ['$conceptoId', linea.conceptoId] },
+              balance: {
+                $max: [
+                  0,
+                  { $add: [{ $ifNull: ['$balance', 0] }, signo * parte] },
+                ],
+              },
             },
           },
         ],
-        // See the identical note in `ajustarSaldosCartera` above.
-        { session, updatePipeline: true },
+        // See the identical note in `ajustarSaldosCartera` above — `upsert`
+        // included, same reasoning as `ajustarCarteraPorDocumento`'s own
+        // docblock: `conceptoDestinoId` here is a Nota Contable's
+        // user-chosen target, which can legitimately be a concepto this
+        // inmueble has never had a `SaldoCartera` row for before.
+        { session, updatePipeline: true, upsert: true },
       )
       .exec();
     if (documento) {
       await ajustarCarteraPorDocumento(
         carteraPorDocumento,
         session,
+        coPropertyId,
+        inmuebleId,
+        documento.tipoDocumento,
         documento.documentoId,
         linea.conceptoId,
         parte,
@@ -659,6 +827,7 @@ export interface ContextoAplicacion {
   saldos: Model<SaldoCarteraDocument>;
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>;
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>;
+  saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>;
   recibos: Model<ReciboDocument>;
   session: ClientSession;
   coPropertyId: Types.ObjectId;
@@ -697,6 +866,7 @@ export async function ejecutarAplicacionManual(
     saldos,
     carteraPorDocumento,
     saldoTotalDocumento,
+    saldoDocumentoOrigen,
     recibos,
     session,
     coPropertyId,
@@ -706,14 +876,27 @@ export async function ejecutarAplicacionManual(
     accountId,
   } = ctx;
 
+  // `recibo.unappliedAmount` is no longer a field the (now immutable)
+  // document carries live — resolved fresh here from `SaldoDocumentoOrigen`,
+  // same pattern `decrementarSaldoFactura` uses for its own return value.
+  // Only a PRE-check for a friendlier error message: the real enforcement is
+  // `decrementarSaldoDocumentoOrigen`'s own atomic guard below, on the final
+  // commit — same two-layer discipline `remanentesPorLinea`/
+  // `validarDistribucionManual` already use on the charge side.
+  const saldoOrigenActual = await saldoDocumentoOrigen
+    .findOne({ documentoId: recibo._id })
+    .session(session)
+    .exec();
+  const unappliedAmountActual = saldoOrigenActual?.saldoDisponible ?? 0;
+
   const sumaSolicitada = solicitadas.reduce(
     (acc, a) => acc + a.montoAplicado,
     0,
   );
-  if (sumaSolicitada > recibo.unappliedAmount) {
+  if (sumaSolicitada > unappliedAmountActual) {
     throw new ConflictException(
       `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
-        `del recibo ${recibo.fullNumber} (${recibo.unappliedAmount})`,
+        `del recibo ${recibo.fullNumber} (${unappliedAmountActual})`,
     );
   }
 
@@ -802,22 +985,34 @@ export async function ejecutarAplicacionManual(
       continue;
     }
 
-    // Read-before-write: `evaluarAplicacionConDescuento` needs the
-    // PRE-decrement `outstandingBalance` to decide whether this payment,
-    // plus the invoice's own discount, covers it completely — the atomic
-    // `decrementarSaldoFactura` below still guards the actual write with
-    // its own `$expr`, so a stale read here just means that guard throws
-    // (same failure mode as today), never a lost update.
-    const facturaActual = await facturas
+    // Read-before-write: `evaluarAplicacionConDescuento`/`remanentesPorLinea`
+    // need the PRE-decrement pending balance to decide whether this payment
+    // (plus the invoice's own discount) covers it completely, and how much
+    // of each línea is still open — the atomic `decrementarSaldoFactura`
+    // below still guards the actual write with its own `$expr`, so a stale
+    // read here just means that guard throws (same failure mode as today),
+    // never a lost update. `Factura` is immutable now, so this is no longer
+    // `facturaDoc.outstandingBalance` itself (permanently frozen at
+    // creation-time `total` — see `SaldoTotalDocumento`'s own docblock);
+    // it's merged in fresh from there, same pattern `decrementarSaldoFactura`
+    // itself uses for its own return value.
+    const facturaDoc = await facturas
       .findOne({ _id: documentoId, coPropertyId, status: 'emitida' })
       .session(session)
       .exec();
-    if (!facturaActual) {
+    if (!facturaDoc) {
       throw new AplicacionInvalidaError(
         documentoId.toString(),
         solicitada.montoAplicado,
       );
     }
+    const saldoPrevioFactura = await saldoTotalDocumento
+      .findOne({ documentoId })
+      .session(session)
+      .exec();
+    const facturaActual = Object.assign(facturaDoc, {
+      outstandingBalance: saldoPrevioFactura?.saldoPendiente ?? 0,
+    });
     // El usuario tomó control explícito del reparto por concepto — validado
     // contra el saldo pendiente REAL de cada concepto de esta factura (nunca
     // contra su totalAmount congelado, a diferencia de una Nota Crédito: esta
@@ -952,18 +1147,17 @@ export async function ejecutarAplicacionManual(
     });
   }
 
-  await recibos
-    .findOneAndUpdate(
-      { _id: recibo._id, coPropertyId },
-      {
-        $inc: {
-          appliedAmount: sumaCashAplicada,
-          unappliedAmount: -sumaCashAplicada,
-        },
-      },
-      { session },
-    )
-    .exec();
+  if (sumaCashAplicada > 0) {
+    await decrementarSaldoDocumentoOrigen(
+      recibos,
+      saldoDocumentoOrigen,
+      session,
+      coPropertyId,
+      recibo._id,
+      sumaCashAplicada,
+      'activo',
+    );
+  }
 
   return {
     creadas,
@@ -1006,6 +1200,7 @@ export async function ejecutarAplicacionFifo(
     saldos,
     carteraPorDocumento,
     saldoTotalDocumento,
+    saldoDocumentoOrigen,
     recibos,
     session,
     coPropertyId,
@@ -1035,7 +1230,10 @@ export async function ejecutarAplicacionFifo(
   ];
   const saldosTotales = idsDelInmueble.length
     ? await saldoTotalDocumento
-        .find({ documentoId: { $in: idsDelInmueble }, saldoPendiente: { $gt: 0 } })
+        .find({
+          documentoId: { $in: idsDelInmueble },
+          saldoPendiente: { $gt: 0 },
+        })
         .session(session)
         .exec()
     : [];
@@ -1068,22 +1266,18 @@ export async function ejecutarAplicacionFifo(
       };
 
   const abiertas: Candidato[] = [
-    ...facturasAbiertas.map(
-      (factura): Candidato => ({
-        tipo: 'FV',
-        doc: factura,
-        saldoPendiente: saldoPorDocumento.get(factura._id.toString())!,
-        prioridad: factura.dueDate ?? factura.issueDate,
-      }),
-    ),
-    ...notasDebitoAbiertas.map(
-      (nota): Candidato => ({
-        tipo: 'ND',
-        doc: nota,
-        saldoPendiente: saldoPorDocumento.get(nota._id.toString())!,
-        prioridad: nota.issueDate,
-      }),
-    ),
+    ...facturasAbiertas.map((factura): Candidato => ({
+      tipo: 'FV',
+      doc: factura,
+      saldoPendiente: saldoPorDocumento.get(factura._id.toString())!,
+      prioridad: factura.dueDate ?? factura.issueDate,
+    })),
+    ...notasDebitoAbiertas.map((nota): Candidato => ({
+      tipo: 'ND',
+      doc: nota,
+      saldoPendiente: saldoPorDocumento.get(nota._id.toString())!,
+      prioridad: nota.issueDate,
+    })),
   ].sort((a, b) => {
     const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
     if (porFecha !== 0) return porFecha;
@@ -1268,18 +1462,15 @@ export async function ejecutarAplicacionFifo(
   }
 
   if (totalAplicado > 0) {
-    await recibos
-      .findOneAndUpdate(
-        { _id: recibo._id, coPropertyId },
-        {
-          $inc: {
-            appliedAmount: totalAplicado,
-            unappliedAmount: -totalAplicado,
-          },
-        },
-        { session },
-      )
-      .exec();
+    await decrementarSaldoDocumentoOrigen(
+      recibos,
+      saldoDocumentoOrigen,
+      session,
+      coPropertyId,
+      recibo._id,
+      totalAplicado,
+      'activo',
+    );
   }
 
   return {

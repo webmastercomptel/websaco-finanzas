@@ -112,9 +112,9 @@ describe('NotasDebitoController.generarPdf', () => {
           issueDate: new Date('2026-08-12'),
           total: 50000,
           description: null,
-          outstandingBalance: 50000,
         }),
       ),
+      findOne: jest.fn(() => Promise.resolve({ saldoPendiente: 50000 })),
     };
     const controller = makeController(notasDebito);
     const set = jest.fn();

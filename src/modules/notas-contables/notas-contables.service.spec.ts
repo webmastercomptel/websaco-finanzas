@@ -271,6 +271,31 @@ describe('NotasContablesService.crear', () => {
     expect(extraerMonto(CONCEPTO_DESTINO)).toBe(100000);
   });
 
+  it('crea la fila del concepto destino si nunca existió — no la deja perdida en silencio (regresión: el monto descontado del origen desaparecía si el destino nunca se había cargado)', async () => {
+    // Bug real: `SaldoCartera`/`CarteraPorDocumento` solo tenían fila para
+    // un (inmueble|documento, concepto) si ese concepto ya se había cobrado
+    // antes — exactamente lo que UNA reclasificación busca cambiar. Sin
+    // `upsert`, el `findOneAndUpdate` del destino no encontraba fila,
+    // no hacía nada, y el monto quedaba descontado del origen sin aparecer
+    // en ningún lado — el total de cartera del inmueble/documento bajaba.
+    const notaCreada = notaContableCreada();
+    const { service, saldos, carteraPorDocumento } = construirServicio({
+      notaCreada,
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    for (const llamada of saldos.findOneAndUpdate.mock.calls as Array<
+      [unknown, unknown, Record<string, unknown>]
+    >) {
+      expect(llamada[2]).toMatchObject({ upsert: true });
+    }
+    for (const llamada of carteraPorDocumento.findOneAndUpdate.mock
+      .calls as unknown as Array<[unknown, unknown, Record<string, unknown>]>) {
+      expect(llamada[2]).toMatchObject({ upsert: true });
+    }
+  });
+
   it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
     const notaCreada = notaContableCreada();
     const { service, asientos } = construirServicio({

@@ -31,6 +31,10 @@ import {
   SaldoTotalDocumentoDocument,
 } from '../../database/schemas/facturacion/saldo-total-documento.schema';
 import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -54,6 +58,7 @@ import {
   AplicacionInvalidaError,
   ajustarSaldosCartera,
   ajustarSaldosCarteraPorDistribucion,
+  decrementarSaldoDocumentoOrigen,
   decrementarSaldoFactura,
   restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
@@ -121,6 +126,8 @@ export class NotasCreditoService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -268,11 +275,27 @@ export class NotasCreditoService {
               conceptoId: new Types.ObjectId(l.conceptoId),
               amount: l.monto,
             })),
+            // Frozen from here on — the document is immutable once issued.
+            // `SaldoDocumentoOrigen` (seeded right below) is the live source
+            // every application/reversal actually moves from now on.
             appliedAmount: 0,
             unappliedAmount: dto.montoTotal,
             notes: dto.observaciones ?? null,
             status: 'activo',
             generatedBy: accountId,
+          },
+        ],
+        { session },
+      );
+
+      await this.saldoDocumentoOrigen.create(
+        [
+          {
+            coPropertyId,
+            tipoDocumento: 'NC',
+            documentoId: creada._id,
+            montoOriginal: dto.montoTotal,
+            saldoDisponible: dto.montoTotal,
           },
         ],
         { session },
@@ -396,18 +419,15 @@ export class NotasCreditoService {
           ],
           { session },
         );
-        await this.notasCredito
-          .findOneAndUpdate(
-            { _id: creada._id, coPropertyId },
-            {
-              $inc: {
-                appliedAmount: montoAAplicar,
-                unappliedAmount: -montoAAplicar,
-              },
-            },
-            { session },
-          )
-          .exec();
+        await decrementarSaldoDocumentoOrigen(
+          this.notasCredito,
+          this.saldoDocumentoOrigen,
+          session,
+          coPropertyId,
+          creada._id,
+          montoAAplicar,
+          'activo',
+        );
         totalAplicadoAhora = montoAAplicar;
       }
 
@@ -430,7 +450,11 @@ export class NotasCreditoService {
         .findOne({ _id: creada._id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaCredito(final!);
+      return toNotaCredito(
+        final!,
+        totalAplicadoAhora,
+        dto.montoTotal - totalAplicadoAhora,
+      );
     });
   }
 
@@ -461,18 +485,28 @@ export class NotasCreditoService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     return this.transaccion(async (session) => {
-      const nota = await this.notasCredito
+      const notaDoc = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      if (!nota) {
+      if (!notaDoc) {
         throw new NotFoundException(`No se encontró la nota crédito ${id}`);
       }
-      if (nota.status !== 'activo') {
+      if (notaDoc.status !== 'activo') {
         throw new ConflictException(
-          `La nota crédito ${nota.fullNumber} está anulada y no admite nuevas aplicaciones`,
+          `La nota crédito ${notaDoc.fullNumber} está anulada y no admite nuevas aplicaciones`,
         );
       }
+      // `unappliedAmount` is no longer a live field on the (now immutable)
+      // NotaCredito — merged in fresh from `SaldoDocumentoOrigen`, same
+      // pattern `decrementarSaldoFactura` uses for its own return value.
+      const saldoOrigen = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: notaDoc._id })
+        .session(session)
+        .exec();
+      const nota = Object.assign(notaDoc, {
+        unappliedAmount: saldoOrigen?.saldoDisponible ?? 0,
+      });
 
       if (dto.aplicaciones?.length) {
         const creadas = await this.aplicarManual(
@@ -494,16 +528,12 @@ export class NotasCreditoService {
             totalAplicado,
           );
         }
-        const notaFinal = await this.notasCredito
-          .findOne({ _id: id, coPropertyId })
-          .session(session)
-          .exec();
         const fechaNota = fechaNotaCredito(nota);
         return {
           aplicadas: creadas.map((a) =>
             toAplicacionCartera(a, null, fechaNota),
           ),
-          montoSinAplicar: notaFinal!.unappliedAmount,
+          montoSinAplicar: nota.unappliedAmount - totalAplicado,
           errores: [],
         };
       }
@@ -620,18 +650,15 @@ export class NotasCreditoService {
       creadas.push(creada);
     }
 
-    await this.notasCredito
-      .findOneAndUpdate(
-        { _id: nota._id, coPropertyId },
-        {
-          $inc: {
-            appliedAmount: sumaSolicitada,
-            unappliedAmount: -sumaSolicitada,
-          },
-        },
-        { session },
-      )
-      .exec();
+    await decrementarSaldoDocumentoOrigen(
+      this.notasCredito,
+      this.saldoDocumentoOrigen,
+      session,
+      coPropertyId,
+      nota._id,
+      sumaSolicitada,
+      'activo',
+    );
 
     return creadas;
   }
@@ -755,18 +782,15 @@ export class NotasCreditoService {
     }
 
     if (totalAplicado > 0) {
-      await this.notasCredito
-        .findOneAndUpdate(
-          { _id: nota._id, coPropertyId },
-          {
-            $inc: {
-              appliedAmount: totalAplicado,
-              unappliedAmount: -totalAplicado,
-            },
-          },
-          { session },
-        )
-        .exec();
+      await decrementarSaldoDocumentoOrigen(
+        this.notasCredito,
+        this.saldoDocumentoOrigen,
+        session,
+        coPropertyId,
+        nota._id,
+        totalAplicado,
+        'activo',
+      );
     }
 
     return { aplicadas, errores, montoSinAplicar: restante };
@@ -802,18 +826,32 @@ export class NotasCreditoService {
     );
 
     return this.transaccion(async (session) => {
-      const nota = await this.notasCredito
+      const notaDoc = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      if (!nota) {
+      if (!notaDoc) {
         throw new NotFoundException(`No se encontró la nota crédito ${id}`);
       }
-      if (nota.status === 'anulado') {
+      if (notaDoc.status === 'anulado') {
         throw new ConflictException(
-          `La nota crédito ${nota.fullNumber} ya está anulada`,
+          `La nota crédito ${notaDoc.fullNumber} ya está anulada`,
         );
       }
+      // `appliedAmount`/`unappliedAmount` are no longer live fields on the
+      // (now immutable) NotaCredito — merged in fresh from
+      // `SaldoDocumentoOrigen` so the reversing entry below (which reads the
+      // note's OWN cached totals) sees the REAL current split.
+      const saldoOrigenPrevio = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: notaDoc._id })
+        .session(session)
+        .exec();
+      const nota = Object.assign(notaDoc, {
+        unappliedAmount: saldoOrigenPrevio?.saldoDisponible ?? 0,
+        appliedAmount:
+          (saldoOrigenPrevio?.montoOriginal ?? 0) -
+          (saldoOrigenPrevio?.saldoDisponible ?? 0),
+      });
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
@@ -1003,12 +1041,21 @@ export class NotasCreditoService {
           { session },
         )
         .exec();
+      // The REAL live balance — `SaldoDocumentoOrigen` — goes to zero too,
+      // same "no anticipo, no applied amount" outcome as the `$set` above.
+      await this.saldoDocumentoOrigen
+        .updateOne(
+          { documentoId: id },
+          { $set: { saldoDisponible: 0 } },
+          { session },
+        )
+        .exec();
 
       const final = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaCredito(final!);
+      return toNotaCredito(final!, 0, 0);
     });
   }
 
@@ -1026,7 +1073,19 @@ export class NotasCreditoService {
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
-    if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
+    if (query.conAnticipoDisponible) {
+      // No longer a field on NotaCredito itself — resolve candidate ids from
+      // `SaldoDocumentoOrigen` first, same pattern `RecibosService.findAll`
+      // already uses.
+      const conSaldo = await this.saldoDocumentoOrigen
+        .find({
+          coPropertyId,
+          tipoDocumento: 'NC',
+          saldoDisponible: { $gt: 0 },
+        })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
+    }
     if (query.desde || query.hasta) {
       const rango = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
@@ -1056,8 +1115,28 @@ export class NotasCreditoService {
       this.notasCredito.countDocuments(filtro).exec(),
     ]);
 
+    const ids = documentos.map((d) => d._id);
+    const saldos = ids.length
+      ? await this.saldoDocumentoOrigen
+          .find({ documentoId: { $in: ids } })
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [
+        s.documentoId.toString(),
+        { montoOriginal: s.montoOriginal, saldoDisponible: s.saldoDisponible },
+      ]),
+    );
+
     return {
-      items: documentos.map((doc) => toNotaCredito(doc)),
+      items: documentos.map((doc) => {
+        const saldo = saldoPorDocumento.get(doc._id.toString());
+        const montoSinAplicar = saldo?.saldoDisponible ?? 0;
+        const montoAplicado = saldo
+          ? saldo.montoOriginal - saldo.saldoDisponible
+          : 0;
+        return toNotaCredito(doc, montoAplicado, montoSinAplicar);
+      }),
       total,
       pagina,
       porPagina,
@@ -1077,6 +1156,13 @@ export class NotasCreditoService {
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota crédito ${id}`);
     }
+    const saldoOrigen = await this.saldoDocumentoOrigen
+      .findOne({ documentoId: nota._id })
+      .exec();
+    const montoSinAplicar = saldoOrigen?.saldoDisponible ?? 0;
+    const montoAplicado = saldoOrigen
+      ? saldoOrigen.montoOriginal - saldoOrigen.saldoDisponible
+      : 0;
     const aplicaciones = await this.aplicaciones
       .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
       .sort({ appliedAt: 1 })
@@ -1102,7 +1188,13 @@ export class NotasCreditoService {
       facturasDoc.map((f) => [f._id.toString(), f.fullNumber]),
     );
 
-    return toNotaCreditoDetalle(nota, aplicaciones, numerosPorDocumento);
+    return toNotaCreditoDetalle(
+      nota,
+      montoAplicado,
+      montoSinAplicar,
+      aplicaciones,
+      numerosPorDocumento,
+    );
   }
 
   /**

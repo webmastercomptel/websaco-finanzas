@@ -38,6 +38,10 @@ const documento = (over: Record<string, unknown> = {}) => ({
   subtotal: 520000,
   totalTax: 0,
   total: 520000,
+  // No longer a real field on the document (see `SaldoTotalDocumento`'s own
+  // docblock) — kept on this fixture purely as the INPUT the test mocks
+  // below (`modeloSaldoTotalDocumento`) read to build their own live rows,
+  // never read by `FacturasService` itself anymore.
   outstandingBalance: 520000,
   status: 'emitida',
   voidedByCreditNoteId: null,
@@ -66,6 +70,85 @@ const modeloCon = (filas: unknown[], total = filas.length) => {
   };
 };
 
+/** `SaldoTotalDocumento` mock, backed by the same fixtures passed to
+ *  `modeloCon` — reads each document's own `outstandingBalance` field as the
+ *  live `saldoPendiente` it now stands in for (see `facturas.service.ts`'s
+ *  own docblock). Handles both query shapes `FacturasService` makes: the
+ *  `conSaldoPendiente` candidate query (no `documentoId` filter, just
+ *  `saldoPendiente: { $gt: 0 }`) and the post-page batch lookup
+ *  (`documentoId: { $in: [...] }`, unfiltered by balance). */
+const modeloSaldoTotalDocumento = (
+  filas: { _id: { toString(): string }; outstandingBalance?: number }[],
+) => {
+  const filtros: Filtro[] = [];
+  return {
+    filtros,
+    find: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      const idsFiltro = (filtro.documentoId as { $in?: unknown[] } | undefined)
+        ?.$in;
+      const resultado = idsFiltro
+        ? filas.filter((f) => idsFiltro.map(String).includes(f._id.toString()))
+        : filas.filter((f) => (f.outstandingBalance ?? 0) > 0);
+      return {
+        exec: () =>
+          Promise.resolve(
+            resultado.map((f) => ({
+              documentoId: f._id,
+              saldoPendiente: f.outstandingBalance ?? 0,
+            })),
+          ),
+      };
+    }),
+    findOne: jest.fn((filtro: Filtro) => {
+      filtros.push(filtro);
+      const fila = filas.find(
+        (f) =>
+          f._id.toString() ===
+          (filtro.documentoId as { toString(): string }).toString(),
+      );
+      return {
+        exec: () =>
+          Promise.resolve(
+            fila
+              ? {
+                  documentoId: fila._id,
+                  saldoPendiente: fila.outstandingBalance ?? 0,
+                }
+              : null,
+          ),
+      };
+    }),
+  };
+};
+
+/** `CarteraPorDocumento` mock, deriving each línea's own `saldoPendiente`
+ *  from that línea's frozen `totalAmount` (none of these fixtures model a
+ *  partial payment) — enough for `toFactura`'s per-línea breakdown, never
+ *  asserted on in detail by the tests below. */
+const modeloCarteraPorDocumento = (
+  filas: {
+    _id: { toString(): string };
+    lines: { conceptoId: { toString(): string }; totalAmount: number }[];
+  }[],
+) => ({
+  find: jest.fn((filtro: Filtro) => {
+    const idsFiltro =
+      (filtro.documentoId as { $in?: unknown[] } | undefined)?.$in ?? [];
+    const ids = idsFiltro.map(String);
+    const filas_ = filas
+      .filter((f) => ids.includes(f._id.toString()))
+      .flatMap((f) =>
+        f.lines.map((linea) => ({
+          documentoId: f._id,
+          conceptoId: linea.conceptoId,
+          saldoPendiente: linea.totalAmount,
+        })),
+      );
+    return { exec: () => Promise.resolve(filas_) };
+  }),
+});
+
 const tenantQueDevuelve = (id: Types.ObjectId | null): TenantContextService =>
   ({
     resolveCoPropertyId: () => {
@@ -74,25 +157,34 @@ const tenantQueDevuelve = (id: Types.ObjectId | null): TenantContextService =>
     },
   }) as unknown as TenantContextService;
 
+/** Builds a `FacturasService` wired against the SAME set of fixtures across
+ *  all three of its models — `facturas`, `saldoTotalDocumento`,
+ *  `carteraPorDocumento` — so a test only has to declare its documento(s)
+ *  once. */
+const construirServicio = (filas: ReturnType<typeof documento>[]) => {
+  const facturas = modeloCon(filas);
+  const saldoTotalDocumento = modeloSaldoTotalDocumento(filas);
+  const carteraPorDocumento = modeloCarteraPorDocumento(filas);
+  const service = new FacturasService(
+    facturas as never,
+    saldoTotalDocumento as never,
+    carteraPorDocumento as never,
+    tenantQueDevuelve(COP),
+  );
+  return { service, facturas, saldoTotalDocumento, carteraPorDocumento };
+};
+
 describe('FacturasService.findAll', () => {
   it('filtra SIEMPRE por la copropiedad activa', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].coPropertyId).toBe(COP);
+    expect(facturas.filtros[0].coPropertyId).toBe(COP);
   });
 
   it('devuelve el contrato en español, con el titular congelado', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service } = construirServicio([documento()]);
 
     const { items } = await service.findAll({});
 
@@ -107,23 +199,15 @@ describe('FacturasService.findAll', () => {
 
 describe('FacturasService.findOne', () => {
   it('busca por id Y copropiedad en la misma consulta', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findOne('fac-1');
 
-    expect(modelo.filtros[0]).toEqual({ _id: 'fac-1', coPropertyId: COP });
+    expect(facturas.filtros[0]).toEqual({ _id: 'fac-1', coPropertyId: COP });
   });
 
   it('responde "no existe" para una factura de otra copropiedad', async () => {
-    const modelo = modeloCon([]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service } = construirServicio([]);
 
     await expect(service.findOne('fac-ajena')).rejects.toBeInstanceOf(
       NotFoundException,
@@ -132,184 +216,142 @@ describe('FacturasService.findOne', () => {
 });
 
 describe('FacturasService.findAll — conSaldoPendiente', () => {
-  it('filtra por outstandingBalance > 0 cuando conSaldoPendiente es true', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+  it('filtra por SaldoTotalDocumento.saldoPendiente > 0 cuando conSaldoPendiente es true', async () => {
+    const doc = documento();
+    const { service, facturas, saldoTotalDocumento } = construirServicio([doc]);
 
     await service.findAll({ conSaldoPendiente: true });
 
-    expect(modelo.filtros[0]).toMatchObject({
-      outstandingBalance: { $gt: 0 },
+    expect(saldoTotalDocumento.filtros[0]).toMatchObject({
+      coPropertyId: COP,
+      tipoDocumento: 'FV',
+      saldoPendiente: { $gt: 0 },
+    });
+    expect(facturas.filtros[0]).toMatchObject({
       status: 'emitida',
+      _id: { $in: [doc._id] },
     });
   });
 
   it('no aplica el filtro cuando conSaldoPendiente es false o ausente', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].outstandingBalance).toBeUndefined();
-    expect(modelo.filtros[0].status).toBeUndefined();
+    expect(facturas.filtros[0]._id).toBeUndefined();
+    expect(facturas.filtros[0].status).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — estado', () => {
   it('filtra por status cuando se pasa estado', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ estado: 'anulada' });
 
-    expect(modelo.filtros[0].status).toBe('anulada');
+    expect(facturas.filtros[0].status).toBe('anulada');
   });
 
   it('estado explícito gana por sobre el status implícito de conSaldoPendiente', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const doc = documento();
+    const { service, facturas } = construirServicio([doc]);
 
     await service.findAll({ estado: 'anulada', conSaldoPendiente: true });
 
-    expect(modelo.filtros[0]).toMatchObject({
+    expect(facturas.filtros[0]).toMatchObject({
       status: 'anulada',
-      outstandingBalance: { $gt: 0 },
+      _id: { $in: [doc._id] },
     });
   });
 
   it('no aplica el filtro cuando estado está ausente', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].status).toBeUndefined();
+    expect(facturas.filtros[0].status).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
   it('filtra issueDate por rango cuando se pasan ambos extremos', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({
       fechaDesde: '2026-08-01',
       fechaHasta: '2026-08-31',
     });
 
-    expect(modelo.filtros[0].issueDate).toEqual({
+    expect(facturas.filtros[0].issueDate).toEqual({
       $gte: new Date('2026-08-01'),
       $lte: new Date('2026-08-31'),
     });
   });
 
   it('filtra con un solo extremo cuando el otro está ausente', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ fechaDesde: '2026-08-01' });
 
-    expect(modelo.filtros[0].issueDate).toEqual({
+    expect(facturas.filtros[0].issueDate).toEqual({
       $gte: new Date('2026-08-01'),
     });
   });
 
   it('no aplica el filtro cuando ambos extremos están ausentes', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].issueDate).toBeUndefined();
+    expect(facturas.filtros[0].issueDate).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — buscar', () => {
   it('filtra por fullNumber con regex insensible a mayúsculas cuando se pasa buscar', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ buscar: '1041' });
 
-    expect(modelo.filtros[0].fullNumber).toEqual({
+    expect(facturas.filtros[0].fullNumber).toEqual({
       $regex: '1041',
       $options: 'i',
     });
   });
 
   it('escapa caracteres especiales de regex en buscar', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ buscar: 'CONJ-2026(1041)' });
 
-    expect((modelo.filtros[0].fullNumber as { $regex: string }).$regex).toBe(
+    expect((facturas.filtros[0].fullNumber as { $regex: string }).$regex).toBe(
       'CONJ-2026\\(1041\\)',
     );
   });
 
   it('no aplica el filtro cuando buscar está ausente', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].fullNumber).toBeUndefined();
+    expect(facturas.filtros[0].fullNumber).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAllRawPorLote', () => {
   it('filtra por copropiedad Y loteId, ordenado por código de unidad', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service, facturas } = construirServicio([documento()]);
 
     await service.findAllRawPorLote('lote-1');
 
-    expect(modelo.filtros[0]).toEqual({ coPropertyId: COP, loteId: 'lote-1' });
+    expect(facturas.filtros[0]).toEqual({
+      coPropertyId: COP,
+      loteId: 'lote-1',
+    });
   });
 
   it('devuelve los documentos crudos, no el contrato mapeado', async () => {
-    const modelo = modeloCon([documento()]);
-    const service = new FacturasService(
-      modelo as never,
-      tenantQueDevuelve(COP),
-    );
+    const { service } = construirServicio([documento()]);
 
     const resultado = await service.findAllRawPorLote('lote-1');
 

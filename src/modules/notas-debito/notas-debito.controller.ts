@@ -84,8 +84,11 @@ export class NotasDebitoController {
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
-    const nota = await this.notasDebito.findOneRaw(id);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [nota, detalle, copropiedad] = await Promise.all([
+      this.notasDebito.findOneRaw(id),
+      this.notasDebito.findOne(id),
+      this.copropiedades.findById(coPropertyId).exec(),
+    ]);
 
     if (!copropiedad) {
       throw new Error(
@@ -93,9 +96,12 @@ export class NotasDebitoController {
       );
     }
 
-    const bytes = await generarPdfNotaDebito(nota, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
+    const bytes = await generarPdfNotaDebito(
+      nota,
+      detalle.saldoPendiente,
+      copropiedad,
+      { duplicado: duplicado === 'true' },
+    );
 
     res.set({
       'Content-Type': 'application/pdf',

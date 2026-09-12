@@ -30,6 +30,10 @@ import {
   SaldoTotalDocumentoDocument,
 } from '../../database/schemas/facturacion/saldo-total-documento.schema';
 import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -67,6 +71,7 @@ import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
+import { restaurarSaldoDocumentoOrigen } from '../recibos/cruce.util';
 import {
   construirContraAsientoNotaDebito,
   construirMovimientos,
@@ -121,6 +126,8 @@ export class NotasDebitoService {
     private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -578,13 +585,21 @@ export class NotasDebitoService {
       // side (Recibo/NotaCredito/NotaAnticipo) — that money becomes free to
       // apply elsewhere, it does NOT come back to this concepto, because this
       // concepto's charge no longer exists once voided. So the net cartera
-      // effect to remove is exactly `nota.outstandingBalance` (whatever is
-      // STILL pending right now, before it gets forced to 0 below) — not
-      // `nota.total`: the portion already paid off left this concepto's
-      // balance for good the moment it was applied, same reasoning
-      // `decrementarSaldoNotaDebito`'s own docblock gives for never restoring
-      // on a stale guard failure.
-      if (nota.outstandingBalance > 0) {
+      // effect to remove is exactly this ND's CURRENT pending balance
+      // (whatever is STILL pending right now, before it gets forced to 0
+      // below) — not `nota.total`: the portion already paid off left this
+      // concepto's balance for good the moment it was applied, same
+      // reasoning `decrementarSaldoNotaDebito`'s own docblock gives for
+      // never restoring on a stale guard failure. No longer a field on the
+      // (now immutable) `nota` document itself — resolved fresh from
+      // `SaldoTotalDocumento`, same live source `decrementarSaldoNotaDebito`
+      // itself reads/writes.
+      const saldoActual = await this.saldoTotalDocumento
+        .findOne({ documentoId: nota._id })
+        .session(session)
+        .exec();
+      const saldoPendienteActual = saldoActual?.saldoPendiente ?? 0;
+      if (saldoPendienteActual > 0) {
         await this.saldos
           .findOneAndUpdate(
             {
@@ -596,7 +611,7 @@ export class NotasDebitoService {
               {
                 $set: {
                   balance: {
-                    $max: [0, { $add: ['$balance', -nota.outstandingBalance] }],
+                    $max: [0, { $add: ['$balance', -saldoPendienteActual] }],
                   },
                 },
               },
@@ -664,31 +679,22 @@ export class NotasDebitoService {
     aplicacion: AplicacionCarteraDocument,
   ): Promise<void> {
     if (aplicacion.sourceType === 'RC') {
-      await this.recibos
-        .findOneAndUpdate(
-          { _id: aplicacion.sourceId, coPropertyId },
-          {
-            $inc: {
-              unappliedAmount: aplicacion.amountApplied,
-              appliedAmount: -aplicacion.amountApplied,
-            },
-          },
-          { session },
-        )
-        .exec();
+      // Live source of `unappliedAmount`/`appliedAmount` is
+      // `SaldoDocumentoOrigen` now — the Recibo itself is immutable once
+      // issued (see that schema's own docblock).
+      await restaurarSaldoDocumentoOrigen(
+        this.saldoDocumentoOrigen,
+        session,
+        aplicacion.sourceId,
+        aplicacion.amountApplied,
+      );
     } else if (aplicacion.sourceType === 'NC') {
-      await this.notasCredito
-        .findOneAndUpdate(
-          { _id: aplicacion.sourceId, coPropertyId },
-          {
-            $inc: {
-              unappliedAmount: aplicacion.amountApplied,
-              appliedAmount: -aplicacion.amountApplied,
-            },
-          },
-          { session },
-        )
-        .exec();
+      await restaurarSaldoDocumentoOrigen(
+        this.saldoDocumentoOrigen,
+        session,
+        aplicacion.sourceId,
+        aplicacion.amountApplied,
+      );
     } else if (aplicacion.sourceType === 'NA') {
       const notaAnticipo = await this.notasAnticipo
         .findOneAndUpdate(
@@ -698,18 +704,12 @@ export class NotasDebitoService {
         )
         .exec();
       if (notaAnticipo) {
-        await this.recibos
-          .findOneAndUpdate(
-            { _id: notaAnticipo.reciboOrigenId, coPropertyId },
-            {
-              $inc: {
-                unappliedAmount: aplicacion.amountApplied,
-                appliedAmount: -aplicacion.amountApplied,
-              },
-            },
-            { session },
-          )
-          .exec();
+        await restaurarSaldoDocumentoOrigen(
+          this.saldoDocumentoOrigen,
+          session,
+          notaAnticipo.reciboOrigenId,
+          aplicacion.amountApplied,
+        );
       }
     }
   }

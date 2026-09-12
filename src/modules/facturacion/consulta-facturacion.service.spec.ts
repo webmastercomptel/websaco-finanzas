@@ -78,6 +78,10 @@ const conceptosModeloCon = (filas: unknown[]) => ({
   find: jest.fn(() => ({ exec: () => Promise.resolve(filas) })),
 });
 
+const saldoTotalDocumentoModeloCon = (filas: unknown[]) => ({
+  find: jest.fn(() => ({ exec: () => Promise.resolve(filas) })),
+});
+
 const tenantQueDevuelve = (id: Types.ObjectId | null): TenantContextService =>
   ({
     resolveCoPropertyId: () => {
@@ -90,11 +94,13 @@ const makeService = (opts: {
   lote?: unknown[];
   facturas?: unknown[];
   conceptos?: unknown[];
+  saldos?: unknown[];
 }) =>
   new ConsultaFacturacionService(
     facturasModeloCon(opts.facturas ?? []) as never,
     loteModeloCon(opts.lote ?? [lote()]) as never,
     conceptosModeloCon(opts.conceptos ?? [concepto()]) as never,
+    saldoTotalDocumentoModeloCon(opts.saldos ?? []) as never,
     tenantQueDevuelve(COP),
   );
 
@@ -222,6 +228,23 @@ describe('ConsultaFacturacionService.generar', () => {
       0,
     );
     expect(sumaBase + sumaIva).toBe(fila.total);
+  });
+
+  it('resuelve id, titular, saldoPendiente y estado por fila — mismas columnas que Facturas', async () => {
+    const service = makeService({
+      facturas: [factura({ holder: { name: 'Juan Pérez' } })],
+      saldos: [
+        { documentoId: { toString: () => 'fac-1' }, saldoPendiente: 40000 },
+      ],
+    });
+    const resultado = await service.generar('lote-1');
+
+    expect(resultado.filas[0]).toMatchObject({
+      id: 'fac-1',
+      titular: { nombre: 'Juan Pérez' },
+      saldoPendiente: 40000,
+      estado: 'emitida',
+    });
   });
 
   it('un lote consolidado sin facturas devuelve arrays vacíos sin lanzar', async () => {

@@ -64,21 +64,268 @@ const modeloFacturas = (factura: Record<string, unknown>) => ({
   })),
   // Used by `findOne()`'s batch `numerosPorDocumento` resolution — never by
   // `crear()`/`aplicar()`, which only ever read one Factura at a time via
-  // `findOne`/`findOneAndUpdate` above.
+  // `findOne` above. The atomic guard itself lives on `SaldoTotalDocumento`
+  // now (see `modeloSaldoTotalDocumento`) — `Factura` is immutable, so this
+  // model never gets a `findOneAndUpdate` again.
   find: jest.fn(() => ({ exec: () => Promise.resolve([factura]) })),
-  findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
+});
+
+/** Combined `SaldoTotalDocumento` mock, backed by whichever Factura fixtures
+ *  the caller passes — same shared-mutable-state trick `modeloFacturas` used
+ *  to run directly on `outstandingBalance`, just relocated off the (now
+ *  immutable) Factura onto this collection instead. Mirrors
+ *  `recibos.service.spec.ts`'s own helper of the same name. */
+const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoPendiente: number } },
+    ) => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        if (!doc) return Promise.resolve(null);
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((doc.outstandingBalance as number) < monto) {
+            return Promise.resolve(null);
+          }
+          doc.outstandingBalance = (doc.outstandingBalance as number) - monto;
+        } else if (update.$inc) {
+          doc.outstandingBalance =
+            (doc.outstandingBalance as number) + update.$inc.saldoPendiente;
+        }
+        return Promise.resolve({
+          documentoId: doc._id,
+          saldoPendiente: doc.outstandingBalance,
+        });
+      },
+    }),
+  ),
+  findOne: jest.fn((filtro: Record<string, unknown>) => ({
+    session: () => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        return Promise.resolve(
+          doc
+            ? { documentoId: doc._id, saldoPendiente: doc.outstandingBalance }
+            : null,
+        );
+      },
+    }),
+  })),
+  find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
+    session: () => ({
+      exec: () => {
+        const ids = (filtro.documentoId?.$in ?? []).map(String);
+        return Promise.resolve(
+          documentos
+            .filter(
+              (d) =>
+                ids.includes(String(d._id)) &&
+                (d.outstandingBalance as number) > 0,
+            )
+            .map((d) => ({
+              documentoId: d._id,
+              saldoPendiente: d.outstandingBalance,
+            })),
+        );
+      },
+    }),
+  })),
+});
+
+/** Single-document leniency variant of `modeloSaldoTotalDocumento`, mirroring
+ *  `modeloFacturas`'s own long-standing leniency: `construirServicio` never
+ *  ties its one `factura` fixture to the id `dtoBase()` happens to submit
+ *  (`dtoBase().facturaId` is an independently-generated `ObjectId`, same as
+ *  it always has been) — so, like `modeloFacturas`, this ignores whichever
+ *  `documentoId` it's asked about and always answers for the one `factura`
+ *  it was built with. Tests that DO need real per-id matching across two+
+ *  documents (aplicar/anular against a specific OTHER factura) build their
+ *  own `modeloSaldoTotalDocumento([...])` instead — this one is for
+ *  `construirServicio` only. */
+const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoPendiente: number } },
+    ) => ({
+      exec: () => {
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((factura.outstandingBalance as number) < monto) {
+            return Promise.resolve(null);
+          }
+          factura.outstandingBalance =
+            (factura.outstandingBalance as number) - monto;
+        } else if (update.$inc) {
+          factura.outstandingBalance =
+            (factura.outstandingBalance as number) + update.$inc.saldoPendiente;
+        }
+        return Promise.resolve({
+          documentoId: factura._id,
+          saldoPendiente: factura.outstandingBalance,
+        });
+      },
+    }),
+  ),
+  findOne: jest.fn(() => ({
+    session: () => ({
+      exec: () =>
+        Promise.resolve({
+          documentoId: factura._id,
+          saldoPendiente: factura.outstandingBalance,
+        }),
+    }),
+  })),
+  find: jest.fn(() => ({
+    session: () => ({
+      exec: () =>
+        Promise.resolve([
+          {
+            documentoId: factura._id,
+            saldoPendiente: factura.outstandingBalance,
+          },
+        ]),
+    }),
+  })),
+});
+
+/** `SaldoDocumentoOrigen` mock, backed by whichever NotaCredito fixtures the
+ *  caller passes — same shared-mutable-state trick `modeloSaldoTotalDocumento`
+ *  uses, just for the SOURCE side (NotaCredito) instead of the charge side.
+ *  Reuses each fixture's own `unappliedAmount` as the live `saldoDisponible`
+ *  and `totalAmount` as the frozen `montoOriginal`. Mirrors
+ *  `recibos.service.spec.ts`'s own helper of the same name. */
+const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
+  create: jest.fn(() => Promise.resolve([{}])),
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoDisponible: number } },
+    ) => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        if (!doc) return Promise.resolve(null);
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((doc.unappliedAmount as number) < monto) {
+            return Promise.resolve(null);
+          }
+          doc.unappliedAmount = (doc.unappliedAmount as number) - monto;
+        } else if (update.$inc) {
+          doc.unappliedAmount =
+            (doc.unappliedAmount as number) + update.$inc.saldoDisponible;
+        }
+        return Promise.resolve({
+          documentoId: doc._id,
+          montoOriginal: doc.totalAmount,
+          saldoDisponible: doc.unappliedAmount,
+        });
+      },
+    }),
+  ),
+  // `findOne` is called both ways: bare `.exec()` (`findOne()`/`findAll()`
+  // service methods) and `.session(session).exec()` (`aplicar()`/`anular()`'s
+  // own transactions) — `.session()` returns the same chainable object so
+  // either call shape resolves.
+  findOne: jest.fn((filtro: Record<string, unknown>) => {
+    const resultado = (() => {
+      const doc = documentos.find(
+        (d) => String(d._id) === String(filtro.documentoId),
+      );
+      return doc
+        ? {
+            documentoId: doc._id,
+            montoOriginal: doc.totalAmount,
+            saldoDisponible: doc.unappliedAmount,
+          }
+        : null;
+    })();
+    const cadena = {
+      session: () => cadena,
+      exec: () => Promise.resolve(resultado),
+    };
+    return cadena;
+  }),
+  updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  // Handles both query shapes `findAll` makes: the `conAnticipoDisponible`
+  // candidate query (no `documentoId` filter, just `saldoDisponible: {$gt:
+  // 0}`) and the post-page batch lookup (`documentoId: {$in: [...]}`).
+  find: jest.fn((filtro: Record<string, unknown>) => ({
     exec: () => {
-      const expr = filtro.$expr as { $gte: [string, number] } | undefined;
-      const monto = expr?.$gte?.[1];
-      const saldo = factura.outstandingBalance as number;
-      if (typeof monto === 'number' && saldo < monto) {
-        return Promise.resolve(null);
-      }
-      return Promise.resolve({
-        ...factura,
-        outstandingBalance: monto === undefined ? saldo : saldo - monto,
-      });
+      const idsFiltro = (filtro.documentoId as { $in?: unknown[] } | undefined)
+        ?.$in;
+      const resultado = idsFiltro
+        ? documentos.filter((d) =>
+            idsFiltro.map(String).includes(String(d._id)),
+          )
+        : documentos.filter((d) => (d.unappliedAmount as number) > 0);
+      return Promise.resolve(
+        resultado.map((d) => ({
+          documentoId: d._id,
+          saldoDisponible: d.unappliedAmount,
+        })),
+      );
     },
+  })),
+});
+
+/** Single-document leniency variant, mirroring `modeloSaldoTotalDocumentoUnico`
+ *  — `construirServicio` never ties its one `notaCreada` fixture to a real
+ *  matching id the same way `modeloSaldoTotalDocumentoUnico` doesn't for
+ *  `factura`, so this ignores whichever `documentoId` it's asked about and
+ *  always answers for the one `nota` it was built with. */
+const modeloSaldoDocumentoOrigenUnico = (nota: Record<string, unknown>) => ({
+  create: jest.fn(() => Promise.resolve([{}])),
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoDisponible: number } },
+    ) => ({
+      exec: () => {
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((nota.unappliedAmount as number) < monto) {
+            return Promise.resolve(null);
+          }
+          nota.unappliedAmount = (nota.unappliedAmount as number) - monto;
+        } else if (update.$inc) {
+          nota.unappliedAmount =
+            (nota.unappliedAmount as number) + update.$inc.saldoDisponible;
+        }
+        return Promise.resolve({
+          documentoId: nota._id,
+          montoOriginal: nota.totalAmount,
+          saldoDisponible: nota.unappliedAmount,
+        });
+      },
+    }),
+  ),
+  findOne: jest.fn(() => {
+    const resultado = {
+      documentoId: nota._id,
+      montoOriginal: nota.totalAmount,
+      saldoDisponible: nota.unappliedAmount,
+    };
+    const cadena = {
+      session: () => cadena,
+      exec: () => Promise.resolve(resultado),
+    };
+    return cadena;
+  }),
+  updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  find: jest.fn(() => ({
+    exec: () =>
+      Promise.resolve([
+        { documentoId: nota._id, saldoDisponible: nota.unappliedAmount },
+      ]),
   })),
 });
 
@@ -135,6 +382,8 @@ const construirServicio = (opts: {
   const notasCredito = modeloNotasCredito(opts.notaCreada);
   const factura = opts.factura ?? facturaDoc();
   const facturas = modeloFacturas(factura);
+  const saldoTotalDocumento = modeloSaldoTotalDocumentoUnico(factura);
+  const saldoDocumentoOrigen = modeloSaldoDocumentoOrigenUnico(opts.notaCreada);
   const saldos = opts.saldos ?? modeloSaldos();
   const carteraPorDocumento = modeloCarteraPorDocumento();
   const aplicaciones = modeloAplicaciones();
@@ -159,12 +408,14 @@ const construirServicio = (opts: {
     facturas as never,
     saldos as never,
     carteraPorDocumento as never,
+    saldoTotalDocumento as never,
     asientos as never,
     copropiedades as never,
     tenantQueDevuelve(COP),
     numeracionQueEntrega('NC-1'),
     conexionCon(session),
     lotesFacturacionFalso(opts.ultimoLoteConsolidado ?? null),
+    saldoDocumentoOrigen as never,
     cuentasContables as never,
     inmuebles as never,
   );
@@ -173,6 +424,8 @@ const construirServicio = (opts: {
     service,
     notasCredito,
     facturas,
+    saldoTotalDocumento,
+    saldoDocumentoOrigen,
     saldos,
     aplicaciones,
     asientos,
@@ -223,7 +476,7 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
 describe('NotasCreditoService.crear', () => {
   it('contra una factura con saldo suficiente, aplica en su totalidad y no deja anticipo', async () => {
     const notaCreada = notaCreditoCreada();
-    const { service, aplicaciones, notasCredito } = construirServicio({
+    const { service, aplicaciones, saldoDocumentoOrigen } = construirServicio({
       notaCreada,
     });
 
@@ -243,10 +496,16 @@ describe('NotasCreditoService.crear', () => {
     expect(filas[0].detalleConceptos).toEqual([
       { conceptoId: CONCEPTO, conceptName: 'Concepto', monto: 200000 },
     ]);
-    expect(notasCredito.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({}),
-      { $inc: { appliedAmount: 200000, unappliedAmount: -200000 } },
-      expect.objectContaining({}),
+    // La NotaCredito ya no cachea `appliedAmount`/`unappliedAmount` — el
+    // decremento vivo ahora es el `$expr`-guarded `findOneAndUpdate` contra
+    // `SaldoDocumentoOrigen` (ver `decrementarSaldoDocumentoOrigen`).
+    expect(saldoDocumentoOrigen.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentoId: notaCreada._id,
+        $expr: { $gte: ['$saldoDisponible', 200000] },
+      }),
+      { $inc: { saldoDisponible: -200000 } },
+      expect.objectContaining({ returnDocument: 'after' }),
     );
   });
 
@@ -493,12 +752,14 @@ describe('NotasCreditoService.crear', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracion,
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -565,8 +826,11 @@ describe('NotasCreditoService.crear', () => {
     });
     const notaCreada = notaCreditoCreada({
       totalAmount: 400000,
-      unappliedAmount: 0,
-      appliedAmount: 400000,
+      // El saldo VIVO pre-aplicación (`SaldoDocumentoOrigen`, reusa este
+      // mismo campo de fixture) tiene que arrancar en el monto total: esta
+      // es la auto-aplicación de `crear()` contra la factura ancla, no un
+      // estado final ya aplicado.
+      unappliedAmount: 400000,
       distribution: [
         { conceptoId: conceptoP, amount: 250000 },
         { conceptoId: conceptoQ, amount: 150000 },
@@ -817,18 +1081,21 @@ describe('NotasCreditoService.aplicar', () => {
     });
     const facturas = modeloFacturas(otraFactura);
     const aplicaciones = modeloAplicaciones();
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([otraFactura]);
     const service = new NotasCreditoService(
       notasCredito as never,
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([nota]) as never,
     );
 
     const resultado = await service.aplicar(
@@ -913,12 +1180,14 @@ describe('NotasCreditoService.aplicar', () => {
       facturas as never,
       saldos as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([otraFactura]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([nota]) as never,
     );
 
     await service.aplicar(
@@ -1003,12 +1272,14 @@ describe('NotasCreditoService.aplicar', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -1032,12 +1303,14 @@ describe('NotasCreditoService.aplicar', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -1060,23 +1333,32 @@ describe('NotasCreditoService.anular', () => {
       amountApplied: 120000,
       status: 'activa',
     };
-    const facturaRestaurada = {
+    const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 200000,
       lines: [],
     };
     const facturas = {
-      // Resolves `desgloseOrigen`'s per-concepto débito accounts — `null`
-      // here just means the reversal falls back to `cuentaDevoluciones`,
-      // which this test doesn't assert on.
-      findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(null) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaRestaurada),
+      // Resolves `desgloseOrigen`'s per-concepto débito accounts (looked up
+      // by `nota.facturaId`, a DIFFERENT id here) — `null` there just means
+      // the reversal falls back to `cuentaDevoluciones`, which this test
+      // doesn't assert on. The reversal loop's own lookup, by
+      // `aplicacion.documentId` (== `facturaId`), DOES need a real document.
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              String(filtro._id) === String(facturaId)
+                ? { ...facturaFrozen }
+                : null,
+            ),
+        }),
       })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 80000 },
+    ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -1103,12 +1385,14 @@ describe('NotasCreditoService.anular', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     const resultado = await service.anular(
@@ -1121,9 +1405,9 @@ describe('NotasCreditoService.anular', () => {
       'acc-1',
     );
 
-    expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: facturaId, coPropertyId: COP },
-      { $inc: { outstandingBalance: 120000 } },
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledWith(
+      { documentoId: facturaId },
+      { $inc: { saldoPendiente: 120000 } },
       { returnDocument: 'after', session: expect.anything() as unknown },
     );
     expect(resultado.estado).toBe('anulado');
@@ -1170,12 +1454,14 @@ describe('NotasCreditoService.anular', () => {
     };
     const facturas = {
       findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(facturaAncla) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaAncla),
+        session: () => ({
+          exec: () => Promise.resolve({ ...facturaAncla } as never),
+        }),
       })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 0 },
+    ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -1202,12 +1488,14 @@ describe('NotasCreditoService.anular', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await service.anular(
@@ -1290,12 +1578,14 @@ describe('NotasCreditoService.anular', () => {
     };
     const facturas = {
       findOne: jest.fn(() => ({
-        session: () => ({ exec: () => Promise.resolve(facturaAncla) }),
-      })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaAncla),
+        session: () => ({
+          exec: () => Promise.resolve({ ...facturaAncla } as never),
+        }),
       })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 0 },
+    ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -1322,6 +1612,7 @@ describe('NotasCreditoService.anular', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       {
         findById: jest.fn(() => ({
@@ -1342,6 +1633,7 @@ describe('NotasCreditoService.anular', () => {
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await service.anular(
@@ -1385,12 +1677,11 @@ describe('NotasCreditoService.anular', () => {
     };
 
     // La factura ya no existe bajo esas condiciones (anulada por otra vía) —
-    // el findOneAndUpdate devuelve null, y el cascade sigue sin lanzar.
+    // el findOne devuelve null, y el cascade sigue sin lanzar.
     const facturas = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(null) }),
       })),
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -1417,12 +1708,14 @@ describe('NotasCreditoService.anular', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -1487,7 +1780,6 @@ describe('NotasCreditoService.anular', () => {
       _id: facturaOtra,
       inmuebleId: INMUEBLE,
       total: 80000,
-      outstandingBalance: 80000, // restaurada por completo: 0 → 80000
       lines: [{ conceptoId: conceptoZ, totalAmount: 80000 }],
     };
 
@@ -1496,24 +1788,31 @@ describe('NotasCreditoService.anular', () => {
       // anchor Factura's own `lines` — no `accountingIncomeAccount` set on
       // them here, so the reversal falls back to `cuentaDevoluciones`, which
       // this test doesn't assert on (it only checks the SaldoCartera math).
-      findOne: jest.fn(() => ({
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
         session: () => ({
-          exec: () => Promise.resolve(facturaAnclaRestaurada),
+          exec: () => {
+            const id = filtro._id as Types.ObjectId;
+            if (id.equals(facturaAncla)) {
+              return Promise.resolve({ ...facturaAnclaRestaurada });
+            }
+            if (id.equals(facturaOtra)) {
+              return Promise.resolve({ ...facturaOtraRestaurada });
+            }
+            return Promise.resolve(null);
+          },
         }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const id = filtro._id as Types.ObjectId;
-          if (id.equals(facturaAncla)) {
-            return Promise.resolve(facturaAnclaRestaurada);
-          }
-          if (id.equals(facturaOtra)) {
-            return Promise.resolve(facturaOtraRestaurada);
-          }
-          return Promise.resolve(null);
-        },
-      })),
     };
+    // `facturaOtra` was fully applied (80000/80000) before this void — the
+    // restore brings its `SaldoTotalDocumento` row back from 0 to 80000,
+    // which is what `ajustarSaldosCartera`'s reverse-cascade needs to derive
+    // "how much of each line was pending before/after" correctly. The
+    // anchor (`facturaAncla`) reverses via distribution math instead, so its
+    // own pre-restore value here is never read.
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaAncla, outstandingBalance: 0 },
+      { _id: facturaOtra, outstandingBalance: 0 },
+    ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -1550,12 +1849,14 @@ describe('NotasCreditoService.anular', () => {
       facturas as never,
       saldos as never,
       modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await service.anular(
@@ -1617,12 +1918,14 @@ describe('NotasCreditoService.anular', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await service.anular(
@@ -1667,12 +1970,14 @@ describe('NotasCreditoService.anular', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -1712,12 +2017,14 @@ describe('NotasCreditoService.findAll', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await service.findAll({
@@ -1742,8 +2049,12 @@ describe('NotasCreditoService.findAll', () => {
     });
   });
 
-  it('aplica conAnticipoDisponible como unappliedAmount > 0', async () => {
+  it('aplica conAnticipoDisponible resolviendo candidatos desde SaldoDocumentoOrigen', async () => {
     const documentos: unknown[] = [];
+    const notaConAnticipo = {
+      _id: new Types.ObjectId(),
+      unappliedAmount: 50000,
+    };
     const notasCredito = {
       find: jest.fn((filtro: Record<string, unknown>) => {
         (notasCredito as unknown as { filtroUsado: unknown }).filtroUsado =
@@ -1764,12 +2075,14 @@ describe('NotasCreditoService.findAll', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([notaConAnticipo]) as never,
     );
 
     await service.findAll({ conAnticipoDisponible: true });
@@ -1777,7 +2090,7 @@ describe('NotasCreditoService.findAll', () => {
     expect(
       (notasCredito as unknown as { filtroUsado: Record<string, unknown> })
         .filtroUsado,
-    ).toMatchObject({ unappliedAmount: { $gt: 0 } });
+    ).toMatchObject({ _id: { $in: [notaConAnticipo._id] } });
   });
 });
 
@@ -1798,12 +2111,14 @@ describe('NotasCreditoService.findOne', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     const detalle = await service.findOne(nota._id.toString());
@@ -1853,12 +2168,14 @@ describe('NotasCreditoService.findOne', () => {
       facturas as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     const detalle = await service.findOne(nota._id.toString());
@@ -1880,12 +2197,14 @@ describe('NotasCreditoService.findOne', () => {
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
       modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
       numeracionQueEntrega('NC-1'),
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(

@@ -87,6 +87,11 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
     (overrides.notasDebito ?? mockFind()) as never,
     (overrides.notasContables ?? mockFind()) as never,
     (overrides.aplicaciones ?? mockFind()) as never,
+    // `unappliedAmount` no longer lives on the Recibo itself — resolved
+    // live from `SaldoDocumentoOrigen` (see that schema's own docblock).
+    // Empty by default: only the "anticipos" test below needs candidate
+    // rows here, and it builds its own to match its own Recibo fixtures.
+    (overrides.saldoDocumentoOrigen ?? mockFind()) as never,
     (overrides.inmuebles ?? mockFindOne()) as never,
     (overrides.terceros ?? mockFindOne()) as never,
     (overrides.copropiedades ?? mockFindById()) as never,
@@ -600,6 +605,13 @@ describe('EstadoCuentaService', () => {
 
       const svc = servicio({
         recibos: mockFind([rConAnticipo, rSinAnticipo, rAnulado]),
+        // Live source of each Recibo's pending balance — only the activos
+        // are ever looked up here (`rAnulado` is filtered out before this
+        // query runs), so its own `unappliedAmount` above is irrelevant.
+        saldoDocumentoOrigen: mockFind([
+          { documentoId: rConAnticipo._id, saldoDisponible: 180200 },
+          { documentoId: rSinAnticipo._id, saldoDisponible: 0 },
+        ]),
         ...svcDefaults(),
       });
 

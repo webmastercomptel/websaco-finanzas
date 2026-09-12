@@ -17,7 +17,12 @@ import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { titularDe } from './facturas.mapper';
 import type {
   RespuestaConsultaFacturacion,
   TotalConceptoLote,
@@ -44,6 +49,8 @@ export class ConsultaFacturacionService {
     private readonly lotes: Model<LoteFacturacionDocument>,
     @InjectModel(ConceptoCobro.name)
     private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -64,6 +71,18 @@ export class ConsultaFacturacionService {
       .find({ coPropertyId, loteId, status: 'emitida' })
       .sort({ unitCode: 1 })
       .exec();
+
+    // Live balance per Factura — same `SaldoTotalDocumento`-sourced figure
+    // `FacturasService.findAll` resolves for the Facturas list, so this
+    // report's "Saldo Pendiente" column reads identically to that screen.
+    const saldos = facturas.length
+      ? await this.saldoTotalDocumento
+          .find({ documentoId: { $in: facturas.map((f) => f._id) } })
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
 
     // Distinct concepts actually present, resolved to their frozen line
     // conceptName (never the mutable ConceptoCobro.name) — order is
@@ -118,6 +137,7 @@ export class ConsultaFacturacionService {
         }
       }
       return {
+        id: f._id.toString(),
         inmuebleId: f.inmuebleId.toString(),
         inmuebleCodigo: f.unitCode,
         tipoDocumento: 'FV' as const,
@@ -126,10 +146,13 @@ export class ConsultaFacturacionService {
         numeroCompleto: f.fullNumber,
         fechaFactura: f.issueDate.toISOString(),
         fechaVence: f.dueDate.toISOString(),
+        titular: titularDe(f.holder),
         valoresPorConcepto,
         valoresIvaPorConcepto,
         subtotal: f.subtotal,
         totalImpuestos: f.totalTax,
+        saldoPendiente: saldoPorDocumento.get(f._id.toString()) ?? 0,
+        estado: f.status,
         total: f.total,
       };
     });

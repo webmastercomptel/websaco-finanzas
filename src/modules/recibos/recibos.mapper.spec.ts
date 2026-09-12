@@ -41,7 +41,7 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
 
 describe('toRecibo', () => {
   it('mapea el documento inglés al contrato español', () => {
-    expect(toRecibo(reciboDoc() as never)).toMatchObject({
+    expect(toRecibo(reciboDoc() as never, 200000, 300000)).toMatchObject({
       id: 'rec-1',
       numeroCompleto: 'RC-84',
       montoRecibido: 500000,
@@ -60,6 +60,8 @@ describe('toRecibo', () => {
         voidedDetail: 'Cargado dos veces por error del cajero',
         voidedAt: new Date('2026-08-28'),
       }) as never,
+      0,
+      0,
     );
 
     expect(anulado.estado).toBe('anulado');
@@ -141,7 +143,7 @@ describe('toAplicacionCartera', () => {
 
 describe('toReciboDetalle', () => {
   it('agrega el arreglo de aplicaciones al recibo', () => {
-    const detalle = toReciboDetalle(reciboDoc() as never, [
+    const detalle = toReciboDetalle(reciboDoc() as never, 200000, 300000, [
       aplicacionDoc() as never,
     ]);
 
@@ -153,6 +155,8 @@ describe('toReciboDetalle', () => {
   it('resuelve numeroDocumento de cada aplicación desde el mapa del caller', () => {
     const detalle = toReciboDetalle(
       reciboDoc() as never,
+      200000,
+      300000,
       [aplicacionDoc() as never],
       new Map([['fac-1', 'FV-1']]),
     );

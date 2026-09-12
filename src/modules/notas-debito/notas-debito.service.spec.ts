@@ -99,6 +99,31 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         session: jest.fn().mockReturnThis(),
         exec: jest.fn(() => Promise.resolve({})),
       })),
+      // `findAll`'s `conSaldoPendiente` candidate query and its per-row
+      // batch lookup never chain a `.session()` call (outside any
+      // transaction), matching the production code — `find` stays bare.
+      find: jest.fn(() => ({
+        exec: jest.fn(() =>
+          Promise.resolve([
+            { documentoId: nota._id, saldoPendiente: nota.outstandingBalance },
+          ]),
+        ),
+      })),
+      // `findOne` is called BOTH ways: bare `.exec()` from the read-only
+      // `findOne()` service method, and `.session(session).exec()` from
+      // `anular()`'s own transaction — `.session()` returns the same
+      // chainable object so either call shape resolves.
+      findOne: jest.fn(() => {
+        const resultado = {
+          documentoId: nota._id,
+          saldoPendiente: nota.outstandingBalance,
+        };
+        const cadena = {
+          session: () => cadena,
+          exec: () => Promise.resolve(resultado),
+        };
+        return cadena;
+      }),
     },
     asientos: { create: jest.fn(() => Promise.resolve([{}])) },
     copropiedades: {
@@ -157,6 +182,14 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
       exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
       obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(null)),
     },
+    // `restaurarMontoFuente`'s live target for RC/NC/NA sources —
+    // unconditional `$inc`, no `.session()` chain (passed via the options
+    // object instead), see `restaurarSaldoDocumentoOrigen`'s own signature.
+    saldoDocumentoOrigen: {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve({ saldoDisponible: 0 })),
+      })),
+    },
   };
 
   const merged = { ...defaults, ...overrides };
@@ -177,6 +210,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     merged.numeracion as never,
     merged.connection as never,
     merged.lotes as never,
+    merged.saldoDocumentoOrigen as never,
     merged.cuentasContables as never,
     merged.inmuebles as never,
   );
@@ -535,9 +569,8 @@ describe('NotasDebitoService', () => {
         amountApplied: 20000,
         status: 'activa',
       };
-      const recibosFindOneAndUpdate = jest.fn(() => ({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn(() => Promise.resolve({ _id: aplicacion.sourceId })),
+      const saldoDocumentoOrigenFindOneAndUpdate = jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve({ saldoDisponible: 20000 })),
       }));
       const svc = servicio({
         aplicaciones: {
@@ -552,7 +585,9 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() => Promise.resolve({})),
           })),
         },
-        recibos: { findOneAndUpdate: recibosFindOneAndUpdate },
+        saldoDocumentoOrigen: {
+          findOneAndUpdate: saldoDocumentoOrigenFindOneAndUpdate,
+        },
       });
 
       const resultado = await svc.anular(
@@ -570,11 +605,9 @@ describe('NotasDebitoService', () => {
       // había descontado (20000) — no un valor cualquiera, ni el campo
       // equivocado. Un bug en el monto/signo no lo habría detectado el test
       // anterior, que solo miraba `estado`.
-      expect(recibosFindOneAndUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: aplicacion.sourceId }),
-        expect.objectContaining({
-          $inc: { unappliedAmount: 20000, appliedAmount: -20000 },
-        }),
+      expect(saldoDocumentoOrigenFindOneAndUpdate).toHaveBeenCalledWith(
+        { documentoId: aplicacion.sourceId },
+        { $inc: { saldoDisponible: 20000 } },
         expect.anything(),
       );
     });
@@ -589,9 +622,8 @@ describe('NotasDebitoService', () => {
         amountApplied: 30000,
         status: 'activa',
       };
-      const notasCreditoFindOneAndUpdate = jest.fn(() => ({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn(() => Promise.resolve({ _id: aplicacion.sourceId })),
+      const saldoDocumentoOrigenFindOneAndUpdate = jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve({ saldoDisponible: 30000 })),
       }));
       const svc = servicio({
         aplicaciones: {
@@ -606,7 +638,9 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() => Promise.resolve({})),
           })),
         },
-        notasCredito: { findOneAndUpdate: notasCreditoFindOneAndUpdate },
+        saldoDocumentoOrigen: {
+          findOneAndUpdate: saldoDocumentoOrigenFindOneAndUpdate,
+        },
       });
 
       const resultado = await svc.anular(
@@ -620,11 +654,9 @@ describe('NotasDebitoService', () => {
       );
 
       expect(resultado.estado).toBe('anulada');
-      expect(notasCreditoFindOneAndUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: aplicacion.sourceId }),
-        expect.objectContaining({
-          $inc: { unappliedAmount: 30000, appliedAmount: -30000 },
-        }),
+      expect(saldoDocumentoOrigenFindOneAndUpdate).toHaveBeenCalledWith(
+        { documentoId: aplicacion.sourceId },
+        { $inc: { saldoDisponible: 30000 } },
         expect.anything(),
       );
     });
@@ -650,9 +682,8 @@ describe('NotasDebitoService', () => {
           Promise.resolve({ _id: notaAnticipoId, reciboOrigenId }),
         ),
       }));
-      const recibosFindOneAndUpdate = jest.fn(() => ({
-        session: jest.fn().mockReturnThis(),
-        exec: jest.fn(() => Promise.resolve({ _id: reciboOrigenId })),
+      const saldoDocumentoOrigenFindOneAndUpdate = jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve({ saldoDisponible: 40000 })),
       }));
       const svc = servicio({
         aplicaciones: {
@@ -668,7 +699,9 @@ describe('NotasDebitoService', () => {
           })),
         },
         notasAnticipo: { findOneAndUpdate: notasAnticipoFindOneAndUpdate },
-        recibos: { findOneAndUpdate: recibosFindOneAndUpdate },
+        saldoDocumentoOrigen: {
+          findOneAndUpdate: saldoDocumentoOrigenFindOneAndUpdate,
+        },
       });
 
       const resultado = await svc.anular(
@@ -687,11 +720,9 @@ describe('NotasDebitoService', () => {
         expect.objectContaining({ $inc: { appliedAmount: -40000 } }),
         expect.anything(),
       );
-      expect(recibosFindOneAndUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ _id: reciboOrigenId }),
-        expect.objectContaining({
-          $inc: { unappliedAmount: 40000, appliedAmount: -40000 },
-        }),
+      expect(saldoDocumentoOrigenFindOneAndUpdate).toHaveBeenCalledWith(
+        { documentoId: reciboOrigenId },
+        { $inc: { saldoDisponible: 40000 } },
         expect.anything(),
       );
     });
@@ -706,9 +737,8 @@ describe('NotasDebitoService', () => {
         amountApplied: 10000,
         status: 'revertida',
       };
-      const recibos = {
+      const saldoDocumentoOrigen = {
         findOneAndUpdate: jest.fn(() => ({
-          session: jest.fn().mockReturnThis(),
           exec: jest.fn(() => Promise.resolve(null)),
         })),
       };
@@ -730,7 +760,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() => Promise.resolve({})),
           })),
         },
-        recibos,
+        saldoDocumentoOrigen,
       });
 
       await svc.anular(
@@ -743,7 +773,7 @@ describe('NotasDebitoService', () => {
         CUENTA.toString(),
       );
 
-      expect(recibos.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(saldoDocumentoOrigen.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it('falla si la nota débito ya está anulada', async () => {
@@ -773,6 +803,60 @@ describe('NotasDebitoService', () => {
           CUENTA.toString(),
         ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('revierte SaldoCartera por el saldo PENDIENTE actual, no por el total original de la nota', async () => {
+      // Regresión: `nota.outstandingBalance` es un campo congelado desde
+      // que `SaldoTotalDocumento` se volvió la fuente viva (ver su propio
+      // docblock) — leerlo directo de `nota` siempre habría dado el total
+      // original, sin importar cuánto de la nota ya se hubiera pagado antes
+      // de anularla. Esta nota tiene total 50000 pero solo 20000 siguen
+      // pendientes (30000 ya se aplicaron vía un Recibo, sin relación con
+      // esta anulación) — el ajuste a SaldoCartera debe ser por 20000.
+      const llamadasSaldos: unknown[][] = [];
+      const svc = servicio({
+        saldoTotalDocumento: {
+          create: jest.fn(() => Promise.resolve([{}])),
+          updateOne: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve({})),
+          })),
+          findOne: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve({ saldoPendiente: 20000 })),
+          })),
+        },
+        saldos: {
+          findOne: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve(null)),
+          })),
+          findOneAndUpdate: jest.fn((...args: unknown[]) => {
+            llamadasSaldos.push(args);
+            return {
+              session: jest.fn().mockReturnThis(),
+              exec: jest.fn(() => Promise.resolve({})),
+            };
+          }),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'otro',
+          detalle: 'Se anula tras haberse pagado parcialmente antes',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      expect(llamadasSaldos).toHaveLength(1);
+      const [, pipeline] = llamadasSaldos[0] as [
+        unknown,
+        [{ $set: { balance: { $max: [number, { $add: [string, number] }] } } }],
+      ];
+      expect(pipeline[0].$set.balance.$max[1].$add[1]).toBe(-20000);
     });
   });
 
