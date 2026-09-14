@@ -91,14 +91,14 @@ describe('generarPdfAuxiliarCartera', () => {
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
   });
 
-  it('la página es horizontal (más ancha que alta)', async () => {
+  it('la página es vertical (más alta que ancha)', async () => {
     const bytes = await generarPdfAuxiliarCartera(
       makeReporte(),
       makeCopropiedad(),
     );
     const doc = await PDFDocument.load(bytes);
     const pagina = doc.getPage(0);
-    expect(pagina.getWidth()).toBeGreaterThan(pagina.getHeight());
+    expect(pagina.getHeight()).toBeGreaterThan(pagina.getWidth());
   });
 
   it('agrega paginas adicionales cuando hay muchos movimientos', async () => {
