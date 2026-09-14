@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import {
   calcularDocumentosConSaldoAFecha,
   finDelDiaCorte,
+  limiteEmisionParaCorte,
 } from './cartera-historica.util';
 
 describe('finDelDiaCorte', () => {
@@ -14,6 +15,33 @@ describe('finDelDiaCorte', () => {
     const corte = finDelDiaCorte(new Date('2026-08-15'));
     const appliedAt8pmColombia = new Date('2026-08-16T01:00:00.000Z');
     expect(appliedAt8pmColombia.getTime()).toBeLessThanOrEqual(corte.getTime());
+  });
+});
+
+describe('limiteEmisionParaCorte', () => {
+  it('deshace el alcance de finDelDiaCorte, dejando el fin del propio dia UTC', () => {
+    const corte = finDelDiaCorte(new Date('2026-06-30'));
+    const limite = limiteEmisionParaCorte(corte);
+    expect(limite.toISOString()).toBe('2026-06-30T23:59:59.999Z');
+  });
+
+  it('bug real reportado: una Factura emitida a medianoche UTC del dia SIGUIENTE al corte queda excluida', () => {
+    const corte = finDelDiaCorte(new Date('2026-06-30'));
+    const limite = limiteEmisionParaCorte(corte);
+    const facturaJulio = new Date('2026-07-01T00:00:00.000Z');
+    expect(facturaJulio.getTime()).toBeGreaterThan(limite.getTime());
+  });
+
+  it('una Factura emitida el mismo dia del corte sigue incluida', () => {
+    const corte = finDelDiaCorte(new Date('2026-06-30'));
+    const limite = limiteEmisionParaCorte(corte);
+    const facturaMismoDia = new Date('2026-06-30T00:00:00.000Z');
+    expect(facturaMismoDia.getTime()).toBeLessThanOrEqual(limite.getTime());
+  });
+
+  it('un instante real (consulta vigente, nunca desplazado por finDelDiaCorte) pasa sin cambios', () => {
+    const ahora = new Date('2026-06-30T15:23:41.123Z');
+    expect(limiteEmisionParaCorte(ahora)).toEqual(ahora);
   });
 });
 

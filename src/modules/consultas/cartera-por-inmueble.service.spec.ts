@@ -633,11 +633,15 @@ describe('CarteraPorInmuebleService', () => {
 
     await svc.findOne({ inmuebleId: inmId.toString(), fecha: '2026-08-01' });
 
-    // End of "2026-08-01" in Colombia local time (UTC-5) is
-    // 2026-08-02T04:59:59.999Z — see `finDelDiaCorte`.
+    // `issueDate` is a PURE calendar date (always UTC midnight, never a real
+    // time-of-day) — the bound must be the un-shifted end of "2026-08-01" in
+    // UTC, NOT `finDelDiaCorte`'s own 2026-08-02T04:59:59.999Z (that reach
+    // is only correct for a REAL timestamp like `appliedAt`; applied here it
+    // would wrongly include a Factura issued at UTC midnight the next day —
+    // see `limiteEmisionParaCorte`'s own docblock).
     expect(facturasFind).toHaveBeenCalledWith(
       expect.objectContaining({
-        issueDate: { $lte: new Date('2026-08-02T04:59:59.999Z') },
+        issueDate: { $lte: new Date('2026-08-01T23:59:59.999Z') },
       }),
     );
   });

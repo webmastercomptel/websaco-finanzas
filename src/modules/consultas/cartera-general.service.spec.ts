@@ -7,6 +7,7 @@ const id = () => new Types.ObjectId();
 const servicio = (overrides: Record<string, unknown> = {}) => {
   const find = (data: unknown[] = []) => ({
     find: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
     exec: jest.fn().mockResolvedValue(data),
   });
   const defaults: Record<string, unknown> = {
@@ -76,6 +77,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([]),
         },
       });
@@ -135,6 +137,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([]),
         },
       });
@@ -200,6 +203,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([]),
         },
       });
@@ -210,6 +214,53 @@ describe('CarteraGeneralService', () => {
       expect(result.totalCartera).toBe(300000);
       // Last month: the application hadn't happened yet — full balance.
       expect(result.totalCarteraMesAnterior).toBe(500000);
+    });
+
+    it('resuelve el ULTIMO dia del mes anterior en UTC, no en un huso local (bug real reportado)', async () => {
+      // Bug real: `prevMonth.setDate(0)`/`setHours(...)` (locales) sobre una
+      // fecha de corte de julio, corridos en un huso detrás de UTC (p. ej.
+      // Colombia, UTC-5), calculaban MAYO en vez de JUNIO — un mes entero de
+      // diferencia, no solo unas horas. Una Factura de junio (el mes
+      // anterior real) debía seguir contando en `totalCarteraMesAnterior`.
+      const inmId = id();
+      const f = {
+        _id: id(),
+        coPropertyId: COP,
+        inmuebleId: inmId,
+        issueDate: new Date('2026-06-30T00:00:00.000Z'),
+        dueDate: new Date('2026-06-30T00:00:00.000Z'),
+        total: 400000,
+        outstandingBalance: 400000,
+        status: 'emitida',
+      };
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        saldosCartera: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        conceptosCobro: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-07-01' });
+
+      expect(result.totalCarteraMesAnterior).toBe(400000);
     });
   });
 
@@ -251,6 +302,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([concepto]),
         },
       });
@@ -263,6 +315,141 @@ describe('CarteraGeneralService', () => {
         nombre: 'Administración',
         saldo: 100000,
       });
+    });
+
+    it('respeta el sortOrder del catalogo de conceptos, no el orden en que llegan las filas de SaldoCartera (bug real reportado)', async () => {
+      const idAdmin = id();
+      const idIntereses = id();
+      const idMultas = id();
+      // SaldoCartera llega en un orden que NO coincide con el catalogo —
+      // antes, ese orden de llegada era el que terminaba mostrando el
+      // gráfico/lista de Cartera General.
+      const saldos = [
+        {
+          _id: id(),
+          coPropertyId: COP,
+          inmuebleId: id(),
+          conceptoId: idMultas,
+          balance: 10000,
+        },
+        {
+          _id: id(),
+          coPropertyId: COP,
+          inmuebleId: id(),
+          conceptoId: idAdmin,
+          balance: 142000000,
+        },
+        {
+          _id: id(),
+          coPropertyId: COP,
+          inmuebleId: id(),
+          conceptoId: idIntereses,
+          balance: 5000,
+        },
+      ];
+      // El catalogo, ya ordenado por sortOrder (como lo devuelve Mongo con
+      // .sort({ sortOrder: 1 })): Administracion, Intereses, Multas.
+      const conceptos = [
+        { _id: idAdmin, name: 'Administracion', sortOrder: 100 },
+        { _id: idIntereses, name: 'Intereses', sortOrder: 200 },
+        { _id: idMultas, name: 'Multas', sortOrder: 300 },
+      ];
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        saldosCartera: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(saldos),
+        },
+        conceptosCobro: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(conceptos),
+        },
+      });
+
+      const result = await svc.findAll({});
+
+      expect(result.carteraPorConcepto.map((c) => c.nombre)).toEqual([
+        'Administracion',
+        'Intereses',
+        'Multas',
+      ]);
+      expect(result.carteraPorConcepto[0].saldo).toBe(142000000);
+    });
+
+    it('una fila de SaldoCartera cuyo ConceptoCobro ya no existe se muestra como Desconocido, al final, sin desaparecer del total', async () => {
+      const idAdmin = id();
+      const idBorrado = id();
+      const saldos = [
+        {
+          _id: id(),
+          coPropertyId: COP,
+          inmuebleId: id(),
+          conceptoId: idBorrado,
+          balance: 30000,
+        },
+        {
+          _id: id(),
+          coPropertyId: COP,
+          inmuebleId: id(),
+          conceptoId: idAdmin,
+          balance: 70000,
+        },
+      ];
+      const conceptos = [
+        { _id: idAdmin, name: 'Administracion', sortOrder: 100 },
+      ];
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        notasDebito: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        aplicaciones: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([]),
+        },
+        saldosCartera: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(saldos),
+        },
+        conceptosCobro: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(conceptos),
+        },
+      });
+
+      const result = await svc.findAll({});
+
+      expect(result.carteraPorConcepto).toEqual([
+        {
+          conceptoId: idAdmin.toString(),
+          nombre: 'Administracion',
+          saldo: 70000,
+        },
+        {
+          conceptoId: idBorrado.toString(),
+          nombre: 'Desconocido',
+          saldo: 30000,
+        },
+      ]);
     });
   });
 
@@ -287,6 +474,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([]),
         },
       });
@@ -348,6 +536,7 @@ describe('CarteraGeneralService', () => {
         },
         conceptosCobro: {
           find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([]),
         },
       });

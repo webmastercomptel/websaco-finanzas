@@ -38,7 +38,11 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { activeAsOf, finDelDiaCorte } from './cartera-historica.util';
+import {
+  activeAsOf,
+  finDelDiaCorte,
+  limiteEmisionParaCorte,
+} from './cartera-historica.util';
 import type {
   CargoCarteraPorConcepto,
   DocumentoCarteraPorInmueble,
@@ -139,13 +143,14 @@ export class CarteraPorInmuebleService {
       propietario = tercero?.name ?? null;
     }
 
+    const limiteEmision = limiteEmisionParaCorte(fecha);
     const [facturas, notasDebito] = await Promise.all([
       this.facturas
         .find({
           coPropertyId,
           inmuebleId,
           status: 'emitida',
-          issueDate: { $lte: fecha },
+          issueDate: { $lte: limiteEmision },
         })
         .exec(),
       this.notasDebito
@@ -153,7 +158,7 @@ export class CarteraPorInmuebleService {
           coPropertyId,
           inmuebleId,
           status: 'emitida',
-          issueDate: { $lte: fecha },
+          issueDate: { $lte: limiteEmision },
         })
         .exec(),
     ]);

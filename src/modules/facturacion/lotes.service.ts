@@ -228,9 +228,16 @@ export class LotesFacturacionService {
     if (dto.fechaLimiteDescuento) {
       discountDeadline = new Date(dto.fechaLimiteDescuento);
     } else {
+      // UTC arithmetic, matching the rest of this codebase's convention
+      // for pure calendar dates — `dto.fechaFacturacion` parses as UTC
+      // midnight, and mixing in local `getDate`/`setDate` reads/writes the
+      // wrong calendar day on a machine not itself running in UTC (e.g.
+      // local dev in Colombia, UTC-5). Harmless today only because "add N
+      // whole days" happens to be translation-invariant under a fixed,
+      // DST-free offset — not a guarantee worth relying on.
       discountDeadline = new Date(dto.fechaFacturacion);
-      discountDeadline.setDate(
-        discountDeadline.getDate() + discountGraceDays - 1,
+      discountDeadline.setUTCDate(
+        discountDeadline.getUTCDate() + discountGraceDays - 1,
       );
     }
 

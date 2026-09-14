@@ -42,6 +42,30 @@ function esFechaDeCorte(fecha: Date): boolean {
 }
 
 /**
+ * The upper bound for filtering `issueDate` — a Factura/NotaDebito's own
+ * PURE calendar date, always UTC midnight, never a real time-of-day —
+ * against a "fecha de corte" cutoff. When `fecha` carries `finDelDiaCorte`'s
+ * own shifted signature (reaching up to 5h into the next UTC day, to
+ * correctly bound a REAL Colombia-evening timestamp like `appliedAt`), that
+ * reach must be undone before comparing against a field that never has a
+ * real time-of-day — otherwise a document issued at UTC midnight the NEXT
+ * calendar day (e.g. billed July 1st, `issueDate`
+ * "2026-07-01T00:00:00.000Z") falls inside that reach
+ * ("2026-07-01T04:59:59.999Z") and is wrongly included in a query cut off
+ * at June 30 — the exact bug reported: a Factura from the next billing run
+ * showing up in a "fecha de corte"/"período" report scoped to the prior
+ * month. Same reasoning/fix as `activeAsOf`'s own `sourceDate` un-shift,
+ * applied here to the `issueDate` filter bound instead. A real "now" instant
+ * (the "vigente" case, never `finDelDiaCorte`-shifted) passes through
+ * unchanged, since it never matches the signature.
+ */
+export function limiteEmisionParaCorte(fecha: Date): Date {
+  return esFechaDeCorte(fecha)
+    ? new Date(fecha.getTime() - CORRIMIENTO_FIN_DIA_MS)
+    : fecha;
+}
+
+/**
  * A document (Factura or NotaDebito) with a positive outstanding balance
  * as of a historical date. Returned by `calcularDocumentosConSaldoAFecha`.
  */
@@ -158,15 +182,16 @@ export async function calcularDocumentosConSaldoAFecha(
   fecha: Date,
   opciones?: { inmuebleId?: Types.ObjectId; conceptoId?: Types.ObjectId },
 ): Promise<DocumentoConSaldoAFecha[]> {
+  const limiteEmision = limiteEmisionParaCorte(fecha);
   const facturasFilter: Record<string, unknown> = {
     coPropertyId,
     status: 'emitida',
-    issueDate: { $lte: fecha },
+    issueDate: { $lte: limiteEmision },
   };
   const ndFilter: Record<string, unknown> = {
     coPropertyId,
     status: 'emitida',
-    issueDate: { $lte: fecha },
+    issueDate: { $lte: limiteEmision },
   };
 
   if (opciones?.inmuebleId) {
