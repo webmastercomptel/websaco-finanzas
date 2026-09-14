@@ -33,12 +33,17 @@ import type {
 } from '../../contracts';
 import type { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
 
-/** Compute days overdue: max(0, floor((corte - referenceDate) / day)). */
+/** Compute days overdue: max(0, floor((corte - referenceDate) / day)).
+ *  UTC truncation, never local — `dueDate`/`fechaReferencia` are always pure
+ *  UTC-midnight calendar dates, and the server itself only runs in UTC on
+ *  Cloud Run; truncating with local `setHours` instead would silently shift
+ *  every count by a day on any machine running in a non-UTC timezone
+ *  (e.g. local dev in Colombia, UTC-5). */
 const calcularDiasMora = (fechaReferencia: Date, corte: Date): number => {
   const c = new Date(corte);
-  c.setHours(0, 0, 0, 0);
+  c.setUTCHours(0, 0, 0, 0);
   const ref = new Date(fechaReferencia);
-  ref.setHours(0, 0, 0, 0);
+  ref.setUTCHours(0, 0, 0, 0);
   const diff = c.getTime() - ref.getTime();
   return Math.max(0, Math.floor(diff / 86_400_000));
 };
@@ -154,10 +159,13 @@ export class CarteraGeneralService {
     coPropertyId: Types.ObjectId,
     fecha: Date,
   ): Promise<number> {
-    // Last day of previous month
+    // Last day of previous month, in UTC — `setDate`/`setHours` (local)
+    // would shift this by a day on any machine not itself running in UTC
+    // (e.g. local dev in Colombia, UTC-5), same class of bug as
+    // `calcularDiasMora`.
     const prevMonth = new Date(fecha);
-    prevMonth.setDate(0); // last day of previous month
-    prevMonth.setHours(23, 59, 59, 999);
+    prevMonth.setUTCDate(0); // last day of previous month
+    prevMonth.setUTCHours(23, 59, 59, 999);
 
     const documentos = await calcularDocumentosConSaldoAFecha(
       {
@@ -192,24 +200,38 @@ export class CarteraGeneralService {
       conceptoMap.set(key, (conceptoMap.get(key) ?? 0) + sc.balance);
     }
 
-    // Resolve concepto names
+    // Resolve concepto names, in the coproperty's own catalog order — the
+    // same `sortOrder` every other cartera-por-concepto breakdown
+    // (CarteraPorInmueble, CarteraPorConceptos) already orders by, instead
+    // of Mongo's arbitrary scan order for `saldos` (the bug reported: the
+    // "Gráfico"/"Cargos de Cartera" order on Cartera General didn't match
+    // the concept catalog's own order).
     const conceptoIds = [...conceptoMap.keys()].map(
       (id) => new Types.ObjectId(id),
     );
     const conceptos = await this.conceptosCobro
       .find({ coPropertyId, _id: { $in: conceptoIds } })
+      .sort({ sortOrder: 1 })
       .exec();
 
-    const nombreMap = new Map<string, string>();
-    for (const c of conceptos) {
-      nombreMap.set(c._id.toString(), c.name);
+    const resultado: CarteraPorConcepto[] = conceptos.map((c) => ({
+      conceptoId: c._id.toString(),
+      nombre: c.name,
+      saldo: conceptoMap.get(c._id.toString()) ?? 0,
+    }));
+
+    // A SaldoCartera row whose ConceptoCobro no longer exists (deleted from
+    // the catalog) has no sortOrder to place it by — appended at the end,
+    // same "Desconocido" fallback as before, so its balance still shows up
+    // instead of silently vanishing from the total the list/chart sum to.
+    const idsConNombre = new Set(conceptos.map((c) => c._id.toString()));
+    for (const [conceptoId, saldo] of conceptoMap) {
+      if (!idsConNombre.has(conceptoId)) {
+        resultado.push({ conceptoId, nombre: 'Desconocido', saldo });
+      }
     }
 
-    return [...conceptoMap.entries()].map(([conceptoId, saldo]) => ({
-      conceptoId,
-      nombre: nombreMap.get(conceptoId) ?? 'Desconocido',
-      saldo,
-    }));
+    return resultado;
   }
 
   /**

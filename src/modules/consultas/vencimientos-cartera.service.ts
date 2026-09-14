@@ -31,12 +31,15 @@ import type {
 } from '../../contracts';
 import type { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 
-/** Compute days overdue: max(0, floor((corte - referenceDate) / day)). */
+/** Compute days overdue: max(0, floor((corte - referenceDate) / day)).
+ *  UTC truncation, never local — see `CarteraGeneralService`'s own copy of
+ *  this function for why local `setHours` would silently shift every count
+ *  by a day on a machine not itself running in UTC. */
 const calcularDiasMora = (fechaReferencia: Date, corte: Date): number => {
   const c = new Date(corte);
-  c.setHours(0, 0, 0, 0);
+  c.setUTCHours(0, 0, 0, 0);
   const ref = new Date(fechaReferencia);
-  ref.setHours(0, 0, 0, 0);
+  ref.setUTCHours(0, 0, 0, 0);
   const diff = c.getTime() - ref.getTime();
   return Math.max(0, Math.floor(diff / 86_400_000));
 };

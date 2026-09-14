@@ -844,6 +844,79 @@ export interface RespuestaCarteraPorInmueble {
   saldoTotalCartera: number;
 }
 
+/* ── Cartera por Conceptos (coproperty-wide, grouped by inmueble) ── */
+
+/** One column of the report — one charge concept in the coproperty's
+ *  catalog. */
+export interface ConceptoColumnaCarteraPorConceptos {
+  conceptoId: string;
+  nombre: string;
+}
+
+/** One pending Factura or Nota Débito for one inmueble, always "right now"
+ *  — no historical `fecha`, unlike its per-unit sibling
+ *  `DocumentoCarteraPorInmueble`. `cargosPorConcepto` keys by `conceptoId`,
+ *  same convention: a concept absent from this document simply has no key,
+ *  read as 0 on the frontend. */
+export interface DocumentoCarteraPorConceptos {
+  documentoId: string;
+  tipo: 'FV' | 'ND';
+  numeroCompleto: string;
+  fecha: string;
+  vence: string | null;
+  saldo: number;
+  cargosPorConcepto: Record<string, number>;
+}
+
+/** One inmueble's pending documents, sorted by document number ascending
+ *  (lowest first) — the table's grouping row. */
+export interface GrupoInmuebleCarteraPorConceptos {
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  titular: string | null;
+  celular: string | null;
+  documentos: DocumentoCarteraPorConceptos[];
+  saldoTotal: number;
+}
+
+/** Response shape for GET /consultas/cartera-por-conceptos. */
+export interface RespuestaCarteraPorConceptos {
+  conceptos: ConceptoColumnaCarteraPorConceptos[];
+  grupos: GrupoInmuebleCarteraPorConceptos[];
+}
+
+/* ── Consecutivos (one document type, sequential, one period) ─── */
+
+/** One column of the report — one charge concept referenced by at least one
+ *  row, in the coproperty's own catalog order. */
+export interface ConceptoColumnaConsecutivos {
+  conceptoId: string;
+  nombre: string;
+}
+
+/** One document of the chosen type ("código" from the Tabla de Documentos),
+ *  issued within the period. `cargosPorConcepto` keys by `conceptoId` — a
+ *  concept this specific document never touched simply has no key, read as
+ *  0 on the frontend. For a Nota Contable (a pure reclassification) the
+ *  origen concepto carries a NEGATIVE value and the destino a positive one,
+ *  netting to zero — the honest picture of "moved from X to Y", not a new
+ *  charge. */
+export interface FilaConsecutivo {
+  documentoId: string;
+  tipoDocumento: string;
+  numeroCompleto: string;
+  inmuebleCodigo: string;
+  fecha: string;
+  valorTotal: number;
+  cargosPorConcepto: Record<string, number>;
+}
+
+/** Response shape for GET /consultas/consecutivos. */
+export interface RespuestaConsecutivos {
+  conceptos: ConceptoColumnaConsecutivos[];
+  filas: FilaConsecutivo[];
+}
+
 /* ── Cartera General (§3) ──────────────────────────────────────── */
 
 /** Balance per charge concept, always "as of now". */
@@ -1242,6 +1315,10 @@ export interface LineaMovimientoContable {
   /** The taxable base this line's tax was computed from — present only on
    *  the tax-credit line a taxed Cargo splits out. */
   baseGravable: number | null;
+  /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
+   *  a receivable against (Factura, Nota Débito) — present only when this
+   *  line's account is flagged `requiresCrossDocument`. */
+  documentoCruce: { tipo: 'FV' | 'ND'; numero: number } | null;
 }
 
 /** One journal entry card in the accounting journal view. */

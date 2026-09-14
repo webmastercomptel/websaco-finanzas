@@ -5,9 +5,11 @@ import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
 import { CarteraPorInmuebleService } from './cartera-por-inmueble.service';
+import { CarteraPorConceptosService } from './cartera-por-conceptos.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
 import { ConciliacionCarteraService } from './conciliacion-cartera.service';
+import { ConsecutivosService } from './consecutivos.service';
 import {
   Factura,
   FacturaSchema,
@@ -90,9 +92,11 @@ import {
     VencimientosCarteraService,
     CarteraGeneralService,
     CarteraPorInmuebleService,
+    CarteraPorConceptosService,
     EstadoCuentaService,
     MovimientoContableService,
     ConciliacionCarteraService,
+    ConsecutivosService,
   ],
 })
 export class ConsultasModule {}

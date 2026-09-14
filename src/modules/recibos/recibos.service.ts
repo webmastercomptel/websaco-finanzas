@@ -1080,9 +1080,9 @@ export class RecibosService {
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaDescuentos =
       copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
-    // null `cuenta` (no accountingReceivableAccount for that concepto, or a
+    // `cuenta: null` (no accountingReceivableAccount for that concepto, or a
     // Nota Débito application) resolves to the coproperty's shared
-    // cuentaCartera — same conversion `anular()` already does below.
+    // cuentaCartera.
     const desgloseCartera = desglose.map((d) => ({
       account: d.cuenta ?? cuentaCartera,
       monto: d.monto,

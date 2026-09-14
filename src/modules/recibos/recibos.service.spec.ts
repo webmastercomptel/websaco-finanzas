@@ -968,6 +968,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
       },
@@ -1061,6 +1063,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
       },

@@ -21,32 +21,41 @@ import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
 import { CarteraPorInmuebleService } from './cartera-por-inmueble.service';
+import { CarteraPorConceptosService } from './cartera-por-conceptos.service';
 import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
 import { ConciliacionCarteraService } from './conciliacion-cartera.service';
+import { ConsecutivosService } from './consecutivos.service';
 import { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto';
 import { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
+import { ConsultarVencimientosCarteraPdfDto } from './dto/consultar-vencimientos-cartera-pdf.dto';
 import { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
 import { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por-inmueble.dto';
+import { ConsultarCarteraPorConceptosDto } from './dto/consultar-cartera-por-conceptos.dto';
+import { ConsultarCarteraPorConceptosPdfDto } from './dto/consultar-cartera-por-conceptos-pdf.dto';
 import { ConsultarPeriodosEstadoCuentaDto } from './dto/consultar-periodos-estado-cuenta.dto';
 import { ConsultarEstadoCuentaDto } from './dto/consultar-estado-cuenta.dto';
 import { ConsultarMovimientoContableDto } from './dto/consultar-movimiento-contable.dto';
 import { ConsultarConciliacionCarteraDto } from './dto/consultar-conciliacion-cartera.dto';
+import { ConsultarConsecutivosDto } from './dto/consultar-consecutivos.dto';
 import type {
   RespuestaAuxiliarCartera,
   RespuestaVencimientosCartera,
   RespuestaCarteraGeneral,
   RespuestaCarteraPorInmueble,
+  RespuestaCarteraPorConceptos,
   PeriodoFacturado,
   RespuestaEstadoCuenta,
   RespuestaMovimientoContable,
   RespuestaConciliacionCartera,
+  RespuestaConsecutivos,
 } from '../../contracts';
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 import { generarPdfAuxiliarCartera } from '../../common/pdf/auxiliar-cartera-pdf';
 import { generarPdfConciliacionCartera } from '../../common/pdf/conciliacion-cartera-pdf';
 import { generarPdfCarteraGeneral } from '../../common/pdf/cartera-general-pdf';
 import { generarPdfCarteraPorInmueble } from '../../common/pdf/cartera-por-inmueble-pdf';
+import { generarPdfCarteraPorConceptos } from '../../common/pdf/cartera-por-conceptos-pdf';
 import { generarPdfVencimientosCartera } from '../../common/pdf/vencimientos-cartera-pdf';
 import { generarPdfMovimientoContable } from '../../common/pdf/movimiento-contable-pdf';
 
@@ -62,9 +71,11 @@ export class ConsultasController {
     private readonly vencimientosCartera: VencimientosCarteraService,
     private readonly carteraGeneral: CarteraGeneralService,
     private readonly carteraPorInmueble: CarteraPorInmuebleService,
+    private readonly carteraPorConceptos: CarteraPorConceptosService,
     private readonly estadoCuenta: EstadoCuentaService,
     private readonly movimientoContable: MovimientoContableService,
     private readonly conciliacionCartera: ConciliacionCarteraService,
+    private readonly consecutivos: ConsecutivosService,
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
@@ -113,7 +124,7 @@ export class ConsultasController {
   @Get('vencimientos-cartera/pdf')
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   async generarPdfVencimientosCartera(
-    @Query() query: ConsultarVencimientosCarteraDto,
+    @Query() query: ConsultarVencimientosCarteraPdfDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -125,7 +136,10 @@ export class ConsultasController {
       );
     }
 
-    const bytes = await generarPdfVencimientosCartera(reporte, copropiedad);
+    const bytes = await generarPdfVencimientosCartera(reporte, copropiedad, {
+      inmuebleId: query.inmuebleId,
+      rango: query.rango,
+    });
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -199,6 +213,46 @@ export class ConsultasController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="cartera-${reporte.inmuebleCodigo}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
+  @Get('cartera-por-conceptos')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findCarteraPorConceptos(
+    @Query() query: ConsultarCarteraPorConceptosDto,
+  ): Promise<RespuestaCarteraPorConceptos> {
+    return this.carteraPorConceptos.findAll(query);
+  }
+
+  @Get('cartera-por-conceptos/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfCarteraPorConceptos(
+    @Query() query: ConsultarCarteraPorConceptosPdfDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.carteraPorConceptos.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const fechaCorte = query.fecha ?? new Date().toISOString();
+    const bytes = await generarPdfCarteraPorConceptos(
+      reporte,
+      copropiedad,
+      fechaCorte,
+      query.tipo,
+      query.conceptoId,
+    );
+
+    const sufijoConcepto = query.conceptoId ? '-concepto' : '';
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="cartera-por-conceptos-${query.tipo}${sufijoConcepto}-${fechaCorte.slice(0, 10)}.pdf"`,
     });
     res.send(Buffer.from(bytes));
   }
@@ -326,5 +380,15 @@ export class ConsultasController {
       'Content-Disposition': `inline; filename="movimiento-contable-${query.desde}.pdf"`,
     });
     res.send(Buffer.from(bytes));
+  }
+
+  /* ── Consecutivos ───────────────────────────────────────────────── */
+
+  @Get('consecutivos')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findConsecutivos(
+    @Query() query: ConsultarConsecutivosDto,
+  ): Promise<RespuestaConsecutivos> {
+    return this.consecutivos.findAll(query);
   }
 }

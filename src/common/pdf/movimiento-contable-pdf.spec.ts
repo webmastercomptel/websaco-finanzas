@@ -34,6 +34,7 @@ function makeLinea(
     centroCosto: null,
     flujoCaja: null,
     baseGravable: null,
+    documentoCruce: null,
     ...overrides,
   };
 }
