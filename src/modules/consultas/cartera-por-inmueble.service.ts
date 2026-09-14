@@ -26,6 +26,10 @@ import {
   CarteraPorDocumentoDocument,
 } from '../../database/schemas/facturacion/cartera-por-documento.schema';
 import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -89,6 +93,8 @@ export class CarteraPorInmuebleService {
     private readonly saldosCartera: Model<SaldoCarteraDocument>,
     @InjectModel(CarteraPorDocumento.name)
     private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -190,6 +196,27 @@ export class CarteraPorInmuebleService {
       carteraDocById.set(docKey, porConcepto);
     }
 
+    // The live per-document TOTAL — same "only fetched/trusted for a right
+    // now query" rule as `carteraPorDocumentoRows` above, and for the exact
+    // same reason: recomputing the total from `AplicacionCartera` via
+    // `activeAsOf` compares against `sourceDate` (the application's own
+    // declared business date), which for a "right now" query can legitimately
+    // sit a little AFTER the instant this request runs (same still-open
+    // period, just a later day within it) — that silently excluded a real,
+    // already-applied Nota de Anticipo from the total while the per-concepto
+    // breakdown above (unconditionally live) already showed it correctly —
+    // a real bug reported for Cartera por Inmueble. `SaldoTotalDocumento` is
+    // never date-gated at all, so it can't have this problem.
+    const saldoTotalRows =
+      esConsultaVigente && docIds.length
+        ? await this.saldoTotalDocumento
+            .find({ documentoId: { $in: docIds } })
+            .exec()
+        : [];
+    const saldoTotalById = new Map(
+      saldoTotalRows.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
     const documentos: DocumentoCarteraPorInmueble[] = [];
     // Fallback source for the aggregate row below — see its own comment on
     // why SaldoCartera alone isn't always trustworthy.
@@ -197,10 +224,17 @@ export class CarteraPorInmuebleService {
 
     for (const f of facturas) {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
-      const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
-      const saldo = Math.max(0, f.total - aplicadoActivo);
+      const saldoVivo = saldoTotalById.get(f._id.toString());
+      const saldo =
+        esConsultaVigente && saldoVivo !== undefined
+          ? saldoVivo
+          : Math.max(
+              0,
+              f.total -
+                apps
+                  .filter((a) => activeAsOf(a, fecha))
+                  .reduce((sum, a) => sum + a.amountApplied, 0),
+            );
       if (saldo <= 0) continue;
 
       const carteraDoc = carteraDocById.get(f._id.toString());
@@ -245,10 +279,17 @@ export class CarteraPorInmuebleService {
 
     for (const nd of notasDebito) {
       const apps = appsByDoc.get(nd._id.toString()) ?? [];
-      const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
-      const saldo = Math.max(0, nd.total - aplicadoActivo);
+      const saldoVivoNd = saldoTotalById.get(nd._id.toString());
+      const saldo =
+        esConsultaVigente && saldoVivoNd !== undefined
+          ? saldoVivoNd
+          : Math.max(
+              0,
+              nd.total -
+                apps
+                  .filter((a) => activeAsOf(a, fecha))
+                  .reduce((sum, a) => sum + a.amountApplied, 0),
+            );
       if (saldo <= 0) continue;
 
       const carteraDoc = carteraDocById.get(nd._id.toString());

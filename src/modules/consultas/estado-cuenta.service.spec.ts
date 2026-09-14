@@ -44,9 +44,17 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const naDoc = (over: Record<string, unknown> = {}) => ({
+  _id: id(),
+  coPropertyId: COP,
+  fullNumber: 'NA-001-001',
+  issueDate: new Date('2026-01-25'),
+  ...over,
+});
+
 const appDoc = (
   sourceId: Types.ObjectId,
-  sourceType: 'RC' | 'NC',
+  sourceType: 'RC' | 'NC' | 'NA',
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
@@ -86,6 +94,7 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
     (overrides.notasCredito ?? mockFind()) as never,
     (overrides.notasDebito ?? mockFind()) as never,
     (overrides.notasContables ?? mockFind()) as never,
+    (overrides.notasAnticipo ?? mockFind()) as never,
     (overrides.aplicaciones ?? mockFind()) as never,
     // `unappliedAmount` no longer lives on the Recibo itself — resolved
     // live from `SaldoDocumentoOrigen` (see that schema's own docblock).
@@ -342,6 +351,44 @@ describe('EstadoCuentaService', () => {
       expect(descRow!.abono).toBe(20000);
       expect(result.descuentosAjustes).toBe(20000);
       expect(result.pagosRecibidos).toBe(0);
+    });
+
+    it('NA application produces categoria pago (bug real reportado: la Nota de Anticipo no aparecía en el estado de cuenta)', async () => {
+      // Bug real: `sourceIds` solo se armaba con recibos+notasCredito — una
+      // AplicacionCartera con sourceType 'NA' nunca calzaba con ningún id de
+      // esa lista, así que el crédito de la Nota de Anticipo desaparecía por
+      // completo del estado de cuenta, entendiendo pagosRecibidos.
+      const inmId = id();
+      const fId = id();
+      const naId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
+      const na = naDoc({ _id: naId, issueDate: new Date('2026-01-25') });
+      const app = appDoc(naId, 'NA', {
+        amountApplied: 40000,
+        appliedAt: new Date('2026-01-25'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        notasAnticipo: mockFind([na]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      const pagoRow = result.movimientos.find(
+        (m) =>
+          m.categoria === 'pago' && m.concepto.includes('Nota de Anticipo'),
+      );
+      expect(pagoRow).toBeDefined();
+      expect(pagoRow!.abono).toBe(40000);
+      expect(pagoRow!.concepto).toBe(`Nota de Anticipo ${na.fullNumber}`);
+      expect(result.pagosRecibidos).toBe(40000);
     });
 
     it('Nota Contable paired rows have categoria null and contribute to neither summary', async () => {

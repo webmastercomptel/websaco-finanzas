@@ -64,6 +64,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     conceptosCobro: find(),
     saldosCartera: find(),
     carteraPorDocumento: find(),
+    saldoTotalDocumento: find(),
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
@@ -76,6 +77,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.conceptosCobro as never,
     m.saldosCartera as never,
     m.carteraPorDocumento as never,
+    m.saldoTotalDocumento as never,
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
@@ -180,6 +182,94 @@ describe('CarteraPorInmuebleService', () => {
       },
     ]);
     expect(result.saldoTotalCartera).toBe(120000);
+  });
+
+  it('una aplicación de Nota de Anticipo con sourceDate futuro (dentro del período abierto) SÍ reduce el saldo total en la consulta vigente, igual que ya reduce cargosPorConcepto', async () => {
+    // Bug real reportado: tras aplicar un anticipo, Cartera por Inmueble
+    // mostraba el cargo afectado (viene de CarteraPorDocumento, siempre
+    // vivo, sin filtro de fecha) pero el SALDO TOTAL no bajaba. El saldo
+    // total se recalcula sumando AplicacionCartera activas via `activeAsOf`,
+    // que ahora compara contra `sourceDate` (la fecha declarada de la Nota
+    // de Anticipo) en vez de `appliedAt`. Cuando se prueban varios períodos
+    // en una sola sesión real, `sourceDate` puede caer un poco DESPUÉS del
+    // instante exacto de "ahora" (mismo período abierto, pero un día
+    // posterior al de hoy) — sin este fix, la consulta VIGENTE (sin fecha de
+    // corte, "ahora mismo") excluía la aplicación por completo.
+    const inmId = id();
+    const fId = id();
+    const conceptoId = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 200000,
+      lines: [
+        { conceptoId, conceptName: 'Administracion', totalAmount: 200000 },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const concepto = conceptoDoc({ _id: conceptoId, name: 'Administracion' });
+    // Fecha muy lejana en el futuro real (nunca alcanzable por "ahora" en
+    // este test) — simula exactamente el caso reportado sin depender de la
+    // fecha real del sistema al correr la suite.
+    const sourceDateFutura = new Date('2099-01-01');
+    const app = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 30000,
+      status: 'activa',
+      appliedAt: new Date(),
+      sourceDate: sourceDateFutura,
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([app]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      conceptosCobro: {
+        find: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([concepto]),
+      },
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 170000 }]),
+      },
+      // Vivo, sin filtro de fecha — ya refleja la aplicación (esto SÍ
+      // funcionaba, per el reporte del usuario).
+      carteraPorDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([
+            { documentoId: fId, conceptoId, saldoPendiente: 170000 },
+          ]),
+      },
+      saldoTotalDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([{ documentoId: fId, saldoPendiente: 170000 }]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.documentos[0].cargosPorConcepto).toEqual({
+      [conceptoId.toString()]: 170000,
+    });
+    expect(result.documentos[0].saldo).toBe(170000);
+    expect(result.saldoTotalCartera).toBe(170000);
   });
 
   it('una Factura con lineas de varios conceptos reparte su saldo por concepto en el mismo documento', async () => {

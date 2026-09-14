@@ -161,6 +161,13 @@ export function escribirLabelValor(
  * `espacioAntesDatos` widens the gap between the header underline and the
  * first data row (default 0.5 line, unchanged unless passed) — Factura uses
  * both to match its own header-line styling.
+ *
+ * `anchosRelativos` gives each column its own weight instead of the default
+ * equal split — needed when one column (a "Concepto" label, say) genuinely
+ * needs more room than a short numeric one; every caller that omits it still
+ * gets equal-width columns, unchanged. Data cells are still drawn without
+ * truncation (same as before this option existed) — a caller with long
+ * content must size its columns wide enough via this, not rely on wrapping.
  */
 export function escribirTabla(
   ctx: PdfContext,
@@ -171,10 +178,15 @@ export function escribirTabla(
     colorLineas?: ReturnType<typeof rgb>;
     grosorLineas?: number;
     espacioAntesDatos?: number;
+    anchosRelativos?: number[];
   },
 ): void {
   const colCount = columnas.length;
-  const colWidth = ctx.contentWidth / colCount;
+  const pesos = opciones?.anchosRelativos ?? columnas.map(() => 1);
+  const pesoTotal = pesos.reduce((acc, p) => acc + p, 0);
+  const anchos = pesos.map((p) => (p / pesoTotal) * ctx.contentWidth);
+  const xInicioCol = (i: number): number =>
+    MARGIN_LEFT + anchos.slice(0, i).reduce((acc, a) => acc + a, 0);
   const primeraNumerica = colCount - (opciones?.columnasNumericas ?? 2);
   const colorLineas = opciones?.colorLineas ?? rgb(0, 0, 0);
   const grosorLineas = opciones?.grosorLineas ?? 0.5;
@@ -184,8 +196,8 @@ export function escribirTabla(
     const isNumeric = i >= primeraNumerica;
     const textWidth = ctx.fontBold.widthOfTextAtSize(columnas[i], FONT_SIZE);
     const x = isNumeric
-      ? MARGIN_LEFT + colWidth * (i + 1) - textWidth - 4
-      : MARGIN_LEFT + colWidth * i + 4;
+      ? xInicioCol(i) + anchos[i] - textWidth - 4
+      : xInicioCol(i) + 4;
     ctx.page.drawText(columnas[i], {
       x,
       y: ctx.y,
@@ -218,8 +230,8 @@ export function escribirTabla(
       const cell = fila[i] ?? '';
       const textWidth = ctx.font.widthOfTextAtSize(cell, FONT_SIZE);
       const x = isNumeric
-        ? MARGIN_LEFT + colWidth * (i + 1) - textWidth - 4
-        : MARGIN_LEFT + colWidth * i + 4;
+        ? xInicioCol(i) + anchos[i] - textWidth - 4
+        : xInicioCol(i) + 4;
       ctx.page.drawText(cell, {
         x,
         y: ctx.y,

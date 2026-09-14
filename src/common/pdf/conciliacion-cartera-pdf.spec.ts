@@ -56,6 +56,7 @@ function makeReporte(
     saldoCarteraCalculado: 42500000,
     saldoCarteraReal: 42500000,
     diferencia: 0,
+    anticiposPendientes: [],
     ...overrides,
   };
 }
@@ -111,6 +112,46 @@ describe('generarPdfConciliacionCartera', () => {
             desde: null,
             hasta: null,
             valorDebito: 0,
+            valorCredito: 0,
+          },
+        ],
+      }),
+      makeCopropiedad(),
+    );
+    expect(empiezaConPdf(bytes)).toBe('%PDF-');
+  });
+
+  it('agrega la tabla de anticipos pendientes cuando hay filas, produciendo más bytes', async () => {
+    const sinAnticipos = await generarPdfConciliacionCartera(
+      makeReporte({ anticiposPendientes: [] }),
+      makeCopropiedad(),
+    );
+    const conAnticipos = await generarPdfConciliacionCartera(
+      makeReporte({
+        anticiposPendientes: [
+          {
+            inmuebleCodigo: '502',
+            fecha: '2026-09-10T00:00:00.000Z',
+            numeroRecibo: 'RC5',
+            valor: 100000,
+          },
+        ],
+      }),
+      makeCopropiedad(),
+    );
+    expect(conAnticipos.length).toBeGreaterThan(sinAnticipos.length);
+  });
+
+  it('no lanza con una etiqueta de concepto larga (regresión: "Desde" se montaba encima de "Concepto" con columnas parejas)', async () => {
+    const bytes = await generarPdfConciliacionCartera(
+      makeReporte({
+        conceptos: [
+          {
+            concepto: 'anulacion_recibos_caja',
+            etiqueta: 'Anulación de Recibos de Caja',
+            desde: 'RC1',
+            hasta: 'RC100',
+            valorDebito: 500000,
             valorCredito: 0,
           },
         ],

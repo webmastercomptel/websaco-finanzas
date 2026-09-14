@@ -22,6 +22,10 @@ import {
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -79,6 +83,8 @@ export class EstadoCuentaService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(SaldoDocumentoOrigen.name)
@@ -170,25 +176,36 @@ export class EstadoCuentaService {
       facturaPeriodo?.dueDate?.toISOString() ?? hasta.toISOString();
 
     // Step 1: fetch all documents for this inmueble (no date filter — see spec §5)
-    const [facturas, notasDebito, recibos, notasCredito, notasContables] =
-      await Promise.all([
-        this.facturas
-          .find({ coPropertyId, inmuebleId, status: 'emitida' })
-          .exec(),
-        this.notasDebito
-          .find({ coPropertyId, inmuebleId, status: 'emitida' })
-          .exec(),
-        this.recibos.find({ coPropertyId, inmuebleId }).exec(),
-        this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
-        this.notasContables
-          .find({ coPropertyId, inmuebleId, status: 'activo' })
-          .exec(),
-      ]);
+    const [
+      facturas,
+      notasDebito,
+      recibos,
+      notasCredito,
+      notasContables,
+      notasAnticipo,
+    ] = await Promise.all([
+      this.facturas
+        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .exec(),
+      this.notasDebito
+        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .exec(),
+      this.recibos.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasContables
+        .find({ coPropertyId, inmuebleId, status: 'activo' })
+        .exec(),
+      this.notasAnticipo.find({ coPropertyId, inmuebleId }).exec(),
+    ]);
 
-    // Step 2: fetch active applications for RC + NC sources
+    // Step 2: fetch active applications for RC + NC + NA sources — omitting
+    // Notas de Anticipo here was a real bug: their applications (crediting
+    // whatever cargo the leftover anticipo settled) never appeared on this
+    // statement at all, silently understating pagosRecibidos.
     const sourceIds = [
       ...recibos.map((r) => r._id),
       ...notasCredito.map((nc) => nc._id),
+      ...notasAnticipo.map((na) => na._id),
     ];
     const aplicaciones = sourceIds.length
       ? await this.aplicaciones
@@ -215,6 +232,12 @@ export class EstadoCuentaService {
       notasCredito.map((nc) => [
         nc._id.toString(),
         { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
+      ]),
+    );
+    const naMap = new Map(
+      notasAnticipo.map((na) => [
+        na._id.toString(),
+        { fullNumber: na.fullNumber, fecha: na.issueDate },
       ]),
     );
 
@@ -248,25 +271,37 @@ export class EstadoCuentaService {
     }
 
     // AplicacionCartera → crédito with categoria
+    const ETIQUETA_ORIGEN: Record<'RC' | 'NC' | 'NA', string> = {
+      RC: 'Recibo',
+      NC: 'Nota Crédito',
+      NA: 'Nota de Anticipo',
+    };
     for (const app of aplicaciones) {
-      const sourceType = app.sourceType as TipoDocumentoKardex;
+      const sourceType = app.sourceType;
       const origen =
         sourceType === 'RC'
           ? reciboMap.get(app.sourceId.toString())
-          : ncMap.get(app.sourceId.toString());
+          : sourceType === 'NA'
+            ? naMap.get(app.sourceId.toString())
+            : ncMap.get(app.sourceId.toString());
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
       const fecha = origen?.fecha ?? app.appliedAt;
+      const etiqueta = ETIQUETA_ORIGEN[sourceType];
 
-      // `amountApplied` on an RC application is cash PLUS whatever early-
+      // `amountApplied` on an RC/NA application is cash PLUS whatever early-
       // payment discount it absorbed (`discountApplied`) — see the Descuento
       // por Pronto Pago plan's own design: the factura is credited the full
-      // amount, the Recibo's cash side is smaller. Counting the whole thing
+      // amount, the source's cash side is smaller. Counting the whole thing
       // as "pago" would overstate what the propietario actually paid, so the
       // discount portion gets its own row/categoria — same bucket a Nota
       // Crédito's own discount already uses — leaving only real cash under
-      // "pago".
+      // "pago". A Nota de Anticipo runs through the exact same cruce
+      // machinery (`ejecutarAplicacionManual`/`Fifo`) as a Recibo, so it can
+      // carry a discount too — never just RC.
       const montoDescuento =
-        sourceType === 'RC' ? (app.discountApplied ?? 0) : 0;
+        sourceType === 'RC' || sourceType === 'NA'
+          ? (app.discountApplied ?? 0)
+          : 0;
       const montoCash = app.amountApplied - montoDescuento;
 
       if (montoCash > 0) {
@@ -274,10 +309,10 @@ export class EstadoCuentaService {
           fecha,
           tipo: sourceType,
           numeroCompleto: sourceNumber,
-          concepto: `${sourceType === 'RC' ? 'Recibo' : 'Nota Crédito'} ${sourceNumber}`,
+          concepto: `${etiqueta} ${sourceNumber}`,
           cargo: null,
           abono: montoCash,
-          categoria: sourceType === 'RC' ? 'pago' : 'descuento',
+          categoria: sourceType === 'NC' ? 'descuento' : 'pago',
         });
       }
       if (montoDescuento > 0) {
@@ -285,7 +320,7 @@ export class EstadoCuentaService {
           fecha,
           tipo: sourceType,
           numeroCompleto: sourceNumber,
-          concepto: `Descuento Pronto Pago Recibo ${sourceNumber}`,
+          concepto: `Descuento Pronto Pago ${etiqueta} ${sourceNumber}`,
           cargo: null,
           abono: montoDescuento,
           categoria: 'descuento',

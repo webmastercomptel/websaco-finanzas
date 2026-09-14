@@ -883,8 +883,8 @@ export interface MovimientoEstadoCuenta {
   concepto: string;
   cargo: number | null;
   abono: number | null;
-  /** `'pago'` for Recibo applications, `'descuento'` for NC, `null` for
-   *  Nota Contable rows (informational only, never summed). */
+  /** `'pago'` for Recibo/Nota de Anticipo applications, `'descuento'` for
+   *  NC, `null` for Nota Contable rows (informational only, never summed). */
   categoria: 'pago' | 'descuento' | null;
 }
 
@@ -959,6 +959,17 @@ export interface FilaConciliacionCartera {
   valorCredito: number;
 }
 
+/** One Recibo still carrying an unapplied anticipo AS OF `periodEnd` — a
+ *  historical snapshot (unlike `AnticipoPendienteEstadoCuenta`'s live-today
+ *  one), matching this report's own point-in-time reasoning: what a
+ *  reconciler closing out that period actually saw. */
+export interface AnticipoPendienteConciliacion {
+  inmuebleCodigo: string;
+  fecha: string;
+  numeroRecibo: string;
+  valor: number;
+}
+
 /**
  * Response shape for GET /consultas/conciliacion-cartera — a coproperty-wide
  * control report, not per-inmueble (contrast Estado de Cuenta): it compares
@@ -980,6 +991,7 @@ export interface RespuestaConciliacionCartera {
   saldoCarteraCalculado: number;
   saldoCarteraReal: number;
   diferencia: number;
+  anticiposPendientes: AnticipoPendienteConciliacion[];
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */
