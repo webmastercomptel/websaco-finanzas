@@ -466,6 +466,7 @@ describe('enriquecerMovimientosConAuxiliares', () => {
           centroUtilidad: false,
           centroDestino: false,
           flujoCaja: false,
+          requiereDocumentoCruce: false,
         },
       ],
       [
@@ -475,6 +476,7 @@ describe('enriquecerMovimientosConAuxiliares', () => {
           centroUtilidad: false,
           centroDestino: false,
           flujoCaja: false,
+          requiereDocumentoCruce: false,
         },
       ],
     ]);
@@ -503,6 +505,7 @@ describe('enriquecerMovimientosConAuxiliares', () => {
           centroUtilidad: false,
           centroDestino: true,
           flujoCaja: false,
+          requiereDocumentoCruce: false,
         },
       ],
     ]);
@@ -530,6 +533,7 @@ describe('enriquecerMovimientosConAuxiliares', () => {
           centroUtilidad: false,
           centroDestino: false,
           flujoCaja: true,
+          requiereDocumentoCruce: false,
         },
       ],
     ]);

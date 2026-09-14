@@ -1365,6 +1365,21 @@ export class LotesFacturacionService {
               );
             }
 
+            // Documento cruce self-reference (FV, this SAME factura's own
+            // número) — a second enrichment pass because the earlier one
+            // (right after `construirMovimientos`, used for the
+            // debits-equal-credits check above) runs BEFORE `numero` is
+            // reserved. Re-running tercero/centroCosto/flujoCaja here too is
+            // harmless — same inputs, same idempotent result — the only
+            // thing this pass actually changes is documentoCruce.
+            const entriesFinal = marcasPorCuenta
+              ? enriquecerMovimientosConAuxiliares(entries, marcasPorCuenta, {
+                  ...contextoAuxiliares,
+                  terceroCode: preliminar.unitCode,
+                  documentoCruce: { tipo: 'FV', numero: numero.numero },
+                })
+              : entries;
+
             await this.asientos.create(
               [
                 {
@@ -1372,7 +1387,7 @@ export class LotesFacturacionService {
                   loteId,
                   facturaId: factura._id.toString(),
                   date: lote.billingDate,
-                  entries,
+                  entries: entriesFinal,
                 },
               ],
               { session },
@@ -1545,6 +1560,7 @@ export class LotesFacturacionService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );

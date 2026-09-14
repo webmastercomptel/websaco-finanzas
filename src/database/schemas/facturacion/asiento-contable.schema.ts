@@ -51,6 +51,22 @@ export class Movimiento {
    *  `taxAmount > 0`; null on every other line. */
   @Prop({ type: Number, default: null })
   baseGravable?: number | null;
+
+  /** "Documento Cruce" — which Factura/Nota Débito this line's own balance
+   *  movement belongs to, set only when this line's account has
+   *  `requiresCrossDocument` on the chart of accounts. A charge-creation
+   *  line (Factura, Nota Débito) self-references — it's creating that exact
+   *  receivable; a line that instead REDUCES an existing receivable (Nota
+   *  Crédito, Recibo de Caja, aplicación de anticipo) references whichever
+   *  Factura/Nota Débito it reduced. See `enriquecerMovimientosConAuxiliares`
+   *  (asiento.builder.ts) for the uniform (self/anchor) case and
+   *  `construirAsientoCruce`/`construirMovimientosAplicacionAnticipo` for the
+   *  per-línea case (a Recibo can settle several documents in one entry). */
+  @Prop({ type: String, enum: ['FV', 'ND'], default: null })
+  tipoDocumento?: 'FV' | 'ND' | null;
+
+  @Prop({ type: Number, default: null })
+  numeroDocumento?: number | null;
 }
 
 export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);

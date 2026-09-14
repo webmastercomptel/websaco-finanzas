@@ -134,7 +134,11 @@ export class NotasDebitoService {
     private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
 
-  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
+  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
+   *  `documentoCruce` is this Nota Débito's own self-reference (ND, its own
+   *  número) — a Nota Débito creates a NEW receivable, so unlike a Recibo/
+   *  Nota Crédito (which reduce someone else's), its cartera line always
+   *  references itself. */
   private async conAuxiliares(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
@@ -144,6 +148,7 @@ export class NotasDebitoService {
       cashFlowCode: string | null;
     } | null,
     entries: ReturnType<typeof construirMovimientos>,
+    documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
   ): Promise<ReturnType<typeof construirMovimientos>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
@@ -158,6 +163,7 @@ export class NotasDebitoService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );
@@ -165,6 +171,7 @@ export class NotasDebitoService {
       terceroCode: inmueble?.code ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      documentoCruce: documentoCruce ?? null,
     });
   }
 
@@ -580,6 +587,7 @@ export class NotasDebitoService {
         nota.inmuebleId,
         copropiedad,
         entries,
+        { tipo: 'ND', numero: nota.number },
       );
       await this.asientos.create(
         [
@@ -783,6 +791,7 @@ export class NotasDebitoService {
       nota.inmuebleId,
       copropiedad,
       entries,
+      { tipo: 'ND', numero: nota.number },
     );
 
     await this.asientos.create(
