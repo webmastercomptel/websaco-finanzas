@@ -255,8 +255,16 @@ export async function generarPdfConsultaFacturacion(
     return y - ALTO_ENCABEZADO_TABLA;
   };
 
+  // `crearContexto` already created a first page (`ctx.page`) — reuse it
+  // for the FIRST call instead of always calling `addPage`, or that page
+  // stays in the document completely blank (nothing ever drew on it) while
+  // every real page shifts one number later — the blank first page reported.
+  let primeraPagina = true;
   const nuevaPagina = (): { page: PDFPage; y: number } => {
-    const page = ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
+    const page = primeraPagina
+      ? ctx.page
+      : ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
+    primeraPagina = false;
     paginas.push(page);
     const yTrasEncabezado = dibujarEncabezado(page);
     const yTrasTitulo = yTrasEncabezado;

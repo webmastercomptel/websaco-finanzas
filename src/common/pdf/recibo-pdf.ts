@@ -169,14 +169,14 @@ async function dibujarEncabezadoRecibo(
     thickness: 0.5,
     color: rgb(0.6, 0.6, 0.6),
   });
-  ctx.y -= 14;
+  // One blank line below the rule before Inmueble/Nombre/etc. start — the
+  // block used to start right against it.
+  ctx.y -= 14 + 15;
 }
 
-/** Left column (inmueble / titular / concepto) alongside "Recibo No.",
- *  Valor and Fecha on the right — all three right-aligned to the same edge,
- *  the same convention the asiento table's own "Valor Credito" column uses.
- *  The amount keeps its large size (the predecessor's own visual anchor for
- *  this document), Recibo No./Fecha sit above/below it in the same column. */
+/** Left column (inmueble / titular / concepto) alongside Valor and Fecha on
+ *  the right, both right-aligned to the same edge — "Recibo No." isn't
+ *  repeated here, the header already carries the document number. */
 function dibujarBloqueRecibo(
   ctx: PdfContext,
   datos: DatosReciboImpresion,
@@ -205,30 +205,25 @@ function dibujarBloqueRecibo(
     ctx.y -= 15;
   }
 
-  // ── Recibo No. / Valor / Fecha, all right-aligned to the same edge ──
-  const reciboNoTexto = `Recibo No. ${datos.numeroCompleto}`;
-  const reciboNoAncho = ctx.font.widthOfTextAtSize(reciboNoTexto, 10);
-  ctx.page.drawText(reciboNoTexto, {
-    x: MARGIN_LEFT + ctx.contentWidth - reciboNoAncho,
-    y: inicioBloque,
-    size: 10,
-    font: ctx.font,
-    color: rgb(0, 0, 0),
-  });
-
-  const montoTexto = formatoPeso(datos.monto);
-  const montoSize = 24;
-  const montoAncho = ctx.fontBold.widthOfTextAtSize(montoTexto, montoSize);
+  // ── Valor / Fecha, right-aligned to the same edge ──
+  // Right-alignment must measure the NUMERAL alone — sizing the offset off
+  // the full "$ 1.234.567" string (the "$ " included) left the numeral
+  // itself short of the true right edge by the width of that prefix.
+  const numeroTexto = formatoPeso(datos.monto).replace(/^\$\s?/, '');
+  const montoSize = 18;
+  const numeroAncho = ctx.fontBold.widthOfTextAtSize(numeroTexto, montoSize);
+  const xNumero = MARGIN_LEFT + ctx.contentWidth - numeroAncho;
+  const dolarAncho = ctx.fontBold.widthOfTextAtSize('$', 13);
   ctx.page.drawText('$', {
-    x: MARGIN_LEFT + ctx.contentWidth - montoAncho - 22,
-    y: inicioBloque - 16,
-    size: 16,
+    x: xNumero - dolarAncho - 4,
+    y: inicioBloque - 2,
+    size: 13,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
   });
-  ctx.page.drawText(montoTexto.replace(/^\$\s?/, ''), {
-    x: MARGIN_LEFT + ctx.contentWidth - montoAncho,
-    y: inicioBloque - 20,
+  ctx.page.drawText(numeroTexto, {
+    x: xNumero,
+    y: inicioBloque - 4,
     size: montoSize,
     font: ctx.fontBold,
     color: rgb(0, 0, 0),
@@ -239,7 +234,7 @@ function dibujarBloqueRecibo(
   const filaFechaAncho = ctx.font.widthOfTextAtSize(filaFecha, 10);
   ctx.page.drawText(filaFecha, {
     x: MARGIN_LEFT + ctx.contentWidth - filaFechaAncho,
-    y: inicioBloque - 48,
+    y: inicioBloque - 26,
     size: 10,
     font: ctx.font,
     color: rgb(0, 0, 0),
@@ -290,13 +285,17 @@ function dibujarTablaAsiento(
     columnas.map((c) => c.ancho),
     { bold: true },
   );
+  // Misma rayita que la del encabezado (gris, 0.5pt) — antes era una línea
+  // negra más gruesa, sin relación visual con el resto del documento.
   ctx.page.drawLine({
     start: { x: MARGIN_LEFT, y: ctx.y + 5 },
     end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 5 },
-    thickness: 0.75,
-    color: rgb(0, 0, 0),
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
   });
-  ctx.y -= 6;
+  // Un poco más de aire antes de la primera fila de datos — quedaba pegada
+  // a la rayita.
+  ctx.y -= 10;
 
   for (const linea of lineas) {
     if (ctx.y < 90) {
@@ -334,11 +333,17 @@ function dibujarTablaAsiento(
   // quede pegado — un renglón de aire entre el asiento y su total.
   ctx.y -= 15;
 
+  // Misma altura de barra y tamaño de fuente que "Total a Pagar" en el PDF
+  // de la factura (`dibujarTotalAPagar`, factura-pdf.ts) — antes era más
+  // baja (16pt) y con el mismo tamaño de fuente (9pt) que el resto de la
+  // tabla.
+  const ALTO_BARRA_TOTALES = 20;
+  const FUENTE_TOTALES = 11;
   ctx.page.drawRectangle({
     x: MARGIN_LEFT,
-    y: ctx.y - 4,
+    y: ctx.y - 5,
     width: ctx.contentWidth,
-    height: 16,
+    height: ALTO_BARRA_TOTALES,
     color: GRIS_CLARO,
   });
   dibujarFilaTabla(
@@ -352,7 +357,7 @@ function dibujarTablaAsiento(
       { texto: formatoPeso(totalCredito), numerica: true },
     ],
     columnas.map((c) => c.ancho),
-    { bold: true },
+    { bold: true, size: FUENTE_TOTALES },
   );
 }
 
@@ -365,10 +370,10 @@ function dibujarFilaTabla(
   ctx: PdfContext,
   celdas: { texto: string; numerica: boolean }[],
   anchos: number[],
-  opciones?: { bold?: boolean },
+  opciones?: { bold?: boolean; size?: number },
 ): void {
   const font = opciones?.bold ? ctx.fontBold : ctx.font;
-  const size = 9;
+  const size = opciones?.size ?? 9;
   let x = MARGIN_LEFT;
   celdas.forEach((celda, i) => {
     const ancho = anchos[i];

@@ -642,6 +642,66 @@ describe('CarteraPorInmuebleService', () => {
     );
   });
 
+  it('con fecha de corte histórica: un Recibo fechado un día DESPUÉS del corte no debe contar como pagado (bug real reportado)', async () => {
+    // Factura del 1-jun, pagada por un Recibo fechado 12-jun. Consultar
+    // Cartera por Inmueble al corte del 11-jun debía seguir mostrando la
+    // factura pendiente (el pago es del día SIGUIENTE) — mostraba saldo 0
+    // en su lugar. Causa: `finDelDiaCorte('2026-06-11')` da
+    // "2026-06-12T04:59:59.999Z" (llega 5h dentro del 12 en UTC, para
+    // capturar un `appliedAt` real de esa noche en Colombia) — pero
+    // `sourceDate` de un Recibo fechado 12-jun es "2026-06-12T00:00:00.000Z"
+    // (medianoche UTC pura, sin hora real), que cae ANTES de esas
+    // 04:59:59.999 — se contaba como ya pagado un día entero antes de tiempo.
+    const inmId = id();
+    const fId = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 100000,
+      issueDate: new Date('2026-06-01'),
+      lines: [],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const app = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 100000,
+      status: 'activa',
+      appliedAt: new Date('2026-06-12T15:00:00.000Z'),
+      sourceDate: new Date('2026-06-12'),
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([app]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+    });
+
+    const alDiaAnterior = await svc.findOne({
+      inmuebleId: inmId.toString(),
+      fecha: '2026-06-11',
+    });
+    expect(alDiaAnterior.documentos).toHaveLength(1);
+    expect(alDiaAnterior.documentos[0].saldo).toBe(100000);
+
+    const alDiaDelPago = await svc.findOne({
+      inmuebleId: inmId.toString(),
+      fecha: '2026-06-12',
+    });
+    expect(alDiaDelPago.documentos).toHaveLength(0);
+  });
+
   it('con fecha de corte = hoy: cuenta un pago aplicado hoy con hora real, no solo a medianoche', async () => {
     // Reproduces the reported bug: typing today's date as Fecha Corte must
     // behave like "up to right now, today", not "up to midnight today" —

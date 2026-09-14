@@ -96,6 +96,19 @@ describe('generarPdfConsultaFacturacion', () => {
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
   });
 
+  it('un reporte de una sola fila produce exactamente una página, nunca una primera en blanco (bug real reportado)', async () => {
+    // `crearContexto` ya crea una primera página — la paginación manual de
+    // este PDF debía reutilizarla en vez de siempre llamar `addPage`, o esa
+    // primera página se quedaba completamente en blanco (nada la dibuja) y
+    // todo el contenido real arrancaba en la página 2.
+    const bytes = await generarPdfConsultaFacturacion(
+      makeReporte(),
+      makeCopropiedad(),
+    );
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+  });
+
   it('no lanza con cero conceptos y cero filas', async () => {
     const bytes = await generarPdfConsultaFacturacion(
       makeReporte({ totalesPorConcepto: [], filas: [] }),
