@@ -5,12 +5,14 @@ const makeController = () => {
   const findVencimientos = jest.fn();
   const findCarteraGeneral = jest.fn();
   const findCarteraPorInmueble = jest.fn();
+  const findCarteraPorConceptos = jest.fn();
   const findPeriodosEstadoCuenta = jest.fn();
   const findAllEstadoCuenta = jest.fn();
   const generarPdfEstadoCuenta = jest.fn();
   const findAllMovimiento = jest.fn();
   const findPeriodosConciliacionCartera = jest.fn();
   const findAllConciliacionCartera = jest.fn();
+  const findAllConsecutivos = jest.fn();
   const resolveCoPropertyId = jest.fn();
   const findByIdCopropiedad = jest.fn();
 
@@ -19,6 +21,7 @@ const makeController = () => {
     { findVencimientos } as never,
     { findCarteraGeneral } as never,
     { findOne: findCarteraPorInmueble } as never,
+    { findAll: findCarteraPorConceptos } as never,
     {
       findPeriodos: findPeriodosEstadoCuenta,
       findAll: findAllEstadoCuenta,
@@ -28,6 +31,7 @@ const makeController = () => {
       findPeriodos: findPeriodosConciliacionCartera,
       findAll: findAllConciliacionCartera,
     } as never,
+    { findAll: findAllConsecutivos } as never,
     { resolveCoPropertyId } as never,
     {
       findById: () => ({ exec: findByIdCopropiedad }),
@@ -40,12 +44,14 @@ const makeController = () => {
     findVencimientos,
     findCarteraGeneral,
     findCarteraPorInmueble,
+    findCarteraPorConceptos,
     findPeriodosEstadoCuenta,
     findAllEstadoCuenta,
     generarPdfEstadoCuenta,
     findAllMovimiento,
     findPeriodosConciliacionCartera,
     findAllConciliacionCartera,
+    findAllConsecutivos,
     resolveCoPropertyId,
     findByIdCopropiedad,
   };
@@ -69,6 +75,19 @@ describe('ConsultasController', () => {
     });
   });
 
+  describe('cartera-por-conceptos', () => {
+    it('delegates findAll to CarteraPorConceptosService', async () => {
+      const { controller, findCarteraPorConceptos } = makeController();
+      const expected = { conceptos: [], grupos: [] };
+      findCarteraPorConceptos.mockResolvedValue(expected);
+
+      const result = await controller.findCarteraPorConceptos({});
+
+      expect(result).toBe(expected);
+      expect(findCarteraPorConceptos).toHaveBeenCalledWith({});
+    });
+  });
+
   describe('movimiento-contable', () => {
     it('delegates findAll to MovimientoContableService', async () => {
       const { controller, findAllMovimiento } = makeController();
@@ -85,6 +104,20 @@ describe('ConsultasController', () => {
         desde: '2026-01-01',
         hasta: '2026-12-31',
       });
+    });
+  });
+
+  describe('consecutivos', () => {
+    it('delegates findAll to ConsecutivosService', async () => {
+      const { controller, findAllConsecutivos } = makeController();
+      const expected = { conceptos: [], filas: [] };
+      findAllConsecutivos.mockResolvedValue(expected);
+
+      const query = { codigo: 'RC', desde: '2026-01-01', hasta: '2026-01-31' };
+      const result = await controller.findConsecutivos(query);
+
+      expect(result).toBe(expected);
+      expect(findAllConsecutivos).toHaveBeenCalledWith(query);
     });
   });
 });

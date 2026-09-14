@@ -44,18 +44,50 @@ function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
 }
 
+/** Narrows `reporte` to one inmueble and/or one aging bucket — the same
+ *  on-screen filters `vencimientos-cartera.tsx` applies client-side, mirrored
+ *  here so the PDF (rendered server-side, unlike the Excel export) reflects
+ *  whichever filters were active instead of always printing everything. */
+function filtrarReporte(
+  reporte: RespuestaVencimientosCartera,
+  filtro: { inmuebleId?: string; rango?: RangoVencimiento },
+): RespuestaVencimientosCartera {
+  if (!filtro.inmuebleId && !filtro.rango) return reporte;
+
+  const filas = reporte.filas.filter(
+    (f) =>
+      (!filtro.inmuebleId || f.inmuebleId === filtro.inmuebleId) &&
+      (!filtro.rango || f.rango === filtro.rango),
+  );
+  const rangos = RANGOS.map((r) => ({
+    rango: r.rango,
+    etiqueta:
+      reporte.rangos.find((existente) => existente.rango === r.rango)
+        ?.etiqueta ?? r.etiqueta,
+    valor: filas
+      .filter((f) => f.rango === r.rango)
+      .reduce((sum, f) => sum + f.saldo, 0),
+  }));
+  const totalCartera = filas.reduce((sum, f) => sum + f.saldo, 0);
+
+  return { ...reporte, filas, rangos, totalCartera };
+}
+
 /**
  * Generates a real PDF for Vencimientos de Cartera: every pending document
  * coproperty-wide, aged into its own column — 17 columns total (8 fixed +
  * 9 aging buckets, all fixed, never per-coproperty dynamic), wide enough
  * that this manages its own landscape pagination with a repeating header
  * and a shrunk font, the same approach `consulta-facturacion-pdf.ts` uses
- * for its own wide, dynamic-column table.
+ * for its own wide, dynamic-column table. `filtro` narrows to one inmueble
+ * and/or one aging bucket, matching whatever's active on screen.
  */
 export async function generarPdfVencimientosCartera(
-  reporte: RespuestaVencimientosCartera,
+  reporteCompleto: RespuestaVencimientosCartera,
   copropiedad: CopropiedadDocument,
+  filtro: { inmuebleId?: string; rango?: RangoVencimiento } = {},
 ): Promise<Uint8Array> {
+  const reporte = filtrarReporte(reporteCompleto, filtro);
   const ctx = await crearContexto({ orientacion: 'horizontal' });
 
   const pesoTotal = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);

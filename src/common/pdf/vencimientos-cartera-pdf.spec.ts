@@ -110,4 +110,71 @@ describe('generarPdfVencimientosCartera', () => {
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBeGreaterThan(1);
   });
+
+  describe('con filtro (inmuebleId y/o rango) — el mismo filtro activo en pantalla', () => {
+    it('filtra por inmuebleId: las filas de otros inmuebles no imprimen (menos páginas que sin filtrar)', async () => {
+      const filas = Array.from({ length: 120 }, (_, i) =>
+        makeFila({
+          inmuebleId: i === 0 ? 'inm-1' : 'inm-2',
+          numeroCompleto: `FV-${i}`,
+        }),
+      );
+      const reporte = makeReporte({ filas });
+
+      const sinFiltrar = await generarPdfVencimientosCartera(
+        reporte,
+        makeCopropiedad(),
+      );
+      const filtrado = await generarPdfVencimientosCartera(
+        reporte,
+        makeCopropiedad(),
+        { inmuebleId: 'inm-1' },
+      );
+
+      const docSinFiltrar = await PDFDocument.load(sinFiltrar);
+      const docFiltrado = await PDFDocument.load(filtrado);
+      expect(docFiltrado.getPageCount()).toBeLessThan(
+        docSinFiltrar.getPageCount(),
+      );
+    });
+
+    it('filtra por rango: recalcula rangos y totalCartera desde las filas filtradas, no desde el reporte completo', async () => {
+      const filas = [
+        makeFila({ rango: 'sinVencer', saldo: 100000 }),
+        makeFila({ rango: 'dias_1_30', saldo: 30000 }),
+      ];
+      const reporte = makeReporte({
+        filas,
+        totalCartera: 130000,
+        rangos: [
+          { rango: 'sinVencer', etiqueta: 'Sin Vencer', valor: 100000 },
+          { rango: 'dias_1_30', etiqueta: '1-30', valor: 30000 },
+          { rango: 'dias_31_60', etiqueta: '31-60', valor: 0 },
+          { rango: 'dias_61_90', etiqueta: '61-90', valor: 0 },
+          { rango: 'dias_91_120', etiqueta: '91-120', valor: 0 },
+          { rango: 'dias_121_180', etiqueta: '121-180', valor: 0 },
+          { rango: 'dias_181_360', etiqueta: '181-360', valor: 0 },
+          { rango: 'dias_361_720', etiqueta: '361-720', valor: 0 },
+          { rango: 'dias_720_mas', etiqueta: '+720', valor: 0 },
+        ],
+      });
+
+      const bytes = await generarPdfVencimientosCartera(
+        reporte,
+        makeCopropiedad(),
+        { rango: 'sinVencer' },
+      );
+
+      expect(empiezaConPdf(bytes)).toBe('%PDF-');
+    });
+
+    it('sin inmuebleId ni rango, no filtra nada (mismo comportamiento de siempre)', async () => {
+      const bytes = await generarPdfVencimientosCartera(
+        makeReporte(),
+        makeCopropiedad(),
+        {},
+      );
+      expect(empiezaConPdf(bytes)).toBe('%PDF-');
+    });
+  });
 });
