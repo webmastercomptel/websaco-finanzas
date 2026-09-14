@@ -19,10 +19,10 @@ const sesionFalsa = () => ({
 const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
   ({ startSession: jest.fn(() => Promise.resolve(session)) }) as never;
 
-const lotesFacturacionFalso = () =>
+const lotesFacturacionFalso = (ultimoConsolidado: unknown = null) =>
   ({
     exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
-    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(null)),
+    obtenerUltimoConsolidado: jest.fn(() => Promise.resolve(ultimoConsolidado)),
   }) as never;
 
 type ReciboFixture = {
@@ -99,6 +99,7 @@ const construirServicio = (
     recibo?: ReciboFixture;
     facturas?: FacturaFixture[];
     notaAnticipo?: NotaAnticipoFixture;
+    ultimoLoteConsolidado?: unknown;
   } = {},
 ) => {
   const session = sesionFalsa();
@@ -378,7 +379,7 @@ const construirServicio = (
     { resolveCoPropertyId: () => COP } as never,
     numeracion as never,
     conexionCon(session),
-    lotesFacturacionFalso(),
+    lotesFacturacionFalso(opciones.ultimoLoteConsolidado ?? null),
     saldoDocumentoOrigen as never,
   );
 
@@ -466,6 +467,42 @@ describe('NotasAnticipoService.crear', () => {
         aplicacionAutomatica: true,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza una fecha de emisión fuera del período del último lote consolidado', async () => {
+    const { service } = construirServicio({
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        codigo: 'NA',
+        reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('deja pasar una fecha de emisión dentro del período del último lote consolidado', async () => {
+    const { service } = construirServicio({
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        codigo: 'NA',
+        reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-08-15',
+        aplicacionAutomatica: true,
+      }),
+    ).resolves.toBeDefined();
   });
 
   it('aplica automáticamente (FIFO) contra la factura abierta, decrementando el recibo y postea un asiento anclado a notaAnticipoId', async () => {

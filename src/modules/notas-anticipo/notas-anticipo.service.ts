@@ -213,6 +213,20 @@ export class NotasAnticipoService {
     // change.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
+    // The document's own date must fall within the last consolidated
+    // billing run's period — same rule, same reasoning, same helper as
+    // `RecibosService.crear()`'s identical check on `fechaRecibo`. A
+    // coproperty that has never consolidated a lote has no "current period"
+    // yet, so nothing to validate against.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fechaEmision),
+      ultimoLote,
+      'La fecha de la nota',
+    );
+
     return this.transaccion(async (session) => {
       const reciboDoc = await this.recibos
         .findOne({

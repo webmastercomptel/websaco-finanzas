@@ -200,6 +200,20 @@ export class NotasDebitoService {
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
+    // The charge's own date must fall within the last consolidated billing
+    // run's period — same rule, same reasoning, same helper as
+    // `RecibosService.crear()`'s identical check on `fechaRecibo`. A
+    // coproperty that has never consolidated a lote has no "current period"
+    // yet, so nothing to validate against.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fechaCargo),
+      ultimoLote,
+      'La fecha de la nota',
+    );
+
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos
       .findOne({ _id: conceptoId, coPropertyId })

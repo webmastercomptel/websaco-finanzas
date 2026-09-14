@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { NotasDebitoService } from './notas-debito.service';
 
@@ -435,6 +439,54 @@ describe('NotasDebitoService', () => {
           fechaCargo: '2026-09-01',
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rechaza una fecha de cargo fuera del período del último lote consolidado', async () => {
+      const svc = servicio({
+        lotes: {
+          exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+          obtenerUltimoConsolidado: jest.fn(() =>
+            Promise.resolve({
+              periodStart: new Date('2026-08-01'),
+              periodEnd: new Date('2026-08-31'),
+            }),
+          ),
+        },
+      });
+
+      await expect(
+        svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
+          inmuebleId: INMUEBLE.toString(),
+          conceptoId: CONCEPTO.toString(),
+          total: 50000,
+          fechaCargo: '2026-09-01',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('deja pasar una fecha de cargo dentro del período del último lote consolidado', async () => {
+      const svc = servicio({
+        lotes: {
+          exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+          obtenerUltimoConsolidado: jest.fn(() =>
+            Promise.resolve({
+              periodStart: new Date('2026-08-01'),
+              periodEnd: new Date('2026-08-31'),
+            }),
+          ),
+        },
+      });
+
+      await expect(
+        svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
+          inmuebleId: INMUEBLE.toString(),
+          conceptoId: CONCEPTO.toString(),
+          total: 50000,
+          fechaCargo: '2026-08-15',
+        }),
+      ).resolves.toBeDefined();
     });
   });
 

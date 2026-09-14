@@ -982,7 +982,10 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
   it('rechaza una fecha de un mes distinto al del último lote consolidado', async () => {
     const { service, notasCredito, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
@@ -996,7 +999,10 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
   it('deja pasar una fecha del mismo mes y año del último lote consolidado', async () => {
     const { service, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
@@ -1017,17 +1023,40 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
   });
 
   it('un lote facturado el día 1 del mes no corre el período un mes hacia atrás (mismo bug real de Recibos)', async () => {
-    // Ver `periodoCalendarioDe`'s own docblock (common/contabilidad/
-    // periodo-calendario.util.ts) y el test gemelo en recibos.service.spec.ts.
+    // Ver el test gemelo en recibos.service.spec.ts.
     const { service, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
       service.crear('acc-1', dtoBase({ fecha: '2026-08-31' })),
     ).resolves.toBeDefined();
     expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza una fecha del mismo mes calendario pero fuera del rango real del período (periodEnd, no fin de mes)', async () => {
+    // El período de un lote no siempre coincide con el mes calendario
+    // entero — esta validación compara contra el rango real
+    // (`periodStart`/`periodEnd`), no contra "mismo mes/año", así que una
+    // nota posterior a `periodEnd` se rechaza aunque siga siendo el mismo mes.
+    const { service, notasCredito, asientos } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-15'),
+      },
+    });
+
+    await expect(
+      service.crear('acc-1', dtoBase({ fecha: '2026-08-20' })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(notasCredito.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
   });
 });
 
