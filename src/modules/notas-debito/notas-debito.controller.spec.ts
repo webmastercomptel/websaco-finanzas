@@ -5,6 +5,10 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 
 const COP = new Types.ObjectId();
 
+const modeloFindOneVacio = () => ({
+  findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
 function makeController(
   notasDebito: Record<string, unknown>,
   copropiedades: Record<string, unknown> = {
@@ -12,11 +16,25 @@ function makeController(
       exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
     })),
   },
+  modelos: {
+    inmuebles?: Record<string, unknown>;
+    terceros?: Record<string, unknown>;
+    conceptos?: Record<string, unknown>;
+    asientos?: Record<string, unknown>;
+    cuentasContables?: Record<string, unknown>;
+  } = {},
 ) {
   return new NotasDebitoController(
     notasDebito as never,
     { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
     copropiedades as never,
+    (modelos.inmuebles ?? modeloFindOneVacio()) as never,
+    (modelos.terceros ?? modeloFindOneVacio()) as never,
+    (modelos.conceptos ?? modeloFindOneVacio()) as never,
+    (modelos.asientos ?? modeloFindOneVacio()) as never,
+    (modelos.cuentasContables ?? {
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+    }) as never,
   );
 }
 
@@ -108,15 +126,41 @@ describe('NotasDebitoController.generarPdf', () => {
     const notasDebito = {
       findOneRaw: jest.fn(() =>
         Promise.resolve({
+          _id: new Types.ObjectId(),
+          inmuebleId: new Types.ObjectId(),
+          terceroId: null,
+          conceptoId: new Types.ObjectId(),
           fullNumber: 'ND-001-0001',
           issueDate: new Date('2026-08-12'),
           total: 50000,
           description: null,
         }),
       ),
-      findOne: jest.fn(() => Promise.resolve({ saldoPendiente: 50000 })),
     };
-    const controller = makeController(notasDebito);
+    const asientos = {
+      findOne: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve({
+            entries: [
+              { account: '130510', type: 'debito', amount: 50000 },
+              { account: '413505', type: 'credito', amount: 50000 },
+            ],
+          }),
+      })),
+    };
+    const cuentasContables = {
+      find: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve([
+            { code: '130510', name: 'CxC Multas' },
+            { code: '413505', name: 'Ingresos por Multas' },
+          ]),
+      })),
+    };
+    const controller = makeController(notasDebito, undefined, {
+      asientos,
+      cuentasContables,
+    });
     const set = jest.fn();
     const send = jest.fn();
 

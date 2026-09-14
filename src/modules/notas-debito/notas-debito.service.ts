@@ -134,7 +134,11 @@ export class NotasDebitoService {
     private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
 
-  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
+  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
+   *  `documentoCruce` is this Nota Débito's own self-reference (ND, its own
+   *  número) — a Nota Débito creates a NEW receivable, so unlike a Recibo/
+   *  Nota Crédito (which reduce someone else's), its cartera line always
+   *  references itself. */
   private async conAuxiliares(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
@@ -144,6 +148,7 @@ export class NotasDebitoService {
       cashFlowCode: string | null;
     } | null,
     entries: ReturnType<typeof construirMovimientos>,
+    documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
   ): Promise<ReturnType<typeof construirMovimientos>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
@@ -158,6 +163,7 @@ export class NotasDebitoService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );
@@ -165,6 +171,7 @@ export class NotasDebitoService {
       terceroCode: inmueble?.code ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      documentoCruce: documentoCruce ?? null,
     });
   }
 
@@ -200,10 +207,25 @@ export class NotasDebitoService {
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
+    // The charge's own date must fall within the last consolidated billing
+    // run's period — same rule, same reasoning, same helper as
+    // `RecibosService.crear()`'s identical check on `fechaRecibo`. A
+    // coproperty that has never consolidated a lote has no "current period"
+    // yet, so nothing to validate against.
+    const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    exigirPeriodoFacturacionActual(
+      new Date(dto.fechaCargo),
+      ultimoLote,
+      'La fecha de la nota',
+    );
+
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos
       .findOne({ _id: conceptoId, coPropertyId })
       .populate('cuentaCreditoId', 'code')
+      .populate('cuentaDebitoId', 'code')
       .exec();
     if (!concepto) {
       throw new NotFoundException(
@@ -297,12 +319,18 @@ export class NotasDebitoService {
         { session },
       );
 
-      // Post creation journal entry: debit cartera, credit income (the
-      // concepto's CREDIT account, per construirMovimientos).
+      // Post creation journal entry: debit the concepto's own receivable
+      // account (cuentaDebitoId), credit its income account (cuentaCreditoId)
+      // — same per-concepto accounts a Factura line codes with, per
+      // `construirMovimientos`'s own docblock. Falls back to the
+      // coproperty's shared `receivablesAccount` only when the concepto has
+      // no `cuentaDebitoId` configured (that fallback lives inside
+      // `construirMovimientos` itself).
       await this.postearAsientoCreacion(
         session,
         coPropertyId,
         creada,
+        codigoDeCuentaContable(concepto.cuentaDebitoId),
         codigoDeCuentaContable(concepto.cuentaCreditoId),
         concepto.kind,
       );
@@ -559,6 +587,7 @@ export class NotasDebitoService {
         nota.inmuebleId,
         copropiedad,
         entries,
+        { tipo: 'ND', numero: nota.number },
       );
       await this.asientos.create(
         [
@@ -730,6 +759,7 @@ export class NotasDebitoService {
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     nota: NotaDebitoDocument,
+    cuentaDebito: string | null,
     cuentaIngreso: string | null,
     conceptoKind: 'administracion' | 'intereses' | 'otro',
   ): Promise<void> {
@@ -745,6 +775,7 @@ export class NotasDebitoService {
         total: nota.total,
         lines: [
           {
+            accountingReceivableAccount: cuentaDebito,
             accountingIncomeAccount: incomeAccount,
             totalAmount: nota.total,
             conceptKind: conceptoKind,
@@ -760,6 +791,7 @@ export class NotasDebitoService {
       nota.inmuebleId,
       copropiedad,
       entries,
+      { tipo: 'ND', numero: nota.number },
     );
 
     await this.asientos.create(

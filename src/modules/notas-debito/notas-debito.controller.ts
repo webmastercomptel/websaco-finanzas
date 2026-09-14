@@ -21,11 +21,32 @@ import { AnularNotaDebitoDto } from './dto/anular-nota-debito.dto';
 import { ListarNotaDebitoDto } from './dto/listar-nota-debito.dto';
 import type { NotaDebito, NotaDebitoDetalle, Paginado } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfNotaDebito } from '../../common/pdf/nota-debito-pdf';
+import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
+import { construirDatosImpresionNotaDebito } from './nota-debito-pdf-datos.util';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  AsientoContable,
+  AsientoContableDocument,
+} from '../../database/schemas/facturacion/asiento-contable.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
@@ -42,6 +63,16 @@ export class NotasDebitoController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptos: Model<ConceptoCobroDocument>,
+    @InjectModel(AsientoContable.name)
+    private readonly asientos: Model<AsientoContableDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
   ) {}
 
   @Get()
@@ -84,9 +115,8 @@ export class NotasDebitoController {
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
-    const [nota, detalle, copropiedad] = await Promise.all([
+    const [nota, copropiedad] = await Promise.all([
       this.notasDebito.findOneRaw(id),
-      this.notasDebito.findOne(id),
       this.copropiedades.findById(coPropertyId).exec(),
     ]);
 
@@ -96,12 +126,22 @@ export class NotasDebitoController {
       );
     }
 
-    const bytes = await generarPdfNotaDebito(
+    const datos = await construirDatosImpresionNotaDebito(
       nota,
-      detalle.saldoPendiente,
       copropiedad,
-      { duplicado: duplicado === 'true' },
+      coPropertyId,
+      {
+        inmuebles: this.inmuebles,
+        terceros: this.terceros,
+        conceptos: this.conceptos,
+        asientos: this.asientos,
+        cuentasContables: this.cuentasContables,
+      },
     );
+
+    const bytes = await generarPdfRecibo(datos, copropiedad, {
+      duplicado: duplicado === 'true',
+    });
 
     res.set({
       'Content-Type': 'application/pdf',

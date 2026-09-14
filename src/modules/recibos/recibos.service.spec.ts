@@ -798,7 +798,10 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
   it('rechaza una fecha de pago de un mes distinto al del último lote consolidado', async () => {
     const { service, recibos, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
@@ -816,7 +819,10 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
   it('deja pasar una fecha de pago del mismo mes y año del último lote consolidado', async () => {
     const { service, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
@@ -849,12 +855,14 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
     // "2026-08-31" — mismo agosto — rechazaba con "el último período
     // facturado fue 07/2026". Causa: `periodoDe()` (común, hora local) leía
     // la medianoche UTC del día 1 como el 31 de julio en un host con offset
-    // negativo (Colombia, UTC-5). Esta validación debe leer SIEMPRE en UTC
-    // (`periodoCalendarioDe`), nunca en hora local — ver la nota en el
-    // código de `crear()`.
+    // negativo (Colombia, UTC-5). Esta validación debe leer SIEMPRE en UTC,
+    // nunca en hora local — ver la nota en el código de `crear()`.
     const { service, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
-      ultimoLoteConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-31'),
+      },
     });
 
     await expect(
@@ -865,6 +873,32 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
       }),
     ).resolves.toBeDefined();
     expect(asientos.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza una fecha de pago del mismo mes calendario pero fuera del rango real del período (periodEnd, no fin de mes)', async () => {
+    // El período de un lote no siempre coincide con el mes calendario
+    // entero (ciclos quincenales, cortes a mitad de mes) — esta validación
+    // compara contra el rango real (`periodStart`/`periodEnd`), no contra
+    // "mismo mes/año", así que un recibo posterior a `periodEnd` se rechaza
+    // aunque siga siendo el mismo mes.
+    const { service, recibos, asientos } = construirServicio({
+      reciboCreado: reciboCreado(),
+      ultimoLoteConsolidado: {
+        periodStart: new Date('2026-08-01'),
+        periodEnd: new Date('2026-08-15'),
+      },
+    });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        fechaRecibo: '2026-08-20',
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(recibos.create).not.toHaveBeenCalled();
+    expect(asientos.create).not.toHaveBeenCalled();
   });
 });
 

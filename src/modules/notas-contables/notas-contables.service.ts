@@ -112,6 +112,7 @@ export class NotasContablesService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );
@@ -312,10 +313,18 @@ export class NotasContablesService {
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
     if (query.fechaDesde || query.fechaHasta) {
-      filtro.createdAt = {
+      const rango = {
         ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
         ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
       };
+      // A note carries a real `issueDate` from that feature onward; one
+      // created before it existed has `issueDate: null` and must fall back
+      // to `createdAt` — same pattern `NotasCreditoService.findAll` already
+      // uses for its own `issueDate`.
+      filtro.$or = [
+        { issueDate: rango },
+        { issueDate: null, createdAt: rango },
+      ];
     }
 
     const pagina = query.pagina ?? 1;

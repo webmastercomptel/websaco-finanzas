@@ -91,6 +91,23 @@ import type { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
 import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 
+/** One credit-side line `aplicarManual`/`aplicarFifo` produce, per concepto
+ *  of the Factura they just settled — `cuenta: null` means the line's
+ *  concepto has no `accountingReceivableAccount` configured, resolved to
+ *  the coproperty's shared `cuentaCartera` only once `postearAsientoAplicacion`
+ *  knows it (same "resolve the fallback account at the last possible
+ *  moment" pattern `crear()`'s own `creditosPorCuenta` already uses).
+ *  `tipoDocumento`/`numeroDocumento` are this application's own documento
+ *  cruce — always the SPECIFIC Factura this line settled, never the note's
+ *  own anchor (a deferred application can settle a completely different
+ *  invoice). */
+type DesgloseCarteraAplicacion = {
+  cuenta: string | null;
+  monto: number;
+  tipoDocumento: 'FV';
+  numeroDocumento: number;
+};
+
 /**
  * CANONICAL CONSTRUCTOR — pinned in Task 3, unchanged here. NO
  * `PeriodoService` argument: unlike `RecibosService`, `crear()` never checks
@@ -134,7 +151,12 @@ export class NotasCreditoService {
     private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
 
-  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
+  /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
+   *  `documentoCruce` is the UNIFORM case (creation and its own reversal,
+   *  which always reference the SAME anchor Factura) — `postearAsientoAplicacion`
+   *  (deferred excess application, which can target a DIFFERENT document per
+   *  línea) tags `tipoDocumento`/`numeroDocumento` per-línea instead, before
+   *  calling this. */
   private async conAuxiliares(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
@@ -144,6 +166,7 @@ export class NotasCreditoService {
       cashFlowCode: string | null;
     } | null,
     entries: ReturnType<typeof construirAsientoCruce>,
+    documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
   ): Promise<ReturnType<typeof construirAsientoCruce>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
@@ -158,6 +181,7 @@ export class NotasCreditoService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );
@@ -165,6 +189,7 @@ export class NotasCreditoService {
       terceroCode: inmueble?.code ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      documentoCruce: documentoCruce ?? null,
     });
   }
 
@@ -445,6 +470,7 @@ export class NotasCreditoService {
         creditosPorCuenta,
         debitosPorCuenta,
         montoAplicadoMora,
+        factura.number,
       );
 
       const final = await this.notasCredito
@@ -510,7 +536,7 @@ export class NotasCreditoService {
       });
 
       if (dto.aplicaciones?.length) {
-        const creadas = await this.aplicarManual(
+        const { creadas, desglose } = await this.aplicarManual(
           session,
           coPropertyId,
           nota,
@@ -527,6 +553,7 @@ export class NotasCreditoService {
             coPropertyId,
             nota,
             totalAplicado,
+            desglose,
           );
         }
         const fechaNota = fechaNotaCredito(nota);
@@ -556,6 +583,7 @@ export class NotasCreditoService {
           coPropertyId,
           nota,
           totalAplicado,
+          resultado.desglose,
         );
       }
       const fechaNota = fechaNotaCredito(nota);
@@ -579,7 +607,10 @@ export class NotasCreditoService {
     nota: NotaCreditoDocument,
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
-  ): Promise<AplicacionCarteraDocument[]> {
+  ): Promise<{
+    creadas: AplicacionCarteraDocument[];
+    desglose: DesgloseCarteraAplicacion[];
+  }> {
     const sumaSolicitada = solicitadas.reduce(
       (acc, a) => acc + a.montoAplicado,
       0,
@@ -592,6 +623,7 @@ export class NotasCreditoService {
     }
 
     const creadas: AplicacionCarteraDocument[] = [];
+    const desglose: DesgloseCarteraAplicacion[] = [];
     for (const solicitada of solicitadas) {
       const facturaId = new Types.ObjectId(solicitada.documentoId);
       const factura = await decrementarSaldoFactura(
@@ -630,6 +662,20 @@ export class NotasCreditoService {
           monto: parte.parte,
         };
       });
+      // Documento cruce per línea: THIS factura, not the note's own anchor —
+      // a deferred application can settle a completely different invoice.
+      // Per-concepto accounts, same as `crear()`'s own `creditosPorCuenta`.
+      for (const parte of partes) {
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        desglose.push({
+          cuenta: linea?.accountingReceivableAccount ?? null,
+          monto: parte.parte,
+          tipoDocumento: 'FV',
+          numeroDocumento: factura.number,
+        });
+      }
 
       const [creada] = await this.aplicaciones.create(
         [
@@ -662,7 +708,7 @@ export class NotasCreditoService {
       'activo',
     );
 
-    return creadas;
+    return { creadas, desglose };
   }
 
   /** Mirrors `RecibosService.aplicarFifo` exactly — `sourceType: 'NC'` in
@@ -680,6 +726,7 @@ export class NotasCreditoService {
     aplicadas: AplicacionCarteraDocument[];
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
+    desglose: DesgloseCarteraAplicacion[];
   }> {
     // Candidates bounded to this ONE inmueble (a small set) — fetched
     // first, THEN cross-referenced against `SaldoTotalDocumento` for which
@@ -712,6 +759,7 @@ export class NotasCreditoService {
 
     const aplicadas: AplicacionCarteraDocument[] = [];
     const errores: ErrorAplicacion[] = [];
+    const desglose: DesgloseCarteraAplicacion[] = [];
     let restante = montoDisponible;
     let totalAplicado = 0;
 
@@ -750,6 +798,19 @@ export class NotasCreditoService {
             monto: parte.parte,
           };
         });
+        // Documento cruce per línea — same reasoning as `aplicarManual`'s
+        // own identical block.
+        for (const parte of partes) {
+          const linea = facturaActualizada.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          desglose.push({
+            cuenta: linea?.accountingReceivableAccount ?? null,
+            monto: parte.parte,
+            tipoDocumento: 'FV',
+            numeroDocumento: facturaActualizada.number,
+          });
+        }
 
         const [creada] = await this.aplicaciones.create(
           [
@@ -796,7 +857,7 @@ export class NotasCreditoService {
       );
     }
 
-    return { aplicadas, errores, montoSinAplicar: restante };
+    return { aplicadas, errores, montoSinAplicar: restante, desglose };
   }
 
   /**
@@ -1003,6 +1064,7 @@ export class NotasCreditoService {
         nota.inmuebleId,
         copropiedad,
         entries,
+        facturaAncla ? { tipo: 'FV', numero: facturaAncla.number } : null,
       );
       await this.asientos.create(
         [
@@ -1215,14 +1277,16 @@ export class NotasCreditoService {
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,
-   *  credit `cuentaCartera`, both for `montoAplicado` — never touches
-   *  `cuentaDevoluciones` again (the correction was already booked at
-   *  creation time). Only called when `montoAplicado > 0`. */
+   *  credit `cuentaCartera` (per concepto/documento, via `desglose` — see
+   *  `construirMovimientosAplicacionAnticipo`), both for `montoAplicado` —
+   *  never touches `cuentaDevoluciones` again (the correction was already
+   *  booked at creation time). Only called when `montoAplicado > 0`. */
   private async postearAsientoAplicacion(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     nota: NotaCreditoDocument,
     montoAplicado: number,
+    desglose: DesgloseCarteraAplicacion[],
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1230,12 +1294,23 @@ export class NotasCreditoService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const desgloseCartera = desglose.map((d) => ({
+      account: d.cuenta ?? cuentaCartera,
+      monto: d.monto,
+      tipoDocumento: d.tipoDocumento,
+      numeroDocumento: d.numeroDocumento,
+    }));
     let entries = construirMovimientosAplicacionAnticipo(
       cuentaAnticipos,
       cuentaCartera,
       montoAplicado,
       'NC',
+      desgloseCartera,
     );
+    // Per-línea documento cruce is already set on `entries` above (from
+    // `desgloseCartera`) — `conAuxiliares` never overwrites it (see its own
+    // `?? contexto.documentoCruce` check), it only fills tercero/centroCosto/
+    // flujoCaja here.
     entries = await this.conAuxiliares(
       session,
       coPropertyId,
@@ -1283,6 +1358,7 @@ export class NotasCreditoService {
     creditosPorCuenta: Map<string | null, number>,
     debitosPorCuenta: Map<string | null, number>,
     montoAplicadoMora: number,
+    numeroFacturaAncla: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1322,6 +1398,7 @@ export class NotasCreditoService {
       nota.inmuebleId,
       copropiedad,
       entries,
+      { tipo: 'FV', numero: numeroFacturaAncla },
     );
 
     await this.asientos.create(

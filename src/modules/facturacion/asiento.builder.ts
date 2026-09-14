@@ -239,15 +239,36 @@ export interface MarcasCuentaContable {
   centroUtilidad: boolean;
   centroDestino: boolean;
   flujoCaja: boolean;
+  requiereDocumentoCruce: boolean;
+}
+
+/** Which Factura/Nota Débito a "documento cruce" line references — `numero`
+ *  is the plain sequential number (`Factura.number`/`NotaDebito.number`),
+ *  never the prefixed `fullNumber`, same convention `LineaAsientoImpresion`
+ *  already uses for its own `numeroDocumento`. */
+export interface DocumentoCruce {
+  tipo: 'FV' | 'ND';
+  numero: number;
 }
 
 /** The per-transaction values `enriquecerMovimientosConAuxiliares` attaches
  *  when an account's flags call for them — the inmueble's own unit code, and
- *  the coproperty's two single auxiliary codes (Parámetros de Facturación). */
+ *  the coproperty's two single auxiliary codes (Parámetros de Facturación).
+ *
+ *  `documentoCruce` is the UNIFORM case only — the single Factura/Nota
+ *  Débito every qualifying line in THIS call's `movimientos` references (a
+ *  Factura or Nota Débito self-referencing its own charge; a Nota Crédito's
+ *  own creation referencing its one anchor Factura). A caller whose lines
+ *  can each reference a DIFFERENT document (a Recibo settling several
+ *  Facturas/Notas Débito in one entry, or a Nota Crédito's deferred
+ *  `aplicar()`) sets `tipoDocumento`/`numeroDocumento` directly on each
+ *  `Movimiento` itself before calling this — see the check below, which
+ *  never overwrites an already-set per-línea value. */
 export interface ContextoAuxiliares {
   terceroCode: string | null;
   centroCosto: string | null;
   flujoCajaCodigo: string | null;
+  documentoCruce?: DocumentoCruce | null;
 }
 
 /**
@@ -276,6 +297,19 @@ export function enriquecerMovimientosConAuxiliares(
   return movimientos.map((movimiento) => {
     const marcas = cuentasPorCodigo.get(movimiento.account);
     if (!marcas) return movimiento;
+    // `?? contexto.documentoCruce` only fills in when the caller hasn't
+    // already tagged this exact line with its own document (the per-línea
+    // case) — never overwrites one that's already there.
+    const tipoDocumento =
+      movimiento.tipoDocumento ??
+      (marcas.requiereDocumentoCruce
+        ? (contexto.documentoCruce?.tipo ?? null)
+        : null);
+    const numeroDocumento =
+      movimiento.numeroDocumento ??
+      (marcas.requiereDocumentoCruce
+        ? (contexto.documentoCruce?.numero ?? null)
+        : null);
     return {
       ...movimiento,
       tercero: marcas.requiereTercero
@@ -288,6 +322,8 @@ export function enriquecerMovimientosConAuxiliares(
       flujoCaja: marcas.flujoCaja
         ? contexto.flujoCajaCodigo
         : (movimiento.flujoCaja ?? null),
+      tipoDocumento,
+      numeroDocumento,
     };
   });
 }
@@ -384,6 +420,68 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
   },
 };
 
+/** One breakdown entry for `desgloseCartera`/`desgloseOrigen` below — an
+ *  account, an amount, and (only for a line whose account will turn out to
+ *  need one) which Factura/Nota Débito it settles. `tipoDocumento`/
+ *  `numeroDocumento` are the caller's per-línea documento cruce — omit them
+ *  (or pass `null`) for a line that doesn't need one; `agruparPorCuentaYDocumento`
+ *  below still merges those purely by account, unchanged from before this
+ *  existed. */
+export interface DesgloseCuenta {
+  account: string;
+  monto: number;
+  tipoDocumento?: 'FV' | 'ND' | null;
+  numeroDocumento?: number | null;
+}
+
+/**
+ * Groups a `desgloseCartera`/`desgloseOrigen` breakdown by account AND
+ * documento cruce together, dropping zero-amount entries — two lines
+ * against the SAME account but for DIFFERENT documents (a Recibo settling
+ * two Facturas that happen to share a concepto's account) must stay two
+ * separate `Movimiento` lines, never merged into one that could only carry
+ * a single documento cruce. A line with no documento cruce at all — the
+ * overwhelming majority, since only an account flagged
+ * `requiresCrossDocument` ever carries one — still merges purely by
+ * account, exactly like before this field existed.
+ */
+function agruparPorCuentaYDocumento(
+  desglose: DesgloseCuenta[],
+): {
+  account: string;
+  monto: number;
+  tipoDocumento: 'FV' | 'ND' | null;
+  numeroDocumento: number | null;
+}[] {
+  const porClave = new Map<
+    string,
+    {
+      account: string;
+      monto: number;
+      tipoDocumento: 'FV' | 'ND' | null;
+      numeroDocumento: number | null;
+    }
+  >();
+  for (const { account, monto, tipoDocumento, numeroDocumento } of desglose) {
+    if (monto === 0) continue;
+    const tipo = tipoDocumento ?? null;
+    const numero = numeroDocumento ?? null;
+    const clave = `${account}|${tipo ?? ''}|${numero ?? ''}`;
+    const existente = porClave.get(clave);
+    if (existente) {
+      existente.monto += monto;
+    } else {
+      porClave.set(clave, {
+        account,
+        monto,
+        tipoDocumento: tipo,
+        numeroDocumento: numero,
+      });
+    }
+  }
+  return [...porClave.values()];
+}
+
 /**
  * Builds the double-entry posting for a cruce document's CREATION: always
  * one debit to `cuentaOrigen` for the FULL `montoAplicado + montoSinAplicar`
@@ -464,25 +562,22 @@ export function construirAsientoCruce(
   montoSinAplicar: number,
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
-  desgloseCartera?: { account: string; monto: number }[],
+  desgloseCartera?: DesgloseCuenta[],
   montoCuentasOrden?: number,
   descuento?: { cuenta: string; monto: number },
-  desgloseOrigen?: { account: string; monto: number }[],
+  desgloseOrigen?: DesgloseCuenta[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
   if (desgloseOrigen && desgloseOrigen.length > 0) {
-    const porCuenta = new Map<string, number>();
-    for (const { account, monto } of desgloseOrigen) {
-      if (monto === 0) continue;
-      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
-    }
-    for (const [account, monto] of porCuenta) {
+    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
         account,
         type: 'debito',
         amount: monto,
         description: d.creacionDebito,
+        tipoDocumento,
+        numeroDocumento,
       });
     }
   } else {
@@ -504,17 +599,14 @@ export function construirAsientoCruce(
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
-      const porCuenta = new Map<string, number>();
-      for (const { account, monto } of desgloseCartera) {
-        if (monto === 0) continue;
-        porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
-      }
-      for (const [account, monto] of porCuenta) {
+      for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
           account,
           type: 'credito',
           amount: monto,
           description: d.creacionCreditoCartera,
+          tipoDocumento,
+          numeroDocumento,
         });
       }
     } else {
@@ -568,7 +660,7 @@ export function construirMovimientosAplicacionAnticipo(
   cuentaCartera: string,
   montoAplicado: number,
   origen: OrigenAsiento,
-  desgloseCartera?: { account: string; monto: number }[],
+  desgloseCartera?: DesgloseCuenta[],
   cuentasOrden?: CuentasOrden | null,
   montoCuentasOrden?: number,
 ): Movimiento[] {
@@ -583,17 +675,14 @@ export function construirMovimientosAplicacionAnticipo(
   ];
 
   if (desgloseCartera && desgloseCartera.length > 0) {
-    const porCuenta = new Map<string, number>();
-    for (const { account, monto } of desgloseCartera) {
-      if (monto === 0) continue;
-      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
-    }
-    for (const [account, monto] of porCuenta) {
+    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
         account,
         type: 'credito',
         amount: monto,
         description: d.aplicacionCreditoCartera,
+        tipoDocumento,
+        numeroDocumento,
       });
     }
   } else {
@@ -642,7 +731,7 @@ export function construirContraAsientoAplicacionAnticipo(
   cuentaCartera: string,
   montoAplicado: number,
   origen: OrigenAsiento,
-  desgloseCartera?: { account: string; monto: number }[],
+  desgloseCartera?: DesgloseCuenta[],
   cuentasOrden?: CuentasOrden | null,
   montoCuentasOrden?: number,
 ): Movimiento[] {
@@ -650,17 +739,14 @@ export function construirContraAsientoAplicacionAnticipo(
   const movimientos: Movimiento[] = [];
 
   if (desgloseCartera && desgloseCartera.length > 0) {
-    const porCuenta = new Map<string, number>();
-    for (const { account, monto } of desgloseCartera) {
-      if (monto === 0) continue;
-      porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
-    }
-    for (const [account, monto] of porCuenta) {
+    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
         account,
         type: 'debito',
         amount: monto,
         description: d.contraDebitoCartera,
+        tipoDocumento,
+        numeroDocumento,
       });
     }
   } else {
@@ -744,7 +830,7 @@ export function construirContraAsientoCruce(
   montoOrigen: number,
   origen: OrigenAsiento,
   cuentasOrden?: CuentasOrden | null,
-  desgloseCartera?: { account: string; monto: number }[],
+  desgloseCartera?: DesgloseCuenta[],
   montoCuentasOrden?: number,
   descuento?: { cuenta: string; monto: number },
   // Mirrors `construirAsientoCruce`'s own `desgloseOrigen` — restores the
@@ -752,24 +838,21 @@ export function construirContraAsientoCruce(
   // not the shared `cuentaOrigen`, for the same "a void must debit back
   // exactly what was credited" reasoning `desgloseCartera`'s own docblock
   // gives.
-  desgloseOrigen?: { account: string; monto: number }[],
+  desgloseOrigen?: DesgloseCuenta[],
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
-      const porCuenta = new Map<string, number>();
-      for (const { account, monto } of desgloseCartera) {
-        if (monto === 0) continue;
-        porCuenta.set(account, (porCuenta.get(account) ?? 0) + monto);
-      }
-      for (const [account, monto] of porCuenta) {
+      for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
           account,
           type: 'debito',
           amount: monto,
           description: d.contraDebitoCartera,
+          tipoDocumento,
+          numeroDocumento,
         });
       }
     } else {
@@ -791,17 +874,14 @@ export function construirContraAsientoCruce(
   }
 
   if (desgloseOrigen && desgloseOrigen.length > 0) {
-    const porCuentaOrigen = new Map<string, number>();
-    for (const { account, monto } of desgloseOrigen) {
-      if (monto === 0) continue;
-      porCuentaOrigen.set(account, (porCuentaOrigen.get(account) ?? 0) + monto);
-    }
-    for (const [account, monto] of porCuentaOrigen) {
+    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
         account,
         type: 'credito',
         amount: monto,
         description: d.contraCredito,
+        tipoDocumento,
+        numeroDocumento,
       });
     }
   } else {

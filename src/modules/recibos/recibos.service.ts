@@ -539,22 +539,16 @@ export class RecibosService {
       // `construirContraAsientoCruce`'s `desgloseCartera`), and how much of
       // this void's cuentas-de-orden reversal is actually mora (same
       // `intereses`-kind check `construirMovimientos` uses at facturación).
-      const creditosPorCuenta = new Map<string | null, number>();
-      const acumular = (cuenta: string | null, monto: number) => {
-        if (monto === 0) return;
-        creditosPorCuenta.set(
-          cuenta,
-          (creditosPorCuenta.get(cuenta) ?? 0) + monto,
-        );
-      };
+      const desglose: DesgloseCarteraAplicacion[] = [];
       let montoAplicadoMora = 0;
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
-        // `facturaDoc` is null when the document was removed/voided through
-        // another path; the reversal proceeds regardless (design §6) — it
-        // just has nothing left to restore beyond crediting an unknown
-        // account below.
+        // `facturaDoc` is null exactly when this aplicación targeted a Nota
+        // Débito instead (never a genuinely missing Factura — nothing
+        // financial is ever hard-deleted, see the audit law) — the `else`
+        // branch below looks that Nota Débito up instead, for its own
+        // documento cruce número.
         const facturaDoc = await this.facturas
           .findOne({ _id: aplicacion.documentId, coPropertyId })
           .session(session)
@@ -615,13 +609,29 @@ export class RecibosService {
             const linea = factura.lines.find((l) =>
               l.conceptoId.equals(parte.conceptoId),
             );
-            acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+            if (parte.parte !== 0) {
+              desglose.push({
+                cuenta: linea?.accountingReceivableAccount ?? null,
+                monto: parte.parte,
+                tipoDocumento: 'FV',
+                numeroDocumento: factura.number,
+              });
+            }
             if (linea?.conceptKind === 'intereses') {
               montoAplicadoMora += parte.parte;
             }
           }
         } else {
-          acumular(null, aplicacion.amountApplied);
+          const notaDebitoDoc = await this.notasDebito
+            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          desglose.push({
+            cuenta: null,
+            monto: aplicacion.amountApplied,
+            tipoDocumento: 'ND',
+            numeroDocumento: notaDebitoDoc?.number ?? 0,
+          });
         }
 
         await this.aplicaciones
@@ -649,9 +659,12 @@ export class RecibosService {
         copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaDescuentos =
         copropiedad?.discountsCreditAccount ?? CUENTA_SIN_ASIGNAR;
-      const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
-        ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
-      );
+      const desgloseCartera = desglose.map((d) => ({
+        account: d.cuenta ?? cuentaCartera,
+        monto: d.monto,
+        tipoDocumento: d.tipoDocumento,
+        numeroDocumento: d.numeroDocumento,
+      }));
       // The cartera side to restore is the FULL amount originally credited
       // (cash plus any discount it absorbed) — `recibo.appliedAmount` alone
       // is cash-only (see `crear()`'s own `cashAplicadoAhora`), so the
@@ -1028,6 +1041,7 @@ export class RecibosService {
           centroUtilidad: c.profitCenter,
           centroDestino: c.destinationCenter,
           flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
         },
       ]),
     );

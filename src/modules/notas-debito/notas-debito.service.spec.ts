@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { NotasDebitoService } from './notas-debito.service';
 
@@ -232,6 +236,66 @@ describe('NotasDebitoService', () => {
       expect(resultado.saldoPendiente).toBe(50000);
     });
 
+    it('codifica el débito con la cuenta débito propia del concepto (cuentaDebitoId), no la cartera genérica de la copropiedad', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'administracion',
+                cuentaCreditoId: { code: '4105' },
+                cuentaDebitoId: { code: '130510' },
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string; type: string }> }[]],
+      ];
+      const debito = documentos[0].entries.find((e) => e.type === 'debito');
+      expect(debito?.account).toBe('130510');
+      const cuentas = documentos[0].entries.map((e) => e.account);
+      expect(cuentas).not.toContain('1305');
+    });
+
+    it('sin cuentaDebitoId configurado en el concepto, cae de vuelta a la cartera genérica de la copropiedad', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      // El fixture por defecto de `servicio()` no trae `cuentaDebitoId` en
+      // su concepto — mismo escenario que un concepto sin ese campo
+      // configurado todavía.
+      const svc = servicio({ asientos });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        total: 50000,
+        fechaCargo: '2026-09-01',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string; type: string }> }[]],
+      ];
+      const debito = documentos[0].entries.find((e) => e.type === 'debito');
+      expect(debito?.account).toBe('1305');
+    });
+
     it('postea el asiento con la fecha declarada (issueDate/fechaCargo), no el instante real del servidor', async () => {
       const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
       // La nota mockeada trae un issueDate bien distinto de "hoy" — si el
@@ -435,6 +499,54 @@ describe('NotasDebitoService', () => {
           fechaCargo: '2026-09-01',
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rechaza una fecha de cargo fuera del período del último lote consolidado', async () => {
+      const svc = servicio({
+        lotes: {
+          exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+          obtenerUltimoConsolidado: jest.fn(() =>
+            Promise.resolve({
+              periodStart: new Date('2026-08-01'),
+              periodEnd: new Date('2026-08-31'),
+            }),
+          ),
+        },
+      });
+
+      await expect(
+        svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
+          inmuebleId: INMUEBLE.toString(),
+          conceptoId: CONCEPTO.toString(),
+          total: 50000,
+          fechaCargo: '2026-09-01',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('deja pasar una fecha de cargo dentro del período del último lote consolidado', async () => {
+      const svc = servicio({
+        lotes: {
+          exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
+          obtenerUltimoConsolidado: jest.fn(() =>
+            Promise.resolve({
+              periodStart: new Date('2026-08-01'),
+              periodEnd: new Date('2026-08-31'),
+            }),
+          ),
+        },
+      });
+
+      await expect(
+        svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
+          inmuebleId: INMUEBLE.toString(),
+          conceptoId: CONCEPTO.toString(),
+          total: 50000,
+          fechaCargo: '2026-08-15',
+        }),
+      ).resolves.toBeDefined();
     });
   });
 

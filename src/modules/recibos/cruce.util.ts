@@ -741,6 +741,22 @@ export type ResumenAplicacion = {
   completa: boolean;
 };
 
+/** One credit-side line an application produces, per concepto of whichever
+ *  Factura/Nota Débito it just settled — `cuenta: null` means that concepto
+ *  has no `accountingReceivableAccount` configured (or, for a Nota Débito,
+ *  which never breaks its charge down by concepto here), resolved to the
+ *  coproperty's shared `cuentaCartera` only once the caller building the
+ *  final `Movimiento[]` knows it. `tipoDocumento`/`numeroDocumento` are this
+ *  line's own documento cruce — the SPECIFIC Factura/Nota Débito it settled,
+ *  never merged across documents even when several share the same `cuenta`
+ *  (see `agruparPorCuentaYDocumento`, asiento.builder.ts). */
+export type DesgloseCarteraAplicacion = {
+  cuenta: string | null;
+  monto: number;
+  tipoDocumento: 'FV' | 'ND';
+  numeroDocumento: number;
+};
+
 /** `montoAFactura` — how much to actually decrement/credit for this
  *  document: its full `outstandingBalance` when the discount activates,
  *  otherwise `montoDisponible` VERBATIM, uncapped — the caller decides
@@ -861,7 +877,7 @@ export async function ejecutarAplicacionManual(
   solicitadas: AplicacionSolicitadaDto[],
 ): Promise<{
   creadas: AplicacionCarteraDocument[];
-  creditosPorCuenta: Map<string | null, number>;
+  desglose: DesgloseCarteraAplicacion[];
   montoAplicadoMora: number;
   resumen: ResumenAplicacion[];
   montoDescuentoTotal: number;
@@ -909,11 +925,7 @@ export async function ejecutarAplicacionManual(
   }
 
   const creadas: AplicacionCarteraDocument[] = [];
-  const creditosPorCuenta = new Map<string | null, number>();
-  const acumular = (cuenta: string | null, monto: number) => {
-    if (monto === 0) return;
-    creditosPorCuenta.set(cuenta, (creditosPorCuenta.get(cuenta) ?? 0) + monto);
-  };
+  const desglose: DesgloseCarteraAplicacion[] = [];
   let montoAplicadoMora = 0;
   let montoDescuentoTotal = 0;
   let sumaCashAplicada = 0;
@@ -957,7 +969,12 @@ export async function ejecutarAplicacionManual(
         -1,
         { tipoDocumento: 'ND', documentoId: notaDebito._id },
       );
-      acumular(null, solicitada.montoAplicado);
+      desglose.push({
+        cuenta: null,
+        monto: solicitada.montoAplicado,
+        tipoDocumento: 'ND',
+        numeroDocumento: notaDebito.number,
+      });
       sumaCashAplicada += solicitada.montoAplicado;
 
       const [creada] = await aplicaciones.create(
@@ -1122,7 +1139,14 @@ export async function ejecutarAplicacionManual(
       const linea = factura.lines.find((l) =>
         l.conceptoId.equals(parte.conceptoId),
       );
-      acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+      if (parte.parte !== 0) {
+        desglose.push({
+          cuenta: linea?.accountingReceivableAccount ?? null,
+          monto: parte.parte,
+          tipoDocumento: 'FV',
+          numeroDocumento: factura.number,
+        });
+      }
       if (linea?.conceptKind === 'intereses') {
         montoAplicadoMora += parte.parte;
       }
@@ -1171,7 +1195,7 @@ export async function ejecutarAplicacionManual(
 
   return {
     creadas,
-    creditosPorCuenta,
+    desglose,
     montoAplicadoMora,
     resumen,
     montoDescuentoTotal,
@@ -1198,7 +1222,7 @@ export async function ejecutarAplicacionFifo(
   aplicadas: AplicacionCarteraDocument[];
   errores: ErrorAplicacion[];
   montoSinAplicar: number;
-  creditosPorCuenta: Map<string | null, number>;
+  desglose: DesgloseCarteraAplicacion[];
   montoAplicadoMora: number;
   resumen: ResumenAplicacion[];
   montoDescuentoTotal: number;
@@ -1297,11 +1321,7 @@ export async function ejecutarAplicacionFifo(
 
   const aplicadas: AplicacionCarteraDocument[] = [];
   const errores: ErrorAplicacion[] = [];
-  const creditosPorCuenta = new Map<string | null, number>();
-  const acumular = (cuenta: string | null, valor: number) => {
-    if (valor === 0) return;
-    creditosPorCuenta.set(cuenta, (creditosPorCuenta.get(cuenta) ?? 0) + valor);
-  };
+  const desglose: DesgloseCarteraAplicacion[] = [];
   let restante = montoDisponible;
   let totalAplicado = 0;
   let montoAplicadoMora = 0;
@@ -1358,7 +1378,12 @@ export async function ejecutarAplicacionFifo(
           -1,
           { tipoDocumento: 'ND', documentoId: notaActualizada._id },
         );
-        acumular(null, monto);
+        desglose.push({
+          cuenta: null,
+          monto,
+          tipoDocumento: 'ND',
+          numeroDocumento: notaActualizada.number,
+        });
 
         const [creada] = await aplicaciones.create(
           [
@@ -1428,7 +1453,14 @@ export async function ejecutarAplicacionFifo(
         const linea = facturaActualizada.lines.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
-        acumular(linea?.accountingReceivableAccount ?? null, parte.parte);
+        if (parte.parte !== 0) {
+          desglose.push({
+            cuenta: linea?.accountingReceivableAccount ?? null,
+            monto: parte.parte,
+            tipoDocumento: 'FV',
+            numeroDocumento: facturaActualizada.number,
+          });
+        }
         if (linea?.conceptKind === 'intereses') {
           montoAplicadoMora += parte.parte;
         }
@@ -1490,7 +1522,7 @@ export async function ejecutarAplicacionFifo(
     aplicadas,
     errores,
     montoSinAplicar: restante,
-    creditosPorCuenta,
+    desglose,
     montoAplicadoMora,
     resumen,
     montoDescuentoTotal,

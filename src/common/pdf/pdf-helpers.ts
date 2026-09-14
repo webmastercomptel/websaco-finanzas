@@ -345,6 +345,102 @@ export function escribirEncabezado(
   }
 }
 
+const GRIS_CLARO = rgb(0.9, 0.9, 0.9);
+
+/**
+ * Gray banner header shared by every "printed form" document (Recibo, Nota
+ * Crédito, Auxiliar de Cartera, …): the copropiedad name and logo in a gray
+ * banner, NIT on the left and the document title — with an optional
+ * document number beside it — right-aligned, then a thin gray rule below.
+ * Originally Recibo/Nota Crédito's own private `dibujarEncabezadoRecibo`;
+ * extracted so Auxiliar de Cartera's print could reuse the identical
+ * masthead instead of `escribirEncabezado`'s plain text-only header.
+ * `numeroCompleto` omitted (or empty) prints the title alone — a report
+ * like Auxiliar de Cartera has no document number of its own.
+ */
+export async function dibujarEncabezadoDocumento(
+  ctx: PdfContext,
+  copropiedad: CopropiedadDocument,
+  tituloDocumento: string,
+  numeroCompleto?: string,
+): Promise<void> {
+  const bannerAltura = 26;
+  const bannerTop = ctx.y + 8;
+  const bannerBottom = bannerTop - bannerAltura;
+  ctx.page.drawRectangle({
+    x: 0,
+    y: ctx.y - bannerAltura + 8,
+    width: ctx.pageWidth,
+    height: bannerAltura,
+    color: GRIS_CLARO,
+  });
+  ctx.page.drawText(copropiedad.name, {
+    x: MARGIN_LEFT,
+    y: ctx.y - 10,
+    size: 16,
+    font: ctx.fontBold,
+    color: rgb(0, 0, 0),
+  });
+
+  const {
+    image: logo,
+    width: logoWidth,
+    height: logoHeight,
+  } = await embebirLogoWebsaco(ctx.doc);
+  ctx.page.drawImage(logo, {
+    x: MARGIN_LEFT + ctx.contentWidth - logoWidth,
+    y: (bannerTop + bannerBottom) / 2 - logoHeight / 2,
+    width: logoWidth,
+    height: logoHeight,
+  });
+
+  ctx.y -= bannerAltura + 6;
+
+  const filaTitulo = ctx.y;
+  const nit = copropiedad.taxId
+    ? copropiedad.taxIdVerificationDigit
+      ? `${copropiedad.taxId}-${copropiedad.taxIdVerificationDigit}`
+      : copropiedad.taxId
+    : '—';
+  ctx.page.drawText('NIT :', {
+    x: MARGIN_LEFT,
+    y: filaTitulo,
+    size: 9,
+    font: ctx.font,
+    color: rgb(0.3, 0.3, 0.3),
+  });
+  ctx.page.drawText(nit, {
+    x: MARGIN_LEFT + 35,
+    y: filaTitulo,
+    size: 9,
+    font: ctx.font,
+    color: rgb(0, 0, 0),
+  });
+
+  const titulo = numeroCompleto
+    ? `${tituloDocumento} ${numeroCompleto}`
+    : tituloDocumento;
+  const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 13);
+  ctx.page.drawText(titulo, {
+    x: MARGIN_LEFT + ctx.contentWidth - tituloAncho,
+    y: filaTitulo,
+    size: 13,
+    font: ctx.fontBold,
+    color: rgb(0, 0, 0),
+  });
+
+  ctx.y -= 10;
+  ctx.page.drawLine({
+    start: { x: MARGIN_LEFT, y: ctx.y },
+    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y },
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
+  });
+  // One blank line below the rule before the caller's own info block starts
+  // — the block used to start right against it.
+  ctx.y -= 14 + 15;
+}
+
 /** "Muy pequeñito" per spec — the logo is a corner mark, not a masthead.
  *  Every document that shows the WebSACO logo (Estado de Cuenta, Factura,
  *  Prefactura) draws it at this same width, aspect ratio preserved. */

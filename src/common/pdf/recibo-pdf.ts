@@ -1,7 +1,7 @@
 import { rgb } from 'pdf-lib';
 import {
   crearContexto,
-  embebirLogoWebsaco,
+  dibujarEncabezadoDocumento,
   escribirMarcaDuplicado,
   formatoPeso,
   formatoFecha,
@@ -72,7 +72,7 @@ export async function generarPdfRecibo(
 ): Promise<Uint8Array> {
   const ctx = await crearContexto();
 
-  await dibujarEncabezadoRecibo(
+  await dibujarEncabezadoDocumento(
     ctx,
     copropiedad,
     datos.tituloDocumento,
@@ -86,92 +86,6 @@ export async function generarPdfRecibo(
   }
 
   return ctx.doc.save();
-}
-
-/** First two header lines mirror `dibujarEncabezadoFactura` (factura-pdf.ts)
- *  exactly — same gray banner with the copropiedad name and logo, same
- *  NIT row with the document title right-aligned beside it, same thin gray
- *  rule ("rayita") below — so a Recibo/Nota de Crédito prints with the
- *  identical masthead as a Factura instead of its own heavier banner. */
-async function dibujarEncabezadoRecibo(
-  ctx: PdfContext,
-  copropiedad: CopropiedadDocument,
-  tituloDocumento: string,
-  numeroCompleto: string,
-): Promise<void> {
-  const bannerAltura = 26;
-  const bannerTop = ctx.y + 8;
-  const bannerBottom = bannerTop - bannerAltura;
-  ctx.page.drawRectangle({
-    x: 0,
-    y: ctx.y - bannerAltura + 8,
-    width: ctx.pageWidth,
-    height: bannerAltura,
-    color: GRIS_CLARO,
-  });
-  ctx.page.drawText(copropiedad.name, {
-    x: MARGIN_LEFT,
-    y: ctx.y - 10,
-    size: 16,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  const {
-    image: logo,
-    width: logoWidth,
-    height: logoHeight,
-  } = await embebirLogoWebsaco(ctx.doc);
-  ctx.page.drawImage(logo, {
-    x: MARGIN_LEFT + ctx.contentWidth - logoWidth,
-    y: (bannerTop + bannerBottom) / 2 - logoHeight / 2,
-    width: logoWidth,
-    height: logoHeight,
-  });
-
-  ctx.y -= bannerAltura + 6;
-
-  const filaTitulo = ctx.y;
-  const nit = copropiedad.taxId
-    ? copropiedad.taxIdVerificationDigit
-      ? `${copropiedad.taxId}-${copropiedad.taxIdVerificationDigit}`
-      : copropiedad.taxId
-    : '—';
-  ctx.page.drawText('NIT :', {
-    x: MARGIN_LEFT,
-    y: filaTitulo,
-    size: 9,
-    font: ctx.font,
-    color: rgb(0.3, 0.3, 0.3),
-  });
-  ctx.page.drawText(nit, {
-    x: MARGIN_LEFT + 35,
-    y: filaTitulo,
-    size: 9,
-    font: ctx.font,
-    color: rgb(0, 0, 0),
-  });
-
-  const titulo = `${tituloDocumento} ${numeroCompleto}`;
-  const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 13);
-  ctx.page.drawText(titulo, {
-    x: MARGIN_LEFT + ctx.contentWidth - tituloAncho,
-    y: filaTitulo,
-    size: 13,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  ctx.y -= 10;
-  ctx.page.drawLine({
-    start: { x: MARGIN_LEFT, y: ctx.y },
-    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y },
-    thickness: 0.5,
-    color: rgb(0.6, 0.6, 0.6),
-  });
-  // One blank line below the rule before Inmueble/Nombre/etc. start — the
-  // block used to start right against it.
-  ctx.y -= 14 + 15;
 }
 
 /** Left column (inmueble / titular / concepto) alongside Valor and Fecha on

@@ -717,7 +717,7 @@ describe('NotasContablesService.anular', () => {
 });
 
 describe('NotasContablesService.findAll', () => {
-  it('filtra por copropiedad, inmueble, estado y rango de fecha', async () => {
+  it('filtra por copropiedad, inmueble, estado y rango de fecha (issueDate, con fallback a createdAt para notas sin issueDate)', async () => {
     const documentos: unknown[] = [];
     const notasContables = {
       find: jest.fn((filtro: Record<string, unknown>) => {
@@ -753,6 +753,10 @@ describe('NotasContablesService.findAll', () => {
       fechaHasta: '2026-08-31',
     });
 
+    const rango = {
+      $gte: new Date('2026-08-01'),
+      $lte: new Date('2026-08-31'),
+    };
     expect(
       (notasContables as unknown as { filtroUsado: Record<string, unknown> })
         .filtroUsado,
@@ -760,10 +764,7 @@ describe('NotasContablesService.findAll', () => {
       coPropertyId: COP,
       inmuebleId: INMUEBLE.toString(),
       status: 'activo',
-      createdAt: {
-        $gte: new Date('2026-08-01'),
-        $lte: new Date('2026-08-31'),
-      },
+      $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
     });
   });
 });
