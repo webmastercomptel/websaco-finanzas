@@ -38,6 +38,8 @@ const makeModelos = (over: {
     notasAnticipo: number;
     notasContables: number;
     aplicaciones: number;
+    carteraPorDocumento: number;
+    saldosDocumentoOrigen: number;
   }>;
 }) => {
   const counts = {
@@ -52,6 +54,8 @@ const makeModelos = (over: {
     notasAnticipo: 0,
     notasContables: 0,
     aplicaciones: 0,
+    carteraPorDocumento: 0,
+    saldosDocumentoOrigen: 0,
     ...over.deletedCounts,
   };
 
@@ -75,6 +79,8 @@ const makeModelos = (over: {
   const notasAnticipo = deleteManyMock(counts.notasAnticipo);
   const notasContables = deleteManyMock(counts.notasContables);
   const aplicaciones = deleteManyMock(counts.aplicaciones);
+  const carteraPorDocumento = deleteManyMock(counts.carteraPorDocumento);
+  const saldosDocumentoOrigen = deleteManyMock(counts.saldosDocumentoOrigen);
 
   const consecutivoLote = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
@@ -109,6 +115,8 @@ const makeModelos = (over: {
     notasDebito,
     notasAnticipo,
     notasContables,
+    carteraPorDocumento,
+    saldosDocumentoOrigen,
   };
 };
 
@@ -122,6 +130,8 @@ const makeService = (
     modelos.lotes as never,
     modelos.asientos as never,
     modelos.saldos as never,
+    modelos.carteraPorDocumento as never,
+    modelos.saldosDocumentoOrigen as never,
     modelos.consecutivoLote as never,
     modelos.consecutivoDocumento as never,
     modelos.resoluciones as never,
@@ -217,6 +227,8 @@ describe('ReiniciarCicloService.reiniciar', () => {
       aplicacionesEliminadas: 6,
       asientosEliminados: 12,
       saldosEliminados: 8,
+      carteraPorDocumentoEliminada: 0,
+      saldosDocumentoOrigenEliminados: 0,
     });
   });
 
@@ -232,6 +244,24 @@ describe('ReiniciarCicloService.reiniciar', () => {
     expect(modelos.asientos.deleteMany).toHaveBeenCalledWith({
       coPropertyId: COP,
     });
+  });
+
+  it('borra también CarteraPorDocumento y SaldoDocumentoOrigen, los dos libros de cartera por documento', async () => {
+    const modelos = makeModelos({
+      deletedCounts: { carteraPorDocumento: 9, saldosDocumentoOrigen: 4 },
+    });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.carteraPorDocumento.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.saldosDocumentoOrigen.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(resultado.carteraPorDocumentoEliminada).toBe(9);
+    expect(resultado.saldosDocumentoOrigenEliminados).toBe(4);
   });
 
   it('reinicia a 0 el consecutivo de lote y TODOS los consecutivos de documento de la copropiedad', async () => {

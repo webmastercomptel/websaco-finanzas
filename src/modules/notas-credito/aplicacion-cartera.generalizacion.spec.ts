@@ -42,6 +42,7 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
     documentId: facturaCompartida,
     amountApplied: 120000,
     appliedAt: new Date('2026-08-27'),
+    sourceDate: new Date('2026-08-27'),
     appliedBy: cuenta,
   });
 
@@ -53,6 +54,7 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
     documentId: facturaCompartida,
     amountApplied: 80000,
     appliedAt: new Date('2026-08-30'),
+    sourceDate: new Date('2026-08-30'),
     appliedBy: cuenta,
   });
 

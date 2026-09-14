@@ -1,5 +1,6 @@
 import {
   IsDateString,
+  IsIn,
   IsMongoId,
   IsPositive,
   IsString,
@@ -18,6 +19,17 @@ export class CrearNotaContableDto {
 
   @IsMongoId()
   inmuebleId: string;
+
+  /** Which specific Factura/NotaDebito this reclassification's per-document
+   *  `CarteraPorDocumento` effect lands on — the same document the user
+   *  picked from "Cartera Pendiente del Inmueble" in the form. A
+   *  reclasificación is scoped to ONE document, never spread across
+   *  however many happen to share the origin concepto at this inmueble. */
+  @IsIn(['FV', 'ND'])
+  tipoDocumento: 'FV' | 'ND';
+
+  @IsMongoId()
+  documentoId: string;
 
   /** The date the user declares for this note — validated in the service
    *  against the coproperty's current billing period, mirroring

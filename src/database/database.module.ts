@@ -61,6 +61,14 @@ import {
   SaldoCarteraSchema,
 } from './schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoSchema,
+} from './schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoSchema,
+} from './schemas/facturacion/saldo-total-documento.schema';
+import {
   AsientoContable,
   AsientoContableSchema,
 } from './schemas/facturacion/asiento-contable.schema';
@@ -97,6 +105,10 @@ import {
   ConsecutivoLoteRecibos,
   ConsecutivoLoteRecibosSchema,
 } from './schemas/recibos/consecutivo-lote-recibos.schema';
+import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenSchema,
+} from './schemas/recibos/saldo-documento-origen.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -129,6 +141,9 @@ const models = [
   { name: CuentaContable.name, schema: CuentaContableSchema },
   { name: LoteRecibos.name, schema: LoteRecibosSchema },
   { name: ConsecutivoLoteRecibos.name, schema: ConsecutivoLoteRecibosSchema },
+  { name: CarteraPorDocumento.name, schema: CarteraPorDocumentoSchema },
+  { name: SaldoDocumentoOrigen.name, schema: SaldoDocumentoOrigenSchema },
+  { name: SaldoTotalDocumento.name, schema: SaldoTotalDocumentoSchema },
 ];
 
 /**

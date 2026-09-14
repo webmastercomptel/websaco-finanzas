@@ -39,7 +39,7 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
 
 describe('toNotaCredito', () => {
   it('mapea el documento inglés al contrato español', () => {
-    expect(toNotaCredito(notaDoc() as never)).toEqual({
+    expect(toNotaCredito(notaDoc() as never, 150000, 50000)).toEqual({
       id: 'nc-1',
       inmuebleId: 'inm-1',
       terceroId: 'ter-1',
@@ -63,14 +63,15 @@ describe('toNotaCredito', () => {
   });
 
   it('cae a createdAt cuando issueDate es null (nota creada antes de este campo)', () => {
-    expect(toNotaCredito(notaDoc({ issueDate: null }) as never).fecha).toBe(
-      '2026-07-01T00:00:00.000Z',
-    );
+    expect(
+      toNotaCredito(notaDoc({ issueDate: null }) as never, 150000, 50000).fecha,
+    ).toBe('2026-07-01T00:00:00.000Z');
   });
 
   it('mapea terceroId null cuando la factura ancla no tiene Tercero vinculado', () => {
     expect(
-      toNotaCredito(notaDoc({ terceroId: null }) as never).terceroId,
+      toNotaCredito(notaDoc({ terceroId: null }) as never, 150000, 50000)
+        .terceroId,
     ).toBeNull();
   });
 
@@ -82,6 +83,8 @@ describe('toNotaCredito', () => {
         voidedDetail: 'Cargada dos veces por error del cajero',
         voidedAt: new Date('2026-08-30'),
       }) as never,
+      0,
+      0,
     );
 
     expect(anulada.estado).toBe('anulado');
@@ -97,6 +100,8 @@ describe('toNotaCreditoDetalle', () => {
     const numerosPorDocumento = new Map([['fac-1', 'FV-0001']]);
     const detalle = toNotaCreditoDetalle(
       notaDoc() as never,
+      150000,
+      50000,
       [aplicacionDoc() as never],
       numerosPorDocumento,
     );
@@ -106,7 +111,7 @@ describe('toNotaCreditoDetalle', () => {
   });
 
   it('agrega el arreglo de aplicaciones a la nota crédito', () => {
-    const detalle = toNotaCreditoDetalle(notaDoc() as never, [
+    const detalle = toNotaCreditoDetalle(notaDoc() as never, 150000, 50000, [
       aplicacionDoc() as never,
     ]);
 

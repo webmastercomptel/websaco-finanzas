@@ -107,20 +107,10 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
  *  same reasoning as `modeloNotasDebito`'s own default. */
 const modeloFacturas = (factura: Record<string, unknown>) => ({
   find: jest.fn(() => ({
-    sort: () => ({ session: () => ({ exec: () => Promise.resolve([]) }) }),
+    session: () => ({ exec: () => Promise.resolve([]) }),
   })),
   findOne: jest.fn(() => ({
     session: () => ({ exec: () => Promise.resolve({ ...factura }) }),
-  })),
-  findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-    exec: () => {
-      const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-      if ((factura.outstandingBalance as number) < monto)
-        return Promise.resolve(null);
-      factura.outstandingBalance =
-        (factura.outstandingBalance as number) - monto;
-      return Promise.resolve({ ...factura });
-    },
   })),
   // `actualizarRemanentesLinea` (cruce.util.ts) — a manual distribucion
   // persists each targeted línea's new `remainingAmount` here.
@@ -129,6 +119,167 @@ const modeloFacturas = (factura: Record<string, unknown>) => ({
 
 const modeloSaldos = () => ({
   findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
+// Same shape as `modeloSaldos` above — `ajustarSaldosCartera`/
+// `ajustarSaldosCarteraPorDistribucion` now run the identical
+// findOneAndUpdate pipeline against this model too, per concepto part.
+const modeloCarteraPorDocumento = () => ({
+  findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+});
+
+/** Combined `SaldoTotalDocumento` mock, backed by whichever Factura/NotaDebito
+ *  fixtures the caller passes — same shared-mutable-state trick
+ *  `modeloFacturas`/`modeloNotasDebito` used to run directly on their own
+ *  `outstandingBalance` field, just relocated off those (now immutable)
+ *  documents onto this collection instead (see `SaldoTotalDocumento`'s own
+ *  docblock on why the atomic guard had to move). */
+const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoPendiente: number } },
+    ) => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        if (!doc) return Promise.resolve(null);
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((doc.outstandingBalance as number) < monto) {
+            return Promise.resolve(null);
+          }
+          doc.outstandingBalance = (doc.outstandingBalance as number) - monto;
+        } else if (update.$inc) {
+          doc.outstandingBalance =
+            (doc.outstandingBalance as number) + update.$inc.saldoPendiente;
+        }
+        return Promise.resolve({
+          documentoId: doc._id,
+          saldoPendiente: doc.outstandingBalance,
+        });
+      },
+    }),
+  ),
+  findOne: jest.fn((filtro: Record<string, unknown>) => ({
+    session: () => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        return Promise.resolve(
+          doc
+            ? { documentoId: doc._id, saldoPendiente: doc.outstandingBalance }
+            : null,
+        );
+      },
+    }),
+  })),
+  find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
+    session: () => ({
+      exec: () => {
+        const ids = (filtro.documentoId?.$in ?? []).map(String);
+        return Promise.resolve(
+          documentos
+            .filter(
+              (d) =>
+                ids.includes(String(d._id)) &&
+                (d.outstandingBalance as number) > 0,
+            )
+            .map((d) => ({
+              documentoId: d._id,
+              saldoPendiente: d.outstandingBalance,
+            })),
+        );
+      },
+    }),
+  })),
+});
+
+/** `SaldoDocumentoOrigen` mock, backed by whichever Recibo fixtures the
+ *  caller passes — same shared-mutable-state trick `modeloSaldoTotalDocumento`
+ *  uses, just for the SOURCE side (Recibo/NotaCredito) instead of the
+ *  charge side. Reuses each fixture's own `unappliedAmount` field as the
+ *  live `saldoDisponible`, and `receivedAmount` as the frozen
+ *  `montoOriginal` — test fixture convenience, not a real schema shape. */
+const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
+  create: jest.fn(() => Promise.resolve([{}])),
+  findOneAndUpdate: jest.fn(
+    (
+      filtro: Record<string, unknown>,
+      update: { $inc?: { saldoDisponible: number } },
+    ) => ({
+      exec: () => {
+        const doc = documentos.find(
+          (d) => String(d._id) === String(filtro.documentoId),
+        );
+        if (!doc) return Promise.resolve(null);
+        if (filtro.$expr) {
+          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+          if ((doc.unappliedAmount as number) < monto) {
+            return Promise.resolve(null);
+          }
+          doc.unappliedAmount = (doc.unappliedAmount as number) - monto;
+        } else if (update.$inc) {
+          doc.unappliedAmount =
+            (doc.unappliedAmount as number) + update.$inc.saldoDisponible;
+        }
+        return Promise.resolve({
+          documentoId: doc._id,
+          montoOriginal: doc.receivedAmount,
+          saldoDisponible: doc.unappliedAmount,
+        });
+      },
+    }),
+  ),
+  // `findOne` is called BOTH ways: bare `.exec()` from the read-only
+  // `findOne()`/`findAll()` service methods, and `.session(session).exec()`
+  // from `ejecutarAplicacionManual`/`anular()`'s own transactions —
+  // `.session()` returns the same chainable object so either call shape
+  // resolves, same pattern `notas-debito.service.spec.ts` uses.
+  findOne: jest.fn((filtro: Record<string, unknown>) => {
+    const resultado = (() => {
+      const doc = documentos.find(
+        (d) => String(d._id) === String(filtro.documentoId),
+      );
+      return doc
+        ? {
+            documentoId: doc._id,
+            montoOriginal: doc.receivedAmount,
+            saldoDisponible: doc.unappliedAmount,
+          }
+        : null;
+    })();
+    const cadena = {
+      session: () => cadena,
+      exec: () => Promise.resolve(resultado),
+    };
+    return cadena;
+  }),
+  updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  // Handles both query shapes `findAll` makes: the `conAnticipoDisponible`
+  // candidate query (no `documentoId` filter, just `saldoDisponible: {$gt:
+  // 0}`) and the post-page batch lookup (`documentoId: {$in: [...]}`,
+  // unfiltered by balance) — same dual shape `FacturasService`'s own
+  // `SaldoTotalDocumento` test mock handles.
+  find: jest.fn((filtro: Record<string, unknown>) => ({
+    exec: () => {
+      const idsFiltro = (filtro.documentoId as { $in?: unknown[] } | undefined)
+        ?.$in;
+      const resultado = idsFiltro
+        ? documentos.filter((d) =>
+            idsFiltro.map(String).includes(String(d._id)),
+          )
+        : documentos.filter((d) => (d.unappliedAmount as number) > 0);
+      return Promise.resolve(
+        resultado.map((d) => ({
+          documentoId: d._id,
+          saldoDisponible: d.unappliedAmount,
+        })),
+      );
+    },
+  })),
 });
 
 const modeloAplicaciones = () => ({
@@ -141,22 +292,15 @@ const modeloAplicaciones = () => ({
  *  `aplicarFifo`/`aplicarManual` tests that DO cover ND pass their own. */
 const modeloNotasDebito = (notas: Record<string, unknown>[] = []) => ({
   find: jest.fn(() => ({
-    sort: () => ({
-      session: () => ({ exec: () => Promise.resolve(notas) }),
-    }),
+    session: () => ({ exec: () => Promise.resolve(notas) }),
   })),
-  findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-    exec: () => {
-      const nota = notas.find((n) =>
-        (n._id as { equals: (o: unknown) => boolean }).equals(filtro._id),
-      );
-      if (!nota) return Promise.resolve(null);
-      const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-      if ((nota.outstandingBalance as number) < monto)
-        return Promise.resolve(null);
-      nota.outstandingBalance = (nota.outstandingBalance as number) - monto;
-      return Promise.resolve({ ...nota });
-    },
+  findOne: jest.fn((filtro: Record<string, unknown>) => ({
+    session: () => ({
+      exec: () =>
+        Promise.resolve(
+          notas.find((n) => String(n._id) === String(filtro._id)) ?? null,
+        ),
+    }),
   })),
 });
 
@@ -190,7 +334,8 @@ const construirServicio = (opts: {
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
-  const facturas = modeloFacturas(opts.factura ?? facturaDoc());
+  const factura = opts.factura ?? facturaDoc();
+  const facturas = modeloFacturas(factura);
   const saldos = opts.saldos ?? modeloSaldos();
   const aplicaciones = modeloAplicaciones();
   const asientos = modeloAsientos();
@@ -198,7 +343,13 @@ const construirServicio = (opts: {
   const espia = periodoEspiado();
   const periodo = opts.periodo ?? espia.periodo;
   const exigirAbierto = espia.exigirAbierto;
-  const notasDebito = modeloNotasDebito(opts.notasDebito ?? []);
+  const notasDebitoList = opts.notasDebito ?? [];
+  const notasDebito = modeloNotasDebito(notasDebitoList);
+  const saldoTotalDocumento = modeloSaldoTotalDocumento([
+    factura,
+    ...notasDebitoList,
+  ]);
+  const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([opts.reciboCreado]);
   const cuentasContables = opts.cuentasContables && {
     find: jest.fn(() => ({
       session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
@@ -217,6 +368,8 @@ const construirServicio = (opts: {
     aplicaciones as never,
     facturas as never,
     saldos as never,
+    modeloCarteraPorDocumento() as never,
+    saldoTotalDocumento as never,
     asientos as never,
     copropiedades as never,
     tenantQueDevuelve(COP),
@@ -225,6 +378,7 @@ const construirServicio = (opts: {
     periodo,
     notasDebito as never,
     lotesFacturacionFalso(opts.ultimoLoteConsolidado ?? null),
+    saldoDocumentoOrigen as never,
     cuentasContables as never,
     inmuebles as never,
   );
@@ -234,6 +388,8 @@ const construirServicio = (opts: {
     recibos,
     facturas,
     saldos,
+    saldoTotalDocumento,
+    saldoDocumentoOrigen,
     aplicaciones,
     asientos,
     notasDebito,
@@ -736,7 +892,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       voidedDetail: null,
       voidedAt: null,
     };
-    const { service, facturas, asientos } = construirServicio({
+    const { service, saldoTotalDocumento, asientos } = construirServicio({
       reciboCreado,
       factura,
     });
@@ -753,7 +909,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     });
 
     expect(resultado.montoAplicado).toBe(200000);
-    expect(facturas.findOneAndUpdate).toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalled();
     expect(asientos.create).toHaveBeenCalledTimes(1);
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
@@ -1147,7 +1303,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       voidedDetail: null,
       voidedAt: null,
     };
-    const { service, notasDebito, aplicaciones } = construirServicio({
+    const { service, saldoTotalDocumento, aplicaciones } = construirServicio({
       reciboCreado,
       notasDebito: [nota],
     });
@@ -1164,7 +1320,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     });
 
     expect(resultado.montoAplicado).toBe(100000);
-    expect(notasDebito.findOneAndUpdate).toHaveBeenCalled();
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalled();
     const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
@@ -1577,6 +1733,83 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('valida el reparto manual contra el saldo pendiente REAL (SaldoTotalDocumento), no contra el outstandingBalance congelado de la Factura', async () => {
+    // Regresión: `Factura.outstandingBalance` queda congelado en su total
+    // original desde que `SaldoTotalDocumento` es la fuente viva (ver su
+    // propio docblock) — nunca vuelve a decrementarse. Esta factura ya tuvo
+    // una cascada previa que agotó Intereses por completo (200000) y dejó
+    // solo Administración pendiente (300000); `SaldoTotalDocumento` refleja
+    // eso, pero la Factura en su colección sigue mostrando 500000. Un
+    // reparto manual que pida CUALQUIER monto contra Intereses debe
+    // rechazarse — leer el campo congelado en vez del saldo vivo lo dejaría
+    // pasar por error.
+    const facturaId = new Types.ObjectId();
+    const conceptoAdmin = new Types.ObjectId();
+    const conceptoIntereses = new Types.ObjectId();
+    const facturaCongelada = facturaDoc({
+      _id: facturaId,
+      total: 500000,
+      outstandingBalance: 500000,
+      lines: [
+        {
+          conceptoId: conceptoAdmin,
+          totalAmount: 300000,
+          accountingReceivableAccount: '130501',
+        },
+        {
+          conceptoId: conceptoIntereses,
+          totalAmount: 200000,
+          conceptKind: 'intereses',
+          accountingReceivableAccount: '130599',
+        },
+      ],
+    });
+    const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(facturaCongelada) }),
+      })),
+    };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 300000 },
+    ]);
+    const recibo = reciboBase();
+    const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([recibo]);
+    const service = new RecibosService(
+      modeloRecibos(recibo) as never,
+      modeloAplicaciones() as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(sesionFalsa()),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+      saldoDocumentoOrigen as never,
+    );
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        ...dtoBase(),
+        montoRecibido: 150000,
+        aplicaciones: [
+          {
+            tipoDocumento: 'FV',
+            documentoId: facturaId.toString(),
+            montoAplicado: 50000,
+            distribucion: [
+              { conceptoId: conceptoIntereses.toString(), monto: 50000 },
+            ],
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('rechaza un reparto por concepto contra una Nota Débito — tiene un solo concepto', async () => {
     const notaDebito = notaDebitoDoc({ _id: new Types.ObjectId() });
     const { service } = construirServicio({
@@ -1640,27 +1873,22 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       voidedAt: null,
     };
 
-    const ordenAplicado: string[] = [];
     const facturas = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({
-            exec: () => Promise.resolve([vieja, nueva]),
-          }),
+        session: () => ({ exec: () => Promise.resolve([vieja, nueva]) }),
+      })),
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              [vieja, nueva].find(
+                (f) => String(f._id) === String(filtro._id),
+              ) ?? null,
+            ),
         }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const id = (filtro._id as Types.ObjectId).toString();
-          const factura = id === vieja._id.toString() ? vieja : nueva;
-          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if (factura.outstandingBalance < monto) return Promise.resolve(null);
-          factura.outstandingBalance -= monto;
-          ordenAplicado.push(id);
-          return Promise.resolve({ ...factura });
-        },
-      })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([vieja, nueva]);
 
     const session = sesionFalsa();
     const recibos = modeloRecibos(reciboCreado);
@@ -1668,12 +1896,15 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const aplicaciones = modeloAplicaciones();
     const asientos = modeloAsientos();
     const copropiedades = modeloCopropiedades();
+    const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([reciboCreado]);
 
     const service = new RecibosService(
       recibos as never,
       aplicaciones as never,
       facturas as never,
       saldos as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       copropiedades as never,
       tenantQueDevuelve(COP),
@@ -1682,6 +1913,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      saldoDocumentoOrigen as never,
     );
 
     await service.crear(CUENTA.toString(), {
@@ -1690,7 +1922,13 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       aplicacionAutomatica: true,
     });
 
-    expect(ordenAplicado).toEqual([vieja._id.toString(), nueva._id.toString()]);
+    // La vieja (vence primero) se agota completa (200000) antes de tocar la
+    // nueva — el orden en que `saldoTotalDocumento.findOneAndUpdate` fue
+    // invocado revela el orden real de aplicación.
+    const idsLlamados = saldoTotalDocumento.findOneAndUpdate.mock.calls.map(
+      ([filtro]) => String((filtro as { documentoId: unknown }).documentoId),
+    );
+    expect(idsLlamados).toEqual([vieja._id.toString(), nueva._id.toString()]);
   });
 
   it('mezcla Facturas y Notas Débito en un solo FIFO, la más vieja de cualquiera de los dos tipos primero', async () => {
@@ -1731,41 +1969,40 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       voidedAt: null,
     };
 
-    const ordenAplicado: string[] = [];
     const facturas = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({ exec: () => Promise.resolve([facturaVieja]) }),
-        }),
+        session: () => ({ exec: () => Promise.resolve([facturaVieja]) }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if (facturaVieja.outstandingBalance < monto)
-            return Promise.resolve(null);
-          facturaVieja.outstandingBalance -= monto;
-          ordenAplicado.push(facturaVieja._id.toString());
-          return Promise.resolve({ ...facturaVieja });
-        },
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              String(filtro._id) === String(facturaVieja._id)
+                ? facturaVieja
+                : null,
+            ),
+        }),
       })),
     };
     const notasDebito = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({ exec: () => Promise.resolve([notaMasVieja]) }),
+        session: () => ({ exec: () => Promise.resolve([notaMasVieja]) }),
+      })),
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              String(filtro._id) === String(notaMasVieja._id)
+                ? notaMasVieja
+                : null,
+            ),
         }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if (notaMasVieja.outstandingBalance < monto)
-            return Promise.resolve(null);
-          notaMasVieja.outstandingBalance -= monto;
-          ordenAplicado.push(notaMasVieja._id.toString());
-          return Promise.resolve({ ...notaMasVieja });
-        },
-      })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      facturaVieja,
+      notaMasVieja,
+    ]);
 
     const session = sesionFalsa();
     const recibos = modeloRecibos(reciboCreado);
@@ -1773,12 +2010,15 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const aplicaciones = modeloAplicaciones();
     const asientos = modeloAsientos();
     const copropiedades = modeloCopropiedades();
+    const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([reciboCreado]);
 
     const service = new RecibosService(
       recibos as never,
       aplicaciones as never,
       facturas as never,
       saldos as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       copropiedades as never,
       tenantQueDevuelve(COP),
@@ -1787,6 +2027,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       periodoAbierto(),
       notasDebito as never,
       lotesFacturacionFalso(),
+      saldoDocumentoOrigen as never,
     );
 
     await service.crear(CUENTA.toString(), {
@@ -1798,8 +2039,10 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // La Nota Débito (issueDate 2026-06-01) es más vieja que la Factura
     // (dueDate 2026-07-31) — tiene que pagarse primero, agotando el monto,
     // sin tocar la Factura.
-    expect(ordenAplicado).toEqual([notaMasVieja._id.toString()]);
-    expect(facturas.findOneAndUpdate).not.toHaveBeenCalled();
+    const idsLlamados = saldoTotalDocumento.findOneAndUpdate.mock.calls.map(
+      ([filtro]) => String((filtro as { documentoId: unknown }).documentoId),
+    );
+    expect(idsLlamados).toEqual([notaMasVieja._id.toString()]);
     const [[fila]] = (aplicaciones.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
@@ -1845,19 +2088,24 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
 
     const facturas = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({ exec: () => Promise.resolve([invalida, valida]) }),
+        session: () => ({ exec: () => Promise.resolve([invalida, valida]) }),
+      })),
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve(
+              [invalida, valida].find(
+                (f) => String(f._id) === String(filtro._id),
+              ) ?? null,
+            ),
         }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const id = (filtro._id as Types.ObjectId).toString();
-          if (id === invalida._id.toString()) return Promise.resolve(null); // voided since listed
-          valida.outstandingBalance = 0;
-          return Promise.resolve({ ...valida });
-        },
-      })),
     };
+    // `invalida` deliberadamente ausente aquí — simula "el documento fue
+    // anulado/removido entre el listado del candidato y la aplicación
+    // real" (una condición de carrera): su guarda atómica no encuentra
+    // fila y `AplicacionInvalidaError` es exactamente lo que produce eso.
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([valida]);
 
     const session = sesionFalsa();
     const recibos = modeloRecibos(reciboCreado);
@@ -1866,6 +2114,8 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       modeloAplicaciones() as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1874,6 +2124,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([reciboCreado]) as never,
     );
 
     // aplicarFifo is private — exercised indirectly through crear(), and its
@@ -1927,16 +2178,16 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
 
     const facturas = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({ exec: () => Promise.resolve([factura]) }),
-        }),
+        session: () => ({ exec: () => Promise.resolve([factura]) }),
       })),
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve({ ...factura, outstandingBalance: 0 }),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(factura) }),
       })),
     };
-    // El decremento pasó; el cache de cartera revienta con un error cualquiera
-    // (una ValidationError de Mongoose, un fallo de red — da igual).
+    // El decremento pasó (esta factura sí tiene saldo suficiente); el cache
+    // de cartera revienta con un error cualquiera (una ValidationError de
+    // Mongoose, un fallo de red — da igual).
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([factura]);
     const saldosQueRevientan = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () =>
@@ -1949,6 +2200,8 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       modeloAplicaciones() as never,
       facturas as never,
       saldosQueRevientan as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -1957,6 +2210,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([reciboCreado]) as never,
     );
 
     await expect(
@@ -2000,17 +2254,10 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
 
     const facturas = {
       find: jest.fn(() => ({
-        sort: () => ({
-          session: () => ({ exec: () => Promise.resolve([factura]) }),
-        }),
+        session: () => ({ exec: () => Promise.resolve([factura]) }),
       })),
-      findOneAndUpdate: jest.fn((filtro: Record<string, unknown>) => ({
-        exec: () => {
-          const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if (factura.outstandingBalance < monto) return Promise.resolve(null);
-          factura.outstandingBalance -= monto;
-          return Promise.resolve({ ...factura });
-        },
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(factura) }),
       })),
     };
     const recibos = modeloRecibos(reciboCreado);
@@ -2020,6 +2267,8 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       modeloAplicaciones() as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([factura]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2028,6 +2277,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([reciboCreado]) as never,
     );
 
     // Recibe menos de lo que debe la factura (200000): el FIFO aplica los
@@ -2088,18 +2338,20 @@ describe('RecibosService.anular', () => {
       detalleConceptos: [],
     };
 
-    const facturaRestaurada = {
+    const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      outstandingBalance: 500000,
       lines: [],
     };
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaRestaurada),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve({ ...facturaFrozen }) }),
       })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 300000 },
+    ]);
     const recibos = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
@@ -2125,6 +2377,8 @@ describe('RecibosService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2133,6 +2387,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
     );
 
     const resultado = await service.anular(
@@ -2145,9 +2400,9 @@ describe('RecibosService.anular', () => {
       CUENTA.toString(),
     );
 
-    expect(facturas.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: facturaId, coPropertyId: COP },
-      { $inc: { outstandingBalance: 200000 } },
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledWith(
+      { documentoId: facturaId },
+      { $inc: { saldoPendiente: 200000 } },
       expect.objectContaining({ returnDocument: 'after' }),
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
@@ -2234,11 +2489,10 @@ describe('RecibosService.anular', () => {
     // Antes de esta anulación: 200.000 de los 500.000 de la factura estaban
     // aplicados (outstandingBalance=300.000); el $inc de la reversión la
     // deja de nuevo en 500.000 (factura.total), toda ella otra vez pendiente.
-    const facturaRestaurada = {
+    const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      outstandingBalance: 500000,
       lines: [
         {
           conceptoId: conceptoMora,
@@ -2248,11 +2502,14 @@ describe('RecibosService.anular', () => {
       ],
     };
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaRestaurada),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve({ ...facturaFrozen }) }),
       })),
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 300000 },
+    ]);
     const recibos = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
@@ -2266,6 +2523,8 @@ describe('RecibosService.anular', () => {
       modeloAplicacionesActivas([aplicacionActiva]) as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2274,6 +2533,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
     );
 
     await service.anular(
@@ -2313,11 +2573,10 @@ describe('RecibosService.anular', () => {
       status: 'activa',
       detalleConceptos: [{ conceptoId: conceptoMora, monto: 200000 }],
     };
-    const facturaRestaurada = {
+    const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      outstandingBalance: 500000,
       lines: [
         {
           conceptoId: conceptoMora,
@@ -2328,11 +2587,14 @@ describe('RecibosService.anular', () => {
       ],
     };
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaRestaurada),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve({ ...facturaFrozen }) }),
       })),
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 300000 },
+    ]);
     const recibos = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
@@ -2360,6 +2622,8 @@ describe('RecibosService.anular', () => {
       modeloAplicacionesActivas([aplicacionActiva]) as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       copropiedades as never,
       tenantQueDevuelve(COP),
@@ -2368,6 +2632,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
     );
 
     await service.anular(
@@ -2419,11 +2684,10 @@ describe('RecibosService.anular', () => {
       status: 'activa',
       detalleConceptos: [{ conceptoId: conceptoIntereses, monto: 150000 }],
     };
-    const facturaRestaurada = {
+    const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      outstandingBalance: 500000,
       lines: [
         {
           conceptoId: conceptoAdmin,
@@ -2439,11 +2703,14 @@ describe('RecibosService.anular', () => {
       ],
     };
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(facturaRestaurada),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve({ ...facturaFrozen }) }),
       })),
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, outstandingBalance: 350000 },
+    ]);
     const recibos = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
@@ -2457,6 +2724,8 @@ describe('RecibosService.anular', () => {
       modeloAplicacionesActivas([aplicacionActiva]) as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2465,6 +2734,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
     );
 
     await service.anular(
@@ -2509,10 +2779,11 @@ describe('RecibosService.anular', () => {
     };
 
     // La factura ya no existe bajo esas condiciones (voidedByCreditNoteId,
-    // u otra vía) — el findOneAndUpdate devuelve null, y el cascade sigue
-    // sin lanzar.
+    // u otra vía) — el findOne devuelve null, y el cascade sigue sin lanzar.
     const facturas = {
-      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(null) }),
+      })),
     };
     const recibos = {
       findOne: jest.fn(() => ({
@@ -2528,6 +2799,8 @@ describe('RecibosService.anular', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2536,6 +2809,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
     );
 
     await expect(
@@ -2568,6 +2842,8 @@ describe('RecibosService.anular', () => {
       modeloAplicacionesActivas([]) as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2576,6 +2852,7 @@ describe('RecibosService.anular', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(
@@ -2625,12 +2902,17 @@ describe('RecibosService.findAll', () => {
     };
   };
 
-  const construirParaListado = (recibos: ReturnType<typeof modeloListado>) =>
+  const construirParaListado = (
+    recibos: ReturnType<typeof modeloListado>,
+    saldoDocumentoOrigen: Record<string, unknown>[] = [],
+  ) =>
     new RecibosService(
       recibos as never,
       modeloAplicacionesGenerico() as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2639,6 +2921,7 @@ describe('RecibosService.findAll', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen(saldoDocumentoOrigen) as never,
     );
 
   function modeloAplicacionesGenerico() {
@@ -2657,13 +2940,19 @@ describe('RecibosService.findAll', () => {
     expect(recibos.filtros[0]).toMatchObject({ coPropertyId: COP });
   });
 
-  it('aplica conAnticipoDisponible como unappliedAmount > 0', async () => {
+  it('aplica conAnticipoDisponible resolviendo candidatos desde SaldoDocumentoOrigen', async () => {
+    const reciboConAnticipo = {
+      _id: new Types.ObjectId(),
+      unappliedAmount: 50000,
+    };
     const recibos = modeloListado([]);
-    const service = construirParaListado(recibos);
+    const service = construirParaListado(recibos, [reciboConAnticipo]);
 
     await service.findAll({ conAnticipoDisponible: true });
 
-    expect(recibos.filtros[0]).toMatchObject({ unappliedAmount: { $gt: 0 } });
+    expect(recibos.filtros[0]).toMatchObject({
+      _id: { $in: [reciboConAnticipo._id] },
+    });
   });
 
   it('aplica el filtro de estado', async () => {
@@ -2721,6 +3010,8 @@ describe('RecibosService.findOne', () => {
       aplicaciones as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2729,6 +3020,7 @@ describe('RecibosService.findOne', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([reciboDoc]) as never,
     );
 
     const detalle = await service.findOne(reciboId.toString());
@@ -2792,6 +3084,8 @@ describe('RecibosService.findOne', () => {
       aplicaciones as never,
       facturas as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2800,6 +3094,7 @@ describe('RecibosService.findOne', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([reciboDoc]) as never,
     );
 
     const detalle = await service.findOne(reciboId.toString());
@@ -2826,6 +3121,8 @@ describe('RecibosService.findOne', () => {
       { find: jest.fn() } as never,
       modeloFacturas(facturaDoc()) as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
       modeloAsientos() as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2834,6 +3131,7 @@ describe('RecibosService.findOne', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
     );
 
     await expect(service.findOne('rec-ajeno')).rejects.toBeInstanceOf(
@@ -2902,28 +3200,53 @@ describe('RecibosService — ciclo de vida completo', () => {
             ),
         }),
       })),
+      // `actualizarRemanentesLinea` — no test in this ciclo-de-vida asserts
+      // on `remainingAmount` itself, only that the call doesn't blow up.
+      updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+
+    // La guardia atómica vive ahora en `SaldoTotalDocumento`, no en
+    // `Factura` — mismo mapa `porId` (mismas referencias) que
+    // `facturasConEstado` para que mutar `outstandingBalance` aquí sea
+    // visible en `facturaA` directamente, igual que antes.
+    const saldoTotalDocumentoConEstado = {
       findOneAndUpdate: jest.fn(
         (
           filtro: Record<string, unknown>,
-          update: { $inc: { outstandingBalance: number } },
+          update: { $inc: { saldoPendiente: number } },
         ) => ({
           exec: () => {
-            const doc = porId.get(String(filtro._id));
+            const doc = porId.get(String(filtro.documentoId));
             if (!doc) return Promise.resolve(null);
-            const delta = update.$inc.outstandingBalance;
-            // Réplica del piso en cero que `decrementarSaldoFactura` impone
-            // con su $expr; una restitución (delta > 0) nunca lo necesita.
+            const delta = update.$inc.saldoPendiente;
+            // Réplica del piso en cero que la guardia $expr impone; una
+            // restitución (delta > 0) nunca lo necesita.
             if (delta < 0 && (doc.outstandingBalance as number) < -delta) {
               return Promise.resolve(null);
             }
             doc.outstandingBalance = (doc.outstandingBalance as number) + delta;
-            return Promise.resolve({ ...doc });
+            return Promise.resolve({
+              documentoId: doc._id,
+              saldoPendiente: doc.outstandingBalance,
+            });
           },
         }),
       ),
-      // `actualizarRemanentesLinea` — no test in this ciclo-de-vida asserts
-      // on `remainingAmount` itself, only that the call doesn't blow up.
-      updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+      findOne: jest.fn((filtro: Record<string, unknown>) => ({
+        session: () => ({
+          exec: () => {
+            const doc = porId.get(String(filtro.documentoId));
+            return Promise.resolve(
+              doc
+                ? {
+                    documentoId: doc._id,
+                    saldoPendiente: doc.outstandingBalance,
+                  }
+                : null,
+            );
+          },
+        }),
+      })),
     };
 
     const aplicaciones = {
@@ -2963,11 +3286,84 @@ describe('RecibosService — ciclo de vida completo', () => {
       }),
     };
 
+    // The Recibo's own live balance — seeded by `crear()`'s own
+    // `saldoDocumentoOrigen.create(...)` call (there is no row until then,
+    // same reasoning `recibo` itself starts as `{}`), then decremented/
+    // restored exactly like `saldoTotalDocumentoConEstado` above, just for
+    // the source side.
+    let saldoOrigen: {
+      documentoId: unknown;
+      montoOriginal: number;
+      saldoDisponible: number;
+    } | null = null;
+    const saldoDocumentoOrigenConEstado = {
+      create: jest.fn((filas: Record<string, unknown>[]) => {
+        saldoOrigen = {
+          documentoId: filas[0].documentoId,
+          montoOriginal: filas[0].montoOriginal as number,
+          saldoDisponible: filas[0].saldoDisponible as number,
+        };
+        return Promise.resolve([saldoOrigen]);
+      }),
+      findOneAndUpdate: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          update: { $inc?: { saldoDisponible: number } },
+        ) => ({
+          exec: () => {
+            if (
+              !saldoOrigen ||
+              String(saldoOrigen.documentoId) !== String(filtro.documentoId)
+            ) {
+              return Promise.resolve(null);
+            }
+            if (filtro.$expr) {
+              const monto = (filtro.$expr as { $gte: [string, number] })
+                .$gte[1];
+              if (saldoOrigen.saldoDisponible < monto) {
+                return Promise.resolve(null);
+              }
+              saldoOrigen.saldoDisponible -= monto;
+            } else if (update.$inc) {
+              saldoOrigen.saldoDisponible += update.$inc.saldoDisponible;
+            }
+            return Promise.resolve({ ...saldoOrigen });
+          },
+        }),
+      ),
+      findOne: jest.fn((filtro: Record<string, unknown>) => {
+        const resultado =
+          saldoOrigen &&
+          String(saldoOrigen.documentoId) === String(filtro.documentoId)
+            ? { ...saldoOrigen }
+            : null;
+        const cadena = {
+          session: () => cadena,
+          exec: () => Promise.resolve(resultado),
+        };
+        return cadena;
+      }),
+      updateOne: jest.fn(
+        (
+          _filtro: Record<string, unknown>,
+          update: { $set?: { saldoDisponible: number } },
+        ) => ({
+          exec: () => {
+            if (saldoOrigen && update.$set)
+              Object.assign(saldoOrigen, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+
     const service = new RecibosService(
       recibos as never,
       aplicaciones as never,
       facturasConEstado as never,
       modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumentoConEstado as never,
       asientos as never,
       modeloCopropiedades() as never,
       tenantQueDevuelve(COP),
@@ -2976,6 +3372,7 @@ describe('RecibosService — ciclo de vida completo', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
+      saldoDocumentoOrigenConEstado as never,
     );
 
     /** Débitos menos créditos, por cuenta, sobre TODOS los asientos posteados. */

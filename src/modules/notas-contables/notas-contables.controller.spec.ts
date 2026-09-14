@@ -67,6 +67,8 @@ describe('NotasContablesController.crear', () => {
       codigo: 'NT',
       inmuebleId: new Types.ObjectId().toString(),
       fecha: '2026-08-15',
+      tipoDocumento: 'FV',
+      documentoId: new Types.ObjectId().toString(),
       conceptoOrigenId: new Types.ObjectId().toString(),
       conceptoDestinoId: new Types.ObjectId().toString(),
       monto: 100000,

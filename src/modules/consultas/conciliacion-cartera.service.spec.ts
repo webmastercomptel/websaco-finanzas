@@ -107,8 +107,10 @@ const notaContableDoc = (over: Doc = {}): Doc => ({
 const reciboDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   coPropertyId: COP,
+  inmuebleId: id(),
   number: 1,
   fullNumber: 'RC1',
+  receivedAmount: 0,
   receivedDate: new Date('2026-09-15'),
   status: 'activo',
   voidedAt: null,
@@ -154,6 +156,25 @@ const saldoCarteraDoc = (balance: number, over: Doc = {}): Doc => ({
   ...over,
 });
 
+const notaAnticipoDoc = (over: Doc = {}): Doc => ({
+  _id: id(),
+  coPropertyId: COP,
+  reciboOrigenId: id(),
+  number: 1,
+  fullNumber: 'NA1',
+  issueDate: new Date('2026-09-15'),
+  status: 'activo',
+  voidedAt: null,
+  ...over,
+});
+
+const inmuebleDoc = (over: Doc = {}): Doc => ({
+  _id: id(),
+  coPropertyId: COP,
+  code: '301',
+  ...over,
+});
+
 const servicio = (
   data: {
     facturas?: Doc[];
@@ -164,6 +185,7 @@ const servicio = (
     notasAnticipo?: Doc[];
     aplicaciones?: Doc[];
     saldosCartera?: Doc[];
+    inmuebles?: Doc[];
   } = {},
 ) =>
   new ConciliacionCarteraService(
@@ -175,6 +197,7 @@ const servicio = (
     coleccion(data.notasAnticipo ?? []) as never,
     coleccion(data.aplicaciones ?? []) as never,
     coleccion(data.saldosCartera ?? []) as never,
+    coleccion(data.inmuebles ?? []) as never,
     { resolveCoPropertyId: () => COP } as never,
   );
 
@@ -472,6 +495,189 @@ describe('ConciliacionCarteraService', () => {
       expect(result.saldoCarteraCalculado).toBe(70000);
       expect(result.saldoCarteraReal).toBe(70000);
       expect(result.diferencia).toBe(0);
+    });
+
+    it('saldoAnterior usa la fecha DECLARADA del Recibo (sourceDate), nunca appliedAt — el instante real en que se guardó (bug real reportado: la conciliación de julio quedó con diferencia)', async () => {
+      // Escenario real: probando varios períodos seguidos en una sola
+      // sesión, un Recibo con receivedDate 15-jun (dentro de junio, el
+      // período ANTERIOR a julio) se guarda HOY — su AplicacionCartera.
+      // appliedAt real es el instante del clic ("5-jul" acá, pero en la
+      // práctica cualquier fecha posterior a junio). `appliedAt` es SOLO un
+      // dato de auditoría (quién y cuándo lo digitó); la fecha que cuenta
+      // para saldoAnterior es `sourceDate` (la fecha que el usuario declaró,
+      // 15-jun). Antes de este fix, `calcularDocumentosConSaldoAFecha` leía
+      // `appliedAt`: como al corte de junio `appliedAt` (5-jul) es
+      // POSTERIOR, el pago no se restaba — saldoAnterior salía 100000 en vez
+      // de 70000, aunque SaldoCartera (real) sí lo tenía aplicado.
+      const fId = id();
+      const rId = id();
+      const fAntes = facturaDoc({
+        _id: fId,
+        issueDate: new Date('2026-05-10'),
+        total: 100000,
+      });
+      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-06-15') });
+      const app = appDoc(rId, 'RC', {
+        documentId: fId,
+        amountApplied: 30000,
+        appliedAt: new Date('2026-07-05'),
+        sourceDate: new Date('2026-06-15'),
+      });
+
+      const svc = servicio({
+        facturas: [fAntes],
+        recibos: [r],
+        aplicaciones: [app],
+        saldosCartera: [saldoCarteraDoc(70000)],
+      });
+
+      const result = await svc.findAll({
+        periodStart: '2026-07-01T00:00:00.000Z',
+        periodEnd: '2026-07-31T23:59:59.999Z',
+      });
+
+      expect(result.saldoAnterior).toBe(70000);
+      expect(result.saldoCarteraCalculado).toBe(70000);
+      expect(result.saldoCarteraReal).toBe(70000);
+      expect(result.diferencia).toBe(0);
+    });
+
+    describe('anticiposPendientes', () => {
+      it('incluye un Recibo con saldo sin aplicar al corte, con inmueble/fecha/número/valor', async () => {
+        const inm = inmuebleDoc({ code: '502' });
+        const r = reciboDoc({
+          inmuebleId: inm._id,
+          fullNumber: 'RC5',
+          receivedAmount: 100000,
+          receivedDate: new Date('2026-09-10'),
+        });
+
+        const svc = servicio({
+          recibos: [r],
+          inmuebles: [inm],
+        });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.anticiposPendientes).toEqual([
+          {
+            inmuebleCodigo: '502',
+            fecha: '2026-09-10T00:00:00.000Z',
+            numeroRecibo: 'RC5',
+            valor: 100000,
+          },
+        ]);
+      });
+
+      it('descuenta lo aplicado — vía la aplicación inicial (RC) y vía una Nota de Anticipo posterior (NA) contra el MISMO recibo', async () => {
+        const inm = inmuebleDoc();
+        const rId = id();
+        const naId = id();
+        const r = reciboDoc({
+          _id: rId,
+          inmuebleId: inm._id,
+          receivedAmount: 100000,
+          receivedDate: new Date('2026-09-05'),
+        });
+        const na = notaAnticipoDoc({
+          _id: naId,
+          reciboOrigenId: rId,
+          issueDate: new Date('2026-09-20'),
+        });
+        const appInicial = appDoc(rId, 'RC', {
+          documentId: id(),
+          amountApplied: 40000,
+          sourceDate: new Date('2026-09-05'),
+        });
+        const appAnticipo = appDoc(naId, 'NA', {
+          documentId: id(),
+          amountApplied: 30000,
+          sourceDate: new Date('2026-09-20'),
+        });
+
+        const svc = servicio({
+          recibos: [r],
+          notasAnticipo: [na],
+          aplicaciones: [appInicial, appAnticipo],
+          inmuebles: [inm],
+        });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.anticiposPendientes).toEqual([
+          expect.objectContaining({ valor: 30000 }),
+        ]);
+      });
+
+      it('no incluye un Recibo ya totalmente aplicado', async () => {
+        const inm = inmuebleDoc();
+        const rId = id();
+        const r = reciboDoc({
+          _id: rId,
+          inmuebleId: inm._id,
+          receivedAmount: 50000,
+          receivedDate: new Date('2026-09-05'),
+        });
+        const app = appDoc(rId, 'RC', {
+          documentId: id(),
+          amountApplied: 50000,
+          sourceDate: new Date('2026-09-05'),
+        });
+
+        const svc = servicio({
+          recibos: [r],
+          aplicaciones: [app],
+          inmuebles: [inm],
+        });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.anticiposPendientes).toEqual([]);
+      });
+
+      it('no cuenta una aplicación posterior al corte del período — refleja el saldo AL FINAL del período, no el de hoy', async () => {
+        const inm = inmuebleDoc();
+        const rId = id();
+        const r = reciboDoc({
+          _id: rId,
+          inmuebleId: inm._id,
+          receivedAmount: 50000,
+          receivedDate: new Date('2026-09-05'),
+        });
+        // Se aplicó recién en octubre — después del corte de septiembre.
+        const app = appDoc(rId, 'RC', {
+          documentId: id(),
+          amountApplied: 50000,
+          sourceDate: new Date('2026-10-03'),
+        });
+
+        const svc = servicio({
+          recibos: [r],
+          aplicaciones: [app],
+          inmuebles: [inm],
+        });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.anticiposPendientes).toEqual([
+          expect.objectContaining({ valor: 50000 }),
+        ]);
+      });
+
+      it('ignora un Recibo recibido después del corte del período', async () => {
+        const inm = inmuebleDoc();
+        const r = reciboDoc({
+          inmuebleId: inm._id,
+          receivedAmount: 50000,
+          receivedDate: new Date('2026-10-05'),
+        });
+
+        const svc = servicio({ recibos: [r], inmuebles: [inm] });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.anticiposPendientes).toEqual([]);
+      });
     });
 
     it('surfaces a non-zero diferencia when SaldoCartera has drifted from the documents', async () => {

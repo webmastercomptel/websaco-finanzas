@@ -11,7 +11,10 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toNotaCredito`.
  */
-export const toNotaDebito = (doc: NotaDebitoDocument): NotaDebitoContract => ({
+export const toNotaDebito = (
+  doc: NotaDebitoDocument,
+  saldoPendiente: number,
+): NotaDebitoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
@@ -22,7 +25,7 @@ export const toNotaDebito = (doc: NotaDebitoDocument): NotaDebitoContract => ({
   numeroCompleto: doc.fullNumber,
   fechaEmision: doc.issueDate.toISOString(),
   total: doc.total,
-  saldoPendiente: doc.outstandingBalance,
+  saldoPendiente,
   estado: doc.status,
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
@@ -44,10 +47,11 @@ export const toNotaDebito = (doc: NotaDebitoDocument): NotaDebitoContract => ({
  */
 export const toNotaDebitoDetalle = (
   doc: NotaDebitoDocument,
+  saldoPendiente: number,
   aplicaciones: AplicacionCarteraDocument[],
   fechasPorSourceId: Map<string, Date> = new Map(),
 ): NotaDebitoDetalle => ({
-  ...toNotaDebito(doc),
+  ...toNotaDebito(doc, saldoPendiente),
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,

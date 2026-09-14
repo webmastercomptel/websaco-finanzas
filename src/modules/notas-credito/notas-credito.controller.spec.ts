@@ -172,6 +172,7 @@ describe('NotasCreditoController.generarPdf', () => {
   it('responde con Content-Type application/pdf y bytes reales', async () => {
     const notasCredito = {
       findOneRaw: jest.fn(() => Promise.resolve(notaFixture())),
+      findOne: jest.fn(() => Promise.resolve({ montoSinAplicar: 0 })),
     };
     const recibos = {
       findAplicacionesForSource: jest.fn(() => Promise.resolve([])),

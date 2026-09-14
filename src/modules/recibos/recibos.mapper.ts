@@ -12,8 +12,19 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
  * Persistence is English, the API is Spanish, and this is the only place the
  * two meet — see "the contract law" in CLAUDE.md, same pattern as
  * `toFactura`/`toLote`.
+ *
+ * `montoAplicado`/`montoSinAplicar` are no longer fields on the (now
+ * immutable) document — `Recibo.appliedAmount`/`unappliedAmount` are gone
+ * precisely so a Recibo never changes after issuance (see
+ * `SaldoDocumentoOrigen`'s own docblock). The caller resolves them (batch-read
+ * from that live ledger) and passes them in here, same pattern `toFactura`
+ * already uses for its own `saldoPendiente`.
  */
-export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
+export const toRecibo = (
+  doc: ReciboDocument,
+  montoAplicado: number,
+  montoSinAplicar: number,
+): ReciboContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
   terceroId: doc.terceroId.toString(),
@@ -26,8 +37,8 @@ export const toRecibo = (doc: ReciboDocument): ReciboContract => ({
   cuentaDestino: doc.destinationAccount,
   referencia: doc.reference,
   observaciones: doc.notes,
-  montoAplicado: doc.appliedAmount,
-  montoSinAplicar: doc.unappliedAmount,
+  montoAplicado,
+  montoSinAplicar,
   estado: doc.status,
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
@@ -87,10 +98,12 @@ export const toAplicacionCartera = (
  */
 export const toReciboDetalle = (
   doc: ReciboDocument,
+  montoAplicado: number,
+  montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
   numerosPorDocumento: Map<string, string> = new Map(),
 ): ReciboDetalle => ({
-  ...toRecibo(doc),
+  ...toRecibo(doc, montoAplicado, montoSinAplicar),
   // Self-sourced: every `aplicacion` here was made BY this Recibo, so its
   // own `receivedDate` — never `appliedAt` — is what a person means by "the
   // date of this movement".

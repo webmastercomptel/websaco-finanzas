@@ -12,9 +12,16 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 /**
  * Generates a real PDF for a NotaDebito (debit note). Simple single-amount
  * document with no line items table.
+ *
+ * `saldoPendiente` is no longer a field on the (now immutable) document —
+ * `NotaDebito.outstandingBalance` is gone precisely so a Nota Débito never
+ * changes after issuance (see `SaldoTotalDocumento`'s own docblock). The
+ * caller resolves it (same live source `NotasDebitoService.findOne` already
+ * reads) and passes it in here, same pattern the JSON mapper uses.
  */
 export async function generarPdfNotaDebito(
   nota: NotaDebitoDocument,
+  saldoPendiente: number,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },
 ): Promise<Uint8Array> {
@@ -32,12 +39,8 @@ export async function generarPdfNotaDebito(
   if (nota.description) {
     escribirLabelValor(ctx, 'Descripción:', nota.description);
   }
-  if (nota.outstandingBalance > 0) {
-    escribirLabelValor(
-      ctx,
-      'Saldo pendiente:',
-      formatoPeso(nota.outstandingBalance),
-    );
+  if (saldoPendiente > 0) {
+    escribirLabelValor(ctx, 'Saldo pendiente:', formatoPeso(saldoPendiente));
   }
 
   if (opciones?.duplicado) {

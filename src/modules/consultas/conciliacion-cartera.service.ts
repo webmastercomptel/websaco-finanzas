@@ -34,9 +34,17 @@ import {
   SaldoCartera,
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { calcularDocumentosConSaldoAFecha } from './cartera-historica.util';
+import {
+  activeAsOf,
+  calcularDocumentosConSaldoAFecha,
+} from './cartera-historica.util';
 import type {
+  AnticipoPendienteConciliacion,
   ConceptoConciliacionCartera,
   FilaConciliacionCartera,
   PeriodoFacturado,
@@ -92,6 +100,8 @@ export class ConciliacionCarteraService {
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldosCartera: Model<SaldoCarteraDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -364,6 +374,11 @@ export class ConciliacionCarteraService {
     const saldoCarteraCalculado = saldoAnterior + totalDebito - totalCredito;
     const diferencia = saldoCarteraCalculado - saldoCarteraReal;
 
+    const anticiposPendientes = await this.anticiposPendientesAlCorte(
+      coPropertyId,
+      hasta,
+    );
+
     return {
       periodStart: desde.toISOString(),
       periodEnd: hasta.toISOString(),
@@ -374,7 +389,95 @@ export class ConciliacionCarteraService {
       saldoCarteraCalculado,
       saldoCarteraReal,
       diferencia,
+      anticiposPendientes,
     };
+  }
+
+  /**
+   * Every Recibo still carrying an unapplied anticipo AS OF `hasta` — a
+   * historical snapshot, not `EstadoCuentaService`'s live-today one (see
+   * `AnticipoPendienteConciliacion`'s own docblock). A Recibo's leftover is
+   * drawn down by two kinds of applications: the initial one at its own
+   * creation (`sourceType: 'RC'`, `sourceId` the Recibo itself) and any later
+   * Nota de Anticipo (`sourceType: 'NA'`, `sourceId` the NOTE's own id, not
+   * the Recibo's — resolved here via `NotaAnticipo.reciboOrigenId`). Both are
+   * judged "already happened by `hasta`" via `activeAsOf`, now keyed by
+   * `sourceDate` (the real fix this report needed — see that field's own
+   * schema docblock).
+   */
+  private async anticiposPendientesAlCorte(
+    coPropertyId: Types.ObjectId,
+    hasta: Date,
+  ): Promise<AnticipoPendienteConciliacion[]> {
+    const recibos = await this.recibos
+      .find({ coPropertyId, receivedDate: { $lte: hasta } })
+      .sort({ number: 1 })
+      .exec();
+    if (recibos.length === 0) return [];
+
+    const reciboIds = recibos.map((r) => r._id);
+    const notasAnticipo = await this.notasAnticipo
+      .find({ coPropertyId, reciboOrigenId: { $in: reciboIds } })
+      .exec();
+    const reciboIdPorNotaAnticipoId = new Map(
+      notasAnticipo.map((n) => [n._id.toString(), n.reciboOrigenId.toString()]),
+    );
+
+    const apps = await this.aplicaciones
+      .find({
+        coPropertyId,
+        $or: [
+          { sourceType: 'RC', sourceId: { $in: reciboIds } },
+          {
+            sourceType: 'NA',
+            sourceId: { $in: notasAnticipo.map((n) => n._id) },
+          },
+        ],
+      })
+      .exec();
+
+    const aplicadoActivoPorRecibo = new Map<string, number>();
+    for (const app of apps) {
+      if (!activeAsOf(app, hasta)) continue;
+      const reciboId =
+        app.sourceType === 'RC'
+          ? app.sourceId.toString()
+          : reciboIdPorNotaAnticipoId.get(app.sourceId.toString());
+      if (!reciboId) continue;
+      aplicadoActivoPorRecibo.set(
+        reciboId,
+        (aplicadoActivoPorRecibo.get(reciboId) ?? 0) + app.amountApplied,
+      );
+    }
+
+    const inmuebleIds = [
+      ...new Set(recibos.map((r) => r.inmuebleId.toString())),
+    ];
+    const inmueblesDoc = inmuebleIds.length
+      ? await this.inmuebles
+          .find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      inmueblesDoc.map((i) => [i._id.toString(), i.code]),
+    );
+
+    return recibos
+      .map((r) => ({
+        r,
+        pendiente: Math.max(
+          0,
+          r.receivedAmount -
+            (aplicadoActivoPorRecibo.get(r._id.toString()) ?? 0),
+        ),
+      }))
+      .filter(({ pendiente }) => pendiente > 0)
+      .map(({ r, pendiente }) => ({
+        inmuebleCodigo: codigoPorInmueble.get(r.inmuebleId.toString()) ?? '—',
+        fecha: r.receivedDate.toISOString(),
+        numeroRecibo: r.fullNumber,
+        valor: pendiente,
+      }));
   }
 
   /**

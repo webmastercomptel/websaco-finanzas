@@ -4,6 +4,8 @@ import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
 import { Account } from '../cuentas/account.schema';
+import { DOCUMENT_TYPES } from '../recibos/aplicacion-cartera.schema';
+import type { DocumentType } from '../recibos/aplicacion-cartera.schema';
 
 export type NotaContableDocument = HydratedDocument<NotaContable>;
 
@@ -25,6 +27,16 @@ export type VoidReasonNotaContable =
  * Recibo/NotaCredito (application sources with unappliedAmount), a
  * NotaContable is a one-shot event: the full `monto` moves atomically at
  * creation time. No outstanding balance, no application lifecycle.
+ *
+ * `documentoId`/`tipoDocumento` anchor this reclassification to ONE specific
+ * Factura/NotaDebito — the same document the user picked from "Cartera
+ * Pendiente del Inmueble" in the creation form. This is what lets the
+ * reclassification's effect land on that document's own
+ * `CarteraPorDocumento` rows (decrement origen, increment/create destino),
+ * not just the cross-document `SaldoCartera` aggregate — a reclasificación
+ * is scoped to one document, never spread across however many happen to
+ * share the origin concepto at this inmueble. Required going forward; a
+ * document created before this field existed simply has neither.
  */
 @Schema({ timestamps: true, collection: 'notas_contables' })
 export class NotaContable {
@@ -43,6 +55,15 @@ export class NotaContable {
     index: true,
   })
   inmuebleId: Types.ObjectId;
+
+  @Prop({ type: String, required: true, enum: DOCUMENT_TYPES })
+  tipoDocumento: DocumentType;
+
+  /** The Factura's or NotaDebito's own `_id` — which collection to look in
+   *  is determined by `tipoDocumento`, same convention as
+   *  `AplicacionCartera.documentId`/`CarteraPorDocumento.documentoId`. */
+  @Prop({ type: SchemaTypes.ObjectId, required: true })
+  documentoId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,

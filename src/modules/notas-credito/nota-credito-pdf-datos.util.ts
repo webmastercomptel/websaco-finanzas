@@ -67,6 +67,12 @@ export interface ModelosDatosImpresionNotaCredito {
  */
 export async function construirDatosImpresionNotaCredito(
   nota: NotaCreditoDocument,
+  // No longer a field on the (now immutable) document —
+  // `NotaCredito.unappliedAmount` is gone precisely so a Nota Crédito never
+  // changes after issuance (see `SaldoDocumentoOrigen`'s own docblock). The
+  // caller resolves it (same live source the JSON detail view reads) and
+  // passes it in here.
+  montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
@@ -137,7 +143,7 @@ export async function construirDatosImpresionNotaCredito(
     }
   }
 
-  if (nota.unappliedAmount > 0) {
+  if (montoSinAplicar > 0) {
     codigosUsados.add(cuentaAnticipos);
     lineas.push({
       cuentaCodigo: cuentaAnticipos,
@@ -145,7 +151,7 @@ export async function construirDatosImpresionNotaCredito(
       tipoDocumento: null,
       numeroDocumento: null,
       debito: 0,
-      credito: nota.unappliedAmount,
+      credito: montoSinAplicar,
     });
   }
 

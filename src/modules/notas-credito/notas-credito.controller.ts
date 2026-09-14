@@ -133,11 +133,15 @@ export class NotasCreditoController {
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
-    const nota = await this.notasCredito.findOneRaw(id);
-    const [aplicaciones, copropiedad] = await Promise.all([
-      this.recibos.findAplicacionesForSource('NC', nota._id),
+    const [nota, detalle, copropiedad] = await Promise.all([
+      this.notasCredito.findOneRaw(id),
+      this.notasCredito.findOne(id),
       this.copropiedades.findById(coPropertyId).exec(),
     ]);
+    const aplicaciones = await this.recibos.findAplicacionesForSource(
+      'NC',
+      nota._id,
+    );
 
     if (!copropiedad) {
       throw new Error(
@@ -147,6 +151,7 @@ export class NotasCreditoController {
 
     const datos = await construirDatosImpresionNotaCredito(
       nota,
+      detalle.montoSinAplicar,
       aplicaciones,
       copropiedad,
       coPropertyId,

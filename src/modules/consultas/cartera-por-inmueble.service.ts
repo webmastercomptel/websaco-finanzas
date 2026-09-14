@@ -22,6 +22,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -46,15 +54,22 @@ import type { ConsultarCarteraPorInmuebleDto } from './dto/consultar-cartera-por
  * twelve-column design; this report keeps that even though its old-system
  * equivalent used one column per concept.
  *
- * The per-document `cargosPorConcepto` (each Factura/Nota Débito's own row)
- * is, and must stay, a plain read of that document's own frozen lines — a
- * Factura is never modified after issue, full stop. The AGGREGATE
- * `cargosPorConcepto` (the per-inmueble totals row) is a different question:
- * it PREFERS `SaldoCartera` over summing those same frozen lines, so a Nota
- * Contable reclassification between two conceptos (e.g. moving 100 from "TV"
- * to "Pintura") shows up there — TV drops, Pintura rises, the inmueble's
- * grand total is unchanged — even though no individual invoice's own row
- * moved even one peso.
+ * The per-document `cargosPorConcepto` (each Factura/Nota Débito's own row),
+ * for a "right now" query, is read from `CarteraPorDocumento` — the live
+ * per-document ledger a Nota Contable reclassification actually moves (see
+ * that schema's own docblock). The underlying Factura/NotaDebito documents
+ * stay frozen forever, same as always — only their SEPARATE cartera ledger
+ * row moves. A HISTORICAL query (`fecha` strictly before today) instead
+ * falls back to the old proportional split of each document's own frozen
+ * lines: `CarteraPorDocumento` only tracks the CURRENT state, not a
+ * point-in-time history, so it cannot answer "what did this document owe,
+ * per concepto, as of last month" — same limitation `cartera-historica.util.ts`
+ * already documents for the aggregate side. The AGGREGATE `cargosPorConcepto`
+ * (the per-inmueble totals row) is a different question: it PREFERS
+ * `SaldoCartera` over summing those same frozen lines, so a Nota Contable
+ * reclassification between two conceptos (e.g. moving 100 from "TV" to
+ * "Pintura") shows up there too — TV drops, Pintura rises, the inmueble's
+ * grand total is unchanged.
  *
  * "Prefers", not "always": a concepto `SaldoCartera` never tracked for this
  * inmueble at all (a Factura loaded by a path that predates or bypasses its
@@ -76,6 +91,10 @@ export class CarteraPorInmuebleService {
     private readonly conceptosCobro: Model<ConceptoCobroDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldosCartera: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -97,6 +116,15 @@ export class CarteraPorInmuebleService {
     const fecha = query.fecha
       ? finDelDiaCorte(new Date(query.fecha))
       : new Date();
+
+    // `CarteraPorDocumento` only tracks the CURRENT state — it has no
+    // point-in-time history. A cutoff strictly before today asks "what did
+    // this document owe back then", which the live ledger cannot answer, so
+    // that case falls back to the old proportional-split-of-frozen-lines
+    // computation below. A cutoff of today (the common case, including
+    // every caller that omits `fecha` entirely) is answered by the ledger.
+    const esConsultaVigente =
+      !query.fecha || fecha.getTime() >= finDelDiaCorte(new Date()).getTime();
 
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })
@@ -148,6 +176,47 @@ export class CarteraPorInmuebleService {
       appsByDoc.set(key, list);
     }
 
+    // The live per-document ledger — only fetched (and only trusted) for a
+    // "right now" query. `carteraDocById` maps documentoId -> conceptoId ->
+    // saldoPendiente, empty per document with no rows there yet (a document
+    // predating this ledger, or a genuinely brand-new one this same
+    // transaction hasn't reached).
+    const carteraPorDocumentoRows =
+      esConsultaVigente && docIds.length
+        ? await this.carteraPorDocumento
+            .find({ coPropertyId, inmuebleId, documentoId: { $in: docIds } })
+            .exec()
+        : [];
+    const carteraDocById = new Map<string, Map<string, number>>();
+    for (const row of carteraPorDocumentoRows) {
+      const docKey = row.documentoId.toString();
+      const porConcepto =
+        carteraDocById.get(docKey) ?? new Map<string, number>();
+      porConcepto.set(row.conceptoId.toString(), row.saldoPendiente);
+      carteraDocById.set(docKey, porConcepto);
+    }
+
+    // The live per-document TOTAL — same "only fetched/trusted for a right
+    // now query" rule as `carteraPorDocumentoRows` above, and for the exact
+    // same reason: recomputing the total from `AplicacionCartera` via
+    // `activeAsOf` compares against `sourceDate` (the application's own
+    // declared business date), which for a "right now" query can legitimately
+    // sit a little AFTER the instant this request runs (same still-open
+    // period, just a later day within it) — that silently excluded a real,
+    // already-applied Nota de Anticipo from the total while the per-concepto
+    // breakdown above (unconditionally live) already showed it correctly —
+    // a real bug reported for Cartera por Inmueble. `SaldoTotalDocumento` is
+    // never date-gated at all, so it can't have this problem.
+    const saldoTotalRows =
+      esConsultaVigente && docIds.length
+        ? await this.saldoTotalDocumento
+            .find({ documentoId: { $in: docIds } })
+            .exec()
+        : [];
+    const saldoTotalById = new Map(
+      saldoTotalRows.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
     const documentos: DocumentoCarteraPorInmueble[] = [];
     // Fallback source for the aggregate row below — see its own comment on
     // why SaldoCartera alone isn't always trustworthy.
@@ -155,25 +224,50 @@ export class CarteraPorInmuebleService {
 
     for (const f of facturas) {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
-      const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
-      const saldo = Math.max(0, f.total - aplicadoActivo);
+      const saldoVivo = saldoTotalById.get(f._id.toString());
+      const saldo =
+        esConsultaVigente && saldoVivo !== undefined
+          ? saldoVivo
+          : Math.max(
+              0,
+              f.total -
+                apps
+                  .filter((a) => activeAsOf(a, fecha))
+                  .reduce((sum, a) => sum + a.amountApplied, 0),
+            );
       if (saldo <= 0) continue;
 
-      // Split the pending share proportionally across lines by totalAmount
-      // — same allocation SaldoCartera's own maintenance uses (see its
-      // schema docblock) — so each line's share sums back to `saldo`.
-      const factor = f.total > 0 ? saldo / f.total : 0;
-      const cargosDoc: Record<string, number> = {};
-      for (const line of f.lines) {
-        const key = line.conceptoId.toString();
-        const monto = line.totalAmount * factor;
-        cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
-        totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + monto);
+      const carteraDoc = carteraDocById.get(f._id.toString());
+      let cargosDoc: Record<string, number>;
+      if (carteraDoc && carteraDoc.size > 0) {
+        // Live ledger, already correct per concepto — reflects any Nota
+        // Contable reclassification this document was the target of.
+        cargosDoc = {};
+        for (const [conceptoId, monto] of carteraDoc) {
+          if (monto <= 0) continue;
+          cargosDoc[conceptoId] = monto;
+          totalesDocumentos.set(
+            conceptoId,
+            (totalesDocumentos.get(conceptoId) ?? 0) + monto,
+          );
+        }
+      } else {
+        // Historical query, or a document the ledger never tracked (see
+        // this class's own docblock) — split the pending share
+        // proportionally across lines by totalAmount, same allocation
+        // `SaldoCartera`'s own maintenance uses.
+        const factor = f.total > 0 ? saldo / f.total : 0;
+        cargosDoc = {};
+        for (const line of f.lines) {
+          const key = line.conceptoId.toString();
+          const monto = line.totalAmount * factor;
+          cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
+          totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + monto);
+        }
       }
 
       documentos.push({
+        documentoId: f._id.toString(),
         tipo: 'FV',
         numeroCompleto: f.fullNumber,
         fecha: f.issueDate.toISOString(),
@@ -185,22 +279,48 @@ export class CarteraPorInmuebleService {
 
     for (const nd of notasDebito) {
       const apps = appsByDoc.get(nd._id.toString()) ?? [];
-      const aplicadoActivo = apps
-        .filter((a) => activeAsOf(a, fecha))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
-      const saldo = Math.max(0, nd.total - aplicadoActivo);
+      const saldoVivoNd = saldoTotalById.get(nd._id.toString());
+      const saldo =
+        esConsultaVigente && saldoVivoNd !== undefined
+          ? saldoVivoNd
+          : Math.max(
+              0,
+              nd.total -
+                apps
+                  .filter((a) => activeAsOf(a, fecha))
+                  .reduce((sum, a) => sum + a.amountApplied, 0),
+            );
       if (saldo <= 0) continue;
 
-      const key = nd.conceptoId.toString();
-      totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + saldo);
+      const carteraDoc = carteraDocById.get(nd._id.toString());
+      let cargosDoc: Record<string, number>;
+      if (carteraDoc && carteraDoc.size > 0) {
+        // Live ledger — a Nota Débito can end up with MORE than its own
+        // single `conceptoId` here if it was ever the DESTINO of a
+        // reclassification into a concepto it never originally charged.
+        cargosDoc = {};
+        for (const [conceptoId, monto] of carteraDoc) {
+          if (monto <= 0) continue;
+          cargosDoc[conceptoId] = monto;
+          totalesDocumentos.set(
+            conceptoId,
+            (totalesDocumentos.get(conceptoId) ?? 0) + monto,
+          );
+        }
+      } else {
+        const key = nd.conceptoId.toString();
+        totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + saldo);
+        cargosDoc = { [key]: saldo };
+      }
 
       documentos.push({
+        documentoId: nd._id.toString(),
         tipo: 'ND',
         numeroCompleto: nd.fullNumber,
         fecha: nd.issueDate.toISOString(),
         vence: null,
         saldo,
-        cargosPorConcepto: { [key]: saldo },
+        cargosPorConcepto: cargosDoc,
       });
     }
 

@@ -27,6 +27,18 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -53,6 +65,7 @@ import {
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
+  restaurarSaldoTotalDocumento,
   type ResumenAplicacion,
 } from './cruce.util';
 import {
@@ -158,6 +171,12 @@ const redactarObservaciones = (
  * billing run is open" rule: `crear()` calls
  * `lotes.exigirSinLoteAbierto()` before the transaction opens, same
  * placement as `periodo.exigirAbierto` — a refusal costs no session.
+ *
+ * `saldoDocumentoOrigen` was APPENDED for the same reason `saldoTotalDocumento`
+ * was: `Recibo.appliedAmount`/`unappliedAmount` are no longer live fields on
+ * the (now immutable) document — `SaldoDocumentoOrigen` is where
+ * `decrementarSaldoDocumentoOrigen`/`restaurarSaldoDocumentoOrigen` now read
+ * and write that balance (see that schema's own docblock).
  */
 @Injectable()
 export class RecibosService {
@@ -170,6 +189,10 @@ export class RecibosService {
     private readonly facturas: Model<FacturaDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(AsientoContable.name)
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(Copropiedad.name)
@@ -181,6 +204,8 @@ export class RecibosService {
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
     private readonly lotes: LotesFacturacionService,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -309,10 +334,26 @@ export class RecibosService {
             destinationAccount,
             reference: dto.referencia ?? null,
             notes: dto.observaciones ?? null,
+            // Frozen from here on — the document is immutable once issued.
+            // `SaldoDocumentoOrigen` (seeded right below) is the live source
+            // every application/reversal actually moves from now on.
             appliedAmount: 0,
             unappliedAmount: dto.montoRecibido,
             status: 'activo',
             generatedBy: accountId,
+          },
+        ],
+        { session },
+      );
+
+      await this.saldoDocumentoOrigen.create(
+        [
+          {
+            coPropertyId,
+            tipoDocumento: 'RC',
+            documentoId: creado._id,
+            montoOriginal: dto.montoRecibido,
+            saldoDisponible: dto.montoRecibido,
           },
         ],
         { session },
@@ -412,7 +453,11 @@ export class RecibosService {
         .findOne({ _id: creado._id, coPropertyId })
         .session(session)
         .exec();
-      return toRecibo(final!);
+      return toRecibo(
+        final!,
+        cashAplicadoAhora,
+        dto.montoRecibido - cashAplicadoAhora,
+      );
     });
   }
 
@@ -450,18 +495,33 @@ export class RecibosService {
     );
 
     return this.transaccion(async (session) => {
-      const recibo = await this.recibos
+      const reciboDoc = await this.recibos
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      if (!recibo) {
+      if (!reciboDoc) {
         throw new NotFoundException(`No se encontró el recibo ${id}`);
       }
-      if (recibo.status === 'anulado') {
+      if (reciboDoc.status === 'anulado') {
         throw new ConflictException(
-          `El recibo ${recibo.fullNumber} ya está anulado`,
+          `El recibo ${reciboDoc.fullNumber} ya está anulado`,
         );
       }
+      // `appliedAmount`/`unappliedAmount` are no longer live fields on the
+      // (now immutable) Recibo — merged in fresh from `SaldoDocumentoOrigen`
+      // so the reversing entry below (which reads the Recibo's OWN cached
+      // totals) sees the REAL current split, not the frozen creation-time
+      // values.
+      const saldoOrigenPrevio = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: reciboDoc._id })
+        .session(session)
+        .exec();
+      const recibo = Object.assign(reciboDoc, {
+        unappliedAmount: saldoOrigenPrevio?.saldoDisponible ?? 0,
+        appliedAmount:
+          (saldoOrigenPrevio?.montoOriginal ?? 0) -
+          (saldoOrigenPrevio?.saldoDisponible ?? 0),
+      });
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
@@ -491,42 +551,43 @@ export class RecibosService {
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
-        // Unconditional, plain $inc — never guarded by
-        // decrementarSaldoFactura's floor (that guard exists to stop
-        // OVER-application, not to gate a reversal). `factura` is null when
-        // the document was removed/voided through another path; the
-        // reversal proceeds regardless (design §6).
-        const factura = await this.facturas
-          .findOneAndUpdate(
-            { _id: aplicacion.documentId, coPropertyId },
-            { $inc: { outstandingBalance: aplicacion.amountApplied } },
-            { returnDocument: 'after', session },
-          )
+        // `facturaDoc` is null when the document was removed/voided through
+        // another path; the reversal proceeds regardless (design §6) — it
+        // just has nothing left to restore beyond crediting an unknown
+        // account below.
+        const facturaDoc = await this.facturas
+          .findOne({ _id: aplicacion.documentId, coPropertyId })
+          .session(session)
           .exec();
 
-        if (factura) {
+        if (facturaDoc) {
+          // Read BEFORE restoring — `remanentesPorLinea` needs the
+          // pre-reversal balance for any línea it still has to legacy-derive
+          // (a línea already carrying a real `remainingAmount` ignores this
+          // and reads its own tracked value regardless).
+          const saldoPrevio = await this.saldoTotalDocumento
+            .findOne({ documentoId: facturaDoc._id })
+            .session(session)
+            .exec();
+          const factura = Object.assign(facturaDoc, {
+            outstandingBalance: saldoPrevio?.saldoPendiente ?? 0,
+          });
           // Replays the EXACT split this application recorded
           // (`detalleConceptos`) instead of re-deriving one via the default
           // cascade — the only way a reversal is correct once the original
           // application could have been a user-chosen manual distribution,
           // not just the cascade (same reasoning `NotaCreditoService.anular()`
           // already applies to its own anchor application's `distribution`).
-          //
-          // `factura` here already reflects the $inc above (outstandingBalance
-          // restored UP) — for a línea `remanentesPorLinea` still has to
-          // legacy-derive (never touched by a manual distribution), that
-          // function needs the state as it stood BEFORE this reversal, so
-          // the aggregate is walked back by exactly what this reversal is
-          // about to give back (a línea already carrying a real
-          // `remainingAmount` ignores this and reads its own tracked value
-          // regardless).
-          const remanentesAntes = remanentesPorLinea({
-            ...factura,
-            outstandingBalance:
-              factura.outstandingBalance - aplicacion.amountApplied,
-          });
+          const remanentesAntes = remanentesPorLinea(factura);
+          await restaurarSaldoTotalDocumento(
+            this.saldoTotalDocumento,
+            session,
+            factura._id,
+            aplicacion.amountApplied,
+          );
           const partes = await ajustarSaldosCarteraPorDistribucion(
             this.saldos,
+            this.carteraPorDocumento,
             session,
             coPropertyId,
             factura.inmuebleId,
@@ -536,6 +597,7 @@ export class RecibosService {
             })),
             aplicacion.amountApplied,
             1,
+            { tipoDocumento: 'FV', documentoId: factura._id },
           );
           await actualizarRemanentesLinea(
             this.facturas,
@@ -669,12 +731,22 @@ export class RecibosService {
           { session },
         )
         .exec();
+      // The REAL live balance — `SaldoDocumentoOrigen`, per this class's own
+      // constructor docblock — goes to zero too, same "no anticipo, no
+      // applied amount" outcome as the `$set` above.
+      await this.saldoDocumentoOrigen
+        .updateOne(
+          { documentoId: id },
+          { $set: { saldoDisponible: 0 } },
+          { session },
+        )
+        .exec();
 
       const final = await this.recibos
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toRecibo(final!);
+      return toRecibo(final!, 0, 0);
     });
   }
 
@@ -691,7 +763,19 @@ export class RecibosService {
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
-    if (query.conAnticipoDisponible) filtro.unappliedAmount = { $gt: 0 };
+    if (query.conAnticipoDisponible) {
+      // No longer a field on Recibo itself — resolve candidate ids from
+      // `SaldoDocumentoOrigen` first (see that schema's own docblock), same
+      // pattern `FacturasService.findAll` already uses on the charge side.
+      const conSaldo = await this.saldoDocumentoOrigen
+        .find({
+          coPropertyId,
+          tipoDocumento: 'RC',
+          saldoDisponible: { $gt: 0 },
+        })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
+    }
     if (query.desde || query.hasta) {
       filtro.receivedDate = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
@@ -712,7 +796,32 @@ export class RecibosService {
       this.recibos.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toRecibo), total, pagina, porPagina };
+    const ids = documentos.map((d) => d._id);
+    const saldos = ids.length
+      ? await this.saldoDocumentoOrigen
+          .find({ documentoId: { $in: ids } })
+          .exec()
+      : [];
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [
+        s.documentoId.toString(),
+        { montoOriginal: s.montoOriginal, saldoDisponible: s.saldoDisponible },
+      ]),
+    );
+
+    return {
+      items: documentos.map((doc) => {
+        const saldo = saldoPorDocumento.get(doc._id.toString());
+        const unappliedAmount = saldo?.saldoDisponible ?? 0;
+        const appliedAmount = saldo
+          ? saldo.montoOriginal - saldo.saldoDisponible
+          : 0;
+        return toRecibo(doc, appliedAmount, unappliedAmount);
+      }),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   /**
@@ -726,6 +835,13 @@ export class RecibosService {
     if (!recibo) {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
+    const saldoOrigen = await this.saldoDocumentoOrigen
+      .findOne({ documentoId: recibo._id })
+      .exec();
+    const unappliedAmount = saldoOrigen?.saldoDisponible ?? 0;
+    const appliedAmount = saldoOrigen
+      ? saldoOrigen.montoOriginal - saldoOrigen.saldoDisponible
+      : 0;
     const aplicaciones = await this.aplicaciones
       .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
@@ -756,7 +872,13 @@ export class RecibosService {
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
     }
 
-    return toReciboDetalle(recibo, aplicaciones, numerosPorDocumento);
+    return toReciboDetalle(
+      recibo,
+      appliedAmount,
+      unappliedAmount,
+      aplicaciones,
+      numerosPorDocumento,
+    );
   }
 
   /**
@@ -812,12 +934,16 @@ export class RecibosService {
         notasDebito: this.notasDebito,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
+        carteraPorDocumento: this.carteraPorDocumento,
+        saldoTotalDocumento: this.saldoTotalDocumento,
+        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
         coPropertyId,
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
+        sourceDate: recibo.receivedDate,
         accountId,
       },
       solicitadas,
@@ -852,12 +978,16 @@ export class RecibosService {
         notasDebito: this.notasDebito,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
+        carteraPorDocumento: this.carteraPorDocumento,
+        saldoTotalDocumento: this.saldoTotalDocumento,
+        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
         coPropertyId,
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
+        sourceDate: recibo.receivedDate,
         accountId,
       },
       montoDisponible,

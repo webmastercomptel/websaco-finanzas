@@ -88,6 +88,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -118,6 +120,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -157,6 +161,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -199,6 +205,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -238,6 +246,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -273,6 +283,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -315,6 +327,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -355,6 +369,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -390,6 +406,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -425,6 +443,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -470,6 +490,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -495,6 +517,8 @@ describe('LotesFacturacionService.crear', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -612,6 +636,8 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
       {} as never, // valoresRecurrentes
@@ -669,6 +695,8 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
       {} as never, // valoresRecurrentes
@@ -730,6 +758,8 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
       {} as never, // valoresRecurrentes
@@ -772,6 +802,8 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
       {} as never, // valoresRecurrentes
@@ -822,6 +854,8 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       { findOne: conceptosFindOne } as never,
       {} as never, // valoresRecurrentes
@@ -867,6 +901,8 @@ describe('LotesFacturacionService.actualizar', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -1081,9 +1117,17 @@ describe('LotesFacturacionService.liquidar', () => {
         exec: () => Promise.resolve(opts.saldos ?? []),
       })),
     };
+    // liquidar() never touches CarteraPorDocumento/SaldoTotalDocumento (only
+    // consolidar() does) — empty stubs, just so these tests' constructor
+    // calls (which pass every argument, unused ones included) still
+    // typecheck.
+    const carteraPorDocumento = {};
+    const saldoTotalDocumento = {};
     return {
       lotes,
       inmuebles,
+      carteraPorDocumento,
+      saldoTotalDocumento,
       terceros,
       conceptos,
       valoresRecurrentes,
@@ -1097,6 +1141,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1138,6 +1184,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1222,6 +1270,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1249,6 +1299,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1303,6 +1355,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1350,6 +1404,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1395,6 +1451,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1423,6 +1481,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1449,6 +1509,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1473,6 +1535,8 @@ describe('LotesFacturacionService.liquidar', () => {
       m.lotes as never,
       {} as never, // facturas
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       {} as never, // asientos
       m.conceptos as never,
       m.valoresRecurrentes as never,
@@ -1551,6 +1615,8 @@ describe('LotesFacturacionService.consolidar', () => {
   }) => {
     const facturasCreadas: Record<string, unknown>[] = [];
     const saldosActualizados: Filtro[] = [];
+    const carteraPorDocumentoCreados: Record<string, unknown>[] = [];
+    const saldoTotalDocumentoCreados: Record<string, unknown>[] = [];
     const asientosCreados: Record<string, unknown>[] = [];
 
     const lotes = {
@@ -1610,6 +1676,21 @@ describe('LotesFacturacionService.consolidar', () => {
         return Promise.resolve({});
       }),
     };
+    const carteraPorDocumento = {
+      // Seeds this Factura's own per-línea row in the new ledger, alongside
+      // `saldos.bulkWrite` above — records what was inserted, same reason.
+      insertMany: jest.fn((docs: Record<string, unknown>[]) => {
+        carteraPorDocumentoCreados.push(...docs);
+        return Promise.resolve(docs);
+      }),
+    };
+    const saldoTotalDocumento = {
+      // Seeds this Factura's own atomically-guarded total-balance row.
+      create: jest.fn((docs: Record<string, unknown>[]) => {
+        saldoTotalDocumentoCreados.push(...docs);
+        return Promise.resolve(docs);
+      }),
+    };
     const asientos = {
       // Resume support: which of the (possibly pre-existing) Facturas for
       // this Lote already have their AsientoContable posted.
@@ -1638,11 +1719,15 @@ describe('LotesFacturacionService.consolidar', () => {
       lotes,
       facturas,
       saldos,
+      carteraPorDocumento,
+      saldoTotalDocumento,
       asientos,
       copropiedades,
       cuentasContables,
       facturasCreadas,
       saldosActualizados,
+      carteraPorDocumentoCreados,
+      saldoTotalDocumentoCreados,
       asientosCreados,
     };
   };
@@ -1699,6 +1784,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos — unused by consolidar()
       {} as never, // valoresRecurrentes — unused by consolidar()
@@ -1748,6 +1835,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -1815,6 +1904,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos — unused by consolidar()
       {} as never, // valoresRecurrentes — unused by consolidar()
@@ -1861,6 +1952,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos — unused by consolidar()
       {} as never, // valoresRecurrentes — unused by consolidar()
@@ -1892,6 +1985,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -1940,6 +2035,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -1986,6 +2083,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2013,6 +2112,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2053,6 +2154,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2107,6 +2210,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2172,6 +2277,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2232,6 +2339,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2289,6 +2398,8 @@ describe('LotesFacturacionService.consolidar', () => {
       m.lotes as never,
       m.facturas as never,
       m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
       m.asientos as never,
       {} as never,
       {} as never,
@@ -2447,6 +2558,8 @@ describe('LotesFacturacionService.findAll', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -2511,6 +2624,8 @@ describe('LotesFacturacionService.findOne', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes
@@ -2556,6 +2671,8 @@ describe('LotesFacturacionService.findOne', () => {
       lotes as never,
       {} as never,
       {} as never,
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never,
       {} as never,
       {} as never,
@@ -2580,6 +2697,8 @@ describe('LotesFacturacionService.cancelar', () => {
       lotes as never,
       {} as never, // facturas
       {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
       {} as never, // asientos
       {} as never, // conceptos
       {} as never, // valoresRecurrentes

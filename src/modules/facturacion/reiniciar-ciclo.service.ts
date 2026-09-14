@@ -22,6 +22,14 @@ import {
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import {
+  CarteraPorDocumento,
+  CarteraPorDocumentoDocument,
+} from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
+import {
   ConsecutivoLote,
   ConsecutivoLoteDocument,
 } from '../../database/schemas/facturacion/consecutivo-lote.schema';
@@ -80,7 +88,9 @@ const CODIGO_COPROPIEDAD_PRUEBA = '0001';
  * Wipes EVERY financial document of the one hardcoded test coproperty —
  * Lotes/Facturas, Recibos (and their own Lotes de Recibos batch uploads),
  * Notas Crédito/Débito/Anticipo/Contables, and everything they moved
- * (AplicacionCartera, asientos contables, saldos de cartera) — and rewinds
+ * (AplicacionCartera, asientos contables, SaldoCartera, and the two
+ * per-document cartera ledgers — `CarteraPorDocumento`,
+ * `SaldoDocumentoOrigen`) — and rewinds
  * every document's numbering back to zero, so the whole billing cycle can be
  * replayed from a blank slate as many times as needed. Nothing is left
  * half-deleted for a caller to clean up by hand: every document type this
@@ -116,6 +126,10 @@ export class ReiniciarCicloService {
     private readonly asientos: Model<AsientoContableDocument>,
     @InjectModel(SaldoCartera.name)
     private readonly saldos: Model<SaldoCarteraDocument>,
+    @InjectModel(CarteraPorDocumento.name)
+    private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldosDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     @InjectModel(ConsecutivoLote.name)
     private readonly consecutivoLote: Model<ConsecutivoLoteDocument>,
     @InjectModel(ConsecutivoDocumento.name)
@@ -173,11 +187,18 @@ export class ReiniciarCicloService {
       this.loteRecibos.deleteMany({ coPropertyId }).exec(),
     ]);
 
-    const [asientosEliminados, saldosEliminados] = await Promise.all([
+    const [
+      asientosEliminados,
+      saldosEliminados,
+      carteraPorDocumentoEliminada,
+      saldosDocumentoOrigenEliminados,
+    ] = await Promise.all([
       // Every asiento, regardless of anchor (Factura/Recibo/NC/ND/NT/NA) —
       // every one of those anchors is wiped above too.
       this.asientos.deleteMany({ coPropertyId }).exec(),
       this.saldos.deleteMany({ coPropertyId }).exec(),
+      this.carteraPorDocumento.deleteMany({ coPropertyId }).exec(),
+      this.saldosDocumentoOrigen.deleteMany({ coPropertyId }).exec(),
     ]);
 
     const facturasEliminadas = await this.facturas
@@ -229,6 +250,9 @@ export class ReiniciarCicloService {
       aplicacionesEliminadas: aplicacionesEliminadas.deletedCount,
       asientosEliminados: asientosEliminados.deletedCount,
       saldosEliminados: saldosEliminados.deletedCount,
+      carteraPorDocumentoEliminada: carteraPorDocumentoEliminada.deletedCount,
+      saldosDocumentoOrigenEliminados:
+        saldosDocumentoOrigenEliminados.deletedCount,
     };
   }
 }

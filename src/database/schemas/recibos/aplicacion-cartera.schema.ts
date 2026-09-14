@@ -118,6 +118,24 @@ export class AplicacionCartera {
   @Prop({ required: true })
   appliedAt: Date;
 
+  /** The SOURCE document's own declared business date — `Recibo.receivedDate`
+   *  for `sourceType: 'RC'`, `NotaCredito.issueDate ?? createdAt` for `'NC'`,
+   *  `NotaAnticipo.issueDate` for `'NA'` — frozen at application time, never
+   *  `appliedAt` (the system-entry timestamp, always `new Date()`). Historical
+   *  point-in-time reports (`activeAsOf`/`calcularDocumentosConSaldoAFecha`,
+   *  Conciliación de Cartera's `saldoAnterior`, Cartera General, Vencimientos)
+   *  must ask "was this payment effective as of that date", which is this
+   *  field — a Recibo dated June but entered late (`appliedAt` in July)
+   *  belongs to June's balance, not July's, exactly like Conciliación de
+   *  Cartera's own current-period rows already treat it (see
+   *  `ConciliacionCarteraService.movimientoDeFuentes`'s docblock, which this
+   *  field brings to the historical side too — a real drift reported for the
+   *  July reconciliation before this field existed). `revertedAt` stays
+   *  system-time on purpose — an anulación's OWN effect is genuinely dated by
+   *  when it happened, matching Conciliación's own anulación rows. */
+  @Prop({ type: Date, required: true })
+  sourceDate: Date;
+
   /** Set at the same moment `status` flips to 'revertida' — closes the
    *  "was this application active on date X?" gap for historical cartera
    *  queries (Vencimientos §8, Cartera General §2). */

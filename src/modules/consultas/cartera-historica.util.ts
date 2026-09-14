@@ -22,6 +22,25 @@ export function finDelDiaCorte(d: Date): Date {
   return r;
 }
 
+/** The UTC-5 reach `finDelDiaCorte` adds past the queried day's own
+ *  midnight — see `activeAsOf`'s own comment on why this needs to be
+ *  subtracted back out before comparing a pure calendar date like
+ *  `sourceDate` against a `finDelDiaCorte`-shifted cutoff. */
+const CORRIMIENTO_FIN_DIA_MS = 5 * 60 * 60 * 1000;
+
+/** True when `fecha` carries `finDelDiaCorte`'s own fixed signature
+ *  (always exactly 04:59:59.999 UTC, from its `setUTCHours(28, …)`
+ *  rollover) — used to tell a shifted historical cutoff apart from a plain
+ *  real-time instant (`new Date()`), which needs no such adjustment. */
+function esFechaDeCorte(fecha: Date): boolean {
+  return (
+    fecha.getUTCHours() === 4 &&
+    fecha.getUTCMinutes() === 59 &&
+    fecha.getUTCSeconds() === 59 &&
+    fecha.getUTCMilliseconds() === 999
+  );
+}
+
 /**
  * A document (Factura or NotaDebito) with a positive outstanding balance
  * as of a historical date. Returned by `calcularDocumentosConSaldoAFecha`.
@@ -36,7 +55,7 @@ export interface DocumentoConSaldoAFecha {
 /**
  * Determine whether an application was active as of a given date.
  *
- * An application is "active as of `fecha`" if it was applied at or before
+ * An application is "active as of `fecha`" if it was effective at or before
  * `fecha` AND either:
  *  - it is still active (`status === 'activa'`), OR
  *  - it was reverted AFTER `fecha` (`status === 'revertida'` AND
@@ -44,12 +63,46 @@ export interface DocumentoConSaldoAFecha {
  *
  * The second condition means: at `fecha` the application had already reduced
  * the balance but its reversal had not yet happened.
+ *
+ * "Effective at or before `fecha`" is judged by `sourceDate` — the SOURCE
+ * document's own declared business date (`Recibo.receivedDate`, etc.) — not
+ * `appliedAt` (the system-entry timestamp). A Recibo dated June but entered
+ * late in July genuinely reduced the balance as of June, from the
+ * accounting period's point of view; keying off `appliedAt` instead made
+ * `calcularDocumentosConSaldoAFecha`'s `saldoAnterior` miss it for exactly
+ * one period (a real drift reported for the July Conciliación de Cartera).
+ * `?? app.appliedAt` is a fallback for a row that predates this field, or a
+ * test fixture that hasn't set it — never for a row created going forward,
+ * every write site now populates `sourceDate`. `revertedAt` stays
+ * system-time on purpose (see its own schema docblock).
+ *
+ * `sourceDate` is always a PURE calendar date — UTC midnight of whatever day
+ * was declared, never a real time-of-day. Comparing it directly against a
+ * `finDelDiaCorte`-shifted `fecha` (which deliberately reaches 5h into the
+ * NEXT UTC day, to correctly bound a real evening-Colombia timestamp like
+ * `appliedAt`/`revertedAt`) double-counts that reach: a document dated the
+ * very next calendar day has its own midnight UTC fall inside that 5h
+ * window, so it read as already active a full day early (a real bug
+ * reported: a Factura from Jun 1, paid by a Recibo dated Jun 12, showed as
+ * already settled when querying Cartera por Inmueble as of Jun 11). Un-shift
+ * the cutoff by that same 5h before comparing `sourceDate` specifically —
+ * `appliedAt`/`revertedAt` keep the cutoff as `finDelDiaCorte` built it.
  */
 export function activeAsOf(
-  app: { status: string; appliedAt: Date; revertedAt: Date | null },
+  app: {
+    status: string;
+    appliedAt: Date;
+    sourceDate?: Date;
+    revertedAt: Date | null;
+  },
   fecha: Date,
 ): boolean {
-  if (app.appliedAt > fecha) return false;
+  const efectiva = app.sourceDate ?? app.appliedAt;
+  const fechaComparacion =
+    app.sourceDate && esFechaDeCorte(fecha)
+      ? new Date(fecha.getTime() - CORRIMIENTO_FIN_DIA_MS)
+      : fecha;
+  if (efectiva > fechaComparacion) return false;
   if (app.status === 'activa') return true;
   if (app.status === 'revertida' && app.revertedAt && app.revertedAt > fecha)
     return true;
@@ -68,6 +121,7 @@ function saldoDocumentoAFecha(
   apps: Array<{
     amountApplied: number;
     appliedAt: Date;
+    sourceDate?: Date;
     status: string;
     revertedAt: Date | null;
   }>,

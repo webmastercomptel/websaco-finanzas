@@ -32,8 +32,13 @@ type ReciboFixture = {
   terceroId: Types.ObjectId;
   fullNumber: string;
   status: string;
+  // No longer live fields on the Recibo document itself — kept on this
+  // fixture purely as the shared backing state the `saldoDocumentoOrigen`
+  // mock below reads/mutates (test convenience, mirrors `facturasState`'s
+  // own `outstandingBalance` reuse), never read directly by production code.
   unappliedAmount: number;
   appliedAmount: number;
+  montoOriginal: number;
 } & Record<string, unknown>;
 
 type FacturaFixture = {
@@ -65,6 +70,7 @@ const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
   status: 'activo',
   unappliedAmount: 300000,
   appliedAmount: 200000,
+  montoOriginal: 500000,
   ...over,
 });
 
@@ -172,24 +178,64 @@ const construirServicio = (
     findOne: jest.fn(() => ({
       session: () => ({ exec: () => Promise.resolve(recibo) }),
     })),
+  };
+
+  // The atomic guard/restore for the Recibo's own leftover now lives here,
+  // not on `recibos` itself — see `SaldoDocumentoOrigen`'s own docblock.
+  // Reuses `recibo`'s own `unappliedAmount` field as the shared backing
+  // state (test fixture convenience, mirrors `saldoTotalDocumento`'s
+  // identical reuse of `outstandingBalance` below).
+  const saldoDocumentoOrigen = {
     findOneAndUpdate: jest.fn(
-      (_f: unknown, update: { $inc?: Record<string, number> }) => ({
-        session: jest.fn().mockReturnThis(),
+      (
+        filtro: Record<string, unknown>,
+        update: { $inc?: { saldoDisponible: number } },
+      ) => ({
         exec: () => {
-          for (const [campo, delta] of Object.entries(update.$inc ?? {})) {
-            recibo[campo] = ((recibo[campo] as number) ?? 0) + delta;
+          if (String(filtro.documentoId) !== String(recibo._id)) {
+            return Promise.resolve(null);
           }
-          return Promise.resolve(recibo);
+          if (filtro.$expr) {
+            const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
+            if (recibo.unappliedAmount < monto) {
+              return Promise.resolve(null);
+            }
+            recibo.unappliedAmount -= monto;
+          } else if (update.$inc) {
+            recibo.unappliedAmount += update.$inc.saldoDisponible;
+          }
+          // Kept in sync purely for this fixture's own convenience — real
+          // production code derives `appliedAmount` on read (see
+          // `decrementarSaldoDocumentoOrigen`'s own `Object.assign`), it
+          // never writes it back onto the (immutable) Recibo.
+          recibo.appliedAmount = recibo.montoOriginal - recibo.unappliedAmount;
+          return Promise.resolve({
+            documentoId: recibo._id,
+            montoOriginal: recibo.montoOriginal,
+            saldoDisponible: recibo.unappliedAmount,
+          });
         },
       }),
     ),
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: () => ({
+        exec: () =>
+          Promise.resolve(
+            String(filtro.documentoId) === String(recibo._id)
+              ? {
+                  documentoId: recibo._id,
+                  montoOriginal: recibo.montoOriginal,
+                  saldoDisponible: recibo.unappliedAmount,
+                }
+              : null,
+          ),
+      }),
+    })),
   };
 
   const facturas = {
     find: jest.fn(() => ({
-      sort: () => ({
-        session: () => ({ exec: () => Promise.resolve(facturasState) }),
-      }),
+      session: () => ({ exec: () => Promise.resolve(facturasState) }),
     })),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: () => ({
@@ -204,16 +250,24 @@ const construirServicio = (
           ),
       }),
     })),
+    // `actualizarRemanentesLinea` (cruce.util.ts) — no test here asserts on
+    // `remainingAmount` itself, only that the call doesn't blow up.
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+
+  // The atomic guard/restore now lives here, not on `facturas` itself — see
+  // `SaldoTotalDocumento`'s own docblock. Reuses `facturasState`'s own
+  // `outstandingBalance` field as the shared backing state (test fixture
+  // convenience, not a real schema shape).
+  const saldoTotalDocumento = {
     findOneAndUpdate: jest.fn(
       (
         filtro: Record<string, unknown>,
-        update: {
-          $inc?: { outstandingBalance: number };
-        },
+        update: { $inc?: { saldoPendiente: number } },
       ) => ({
         exec: () => {
           const factura = facturasState.find(
-            (f) => String(f._id) === String(filtro._id),
+            (f) => String(f._id) === String(filtro.documentoId),
           );
           if (!factura) return Promise.resolve(null);
           if (filtro.$expr) {
@@ -224,20 +278,56 @@ const construirServicio = (
             factura.outstandingBalance = factura.outstandingBalance - monto;
           } else if (update.$inc) {
             factura.outstandingBalance =
-              factura.outstandingBalance + update.$inc.outstandingBalance;
+              factura.outstandingBalance + update.$inc.saldoPendiente;
           }
-          return Promise.resolve({ ...factura });
+          return Promise.resolve({
+            documentoId: factura._id,
+            saldoPendiente: factura.outstandingBalance,
+          });
         },
       }),
     ),
-    // `actualizarRemanentesLinea` (cruce.util.ts) — no test here asserts on
-    // `remainingAmount` itself, only that the call doesn't blow up.
-    updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: () => ({
+        exec: () => {
+          const factura = facturasState.find(
+            (f) => String(f._id) === String(filtro.documentoId),
+          );
+          return Promise.resolve(
+            factura
+              ? {
+                  documentoId: factura._id,
+                  saldoPendiente: factura.outstandingBalance,
+                }
+              : null,
+          );
+        },
+      }),
+    })),
+    // The FIFO candidate query — every row with a positive balance among
+    // the requested ids.
+    find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
+      session: () => ({
+        exec: () => {
+          const ids = (filtro.documentoId?.$in ?? []).map(String);
+          return Promise.resolve(
+            facturasState
+              .filter(
+                (f) => ids.includes(String(f._id)) && f.outstandingBalance > 0,
+              )
+              .map((f) => ({
+                documentoId: f._id,
+                saldoPendiente: f.outstandingBalance,
+              })),
+          );
+        },
+      }),
+    })),
   };
 
   const notasDebito = {
     find: jest.fn(() => ({
-      sort: () => ({ session: () => ({ exec: () => Promise.resolve([]) }) }),
+      session: () => ({ exec: () => Promise.resolve([]) }),
     })),
     findOneAndUpdate: jest.fn(() => ({
       exec: () => Promise.resolve(null),
@@ -245,6 +335,9 @@ const construirServicio = (
   };
 
   const saldos = {
+    findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const carteraPorDocumento = {
     findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
   const asientosStore: { entries: unknown[] }[] = [];
@@ -278,12 +371,15 @@ const construirServicio = (
     facturas as never,
     notasDebito as never,
     saldos as never,
+    carteraPorDocumento as never,
+    saldoTotalDocumento as never,
     asientos as never,
     copropiedades as never,
     { resolveCoPropertyId: () => COP } as never,
     numeracion as never,
     conexionCon(session),
     lotesFacturacionFalso(),
+    saldoDocumentoOrigen as never,
   );
 
   return {
@@ -293,6 +389,7 @@ const construirServicio = (
     asientosStore,
     notasAnticipo,
     recibos,
+    saldoDocumentoOrigen,
   };
 };
 

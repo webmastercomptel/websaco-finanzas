@@ -44,6 +44,7 @@ describe('generarPdfNotaDebito', () => {
   it('resuelve a bytes que empiezan con %PDF-', async () => {
     const bytes = await generarPdfNotaDebito(
       makeNotaDebito(),
+      50000,
       makeCopropiedad(),
     );
 
@@ -55,14 +56,16 @@ describe('generarPdfNotaDebito', () => {
   it('no lanza cuando description es null', async () => {
     const bytes = await generarPdfNotaDebito(
       makeNotaDebito({ description: null }),
+      50000,
       makeCopropiedad(),
     );
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
   });
 
-  it('no lanza cuando outstandingBalance es 0', async () => {
+  it('no lanza cuando el saldo pendiente es 0', async () => {
     const bytes = await generarPdfNotaDebito(
-      makeNotaDebito({ outstandingBalance: 0 }),
+      makeNotaDebito(),
+      0,
       makeCopropiedad(),
     );
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
@@ -71,10 +74,12 @@ describe('generarPdfNotaDebito', () => {
   it('produce un output más grande con duplicado que sin él', async () => {
     const base = await generarPdfNotaDebito(
       makeNotaDebito(),
+      50000,
       makeCopropiedad(),
     );
     const duplicado = await generarPdfNotaDebito(
       makeNotaDebito(),
+      50000,
       makeCopropiedad(),
       { duplicado: true },
     );

@@ -52,7 +52,15 @@ export async function generarPdfConciliacionCartera(
     c.valorDebito > 0 ? formatoPeso(c.valorDebito) : '',
     c.valorCredito > 0 ? formatoPeso(c.valorCredito) : '',
   ]);
-  escribirTabla(ctx, COLUMNAS, filas, { columnasNumericas: 2 });
+  // Concepto's own label ("Anulación de Recibos de Caja", …) runs far
+  // longer than a short document number — an equal five-way split (the
+  // default) ran Desde's text right into Concepto's own, since `escribirTabla`
+  // never truncates data cells. Concepto gets the lion's share; Desde/Hasta
+  // only ever hold one document number each.
+  escribirTabla(ctx, COLUMNAS, filas, {
+    columnasNumericas: 2,
+    anchosRelativos: [3, 1, 1, 1.3, 1.3],
+  });
 
   escribirLabelValor(
     ctx,
@@ -103,6 +111,26 @@ export async function generarPdfConciliacionCartera(
     escribirLinea(
       ctx,
       'No se registraron movimientos de cartera en el período seleccionado.',
+    );
+  }
+
+  ctx.y -= 10;
+  escribirLinea(ctx, 'Anticipos Pendientes al Final del Período', {
+    bold: true,
+  });
+  if (reporte.anticiposPendientes.length === 0) {
+    escribirLinea(ctx, 'No hay anticipos pendientes a esa fecha.');
+  } else {
+    escribirTabla(
+      ctx,
+      ['Inmueble', 'Fecha', 'No. Recibo', 'Valor'],
+      reporte.anticiposPendientes.map((a) => [
+        a.inmuebleCodigo,
+        formatoFecha(a.fecha),
+        a.numeroRecibo,
+        formatoPeso(a.valor),
+      ]),
+      { columnasNumericas: 1 },
     );
   }
 

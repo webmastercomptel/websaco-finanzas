@@ -63,6 +63,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     aplicaciones: find(),
     conceptosCobro: find(),
     saldosCartera: find(),
+    carteraPorDocumento: find(),
+    saldoTotalDocumento: find(),
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
@@ -74,6 +76,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.aplicaciones as never,
     m.conceptosCobro as never,
     m.saldosCartera as never,
+    m.carteraPorDocumento as never,
+    m.saldoTotalDocumento as never,
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
@@ -178,6 +182,94 @@ describe('CarteraPorInmuebleService', () => {
       },
     ]);
     expect(result.saldoTotalCartera).toBe(120000);
+  });
+
+  it('una aplicación de Nota de Anticipo con sourceDate futuro (dentro del período abierto) SÍ reduce el saldo total en la consulta vigente, igual que ya reduce cargosPorConcepto', async () => {
+    // Bug real reportado: tras aplicar un anticipo, Cartera por Inmueble
+    // mostraba el cargo afectado (viene de CarteraPorDocumento, siempre
+    // vivo, sin filtro de fecha) pero el SALDO TOTAL no bajaba. El saldo
+    // total se recalcula sumando AplicacionCartera activas via `activeAsOf`,
+    // que ahora compara contra `sourceDate` (la fecha declarada de la Nota
+    // de Anticipo) en vez de `appliedAt`. Cuando se prueban varios períodos
+    // en una sola sesión real, `sourceDate` puede caer un poco DESPUÉS del
+    // instante exacto de "ahora" (mismo período abierto, pero un día
+    // posterior al de hoy) — sin este fix, la consulta VIGENTE (sin fecha de
+    // corte, "ahora mismo") excluía la aplicación por completo.
+    const inmId = id();
+    const fId = id();
+    const conceptoId = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 200000,
+      lines: [
+        { conceptoId, conceptName: 'Administracion', totalAmount: 200000 },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const concepto = conceptoDoc({ _id: conceptoId, name: 'Administracion' });
+    // Fecha muy lejana en el futuro real (nunca alcanzable por "ahora" en
+    // este test) — simula exactamente el caso reportado sin depender de la
+    // fecha real del sistema al correr la suite.
+    const sourceDateFutura = new Date('2099-01-01');
+    const app = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 30000,
+      status: 'activa',
+      appliedAt: new Date(),
+      sourceDate: sourceDateFutura,
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([app]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      conceptosCobro: {
+        find: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([concepto]),
+      },
+      saldosCartera: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 170000 }]),
+      },
+      // Vivo, sin filtro de fecha — ya refleja la aplicación (esto SÍ
+      // funcionaba, per el reporte del usuario).
+      carteraPorDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([
+            { documentoId: fId, conceptoId, saldoPendiente: 170000 },
+          ]),
+      },
+      saldoTotalDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest
+          .fn()
+          .mockResolvedValue([{ documentoId: fId, saldoPendiente: 170000 }]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.documentos[0].cargosPorConcepto).toEqual({
+      [conceptoId.toString()]: 170000,
+    });
+    expect(result.documentos[0].saldo).toBe(170000);
+    expect(result.saldoTotalCartera).toBe(170000);
   });
 
   it('una Factura con lineas de varios conceptos reparte su saldo por concepto en el mismo documento', async () => {
@@ -550,6 +642,66 @@ describe('CarteraPorInmuebleService', () => {
     );
   });
 
+  it('con fecha de corte histórica: un Recibo fechado un día DESPUÉS del corte no debe contar como pagado (bug real reportado)', async () => {
+    // Factura del 1-jun, pagada por un Recibo fechado 12-jun. Consultar
+    // Cartera por Inmueble al corte del 11-jun debía seguir mostrando la
+    // factura pendiente (el pago es del día SIGUIENTE) — mostraba saldo 0
+    // en su lugar. Causa: `finDelDiaCorte('2026-06-11')` da
+    // "2026-06-12T04:59:59.999Z" (llega 5h dentro del 12 en UTC, para
+    // capturar un `appliedAt` real de esa noche en Colombia) — pero
+    // `sourceDate` de un Recibo fechado 12-jun es "2026-06-12T00:00:00.000Z"
+    // (medianoche UTC pura, sin hora real), que cae ANTES de esas
+    // 04:59:59.999 — se contaba como ya pagado un día entero antes de tiempo.
+    const inmId = id();
+    const fId = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 100000,
+      issueDate: new Date('2026-06-01'),
+      lines: [],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const app = {
+      _id: id(),
+      documentId: fId,
+      amountApplied: 100000,
+      status: 'activa',
+      appliedAt: new Date('2026-06-12T15:00:00.000Z'),
+      sourceDate: new Date('2026-06-12'),
+      revertedAt: null,
+    };
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      aplicaciones: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([app]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+    });
+
+    const alDiaAnterior = await svc.findOne({
+      inmuebleId: inmId.toString(),
+      fecha: '2026-06-11',
+    });
+    expect(alDiaAnterior.documentos).toHaveLength(1);
+    expect(alDiaAnterior.documentos[0].saldo).toBe(100000);
+
+    const alDiaDelPago = await svc.findOne({
+      inmuebleId: inmId.toString(),
+      fecha: '2026-06-12',
+    });
+    expect(alDiaDelPago.documentos).toHaveLength(0);
+  });
+
   it('con fecha de corte = hoy: cuenta un pago aplicado hoy con hora real, no solo a medianoche', async () => {
     // Reproduces the reported bug: typing today's date as Fecha Corte must
     // behave like "up to right now, today", not "up to midnight today" —
@@ -640,5 +792,62 @@ describe('CarteraPorInmuebleService', () => {
 
     expect(result.documentos).toHaveLength(0);
     expect(result.saldoTotalCartera).toBe(0);
+  });
+
+  it('sin fecha de corte (consulta vigente): el desglose por documento sale de CarteraPorDocumento, reflejando una reclasificación — no del split proporcional de las líneas congeladas', async () => {
+    // El caso que arrancó esta funcionalidad: una Nota Contable reclasificó
+    // 50000 de "TV por Cable" a "Administración" en ESTA factura puntual.
+    // La factura original (`lines`) nunca cambia — pero la fila que el
+    // usuario ve en pantalla para esta factura sí debe reflejarlo.
+    const inmId = id();
+    const fId = id();
+    const conceptoTv = id();
+    const conceptoAdmin = id();
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      total: 200000,
+      lines: [
+        { conceptoId: conceptoTv, conceptName: 'TV', totalAmount: 100000 },
+        {
+          conceptoId: conceptoAdmin,
+          conceptName: 'Administracion',
+          totalAmount: 100000,
+        },
+      ],
+    });
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+
+    const svc = servicio({
+      facturas: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([f]),
+      },
+      inmuebles: {
+        find: jest.fn().mockReturnThis(),
+        findOne: jest.fn().mockReturnValue(findOneStub(inm)),
+        exec: jest.fn().mockResolvedValue([inm]),
+      },
+      // Post-reclasificación: TV en 0 (fila presente, valor 0 — se filtra),
+      // Administración con 100000 originales + 50000 recibidos = 150000.
+      carteraPorDocumento: {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          { documentoId: fId, conceptoId: conceptoTv, saldoPendiente: 0 },
+          {
+            documentoId: fId,
+            conceptoId: conceptoAdmin,
+            saldoPendiente: 150000,
+          },
+        ]),
+      },
+    });
+
+    const result = await svc.findOne({ inmuebleId: inmId.toString() });
+
+    expect(result.documentos[0].saldo).toBe(200000);
+    expect(result.documentos[0].cargosPorConcepto).toEqual({
+      [conceptoAdmin.toString()]: 150000,
+    });
   });
 });

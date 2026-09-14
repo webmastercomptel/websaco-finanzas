@@ -45,6 +45,9 @@ import type {
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 import { generarPdfAuxiliarCartera } from '../../common/pdf/auxiliar-cartera-pdf';
 import { generarPdfConciliacionCartera } from '../../common/pdf/conciliacion-cartera-pdf';
+import { generarPdfCarteraGeneral } from '../../common/pdf/cartera-general-pdf';
+import { generarPdfCarteraPorInmueble } from '../../common/pdf/cartera-por-inmueble-pdf';
+import { generarPdfVencimientosCartera } from '../../common/pdf/vencimientos-cartera-pdf';
 
 /**
  * Read-only reporting endpoint. Reuses the already-stubbed 'Consulta'
@@ -106,6 +109,30 @@ export class ConsultasController {
     return this.vencimientosCartera.findAll(query);
   }
 
+  @Get('vencimientos-cartera/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfVencimientosCartera(
+    @Query() query: ConsultarVencimientosCarteraDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.vencimientosCartera.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfVencimientosCartera(reporte, copropiedad);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="vencimientos-cartera-${reporte.fechaCorte.slice(0, 10)}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
   @Get('cartera-general')
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   findCarteraGeneral(
@@ -114,12 +141,65 @@ export class ConsultasController {
     return this.carteraGeneral.findAll(query);
   }
 
+  @Get('cartera-general/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfCarteraGeneral(
+    @Query() query: ConsultarCarteraGeneralDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.carteraGeneral.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const fechaCorte = query.fecha ?? new Date().toISOString();
+    const bytes = await generarPdfCarteraGeneral(
+      reporte,
+      copropiedad,
+      fechaCorte,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="cartera-general-${fechaCorte.slice(0, 10)}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
+  }
+
   @Get('cartera-por-inmueble')
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   findCarteraPorInmueble(
     @Query() query: ConsultarCarteraPorInmuebleDto,
   ): Promise<RespuestaCarteraPorInmueble> {
     return this.carteraPorInmueble.findOne(query);
+  }
+
+  @Get('cartera-por-inmueble/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfCarteraPorInmueble(
+    @Query() query: ConsultarCarteraPorInmuebleDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.carteraPorInmueble.findOne(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfCarteraPorInmueble(reporte, copropiedad);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="cartera-${reporte.inmuebleCodigo}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 
   @Get('estado-cuenta/periodos')

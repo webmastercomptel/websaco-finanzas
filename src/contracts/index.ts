@@ -321,6 +321,8 @@ export interface ResultadoReinicioCiclo {
   aplicacionesEliminadas: number;
   asientosEliminados: number;
   saldosEliminados: number;
+  carteraPorDocumentoEliminada: number;
+  saldosDocumentoOrigenEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -357,6 +359,9 @@ export interface TotalConceptoLote {
  * `total`.
  */
 export interface FilaConsultaFacturacion {
+  /** The Factura's own id — lets the on-screen table link to `/facturas/:id`
+   *  ("Ver"), the same way the Facturas list itself does. */
+  id: string;
   inmuebleId: string;
   inmuebleCodigo: string;
   tipoDocumento: 'FV';
@@ -365,11 +370,16 @@ export interface FilaConsultaFacturacion {
   numeroCompleto: string;
   fechaFactura: IsoDate;
   fechaVence: IsoDate;
+  titular: TitularFactura | null;
   valoresPorConcepto: Record<string, Monto>;
   valoresIvaPorConcepto: Record<string, Monto>;
   subtotal: Monto;
   totalImpuestos: Monto;
   total: Monto;
+  /** Live balance, same `SaldoTotalDocumento`-sourced figure the Facturas
+   *  list itself shows — never a frozen field on the Factura. */
+  saldoPendiente: Monto;
+  estado: 'emitida' | 'anulada';
 }
 
 /** Response of `GET /lotes/:id/consulta-facturacion`. */
@@ -686,6 +696,11 @@ export interface NotaAnticipoDetalle extends NotaAnticipo {
 export interface NotaContable {
   id: string;
   inmuebleId: string;
+  /** The specific Factura/NotaDebito this reclassification's per-document
+   *  cartera effect landed on. Null on a note created before this field
+   *  existed. */
+  tipoDocumento: 'FV' | 'ND' | null;
+  documentoId: string | null;
   conceptoOrigenId: string;
   conceptoDestinoId: string;
   fecha: IsoDate;
@@ -792,6 +807,9 @@ export interface RespuestaVencimientosCartera {
  * has no key, read as 0 on the frontend).
  */
 export interface DocumentoCarteraPorInmueble {
+  /** This document's own `_id` — what a Nota Contable's `documentoId` must
+   *  reference to reclassify against it specifically. */
+  documentoId: string;
   tipo: 'FV' | 'ND';
   numeroCompleto: string;
   fecha: string;
@@ -865,8 +883,8 @@ export interface MovimientoEstadoCuenta {
   concepto: string;
   cargo: number | null;
   abono: number | null;
-  /** `'pago'` for Recibo applications, `'descuento'` for NC, `null` for
-   *  Nota Contable rows (informational only, never summed). */
+  /** `'pago'` for Recibo/Nota de Anticipo applications, `'descuento'` for
+   *  NC, `null` for Nota Contable rows (informational only, never summed). */
   categoria: 'pago' | 'descuento' | null;
 }
 
@@ -941,6 +959,17 @@ export interface FilaConciliacionCartera {
   valorCredito: number;
 }
 
+/** One Recibo still carrying an unapplied anticipo AS OF `periodEnd` — a
+ *  historical snapshot (unlike `AnticipoPendienteEstadoCuenta`'s live-today
+ *  one), matching this report's own point-in-time reasoning: what a
+ *  reconciler closing out that period actually saw. */
+export interface AnticipoPendienteConciliacion {
+  inmuebleCodigo: string;
+  fecha: string;
+  numeroRecibo: string;
+  valor: number;
+}
+
 /**
  * Response shape for GET /consultas/conciliacion-cartera — a coproperty-wide
  * control report, not per-inmueble (contrast Estado de Cuenta): it compares
@@ -962,6 +991,7 @@ export interface RespuestaConciliacionCartera {
   saldoCarteraCalculado: number;
   saldoCarteraReal: number;
   diferencia: number;
+  anticiposPendientes: AnticipoPendienteConciliacion[];
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */
