@@ -506,6 +506,9 @@ export interface LoteRecibos {
   id: string;
   numero: number;
   estado: 'borrador' | 'cargado' | 'aplicado';
+  /** When this batch was created — a domain field the service sets
+   *  explicitly, not Mongo's own `timestamps` bookkeeping. */
+  creadoEn: IsoDate;
   codigo: string;
   medioPago: 'transferencia' | 'cheque' | 'pse' | 'efectivo';
   cuentaDestino: string | null;

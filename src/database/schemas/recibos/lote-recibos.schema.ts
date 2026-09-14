@@ -107,6 +107,14 @@ export class LoteRecibos {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
+
+  /** When this batch was created — a domain field set explicitly at
+   *  `crear()` time, deliberately NOT the same thing as Mongoose's own
+   *  `timestamps: true` bookkeeping (`createdAt` below): that one tracks the
+   *  document's own persistence history and is not meant to leak into the
+   *  API contract, this one is business data the frontend actually shows. */
+  @Prop({ required: true })
+  creadoEn: Date;
 }
 
 export const LoteRecibosSchema = SchemaFactory.createForClass(LoteRecibos);

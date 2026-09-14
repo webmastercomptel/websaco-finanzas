@@ -122,6 +122,7 @@ export class LoteRecibosService {
       totalDigitado: dto.totalDigitado,
       filas: [],
       generatedBy: accountId,
+      creadoEn: new Date(),
     });
 
     return toLoteRecibos(creado);

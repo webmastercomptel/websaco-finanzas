@@ -39,6 +39,7 @@ export const toLoteRecibos = (
   id: doc._id.toString(),
   numero: doc.number,
   estado: doc.status,
+  creadoEn: doc.creadoEn.toISOString(),
   codigo: doc.codigo,
   medioPago: doc.medioPago,
   cuentaDestino: doc.cuentaDestino,

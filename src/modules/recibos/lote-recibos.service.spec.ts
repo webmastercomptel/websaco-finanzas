@@ -27,6 +27,7 @@ const loteDoc = (over: Record<string, unknown> = {}) => ({
   coPropertyId: COP,
   number: 1,
   status: 'cargado',
+  creadoEn: new Date('2026-06-10T14:30:00.000Z'),
   codigo: 'RC',
   medioPago: 'transferencia',
   cuentaDestino: '111005',
