@@ -696,6 +696,8 @@ describe('NotasCreditoService.crear', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        tipoDocumento: null,
+        numeroDocumento: null,
       },
     ]);
   });

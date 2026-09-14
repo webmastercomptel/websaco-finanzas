@@ -968,6 +968,10 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
+        tipoDocumento: 'FV',
+        numeroDocumento: null,
       },
       {
         account: '210505',
@@ -1059,6 +1063,10 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
+        tipoDocumento: 'FV',
+        numeroDocumento: null,
       },
       {
         account: '210505',
@@ -1593,6 +1601,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 400000,
         description: expect.any(String) as string,
+        tipoDocumento: 'FV',
+        numeroDocumento: 173,
       },
     ]);
   });

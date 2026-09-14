@@ -80,6 +80,10 @@ export function resolverMovimientoContable(
     centroCosto: e.centroCosto ?? null,
     flujoCaja: e.flujoCaja ?? null,
     baseGravable: e.baseGravable ?? null,
+    documentoCruce:
+      e.tipoDocumento && e.numeroDocumento != null
+        ? { tipo: e.tipoDocumento, numero: e.numeroDocumento }
+        : null,
   }));
 
   const totalDebito = asiento.entries

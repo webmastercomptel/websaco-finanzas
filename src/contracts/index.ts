@@ -1239,6 +1239,10 @@ export interface LineaMovimientoContable {
   /** The taxable base this line's tax was computed from — present only on
    *  the tax-credit line a taxed Cargo splits out. */
   baseGravable: number | null;
+  /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
+   *  a receivable against (Factura, Nota Débito) — present only when this
+   *  line's account is flagged `requiresCrossDocument`. */
+  documentoCruce: { tipo: 'FV' | 'ND'; numero: number } | null;
 }
 
 /** One journal entry card in the accounting journal view. */
