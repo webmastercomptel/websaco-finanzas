@@ -96,7 +96,7 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
  *  concepto has no `accountingReceivableAccount` configured, resolved to
  *  the coproperty's shared `cuentaCartera` only once `postearAsientoAplicacion`
  *  knows it (same "resolve the fallback account at the last possible
- *  moment" pattern `crear()`'s own `creditosPorCuenta` already uses).
+ *  moment" pattern `crear()`'s own `desglose` already uses).
  *  `tipoDocumento`/`numeroDocumento` are this application's own documento
  *  cruce — always the SPECIFIC Factura this line settled, never the note's
  *  own anchor (a deferred application can settle a completely different
@@ -337,16 +337,17 @@ export class NotasCreditoService {
       // — never scaled to `montoAAplicar` below: even the portion that
       // becomes anticipo still reverses revenue for those same concepts, it
       // just hasn't been applied against a specific invoice balance yet.
-      const debitosPorCuenta = new Map<string | null, number>();
+      const desgloseOrigen: DesgloseCarteraAplicacion[] = [];
       for (const linea of dto.distribucion) {
         const facturaLinea = factura.lines.find((l) =>
           l.conceptoId.equals(linea.conceptoId),
         );
-        const cuenta = facturaLinea?.accountingIncomeAccount ?? null;
-        debitosPorCuenta.set(
-          cuenta,
-          (debitosPorCuenta.get(cuenta) ?? 0) + linea.monto,
-        );
+        desgloseOrigen.push({
+          cuenta: facturaLinea?.accountingIncomeAccount ?? null,
+          monto: linea.monto,
+          tipoDocumento: 'FV',
+          numeroDocumento: factura.number,
+        });
       }
 
       // Always exactly one target: the anchor invoice itself — never a
@@ -368,7 +369,7 @@ export class NotasCreditoService {
       // call used to, defaults the builder to the note's FULL amount,
       // moving the memo pair even when the note never touched mora.
       let montoAplicadoMora = 0;
-      const creditosPorCuenta = new Map<string | null, number>();
+      const desglose: DesgloseCarteraAplicacion[] = [];
       if (montoAAplicar > 0) {
         // Needed now (unlike before per-concepto coding): each distribution
         // line's own accountingReceivableAccount comes off the anchor
@@ -413,11 +414,12 @@ export class NotasCreditoService {
           const linea = factura.lines.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
-          const cuenta = linea?.accountingReceivableAccount ?? null;
-          creditosPorCuenta.set(
-            cuenta,
-            (creditosPorCuenta.get(cuenta) ?? 0) + parte.parte,
-          );
+          desglose.push({
+            cuenta: linea?.accountingReceivableAccount ?? null,
+            monto: parte.parte,
+            tipoDocumento: 'FV',
+            numeroDocumento: factura.number,
+          });
           if (linea?.conceptKind === 'intereses') {
             montoAplicadoMora += parte.parte;
           }
@@ -467,8 +469,8 @@ export class NotasCreditoService {
         notaActual!,
         totalAplicadoAhora,
         dto.montoTotal - totalAplicadoAhora,
-        creditosPorCuenta,
-        debitosPorCuenta,
+        desglose,
+        desgloseOrigen,
         montoAplicadoMora,
         factura.number,
       );
@@ -664,7 +666,7 @@ export class NotasCreditoService {
       });
       // Documento cruce per línea: THIS factura, not the note's own anchor —
       // a deferred application can settle a completely different invoice.
-      // Per-concepto accounts, same as `crear()`'s own `creditosPorCuenta`.
+      // Per-concepto accounts, same as `crear()`'s own `desglose`.
       for (const parte of partes) {
         const linea = factura.lines.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
@@ -1355,8 +1357,8 @@ export class NotasCreditoService {
     nota: NotaCreditoDocument,
     montoAplicado: number,
     montoSinAplicar: number,
-    creditosPorCuenta: Map<string | null, number>,
-    debitosPorCuenta: Map<string | null, number>,
+    desglose: DesgloseCarteraAplicacion[],
+    desgloseOrigen: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
     numeroFacturaAncla: number,
   ): Promise<void> {
@@ -1368,17 +1370,23 @@ export class NotasCreditoService {
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaDevoluciones =
       copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
-    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
-      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
-    );
+    const desgloseCartera = desglose.map((d) => ({
+      account: d.cuenta ?? cuentaCartera,
+      monto: d.monto,
+      tipoDocumento: d.tipoDocumento,
+      numeroDocumento: d.numeroDocumento,
+    }));
     // Per-concepto income accounts for the débito side — see
     // `construirAsientoCruce`'s own `desgloseOrigen` docblock. Falls back to
     // `cuentaDevoluciones` (never a bare `null` account) for a concept with
     // no `accountingIncomeAccount` configured, same fallback role
     // `cuentaCartera` plays for `desgloseCartera` above.
-    const desgloseOrigen = Array.from(debitosPorCuenta.entries()).map(
-      ([cuenta, monto]) => ({ account: cuenta ?? cuentaDevoluciones, monto }),
-    );
+    const desgloseOrigenCuentas = desgloseOrigen.map((d) => ({
+      account: d.cuenta ?? cuentaDevoluciones,
+      monto: d.monto,
+      tipoDocumento: d.tipoDocumento,
+      numeroDocumento: d.numeroDocumento,
+    }));
     let entries = construirAsientoCruce(
       cuentaDevoluciones,
       cuentaCartera,
@@ -1390,7 +1398,7 @@ export class NotasCreditoService {
       desgloseCartera,
       montoAplicadoMora,
       undefined,
-      desgloseOrigen,
+      desgloseOrigenCuentas,
     );
     entries = await this.conAuxiliares(
       session,

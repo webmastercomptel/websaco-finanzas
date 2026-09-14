@@ -666,6 +666,7 @@ describe('NotasCreditoService.crear', () => {
 
   it('acredita la cuenta propia del concepto cuando la línea de la factura ancla la trae configurada', async () => {
     const factura = facturaDoc({
+      number: 42,
       lines: [
         {
           conceptoId: CONCEPTO,
@@ -686,16 +687,22 @@ describe('NotasCreditoService.crear', () => {
       account: string;
       type: string;
       amount: number;
+      tipoDocumento: string | null;
+      numeroDocumento: number | null;
     }>;
     const creditos = entries.filter((m) => m.type === 'credito');
     // La cuenta propia del concepto (130599), NO la cuenta plana de cartera
-    // de la copropiedad (130501) — aplicación total, sin anticipo.
+    // de la copropiedad (130501) — aplicación total, sin anticipo. El
+    // documento cruce (FV-42, la factura ancla) viaja con la línea, igual
+    // que en `aplicarManual`/`aplicarFifo`.
     expect(creditos).toEqual([
       {
         account: '130599',
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        tipoDocumento: 'FV',
+        numeroDocumento: 42,
       },
     ]);
   });

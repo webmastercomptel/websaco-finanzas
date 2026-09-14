@@ -968,6 +968,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        tipoDocumento: 'FV',
+        numeroDocumento: null,
       },
       {
         account: '210505',
@@ -1059,6 +1061,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
+        tipoDocumento: 'FV',
+        numeroDocumento: null,
       },
       {
         account: '210505',
@@ -1593,6 +1597,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 400000,
         description: expect.any(String) as string,
+        tipoDocumento: 'FV',
+        numeroDocumento: 173,
       },
     ]);
   });

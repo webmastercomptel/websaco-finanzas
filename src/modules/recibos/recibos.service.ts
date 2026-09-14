@@ -66,6 +66,7 @@ import {
   ejecutarAplicacionManual,
   remanentesPorLinea,
   restaurarSaldoTotalDocumento,
+  type DesgloseCarteraAplicacion,
   type ResumenAplicacion,
 } from './cruce.util';
 import {
@@ -360,7 +361,7 @@ export class RecibosService {
       );
 
       let totalAplicadoAhora = 0;
-      let creditosPorCuenta = new Map<string | null, number>();
+      let desglose: DesgloseCarteraAplicacion[] = [];
       let montoAplicadoMora = 0;
       let montoDescuentoAhora = 0;
       let resumenAplicaciones: ResumenAplicacion[] = [];
@@ -376,7 +377,7 @@ export class RecibosService {
           (acc, a) => acc + a.amountApplied,
           0,
         );
-        creditosPorCuenta = resultado.creditosPorCuenta;
+        desglose = resultado.desglose;
         montoAplicadoMora = resultado.montoAplicadoMora;
         resumenAplicaciones = resultado.resumen;
         montoDescuentoAhora = resultado.montoDescuentoTotal;
@@ -392,7 +393,7 @@ export class RecibosService {
           (acc, a) => acc + a.amountApplied,
           0,
         );
-        creditosPorCuenta = resultado.creditosPorCuenta;
+        desglose = resultado.desglose;
         montoAplicadoMora = resultado.montoAplicadoMora;
         resumenAplicaciones = resultado.resumen;
         montoDescuentoAhora = resultado.montoDescuentoTotal;
@@ -444,7 +445,7 @@ export class RecibosService {
         reciboActual!,
         totalAplicadoAhora,
         dto.montoRecibido - cashAplicadoAhora,
-        creditosPorCuenta,
+        desglose,
         montoAplicadoMora,
         montoDescuentoAhora,
       );
@@ -936,7 +937,7 @@ export class RecibosService {
     accountId: string,
   ): Promise<{
     creadas: AplicacionCarteraDocument[];
-    creditosPorCuenta: Map<string | null, number>;
+    desglose: DesgloseCarteraAplicacion[];
     montoAplicadoMora: number;
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
@@ -980,7 +981,7 @@ export class RecibosService {
     aplicadas: AplicacionCarteraDocument[];
     errores: ErrorAplicacion[];
     montoSinAplicar: number;
-    creditosPorCuenta: Map<string | null, number>;
+    desglose: DesgloseCarteraAplicacion[];
     montoAplicadoMora: number;
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
@@ -1067,7 +1068,7 @@ export class RecibosService {
     recibo: ReciboDocument,
     montoAplicado: number,
     montoSinAplicar: number,
-    creditosPorCuenta: Map<string | null, number>,
+    desglose: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
     montoDescuento: number,
   ): Promise<void> {
@@ -1079,11 +1080,15 @@ export class RecibosService {
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaDescuentos =
       copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
-    // null key (no accountingReceivableAccount for that concepto, or a Nota
-    // Débito application) resolves to the coproperty's shared cuentaCartera.
-    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
-      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
-    );
+    // null `cuenta` (no accountingReceivableAccount for that concepto, or a
+    // Nota Débito application) resolves to the coproperty's shared
+    // cuentaCartera — same conversion `anular()` already does below.
+    const desgloseCartera = desglose.map((d) => ({
+      account: d.cuenta ?? cuentaCartera,
+      monto: d.monto,
+      tipoDocumento: d.tipoDocumento,
+      numeroDocumento: d.numeroDocumento,
+    }));
     let entries = construirAsientoCruce(
       recibo.destinationAccount,
       cuentaCartera,

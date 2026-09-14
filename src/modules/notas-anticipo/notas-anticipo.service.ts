@@ -71,6 +71,7 @@ import {
   remanentesPorLinea,
   restaurarSaldoDocumentoOrigen,
   restaurarSaldoTotalDocumento,
+  type DesgloseCarteraAplicacion,
 } from '../recibos/cruce.util';
 import {
   construirContraAsientoAplicacionAnticipo,
@@ -309,8 +310,8 @@ export class NotasAnticipoService {
         accountId,
       };
 
-      const { totalAplicado, creditosPorCuenta, montoAplicadoMora } = dto
-        .aplicaciones?.length
+      const { totalAplicado, desglose, montoAplicadoMora } = dto.aplicaciones
+        ?.length
         ? await (async () => {
             const resultado = await ejecutarAplicacionManual(
               ctx,
@@ -321,7 +322,7 @@ export class NotasAnticipoService {
                 (acc, a) => acc + a.amountApplied,
                 0,
               ),
-              creditosPorCuenta: resultado.creditosPorCuenta,
+              desglose: resultado.desglose,
               montoAplicadoMora: resultado.montoAplicadoMora,
             };
           })()
@@ -335,7 +336,7 @@ export class NotasAnticipoService {
                 (acc, a) => acc + a.amountApplied,
                 0,
               ),
-              creditosPorCuenta: resultado.creditosPorCuenta,
+              desglose: resultado.desglose,
               montoAplicadoMora: resultado.montoAplicadoMora,
             };
           })();
@@ -363,7 +364,7 @@ export class NotasAnticipoService {
         { _id: creada._id, inmuebleId: recibo.inmuebleId },
         fechaEmision,
         totalAplicado,
-        creditosPorCuenta,
+        desglose,
         montoAplicadoMora,
       );
 
@@ -683,7 +684,7 @@ export class NotasAnticipoService {
     nota: { _id: Types.ObjectId; inmuebleId: Types.ObjectId },
     fechaEmision: Date,
     montoAplicado: number,
-    creditosPorCuenta: Map<string | null, number>,
+    desglose: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
@@ -692,9 +693,12 @@ export class NotasAnticipoService {
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-    const desgloseCartera = Array.from(creditosPorCuenta.entries()).map(
-      ([cuenta, monto]) => ({ account: cuenta ?? cuentaCartera, monto }),
-    );
+    const desgloseCartera = desglose.map((d) => ({
+      account: d.cuenta ?? cuentaCartera,
+      monto: d.monto,
+      tipoDocumento: d.tipoDocumento,
+      numeroDocumento: d.numeroDocumento,
+    }));
     let entries = construirMovimientosAplicacionAnticipo(
       cuentaAnticipos,
       cuentaCartera,
