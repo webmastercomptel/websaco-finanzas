@@ -218,6 +218,7 @@ export class NotasDebitoService {
     const concepto = await this.conceptos
       .findOne({ _id: conceptoId, coPropertyId })
       .populate('cuentaCreditoId', 'code')
+      .populate('cuentaDebitoId', 'code')
       .exec();
     if (!concepto) {
       throw new NotFoundException(
@@ -311,12 +312,18 @@ export class NotasDebitoService {
         { session },
       );
 
-      // Post creation journal entry: debit cartera, credit income (the
-      // concepto's CREDIT account, per construirMovimientos).
+      // Post creation journal entry: debit the concepto's own receivable
+      // account (cuentaDebitoId), credit its income account (cuentaCreditoId)
+      // — same per-concepto accounts a Factura line codes with, per
+      // `construirMovimientos`'s own docblock. Falls back to the
+      // coproperty's shared `receivablesAccount` only when the concepto has
+      // no `cuentaDebitoId` configured (that fallback lives inside
+      // `construirMovimientos` itself).
       await this.postearAsientoCreacion(
         session,
         coPropertyId,
         creada,
+        codigoDeCuentaContable(concepto.cuentaDebitoId),
         codigoDeCuentaContable(concepto.cuentaCreditoId),
         concepto.kind,
       );
@@ -744,6 +751,7 @@ export class NotasDebitoService {
     session: ClientSession,
     coPropertyId: Types.ObjectId,
     nota: NotaDebitoDocument,
+    cuentaDebito: string | null,
     cuentaIngreso: string | null,
     conceptoKind: 'administracion' | 'intereses' | 'otro',
   ): Promise<void> {
@@ -759,6 +767,7 @@ export class NotasDebitoService {
         total: nota.total,
         lines: [
           {
+            accountingReceivableAccount: cuentaDebito,
             accountingIncomeAccount: incomeAccount,
             totalAmount: nota.total,
             conceptKind: conceptoKind,
