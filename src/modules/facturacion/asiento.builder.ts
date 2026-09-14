@@ -445,9 +445,7 @@ export interface DesgloseCuenta {
  * `requiresCrossDocument` ever carries one — still merges purely by
  * account, exactly like before this field existed.
  */
-function agruparPorCuentaYDocumento(
-  desglose: DesgloseCuenta[],
-): {
+function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
   account: string;
   monto: number;
   tipoDocumento: 'FV' | 'ND' | null;
@@ -570,7 +568,12 @@ export function construirAsientoCruce(
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
   if (desgloseOrigen && desgloseOrigen.length > 0) {
-    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseOrigen)) {
+    for (const {
+      account,
+      monto,
+      tipoDocumento,
+      numeroDocumento,
+    } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
         account,
         type: 'debito',
@@ -599,7 +602,12 @@ export function construirAsientoCruce(
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
-      for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
+      for (const {
+        account,
+        monto,
+        tipoDocumento,
+        numeroDocumento,
+      } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
           account,
           type: 'credito',
@@ -675,7 +683,12 @@ export function construirMovimientosAplicacionAnticipo(
   ];
 
   if (desgloseCartera && desgloseCartera.length > 0) {
-    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
+    for (const {
+      account,
+      monto,
+      tipoDocumento,
+      numeroDocumento,
+    } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
         account,
         type: 'credito',
@@ -739,7 +752,12 @@ export function construirContraAsientoAplicacionAnticipo(
   const movimientos: Movimiento[] = [];
 
   if (desgloseCartera && desgloseCartera.length > 0) {
-    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
+    for (const {
+      account,
+      monto,
+      tipoDocumento,
+      numeroDocumento,
+    } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
         account,
         type: 'debito',
@@ -845,7 +863,12 @@ export function construirContraAsientoCruce(
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
-      for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseCartera)) {
+      for (const {
+        account,
+        monto,
+        tipoDocumento,
+        numeroDocumento,
+      } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
           account,
           type: 'debito',
@@ -874,7 +897,12 @@ export function construirContraAsientoCruce(
   }
 
   if (desgloseOrigen && desgloseOrigen.length > 0) {
-    for (const { account, monto, tipoDocumento, numeroDocumento } of agruparPorCuentaYDocumento(desgloseOrigen)) {
+    for (const {
+      account,
+      monto,
+      tipoDocumento,
+      numeroDocumento,
+    } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
         account,
         type: 'credito',

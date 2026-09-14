@@ -48,6 +48,7 @@ import { generarPdfConciliacionCartera } from '../../common/pdf/conciliacion-car
 import { generarPdfCarteraGeneral } from '../../common/pdf/cartera-general-pdf';
 import { generarPdfCarteraPorInmueble } from '../../common/pdf/cartera-por-inmueble-pdf';
 import { generarPdfVencimientosCartera } from '../../common/pdf/vencimientos-cartera-pdf';
+import { generarPdfMovimientoContable } from '../../common/pdf/movimiento-contable-pdf';
 
 /**
  * Read-only reporting endpoint. Reuses the already-stubbed 'Consulta'
@@ -296,5 +297,34 @@ export class ConsultasController {
     @Query() query: ConsultarMovimientoContableDto,
   ): Promise<RespuestaMovimientoContable> {
     return this.movimientoContable.findAll(query);
+  }
+
+  @Get('movimiento-contable/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfMovimientoContable(
+    @Query() query: ConsultarMovimientoContableDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.movimientoContable.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfMovimientoContable(
+      reporte,
+      copropiedad,
+      query.desde,
+      query.hasta,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="movimiento-contable-${query.desde}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }
