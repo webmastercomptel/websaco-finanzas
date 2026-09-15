@@ -56,9 +56,7 @@ export function EncabezadoReporte(props: {
     View,
     { style: styles.container },
     createElement(Text, { style: styles.nombre }, copropiedad.name),
-    direccion
-      ? createElement(Text, { style: styles.linea }, direccion)
-      : null,
+    direccion ? createElement(Text, { style: styles.linea }, direccion) : null,
     nit ? createElement(Text, { style: styles.linea }, nit) : null,
     contacto ? createElement(Text, { style: styles.linea }, contacto) : null,
     createElement(Text, { style: styles.titulo }, titulo),
