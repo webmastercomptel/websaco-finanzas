@@ -67,6 +67,39 @@ export function reporteDocumento(
   );
 }
 
+/**
+ * Builds a multi-page Letter document, one Page per content element — the
+ * react-pdf replacement for pdf-lib's "generate N PDFs, then `copyPages`
+ * them into one" batch pattern (`facturas-lote-pdf.ts`,
+ * `prefacturas-lote-pdf.ts`, `recibos-lote-pdf.ts`). React-pdf has no
+ * byte-level merge API; a batch here is one `<Document>` repeating the same
+ * per-item content across N `<Page>`s instead of stitching N independently
+ * rendered PDFs together.
+ */
+export function reporteDocumentoMultiPagina(
+  paginas: ReactElement[],
+  opciones?: { orientacion?: 'vertical' | 'horizontal' },
+): ReactElement<DocumentProps> {
+  const horizontal = opciones?.orientacion === 'horizontal';
+  return createElement(
+    Document,
+    null,
+    ...paginas.map((contenido, i) =>
+      createElement(
+        Page,
+        {
+          key: i,
+          size: 'LETTER',
+          orientation: horizontal ? 'landscape' : 'portrait',
+          style: horizontal ? PAGE_STYLES.horizontal : PAGE_STYLES.vertical,
+          wrap: true,
+        },
+        contenido,
+      ),
+    ),
+  );
+}
+
 /** Renders a document tree to a Buffer — the server-side entry point
  *  every migrated builder's exported function calls at the end. */
 export async function renderizarPdf(

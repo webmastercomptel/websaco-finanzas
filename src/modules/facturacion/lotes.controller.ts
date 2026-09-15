@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -38,8 +39,11 @@ import type {
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
+import { generarPdfPrefacturaReactPdf } from '../../common/pdf/prefactura-pdf.react';
 import { generarPdfPrefacturasLote } from '../../common/pdf/prefacturas-lote-pdf';
+import { generarPdfPrefacturasLoteReactPdf } from '../../common/pdf/prefacturas-lote-pdf.react';
 import { generarPdfFacturasLote } from '../../common/pdf/facturas-lote-pdf';
+import { generarPdfFacturasLoteReactPdf } from '../../common/pdf/facturas-lote-pdf.react';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import {
   Copropiedad,
@@ -150,6 +154,9 @@ export class LotesController {
   async generarPrefacturaPdf(
     @Param('id') id: string,
     @Param('inmuebleId') inmuebleId: string,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfPrefactura.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -169,7 +176,10 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfPrefactura(preliminar, lote, copropiedad);
+    const bytes =
+      version === 'new'
+        ? await generarPdfPrefacturaReactPdf(preliminar, lote, copropiedad)
+        : await generarPdfPrefactura(preliminar, lote, copropiedad);
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -190,6 +200,9 @@ export class LotesController {
   @CheckAbility({ action: 'read', subject: 'Factura' })
   async generarPdfPrefacturas(
     @Param('id') id: string,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfPrefacturasLote.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -206,11 +219,10 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfPrefacturasLote(
-      lote.preview,
-      lote,
-      copropiedad,
-    );
+    const bytes =
+      version === 'new'
+        ? await generarPdfPrefacturasLoteReactPdf(lote.preview, lote, copropiedad)
+        : await generarPdfPrefacturasLote(lote.preview, lote, copropiedad);
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -228,6 +240,9 @@ export class LotesController {
   @CheckAbility({ action: 'read', subject: 'Factura' })
   async generarPdfFacturas(
     @Param('id') id: string,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfFacturasLote.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -263,11 +278,10 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfFacturasLote(
-      facturas,
-      resolucionesPorId,
-      copropiedad,
-    );
+    const bytes =
+      version === 'new'
+        ? await generarPdfFacturasLoteReactPdf(facturas, resolucionesPorId, copropiedad)
+        : await generarPdfFacturasLote(facturas, resolucionesPorId, copropiedad);
 
     res.set({
       'Content-Type': 'application/pdf',

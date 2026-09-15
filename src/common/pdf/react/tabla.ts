@@ -22,6 +22,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: '#000000',
   },
+  filaTotales: {
+    flexDirection: 'row',
+    paddingTop: 2,
+  },
   celdaEncabezado: {
     fontSize: 10,
     fontFamily: 'Helvetica-Bold',
@@ -48,6 +52,10 @@ export function Tabla(props: {
   filas: string[][];
   columnasNumericas?: number;
   anchosRelativos?: number[];
+  /** Optional bold row appended below the closing rule (e.g. "Total",
+   *  '', '', formatoPeso(totalCargo), formatoPeso(totalAbono)) — same
+   *  column widths/alignment as the data rows above it. */
+  filaTotales?: string[];
 }): ReactElement {
   const { columnas, filas } = props;
   const numColumnas = columnas.length;
@@ -86,5 +94,18 @@ export function Tabla(props: {
       ),
     ),
     createElement(View, { style: styles.reglaFinal }),
+    props.filaTotales
+      ? createElement(
+          View,
+          { style: styles.filaTotales, wrap: false },
+          ...props.filaTotales.map((celda, i) =>
+            createElement(
+              Text,
+              { key: `t-${i}`, style: celdaStyle(i, true) },
+              celda ?? '',
+            ),
+          ),
+        )
+      : null,
   );
 }

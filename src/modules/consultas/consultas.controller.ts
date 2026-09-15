@@ -52,9 +52,12 @@ import type {
   RespuestaConsecutivos,
 } from '../../contracts';
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
+import { generarPdfEstadoCuentaReactPdf } from '../../common/pdf/estado-cuenta-pdf.react';
 import { generarPdfAuxiliarCartera } from '../../common/pdf/auxiliar-cartera-pdf';
 import { generarPdfConciliacionCartera } from '../../common/pdf/conciliacion-cartera-pdf';
+import { generarPdfConciliacionCarteraReactPdf } from '../../common/pdf/conciliacion-cartera-pdf.react';
 import { generarPdfCarteraGeneral } from '../../common/pdf/cartera-general-pdf';
+import { generarPdfCarteraGeneralReactPdf } from '../../common/pdf/cartera-general-pdf.react';
 import { generarPdfCarteraPorInmueble } from '../../common/pdf/cartera-por-inmueble-pdf';
 import { generarPdfCarteraPorConceptos } from '../../common/pdf/cartera-por-conceptos-pdf';
 import { generarPdfVencimientosCartera } from '../../common/pdf/vencimientos-cartera-pdf';
@@ -162,6 +165,9 @@ export class ConsultasController {
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   async generarPdfCarteraGeneral(
     @Query() query: ConsultarCarteraGeneralDto,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfCarteraGeneral.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -174,11 +180,10 @@ export class ConsultasController {
     }
 
     const fechaCorte = query.fecha ?? new Date().toISOString();
-    const bytes = await generarPdfCarteraGeneral(
-      reporte,
-      copropiedad,
-      fechaCorte,
-    );
+    const bytes =
+      version === 'new'
+        ? await generarPdfCarteraGeneralReactPdf(reporte, copropiedad, fechaCorte)
+        : await generarPdfCarteraGeneral(reporte, copropiedad, fechaCorte);
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -280,6 +285,9 @@ export class ConsultasController {
   async generarPdfEstadoCuenta(
     @Query() query: ConsultarEstadoCuentaDto,
     @Query('duplicado') duplicado: string | undefined,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfEstadoCuenta.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -291,9 +299,14 @@ export class ConsultasController {
       );
     }
 
-    const bytes = await generarPdfEstadoCuenta(estado, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
+    const bytes =
+      version === 'new'
+        ? await generarPdfEstadoCuentaReactPdf(estado, copropiedad, {
+            duplicado: duplicado === 'true',
+          })
+        : await generarPdfEstadoCuenta(estado, copropiedad, {
+            duplicado: duplicado === 'true',
+          });
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -324,6 +337,9 @@ export class ConsultasController {
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   async generarPdfConciliacionCartera(
     @Query() query: ConsultarConciliacionCarteraDto,
+    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
+    // Remove once react-pdf fully replaces generarPdfConciliacionCartera.
+    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -335,7 +351,10 @@ export class ConsultasController {
       );
     }
 
-    const bytes = await generarPdfConciliacionCartera(reporte, copropiedad);
+    const bytes =
+      version === 'new'
+        ? await generarPdfConciliacionCarteraReactPdf(reporte, copropiedad)
+        : await generarPdfConciliacionCartera(reporte, copropiedad);
 
     res.set({
       'Content-Type': 'application/pdf',

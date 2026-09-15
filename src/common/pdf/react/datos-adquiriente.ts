@@ -1,5 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { ROJO_DANGER, TEXTO_MUTED } from './paleta';
 
 const styles = StyleSheet.create({
   contenedor: {
@@ -23,7 +24,7 @@ const styles = StyleSheet.create({
   tituloFechas: {
     fontSize: 7.5,
     fontFamily: 'Helvetica-Bold',
-    color: '#767a80',
+    color: TEXTO_MUTED,
     marginBottom: 5,
   },
   filaFecha: {
@@ -34,14 +35,12 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   dt: {
-    color: '#767a80',
+    color: TEXTO_MUTED,
   },
-  dd: {
-    color: '#292d33',
-  },
+  dd: {},
   pillVence: {
     fontSize: 8.5,
-    color: '#c4401f',
+    color: ROJO_DANGER,
     backgroundColor: '#f8e2dc',
     borderRadius: 7,
     paddingVertical: 1.5,
