@@ -49,6 +49,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     notasCredito: find(),
     notasDebito: find(),
     notasContables: find(),
+    notasAnticipo: find(),
     aplicaciones: find(),
     conceptosCobro: find(),
     inmuebles: find(),
@@ -62,6 +63,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.notasCredito as never,
     m.notasDebito as never,
     m.notasContables as never,
+    m.notasAnticipo as never,
     m.aplicaciones as never,
     m.conceptosCobro as never,
     m.inmuebles as never,
@@ -315,6 +317,59 @@ describe('ConsecutivosService', () => {
         [conceptoDestino.toString()]: 15000,
       });
       expect(result.filas[0].valorTotal).toBe(15000);
+    });
+
+    it('un código NT usado para Notas de Anticipo las trae desde NotaAnticipo, no NotaContable (bug real reportado)', async () => {
+      const inmId = id();
+      const conceptoId = id();
+      const notaId = id();
+      const na = {
+        _id: notaId,
+        coPropertyId: COP,
+        inmuebleId: inmId,
+        number: 1,
+        fullNumber: 'NA-1',
+        issueDate: new Date('2026-08-01'),
+        appliedAmount: 40000,
+        status: 'activo',
+      };
+      const app = {
+        _id: id(),
+        sourceType: 'NA',
+        sourceId: notaId,
+        status: 'activa',
+        detalleConceptos: [
+          { conceptoId, conceptName: 'Administracion', monto: 40000 },
+        ],
+      };
+      const inm = inmuebleDoc({ _id: inmId, code: '307' });
+      const concepto = conceptoDoc({ _id: conceptoId, name: 'Administracion' });
+
+      const svc = servicio({
+        consecutivos: findOneStub(
+          consecutivoDoc({ category: 'NT', code: 'NA', prefix: 'NA' }),
+        ),
+        notasContables: find([]),
+        notasAnticipo: find([na]),
+        aplicaciones: find([app]),
+        inmuebles: find([inm]),
+        conceptosCobro: find([concepto]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'NA',
+        desde: '2026-08-01',
+        hasta: '2026-08-31',
+      });
+
+      expect(result.filas).toHaveLength(1);
+      expect(result.filas[0]).toMatchObject({
+        tipoDocumento: 'NA',
+        numeroCompleto: 'NA-1',
+        inmuebleCodigo: '307',
+        valorTotal: 40000,
+        cargosPorConcepto: { [conceptoId.toString()]: 40000 },
+      });
     });
   });
 

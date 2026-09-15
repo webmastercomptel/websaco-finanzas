@@ -26,6 +26,10 @@ import {
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  NotaAnticipo,
+  NotaAnticipoDocument,
+} from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -81,6 +85,16 @@ const sumarCargo = (
  *    ResolucionFacturacion and falls back to a plain `ConsecutivoDocumento`
  *    row for invoicing — see `NumeracionService.siguienteFactura`): its own
  *    `lines`.
+ *
+ * Category `NT` covers two DIFFERENT document collections sharing the one
+ * closed-category type: a plain reclassification lands in `NotaContable`,
+ * while a Nota de Anticipo (`CrearNotaAnticipoDto` explicitly reuses
+ * category NT — see its own docblock) lands in `NotaAnticipo`. Nothing at
+ * the `ConsecutivoDocumento` level says which collection a given código
+ * feeds, so an `NT` lookup queries both by `prefix` and concatenates — only
+ * one of the two ever actually matches a real código in practice. Missing
+ * this was a real bug: a Nota de Anticipo's own código never appeared in
+ * this report because only `NotaContable` was queried.
  */
 @Injectable()
 export class ConsecutivosService {
@@ -97,6 +111,8 @@ export class ConsecutivosService {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(NotaAnticipo.name)
+    private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(AplicacionCartera.name)
     private readonly aplicaciones: Model<AplicacionCarteraDocument>,
     @InjectModel(ConceptoCobro.name)
@@ -152,13 +168,22 @@ export class ConsecutivosService {
         );
         break;
       case 'NT':
-        filasInternas = await this.filasNotasContables(
-          coPropertyId,
-          consecutivo.code,
-          consecutivo.prefix,
-          desde,
-          hasta,
-        );
+        filasInternas = [
+          ...(await this.filasNotasContables(
+            coPropertyId,
+            consecutivo.code,
+            consecutivo.prefix,
+            desde,
+            hasta,
+          )),
+          ...(await this.filasNotasAnticipo(
+            coPropertyId,
+            consecutivo.code,
+            consecutivo.prefix,
+            desde,
+            hasta,
+          )),
+        ];
         break;
       case 'FV':
         filasInternas = await this.filasFacturas(
@@ -355,6 +380,55 @@ export class ConsecutivosService {
           [n.conceptoDestinoId.toString()]: n.monto,
         },
       }));
+  }
+
+  private async filasNotasAnticipo(
+    coPropertyId: Types.ObjectId,
+    codigo: string,
+    prefix: string,
+    desde: Date,
+    hasta: Date,
+  ): Promise<FilaInterna[]> {
+    const notas = await this.notasAnticipo
+      .find({
+        coPropertyId,
+        prefix,
+        status: 'activo',
+        issueDate: { $gte: desde, $lte: hasta },
+      })
+      .exec();
+    if (notas.length === 0) return [];
+
+    const notaIds = notas.map((n) => n._id);
+    const aplicaciones = await this.aplicaciones
+      .find({
+        coPropertyId,
+        sourceType: 'NA',
+        sourceId: { $in: notaIds },
+        status: 'activa',
+      })
+      .exec();
+
+    const cargosPorNota = new Map<string, Record<string, number>>();
+    for (const app of aplicaciones) {
+      const key = app.sourceId.toString();
+      const cargos = cargosPorNota.get(key) ?? {};
+      for (const detalle of app.detalleConceptos) {
+        sumarCargo(cargos, detalle.conceptoId.toString(), detalle.monto);
+      }
+      cargosPorNota.set(key, cargos);
+    }
+
+    return notas.map((n) => ({
+      documentoId: n._id.toString(),
+      tipoDocumento: codigo,
+      numero: n.number,
+      numeroCompleto: n.fullNumber,
+      inmuebleId: n.inmuebleId,
+      fecha: n.issueDate.toISOString(),
+      valorTotal: n.appliedAmount,
+      cargosPorConcepto: cargosPorNota.get(n._id.toString()) ?? {},
+    }));
   }
 
   private async filasFacturas(
