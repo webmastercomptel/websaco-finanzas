@@ -150,9 +150,9 @@ async function generarPorInmueble(
     const columnas = [
       'Inmueble',
       'Titular',
+      'Fecha',
       'Tipo',
       'Número',
-      'Fecha',
       'Vence',
       'Saldo',
       ...columnasCargos,
@@ -160,9 +160,9 @@ async function generarPorInmueble(
     const anchosRelativos = [
       0.7,
       1.4,
+      0.8,
       0.6,
       1,
-      0.8,
       0.8,
       1,
       ...columnasCargos.map(() => 1.1),
@@ -172,9 +172,9 @@ async function generarPorInmueble(
       g.documentos.map((d) => [
         g.inmuebleCodigo,
         g.titular ?? '—',
+        formatoFecha(d.fecha),
         d.tipo,
         d.numeroCompleto,
-        formatoFecha(d.fecha),
         d.vence ? formatoFecha(d.vence) : '—',
         formatoPeso(d.saldo),
         ...cargosDe(d.cargosPorConcepto),
@@ -287,9 +287,9 @@ async function generarPorConcepto(
     const columnas = [
       'Inmueble',
       'Titular',
+      'Fecha',
       'Tipo',
       'Número',
-      'Fecha',
       'Vence',
       'Saldo',
       nombreCargo,
@@ -301,9 +301,9 @@ async function generarPorConcepto(
         return [
           g.inmuebleCodigo,
           g.titular ?? '—',
+          formatoFecha(d.fecha),
           d.tipo,
           d.numeroCompleto,
-          formatoFecha(d.fecha),
           d.vence ? formatoFecha(d.vence) : '—',
           formatoPeso(d.saldo),
           formatoPeso(cargo),
@@ -325,7 +325,7 @@ async function generarPorConcepto(
 
     escribirTabla(ctx, columnas, filas, {
       columnasNumericas: 3,
-      anchosRelativos: [0.7, 1.4, 0.6, 1, 0.8, 0.8, 1, 1.1, 1.1],
+      anchosRelativos: [0.7, 1.4, 0.8, 0.6, 1, 0.8, 1, 1.1, 1.1],
     });
   }
 
