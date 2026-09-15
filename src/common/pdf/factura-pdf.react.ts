@@ -23,6 +23,7 @@ const styles = StyleSheet.create({
   },
   pieResolucion: {
     fontSize: 8,
+    fontFamily: 'Helvetica',
     marginTop: 4,
   },
 });

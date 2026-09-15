@@ -1,6 +1,5 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { TEXTO_MUTED } from './paleta';
 import type { CopropiedadDocument } from '../../../database/schemas/copropiedades/copropiedad.schema';
 
 const styles = StyleSheet.create({
@@ -14,6 +13,7 @@ const styles = StyleSheet.create({
   },
   linea: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
     marginBottom: 3,
   },
   titulo: {
@@ -24,8 +24,8 @@ const styles = StyleSheet.create({
   },
   subtitulo: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
     textAlign: 'center',
-    color: TEXTO_MUTED,
     marginTop: 4,
   },
 });

@@ -34,6 +34,7 @@ const styles = StyleSheet.create({
   },
   textoCaja: {
     fontSize: 8.5,
+    fontFamily: 'Helvetica',
     textAlign: 'center',
   },
   descuento: {
@@ -58,6 +59,7 @@ const styles = StyleSheet.create({
   },
   descuentoFecha: {
     fontSize: 8.5,
+    fontFamily: 'Helvetica',
     color: AMBAR_TEXTO,
     textAlign: 'center',
     marginBottom: 3,

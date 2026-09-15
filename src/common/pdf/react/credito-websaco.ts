@@ -1,7 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
 import { logoBytesWebsaco } from './logo-websaco';
-import { TEXTO_MUTED } from './paleta';
 
 const styles = StyleSheet.create({
   contenedor: {
@@ -16,11 +15,11 @@ const styles = StyleSheet.create({
   },
   texto: {
     fontSize: 7,
-    color: TEXTO_MUTED,
+    fontFamily: 'Helvetica',
   },
   textoConMargen: {
     fontSize: 7,
-    color: TEXTO_MUTED,
+    fontFamily: 'Helvetica',
     marginRight: 4,
   },
   logo: {
@@ -29,16 +28,23 @@ const styles = StyleSheet.create({
 });
 
 /**
- * One row closing the document's content: "Generado por [logo]" on the
- * left, "Página i/N" on the right — same faint gray, same size, read as one
- * unit instead of two unrelated footer concerns. Placed ONCE in the
- * document's own flow (right after Observaciones, in practice), not pinned
- * to the page's absolute bottom edge (`PieDocumento`, still available for a
- * document that genuinely needs a footer repeated identically on every
- * page — the wide multi-page reports migrating later are the likely case).
- * A single-page Factura/Estado de Cuenta never needed that repetition
- * (`Página 1/1` is not information); pageNumber/totalPages still come from
- * react-pdf's own per-page `render` callback either way.
+ * "Generado por [logo]" on the left, "Página i/N" on the right — same
+ * faint gray, same size, read as one unit instead of two unrelated footer
+ * concerns. Placed in-flow, once per `<Page>` element it's put on — for a
+ * single-page document (Factura, Estado de Cuenta) that's naturally once
+ * per document; for a manually-paginated wide report (Vencimientos,
+ * Movimiento Contable, Consulta/Consecutivos de Facturación — each page
+ * built by hand, one `<Page>` per row-chunk), the caller puts one
+ * `CreditoWebsaco` on each page's own content, so it repeats correctly
+ * without needing `position: absolute` at all.
+ *
+ * A `position: absolute` + `fixed` variant was tried for the wide-report
+ * case and dropped: react-pdf's automatic `wrap` pagination doesn't
+ * reserve space for a `fixed` element sitting outside the flow, so
+ * flowed rows kept overlapping it near the bottom of a full page
+ * regardless of how much extra bottom padding was added — the two never
+ * converged. Manual per-page pagination (see `vencimientos-cartera-pdf.ts`)
+ * sidesteps the interaction entirely instead of fighting it.
  *
  * The WebSACO mark itself replaces the logo that used to sit in
  * `EncabezadoDocumento`'s masthead banner — support's feedback was that

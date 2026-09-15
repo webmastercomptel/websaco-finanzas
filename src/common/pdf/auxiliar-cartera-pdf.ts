@@ -4,7 +4,7 @@ import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import { CreditoWebsaco } from './react/credito-websaco';
-import { TEXTO_MUTED } from './react/paleta';
+import { FONDO_ZEBRA } from './react/paleta';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaAuxiliarCartera } from '../../contracts';
 
@@ -32,17 +32,22 @@ const styles = StyleSheet.create({
   filaSimpleLabel: {
     width: 55,
     fontSize: 9,
-    color: TEXTO_MUTED,
+    fontFamily: 'Helvetica',
   },
   filaSimpleValor: {
     fontSize: 9,
+    fontFamily: 'Helvetica',
   },
   periodo: {
     flexDirection: 'row',
-    fontSize: 9,
   },
   periodoLabel: {
-    color: TEXTO_MUTED,
+    fontSize: 9,
+    fontFamily: 'Helvetica',
+  },
+  periodoValor: {
+    fontSize: 9,
+    fontFamily: 'Helvetica',
   },
   filaEncabezado: {
     flexDirection: 'row',
@@ -54,6 +59,9 @@ const styles = StyleSheet.create({
   fila: {
     flexDirection: 'row',
     paddingVertical: 2,
+  },
+  filaPar: {
+    backgroundColor: FONDO_ZEBRA,
   },
   filaBarra: {
     flexDirection: 'row',
@@ -67,6 +75,7 @@ const styles = StyleSheet.create({
   },
   celda: {
     fontSize: 9,
+    fontFamily: 'Helvetica',
   },
   celdaBarra: {
     fontSize: 9,
@@ -74,6 +83,7 @@ const styles = StyleSheet.create({
   },
   sinMovimientos: {
     fontSize: 9,
+    fontFamily: 'Helvetica',
     marginVertical: 6,
   },
 });
@@ -154,7 +164,7 @@ export async function generarPdfAuxiliarCartera(
         createElement(Text, { style: styles.periodoLabel }, 'Periodo: '),
         createElement(
           Text,
-          null,
+          { style: styles.periodoValor },
           `${formatoFecha(reporte.desde)} al ${formatoFecha(reporte.hasta)}`,
         ),
       ),
@@ -173,7 +183,11 @@ export async function generarPdfAuxiliarCartera(
     ...reporte.movimientos.map((m, i) =>
       createElement(
         View,
-        { key: i, style: styles.fila, wrap: false },
+        {
+          key: i,
+          style: i % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
+          wrap: false,
+        },
         createElement(Text, { style: celdaStyle(0, 'normal') }, formatoFecha(m.fecha)),
         createElement(Text, { style: celdaStyle(1, 'normal') }, m.tipo),
         createElement(Text, { style: celdaStyle(2, 'normal') }, m.numeroCompleto),

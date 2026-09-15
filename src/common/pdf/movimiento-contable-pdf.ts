@@ -1,5 +1,14 @@
-import { type PDFPage, rgb } from 'pdf-lib';
-import { crearContexto, formatoFecha, truncateToFit } from './pdf-helpers';
+import { createElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFecha } from './pdf-helpers';
+import {
+  reporteDocumentoMultiPagina,
+  renderizarPdf,
+  CONTENT_WIDTH_PT_HORIZONTAL,
+} from './react/document';
+import { CreditoWebsaco } from './react/credito-websaco';
+import { FONDO_ZEBRA } from './react/paleta';
+import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type {
   MovimientoContable,
@@ -33,10 +42,6 @@ function filtrarReporte(
   return { movimientos };
 }
 
-const MARGIN = 50;
-const ALTO_FILA = 12;
-const MARGIN_PIE = 30;
-
 interface ColumnaTabla {
   titulo: string;
   peso: number;
@@ -57,6 +62,14 @@ const COLUMNAS: ColumnaTabla[] = [
   { titulo: 'Flujo Caja', peso: 1.0, numerica: false },
   { titulo: 'Base Gravable', peso: 1.0, numerica: true },
 ];
+const PESO_TOTAL = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
+const ANCHOS_PT = COLUMNAS.map((c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL);
+
+const FUENTE_DATOS = 6.5;
+
+/** Same reasoning as `vencimientos-cartera-pdf.ts`'s own constant — manual
+ *  per-page pagination instead of react-pdf's automatic `wrap`. */
+const FILAS_POR_PAGINA = 38;
 
 function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
@@ -120,168 +133,20 @@ function aFilas(reporte: RespuestaMovimientoContable): FilaLinea[] {
   return filas.sort(compararPorTipoYNumero);
 }
 
-/**
- * Generates a real PDF for Consulta de Movimiento Contable: the coproperty's
- * full accounting ledger for a date range, flattened to one row per line and
- * closing each document with its own subtotal bar — 12 columns, wide enough
- * that (like `vencimientos-cartera-pdf.ts`) this manages its own landscape
- * pagination with a repeating header and a shrunk font.
- */
-export async function generarPdfMovimientoContable(
-  reporteCompleto: RespuestaMovimientoContable,
-  copropiedad: CopropiedadDocument,
-  desde: string,
-  hasta: string,
-  filtro: FiltroMovimientoContable = {},
-): Promise<Uint8Array> {
-  const reporte = filtrarReporte(reporteCompleto, filtro);
-  const ctx = await crearContexto({ orientacion: 'horizontal' });
+type ItemImprimible =
+  | { tipo: 'linea'; fila: FilaLinea }
+  | { tipo: 'subtotalDocumento'; debito: number; credito: number };
 
-  const pesoTotal = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
-  const anchos = COLUMNAS.map((c) => (c.peso / pesoTotal) * ctx.contentWidth);
-  // 12 columns still need a small font to all fit comfortably alongside
-  // free-text ones ("Nombre de la Cuenta", "Tercero") — same approach
-  // `vencimientos-cartera-pdf.ts` uses for its own wide table.
-  const fuenteDatos = 6.5;
-  const fuenteTitulo = 7;
-
-  const subtitulo = `Movimiento Contable — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
-  const paginas: PDFPage[] = [];
-
-  const dibujarEncabezado = (page: PDFPage): number => {
-    let y = ctx.pageHeight - 34;
-    page.drawText(copropiedad.name, {
-      x: MARGIN,
-      y,
-      size: 12,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    y -= 16;
-    page.drawText(subtitulo, {
-      x: MARGIN,
-      y,
-      size: fuenteTitulo + 3,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    y -= 14;
-    page.drawLine({
-      start: { x: MARGIN, y },
-      end: { x: MARGIN + ctx.contentWidth, y },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-    y -= 12;
-    return y;
-  };
-
-  const dibujarFila = (
-    page: PDFPage,
-    y: number,
-    celdas: string[],
-    opciones?: { bold?: boolean; fondo?: boolean },
-  ): void => {
-    const font = opciones?.bold ? ctx.fontBold : ctx.font;
-    if (opciones?.fondo) {
-      page.drawRectangle({
-        x: MARGIN,
-        y: y - 3,
-        width: ctx.contentWidth,
-        height: ALTO_FILA + 3,
-        color: rgb(0.92, 0.92, 0.92),
-      });
-    }
-    let x = MARGIN;
-    celdas.forEach((celda, i) => {
-      const ancho = anchos[i];
-      const texto =
-        font.widthOfTextAtSize(celda, fuenteDatos) > ancho - 4
-          ? truncateToFit(font, celda, fuenteDatos, ancho - 4)
-          : celda;
-      const textWidth = font.widthOfTextAtSize(texto, fuenteDatos);
-      const cellX = COLUMNAS[i].numerica ? x + ancho - textWidth - 3 : x + 3;
-      page.drawText(texto, {
-        x: cellX,
-        y,
-        size: fuenteDatos,
-        font,
-        color: rgb(0, 0, 0),
-      });
-      x += ancho;
-    });
-  };
-
-  const dibujarEncabezadoTabla = (page: PDFPage, y: number): number => {
-    dibujarFila(
-      page,
-      y,
-      COLUMNAS.map((c) => c.titulo),
-      { bold: true, fondo: true },
-    );
-    page.drawLine({
-      start: { x: MARGIN, y: y - 4 },
-      end: { x: MARGIN + ctx.contentWidth, y: y - 4 },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-    return y - ALTO_FILA - 5;
-  };
-
-  let primeraPagina = true;
-  const nuevaPagina = (): { page: PDFPage; y: number } => {
-    const page = primeraPagina
-      ? ctx.page
-      : ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
-    primeraPagina = false;
-    paginas.push(page);
-    const yTrasEncabezado = dibujarEncabezado(page);
-    return { page, y: dibujarEncabezadoTabla(page, yTrasEncabezado) };
-  };
-
-  let { page, y } = nuevaPagina();
-
-  const filas = aFilas(reporte);
-  let totalDebitoGeneral = 0;
-  let totalCreditoGeneral = 0;
-
-  const filaSubtotal = (debito: number, credito: number): string[] => [
-    '',
-    '',
-    '',
-    'Total',
-    '',
-    '',
-    formatoPesoCompacto(debito),
-    formatoPesoCompacto(credito),
-    '',
-    '',
-    '',
-    '',
-  ];
-
+/** Flattens sorted lines into the exact print sequence — a line, then
+ *  (once the next line belongs to a different document) its own subtotal
+ *  bar — so pagination can chunk this list directly instead of tracking
+ *  "am I at a document boundary" while also tracking "does this row fit on
+ *  the current page", the way the pdf-lib original's single imperative
+ *  loop did both at once. */
+function aItemsImprimibles(filas: FilaLinea[]): ItemImprimible[] {
+  const items: ItemImprimible[] = [];
   filas.forEach((f, i) => {
-    if (y < MARGIN_PIE + ALTO_FILA) {
-      ({ page, y } = nuevaPagina());
-    }
-    dibujarFila(page, y, [
-      f.tipoDocumento,
-      f.numeroDocumento,
-      f.cuenta,
-      f.nombreCuenta,
-      f.inmuebleCodigo ?? '—',
-      formatoFecha(f.fecha),
-      f.debito != null ? formatoPesoCompacto(f.debito) : '',
-      f.credito != null ? formatoPesoCompacto(f.credito) : '',
-      f.tercero ?? '—',
-      f.centroCosto ?? '—',
-      f.flujoCaja ?? '—',
-      f.baseGravable != null ? formatoPesoCompacto(f.baseGravable) : '—',
-    ]);
-    y -= ALTO_FILA;
-    totalDebitoGeneral += f.debito ?? 0;
-    totalCreditoGeneral += f.credito ?? 0;
-
+    items.push({ tipo: 'linea', fila: f });
     const siguiente = filas[i + 1];
     const esUltimaDelDocumento =
       !siguiente ||
@@ -293,60 +158,248 @@ export async function generarPdfMovimientoContable(
           x.tipoDocumento === f.tipoDocumento &&
           x.numeroDocumento === f.numeroDocumento,
       );
-      const debitoDoc = delDocumento.reduce((s, x) => s + (x.debito ?? 0), 0);
-      const creditoDoc = delDocumento.reduce((s, x) => s + (x.credito ?? 0), 0);
-      if (y < MARGIN_PIE + ALTO_FILA) {
-        ({ page, y } = nuevaPagina());
-      }
-      dibujarFila(page, y, filaSubtotal(debitoDoc, creditoDoc), {
-        bold: true,
-        fondo: true,
+      items.push({
+        tipo: 'subtotalDocumento',
+        debito: delDocumento.reduce((s, x) => s + (x.debito ?? 0), 0),
+        credito: delDocumento.reduce((s, x) => s + (x.credito ?? 0), 0),
       });
-      y -= ALTO_FILA;
     }
   });
+  return items;
+}
+
+function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
+  if (items.length === 0) return [[]];
+  const paginas: T[][] = [];
+  for (let i = 0; i < items.length; i += porPagina) {
+    paginas.push(items.slice(i, i + porPagina));
+  }
+  return paginas;
+}
+
+const styles = StyleSheet.create({
+  masthead: {
+    marginBottom: 8,
+  },
+  nombre: {
+    fontSize: 12,
+    fontFamily: 'Helvetica-Bold',
+    marginBottom: 4,
+  },
+  subtitulo: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    marginBottom: 6,
+  },
+  regla: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#999999',
+  },
+  filaEncabezado: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#999999',
+    paddingVertical: 3,
+    marginTop: 6,
+    marginBottom: 3,
+  },
+  fila: {
+    flexDirection: 'row',
+    paddingVertical: 1.5,
+  },
+  filaPar: {
+    backgroundColor: FONDO_ZEBRA,
+  },
+  filaSubtotal: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    paddingVertical: 1.5,
+  },
+  filaFinal: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  celdaEncabezado: {
+    fontSize: 7,
+    fontFamily: 'Helvetica-Bold',
+  },
+  celda: {
+    fontSize: FUENTE_DATOS,
+    fontFamily: 'Helvetica',
+  },
+  celdaFinal: {
+    fontSize: FUENTE_DATOS,
+    fontFamily: 'Helvetica-Bold',
+  },
+  sinDatos: {
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
+  },
+});
+
+const celdaEstilo = (i: number, variante: 'encabezado' | 'normal' | 'final') => ({
+  flexGrow: COLUMNAS[i].peso,
+  flexBasis: 0,
+  textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
+  paddingRight: 3,
+  ...(variante === 'encabezado'
+    ? styles.celdaEncabezado
+    : variante === 'final'
+      ? styles.celdaFinal
+      : styles.celda),
+});
+
+const filaSubtotalValores = (debito: number, credito: number): string[] => [
+  '',
+  '',
+  '',
+  'Total',
+  '',
+  '',
+  formatoPesoCompacto(debito),
+  formatoPesoCompacto(credito),
+  '',
+  '',
+  '',
+  '',
+];
+
+/**
+ * Generates a real PDF for Consulta de Movimiento Contable: the coproperty's
+ * full accounting ledger for a date range, flattened to one row per line and
+ * closing each document with its own subtotal bar — 12 columns.
+ *
+ * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
+ * toggle). Paginated by hand, same approach as `vencimientos-cartera-pdf.ts`
+ * (see that file's `FILAS_POR_PAGINA` docblock for why): line rows and
+ * subtotal-bar rows are flattened into one ordered `ItemImprimible[]` first,
+ * so chunking into pages doesn't need to track document boundaries and page
+ * boundaries at the same time the way the pdf-lib original's single
+ * imperative loop did.
+ */
+export async function generarPdfMovimientoContable(
+  reporteCompleto: RespuestaMovimientoContable,
+  copropiedad: CopropiedadDocument,
+  desde: string,
+  hasta: string,
+  filtro: FiltroMovimientoContable = {},
+): Promise<Buffer> {
+  const reporte = filtrarReporte(reporteCompleto, filtro);
+  const subtitulo = `Movimiento Contable — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
+
+  const filas = aFilas(reporte);
+  const totalDebitoGeneral = filas.reduce((s, f) => s + (f.debito ?? 0), 0);
+  const totalCreditoGeneral = filas.reduce((s, f) => s + (f.credito ?? 0), 0);
+
+  const celda = (texto: string, i: number, variante: 'encabezado' | 'normal' | 'final') =>
+    createElement(
+      Text,
+      { key: i, style: celdaEstilo(i, variante) },
+      variante === 'normal' ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS) : texto,
+    );
+
+  const masthead = createElement(
+    View,
+    { style: styles.masthead },
+    createElement(Text, { style: styles.nombre }, copropiedad.name),
+    createElement(Text, { style: styles.subtitulo }, subtitulo),
+    createElement(View, { style: styles.regla }),
+  );
+  const filaEncabezadoTabla = createElement(
+    View,
+    { style: styles.filaEncabezado, wrap: false },
+    ...COLUMNAS.map((c, i) => celda(c.titulo, i, 'encabezado')),
+  );
 
   if (filas.length === 0) {
-    if (y < MARGIN_PIE + ALTO_FILA) {
-      ({ page, y } = nuevaPagina());
-    }
-    const mensaje = truncateToFit(
-      ctx.font,
-      'No hay transacciones contables en el período seleccionado',
-      fuenteDatos + 2,
-      ctx.contentWidth - 8,
-    );
-    page.drawText(mensaje, {
-      x: MARGIN + 4,
-      y,
-      size: fuenteDatos + 2,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-  } else {
-    if (y < MARGIN_PIE + ALTO_FILA) {
-      ({ page, y } = nuevaPagina());
-    }
-    dibujarFila(
-      page,
-      y,
-      filaSubtotal(totalDebitoGeneral, totalCreditoGeneral),
-      { bold: true, fondo: true },
+    return renderizarPdf(
+      reporteDocumentoMultiPagina(
+        [
+          createElement(
+            View,
+            null,
+            masthead,
+            filaEncabezadoTabla,
+            createElement(
+              Text,
+              { style: styles.sinDatos },
+              'No hay transacciones contables en el período seleccionado',
+            ),
+            createElement(CreditoWebsaco),
+          ),
+        ],
+        { orientacion: 'horizontal' },
+      ),
     );
   }
 
-  const totalPaginas = paginas.length;
-  paginas.forEach((p, i) => {
-    const texto = `Página ${i + 1}/${totalPaginas}`;
-    const ancho = ctx.font.widthOfTextAtSize(texto, 8);
-    p.drawText(texto, {
-      x: MARGIN + ctx.contentWidth - ancho,
-      y: MARGIN_PIE - 16,
-      size: 8,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
+  const items = aItemsImprimibles(filas);
+  const bloques = agruparEnPaginas(items, FILAS_POR_PAGINA);
+
+  const paginas = bloques.map((bloque, indicePagina) => {
+    const esUltima = indicePagina === bloques.length - 1;
+    let indiceFilaDato = 0;
+
+    return createElement(
+      View,
+      null,
+      masthead,
+      filaEncabezadoTabla,
+
+      ...bloque.map((item, i) => {
+        if (item.tipo === 'subtotalDocumento') {
+          return createElement(
+            View,
+            { key: i, style: styles.filaSubtotal, wrap: false },
+            ...filaSubtotalValores(item.debito, item.credito).map((v, ci) =>
+              celda(v, ci, 'final'),
+            ),
+          );
+        }
+        const f = item.fila;
+        const valores = [
+          f.tipoDocumento,
+          f.numeroDocumento,
+          f.cuenta,
+          f.nombreCuenta,
+          f.inmuebleCodigo ?? '—',
+          formatoFecha(f.fecha),
+          f.debito != null ? formatoPesoCompacto(f.debito) : '',
+          f.credito != null ? formatoPesoCompacto(f.credito) : '',
+          f.tercero ?? '—',
+          f.centroCosto ?? '—',
+          f.flujoCaja ?? '—',
+          f.baseGravable != null ? formatoPesoCompacto(f.baseGravable) : '—',
+        ];
+        const esImpar = indiceFilaDato % 2 === 1;
+        indiceFilaDato += 1;
+        return createElement(
+          View,
+          {
+            key: i,
+            style: esImpar ? [styles.fila, styles.filaPar] : styles.fila,
+            wrap: false,
+          },
+          ...valores.map((v, ci) => celda(v, ci, 'normal')),
+        );
+      }),
+
+      esUltima
+        ? createElement(
+            View,
+            { style: styles.filaFinal, wrap: false },
+            ...filaSubtotalValores(totalDebitoGeneral, totalCreditoGeneral).map((v, i) =>
+              celda(v, i, 'final'),
+            ),
+          )
+        : null,
+
+      createElement(CreditoWebsaco),
+    );
   });
 
-  return ctx.doc.save();
+  return renderizarPdf(reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }));
 }

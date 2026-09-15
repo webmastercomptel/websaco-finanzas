@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { TEXTO_MUTED } from './paleta';
+import { FONDO_ZEBRA } from './paleta';
 
 export interface FilaResumen {
   label: string;
@@ -25,7 +25,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   filaPar: {
-    backgroundColor: '#f7f7f7',
+    backgroundColor: FONDO_ZEBRA,
   },
   filaDestacada: {
     borderTopWidth: 0.75,
@@ -35,7 +35,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 9,
-    color: TEXTO_MUTED,
+    fontFamily: 'Helvetica',
   },
   valor: {
     fontSize: 9,

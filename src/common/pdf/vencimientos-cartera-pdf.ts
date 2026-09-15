@@ -1,14 +1,19 @@
-import { type PDFPage, rgb } from 'pdf-lib';
-import { crearContexto, formatoFecha, truncateToFit } from './pdf-helpers';
+import { createElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFecha } from './pdf-helpers';
+import {
+  reporteDocumentoMultiPagina,
+  renderizarPdf,
+  CONTENT_WIDTH_PT_HORIZONTAL,
+} from './react/document';
+import { CreditoWebsaco } from './react/credito-websaco';
+import { FONDO_ZEBRA } from './react/paleta';
+import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type {
   RangoVencimiento,
   RespuestaVencimientosCartera,
 } from '../../contracts';
-
-const MARGIN = 50;
-const ALTO_FILA = 12;
-const MARGIN_PIE = 30;
 
 const RANGOS: { rango: RangoVencimiento; etiqueta: string }[] = [
   { rango: 'sinVencer', etiqueta: 'Sin Vencer' },
@@ -39,6 +44,30 @@ const COLUMNAS: ColumnaTabla[] = [
   { titulo: 'Saldo', peso: 1.1, numerica: true },
   ...RANGOS.map((r) => ({ titulo: r.etiqueta, peso: 1, numerica: true })),
 ];
+const PESO_TOTAL = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
+/** Absolute pt widths, precomputed from the same weights the flex columns
+ *  use — needed by `truncarTexto`, which measures against a real width,
+ *  not a flex ratio. */
+const ANCHOS_PT = COLUMNAS.map((c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL);
+
+const FUENTE_DATOS = 6.5;
+
+/** Rows per page, computed by hand rather than left to react-pdf's
+ *  automatic `wrap` pagination — a masthead+table-header repeated via
+ *  `fixed` on every page turned out to NOT reserve its own height against
+ *  react-pdf's row-fitting estimate (verified empirically: raising the
+ *  page's bottom padding shrank the row count per page correctly, but the
+ *  last 1-2 rows kept overlapping the fixed footer regardless of how much
+ *  padding was added — the estimate and the actual fixed-element geometry
+ *  were fighting each other, not converging). Manual, per-page `<Page>`
+ *  elements (`reporteDocumentoMultiPagina`, already built for the
+ *  facturas-lote/prefacturas-lote merge) sidestep the interaction
+ *  entirely — same approach the pdf-lib original used (`nuevaPagina()`),
+ *  just built once instead of triggered by a live cursor position.
+ *  612 (landscape height) − 100 (top+bottom padding) − ~50 (masthead+table
+ *  header) − ~20 (footer clearance) ≈ 442pt ÷ ~10.5pt/row ≈ 42; kept at 38
+ *  for headroom against `Text`'s own line-height rounding. */
+const FILAS_POR_PAGINA = 38;
 
 function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
@@ -73,183 +102,174 @@ function filtrarReporte(
   return { ...reporte, filas, rangos, totalCartera };
 }
 
+function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
+  if (items.length === 0) return [[]];
+  const paginas: T[][] = [];
+  for (let i = 0; i < items.length; i += porPagina) {
+    paginas.push(items.slice(i, i + porPagina));
+  }
+  return paginas;
+}
+
+const styles = StyleSheet.create({
+  masthead: {
+    marginBottom: 8,
+  },
+  nombre: {
+    fontSize: 12,
+    fontFamily: 'Helvetica-Bold',
+    marginBottom: 4,
+  },
+  subtitulo: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    marginBottom: 6,
+  },
+  regla: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#999999',
+  },
+  filaEncabezado: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#999999',
+    paddingVertical: 3,
+    marginTop: 6,
+    marginBottom: 3,
+  },
+  fila: {
+    flexDirection: 'row',
+    paddingVertical: 1.5,
+  },
+  filaPar: {
+    backgroundColor: FONDO_ZEBRA,
+  },
+  filaFinal: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  celdaEncabezado: {
+    fontSize: 7,
+    fontFamily: 'Helvetica-Bold',
+  },
+  celda: {
+    fontSize: FUENTE_DATOS,
+    fontFamily: 'Helvetica',
+  },
+  celdaFinal: {
+    fontSize: FUENTE_DATOS,
+    fontFamily: 'Helvetica-Bold',
+  },
+});
+
+const celdaEstilo = (i: number, variante: 'encabezado' | 'normal' | 'final') => ({
+  flexGrow: COLUMNAS[i].peso,
+  flexBasis: 0,
+  textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
+  paddingRight: 3,
+  ...(variante === 'encabezado'
+    ? styles.celdaEncabezado
+    : variante === 'final'
+      ? styles.celdaFinal
+      : styles.celda),
+});
+
 /**
  * Generates a real PDF for Vencimientos de Cartera: every pending document
  * coproperty-wide, aged into its own column — 17 columns total (8 fixed +
- * 9 aging buckets, all fixed, never per-coproperty dynamic), wide enough
- * that this manages its own landscape pagination with a repeating header
- * and a shrunk font, the same approach `consulta-facturacion-pdf.ts` uses
- * for its own wide, dynamic-column table. `filtro` narrows to one inmueble
- * and/or one aging bucket, matching whatever's active on screen.
+ * 9 aging buckets, all fixed, never per-coproperty dynamic). `filtro`
+ * narrows to one inmueble and/or one aging bucket, matching whatever's
+ * active on screen.
+ *
+ * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
+ * toggle). Paginated by hand (see `FILAS_POR_PAGINA`'s docblock) — one
+ * `<Page>` per row-chunk, each carrying its own masthead + table header, the
+ * TOTAL row only on the last one.
  */
 export async function generarPdfVencimientosCartera(
   reporteCompleto: RespuestaVencimientosCartera,
   copropiedad: CopropiedadDocument,
   filtro: { inmuebleId?: string; rango?: RangoVencimiento } = {},
-): Promise<Uint8Array> {
+): Promise<Buffer> {
   const reporte = filtrarReporte(reporteCompleto, filtro);
-  const ctx = await crearContexto({ orientacion: 'horizontal' });
-
-  const pesoTotal = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
-  const anchos = COLUMNAS.map((c) => (c.peso / pesoTotal) * ctx.contentWidth);
-  // 17 columns need a small font to all fit — no truncation-worthy content
-  // is expected at this size (codes/numbers are short), "Nombre" gets
-  // truncated defensively via `truncateToFit` regardless.
-  const fuenteDatos = 6.5;
-  const fuenteTitulo = 7;
-
   const subtitulo = `Análisis de Vencimientos — Corte al ${formatoFecha(reporte.fechaCorte)}`;
-  const paginas: PDFPage[] = [];
-
-  const dibujarEncabezado = (page: PDFPage): number => {
-    let y = ctx.pageHeight - 34;
-    page.drawText(copropiedad.name, {
-      x: MARGIN,
-      y,
-      size: 12,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    y -= 16;
-    page.drawText(subtitulo, {
-      x: MARGIN,
-      y,
-      size: fuenteTitulo + 3,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    y -= 14;
-    page.drawLine({
-      start: { x: MARGIN, y },
-      end: { x: MARGIN + ctx.contentWidth, y },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-    y -= 12;
-    return y;
-  };
-
-  const dibujarFila = (
-    page: PDFPage,
-    y: number,
-    celdas: string[],
-    opciones?: { bold?: boolean; fondo?: boolean },
-  ): void => {
-    const font = opciones?.bold ? ctx.fontBold : ctx.font;
-    if (opciones?.fondo) {
-      page.drawRectangle({
-        x: MARGIN,
-        y: y - 3,
-        width: ctx.contentWidth,
-        height: ALTO_FILA + 3,
-        color: rgb(0.92, 0.92, 0.92),
-      });
-    }
-    let x = MARGIN;
-    celdas.forEach((celda, i) => {
-      const ancho = anchos[i];
-      const texto =
-        font.widthOfTextAtSize(celda, fuenteDatos) > ancho - 4
-          ? truncateToFit(font, celda, fuenteDatos, ancho - 4)
-          : celda;
-      const textWidth = font.widthOfTextAtSize(texto, fuenteDatos);
-      const cellX = COLUMNAS[i].numerica ? x + ancho - textWidth - 3 : x + 3;
-      page.drawText(texto, {
-        x: cellX,
-        y,
-        size: fuenteDatos,
-        font,
-        color: rgb(0, 0, 0),
-      });
-      x += ancho;
-    });
-  };
-
-  const dibujarEncabezadoTabla = (page: PDFPage, y: number): number => {
-    dibujarFila(
-      page,
-      y,
-      COLUMNAS.map((c) => c.titulo),
-      { bold: true, fondo: true },
-    );
-    page.drawLine({
-      start: { x: MARGIN, y: y - 4 },
-      end: { x: MARGIN + ctx.contentWidth, y: y - 4 },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-    return y - ALTO_FILA - 5;
-  };
-
-  let primeraPagina = true;
-  const nuevaPagina = (): { page: PDFPage; y: number } => {
-    const page = primeraPagina
-      ? ctx.page
-      : ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
-    primeraPagina = false;
-    paginas.push(page);
-    const yTrasEncabezado = dibujarEncabezado(page);
-    return { page, y: dibujarEncabezadoTabla(page, yTrasEncabezado) };
-  };
-
-  let { page, y } = nuevaPagina();
-
-  for (const f of reporte.filas) {
-    if (y < MARGIN_PIE + ALTO_FILA) {
-      ({ page, y } = nuevaPagina());
-    }
-    const celdas = [
-      f.inmuebleCodigo,
-      f.propietario ?? '—',
-      f.tipo,
-      f.numeroCompleto,
-      formatoFecha(f.fecha),
-      formatoFecha(f.vence),
-      String(f.diasMora),
-      formatoPesoCompacto(f.saldo),
-      ...RANGOS.map((r) =>
-        f.rango === r.rango ? formatoPesoCompacto(f.saldo) : '',
-      ),
-    ];
-    dibujarFila(page, y, celdas);
-    y -= ALTO_FILA;
-  }
-
-  if (y < MARGIN_PIE + ALTO_FILA) {
-    ({ page, y } = nuevaPagina());
-  }
   const totalPorRango = new Map(reporte.rangos.map((r) => [r.rango, r.valor]));
-  dibujarFila(
-    page,
-    y,
-    [
-      'TOTAL',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      formatoPesoCompacto(reporte.totalCartera),
-      ...RANGOS.map((r) =>
-        formatoPesoCompacto(totalPorRango.get(r.rango) ?? 0),
-      ),
-    ],
-    { bold: true, fondo: true },
-  );
 
-  const totalPaginas = paginas.length;
-  paginas.forEach((p, i) => {
-    const texto = `Página ${i + 1}/${totalPaginas}`;
-    const ancho = ctx.font.widthOfTextAtSize(texto, 8);
-    p.drawText(texto, {
-      x: MARGIN + ctx.contentWidth - ancho,
-      y: MARGIN_PIE - 16,
-      size: 8,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
+  const celda = (texto: string, i: number, variante: 'encabezado' | 'normal' | 'final') =>
+    createElement(
+      Text,
+      { key: i, style: celdaEstilo(i, variante) },
+      variante === 'normal' ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS) : texto,
+    );
+
+  const bloquesFilas = agruparEnPaginas(reporte.filas, FILAS_POR_PAGINA);
+
+  const paginas = bloquesFilas.map((bloque, indicePagina) => {
+    const esUltima = indicePagina === bloquesFilas.length - 1;
+
+    return createElement(
+      View,
+      null,
+      createElement(
+        View,
+        { style: styles.masthead },
+        createElement(Text, { style: styles.nombre }, copropiedad.name),
+        createElement(Text, { style: styles.subtitulo }, subtitulo),
+        createElement(View, { style: styles.regla }),
+      ),
+      createElement(
+        View,
+        { style: styles.filaEncabezado, wrap: false },
+        ...COLUMNAS.map((c, i) => celda(c.titulo, i, 'encabezado')),
+      ),
+
+      ...bloque.map((f, filaIdx) => {
+        const valores = [
+          f.inmuebleCodigo,
+          f.propietario ?? '—',
+          f.tipo,
+          f.numeroCompleto,
+          formatoFecha(f.fecha),
+          formatoFecha(f.vence),
+          String(f.diasMora),
+          formatoPesoCompacto(f.saldo),
+          ...RANGOS.map((r) => (f.rango === r.rango ? formatoPesoCompacto(f.saldo) : '')),
+        ];
+        return createElement(
+          View,
+          {
+            key: filaIdx,
+            style: filaIdx % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
+            wrap: false,
+          },
+          ...valores.map((v, i) => celda(v, i, 'normal')),
+        );
+      }),
+
+      esUltima
+        ? createElement(
+            View,
+            { style: styles.filaFinal, wrap: false },
+            ...[
+              'TOTAL',
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              formatoPesoCompacto(reporte.totalCartera),
+              ...RANGOS.map((r) => formatoPesoCompacto(totalPorRango.get(r.rango) ?? 0)),
+            ].map((v, i) => celda(v, i, 'final')),
+          )
+        : null,
+
+      createElement(CreditoWebsaco),
+    );
   });
 
-  return ctx.doc.save();
+  return renderizarPdf(reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }));
 }

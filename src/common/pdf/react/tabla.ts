@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { Style } from '@react-pdf/types';
+import { FONDO_ZEBRA } from './paleta';
 
 const styles = StyleSheet.create({
   tabla: {
@@ -18,6 +19,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 1,
   },
+  filaPar: {
+    backgroundColor: FONDO_ZEBRA,
+  },
   reglaFinal: {
     borderBottomWidth: 0.5,
     borderBottomColor: '#000000',
@@ -32,6 +36,7 @@ const styles = StyleSheet.create({
   },
   celda: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
   },
 });
 
@@ -56,6 +61,10 @@ export function Tabla(props: {
    *  '', '', formatoPeso(totalCargo), formatoPeso(totalAbono)) — same
    *  column widths/alignment as the data rows above it. */
   filaTotales?: string[];
+  /** Alternating row background (same `FONDO_ZEBRA` `TablaResumen` and
+   *  `CuerpoFactura` use) — off by default since not every table asked
+   *  for it, on for Estado de Cuenta's Detalle de Movimientos. */
+  striped?: boolean;
 }): ReactElement {
   const { columnas, filas } = props;
   const numColumnas = columnas.length;
@@ -83,7 +92,14 @@ export function Tabla(props: {
     ...filas.map((fila, filaIdx) =>
       createElement(
         View,
-        { key: `f-${filaIdx}`, style: styles.fila, wrap: false },
+        {
+          key: `f-${filaIdx}`,
+          style:
+            props.striped && filaIdx % 2 === 1
+              ? [styles.fila, styles.filaPar]
+              : styles.fila,
+          wrap: false,
+        },
         ...fila.map((celda, i) =>
           createElement(
             Text,

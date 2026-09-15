@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoPeso } from '../pdf-helpers';
+import { FONDO_ZEBRA } from './paleta';
 
 const PESOS = [2.4, 1, 1, 1.1];
 
@@ -21,7 +22,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   filaPar: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: FONDO_ZEBRA,
   },
   reglaTotales: {
     borderBottomWidth: 0.5,
@@ -47,6 +48,7 @@ const styles = StyleSheet.create({
   },
   celda: {
     fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   celdaTotales: {
     fontSize: 8.5,

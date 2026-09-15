@@ -1,6 +1,5 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { TEXTO_MUTED } from './paleta';
 
 const styles = StyleSheet.create({
   fila: {
@@ -10,20 +9,21 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 9,
-    color: TEXTO_MUTED,
+    fontFamily: 'Helvetica',
   },
   valor: {
     fontSize: 9,
+    fontFamily: 'Helvetica',
   },
 });
 
 /**
- * Light label/value metadata row — label muted gray, value plain (not
- * bold). For a header-metadata block like Estado de Cuenta's "Generado /
- * Inmueble / Propietario / Periodo": four `FilaLabelValor` in a row (bold
- * value, black label) read as a wall of bold text — heavier than a plain
- * metadata block needs. Matches the on-screen convention closer too
- * (`text-muted-foreground` label + `font-medium` value, not `font-bold`).
+ * Light label/value metadata row — plain text, not bold. For a
+ * header-metadata block like Estado de Cuenta's "Generado / Inmueble /
+ * Propietario / Periodo": four `FilaLabelValor` in a row (bold value) read
+ * as a wall of bold text — heavier than a plain metadata block needs.
+ * One black throughout, same as the rest of the document — red/green stay
+ * reserved for where they carry real meaning (a status, a discount).
  * `FilaLabelValor` stays reserved for values that actually need the
  * emphasis (Cartera General/Conciliación's KPI figures).
  */

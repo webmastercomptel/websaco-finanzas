@@ -118,6 +118,7 @@ export async function generarPdfEstadoCuentaReactPdf(
             ]),
             columnasNumericas: 2,
             anchosRelativos: ANCHOS_MOVIMIENTOS,
+            striped: true,
             filaTotales:
               estado.movimientos.length > 1
                 ? [
@@ -145,6 +146,7 @@ export async function generarPdfEstadoCuentaReactPdf(
               formatoPeso(a.monto),
             ]),
             columnasNumericas: 1,
+            striped: true,
           }),
         )
       : null,

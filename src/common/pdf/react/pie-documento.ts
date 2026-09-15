@@ -12,6 +12,7 @@ const styles = StyleSheet.create({
   },
   texto: {
     fontSize: 8,
+    fontFamily: 'Helvetica',
   },
 });
 

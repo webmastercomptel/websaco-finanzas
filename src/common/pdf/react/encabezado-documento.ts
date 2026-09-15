@@ -29,14 +29,17 @@ const styles = StyleSheet.create({
   },
   dato: {
     flexDirection: 'row',
-    fontSize: 8.5,
     marginBottom: 2,
   },
   etiqueta: {
     width: 54,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   valor: {
     marginLeft: 5,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   titulo: {
     fontSize: 11,
