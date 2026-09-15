@@ -190,7 +190,7 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoAnterior).toBe(150000);
     });
 
-    it("el concepto de una Factura es 'N Cargos del mes FV-xxx', N según la cantidad de líneas", async () => {
+    it('el concepto de una Factura es su nombre de documento, no una oración con su número (que ya tiene columna propia)', async () => {
       const inmId = id();
       const f = facturaDoc({
         inmuebleId: inmId,
@@ -210,7 +210,10 @@ describe('EstadoCuentaService', () => {
         periodEnd: '2026-01-31T23:59:59.999Z',
       });
 
-      expect(result.movimientos[0].concepto).toBe('3 Cargos del mes FV-0012');
+      expect(result.movimientos[0]).toMatchObject({
+        numeroCompleto: 'FV-0012',
+        concepto: 'Factura de Venta',
+      });
     });
 
     it('el descuento por pronto pago de un Recibo va a descuentosAjustes, NUNCA a pagosRecibidos', async () => {
@@ -387,7 +390,8 @@ describe('EstadoCuentaService', () => {
       );
       expect(pagoRow).toBeDefined();
       expect(pagoRow!.abono).toBe(40000);
-      expect(pagoRow!.concepto).toBe(`Nota de Anticipo ${na.fullNumber}`);
+      expect(pagoRow!.concepto).toBe('Nota de Anticipo');
+      expect(pagoRow!.numeroCompleto).toBe(na.fullNumber);
       expect(result.pagosRecibidos).toBe(40000);
     });
 
@@ -410,9 +414,13 @@ describe('EstadoCuentaService', () => {
       });
 
       const ntRows = result.movimientos.filter(
-        (m) => m.categoria === null && m.concepto === 'Reclasificación',
+        (m) => m.categoria === null && m.concepto === 'Nota Contable',
       );
       expect(ntRows).toHaveLength(2);
+      expect(ntRows[0]).toMatchObject({
+        numeroCompleto: nt.fullNumber,
+        concepto: 'Nota Contable',
+      });
       expect(result.pagosRecibidos).toBe(0);
       expect(result.descuentosAjustes).toBe(0);
       // Direct assertion, not derived from the same formula saldoActual
@@ -456,6 +464,104 @@ describe('EstadoCuentaService', () => {
 
       expect(result.estado).toBe('al_dia');
       expect(result.saldoActual).toBe(0);
+    });
+
+    it('estado es vencido y diasMoraMaximo es positivo cuando una Factura sigue con saldo A LA FECHA DE CORTE (periodEnd) y ya pasó dueDate', async () => {
+      // Bug real reportado: el cálculo anterior solo miraba si la factura
+      // DEL PERÍODO CONSULTADO ya había vencido — una cartera vencida de un
+      // mes anterior podía leerse "al día" si se consultaba un período
+      // distinto. Ahora se revisa, a la fecha de corte del propio estado de
+      // cuenta (periodEnd), cada Factura/Nota Débito del inmueble que siga
+      // con saldo pendiente, sin importar el período mostrado.
+      const inmId = id();
+      const fId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        fullNumber: 'FV-0050',
+        total: 200000,
+        issueDate: new Date('2026-01-01'),
+        dueDate: new Date('2020-01-01'), // muy en el pasado — vencida
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.estado).toBe('vencido');
+      expect(result.diasMoraMaximo).toBeGreaterThan(0);
+    });
+
+    it('una Factura vencida pero ya pagada por completo (una AplicacionCartera activa cubre el total) no cuenta como mora', async () => {
+      const inmId = id();
+      const fId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        total: 200000,
+        dueDate: new Date('2020-01-01'),
+      });
+      const pago = appDoc(id(), 'RC', {
+        documentId: fId,
+        amountApplied: 200000,
+        appliedAt: new Date('2026-01-05'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        aplicaciones: mockFind([pago]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.estado).toBe('al_dia');
+      expect(result.diasMoraMaximo).toBeNull();
+    });
+
+    it('una Nota Débito vencida usa su propia issueDate como vencimiento (nunca tiene dueDate propio)', async () => {
+      const inmId = id();
+      const ndId = id();
+      const f = facturaDoc({ inmuebleId: inmId, total: 0 });
+      const nd = {
+        _id: ndId,
+        coPropertyId: COP,
+        inmuebleId: inmId,
+        fullNumber: 'ND-0003',
+        total: 50000,
+        // Dentro del período consultado (para que aparezca en movimientos)
+        // pero, al ser una fecha real del pasado respecto a hoy, también ya
+        // vencida — su propia issueDate es su "vence", nunca hay un dueDate
+        // separado.
+        issueDate: new Date('2026-01-10'),
+        status: 'emitida',
+      };
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        notasDebito: mockFind([nd]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.estado).toBe('vencido');
+      expect(result.diasMoraMaximo).toBeGreaterThan(0);
     });
 
     it('movimientos excludes rows outside period window', async () => {
@@ -546,7 +652,7 @@ describe('EstadoCuentaService', () => {
       expect(result.copropiedadEmail).toBe('admin@cop.com');
     });
 
-    it("fechaEmision and vencimiento come from the period's own Factura", async () => {
+    it("fechaEmision comes from the period's own Factura", async () => {
       const inmId = id();
       const f = facturaDoc({
         inmuebleId: inmId,
@@ -568,7 +674,8 @@ describe('EstadoCuentaService', () => {
         exec: jest
           .fn()
           .mockResolvedValueOnce(f) // findOne().exec() — awaited first in the service
-          .mockResolvedValueOnce([f]), // find().exec() — step 1, awaited second
+          .mockResolvedValueOnce([f]) // find().exec() — step 1, awaited second
+          .mockResolvedValue([f]), // calcularDocumentosConSaldoAFecha's own find().exec() — step 9
       };
 
       const svc = servicio({
@@ -582,11 +689,10 @@ describe('EstadoCuentaService', () => {
         periodEnd: '2026-01-31T23:59:59.999Z',
       });
 
-      // Must be the Factura's real issueDate/dueDate — NOT periodStart/
-      // periodEnd echoed back (the bug a typo'd query field would produce,
-      // since findOne would never match and fall through to that fallback).
+      // Must be the Factura's real issueDate — NOT periodStart echoed back
+      // (the bug a typo'd query field would produce, since findOne would
+      // never match and fall through to that fallback).
       expect(result.fechaEmision).toBe('2026-01-15T00:00:00.000Z');
-      expect(result.vencimiento).toBe('2026-02-01T00:00:00.000Z');
     });
 
     it('filtra la consulta a Inmueble y Tercero por coPropertyId (tenancy law)', async () => {

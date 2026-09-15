@@ -868,8 +868,8 @@ export interface DocumentoCarteraPorConceptos {
   cargosPorConcepto: Record<string, number>;
 }
 
-/** One inmueble's pending documents, sorted by document number ascending
- *  (lowest first) — the table's grouping row. */
+/** One inmueble's pending documents, sorted by fecha ascending (then tipo,
+ *  then número as tie-breakers) — the table's grouping row. */
 export interface GrupoInmuebleCarteraPorConceptos {
   inmuebleId: string;
   inmuebleCodigo: string;
@@ -956,6 +956,11 @@ export interface PeriodoFacturado {
 /** One movement line in an owner's statement. */
 export interface MovimientoEstadoCuenta {
   fecha: string;
+  /** Already carries its own type prefix (e.g. "FV-0012", "RC-001-001") —
+   *  no separate "Tipo Doc." column needed alongside it. */
+  numeroCompleto: string;
+  /** The document's own type name (e.g. "Factura de Venta", "Recibo") —
+   *  never repeats `numeroCompleto`. */
   concepto: string;
   cargo: number | null;
   abono: number | null;
@@ -984,14 +989,32 @@ export interface RespuestaEstadoCuenta {
   copropiedadEmail: string | null;
   periodStart: string;
   periodEnd: string;
+  /** Kept for `escribirMarcaDuplicado`'s own use (the "DUPLICADO" stamp
+   *  shows the original emission date) — no longer rendered as its own
+   *  "Fecha de emisión:" line. */
   fechaEmision: string;
-  vencimiento: string;
   saldoAnterior: number;
   cargosDelMes: number;
+  /** Pagos en efectivo (Recibo) y anticipos aplicados (Nota de Anticipo)
+   *  recibidos en el período — el nombre del campo se quedó corto una vez
+   *  Nota de Anticipo entró a sumar acá también; el label en pantalla/PDF
+   *  ya dice "Pagos y Anticipos Aplicados". */
   pagosRecibidos: number;
   descuentosAjustes: number;
   saldoActual: number;
-  estado: 'al_dia' | 'pendiente' | 'vencido';
+  /** "Vencida" cuando al menos una Factura/Nota Débito de este inmueble
+   *  (sin importar el período) sigue con saldo pendiente A LA FECHA DE
+   *  CORTE (`periodEnd`) y ya había pasado su propio vencimiento a esa
+   *  misma fecha — no el estado de un solo documento del período
+   *  consultado, que era el cálculo anterior (bug real reportado: un
+   *  inmueble con cartera vencida de un mes anterior podía marcar "al día"
+   *  si la factura del período consultado en particular aún no vencía). */
+  estado: 'al_dia' | 'vencido';
+  /** El mayor número de días de mora entre los documentos que hacen
+   *  `estado` "vencido" — `null` cuando `estado` es "al_dia". Siempre
+   *  calculado a `periodEnd` (la fecha de corte del propio estado de
+   *  cuenta), nunca a la fecha real de hoy — ver `estado`'s docblock. */
+  diasMoraMaximo: number | null;
   movimientos: MovimientoEstadoCuenta[];
   /** Anticipos pendientes por aplicar de este inmueble, sin importar el
    *  período consultado — un anticipo vivo es un saldo actual, no un

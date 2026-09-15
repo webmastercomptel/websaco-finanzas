@@ -461,8 +461,9 @@ function cargarLogoBytes(): Buffer {
 /**
  * Embeds the WebSACO logo into `doc` at the shared `LOGO_WIDTH`, aspect
  * ratio preserved. Each caller still positions it — headers differ too much
- * (Estado de Cuenta's two-row block vs. Factura's gray banner) to share a
- * single draw call, but the size and the asset must stay identical.
+ * (Factura's own layout vs. the shared gray-banner masthead
+ * `dibujarEncabezadoDocumento` uses) to share a single draw call, but the
+ * size and the asset must stay identical.
  */
 export async function embebirLogoWebsaco(doc: PDFDocument): Promise<{
   image: PDFImage;

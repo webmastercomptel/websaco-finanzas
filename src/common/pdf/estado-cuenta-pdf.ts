@@ -1,11 +1,11 @@
 import { rgb } from 'pdf-lib';
 import {
   crearContexto,
+  dibujarEncabezadoDocumento,
   escribirLinea,
   escribirLabelValor,
   escribirTabla,
   escribirMarcaDuplicado,
-  embebirLogoWebsaco,
   formatoPeso,
   formatoFecha,
   type PdfContext,
@@ -14,88 +14,21 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 import type { RespuestaEstadoCuenta } from '../../contracts';
 
 const ESTADO_LABELS: Record<string, string> = {
-  al_dia: 'Cancelado',
-  pendiente: 'Pendiente',
-  vencido: 'Vencido',
+  al_dia: 'Al Día',
+  vencido: 'Vencida',
 };
+
+/** Fecha, Número, Concepto, Cargo, Abono — relative weights summing to
+ *  `ctx.contentWidth` on portrait. No separate "Tipo Doc." column: `número`
+ *  already carries its own type prefix (e.g. "FV-0012"). Concepto gets the
+ *  lion's share — a short document-type name, but still the longest fixed
+ *  label ("Descuento Pronto Pago") among these columns. */
+const ANCHOS_MOVIMIENTOS = [0.9, 1.1, 2.2, 1, 1];
 
 const MARGIN_LEFT = 50;
 /** Below `pdf-helpers`' own BOTTOM_MARGIN (50) — clear of any body content,
  *  which already breaks to a new page before reaching this low. */
 const FOOTER_Y = 30;
-
-/**
- * Estado de Cuenta's own two-row letterhead (distinct from `escribirEncabezado`,
- * which every other PDF in this module uses):
- *   Row 1 — copropiedad name (left) / fecha y hora en que se generó este PDF (right)
- *   Row 2 — NIT + dígito de verificación (left) / logo WebSACO, pequeño (right)
- * followed by the centered document title.
- */
-async function escribirEncabezadoEstadoCuenta(
-  ctx: PdfContext,
-  copropiedad: CopropiedadDocument,
-): Promise<void> {
-  const ahora = new Date();
-  const fechaHoraEmision = `${ahora.toLocaleDateString('es-CO')} ${ahora.toLocaleTimeString('es-CO')}`;
-
-  // Row 1: name (left) / fecha y hora de emisión del PDF (right)
-  ctx.page.drawText(copropiedad.name, {
-    x: MARGIN_LEFT,
-    y: ctx.y,
-    size: 14,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  const anchoFechaHora = ctx.font.widthOfTextAtSize(fechaHoraEmision, 10);
-  ctx.page.drawText(fechaHoraEmision, {
-    x: MARGIN_LEFT + ctx.contentWidth - anchoFechaHora,
-    y: ctx.y + 2,
-    size: 10,
-    font: ctx.font,
-    color: rgb(0, 0, 0),
-  });
-  ctx.y -= 20;
-
-  // Row 2: NIT (left) / logo, small (right)
-  if (copropiedad.taxId) {
-    const nit = copropiedad.taxIdVerificationDigit
-      ? `NIT ${copropiedad.taxId}-${copropiedad.taxIdVerificationDigit}`
-      : `NIT ${copropiedad.taxId}`;
-    ctx.page.drawText(nit, {
-      x: MARGIN_LEFT,
-      y: ctx.y,
-      size: 10,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-  }
-
-  const {
-    image: logo,
-    width: logoWidth,
-    height: logoHeight,
-  } = await embebirLogoWebsaco(ctx.doc);
-  ctx.page.drawImage(logo, {
-    x: MARGIN_LEFT + ctx.contentWidth - logoWidth,
-    y: ctx.y - logoHeight + 9,
-    width: logoWidth,
-    height: logoHeight,
-  });
-
-  ctx.y -= Math.max(20, logoHeight) + 8;
-
-  // Document title, centered
-  const titulo = 'ESTADO DE CUENTA';
-  const tituloWidth = ctx.fontBold.widthOfTextAtSize(titulo, 14);
-  ctx.page.drawText(titulo, {
-    x: MARGIN_LEFT + (ctx.contentWidth - tituloWidth) / 2,
-    y: ctx.y,
-    size: 14,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  ctx.y -= 22;
-}
 
 /**
  * Stamps every page with the copropiedad's contact info (left) and
@@ -131,15 +64,20 @@ function escribirPiePagina(ctx: PdfContext, contactoTexto: string): void {
 
 /**
  * Draws the Cargo/Abono column totals right below the Detalle de Movimientos
- * table — same 4-column layout `escribirTabla` used for it (Fecha, Concepto,
- * Cargo, Abono), so the totals land under their own columns.
+ * table — same `ANCHOS_MOVIMIENTOS` weights that table used, so the totals
+ * land under their own columns (the last two).
  */
 function escribirTotalesMovimientos(
   ctx: PdfContext,
   totalCargo: number,
   totalAbono: number,
 ): void {
-  const colWidth = ctx.contentWidth / 4;
+  const pesoTotal = ANCHOS_MOVIMIENTOS.reduce((acc, p) => acc + p, 0);
+  const anchos = ANCHOS_MOVIMIENTOS.map(
+    (p) => (p / pesoTotal) * ctx.contentWidth,
+  );
+  const xInicioCol = (i: number): number =>
+    MARGIN_LEFT + anchos.slice(0, i).reduce((acc, a) => acc + a, 0);
 
   ctx.page.drawText('Total', {
     x: MARGIN_LEFT + 4,
@@ -152,7 +90,7 @@ function escribirTotalesMovimientos(
   const cargoTexto = formatoPeso(totalCargo);
   const cargoWidth = ctx.fontBold.widthOfTextAtSize(cargoTexto, 10);
   ctx.page.drawText(cargoTexto, {
-    x: MARGIN_LEFT + colWidth * 3 - cargoWidth - 4,
+    x: xInicioCol(3) + anchos[3] - cargoWidth - 4,
     y: ctx.y,
     size: 10,
     font: ctx.fontBold,
@@ -162,7 +100,7 @@ function escribirTotalesMovimientos(
   const abonoTexto = formatoPeso(totalAbono);
   const abonoWidth = ctx.fontBold.widthOfTextAtSize(abonoTexto, 10);
   ctx.page.drawText(abonoTexto, {
-    x: MARGIN_LEFT + colWidth * 4 - abonoWidth - 4,
+    x: xInicioCol(4) + anchos[4] - abonoWidth - 4,
     y: ctx.y,
     size: 10,
     font: ctx.fontBold,
@@ -177,10 +115,35 @@ function escribirTotalesMovimientos(
 }
 
 /**
+ * Draws one section title ("Resumen de Saldos", "Detalle de Movimientos",
+ * "Anticipos Pendientes") a little lower than the body text above it, with
+ * the same thin gray rule the main masthead (`dibujarEncabezadoDocumento`)
+ * draws under ITS OWN title — so every title in the document, header or
+ * section, reads with the same visual weight.
+ */
+function escribirTituloSeccion(ctx: PdfContext, texto: string): void {
+  ctx.y -= 14;
+  escribirLinea(ctx, texto, { bold: true });
+  ctx.page.drawLine({
+    start: { x: MARGIN_LEFT, y: ctx.y + 4 },
+    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 4 },
+    thickness: 0.5,
+    color: rgb(0.6, 0.6, 0.6),
+  });
+  ctx.y -= 6;
+}
+
+/**
  * Generates a real PDF for an Estado de Cuenta (owner statement).
  * Unlike the other five builders which take raw Mongoose documents,
  * this one takes the computed contract directly — the service already
  * resolved all the data the JSON endpoint returns.
+ *
+ * Masthead is the same shared `dibujarEncabezadoDocumento` gray-banner
+ * treatment as Auxiliar de Cartera/Recibo/Nota Crédito — this report used
+ * to draw its own two-row letterhead instead. The "fecha y hora de
+ * generación" that row used to show on the right moved into the info
+ * block below as its own "Generado:" line.
  */
 export async function generarPdfEstadoCuenta(
   estado: RespuestaEstadoCuenta,
@@ -189,9 +152,15 @@ export async function generarPdfEstadoCuenta(
 ): Promise<Uint8Array> {
   const ctx = await crearContexto();
 
-  await escribirEncabezadoEstadoCuenta(ctx, copropiedad);
+  await dibujarEncabezadoDocumento(ctx, copropiedad, 'Estado de Cuenta');
 
   // ── Property + owner info ──
+  const ahora = new Date();
+  escribirLabelValor(
+    ctx,
+    'Generado:',
+    `${ahora.toLocaleDateString('es-CO')} ${ahora.toLocaleTimeString('es-CO')}`,
+  );
   escribirLabelValor(ctx, 'Inmueble:', estado.inmuebleCodigo);
   if (estado.propietario) {
     escribirLabelValor(ctx, 'Propietario:', estado.propietario);
@@ -201,25 +170,14 @@ export async function generarPdfEstadoCuenta(
     'Periodo:',
     `${formatoFecha(estado.periodStart)} al ${formatoFecha(estado.periodEnd)}`,
   );
-  if (estado.fechaEmision) {
-    escribirLabelValor(
-      ctx,
-      'Fecha de emisión:',
-      formatoFecha(estado.fechaEmision),
-    );
-  }
-  if (estado.vencimiento) {
-    escribirLabelValor(ctx, 'Vencimiento:', formatoFecha(estado.vencimiento));
-  }
 
   // ── Summary ──
-  ctx.y -= 10;
-  escribirLinea(ctx, 'Resumen de Saldos', { bold: true });
+  escribirTituloSeccion(ctx, 'Resumen de Saldos');
   escribirLabelValor(ctx, 'Saldo anterior:', formatoPeso(estado.saldoAnterior));
   escribirLabelValor(ctx, 'Cargos del mes:', formatoPeso(estado.cargosDelMes));
   escribirLabelValor(
     ctx,
-    'Pagos recibidos:',
+    'Pagos y Anticipos Aplicados:',
     formatoPeso(estado.pagosRecibidos),
   );
   escribirLabelValor(
@@ -229,24 +187,27 @@ export async function generarPdfEstadoCuenta(
   );
   ctx.y -= 4;
   escribirLabelValor(ctx, 'Saldo actual:', formatoPeso(estado.saldoActual));
-  escribirLabelValor(
-    ctx,
-    'Estado del Pago:',
-    ESTADO_LABELS[estado.estado] ?? estado.estado,
-  );
+  const estadoTexto =
+    estado.diasMoraMaximo != null
+      ? `${ESTADO_LABELS[estado.estado] ?? estado.estado} — ${estado.diasMoraMaximo} días de mora`
+      : (ESTADO_LABELS[estado.estado] ?? estado.estado);
+  escribirLabelValor(ctx, 'Estado de la Cartera:', estadoTexto);
 
   // ── Movements table ──
   if (estado.movimientos.length > 0) {
-    ctx.y -= 10;
-    escribirLinea(ctx, 'Detalle de Movimientos', { bold: true });
-    const columnas = ['Fecha', 'Concepto', 'Cargo', 'Abono'];
+    escribirTituloSeccion(ctx, 'Detalle de Movimientos');
+    const columnas = ['Fecha', 'Número', 'Concepto', 'Cargo', 'Abono'];
     const filas = estado.movimientos.map((m) => [
       formatoFecha(m.fecha),
+      m.numeroCompleto,
       m.concepto,
       m.cargo != null ? formatoPeso(m.cargo) : '',
       m.abono != null ? formatoPeso(m.abono) : '',
     ]);
-    escribirTabla(ctx, columnas, filas);
+    escribirTabla(ctx, columnas, filas, {
+      columnasNumericas: 2,
+      anchosRelativos: ANCHOS_MOVIMIENTOS,
+    });
 
     if (estado.movimientos.length > 1) {
       const totalCargo = estado.movimientos.reduce(
@@ -264,8 +225,7 @@ export async function generarPdfEstadoCuenta(
   // ── Anticipos pendientes ── (live balance, not period-scoped — see the
   // service's own docblock on `anticipos`)
   if (estado.anticipos.length > 0) {
-    ctx.y -= 10;
-    escribirLinea(ctx, 'Anticipos Pendientes', { bold: true });
+    escribirTituloSeccion(ctx, 'Anticipos Pendientes');
     const columnas = ['Recibo', 'Fecha', 'Saldo Disponible'];
     const filas = estado.anticipos.map((a) => [
       a.numeroCompleto,

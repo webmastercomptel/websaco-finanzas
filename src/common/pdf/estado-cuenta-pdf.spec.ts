@@ -38,16 +38,17 @@ function makeEstadoCuenta(
     periodStart: '2026-08-01',
     periodEnd: '2026-08-31',
     fechaEmision: '2026-08-01',
-    vencimiento: '2026-08-15',
     saldoAnterior: 0,
     cargosDelMes: 200000,
     pagosRecibidos: 200000,
     descuentosAjustes: 0,
     saldoActual: 0,
     estado: 'al_dia',
+    diasMoraMaximo: null,
     movimientos: [
       {
         fecha: '2026-08-01',
+        numeroCompleto: 'FV-0001',
         concepto: 'Factura de Venta',
         cargo: 200000,
         abono: null,
@@ -182,6 +183,7 @@ describe('generarPdfEstadoCuenta', () => {
         movimientos: [
           {
             fecha: '2026-08-01',
+            numeroCompleto: 'FV-0001',
             concepto: 'Factura de Venta',
             cargo: 200000,
             abono: null,
@@ -189,7 +191,8 @@ describe('generarPdfEstadoCuenta', () => {
           },
           {
             fecha: '2026-08-10',
-            concepto: 'Recibo RC-0001',
+            numeroCompleto: 'RC-0001',
+            concepto: 'Recibo',
             cargo: null,
             abono: 150000,
             categoria: 'pago',
@@ -225,6 +228,7 @@ describe('generarPdfEstadoCuenta', () => {
   it('stamps a page-number footer on every page of a multi-page statement', async () => {
     const muchosMovimientos = Array.from({ length: 60 }, (_, i) => ({
       fecha: '2026-08-06',
+      numeroCompleto: `FV-${String(i).padStart(4, '0')}`,
       concepto: `Movimiento ${i}`,
       cargo: 10000,
       abono: null,
@@ -272,5 +276,20 @@ describe('generarPdfEstadoCuenta', () => {
       makeCopropiedad({ taxId: null, taxIdVerificationDigit: null }),
     );
     expect(empiezaConPdf(bytes)).toBe('%PDF-');
+  });
+
+  it('no hay columna "Días Mora" en el detalle — un estado vencido con diasMoraMaximo produce más bytes junto al resumen (bug real reportado: no debía ser una columna más)', async () => {
+    const alDia = await generarPdfEstadoCuenta(
+      makeEstadoCuenta({ estado: 'al_dia', diasMoraMaximo: null }),
+      makeCopropiedad(),
+    );
+    const vencidoConMora = await generarPdfEstadoCuenta(
+      makeEstadoCuenta({ estado: 'vencido', diasMoraMaximo: 45 }),
+      makeCopropiedad(),
+    );
+    // "Al Día" (sin días de mora) vs. "Vencida — 45 días de mora" — el
+    // resumen debe crecer, no la tabla de movimientos (que se queda con las
+    // mismas 5 columnas fijas: Fecha, Número, Concepto, Cargo, Abono).
+    expect(vencidoConMora.length).toBeGreaterThan(alDia.length);
   });
 });
