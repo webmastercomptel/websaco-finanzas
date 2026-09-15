@@ -8,6 +8,7 @@ import { NotaCredito } from '../notas-credito/nota-credito.schema';
 import { NotaDebito } from '../notas-debito/nota-debito.schema';
 import { NotaContable } from '../notas-contables/nota-contable.schema';
 import { NotaAnticipo } from '../notas-anticipo/nota-anticipo.schema';
+import { LoteContabilidad } from '../contabilidad/lote-contabilidad.schema';
 
 export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 
@@ -132,6 +133,18 @@ export class AsientoContable {
 
   @Prop({ type: [MovimientoSchema], required: true })
   entries: Movimiento[];
+
+  /** Which "Adición a Contabilidad" export (MOVMES.csv/MOVMESDO.csv)
+   *  already carried this entry — null means "not exported yet". Stamped
+   *  once, never cleared: re-generating only picks up rows still null,
+   *  which is the whole "no se vuelvan a adicionar" point of that feature.
+   *  See `AdicionContabilidadService`. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: LoteContabilidad.name,
+    default: null,
+  })
+  contabilidadLoteId: Types.ObjectId | null;
 }
 
 export const AsientoContableSchema =
@@ -197,3 +210,10 @@ AsientoContableSchema.index({ notaContableId: 1 });
 // Every entry a given Nota de Anticipo ever produced (creation and
 // /anular) — not unique, same reasoning as the reciboId index.
 AsientoContableSchema.index({ notaAnticipoId: 1 });
+
+// AdicionContabilidadService's own "not yet exported, in this period" scan.
+AsientoContableSchema.index({
+  coPropertyId: 1,
+  contabilidadLoteId: 1,
+  date: 1,
+});

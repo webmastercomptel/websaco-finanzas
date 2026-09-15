@@ -13,6 +13,15 @@ import {
 
 export type FacturaDocument = HydratedDocument<Factura>;
 
+export const VOID_REASONS_FACTURA = [
+  'error_digitacion',
+  'error_facturacion',
+  'duplicado',
+  'ajuste_contrato',
+  'otro',
+] as const;
+export type VoidReasonFactura = (typeof VOID_REASONS_FACTURA)[number];
+
 /**
  * A sales invoice ("FV"). Only ever created already-numbered, at the moment
  * a LoteFacturacion is consolidated — there is no draft Factura. While a
@@ -132,10 +141,23 @@ export class Factura {
   @Prop({ required: true, enum: ['emitida', 'anulada'], default: 'emitida' })
   status: 'emitida' | 'anulada';
 
-  /** Exists now so voiding, once NotaCredito is designed, fills this field
-   *  instead of migrating the schema. */
+  /** Set together with the four fields below it, at the same anulación —
+   *  the Nota Crédito that reversed this invoice's cartera and accounting
+   *  entries (see `AnularFacturaService`). Never set on its own. */
   @Prop({ type: SchemaTypes.ObjectId, default: null })
   voidedByCreditNoteId: Types.ObjectId | null;
+
+  @Prop({ type: String, enum: VOID_REASONS_FACTURA, default: null })
+  voidedReason: VoidReasonFactura | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  voidedDetail: string | null;
+
+  @Prop({ type: Date, default: null })
+  voidedAt: Date | null;
+
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Account', default: null })
+  voidedBy: Types.ObjectId | null;
 }
 
 export const FacturaSchema = SchemaFactory.createForClass(Factura);

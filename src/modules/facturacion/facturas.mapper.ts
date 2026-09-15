@@ -87,4 +87,7 @@ export const toFactura = (
     ? doc.discountDeadline.toISOString()
     : null,
   estado: doc.status,
+  motivoAnulacion: doc.voidedReason,
+  detalleAnulacion: doc.voidedDetail,
+  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
 });

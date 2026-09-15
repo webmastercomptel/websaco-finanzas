@@ -35,6 +35,7 @@ export const toLote = (doc: LoteFacturacionDocument): LoteContract => ({
   // when the caller omits them, so an old lote still shows something sane.
   fechaLimiteDescuento: (doc.discountDeadline ?? doc.billingDate).toISOString(),
   fechaSuspension: (doc.serviceSuspensionDate ?? doc.periodEnd).toISOString(),
+  inmuebleId: doc.inmuebleId ? doc.inmuebleId.toString() : null,
   totalNovedades: doc.adjustments.length,
   totalPrevisualizacion: doc.preview.length,
   resumen: doc.summary

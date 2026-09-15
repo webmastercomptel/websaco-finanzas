@@ -70,6 +70,9 @@ export class NotaDebito {
   issueDate: Date;
 
   @Prop({ required: true })
+  dueDate: Date;
+
+  @Prop({ required: true })
   total: number;
 
   /** Mutable cache: starts equal to `total`; a future Recibo decreases it. */

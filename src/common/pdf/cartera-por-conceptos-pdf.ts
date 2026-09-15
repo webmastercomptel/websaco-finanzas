@@ -16,6 +16,13 @@ import type { RespuestaCarteraPorConceptos } from '../../contracts';
  *  the "un solo concepto" layout never has more than its own one column. */
 const MAX_CARGOS_INDIVIDUALES = 8;
 
+const ESTADO_LABELS: Record<'al_dia' | 'juridico' | 'dificil_recaudo', string> =
+  {
+    al_dia: 'Vigente',
+    dificil_recaudo: 'Difícil Recaudo',
+    juridico: 'En Jurídico',
+  };
+
 /** cargo/saldo * 100, or "—" when there is nothing to divide by (never
  *  happens for a real row — a document with saldo <= 0 is excluded
  *  upstream — but a totals row is a derived sum worth guarding on its own). */
@@ -33,6 +40,9 @@ function formatoPorcentaje(cargo: number, saldo: number): string {
  *   layout — filtered to documents carrying that one charge, with a single
  *   named cargo column plus a "% Participación" column (cargo/saldo), same
  *   resumido/detallado split.
+ * - One single collection status (`estado` given): the "Por Estado" tab's
+ *   own layout — the same "Por Inmueble" one-column-per-concept table,
+ *   filtered down to inmuebles carrying that `estadoCartera`.
  */
 export async function generarPdfCarteraPorConceptos(
   reporte: RespuestaCarteraPorConceptos,
@@ -40,7 +50,21 @@ export async function generarPdfCarteraPorConceptos(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   conceptoId?: string,
+  estado?: 'al_dia' | 'juridico' | 'dificil_recaudo',
 ): Promise<Uint8Array> {
+  if (estado) {
+    const filtrado: RespuestaCarteraPorConceptos = {
+      ...reporte,
+      grupos: reporte.grupos.filter((g) => g.estadoCartera === estado),
+    };
+    return generarPorInmueble(
+      filtrado,
+      copropiedad,
+      fechaCorte,
+      tipo,
+      ESTADO_LABELS[estado],
+    );
+  }
   return conceptoId
     ? generarPorConcepto(reporte, copropiedad, fechaCorte, tipo, conceptoId)
     : generarPorInmueble(reporte, copropiedad, fechaCorte, tipo);
@@ -51,6 +75,7 @@ async function generarPorInmueble(
   copropiedad: CopropiedadDocument,
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
+  estadoLabel?: string,
 ): Promise<Uint8Array> {
   const ctx = await crearContexto({ orientacion: 'horizontal' });
 
@@ -58,7 +83,7 @@ async function generarPorInmueble(
     ctx,
     copropiedad,
     'CARTERA POR CONCEPTOS',
-    `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}`,
+    `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
   );
 
   if (reporte.grupos.length === 0) {

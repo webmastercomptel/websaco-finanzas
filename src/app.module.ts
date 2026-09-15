@@ -30,6 +30,7 @@ import { PanelControlModule } from './modules/panel-control/panel-control.module
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
 import { HealthModule } from './modules/health/health.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
+import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicion-contabilidad.module';
 
 /**
  * Bootstrap module: config, the database connection and its schemas, the
@@ -77,6 +78,7 @@ import { CatalogosModule } from './modules/catalogos/catalogos.module';
     ConfiguracionModule,
     HealthModule,
     CatalogosModule,
+    AdicionContabilidadModule,
   ],
 })
 export class AppModule {}

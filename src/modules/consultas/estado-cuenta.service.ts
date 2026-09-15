@@ -47,6 +47,7 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
+import { fechaNotaContable } from '../notas-contables/notas-contables.mapper';
 import {
   calcularDocumentosConSaldoAFecha,
   finDelDiaCorte,
@@ -137,8 +138,10 @@ export class EstadoCuentaService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const oid = new Types.ObjectId(inmuebleId);
 
+    // Not status-filtered — see the main `findAll` fetch below for why an
+    // anulada Factura still belongs in this inmueble's own history.
     const facturas = await this.facturas
-      .find({ coPropertyId, inmuebleId: oid, status: 'emitida' })
+      .find({ coPropertyId, inmuebleId: oid })
       .sort({ periodStart: -1 })
       .exec();
 
@@ -190,12 +193,14 @@ export class EstadoCuentaService {
     const copropiedadTelefono = copropiedad?.phone ?? null;
     const copropiedadEmail = copropiedad?.email ?? null;
 
-    // Find the period's own Factura for fechaEmision
+    // Find the period's own Factura for fechaEmision — not status-filtered,
+    // same reasoning as the main fetch below: an anulada Factura still
+    // really was issued on this date, and printing the period's start date
+    // instead (the fallback below) would be a worse answer than the truth.
     const facturaPeriodo = await this.facturas
       .findOne({
         coPropertyId,
         inmuebleId,
-        status: 'emitida',
         periodStart: desde,
         periodEnd: hasta,
       })
@@ -205,6 +210,17 @@ export class EstadoCuentaService {
       facturaPeriodo?.issueDate?.toISOString() ?? desde.toISOString();
 
     // Step 1: fetch all documents for this inmueble (no date filter — see spec §5)
+    //
+    // Facturas: NOT status-filtered, on purpose. An anulada Factura is
+    // voided by creating a full-amount Nota Crédito against it
+    // (AnularFacturaService) — that note's own value already lands in
+    // `descuentosAjustes` below (NotaCredito is fetched unfiltered too, a
+    // few lines down). Excluding the Factura's own `cargosDelMes` charge
+    // while still counting its reversal in `descuentosAjustes` doesn't just
+    // hide a row — it understates `saldoActual` by the exact voided amount
+    // (a credit with no matching charge to net against). Keeping the
+    // Factura here makes the statement read as "charged X, then credited X
+    // back" — correct history, and a correct balance.
     const [
       facturas,
       notasDebito,
@@ -213,9 +229,7 @@ export class EstadoCuentaService {
       notasContables,
       notasAnticipo,
     ] = await Promise.all([
-      this.facturas
-        .find({ coPropertyId, inmuebleId, status: 'emitida' })
-        .exec(),
+      this.facturas.find({ coPropertyId, inmuebleId }).exec(),
       this.notasDebito
         .find({ coPropertyId, inmuebleId, status: 'emitida' })
         .exec(),
@@ -352,9 +366,14 @@ export class EstadoCuentaService {
       }
     }
 
-    // Notas Contables → TWO rows each (débito + crédito, net zero)
+    // Notas Contables → TWO rows each (débito + crédito, net zero).
+    // `fechaNotaContable` — never `createdAt` directly: that's the real
+    // server instant the record was INSERTED, which can land in a
+    // completely different month than the note's own declared business
+    // date (bug real reportado: una nota fechada en junio apareció con
+    // fecha de septiembre porque se guardó/editó ese día).
     for (const nc of notasContables) {
-      const fecha = (nc as unknown as { createdAt: Date }).createdAt;
+      const fecha = fechaNotaContable(nc);
       rows.push({
         fecha,
         tipo: 'NT',

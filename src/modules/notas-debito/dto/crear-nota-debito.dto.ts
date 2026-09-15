@@ -32,6 +32,9 @@ export class CrearNotaDebitoDto {
   @IsDateString()
   fechaCargo: string;
 
+  @IsDateString()
+  fechaVencimiento: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(500)

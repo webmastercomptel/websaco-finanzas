@@ -23,6 +23,7 @@ import { LotesFacturacionService } from './lotes.service';
 import { FacturasService } from './facturas.service';
 import { ConsultaFacturacionService } from './consulta-facturacion.service';
 import { CrearLoteDto } from './dto/crear-lote.dto';
+import { CrearFacturaIndividualDto } from './dto/crear-factura-individual.dto';
 import { ActualizarLoteDto } from './dto/actualizar-lote.dto';
 import { CargarNovedadesDto } from './dto/cargar-novedades.dto';
 import {
@@ -93,6 +94,21 @@ export class LotesController {
     // an account with an active assignment can hold — accountId is
     // guaranteed set here, unlike on the account-less-allowed /auth/me route.
     return this.lotes.crear(user.accountId!, dto);
+  }
+
+  /**
+   * Starts a "Factura Individual" — a one-off Lote scoped to one inmueble,
+   * pinned to the current period. Every other route below (add/edit cargo,
+   * liquidar, consolidar, cancelar, the PDFs) already works on it unchanged
+   * — see `LotesFacturacionService.crearIndividual`.
+   */
+  @Post('individual')
+  @CheckAbility({ action: 'create', subject: 'Factura' })
+  crearIndividual(
+    @CurrentUser() user: IRequestUser,
+    @Body() dto: CrearFacturaIndividualDto,
+  ): Promise<LoteFacturacion> {
+    return this.lotes.crearIndividual(user.accountId!, dto);
   }
 
   /**

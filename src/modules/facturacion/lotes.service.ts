@@ -68,6 +68,7 @@ import type {
 } from '../../contracts';
 import { toLote, toLoteDetalle } from './lotes.mapper';
 import type { CrearLoteDto } from './dto/crear-lote.dto';
+import type { CrearFacturaIndividualDto } from './dto/crear-factura-individual.dto';
 import type { ActualizarLoteDto } from './dto/actualizar-lote.dto';
 import type { NovedadFilaDto } from './dto/cargar-novedades.dto';
 import type {
@@ -268,6 +269,97 @@ export class LotesFacturacionService {
   }
 
   /**
+   * Starts a "Factura Individual" — a one-off Lote scoped to exactly one
+   * inmueble, created outside the normal monthly cycle (e.g. a unit that
+   * missed the regular run, or a special one-time charge). Shares the SAME
+   * status lifecycle and every other route (`agregarNovedadLinea`,
+   * `liquidar`, `consolidar`, `cancelar`, the prefactura/factura PDFs) as an
+   * ordinary lote — the only thing this method does differently from
+   * `crear()` above is how it picks the run's dates/parameters and that it
+   * stamps `inmuebleId`.
+   *
+   * ALWAYS pinned to the CURRENT period — copied verbatim from the most
+   * recently consolidado lote (billingDate, dueDate, period, discount/mora
+   * settings, all of it), never freely chosen by the caller: product
+   * decision was explicit that this kind of invoice "no puede quedar
+   * suelta, ni pertenecer a ningún periodo anterior". Refuses outright when
+   * the coproperty has never consolidated a lote — there is no "current
+   * period" yet to attach to.
+   *
+   * Still subject to the same one-lote-in-flight guard as `crear()` (the
+   * partial unique index on `status`) — a Factura Individual mid-edit blocks
+   * a new monthly run starting, and vice versa, same as any two ordinary
+   * lotes would.
+   */
+  async crearIndividual(
+    accountId: string,
+    dto: CrearFacturaIndividualDto,
+  ): Promise<LoteContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    const yaHayUno = await this.lotes
+      .exists({
+        coPropertyId,
+        status: { $in: ['borrador', 'liquidado'] },
+      })
+      .exec();
+    if (yaHayUno) {
+      throw new ConflictException(
+        'Ya hay un lote de facturación en curso para esta copropiedad. ' +
+          'Consolidalo o esperá a que se resuelva antes de crear uno nuevo.',
+      );
+    }
+
+    const inmueble = await this.inmuebles
+      .findOne({ _id: dto.inmuebleId, coPropertyId })
+      .exec();
+    if (!inmueble) {
+      throw new NotFoundException(
+        `No se encontró el inmueble ${dto.inmuebleId}`,
+      );
+    }
+
+    const ultimoConsolidado = await this.obtenerUltimoConsolidado(
+      coPropertyId.toString(),
+    );
+    if (!ultimoConsolidado) {
+      throw new BadRequestException(
+        'Esta copropiedad todavía no tiene un período de facturación ' +
+          'consolidado — una Factura Individual necesita un período actual ' +
+          'al cual pertenecer.',
+      );
+    }
+
+    const numero = await this.numeracion.siguienteLote(coPropertyId.toString());
+
+    const creado = await this.lotes.create({
+      coPropertyId,
+      number: numero,
+      status: 'borrador',
+      inmuebleId: new Types.ObjectId(dto.inmuebleId),
+      // Todo lo demás, copiado tal cual del período actual — nunca
+      // recalculado desde los parámetros vigentes de la copropiedad, para
+      // que esta factura quede indistinguible de una emitida por el lote
+      // real de ese mismo ciclo.
+      billingDate: ultimoConsolidado.billingDate,
+      dueDate: ultimoConsolidado.dueDate,
+      periodStart: ultimoConsolidado.periodStart,
+      periodEnd: ultimoConsolidado.periodEnd,
+      earlyPaymentDiscount: ultimoConsolidado.earlyPaymentDiscount,
+      earlyPaymentDiscountFixedValue:
+        ultimoConsolidado.earlyPaymentDiscountFixedValue,
+      discountGraceDays: ultimoConsolidado.discountGraceDays,
+      lateInterestRate: ultimoConsolidado.lateInterestRate,
+      lateInterestCap: ultimoConsolidado.lateInterestCap,
+      discountDeadline: ultimoConsolidado.discountDeadline,
+      serviceSuspensionDate: ultimoConsolidado.serviceSuspensionDate,
+      generatedBy: accountId,
+    });
+
+    return toLote(creado);
+  }
+
+  /**
    * Edits an in-progress run's own definition — refused once consolidado,
    * when the period/discount/mora parameters have already produced real
    * Facturas and can no longer change retroactively.
@@ -450,6 +542,12 @@ export class LotesFacturacionService {
     if (lote.status === 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} ya está consolidado y no se le pueden agregar cargos`,
+      );
+    }
+    if (lote.inmuebleId && lote.inmuebleId.toString() !== dto.inmuebleId) {
+      throw new ConflictException(
+        `El lote ${loteId} es una Factura Individual del inmueble ` +
+          `${lote.inmuebleId.toString()} — no admite cargos de otro inmueble`,
       );
     }
 
@@ -704,8 +802,25 @@ export class LotesFacturacionService {
     lote: LoteFacturacionDocument,
     coPropertyId: Types.ObjectId,
   ): Promise<Record<string, unknown>[]> {
+    // A Factura Individual (`lote.inmuebleId` set) scopes the whole preview
+    // to that one unit, and — product decision — never auto-populates from
+    // ValorRecurrente or the automatic mora formula: every charge on it is
+    // added by hand via `agregarNovedadLinea`, precisely so it can never
+    // silently repeat a charge the NEXT regular cycle would also produce.
+    // `esIndividual` gates both below.
+    // `!= null` (loose) on purpose — catches both a real `null` (the
+    // schema's own default) and `undefined` (a plain object fixture in a
+    // test, or any document read before this field existed), so an ordinary
+    // whole-coproperty lote never accidentally takes the individual branch.
+    const esIndividual = lote.inmuebleId != null;
     const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
-      this.inmuebles.find({ coPropertyId, status: 'active' }).exec(),
+      this.inmuebles
+        .find({
+          coPropertyId,
+          status: 'active',
+          ...(lote.inmuebleId ? { _id: lote.inmuebleId } : {}),
+        })
+        .exec(),
       // No more active/inactive switch on a concepto (design note on the
       // schema): every declared concept is chargeable, system ones included.
       this.conceptos
@@ -714,7 +829,9 @@ export class LotesFacturacionService {
         .populate('cuentaDebitoId', 'code')
         .populate('cuentaImpuestoId', 'code')
         .exec(),
-      this.valoresRecurrentes.find({ coPropertyId }).exec(),
+      esIndividual
+        ? Promise.resolve([])
+        : this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
     const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
@@ -848,7 +965,7 @@ export class LotesFacturacionService {
               ),
             );
           }
-        } else if (administracionConcepto) {
+        } else if (administracionConcepto && !esIndividual) {
           // Mora is charged on Administración's OWN prior balance — not the
           // unit's total cartera across every concepto (product correction:
           // Multas/Parqueadero/etc. sitting overdue must never inflate the

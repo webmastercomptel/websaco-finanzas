@@ -39,6 +39,7 @@ import {
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
+import { fechaNotaContable } from '../notas-contables/notas-contables.mapper';
 import { finDelDiaCorte } from './cartera-historica.util';
 import type {
   MovimientoKardex,
@@ -112,6 +113,15 @@ export class AuxiliarCarteraService {
     }
 
     // Step 1: fetch all documents for this inmueble (no date filter — see §5)
+    //
+    // Facturas: NOT status-filtered, on purpose — this is a kardex, and an
+    // anulada Factura's débito is a real historical event that still
+    // happened (never physically deleted, per the audit law). Voiding it
+    // today (via a Nota Crédito, see AnularFacturaService) posts its own
+    // crédito row through the AplicacionCartera fetch below; excluding the
+    // Factura here would leave that crédito with no matching débito to net
+    // against — same reasoning Recibo/NotaCredito already follow (fetched
+    // unfiltered right below).
     const [
       facturas,
       notasDebito,
@@ -120,9 +130,7 @@ export class AuxiliarCarteraService {
       notasContables,
       notasAnticipo,
     ] = await Promise.all([
-      this.facturas
-        .find({ coPropertyId, inmuebleId, status: 'emitida' })
-        .exec(),
+      this.facturas.find({ coPropertyId, inmuebleId }).exec(),
       this.notasDebito
         .find({ coPropertyId, inmuebleId, status: 'emitida' })
         .exec(),
@@ -243,11 +251,14 @@ export class AuxiliarCarteraService {
       });
     }
 
-    // Notas Contables → TWO rows each (débito destino, crédito origen)
-    // `createdAt` is added by Mongoose `timestamps: true` at runtime but
-    // not reflected in the TypeScript type — cast needed.
+    // Notas Contables → TWO rows each (débito destino, crédito origen).
+    // `fechaNotaContable` — never `createdAt` directly: that's the real
+    // server instant the record was INSERTED, which can land in a
+    // completely different month than the note's own declared business
+    // date (bug real reportado: una nota fechada en junio apareció con
+    // fecha de septiembre porque se guardó/editó ese día).
     for (const nc of notasContables) {
-      const fecha = (nc as unknown as { createdAt: Date }).createdAt;
+      const fecha = fechaNotaContable(nc);
       rows.push({
         fecha,
         tipo: 'NT',

@@ -664,6 +664,85 @@ describe('NotasCreditoService.crear', () => {
     ).toBe(50000);
   });
 
+  it('no debita/acredita las cuentas reales de un concepto de intereses cuando la aplicación es completa — solo cuentasOrden', async () => {
+    const conceptoMora = new Types.ObjectId();
+    const factura = facturaDoc({
+      outstandingBalance: 200000,
+      total: 200000,
+      lines: [
+        {
+          conceptoId: CONCEPTO,
+          conceptKind: 'administracion',
+          totalAmount: 150000,
+          accountingIncomeAccount: '413501',
+          accountingReceivableAccount: '130599',
+        },
+        {
+          conceptoId: conceptoMora,
+          conceptKind: 'intereses',
+          totalAmount: 50000,
+          accountingIncomeAccount: '413502',
+          accountingReceivableAccount: '130502',
+        },
+      ],
+    });
+    const notaCreada = notaCreditoCreada({ totalAmount: 200000 });
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      factura,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                receivablesAccount: '130501',
+                advancesAccount: '210505',
+                creditNotesAccount: '413595',
+                usesMemorandumAccounts: true,
+                memorandumDebitAccount: '831505',
+                memorandumCreditAccount: '831510',
+              }),
+          }),
+        })),
+      },
+    });
+
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        montoTotal: 200000,
+        distribucion: [
+          { conceptoId: CONCEPTO.toString(), monto: 150000 },
+          { conceptoId: conceptoMora.toString(), monto: 50000 },
+        ],
+      }),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].entries as Array<{
+      account: string;
+      amount: number;
+    }>;
+
+    // La cuenta real de intereses (CxC/Ingreso) nunca debe aparecer — su
+    // reverso va SOLO por cuentasOrden, igual que su cargo original nunca
+    // las tocó (construirMovimientos).
+    expect(entries.some((e) => e.account === '413502')).toBe(false);
+    expect(entries.some((e) => e.account === '130502')).toBe(false);
+
+    // Administración sí se mueve normalmente por sus propias cuentas.
+    expect(entries.find((e) => e.account === '413501')?.amount).toBe(150000);
+    expect(entries.find((e) => e.account === '130599')?.amount).toBe(150000);
+
+    // cuentasOrden se mueve por los 50000 de mora, sin cambios.
+    expect(
+      entries.find((e) => e.account === '831505' || e.account === '831510')
+        ?.amount,
+    ).toBe(50000);
+  });
+
   it('acredita la cuenta propia del concepto cuando la línea de la factura ancla la trae configurada', async () => {
     const factura = facturaDoc({
       number: 42,

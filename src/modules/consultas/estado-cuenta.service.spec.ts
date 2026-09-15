@@ -356,6 +356,41 @@ describe('EstadoCuentaService', () => {
       expect(result.pagosRecibidos).toBe(0);
     });
 
+    it('una Factura anulada TODAVÍA cuenta en cargosDelMes — bug real reportado: se contaba su Nota Crédito de anulación en descuentosAjustes pero no el cargo original, subestimando saldoActual', async () => {
+      const inmId = id();
+      const fId = id();
+      const ncId = id();
+      const f = facturaDoc({
+        _id: fId,
+        inmuebleId: inmId,
+        total: 100000,
+        status: 'anulada',
+      });
+      const nc = ncDoc({ _id: ncId });
+      const app = appDoc(ncId, 'NC', {
+        amountApplied: 100000,
+        appliedAt: new Date('2026-01-22'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        notasCredito: mockFind([nc]),
+        aplicaciones: mockFind([app]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.cargosDelMes).toBe(100000);
+      expect(result.descuentosAjustes).toBe(100000);
+      // Cargada y anulada dentro del mismo período: el saldo no debe moverse.
+      expect(result.saldoActual).toBe(result.saldoAnterior);
+    });
+
     it('NA application produces categoria pago (bug real reportado: la Nota de Anticipo no aparecía en el estado de cuenta)', async () => {
       // Bug real: `sourceIds` solo se armaba con recibos+notasCredito — una
       // AplicacionCartera con sourceType 'NA' nunca calzaba con ningún id de
@@ -436,6 +471,33 @@ describe('EstadoCuentaService', () => {
           result.pagosRecibidos -
           result.descuentosAjustes,
       ).toBe(result.saldoActual);
+    });
+
+    it('una Nota Contable usa su propia issueDate, NUNCA createdAt — bug real reportado: una nota fechada en junio aparecía en septiembre', async () => {
+      const inmId = id();
+      const nt = ntDoc({
+        issueDate: new Date('2026-01-10'),
+        createdAt: new Date('2026-09-14'),
+      });
+
+      const svc = servicio({
+        notasContables: mockFind([nt]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      // Si se leyera createdAt (septiembre), estas filas quedarían FUERA del
+      // período de enero consultado.
+      const ntRows = result.movimientos.filter(
+        (m) => m.numeroCompleto === nt.fullNumber,
+      );
+      expect(ntRows).toHaveLength(2);
+      expect(ntRows[0].fecha).toBe(new Date('2026-01-10').toISOString());
     });
 
     it('estado is al_dia when saldoActual <= 0', async () => {

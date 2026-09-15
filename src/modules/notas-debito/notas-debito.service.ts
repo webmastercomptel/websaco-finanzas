@@ -252,6 +252,7 @@ export class NotasDebitoService {
             number: numero.numero,
             fullNumber: numero.completo,
             issueDate: new Date(dto.fechaCargo),
+            dueDate: new Date(dto.fechaVencimiento),
             total: dto.total,
             outstandingBalance: dto.total,
             status: 'emitida',

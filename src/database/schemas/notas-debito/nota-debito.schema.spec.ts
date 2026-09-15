@@ -21,6 +21,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   conceptoId: concepto,
   fullNumber: 'ND-1',
   issueDate: new Date(),
+  dueDate: new Date(),
   total: 150000,
   outstandingBalance: 150000,
   generatedBy: cuenta,

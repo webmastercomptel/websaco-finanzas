@@ -56,6 +56,7 @@ describe('NotasDebitoController.crear', () => {
       conceptoId: new Types.ObjectId().toString(),
       total: 150000,
       fechaCargo: '2026-09-01',
+      fechaVencimiento: '2026-09-30',
       descripcion: 'Cargo por mora',
     });
 

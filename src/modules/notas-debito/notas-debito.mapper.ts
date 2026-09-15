@@ -24,6 +24,7 @@ export const toNotaDebito = (
   numero: doc.number,
   numeroCompleto: doc.fullNumber,
   fechaEmision: doc.issueDate.toISOString(),
+  fechaVencimiento: doc.dueDate.toISOString(),
   total: doc.total,
   saldoPendiente,
   estado: doc.status,
