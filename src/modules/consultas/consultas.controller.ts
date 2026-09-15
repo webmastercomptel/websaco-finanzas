@@ -58,6 +58,7 @@ import { generarPdfCarteraPorInmueble } from '../../common/pdf/cartera-por-inmue
 import { generarPdfCarteraPorConceptos } from '../../common/pdf/cartera-por-conceptos-pdf';
 import { generarPdfVencimientosCartera } from '../../common/pdf/vencimientos-cartera-pdf';
 import { generarPdfMovimientoContable } from '../../common/pdf/movimiento-contable-pdf';
+import { generarPdfConsecutivos } from '../../common/pdf/consecutivos-pdf';
 
 /**
  * Read-only reporting endpoint. Reuses the already-stubbed 'Consulta'
@@ -390,5 +391,35 @@ export class ConsultasController {
     @Query() query: ConsultarConsecutivosDto,
   ): Promise<RespuestaConsecutivos> {
     return this.consecutivos.findAll(query);
+  }
+
+  @Get('consecutivos/pdf')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  async generarPdfConsecutivos(
+    @Query() query: ConsultarConsecutivosDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const reporte = await this.consecutivos.findAll(query);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const bytes = await generarPdfConsecutivos(
+      reporte,
+      copropiedad,
+      query.codigo,
+      query.desde,
+      query.hasta,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="consecutivos-${query.codigo}-${query.desde}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }
