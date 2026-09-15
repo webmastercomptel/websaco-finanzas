@@ -8,6 +8,20 @@ import { Account } from '../cuentas/account.schema';
 
 export type NotaDebitoDocument = HydratedDocument<NotaDebito>;
 
+/** DIAN's own "Concepto de Corrección para Notas débito" catalog (Anexo
+ *  1.8-2021 §13.2.5, `cac:DiscrepancyResponse/cbc:ResponseCode`) — codes
+ *  1-4 in that order: intereses, gastos por cobrar, cambio del valor,
+ *  otros. Not this app's own invention, so it is not free to add/reorder
+ *  entries here independently of that table — same precedent as
+ *  `MOTIVOS_NOTA_CREDITO` (`nota-credito.schema.ts`). */
+export const MOTIVOS_NOTA_DEBITO = [
+  'intereses',
+  'gastos_por_cobrar',
+  'cambio_valor',
+  'otro',
+] as const;
+export type MotivoNotaDebito = (typeof MOTIVOS_NOTA_DEBITO)[number];
+
 export const VOID_REASONS_NOTA_DEBITO = [
   'error_digitacion',
   'error_facturacion',
@@ -53,6 +67,9 @@ export class NotaDebito {
     required: true,
   })
   conceptoId: Types.ObjectId;
+
+  @Prop({ type: String, required: true, enum: MOTIVOS_NOTA_DEBITO })
+  reason: MotivoNotaDebito;
 
   @Prop({ type: String, default: null, trim: true })
   description: string | null;

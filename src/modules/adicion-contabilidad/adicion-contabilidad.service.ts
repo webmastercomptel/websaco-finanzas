@@ -53,6 +53,7 @@ import { toLoteContabilidad } from './adicion-contabilidad.mapper';
 import {
   construirMovmes,
   construirMovmesdo,
+  fechaDdMmAaaa,
   type FilaMovmes,
   type FilaMovmesdo,
 } from './movmes.util';
@@ -205,6 +206,11 @@ export class AdicionContabilidadService {
         coPropertyId,
         session,
       );
+      const conceptoMap = await this.resolveConceptos(
+        asientos,
+        coPropertyId,
+        session,
+      );
       const comprobantePorClave = await this.resolveComprobantes(
         asientos,
         anchorMap,
@@ -226,14 +232,22 @@ export class AdicionContabilidadService {
 
       for (const asiento of asientos) {
         const tipoDocumento = tipoDocumentoDe(asiento);
-        const anchor = anchorMap.get(resolveAnchorId(asiento).toString());
+        const anchorIdStr = resolveAnchorId(asiento).toString();
+        const anchor = anchorMap.get(anchorIdStr);
+        // The document's own concepto (Observaciones/Detalle/Descripción, or
+        // the NA/FV composed text) — the accountant reads THIS in the target
+        // system, never the internal ledger's fixed catalog wording. Falls
+        // back to that internal wording only when the source document left
+        // its own concepto empty (RC/NC/ND's optional field).
+        const detalle =
+          conceptoMap.get(anchorIdStr) ?? asiento.entries[0]?.description ?? '';
 
         filasMovmes.push({
           tipoDocumento,
           numero: anchor?.number ?? 0,
           fecha: asiento.date,
           numeroLote,
-          detalle: asiento.entries[0]?.description ?? '',
+          detalle,
         });
 
         const comprobante =
@@ -245,7 +259,7 @@ export class AdicionContabilidadService {
             cuenta: entry.account,
             centroCosto: entry.centroCosto ?? null,
             tercero: entry.tercero ?? null,
-            detalle: entry.description,
+            detalle,
             baseGravable: entry.baseGravable ?? null,
             valorDebito: entry.type === 'debito' ? entry.amount : null,
             valorCredito: entry.type === 'credito' ? entry.amount : null,
@@ -325,6 +339,127 @@ export class AdicionContabilidadService {
         .exec();
       for (const doc of docs) {
         map.set(doc._id.toString(), { prefix: doc.prefix, number: doc.number });
+      }
+    }
+
+    return map;
+  }
+
+  /**
+   * Batch-resolves the "detalle" the target accounting system actually wants
+   * per anchor document — the concepto the user typed on that document
+   * (Observaciones/Detalle/Descripción), NOT `entries[].description`'s fixed
+   * internal ledger wording (see `generar()`'s own comment on the fallback).
+   * RC/NC/ND/NT read straight off their own field; FV and NA have none, so
+   * their text is composed instead — see each branch below.
+   */
+  private async resolveConceptos(
+    asientos: AsientoContableDocument[],
+    coPropertyId: Types.ObjectId,
+    session: ClientSession,
+  ): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+
+    const idsByType = new Map<TipoDocumentoExport, Types.ObjectId[]>();
+    for (const a of asientos) {
+      const tipo = tipoDocumentoDe(a);
+      const list = idsByType.get(tipo) ?? [];
+      list.push(resolveAnchorId(a));
+      idsByType.set(tipo, list);
+    }
+
+    const agregarSiNoVacio = (
+      id: Types.ObjectId,
+      texto: string | null | undefined,
+    ): void => {
+      if (texto && texto.trim()) map.set(id.toString(), texto);
+    };
+
+    const reciboIds = idsByType.get('RC');
+    if (reciboIds && reciboIds.length > 0) {
+      const recibos = await this.recibos
+        .find({ _id: { $in: reciboIds }, coPropertyId }, { notes: 1 })
+        .session(session)
+        .exec();
+      for (const r of recibos) agregarSiNoVacio(r._id, r.notes);
+    }
+
+    const notaCreditoIds = idsByType.get('NC');
+    if (notaCreditoIds && notaCreditoIds.length > 0) {
+      const notasCredito = await this.notasCredito
+        .find({ _id: { $in: notaCreditoIds }, coPropertyId }, { notes: 1 })
+        .session(session)
+        .exec();
+      for (const n of notasCredito) agregarSiNoVacio(n._id, n.notes);
+    }
+
+    const notaDebitoIds = idsByType.get('ND');
+    if (notaDebitoIds && notaDebitoIds.length > 0) {
+      const notasDebito = await this.notasDebito
+        .find({ _id: { $in: notaDebitoIds }, coPropertyId }, { description: 1 })
+        .session(session)
+        .exec();
+      for (const n of notasDebito) agregarSiNoVacio(n._id, n.description);
+    }
+
+    const notaContableIds = idsByType.get('NT');
+    if (notaContableIds && notaContableIds.length > 0) {
+      const notasContables = await this.notasContables
+        .find(
+          { _id: { $in: notaContableIds }, coPropertyId },
+          { description: 1 },
+        )
+        .session(session)
+        .exec();
+      for (const n of notasContables) agregarSiNoVacio(n._id, n.description);
+    }
+
+    // FV: no free-text field on the invoice itself — the period it bills,
+    // same for every line regardless of conceptName, per the accountant's
+    // own request (replaces `linea.conceptName` in THIS export only).
+    const facturaIds = idsByType.get('FV');
+    if (facturaIds && facturaIds.length > 0) {
+      const facturas = await this.facturas
+        .find(
+          { _id: { $in: facturaIds }, coPropertyId },
+          { periodStart: 1, periodEnd: 1 },
+        )
+        .session(session)
+        .exec();
+      for (const f of facturas) {
+        map.set(
+          f._id.toString(),
+          `Cargo del Periodo ${fechaDdMmAaaa(f.periodStart)} - ${fechaDdMmAaaa(f.periodEnd)}`,
+        );
+      }
+    }
+
+    // NA: no free-text field either — composed from the Recibo it draws its
+    // anticipo from, per the accountant's own request.
+    const notaAnticipoIds = idsByType.get('NA');
+    if (notaAnticipoIds && notaAnticipoIds.length > 0) {
+      const notasAnticipo = await this.notasAnticipo
+        .find(
+          { _id: { $in: notaAnticipoIds }, coPropertyId },
+          { reciboOrigenId: 1 },
+        )
+        .session(session)
+        .exec();
+      const reciboOrigenIds = [
+        ...new Set(notasAnticipo.map((n) => n.reciboOrigenId.toString())),
+      ].map((id) => new Types.ObjectId(id));
+      const recibos = await this.recibos
+        .find({ _id: { $in: reciboOrigenIds }, coPropertyId }, { number: 1 })
+        .session(session)
+        .exec();
+      const numeroPorRecibo = new Map(
+        recibos.map((r) => [r._id.toString(), r.number]),
+      );
+      for (const n of notasAnticipo) {
+        const numero = numeroPorRecibo.get(n.reciboOrigenId.toString());
+        if (numero !== undefined) {
+          map.set(n._id.toString(), `Aplicación de Anticipo RC # ${numero}`);
+        }
       }
     }
 

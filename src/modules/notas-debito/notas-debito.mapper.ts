@@ -19,6 +19,7 @@ export const toNotaDebito = (
   inmuebleId: doc.inmuebleId.toString(),
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
   conceptoId: doc.conceptoId.toString(),
+  motivo: doc.reason,
   descripcion: doc.description,
   prefijo: doc.prefix,
   numero: doc.number,

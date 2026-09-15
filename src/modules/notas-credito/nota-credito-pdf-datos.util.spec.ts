@@ -18,7 +18,7 @@ const notaBase = (over: Record<string, unknown> = {}): NotaCreditoDocument =>
     facturaId: FACTURA,
     fullNumber: 'NC-0002',
     issueDate: new Date('2026-06-10'),
-    reason: 'error_facturacion',
+    reason: 'ajuste_precio',
     notes: null,
     totalAmount: 100000,
     unappliedAmount: 0,
@@ -83,7 +83,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
   it('usa la etiqueta del motivo cuando la nota no tiene notes', async () => {
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ notes: null, reason: 'descuento_comercial' }),
+      notaBase({ notes: null, reason: 'descuento' }),
       0,
       [],
       copropiedadBase(),
@@ -91,7 +91,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       modelosVacios() as never,
     );
 
-    expect(datos.concepto).toBe('Descuento comercial');
+    expect(datos.concepto).toBe('Rebaja o descuento parcial o total');
   });
 
   it('usa notes cuando la nota sí las tiene, en vez del motivo', async () => {

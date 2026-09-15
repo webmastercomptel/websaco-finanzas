@@ -16,7 +16,10 @@
  *  getters here would read as the day before west of Greenwich. */
 const dosDigitos = (n: number): string => String(n).padStart(2, '0');
 
-const fechaDdMmAaaa = (fecha: Date): string =>
+/** Exported for `AdicionContabilidadService.resolveConceptos` — the FV
+ *  "Cargo del Periodo" detalle formats `Factura.periodStart`/`periodEnd`
+ *  with this exact dd/mm/aaaa convention, same UTC-midnight reasoning. */
+export const fechaDdMmAaaa = (fecha: Date): string =>
   `${dosDigitos(fecha.getUTCDate())}/${dosDigitos(fecha.getUTCMonth() + 1)}/${fecha.getUTCFullYear()}`;
 
 const mesDosDigitos = (fecha: Date): string =>

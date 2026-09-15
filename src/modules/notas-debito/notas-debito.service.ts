@@ -247,6 +247,7 @@ export class NotasDebitoService {
             inmuebleId,
             terceroId: null,
             conceptoId,
+            reason: dto.motivo,
             description: dto.descripcion ?? null,
             prefix: numero.prefijo,
             number: numero.numero,

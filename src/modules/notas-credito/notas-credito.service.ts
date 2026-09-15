@@ -590,14 +590,15 @@ export class NotasCreditoService {
 
     // `montoTotal: factura.total` against an untouched invoice (guarded
     // above) always fully applies, so nothing becomes anticipo.
-    // `'anulacion_documento'` is the one creation-time motivo built for
-    // exactly this case.
+    // `'anulacion_factura'` is DIAN's own code 2 ("Anulación de factura
+    // electrónica") — the one creation-time motivo built for exactly this
+    // case.
     const notaCredito = await this.crear(accountId, {
       codigo: dto.codigo,
       inmuebleId: factura.inmuebleId.toString(),
       facturaId: factura._id.toString(),
       fecha: dto.fecha,
-      motivo: 'anulacion_documento',
+      motivo: 'anulacion_factura',
       montoTotal: factura.total,
       distribucion,
       observaciones: `Anulación de la factura ${factura.fullNumber}: ${dto.detalle}`,

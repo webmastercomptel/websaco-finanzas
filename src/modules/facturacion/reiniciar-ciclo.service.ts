@@ -73,6 +73,14 @@ import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import {
+  LoteContabilidad,
+  LoteContabilidadDocument,
+} from '../../database/schemas/contabilidad/lote-contabilidad.schema';
+import {
+  ConsecutivoLoteContabilidad,
+  ConsecutivoLoteContabilidadDocument,
+} from '../../database/schemas/contabilidad/consecutivo-lote-contabilidad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ResultadoReinicioCiclo } from '../../contracts';
 
@@ -87,10 +95,11 @@ const CODIGO_COPROPIEDAD_PRUEBA = '0001';
 /**
  * Wipes EVERY financial document of the one hardcoded test coproperty —
  * Lotes/Facturas, Recibos (and their own Lotes de Recibos batch uploads),
- * Notas Crédito/Débito/Anticipo/Contables, and everything they moved
+ * Notas Crédito/Débito/Anticipo/Contables, everything they moved
  * (AplicacionCartera, asientos contables, SaldoCartera, and the two
  * per-document cartera ledgers — `CarteraPorDocumento`,
- * `SaldoDocumentoOrigen`) — and rewinds
+ * `SaldoDocumentoOrigen`), and every past "Adición a Contabilidad" export
+ * (`LoteContabilidad`) — and rewinds
  * every document's numbering back to zero, so the whole billing cycle can be
  * replayed from a blank slate as many times as needed. Nothing is left
  * half-deleted for a caller to clean up by hand: every document type this
@@ -152,6 +161,10 @@ export class ReiniciarCicloService {
     private readonly notasAnticipo: Model<NotaAnticipoDocument>,
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
+    @InjectModel(LoteContabilidad.name)
+    private readonly lotesContabilidad: Model<LoteContabilidadDocument>,
+    @InjectModel(ConsecutivoLoteContabilidad.name)
+    private readonly consecutivoLoteContabilidad: Model<ConsecutivoLoteContabilidadDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -177,6 +190,7 @@ export class ReiniciarCicloService {
       notasContablesEliminadas,
       recibosEliminados,
       loteRecibosEliminados,
+      lotesContabilidadEliminados,
     ] = await Promise.all([
       this.aplicaciones.deleteMany({ coPropertyId }).exec(),
       this.notasCredito.deleteMany({ coPropertyId }).exec(),
@@ -185,6 +199,7 @@ export class ReiniciarCicloService {
       this.notasContables.deleteMany({ coPropertyId }).exec(),
       this.recibos.deleteMany({ coPropertyId }).exec(),
       this.loteRecibos.deleteMany({ coPropertyId }).exec(),
+      this.lotesContabilidad.deleteMany({ coPropertyId }).exec(),
     ]);
 
     const [
@@ -226,6 +241,11 @@ export class ReiniciarCicloService {
     await this.consecutivoLoteRecibos
       .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
       .exec();
+    // Same reasoning as consecutivoLoteRecibos above — "Adición a
+    // Contabilidad" has its own independent batch sequence.
+    await this.consecutivoLoteContabilidad
+      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .exec();
     const resolucionActiva = await this.resoluciones
       .findOne({ coPropertyId, status: 'active' })
       .exec();
@@ -253,6 +273,7 @@ export class ReiniciarCicloService {
       carteraPorDocumentoEliminada: carteraPorDocumentoEliminada.deletedCount,
       saldosDocumentoOrigenEliminados:
         saldosDocumentoOrigenEliminados.deletedCount,
+      lotesContabilidadEliminados: lotesContabilidadEliminados.deletedCount,
     };
   }
 }

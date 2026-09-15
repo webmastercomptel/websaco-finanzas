@@ -40,6 +40,7 @@ const makeModelos = (over: {
     aplicaciones: number;
     carteraPorDocumento: number;
     saldosDocumentoOrigen: number;
+    lotesContabilidad: number;
   }>;
 }) => {
   const counts = {
@@ -56,6 +57,7 @@ const makeModelos = (over: {
     aplicaciones: 0,
     carteraPorDocumento: 0,
     saldosDocumentoOrigen: 0,
+    lotesContabilidad: 0,
     ...over.deletedCounts,
   };
 
@@ -81,6 +83,7 @@ const makeModelos = (over: {
   const aplicaciones = deleteManyMock(counts.aplicaciones);
   const carteraPorDocumento = deleteManyMock(counts.carteraPorDocumento);
   const saldosDocumentoOrigen = deleteManyMock(counts.saldosDocumentoOrigen);
+  const lotesContabilidad = deleteManyMock(counts.lotesContabilidad);
 
   const consecutivoLote = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
@@ -89,6 +92,9 @@ const makeModelos = (over: {
     updateMany: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const consecutivoLoteRecibos = {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const consecutivoLoteContabilidad = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const resoluciones = {
@@ -117,6 +123,8 @@ const makeModelos = (over: {
     notasContables,
     carteraPorDocumento,
     saldosDocumentoOrigen,
+    lotesContabilidad,
+    consecutivoLoteContabilidad,
   };
 };
 
@@ -143,6 +151,8 @@ const makeService = (
     modelos.notasDebito as never,
     modelos.notasAnticipo as never,
     modelos.notasContables as never,
+    modelos.lotesContabilidad as never,
+    modelos.consecutivoLoteContabilidad as never,
     tenantQueDevuelve(coPropertyId),
   );
 
@@ -229,7 +239,27 @@ describe('ReiniciarCicloService.reiniciar', () => {
       saldosEliminados: 8,
       carteraPorDocumentoEliminada: 0,
       saldosDocumentoOrigenEliminados: 0,
+      lotesContabilidadEliminados: 0,
     });
+  });
+
+  it('borra los lotes de "Adición a Contabilidad" y reinicia su propio consecutivo', async () => {
+    // Regresión: este servicio se escribió antes de que existiera el módulo
+    // de Adición a Contabilidad — sin esto, un reinicio dejaba lotes/números
+    // viejos de una corrida anterior mezclados con la siguiente.
+    const modelos = makeModelos({ deletedCounts: { lotesContabilidad: 3 } });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.lotesContabilidad.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.consecutivoLoteContabilidad.updateOne).toHaveBeenCalledWith(
+      { coPropertyId: COP },
+      { $set: { nextNumber: 0 } },
+    );
+    expect(resultado.lotesContabilidadEliminados).toBe(3);
   });
 
   it('borra TODOS los asientos contables, sin filtrar por tipo de ancla', async () => {

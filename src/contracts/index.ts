@@ -234,7 +234,7 @@ export interface Factura {
  *  domain-specific list was requested for this document either). Voiding a
  *  Factura always creates a Nota Crédito behind the scenes (see
  *  `AnularFacturaService`) — this is the Factura's OWN void reason, distinct
- *  from that note's `reason` (always `'anulacion_documento'` for this path). */
+ *  from that note's `motivo` (always `'anulacion_factura'` for this path). */
 export type MotivoAnulacionFactura =
   | 'error_digitacion'
   | 'error_facturacion'
@@ -343,6 +343,7 @@ export interface ResultadoReinicioCiclo {
   saldosEliminados: number;
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
+  lotesContabilidadEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -576,10 +577,16 @@ export interface ResultadoAplicacion {
 
 /* ── Notas Crédito ─────────────────────────────────────────────── */
 
-/** Why a Nota Crédito was issued — a fixed list, matching the mockup's
- *  reason options (design §3.2). */
+/** Why a Nota Crédito was issued — DIAN's own "Concepto de Corrección para
+ *  Notas crédito" catalog (Anexo 1.8-2021 §13.3.4), not this app's own
+ *  invention. See the schema's own docblock (`nota-credito.schema.ts`) for
+ *  the full citation and the code-1-through-5 ordering these mirror. */
 export type MotivoNotaCredito =
-  'error_facturacion' | 'descuento_comercial' | 'anulacion_documento' | 'otro';
+  | 'devolucion_parcial'
+  | 'anulacion_factura'
+  | 'descuento'
+  | 'ajuste_precio'
+  | 'otro';
 
 /** Why a Nota Crédito was voided — same catalog as a Recibo's void (design
  *  §5/§8; no domain-specific list was requested for this document). */
@@ -642,6 +649,13 @@ export interface NotaCreditoDetalle extends NotaCredito {
 
 /* ── Notas Débito ─────────────────────────────────────────────── */
 
+/** Why a Nota Débito was issued — DIAN's own "Concepto de Corrección para
+ *  Notas débito" catalog (Anexo 1.8-2021 §13.2.5), not this app's own
+ *  invention. See the schema's own docblock (`nota-debito.schema.ts`) for
+ *  the full citation and the code-1-through-4 ordering these mirror. */
+export type MotivoNotaDebito =
+  'intereses' | 'gastos_por_cobrar' | 'cambio_valor' | 'otro';
+
 /** A debit note ("ND"), always issued against a concepto for an inmueble —
  *  used to charge amounts that are not part of a regular invoice (design §2). */
 export interface NotaDebito {
@@ -649,6 +663,7 @@ export interface NotaDebito {
   inmuebleId: string;
   terceroId: string | null;
   conceptoId: string;
+  motivo: MotivoNotaDebito;
   descripcion: string | null;
   prefijo: string;
   numero: number;

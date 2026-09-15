@@ -467,7 +467,7 @@ const dtoBase = (over: Record<string, unknown> = {}) => ({
   inmuebleId: INMUEBLE.toString(),
   facturaId: new Types.ObjectId().toString(),
   fecha: '2026-01-15',
-  motivo: 'error_facturacion' as const,
+  motivo: 'ajuste_precio' as const,
   montoTotal: 200000,
   distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 200000 }],
   ...over,

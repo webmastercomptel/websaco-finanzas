@@ -54,6 +54,7 @@ describe('NotasDebitoController.crear', () => {
       codigo: 'ND',
       inmuebleId: new Types.ObjectId().toString(),
       conceptoId: new Types.ObjectId().toString(),
+      motivo: 'otro',
       total: 150000,
       fechaCargo: '2026-09-01',
       fechaVencimiento: '2026-09-30',

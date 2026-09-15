@@ -60,7 +60,7 @@ describe('NotasCreditoController.crear', () => {
       inmuebleId: new Types.ObjectId().toString(),
       facturaId: new Types.ObjectId().toString(),
       fecha: '2026-01-15',
-      motivo: 'error_facturacion',
+      motivo: 'ajuste_precio',
       montoTotal: 200000,
       distribucion: [
         { conceptoId: new Types.ObjectId().toString(), monto: 200000 },
