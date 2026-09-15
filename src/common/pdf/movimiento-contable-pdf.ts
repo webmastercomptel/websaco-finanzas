@@ -1,7 +1,37 @@
 import { type PDFPage, rgb } from 'pdf-lib';
 import { crearContexto, formatoFecha, truncateToFit } from './pdf-helpers';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
-import type { RespuestaMovimientoContable } from '../../contracts';
+import type {
+  MovimientoContable,
+  RespuestaMovimientoContable,
+} from '../../contracts';
+
+interface FiltroMovimientoContable {
+  tipo?: MovimientoContable['tipoDocumento'];
+  inmuebleCodigo?: string;
+  numero?: string;
+}
+
+/** Same narrowing the on-screen table applies client-side
+ *  (`movimiento-contable.tsx`'s own `filas` filter) — applied here too so
+ *  the printed PDF matches what's actually on screen instead of always
+ *  dumping the whole period (bug real reportado: el PDF ignoraba tipo,
+ *  inmueble y número). */
+function filtrarReporte(
+  reporteCompleto: RespuestaMovimientoContable,
+  filtro: FiltroMovimientoContable,
+): RespuestaMovimientoContable {
+  const numeroFiltro = filtro.numero?.trim().toLowerCase();
+  const movimientos = reporteCompleto.movimientos.filter((m) => {
+    if (filtro.tipo && m.tipoDocumento !== filtro.tipo) return false;
+    if (filtro.inmuebleCodigo && m.inmuebleCodigo !== filtro.inmuebleCodigo)
+      return false;
+    if (numeroFiltro && !m.numeroDocumento.toLowerCase().includes(numeroFiltro))
+      return false;
+    return true;
+  });
+  return { movimientos };
+}
 
 const MARGIN = 50;
 const ALTO_FILA = 12;
@@ -98,11 +128,13 @@ function aFilas(reporte: RespuestaMovimientoContable): FilaLinea[] {
  * pagination with a repeating header and a shrunk font.
  */
 export async function generarPdfMovimientoContable(
-  reporte: RespuestaMovimientoContable,
+  reporteCompleto: RespuestaMovimientoContable,
   copropiedad: CopropiedadDocument,
   desde: string,
   hasta: string,
+  filtro: FiltroMovimientoContable = {},
 ): Promise<Uint8Array> {
+  const reporte = filtrarReporte(reporteCompleto, filtro);
   const ctx = await crearContexto({ orientacion: 'horizontal' });
 
   const pesoTotal = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);

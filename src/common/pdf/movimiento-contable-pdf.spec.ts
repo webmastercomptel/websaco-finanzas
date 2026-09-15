@@ -135,4 +135,84 @@ describe('generarPdfMovimientoContable', () => {
     const doc = await PDFDocument.load(bytes);
     expect(doc.getPageCount()).toBeGreaterThan(1);
   });
+
+  describe('con filtro (tipo/inmuebleCodigo/número) — el mismo filtro activo en pantalla', () => {
+    const movimientosMixtos = [
+      ...Array.from({ length: 40 }, (_, i) =>
+        makeMovimiento({
+          id: `rc-${i}`,
+          documentoId: `rc-${i}`,
+          tipoDocumento: 'RC',
+          numeroDocumento: `RC-${String(i).padStart(4, '0')}`,
+          inmuebleCodigo: '301',
+        }),
+      ),
+      ...Array.from({ length: 40 }, (_, i) =>
+        makeMovimiento({
+          id: `fc-${i}`,
+          documentoId: `fc-${i}`,
+          tipoDocumento: 'FC',
+          numeroDocumento: `FV-${String(i).padStart(4, '0')}`,
+          inmuebleCodigo: '302',
+        }),
+      ),
+    ];
+
+    it('filtra por tipo: los movimientos de otro tipo no imprimen (menos páginas que sin filtrar, bug real reportado)', async () => {
+      const sinFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+      );
+      const conFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+        { tipo: 'RC' },
+      );
+      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
+      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
+    });
+
+    it('filtra por inmuebleCodigo: los movimientos de otro inmueble no imprimen', async () => {
+      const sinFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+      );
+      const conFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+        { inmuebleCodigo: '301' },
+      );
+      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
+      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
+    });
+
+    it('filtra por número (substring, case-insensitive)', async () => {
+      const sinFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+      );
+      const conFiltro = await generarPdfMovimientoContable(
+        makeReporte({ movimientos: movimientosMixtos }),
+        makeCopropiedad(),
+        '2026-08-01',
+        '2026-08-31',
+        { numero: 'rc-' },
+      );
+      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
+      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
+    });
+  });
 });

@@ -36,6 +36,7 @@ import { ConsultarCarteraPorConceptosPdfDto } from './dto/consultar-cartera-por-
 import { ConsultarPeriodosEstadoCuentaDto } from './dto/consultar-periodos-estado-cuenta.dto';
 import { ConsultarEstadoCuentaDto } from './dto/consultar-estado-cuenta.dto';
 import { ConsultarMovimientoContableDto } from './dto/consultar-movimiento-contable.dto';
+import { ConsultarMovimientoContablePdfDto } from './dto/consultar-movimiento-contable-pdf.dto';
 import { ConsultarConciliacionCarteraDto } from './dto/consultar-conciliacion-cartera.dto';
 import { ConsultarConsecutivosDto } from './dto/consultar-consecutivos.dto';
 import type {
@@ -357,7 +358,7 @@ export class ConsultasController {
   @Get('movimiento-contable/pdf')
   @CheckAbility({ action: 'read', subject: 'Consulta' })
   async generarPdfMovimientoContable(
-    @Query() query: ConsultarMovimientoContableDto,
+    @Query() query: ConsultarMovimientoContablePdfDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -374,6 +375,11 @@ export class ConsultasController {
       copropiedad,
       query.desde,
       query.hasta,
+      {
+        tipo: query.tipo,
+        inmuebleCodigo: query.inmuebleCodigo,
+        numero: query.numero,
+      },
     );
 
     res.set({
