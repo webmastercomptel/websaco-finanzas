@@ -47,6 +47,10 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
+import {
+  calcularDocumentosConSaldoAFecha,
+  finDelDiaCorte,
+} from './cartera-historica.util';
 import type {
   MovimientoEstadoCuenta,
   PeriodoFacturado,
@@ -63,6 +67,33 @@ type RowRaw = {
   cargo: number | null;
   abono: number | null;
   categoria: 'pago' | 'descuento' | null;
+};
+
+/** The document's own type name — never a computed sentence mixing in its
+ *  número, which has its own column now. */
+const ETIQUETA_DOCUMENTO: Record<TipoDocumentoKardex, string> = {
+  FC: 'Factura de Venta',
+  RC: 'Recibo',
+  NC: 'Nota Crédito',
+  ND: 'Nota Débito',
+  NT: 'Nota Contable',
+  NA: 'Nota de Anticipo',
+};
+
+/** Compute days overdue AS OF `corte`: max(0, floor((corte - vence) / day)).
+ *  UTC truncation, never local — same formula `VencimientosCarteraService`/
+ *  `CarteraGeneralService` each keep their own copy of, for the same
+ *  reason: a local `setHours` would silently shift every count by a day on
+ *  a machine not itself running in UTC. `corte` here is always `periodEnd`
+ *  — the statement's OWN cutoff date, never the real "today" (see
+ *  `RespuestaEstadoCuenta.estado`'s own docblock). */
+const calcularDiasMora = (vence: Date, corte: Date): number => {
+  const c = new Date(corte);
+  c.setUTCHours(0, 0, 0, 0);
+  const v = new Date(vence);
+  v.setUTCHours(0, 0, 0, 0);
+  const diff = c.getTime() - v.getTime();
+  return Math.max(0, Math.floor(diff / 86_400_000));
 };
 
 /**
@@ -159,7 +190,7 @@ export class EstadoCuentaService {
     const copropiedadTelefono = copropiedad?.phone ?? null;
     const copropiedadEmail = copropiedad?.email ?? null;
 
-    // Find the period's own Factura for fechaEmision/vencimiento
+    // Find the period's own Factura for fechaEmision
     const facturaPeriodo = await this.facturas
       .findOne({
         coPropertyId,
@@ -172,8 +203,6 @@ export class EstadoCuentaService {
 
     const fechaEmision =
       facturaPeriodo?.issueDate?.toISOString() ?? desde.toISOString();
-    const vencimiento =
-      facturaPeriodo?.dueDate?.toISOString() ?? hasta.toISOString();
 
     // Step 1: fetch all documents for this inmueble (no date filter — see spec §5)
     const [
@@ -250,7 +279,7 @@ export class EstadoCuentaService {
         fecha: f.issueDate,
         tipo: 'FC',
         numeroCompleto: f.fullNumber,
-        concepto: `${f.lines.length} Cargos del mes ${f.fullNumber}`,
+        concepto: ETIQUETA_DOCUMENTO.FC,
         cargo: f.total,
         abono: null,
         categoria: null,
@@ -263,7 +292,7 @@ export class EstadoCuentaService {
         fecha: nd.issueDate,
         tipo: 'ND',
         numeroCompleto: nd.fullNumber,
-        concepto: nd.description ?? 'Nota Débito',
+        concepto: ETIQUETA_DOCUMENTO.ND,
         cargo: nd.total,
         abono: null,
         categoria: null,
@@ -271,11 +300,6 @@ export class EstadoCuentaService {
     }
 
     // AplicacionCartera → crédito with categoria
-    const ETIQUETA_ORIGEN: Record<'RC' | 'NC' | 'NA', string> = {
-      RC: 'Recibo',
-      NC: 'Nota Crédito',
-      NA: 'Nota de Anticipo',
-    };
     for (const app of aplicaciones) {
       const sourceType = app.sourceType;
       const origen =
@@ -286,7 +310,7 @@ export class EstadoCuentaService {
             : ncMap.get(app.sourceId.toString());
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
       const fecha = origen?.fecha ?? app.appliedAt;
-      const etiqueta = ETIQUETA_ORIGEN[sourceType];
+      const etiqueta = ETIQUETA_DOCUMENTO[sourceType];
 
       // `amountApplied` on an RC/NA application is cash PLUS whatever early-
       // payment discount it absorbed (`discountApplied`) — see the Descuento
@@ -309,7 +333,7 @@ export class EstadoCuentaService {
           fecha,
           tipo: sourceType,
           numeroCompleto: sourceNumber,
-          concepto: `${etiqueta} ${sourceNumber}`,
+          concepto: etiqueta,
           cargo: null,
           abono: montoCash,
           categoria: sourceType === 'NC' ? 'descuento' : 'pago',
@@ -320,7 +344,7 @@ export class EstadoCuentaService {
           fecha,
           tipo: sourceType,
           numeroCompleto: sourceNumber,
-          concepto: `Descuento Pronto Pago ${etiqueta} ${sourceNumber}`,
+          concepto: 'Descuento Pronto Pago',
           cargo: null,
           abono: montoDescuento,
           categoria: 'descuento',
@@ -335,7 +359,7 @@ export class EstadoCuentaService {
         fecha,
         tipo: 'NT',
         numeroCompleto: nc.fullNumber,
-        concepto: nc.description,
+        concepto: ETIQUETA_DOCUMENTO.NT,
         cargo: nc.monto,
         abono: null,
         categoria: null,
@@ -344,7 +368,7 @@ export class EstadoCuentaService {
         fecha,
         tipo: 'NT',
         numeroCompleto: nc.fullNumber,
-        concepto: nc.description,
+        concepto: ETIQUETA_DOCUMENTO.NT,
         cargo: null,
         abono: nc.monto,
         categoria: null,
@@ -416,20 +440,51 @@ export class EstadoCuentaService {
         monto,
       }));
 
-    // Step 9: estado derivation (three-state)
-    let estado: 'al_dia' | 'pendiente' | 'vencido';
-    if (saldoActual <= 0) {
-      estado = 'al_dia';
-    } else if (new Date(vencimiento) > new Date()) {
-      estado = 'pendiente';
-    } else {
-      estado = 'vencido';
+    // Step 9: estado/diasMoraMaximo derivation — "vencida" when ANY of this
+    // inmueble's Facturas/Notas Débito still has a positive balance AS OF
+    // `hasta` (the statement's OWN cutoff date, `periodEnd`) and had already
+    // passed its own vencimiento by that same date — never the real "today"
+    // (see `RespuestaEstadoCuenta.estado`'s own docblock), and never just
+    // whether the period's own factura had passed its due date, the old
+    // (buggy) single-document check. Reuses the same shared point-in-time
+    // utility Vencimientos de Cartera/Cartera General rely on for their own
+    // historical aging, instead of a bespoke live-balance lookup.
+    //
+    // `hastaCorte` (shifted +5h, see `finDelDiaCorte`) goes into the query
+    // itself — it decides which applications count as already active,
+    // including a same-day evening-Colombia payment. `hasta` (raw, pure UTC
+    // midnight) is what `calcularDiasMora` compares `fechaReferencia`
+    // against — both are always pure UTC-midnight business dates, so
+    // comparing them against the SHIFTED cutoff would silently overcount by
+    // a day (same bug class `cartera-historica.util.ts` documents at length
+    // on `activeAsOf`/`limiteEmisionParaCorte`).
+    const hastaCorte = finDelDiaCorte(hasta);
+    const documentosConSaldo = await calcularDocumentosConSaldoAFecha(
+      {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        aplicaciones: this.aplicaciones,
+      },
+      coPropertyId,
+      hastaCorte,
+      { inmuebleId },
+    );
+    let diasMoraMaximo: number | null = null;
+    for (const doc of documentosConSaldo) {
+      if (doc.fechaReferencia >= hasta) continue;
+      const dias = calcularDiasMora(doc.fechaReferencia, hasta);
+      if (dias > 0 && (diasMoraMaximo === null || dias > diasMoraMaximo)) {
+        diasMoraMaximo = dias;
+      }
     }
+    const estado: 'al_dia' | 'vencido' =
+      diasMoraMaximo !== null ? 'vencido' : 'al_dia';
 
     // Step 10: build movimientos for API response
     const movimientos: MovimientoEstadoCuenta[] = movimientosEnPeriodo.map(
       (r) => ({
         fecha: r.fecha.toISOString(),
+        numeroCompleto: r.numeroCompleto,
         concepto: r.concepto,
         cargo: r.cargo,
         abono: r.abono,
@@ -445,13 +500,13 @@ export class EstadoCuentaService {
       periodStart: desde.toISOString(),
       periodEnd: hasta.toISOString(),
       fechaEmision,
-      vencimiento,
       saldoAnterior,
       cargosDelMes,
       pagosRecibidos,
       descuentosAjustes,
       saldoActual,
       estado,
+      diasMoraMaximo,
       movimientos,
       anticipos,
     };

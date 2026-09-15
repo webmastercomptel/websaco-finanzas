@@ -172,8 +172,12 @@ describe('generarPdfMovimientoContable', () => {
         '2026-08-31',
         { tipo: 'RC' },
       );
-      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
-      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      const paginasSinFiltro = (
+        await PDFDocument.load(sinFiltro)
+      ).getPageCount();
+      const paginasConFiltro = (
+        await PDFDocument.load(conFiltro)
+      ).getPageCount();
       expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
     });
 
@@ -191,8 +195,12 @@ describe('generarPdfMovimientoContable', () => {
         '2026-08-31',
         { inmuebleCodigo: '301' },
       );
-      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
-      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      const paginasSinFiltro = (
+        await PDFDocument.load(sinFiltro)
+      ).getPageCount();
+      const paginasConFiltro = (
+        await PDFDocument.load(conFiltro)
+      ).getPageCount();
       expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
     });
 
@@ -210,8 +218,12 @@ describe('generarPdfMovimientoContable', () => {
         '2026-08-31',
         { numero: 'rc-' },
       );
-      const paginasSinFiltro = (await PDFDocument.load(sinFiltro)).getPageCount();
-      const paginasConFiltro = (await PDFDocument.load(conFiltro)).getPageCount();
+      const paginasSinFiltro = (
+        await PDFDocument.load(sinFiltro)
+      ).getPageCount();
+      const paginasConFiltro = (
+        await PDFDocument.load(conFiltro)
+      ).getPageCount();
       expect(paginasConFiltro).toBeLessThan(paginasSinFiltro);
     });
   });

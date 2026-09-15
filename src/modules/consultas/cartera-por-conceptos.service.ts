@@ -46,9 +46,10 @@ import type {
 } from '../../contracts';
 import type { ConsultarCarteraPorConceptosDto } from './dto/consultar-cartera-por-conceptos.dto';
 
-/** Internal working shape — carries the raw document number so each
- *  inmueble's documents can be sorted ascending before it is dropped from
- *  the public contract (the API already returns them pre-sorted). */
+/** Internal working shape — carries the raw document number as a
+ *  tie-breaker (after fecha, then tipo) for the ascending sort before it is
+ *  dropped from the public contract (the API already returns them
+ *  pre-sorted). */
 type DocumentoInterno = DocumentoCarteraPorConceptos & { numero: number };
 
 /**
@@ -292,7 +293,16 @@ export class CarteraPorConceptosService {
 
     const grupos: GrupoInmuebleCarteraPorConceptos[] = [];
     for (const [inmuebleId, documentosInternos] of docsPorInmueble) {
-      documentosInternos.sort((a, b) => a.numero - b.numero);
+      // Fecha ascending first, then tipo, then número — matches the
+      // on-screen/Excel/PDF column order (bug real reportado: antes
+      // ordenaba solo por número crudo, mezclando FV y ND sin criterio
+      // visible). `fecha` is already an ISO 8601 UTC string, so a plain
+      // string compare sorts chronologically.
+      documentosInternos.sort((a, b) => {
+        if (a.fecha !== b.fecha) return a.fecha < b.fecha ? -1 : 1;
+        if (a.tipo !== b.tipo) return a.tipo.localeCompare(b.tipo);
+        return a.numero - b.numero;
+      });
       const documentos = documentosInternos.map(
         ({ numero: _numero, ...doc }) => doc,
       );

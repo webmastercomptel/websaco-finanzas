@@ -131,7 +131,7 @@ describe('CarteraPorConceptosService', () => {
     ]);
   });
 
-  it('ordena los documentos de un mismo inmueble por numero ascendente, mezclando FV y ND', async () => {
+  it('ordena los documentos de un mismo inmueble por fecha ascendente, mezclando FV y ND', async () => {
     const inmId = id();
     const inm = inmuebleDoc({ _id: inmId, code: '301' });
     const fId = id();
@@ -141,6 +141,7 @@ describe('CarteraPorConceptosService', () => {
       inmuebleId: inmId,
       number: 7,
       fullNumber: 'FV-0007',
+      issueDate: new Date('2026-08-01'),
       total: 100000,
     });
     const nd = ndDoc({
@@ -148,6 +149,7 @@ describe('CarteraPorConceptosService', () => {
       inmuebleId: inmId,
       number: 3,
       fullNumber: 'ND-0003',
+      issueDate: new Date('2026-07-15'),
       total: 20000,
     });
 
@@ -166,6 +168,48 @@ describe('CarteraPorConceptosService', () => {
     expect(result.grupos[0].documentos.map((d) => d.numeroCompleto)).toEqual([
       'ND-0003',
       'FV-0007',
+    ]);
+  });
+
+  it('la fecha manda sobre el número — un número más alto pero fecha más temprana va primero (bug real reportado)', async () => {
+    const inmId = id();
+    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const fId = id();
+    const ndId = id();
+    // Número más alto (337) pero fecha más temprana — antes de la
+    // corrección el orden crudo por número lo dejaba de último.
+    const f = facturaDoc({
+      _id: fId,
+      inmuebleId: inmId,
+      number: 337,
+      fullNumber: 'FV-337',
+      issueDate: new Date('2026-06-01'),
+      total: 100000,
+    });
+    const nd = ndDoc({
+      _id: ndId,
+      inmuebleId: inmId,
+      number: 5,
+      fullNumber: 'ND-5',
+      issueDate: new Date('2026-08-21'),
+      total: 20000,
+    });
+
+    const svc = servicio({
+      facturas: find([f]),
+      notasDebito: find([nd]),
+      inmuebles: find([inm]),
+      saldoTotalDocumento: find([
+        { documentoId: fId, saldoPendiente: 100000 },
+        { documentoId: ndId, saldoPendiente: 20000 },
+      ]),
+    });
+
+    const result = await svc.findAll({});
+
+    expect(result.grupos[0].documentos.map((d) => d.numeroCompleto)).toEqual([
+      'FV-337',
+      'ND-5',
     ]);
   });
 
