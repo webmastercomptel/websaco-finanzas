@@ -78,9 +78,17 @@ export async function generarPdfCarteraGeneralReactPdf(
       valor: String(reporte.diasPromedioMora),
     }),
 
-    createElement(Text, { style: styles.seccionTitulo }, 'Cartera por Concepto'),
+    createElement(
+      Text,
+      { style: styles.seccionTitulo },
+      'Cartera por Concepto',
+    ),
     reporte.carteraPorConcepto.length === 0
-      ? createElement(Text, { style: styles.sinDatos }, 'Sin cartera por concepto.')
+      ? createElement(
+          Text,
+          { style: styles.sinDatos },
+          'Sin cartera por concepto.',
+        )
       : createElement(Tabla, {
           columnas: ['Concepto', 'Saldo'],
           filas: reporte.carteraPorConcepto.map((c) => [

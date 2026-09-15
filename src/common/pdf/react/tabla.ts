@@ -56,7 +56,7 @@ export function Tabla(props: {
   const celdaStyle = (i: number, encabezado: boolean) => ({
     flexGrow: pesos[i],
     flexBasis: 0,
-    textAlign: (i >= primeraNumerica ? 'right' : 'left') as 'right' | 'left',
+    textAlign: i >= primeraNumerica ? 'right' : 'left',
     paddingRight: 4,
     ...(encabezado ? styles.celdaEncabezado : styles.celda),
   });
