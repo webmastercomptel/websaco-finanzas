@@ -1,5 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { Style } from '@react-pdf/types';
 
 const styles = StyleSheet.create({
   tabla: {
@@ -53,7 +54,7 @@ export function Tabla(props: {
   const pesos = props.anchosRelativos ?? columnas.map(() => 1);
   const primeraNumerica = numColumnas - (props.columnasNumericas ?? 2);
 
-  const celdaStyle = (i: number, encabezado: boolean) => ({
+  const celdaStyle = (i: number, encabezado: boolean): Style => ({
     flexGrow: pesos[i],
     flexBasis: 0,
     textAlign: i >= primeraNumerica ? 'right' : 'left',
