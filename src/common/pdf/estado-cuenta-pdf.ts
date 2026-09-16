@@ -1,4 +1,4 @@
-import { createElement, type ReactElement } from 'react';
+import { createElement } from 'react';
 import { View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';

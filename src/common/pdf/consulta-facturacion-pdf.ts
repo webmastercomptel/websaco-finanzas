@@ -1,14 +1,18 @@
-import { type PDFPage, rgb } from 'pdf-lib';
+import { createElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { Style } from '@react-pdf/types';
 import {
-  crearContexto,
-  embebirLogoWebsaco,
-  formatoFecha,
-  truncateToFit,
-} from './pdf-helpers';
+  reporteDocumentoMultiPagina,
+  renderizarPdf,
+  CONTENT_WIDTH_PT_HORIZONTAL,
+} from './react/document';
+import { CreditoWebsaco } from './react/credito-websaco';
+import { FONDO_ZEBRA } from './react/paleta';
+import { truncarTexto } from './react/text-measure';
+import { formatoFecha } from './pdf-helpers';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaConsultaFacturacion } from '../../contracts';
 
-const MARGIN = 50;
 /** Up to 11 concepts get their own column; anything beyond that is summed
  *  into one final "Otros Cargos" column — per product decision, a
  *  coproperty with 11 concepts or fewer never shows that grouped column at
@@ -16,10 +20,11 @@ const MARGIN = 50;
 const MAX_CARGOS_INDIVIDUALES = 11;
 const FONT_TITULO = 8;
 const FONT_DATA = 7;
-const ALTO_FILA = 13;
-const ALTO_ENCABEZADO_TABLA = 16;
-/** Reserved at the bottom of every page for the "Página x/xxx" footer. */
-const MARGIN_PIE = 30;
+
+/** Rows per page, computed by hand rather than left to react-pdf's automatic
+ *  `wrap` pagination — same reasoning as `vencimientos-cartera-pdf.ts`'s own
+ *  `FILAS_POR_PAGINA`. */
+const FILAS_POR_PAGINA = 30;
 
 /** Same grouping-thousands format as `formatoPeso`, minus the "$ " prefix —
  *  this table is dense enough (up to sixteen columns) that the symbol on
@@ -29,22 +34,16 @@ function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
 }
 
-function formatoHora(fecha: Date): string {
-  return fecha.toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: 'America/Bogota',
-  });
+function formatoFechaHora(fecha: Date): string {
+  return `${fecha.toLocaleDateString('es-CO')} ${fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'America/Bogota' })}`;
 }
 
 interface ColumnaTabla {
   titulo: string;
-  /** Relative weight, not points — normalized against `ctx.contentWidth`
-   *  once the full column set (fixed to `4 + hasta 12` de dinámicas) is
-   *  known, so the table always fills the page regardless of how many
-   *  concept columns a coproperty ends up with. */
+  /** Relative weight, not points — normalized against the content width
+   *  once the full column set (fixed 4 + up to 12 dynamic) is known, so the
+   *  table always fills the page regardless of how many concept columns a
+   *  coproperty ends up with. */
   peso: number;
   numerica: boolean;
 }
@@ -85,41 +84,94 @@ function construirColumnas(reporte: RespuestaConsultaFacturacion): {
   return { columnas, conceptosIndividuales, conceptosAgrupados };
 }
 
+const styles = StyleSheet.create({
+  masthead: {
+    marginBottom: 6,
+  },
+  filaNombre: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  nombre: {
+    fontSize: 12,
+    fontFamily: 'Helvetica-Bold',
+  },
+  generado: {
+    fontSize: 8,
+    fontFamily: 'Helvetica',
+    color: '#4d4d4d',
+  },
+  subtitulo: {
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 2,
+  },
+  regla: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#999999',
+    marginTop: 4,
+  },
+  filaEncabezado: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    borderBottomWidth: 0.75,
+    borderBottomColor: '#000000',
+    paddingVertical: 3,
+    marginTop: 6,
+  },
+  fila: {
+    flexDirection: 'row',
+    paddingVertical: 2,
+  },
+  filaPar: {
+    backgroundColor: FONDO_ZEBRA,
+  },
+  filaTotales: {
+    flexDirection: 'row',
+    backgroundColor: '#ededed',
+    paddingVertical: 3,
+    marginTop: 1,
+  },
+  celdaEncabezado: {
+    fontFamily: 'Helvetica-Bold',
+  },
+  celdaNormal: {
+    fontFamily: 'Helvetica',
+  },
+  celdaTotales: {
+    fontFamily: 'Helvetica-Bold',
+  },
+});
+
+function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
+  if (items.length === 0) return [[]];
+  const paginas: T[][] = [];
+  for (let i = 0; i < items.length; i += porPagina) {
+    paginas.push(items.slice(i, i + porPagina));
+  }
+  return paginas;
+}
+
 /**
  * Generates the "Consulta de Facturación" report PDF: a single unified,
  * landscape table — one row per Factura of the lote, columns No. Factura /
  * Inmueble / Fecha / Total Factura, then up to eleven individual concept
  * columns and (only when the coproperty has more than eleven concepts) one
  * final "Otros Cargos" column summing the rest. A two-line masthead
- * (coproperty name + generation timestamp; report title + billing period +
- * the small WebSACO logo) and a "Página x/xxx" footer repeat on every page —
- * modeled after the predecessor system's own printed listing (see the
- * product brief's reference PDF), adapted for a dynamic concept count
- * instead of the predecessor's hardcoded twelve.
- *
- * Unlike every other PDF builder in this module, this one manages its own
- * pagination instead of relying on `pdf-helpers`' `escribirTabla`/
- * `saltarLinea`: the masthead must redraw on every new page (including ones
- * `pdf-helpers` would add automatically mid-table) and the footer needs the
- * final page count, known only once every row is placed — neither fits
- * `pdf-helpers`' single-pass, no-callback drawing model.
+ * (coproperty name + generation timestamp; report title + billing period)
+ * repeats on every page — modeled after the predecessor system's own
+ * printed listing, adapted for a dynamic concept count instead of the
+ * predecessor's hardcoded twelve. React-pdf, built directly (no pdf-lib
+ * version kept behind a `?version=` toggle). Paginated by hand (see
+ * `FILAS_POR_PAGINA`'s docblock).
  */
 export async function generarPdfConsultaFacturacion(
   reporte: RespuestaConsultaFacturacion,
   copropiedad: CopropiedadDocument,
-): Promise<Uint8Array> {
-  const ctx = await crearContexto({ orientacion: 'horizontal' });
-  const {
-    image: logo,
-    width: logoWidth,
-    height: logoHeight,
-  } = await embebirLogoWebsaco(ctx.doc);
+): Promise<Buffer> {
   const generadoEl = new Date();
-
   const { columnas, conceptosIndividuales, conceptosAgrupados } =
     construirColumnas(reporte);
-  const pesoTotal = columnas.reduce((acc, c) => acc + c.peso, 0);
-  const anchos = columnas.map((c) => (c.peso / pesoTotal) * ctx.contentWidth);
+  const hayOtros = conceptosAgrupados.length > 0;
 
   // Shrinks the data font as column count grows, down to a 5.5pt floor —
   // "ajustar para esto el tamaño de la fuente" (product brief): a
@@ -136,153 +188,43 @@ export async function generarPdfConsultaFacturacion(
 
   const subtitulo = `Listado de Facturación al día ${formatoFecha(reporte.fechaFacturacion)} — Período: ${formatoFecha(reporte.fechaFacturacion)} a ${formatoFecha(reporte.fechaVencimiento)}`;
 
-  const paginas: PDFPage[] = [];
+  const anchos = columnas.map((c) => c.peso);
 
-  /** Draws the two-line masthead on `page` and returns the y coordinate
-   *  where page content (the table) may start. Called once per page,
-   *  including every page a mid-table break adds — so the header is
-   *  identical on every page, exactly as the product brief asked
-   *  ("esto se debe repetir en todo en cada pagina"). */
-  const dibujarEncabezado = (page: PDFPage): number => {
-    let y = ctx.pageHeight - 34;
-
-    page.drawText(copropiedad.name, {
-      x: MARGIN,
-      y,
-      size: 12,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    const generadoTexto = `Generado: ${formatoFecha(generadoEl)} ${formatoHora(generadoEl)}`;
-    const generadoAncho = ctx.font.widthOfTextAtSize(generadoTexto, 8);
-    page.drawText(generadoTexto, {
-      x: MARGIN + ctx.contentWidth - generadoAncho,
-      y: y + 1,
-      size: 8,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-
-    y -= 16;
-    const tituloAncho = ctx.fontBold.widthOfTextAtSize(subtitulo, fuenteTitulo);
-    const tituloMostrado =
-      tituloAncho > ctx.contentWidth - logoWidth - 10
-        ? truncateToFit(
-            ctx.fontBold,
-            subtitulo,
-            fuenteTitulo,
-            ctx.contentWidth - logoWidth - 10,
-          )
-        : subtitulo;
-    page.drawText(tituloMostrado, {
-      x: MARGIN,
-      y,
-      size: fuenteTitulo,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    page.drawImage(logo, {
-      x: MARGIN + ctx.contentWidth - logoWidth,
-      y: y - logoHeight + 8,
-      width: logoWidth,
-      height: logoHeight,
-    });
-
-    y -= 14;
-    page.drawLine({
-      start: { x: MARGIN, y },
-      end: { x: MARGIN + ctx.contentWidth, y },
-      thickness: 0.5,
-      color: rgb(0.6, 0.6, 0.6),
-    });
-    y -= 12;
-
-    return y;
-  };
-
-  /** Draws one row of fixed-width cells at the current `y`, right-aligning
-   *  numeric columns — same convention every other PDF builder in this
-   *  module uses. */
-  const dibujarFila = (
-    page: PDFPage,
-    y: number,
-    celdas: string[],
-    opciones?: { bold?: boolean; fondo?: boolean },
-  ): void => {
-    const font = opciones?.bold ? ctx.fontBold : ctx.font;
-    if (opciones?.fondo) {
-      page.drawRectangle({
-        x: MARGIN,
-        y: y - 3,
-        width: ctx.contentWidth,
-        height: ALTO_FILA,
-        color: rgb(0.92, 0.92, 0.92),
-      });
-    }
-    let x = MARGIN;
-    celdas.forEach((celda, i) => {
-      const ancho = anchos[i];
-      const texto =
-        font.widthOfTextAtSize(celda, fuenteDatos) > ancho - 6
-          ? truncateToFit(font, celda, fuenteDatos, ancho - 6)
-          : celda;
-      const textWidth = font.widthOfTextAtSize(texto, fuenteDatos);
-      const cellX = columnas[i].numerica ? x + ancho - textWidth - 4 : x + 4;
-      page.drawText(texto, {
-        x: cellX,
-        y,
-        size: fuenteDatos,
-        font,
-        color: rgb(0, 0, 0),
-      });
-      x += ancho;
-    });
-  };
-
-  const dibujarEncabezadoTabla = (page: PDFPage, y: number): number => {
-    dibujarFila(
-      page,
-      y,
-      columnas.map((c) => c.titulo),
-      { bold: true, fondo: true },
+  const celda = (
+    texto: string,
+    i: number,
+    variante: 'encabezado' | 'normal' | 'totales',
+  ) => {
+    const base =
+      variante === 'encabezado'
+        ? styles.celdaEncabezado
+        : variante === 'totales'
+          ? styles.celdaTotales
+          : styles.celdaNormal;
+    const dimensiones: Style = {
+      flexGrow: anchos[i],
+      flexBasis: 0,
+      fontSize: variante === 'encabezado' ? fuenteTitulo : fuenteDatos,
+      textAlign: columnas[i].numerica ? 'right' : 'left',
+      paddingRight: 4,
+      paddingLeft: 4,
+    };
+    const pesoTotal = anchos.reduce((a, b) => a + b, 0);
+    const anchoColumnaPt =
+      (CONTENT_WIDTH_PT_HORIZONTAL * anchos[i]) / pesoTotal;
+    return createElement(
+      Text,
+      { key: i, style: [base, dimensiones] },
+      truncarTexto(texto, anchoColumnaPt - 6, dimensiones.fontSize as number),
     );
-    page.drawLine({
-      start: { x: MARGIN, y: y - 4 },
-      end: { x: MARGIN + ctx.contentWidth, y: y - 4 },
-      thickness: 0.75,
-      color: rgb(0, 0, 0),
-    });
-    return y - ALTO_ENCABEZADO_TABLA;
   };
 
-  // `crearContexto` already created a first page (`ctx.page`) — reuse it
-  // for the FIRST call instead of always calling `addPage`, or that page
-  // stays in the document completely blank (nothing ever drew on it) while
-  // every real page shifts one number later — the blank first page reported.
-  let primeraPagina = true;
-  const nuevaPagina = (): { page: PDFPage; y: number } => {
-    const page = primeraPagina
-      ? ctx.page
-      : ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
-    primeraPagina = false;
-    paginas.push(page);
-    const yTrasEncabezado = dibujarEncabezado(page);
-    const yTrasTitulo = yTrasEncabezado;
-    return { page, y: dibujarEncabezadoTabla(page, yTrasTitulo) };
-  };
-
-  let { page, y } = nuevaPagina();
-
-  for (const f of reporte.filas) {
-    if (y < MARGIN_PIE + ALTO_FILA) {
-      ({ page, y } = nuevaPagina());
-    }
-
+  const filas = reporte.filas.map((f) => {
     const otrosCargos = conceptosAgrupados.reduce(
       (acc, c) => acc + (f.valoresPorConcepto[c.conceptoId] ?? 0),
       0,
     );
-    const celdas = [
+    return [
       f.numeroCompleto,
       f.inmuebleCodigo,
       formatoFecha(f.fechaFactura),
@@ -290,17 +232,10 @@ export async function generarPdfConsultaFacturacion(
       ...conceptosIndividuales.map((c) =>
         formatoPesoCompacto(f.valoresPorConcepto[c.conceptoId] ?? 0),
       ),
-      ...(conceptosAgrupados.length > 0
-        ? [formatoPesoCompacto(otrosCargos)]
-        : []),
+      ...(hayOtros ? [formatoPesoCompacto(otrosCargos)] : []),
     ];
-    dibujarFila(page, y, celdas);
-    y -= ALTO_FILA;
-  }
+  });
 
-  if (y < MARGIN_PIE + ALTO_FILA) {
-    ({ page, y } = nuevaPagina());
-  }
   const totalOtrosCargos = reporte.filas.reduce(
     (acc, f) =>
       acc +
@@ -310,32 +245,75 @@ export async function generarPdfConsultaFacturacion(
       ),
     0,
   );
-  const celdasTotales = [
+  const filaTotales = [
     'TOTALES',
     '',
     '',
     formatoPesoCompacto(reporte.total),
     ...conceptosIndividuales.map((c) => formatoPesoCompacto(c.monto)),
-    ...(conceptosAgrupados.length > 0
-      ? [formatoPesoCompacto(totalOtrosCargos)]
-      : []),
+    ...(hayOtros ? [formatoPesoCompacto(totalOtrosCargos)] : []),
   ];
-  dibujarFila(page, y, celdasTotales, { bold: true, fondo: true });
 
-  // ── Footer: "Página x/xxx", bottom-right of every page — only knowable
-  // now that every page has been created. ──
-  const totalPaginas = paginas.length;
-  paginas.forEach((p, i) => {
-    const texto = `Página ${i + 1}/${totalPaginas}`;
-    const ancho = ctx.font.widthOfTextAtSize(texto, 8);
-    p.drawText(texto, {
-      x: MARGIN + ctx.contentWidth - ancho,
-      y: MARGIN_PIE - 16,
-      size: 8,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
+  const bloques = agruparEnPaginas(filas, FILAS_POR_PAGINA);
+
+  const paginas = bloques.map((bloque, indicePagina) => {
+    const esUltima = indicePagina === bloques.length - 1;
+    return createElement(
+      View,
+      { key: indicePagina },
+      createElement(
+        View,
+        { style: styles.masthead },
+        createElement(
+          View,
+          { style: styles.filaNombre },
+          createElement(Text, { style: styles.nombre }, copropiedad.name),
+          createElement(
+            Text,
+            { style: styles.generado },
+            `Generado: ${formatoFechaHora(generadoEl)}`,
+          ),
+        ),
+        createElement(
+          Text,
+          { style: [styles.subtitulo, { fontSize: fuenteTitulo }] },
+          subtitulo,
+        ),
+        createElement(View, { style: styles.regla }),
+      ),
+
+      createElement(
+        View,
+        { style: styles.filaEncabezado, wrap: false },
+        ...columnas.map((c, i) => celda(c.titulo, i, 'encabezado')),
+      ),
+
+      ...bloque.map((fila, filaIdx) =>
+        createElement(
+          View,
+          {
+            key: filaIdx,
+            style:
+              filaIdx % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
+            wrap: false,
+          },
+          ...fila.map((v, i) => celda(v, i, 'normal')),
+        ),
+      ),
+
+      esUltima
+        ? createElement(
+            View,
+            { style: styles.filaTotales, wrap: false },
+            ...filaTotales.map((v, i) => celda(v, i, 'totales')),
+          )
+        : null,
+
+      createElement(CreditoWebsaco),
+    );
   });
 
-  return ctx.doc.save();
+  return renderizarPdf(
+    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  );
 }

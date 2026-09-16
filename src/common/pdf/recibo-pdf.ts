@@ -1,16 +1,11 @@
-import { rgb } from 'pdf-lib';
-import {
-  crearContexto,
-  dibujarEncabezadoDocumento,
-  escribirMarcaDuplicado,
-  formatoPeso,
-  formatoFecha,
-  type PdfContext,
-} from './pdf-helpers';
+import { createElement, type ReactElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoPeso, formatoFecha } from './pdf-helpers';
+import { reporteDocumento, renderizarPdf } from './react/document';
+import { EncabezadoDocumento } from './react/encabezado-documento';
+import { MarcaDuplicado } from './react/marca-duplicado';
+import { Tabla } from './react/tabla';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
-
-const MARGIN_LEFT = 50;
-const GRIS_CLARO = rgb(0.9, 0.9, 0.9);
 
 /** One débito/crédito line of the Recibo's own journal entry, already
  *  resolved to display-ready values (account code/name, target document
@@ -54,6 +49,89 @@ export interface DatosReciboImpresion {
   lineas: LineaAsientoImpresion[];
 }
 
+/** Column widths for the journal-entry table, left to right: Codigo, Nombre
+ *  del Cargo, Tipo, Numero, Valor Debito, Valor Credito — same relative
+ *  proportions as the pdf-lib original's `ANCHOS_COLUMNA` (65/175/35/45/
+ *  96/96, summing to the 512pt Letter-portrait content width). "Nombre del
+ *  Cargo" gets the lion's share since account names run long ("CxC
+ *  Intereses de Mora"); "Codigo"/"Tipo"/"Numero" are short, fixed
+ *  identifiers. */
+const ANCHOS_RELATIVOS = [65, 175, 35, 45, 96, 96];
+
+const styles = StyleSheet.create({
+  bloque: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  izquierda: {
+    flexDirection: 'column',
+  },
+  fila: {
+    flexDirection: 'row',
+    marginBottom: 3,
+  },
+  etiqueta: {
+    width: 95,
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+  },
+  valor: {
+    fontSize: 10,
+    fontFamily: 'Helvetica',
+  },
+  derecha: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+  },
+  monto: {
+    fontSize: 18,
+    fontFamily: 'Helvetica-Bold',
+  },
+  fecha: {
+    fontSize: 10,
+    fontFamily: 'Helvetica',
+    marginTop: 8,
+  },
+});
+
+/** Left column (inmueble / titular / concepto) alongside Valor and Fecha on
+ *  the right, both right-aligned to the same edge — "Recibo No." isn't
+ *  repeated here, the header already carries the document number. */
+function BloqueRecibo(props: { datos: DatosReciboImpresion }): ReactElement {
+  const { datos } = props;
+  const filaDato = (etiqueta: string, valor: string): ReactElement =>
+    createElement(
+      View,
+      { style: styles.fila },
+      createElement(Text, { style: styles.etiqueta }, etiqueta),
+      createElement(Text, { style: styles.valor }, valor),
+    );
+
+  return createElement(
+    View,
+    { style: styles.bloque },
+    createElement(
+      View,
+      { style: styles.izquierda },
+      filaDato('Inmueble :', datos.inmuebleCodigo),
+      filaDato('Nombre :', datos.titularNombre),
+      filaDato('Por Concepto de', datos.concepto),
+    ),
+    createElement(
+      View,
+      { style: styles.derecha },
+      createElement(Text, { style: styles.monto }, formatoPeso(datos.monto)),
+      createElement(
+        Text,
+        { style: styles.fecha },
+        `Fecha : ${formatoFecha(datos.fecha.toISOString())}`,
+      ),
+    ),
+  );
+}
+
 /**
  * Generates a real PDF for a Recibo (cash receipt) or a Nota Crédito
  * (`datos.tituloDocumento` picks which), styled after the predecessor
@@ -63,246 +141,70 @@ export interface DatosReciboImpresion {
  * journal entry as a débito/crédito table — not a generic "aplicaciones"
  * list, since what a resident wants to see on either document is exactly
  * what the old system showed: which account absorbed the money, against
- * which document.
+ * which document. React-pdf, built directly (no pdf-lib version kept
+ * behind a `?version=` toggle).
  */
 export async function generarPdfRecibo(
   datos: DatosReciboImpresion,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },
-): Promise<Uint8Array> {
-  const ctx = await crearContexto();
-
-  await dibujarEncabezadoDocumento(
-    ctx,
-    copropiedad,
-    datos.tituloDocumento,
-    datos.numeroCompleto,
+): Promise<Buffer> {
+  return renderizarPdf(
+    reporteDocumento(contenidoRecibo(datos, copropiedad, opciones)),
   );
-  dibujarBloqueRecibo(ctx, datos);
-  dibujarTablaAsiento(ctx, datos.lineas);
-
-  if (opciones?.duplicado) {
-    escribirMarcaDuplicado(ctx, datos.fecha.toISOString());
-  }
-
-  return ctx.doc.save();
 }
 
-/** Left column (inmueble / titular / concepto) alongside Valor and Fecha on
- *  the right, both right-aligned to the same edge — "Recibo No." isn't
- *  repeated here, the header already carries the document number. */
-function dibujarBloqueRecibo(
-  ctx: PdfContext,
+/** Page content only, no `<Document>`/`<Page>` wrapper — shared with
+ *  `generarPdfRecibosLote`, same split as `contenidoDocumentoFacturacion`/
+ *  `paginaFactura` in `factura-pdf.ts`. */
+export function contenidoRecibo(
   datos: DatosReciboImpresion,
-): void {
-  const inicioBloque = ctx.y;
-  const filas: [string, string][] = [
-    ['Inmueble :', datos.inmuebleCodigo],
-    ['Nombre :', datos.titularNombre],
-    ['Por Concepto de', datos.concepto],
-  ];
-  for (const [label, valor] of filas) {
-    ctx.page.drawText(label, {
-      x: MARGIN_LEFT,
-      y: ctx.y,
-      size: 10,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-    ctx.page.drawText(valor, {
-      x: MARGIN_LEFT + 95,
-      y: ctx.y,
-      size: 10,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-    ctx.y -= 15;
-  }
+  copropiedad: CopropiedadDocument,
+  opciones?: { duplicado?: boolean },
+): ReactElement {
+  const totalDebito = datos.lineas.reduce((acc, l) => acc + l.debito, 0);
+  const totalCredito = datos.lineas.reduce((acc, l) => acc + l.credito, 0);
 
-  // ── Valor / Fecha, right-aligned to the same edge ──
-  // Right-alignment must measure the NUMERAL alone — sizing the offset off
-  // the full "$ 1.234.567" string (the "$ " included) left the numeral
-  // itself short of the true right edge by the width of that prefix.
-  const numeroTexto = formatoPeso(datos.monto).replace(/^\$\s?/, '');
-  const montoSize = 18;
-  const numeroAncho = ctx.fontBold.widthOfTextAtSize(numeroTexto, montoSize);
-  const xNumero = MARGIN_LEFT + ctx.contentWidth - numeroAncho;
-  const dolarAncho = ctx.fontBold.widthOfTextAtSize('$', 13);
-  ctx.page.drawText('$', {
-    x: xNumero - dolarAncho - 4,
-    y: inicioBloque - 2,
-    size: 13,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  ctx.page.drawText(numeroTexto, {
-    x: xNumero,
-    y: inicioBloque - 4,
-    size: montoSize,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  const fechaTexto = formatoFecha(datos.fecha);
-  const filaFecha = `Fecha : ${fechaTexto}`;
-  const filaFechaAncho = ctx.font.widthOfTextAtSize(filaFecha, 10);
-  ctx.page.drawText(filaFecha, {
-    x: MARGIN_LEFT + ctx.contentWidth - filaFechaAncho,
-    y: inicioBloque - 26,
-    size: 10,
-    font: ctx.font,
-    color: rgb(0, 0, 0),
-  });
-
-  ctx.y -= 20;
-}
-
-/** Column widths for the journal-entry table, left to right: Codigo,
- *  Nombre del Cargo, Tipo, Numero, Valor Debito, Valor Credito — summing to
- *  exactly `ctx.contentWidth` (512pt on Letter portrait). "Nombre del
- *  Cargo" gets the lion's share since account names run long
- *  ("CxC Intereses de Mora"); "Codigo"/"Tipo"/"Numero" are short, fixed
- *  identifiers. Not `escribirTabla` (equal-width columns) — this table's
- *  columns need very different widths to read cleanly. */
-const ANCHOS_COLUMNA = {
-  codigo: 65,
-  nombreCargo: 175,
-  tipo: 35,
-  numero: 45,
-  debito: 96,
-  credito: 96,
-};
-
-/** The journal-entry table itself, plus the bold, gray-shaded "Totales"
- *  row — mirrors the predecessor system's own printed layout line for
- *  line. */
-function dibujarTablaAsiento(
-  ctx: PdfContext,
-  lineas: LineaAsientoImpresion[],
-): void {
-  const columnas = [
-    { titulo: 'Codigo', ancho: ANCHOS_COLUMNA.codigo, numerica: false },
-    {
-      titulo: 'Nombre del Cargo',
-      ancho: ANCHOS_COLUMNA.nombreCargo,
-      numerica: false,
-    },
-    { titulo: 'Tipo', ancho: ANCHOS_COLUMNA.tipo, numerica: false },
-    { titulo: 'Numero', ancho: ANCHOS_COLUMNA.numero, numerica: false },
-    { titulo: 'Valor Debito', ancho: ANCHOS_COLUMNA.debito, numerica: true },
-    { titulo: 'Valor Credito', ancho: ANCHOS_COLUMNA.credito, numerica: true },
-  ];
-
-  dibujarFilaTabla(
-    ctx,
-    columnas.map((c) => ({ texto: c.titulo, numerica: c.numerica })),
-    columnas.map((c) => c.ancho),
-    { bold: true },
-  );
-  // Misma rayita que la del encabezado (gris, 0.5pt) — antes era una línea
-  // negra más gruesa, sin relación visual con el resto del documento.
-  ctx.page.drawLine({
-    start: { x: MARGIN_LEFT, y: ctx.y + 5 },
-    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y + 5 },
-    thickness: 0.5,
-    color: rgb(0.6, 0.6, 0.6),
-  });
-  // Un poco más de aire antes de la primera fila de datos — quedaba pegada
-  // a la rayita.
-  ctx.y -= 10;
-
-  for (const linea of lineas) {
-    if (ctx.y < 90) {
-      ctx.page = ctx.doc.addPage([ctx.pageWidth, ctx.pageHeight]);
-      ctx.y = ctx.pageHeight - 50;
-    }
-    dibujarFilaTabla(
-      ctx,
-      [
-        { texto: linea.cuentaCodigo, numerica: false },
-        { texto: linea.cuentaNombre, numerica: false },
-        { texto: linea.tipoDocumento ?? '', numerica: false },
-        {
-          texto:
-            linea.numeroDocumento !== null ? String(linea.numeroDocumento) : '',
-          numerica: false,
-        },
-        {
-          texto: linea.debito > 0 ? formatoPeso(linea.debito) : '0.00',
-          numerica: true,
-        },
-        {
-          texto: linea.credito > 0 ? formatoPeso(linea.credito) : '0.00',
-          numerica: true,
-        },
+  return createElement(
+    View,
+    null,
+    opciones?.duplicado
+      ? createElement(MarcaDuplicado, {
+          fechaEmisionIso: datos.fecha.toISOString(),
+        })
+      : null,
+    createElement(EncabezadoDocumento, {
+      copropiedad,
+      titulo: `${datos.tituloDocumento} ${datos.numeroCompleto}`,
+    }),
+    createElement(BloqueRecibo, { datos }),
+    createElement(Tabla, {
+      columnas: [
+        'Codigo',
+        'Nombre del Cargo',
+        'Tipo',
+        'Numero',
+        'Valor Debito',
+        'Valor Credito',
       ],
-      columnas.map((c) => c.ancho),
-    );
-  }
-
-  const totalDebito = lineas.reduce((acc, l) => acc + l.debito, 0);
-  const totalCredito = lineas.reduce((acc, l) => acc + l.credito, 0);
-
-  // Totales bajado una línea respecto a la última fila de datos, para que no
-  // quede pegado — un renglón de aire entre el asiento y su total.
-  ctx.y -= 15;
-
-  // Misma altura de barra y tamaño de fuente que "Total a Pagar" en el PDF
-  // de la factura (`dibujarTotalAPagar`, factura-pdf.ts) — antes era más
-  // baja (16pt) y con el mismo tamaño de fuente (9pt) que el resto de la
-  // tabla.
-  const ALTO_BARRA_TOTALES = 20;
-  const FUENTE_TOTALES = 11;
-  ctx.page.drawRectangle({
-    x: MARGIN_LEFT,
-    y: ctx.y - 5,
-    width: ctx.contentWidth,
-    height: ALTO_BARRA_TOTALES,
-    color: GRIS_CLARO,
-  });
-  dibujarFilaTabla(
-    ctx,
-    [
-      { texto: 'Totales', numerica: false },
-      { texto: '', numerica: false },
-      { texto: '', numerica: false },
-      { texto: '', numerica: false },
-      { texto: formatoPeso(totalDebito), numerica: true },
-      { texto: formatoPeso(totalCredito), numerica: true },
-    ],
-    columnas.map((c) => c.ancho),
-    { bold: true, size: FUENTE_TOTALES },
+      filas: datos.lineas.map((l) => [
+        l.cuentaCodigo,
+        l.cuentaNombre,
+        l.tipoDocumento ?? '',
+        l.numeroDocumento !== null ? String(l.numeroDocumento) : '',
+        l.debito > 0 ? formatoPeso(l.debito) : '0.00',
+        l.credito > 0 ? formatoPeso(l.credito) : '0.00',
+      ]),
+      columnasNumericas: 2,
+      anchosRelativos: ANCHOS_RELATIVOS,
+      filaTotales: [
+        'Totales',
+        '',
+        '',
+        '',
+        formatoPeso(totalDebito),
+        formatoPeso(totalCredito),
+      ],
+    }),
   );
-}
-
-/** Draws one row of fixed-width cells, left-aligned for text columns and
- *  right-aligned (with a small right padding) for numeric ones, advancing
- *  `ctx.y` by one line afterward. Shared by the table's header, its data
- *  rows, and its Totales row so all three stay pixel-aligned to the same
- *  column edges. */
-function dibujarFilaTabla(
-  ctx: PdfContext,
-  celdas: { texto: string; numerica: boolean }[],
-  anchos: number[],
-  opciones?: { bold?: boolean; size?: number },
-): void {
-  const font = opciones?.bold ? ctx.fontBold : ctx.font;
-  const size = opciones?.size ?? 9;
-  let x = MARGIN_LEFT;
-  celdas.forEach((celda, i) => {
-    const ancho = anchos[i];
-    if (celda.texto) {
-      const textWidth = font.widthOfTextAtSize(celda.texto, size);
-      const cellX = celda.numerica ? x + ancho - textWidth - 6 : x + 4;
-      ctx.page.drawText(celda.texto, {
-        x: cellX,
-        y: ctx.y,
-        size,
-        font,
-        color: rgb(0, 0, 0),
-      });
-    }
-    x += ancho;
-  });
-  ctx.y -= 15;
 }
