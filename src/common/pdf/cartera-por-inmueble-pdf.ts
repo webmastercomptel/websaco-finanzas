@@ -109,6 +109,7 @@ export async function generarPdfCarteraPorInmueble(
           columnasNumericas,
           anchosRelativos,
           filaTotales,
+          striped: true,
         }),
       ),
       { orientacion: 'horizontal' },
