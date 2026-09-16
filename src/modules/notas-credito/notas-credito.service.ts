@@ -387,6 +387,24 @@ export class NotasCreditoService {
         );
       }
 
+      // The anchor's own `terceroId` can be null — a Nota Débito issued to a
+      // unit that had no holder assigned yet, or one created before its own
+      // creation flow started resolving this (`NotasDebitoService.crear()`'s
+      // own fix; every note débito predating that fix has this frozen
+      // forever, by design — a financial document never changes after
+      // issuance). Rather than silently propagate that blank onto the Nota
+      // Crédito's own PDF too, fall back to the inmueble's CURRENT holder,
+      // same source (`Inmueble.holderId`) that fix reads.
+      const terceroId =
+        documentoAncla.terceroId ??
+        (
+          await this.inmuebles
+            ?.findOne({ _id: inmuebleId, coPropertyId })
+            .session(session)
+            .exec()
+        )?.holderId ??
+        null;
+
       const lineasAncla = await this.resolverLineasAncla(
         session,
         coPropertyId,
@@ -447,7 +465,7 @@ export class NotasCreditoService {
           {
             coPropertyId,
             inmuebleId,
-            terceroId: documentoAncla.terceroId,
+            terceroId,
             facturaId: dto.tipoDocumento === 'FV' ? documentoId : null,
             notaDebitoId: dto.tipoDocumento === 'ND' ? documentoId : null,
             tipoDocumentoAncla: dto.tipoDocumento,

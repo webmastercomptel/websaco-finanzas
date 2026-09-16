@@ -1241,6 +1241,60 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     });
   });
 
+  it('cuando el ancla ND no trae terceroId (congelado null desde antes del propio fix de Notas Débito), cae al holderId ACTUAL del inmueble en vez de dejarlo en blanco', async () => {
+    const TITULAR = new Types.ObjectId();
+    const notaDebito = notaDebitoDoc({ terceroId: null });
+    const notaCreada = notaCreditoCreada({
+      facturaId: null,
+      notaDebitoId: notaDebito._id,
+      tipoDocumentoAncla: 'ND',
+      totalAmount: 150000,
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+    });
+    const notasCredito = modeloNotasCredito(notaCreada);
+    const concepto = {
+      _id: CONCEPTO,
+      name: 'Multa por parqueo',
+      kind: 'otro',
+      cuentaCreditoId: { code: '413595' },
+      cuentaDebitoId: { code: '130505' },
+    };
+    const inmuebles = {
+      findOne: jest.fn(() => ({
+        session: () => ({
+          exec: () => Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
+        }),
+      })),
+    };
+
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumentoUnico(notaDebito) as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigenUnico(notaCreada) as never,
+      modeloNotaDebito(notaDebito) as never,
+      modeloConceptoCobro(concepto) as never,
+      undefined,
+      inmuebles as never,
+    );
+
+    await service.crear('acc-1', dtoNotaDebito(notaDebito));
+
+    const [[filas]] = notasCredito.create.mock.calls as unknown as [
+      Record<string, unknown>[],
+    ][];
+    expect(filas[0].terceroId).toBe(TITULAR);
+  });
+
   it('rechaza el motivo "anulacion_factura" contra una Nota Débito — ese motivo es exclusivo de Factura', async () => {
     const notaDebito = notaDebitoDoc();
     const service = new NotasCreditoService(
