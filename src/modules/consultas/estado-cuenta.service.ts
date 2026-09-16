@@ -326,16 +326,20 @@ export class EstadoCuentaService {
       const fecha = origen?.fecha ?? app.appliedAt;
       const etiqueta = ETIQUETA_DOCUMENTO[sourceType];
 
-      // `amountApplied` on an RC/NA application is cash PLUS whatever early-
-      // payment discount it absorbed (`discountApplied`) — see the Descuento
-      // por Pronto Pago plan's own design: the factura is credited the full
-      // amount, the source's cash side is smaller. Counting the whole thing
-      // as "pago" would overstate what the propietario actually paid, so the
-      // discount portion gets its own row/categoria — same bucket a Nota
-      // Crédito's own discount already uses — leaving only real cash under
-      // "pago". A Nota de Anticipo runs through the exact same cruce
-      // machinery (`ejecutarAplicacionManual`/`Fifo`) as a Recibo, so it can
-      // carry a discount too — never just RC.
+      // `amountApplied` on an RC/NA application is cash PLUS whatever
+      // discount it absorbed (`discountApplied`) — automatic pronto pago OR
+      // a user-confirmed payment shortfall sent to Descuentos (RecibosService
+      // .crear()'s `confirmarDescuentoFaltante`, `cruce.util.ts`'s own
+      // `descuentoLinea`) — the factura is credited the full amount, the
+      // source's cash side is smaller either way, and this screen has no way
+      // to tell the two apart (nor does it need to — "Descuento Aplicado"
+      // covers both). Counting the whole thing as "pago" would overstate
+      // what the propietario actually paid, so the discount portion gets its
+      // own row/categoria — same bucket a Nota Crédito's own discount
+      // already uses — leaving only real cash under "pago". A Nota de
+      // Anticipo runs through the exact same cruce machinery
+      // (`ejecutarAplicacionManual`/`Fifo`) as a Recibo, so it can carry a
+      // discount too — never just RC.
       const montoDescuento =
         sourceType === 'RC' || sourceType === 'NA'
           ? (app.discountApplied ?? 0)
@@ -358,7 +362,7 @@ export class EstadoCuentaService {
           fecha,
           tipo: sourceType,
           numeroCompleto: sourceNumber,
-          concepto: 'Descuento Pronto Pago',
+          concepto: 'Descuento Aplicado',
           cargo: null,
           abono: montoDescuento,
           categoria: 'descuento',
