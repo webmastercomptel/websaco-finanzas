@@ -173,6 +173,7 @@ const celdaEstilo = (
 ) => ({
   flexGrow: COLUMNAS[i].peso,
   flexBasis: 0,
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
   textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
   paddingRight: 3,
   ...(variante === 'encabezado'
