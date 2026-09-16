@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { Style } from '@react-pdf/types';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
@@ -100,11 +101,10 @@ const styles = StyleSheet.create({
 const celdaStyle = (
   i: number,
   variante: 'encabezado' | 'normal' | 'barra',
-) => ({
+): Style => ({
   flexGrow: PESOS[i],
   flexBasis: 0,
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
-  textAlign: (i >= PRIMERA_NUMERICA ? 'right' : 'left') as 'right' | 'left',
+  textAlign: i >= PRIMERA_NUMERICA ? 'right' : 'left',
   paddingRight: 4,
   ...(variante === 'encabezado'
     ? styles.celdaEncabezado
