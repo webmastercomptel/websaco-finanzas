@@ -98,19 +98,20 @@ interface FilaLinea {
   baseGravable: number | null;
 }
 
-/** Same ascending tipo-then-número ordering the on-screen table uses
+/** Same descending tipo-then-número ordering the on-screen table uses
  *  (`compararPorTipoYNumero` in `movimiento-contable.tsx`) — `numeric: true`
- *  compares "RC-10" after "RC-9", not before as a plain string compare
- *  would. `sort` is stable, so lines already grouped by document stay
- *  grouped after this. */
+ *  compares "RC-10" before "RC-9", not after as a plain string compare
+ *  would; comparing b against a instead of a against b flips the direction
+ *  without losing that. `sort` is stable, so lines already grouped by
+ *  document stay grouped after this. */
 const collator = new Intl.Collator('es', {
   numeric: true,
   sensitivity: 'base',
 });
 function compararPorTipoYNumero(a: FilaLinea, b: FilaLinea): number {
   return (
-    collator.compare(a.tipoDocumento, b.tipoDocumento) ||
-    collator.compare(a.numeroDocumento, b.numeroDocumento)
+    collator.compare(b.tipoDocumento, a.tipoDocumento) ||
+    collator.compare(b.numeroDocumento, a.numeroDocumento)
   );
 }
 
