@@ -1,12 +1,10 @@
-import {
-  crearContexto,
-  escribirEncabezado,
-  escribirLabelValor,
-  escribirLinea,
-  escribirTabla,
-  formatoFecha,
-  formatoPeso,
-} from './pdf-helpers';
+import { createElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { reporteDocumento, renderizarPdf } from './react/document';
+import { EncabezadoDocumento } from './react/encabezado-documento';
+import { FilaLabelValor } from './react/fila-label-valor';
+import { Tabla } from './react/tabla';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaCarteraGeneral } from '../../contracts';
 
@@ -26,77 +24,96 @@ const MESES = [
   'Dic',
 ];
 
+const styles = StyleSheet.create({
+  seccionTitulo: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    marginTop: 10,
+    marginBottom: 2,
+  },
+  sinDatos: {
+    fontSize: 10,
+  },
+});
+
 /**
  * Generates a real PDF for the Cartera General dashboard: the same KPIs and
- * two breakdown tables (por concepto, tendencia de recaudo) the on-screen
- * page shows, printable/shareable outside the browser.
+ * two breakdown tables (Cartera por Concepto, Tendencia de Recaudo) the
+ * screen shows. React-pdf, built directly (no pdf-lib version kept behind a
+ * `?version=` toggle).
  */
 export async function generarPdfCarteraGeneral(
   reporte: RespuestaCarteraGeneral,
   copropiedad: CopropiedadDocument,
   fechaCorte: string,
-): Promise<Uint8Array> {
-  const ctx = await crearContexto();
+): Promise<Buffer> {
+  const contenido = createElement(
+    View,
+    null,
+    createElement(EncabezadoDocumento, {
+      copropiedad,
+      titulo: 'CARTERA GENERAL',
+      subtitulo: `Corte al ${formatoFecha(fechaCorte)}`,
+    }),
+    createElement(FilaLabelValor, {
+      label: 'Total Cartera:',
+      valor: formatoPeso(reporte.totalCartera),
+    }),
+    createElement(FilaLabelValor, {
+      label: 'Monto Vencido:',
+      valor: `${formatoPeso(reporte.totalVencido)} (${reporte.porcentajeVencido.toFixed(1)}%)`,
+    }),
+    createElement(FilaLabelValor, {
+      label: 'Total Pendiente (sin vencer):',
+      valor: formatoPeso(reporte.totalPendiente),
+    }),
+    reporte.totalCarteraMesAnterior !== null
+      ? createElement(FilaLabelValor, {
+          label: 'Total Cartera Mes Anterior:',
+          valor: formatoPeso(reporte.totalCarteraMesAnterior),
+        })
+      : null,
+    createElement(FilaLabelValor, {
+      label: 'Días Promedio Mora:',
+      valor: String(reporte.diasPromedioMora),
+    }),
 
-  escribirEncabezado(
-    ctx,
-    copropiedad,
-    'CARTERA GENERAL',
-    `Corte al ${formatoFecha(fechaCorte)}`,
+    createElement(
+      Text,
+      { style: styles.seccionTitulo },
+      'Cartera por Concepto',
+    ),
+    reporte.carteraPorConcepto.length === 0
+      ? createElement(
+          Text,
+          { style: styles.sinDatos },
+          'Sin cartera por concepto.',
+        )
+      : createElement(Tabla, {
+          columnas: ['Concepto', 'Saldo'],
+          filas: reporte.carteraPorConcepto.map((c) => [
+            c.nombre,
+            formatoPeso(c.saldo),
+          ]),
+          columnasNumericas: 1,
+        }),
+
+    createElement(
+      Text,
+      { style: styles.seccionTitulo },
+      'Tendencia de Recaudo (6 meses)',
+    ),
+    reporte.tendenciaRecaudo.length === 0
+      ? createElement(Text, { style: styles.sinDatos }, 'Sin datos de recaudo.')
+      : createElement(Tabla, {
+          columnas: ['Mes', 'Recaudo'],
+          filas: reporte.tendenciaRecaudo.map((r) => [
+            `${MESES[r.mes]} ${r.anio}`,
+            formatoPeso(r.monto),
+          ]),
+          columnasNumericas: 1,
+        }),
   );
 
-  escribirLabelValor(ctx, 'Total Cartera:', formatoPeso(reporte.totalCartera));
-  escribirLabelValor(
-    ctx,
-    'Monto Vencido:',
-    `${formatoPeso(reporte.totalVencido)} (${reporte.porcentajeVencido.toFixed(1)}%)`,
-  );
-  escribirLabelValor(
-    ctx,
-    'Total Pendiente (sin vencer):',
-    formatoPeso(reporte.totalPendiente),
-  );
-  if (reporte.totalCarteraMesAnterior !== null) {
-    escribirLabelValor(
-      ctx,
-      'Total Cartera Mes Anterior:',
-      formatoPeso(reporte.totalCarteraMesAnterior),
-    );
-  }
-  escribirLabelValor(
-    ctx,
-    'Días Promedio Mora:',
-    String(reporte.diasPromedioMora),
-  );
-
-  ctx.y -= 10;
-  escribirLinea(ctx, 'Cartera por Concepto', { bold: true });
-  if (reporte.carteraPorConcepto.length === 0) {
-    escribirLinea(ctx, 'Sin cartera por concepto.');
-  } else {
-    escribirTabla(
-      ctx,
-      ['Concepto', 'Saldo'],
-      reporte.carteraPorConcepto.map((c) => [c.nombre, formatoPeso(c.saldo)]),
-      { columnasNumericas: 1 },
-    );
-  }
-
-  ctx.y -= 10;
-  escribirLinea(ctx, 'Tendencia de Recaudo (6 meses)', { bold: true });
-  if (reporte.tendenciaRecaudo.length === 0) {
-    escribirLinea(ctx, 'Sin datos de recaudo.');
-  } else {
-    escribirTabla(
-      ctx,
-      ['Mes', 'Recaudo'],
-      reporte.tendenciaRecaudo.map((r) => [
-        `${MESES[r.mes]} ${r.anio}`,
-        formatoPeso(r.monto),
-      ]),
-      { columnasNumericas: 1 },
-    );
-  }
-
-  return ctx.doc.save();
+  return renderizarPdf(reporteDocumento(contenido));
 }

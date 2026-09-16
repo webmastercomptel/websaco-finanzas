@@ -8,6 +8,7 @@ import {
   CONTENT_WIDTH_PT_HORIZONTAL,
 } from './react/document';
 import { CreditoWebsaco } from './react/credito-websaco';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { FONDO_ZEBRA } from './react/paleta';
 import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -181,23 +182,6 @@ function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
 }
 
 const styles = StyleSheet.create({
-  masthead: {
-    marginBottom: 8,
-  },
-  nombre: {
-    fontSize: 12,
-    fontFamily: 'Helvetica-Bold',
-    marginBottom: 4,
-  },
-  subtitulo: {
-    fontSize: 10,
-    fontFamily: 'Helvetica-Bold',
-    marginBottom: 6,
-  },
-  regla: {
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#999999',
-  },
   filaEncabezado: {
     flexDirection: 'row',
     backgroundColor: '#ededed',
@@ -294,7 +278,7 @@ export async function generarPdfMovimientoContable(
   filtro: FiltroMovimientoContable = {},
 ): Promise<Buffer> {
   const reporte = filtrarReporte(reporteCompleto, filtro);
-  const subtitulo = `Movimiento Contable — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
+  const subtitulo = `${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
 
   const filas = aFilas(reporte);
   const totalDebitoGeneral = filas.reduce((s, f) => s + (f.debito ?? 0), 0);
@@ -313,13 +297,11 @@ export async function generarPdfMovimientoContable(
         : texto,
     );
 
-  const masthead = createElement(
-    View,
-    { style: styles.masthead },
-    createElement(Text, { style: styles.nombre }, copropiedad.name),
-    createElement(Text, { style: styles.subtitulo }, subtitulo),
-    createElement(View, { style: styles.regla }),
-  );
+  const masthead = createElement(EncabezadoInforme, {
+    copropiedad,
+    titulo: 'MOVIMIENTO CONTABLE',
+    subtitulo,
+  });
   const filaEncabezadoTabla = createElement(
     View,
     { style: styles.filaEncabezado, wrap: false },

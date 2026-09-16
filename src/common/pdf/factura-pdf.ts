@@ -1,13 +1,16 @@
-import { degrees, rgb, type PDFFont } from 'pdf-lib';
+import { createElement, type ReactElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { reporteDocumento, renderizarPdf } from './react/document';
+import { EncabezadoDocumento } from './react/encabezado-documento';
 import {
-  crearContexto,
-  escribirLinea,
-  escribirTabla,
-  embebirLogoWebsaco,
-  formatoPeso,
-  formatoFecha,
-  type PdfContext,
-} from './pdf-helpers';
+  DatosAdquiriente,
+  type PeriodoDocumento,
+} from './react/datos-adquiriente';
+import { CuerpoFactura, type CargoFactura } from './react/cuerpo-factura';
+import { ObservacionesFactura } from './react/observaciones-factura';
+import { MarcaDuplicado } from './react/marca-duplicado';
+import { CreditoWebsaco } from './react/credito-websaco';
 import type {
   FacturaLinea,
   TitularCongelado,
@@ -15,10 +18,6 @@ import type {
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
-
-const MARGIN_LEFT = 50;
-const GRIS_CLARO = rgb(0.9, 0.9, 0.9);
-const ROJO_DESCUENTO = rgb(0.75, 0, 0);
 
 /**
  * What the shared renderer needs, independent of whether it came from an
@@ -37,12 +36,13 @@ export interface DatosDocumentoFacturacion {
   lines: FacturaLinea[];
   descuento: InfoDescuentoProntoPago | null;
   /** ISO date string when this is a reprint ("DUPLICADO"), null otherwise —
-   *  see `dibujarMarcaDuplicadoFondo` for why this is drawn FIRST rather
-   *  than as a footer note. */
+   *  rendered via `MarcaDuplicado`, drawn FIRST in the content tree so every
+   *  real number/label painted afterward lands on top of it and stays
+   *  legible; the stamp only shows through blank space. */
   marcaDuplicado: string | null;
 }
 
-/** Display shape `dibujarDescuentoProntoPago` draws — the Spanish-named
+/** Display shape `ObservacionesFactura` draws — the Spanish-named
  *  on-page fields, kept distinct from `DescuentoProntoPago`
  *  (`common/facturacion/descuento-pronto-pago.util.ts`, the calculation's
  *  own English-named result) so the render layer never depends on that
@@ -52,568 +52,184 @@ export interface InfoDescuentoProntoPago {
   monto: number;
 }
 
+const styles = StyleSheet.create({
+  iva: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    textAlign: 'right',
+    marginTop: -6,
+    marginBottom: 8,
+  },
+  pieResolucion: {
+    fontSize: 8,
+    fontFamily: 'Helvetica',
+    marginTop: 4,
+  },
+});
+
 /**
- * Renders the "Consulta/Listado de Facturación"-style invoice layout the
- * predecessor system used — a per-concept "Saldo Anterior / Cargos del Mes
- * / Nuevo Saldo" table, not a generic line-item invoice — so the resident
- * sees both what this document charges AND their running balance per
- * concept, exactly like the WebSaco original. Shared by `generarPdfFactura`
- * and `generarPdfPrefactura`; the only difference between the two is the
- * `titulo` (and that a Factura's `lines[].balanceBefore/After` are frozen
- * at consolidación while a preliminar's are computed live). Returns the
- * still-open `PdfContext` rather than saved bytes — `generarPdfFactura`
- * still has its own DIAN footer and duplicado stamp to add on top before
- * saving; `generarPdfPrefactura` saves it as-is.
+ * Shared body for Factura and Prefactura — the "Consulta/Listado de
+ * Facturación"-style invoice layout the predecessor system used: a
+ * per-concept "Saldo Anterior / Cargos del Mes / Nuevo Saldo" table, not a
+ * generic line-item invoice — so the resident sees both what this document
+ * charges AND their running balance per concept, exactly like the WebSaco
+ * original. Composed from Bernardo's approved layout components
+ * (`EncabezadoDocumento`, `DatosAdquiriente`, `CuerpoFactura`,
+ * `ObservacionesFactura`). Returns page content only — `generarPdfFactura`
+ * still appends the DIAN footer on top before rendering; `generarPdfPrefactura`
+ * uses this as-is.
+ *
+ * The IVA breakout row (only when `totalIva > 0`) isn't part of
+ * `CuerpoFactura` — that component is Bernardo's in-flight file, so this adds
+ * it as a sibling line right below instead of editing his component.
  */
-export async function generarContextoDocumentoFacturacion(
+export function contenidoDocumentoFacturacion(
   datos: DatosDocumentoFacturacion,
   copropiedad: CopropiedadDocument,
-): Promise<PdfContext> {
-  const ctx = await crearContexto();
-
-  if (datos.marcaDuplicado) {
-    dibujarMarcaDuplicadoFondo(ctx, datos.marcaDuplicado);
-  }
-
-  await dibujarEncabezadoFactura(ctx, copropiedad, datos.titulo);
-  dibujarBloqueInmueble(ctx, datos);
-  dibujarTablaConceptos(ctx, datos.lines);
-  dibujarSubtotal(ctx, datos.lines);
-  dibujarTotalAPagar(ctx, datos.lines);
-
-  // Bordered box the predecessor left blank for a handwritten note/signature
-  // — now also carries the coproperty's own "Observaciones de facturación"
-  // (Parámetros de Facturación), centered, when there is one.
-  ctx.y -= 10;
-  const cajaAltura = 60;
-  const cajaAnchoObs = ctx.contentWidth * 0.6;
-  ctx.page.drawRectangle({
-    x: MARGIN_LEFT,
-    y: ctx.y - cajaAltura,
-    width: cajaAnchoObs,
-    height: cajaAltura,
-    borderColor: rgb(0.7, 0.7, 0.7),
-    borderWidth: 1,
-  });
-  dibujarObservacionesCentradas(
-    ctx,
-    copropiedad.billingNotes,
-    cajaAnchoObs,
-    cajaAltura,
+): ReactElement {
+  const totalSaldoAnterior = datos.lines.reduce(
+    (acc, l) => acc + l.balanceBefore,
+    0,
   );
-  dibujarDescuentoProntoPago(
-    ctx,
-    datos.descuento,
-    datos.lines,
-    cajaAnchoObs,
-    cajaAltura,
+  const totalCargosDelMes = datos.lines.reduce(
+    (acc, l) => acc + l.baseAmount,
+    0,
   );
-  ctx.y -= cajaAltura + 10;
+  const totalNuevoSaldo = totalSaldoAnterior + totalCargosDelMes;
+  const totalIva = datos.lines.reduce((acc, l) => acc + l.taxAmount, 0);
+  const totalAPagar = datos.lines.reduce((acc, l) => acc + l.balanceAfter, 0);
 
-  return ctx;
-}
+  const cargos: CargoFactura[] = datos.lines.map((l) => ({
+    nombre:
+      l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
+    saldoAnterior: l.balanceBefore,
+    cargosDelMes: l.baseAmount,
+    nuevoSaldo: l.balanceBefore + l.baseAmount,
+  }));
 
-/** Stamps "DUPLICADO — Documento original emitido el {fecha}" diagonally,
- *  light gray, across the page — drawn FIRST, before any other content, so
- *  every real number/label painted afterward lands fully opaque on top of
- *  it and stays legible; the stamp only shows through blank space. Drawing
- *  it LAST (as this used to, right before saving) painted it OVER the
- *  finished invoice instead, and a stamp this long — the whole sentence,
- *  rotated 30° — reaches most of the page's height, so it visibly crossed
- *  through the Periodo box and the cargos table, garbling both. */
-function dibujarMarcaDuplicadoFondo(
-  ctx: PdfContext,
-  fechaEmisionIso: string,
-): void {
-  const texto = `DUPLICADO — Documento original emitido el ${formatoFecha(fechaEmisionIso)}`;
-  ctx.page.drawText(texto, {
-    x: 40,
-    y: ctx.pageHeight * 0.4,
-    size: 16,
-    font: ctx.fontBold,
-    color: rgb(0.85, 0.85, 0.85),
-    rotate: degrees(28),
-  });
-}
+  const tasasIva = new Set(
+    datos.lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
+  );
+  const etiquetaIva = tasasIva.size === 1 ? `IVA ${[...tasasIva][0]}%` : 'IVA';
 
-/** Gray banner with the copropiedad name, contact block, and the document
- *  title (right-aligned) — the header every printed page of this document
- *  type shares. The WebSACO logo sits inside the same banner, right of the
- *  copropiedad name — same size as Estado de Cuenta's (see LOGO_WIDTH in
- *  pdf-helpers.ts). */
-async function dibujarEncabezadoFactura(
-  ctx: PdfContext,
-  copropiedad: CopropiedadDocument,
-  titulo: string,
-): Promise<void> {
-  const bannerAltura = 26;
-  const bannerTop = ctx.y + 8;
-  const bannerBottom = bannerTop - bannerAltura;
-  ctx.page.drawRectangle({
-    x: 0,
-    y: ctx.y - bannerAltura + 8,
-    width: ctx.pageWidth,
-    height: bannerAltura,
-    color: GRIS_CLARO,
-  });
-  ctx.page.drawText(copropiedad.name, {
-    x: MARGIN_LEFT,
-    y: ctx.y - 10,
-    size: 16,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  const {
-    image: logo,
-    width: logoWidth,
-    height: logoHeight,
-  } = await embebirLogoWebsaco(ctx.doc);
-  ctx.page.drawImage(logo, {
-    x: MARGIN_LEFT + ctx.contentWidth - logoWidth,
-    y: (bannerTop + bannerBottom) / 2 - logoHeight / 2,
-    width: logoWidth,
-    height: logoHeight,
-  });
-
-  ctx.y -= bannerAltura + 6;
-
-  const filaSuperior = ctx.y;
-  const contacto: [string, string | null][] = [
-    [
-      'NIT :',
-      copropiedad.taxId
-        ? copropiedad.taxIdVerificationDigit
-          ? `${copropiedad.taxId}-${copropiedad.taxIdVerificationDigit}`
-          : copropiedad.taxId
-        : null,
-    ],
-    // City rides on the same row as the address, "{address} - {city}" — not
-    // its own row, which would push this block taller than the "Codigo del
-    // Inmueble" block right after it.
-    [
-      'Dirección :',
-      copropiedad.address && copropiedad.city
-        ? `${copropiedad.address} - ${copropiedad.city}`
-        : (copropiedad.address ?? copropiedad.city),
-    ],
-    ['Celular :', copropiedad.phone],
-    ['Email :', copropiedad.email],
-  ];
-  for (const [label, valor] of contacto) {
-    ctx.page.drawText(label, {
-      x: MARGIN_LEFT,
-      y: ctx.y,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-    ctx.page.drawText(valor ?? '', {
-      x: MARGIN_LEFT + 70,
-      y: ctx.y,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-    ctx.y -= 13;
-  }
-
-  const tituloAncho = ctx.fontBold.widthOfTextAtSize(titulo, 13);
-  ctx.page.drawText(titulo, {
-    x: MARGIN_LEFT + ctx.contentWidth - tituloAncho,
-    y: filaSuperior,
-    size: 13,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  ctx.y -= 10;
-  ctx.page.drawLine({
-    start: { x: MARGIN_LEFT, y: ctx.y },
-    end: { x: MARGIN_LEFT + ctx.contentWidth, y: ctx.y },
-    thickness: 0.5,
-    color: rgb(0.6, 0.6, 0.6),
-  });
-  ctx.y -= 14;
-}
-
-/** Left column (unit + titular) alongside the bordered "Fecha/Periodo" box
- *  on the right — the predecessor's "ID: {código}" sits on the same row as
- *  "Codigo del Inmueble". */
-function dibujarBloqueInmueble(
-  ctx: PdfContext,
-  datos: DatosDocumentoFacturacion,
-): void {
-  const inicioBloque = ctx.y;
   const h = datos.holder;
   const identificacion = h
     ? [h.identificationType, h.identificationNumber].filter(Boolean).join(' ')
-    : '';
+    : null;
 
-  const filas: [string, string][] = [
-    ['Codigo del Inmueble :', datos.unitCode],
-    ['Nombre :', h?.name ?? ''],
-    ['Direccion :', h?.address ?? ''],
-    ['Email :', h?.email ?? ''],
-    ['Identificación :', identificacion],
-  ];
-  for (const [label, valor] of filas) {
-    ctx.page.drawText(label, {
-      x: MARGIN_LEFT,
-      y: ctx.y,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-    ctx.page.drawText(valor, {
-      x: MARGIN_LEFT + 100,
-      y: ctx.y,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-    ctx.y -= 13;
-  }
-  ctx.page.drawText(`ID: ${datos.unitCode}`, {
-    x: MARGIN_LEFT + 220,
-    y: inicioBloque,
-    size: 9,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-
-  // ── Bordered date/period box, right-aligned ──
-  const cajaAncho = 170;
-  const cajaX = MARGIN_LEFT + ctx.contentWidth - cajaAncho;
-  // 82pt is exactly the six lines drawn below (dd/mm/aaaa, Fecha, Vence,
-  // Periodo, Desde, Hasta) with NO bottom margin — the last line's baseline
-  // landed flush on the border. +8 gives it real breathing room.
-  const cajaAlto = 90;
-  const cajaYtope = inicioBloque + 4;
-  ctx.page.drawRectangle({
-    x: cajaX,
-    y: cajaYtope - cajaAlto,
-    width: cajaAncho,
-    height: cajaAlto,
-    borderColor: rgb(0.6, 0.6, 0.6),
-    borderWidth: 0.75,
-  });
-
-  let yCaja = cajaYtope - 12;
-  ctx.page.drawText('(dd/mm/aaaa)', {
-    x: cajaX + 10,
-    y: yCaja,
-    size: 7,
-    font: ctx.font,
-    color: rgb(0.4, 0.4, 0.4),
-  });
-  yCaja -= 14;
-  const filaCaja = (label: string, valor: string): void => {
-    ctx.page.drawText(label, {
-      x: cajaX + 10,
-      y: yCaja,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0.3, 0.3, 0.3),
-    });
-    ctx.page.drawText(valor, {
-      x: cajaX + 55,
-      y: yCaja,
-      size: 9,
-      font: ctx.font,
-      color: rgb(0, 0, 0),
-    });
-    yCaja -= 13;
+  const periodo: PeriodoDocumento = {
+    fecha: formatoFecha(datos.issueDate),
+    vence: formatoFecha(datos.dueDate),
+    desde: formatoFecha(datos.periodStart),
+    hasta: formatoFecha(datos.periodEnd),
   };
-  filaCaja('Fecha :', formatoFecha(datos.issueDate));
-  filaCaja('Vence :', formatoFecha(datos.dueDate));
-  yCaja -= 4;
-  ctx.page.drawText('Periodo', {
-    x: cajaX + 10,
-    y: yCaja,
-    size: 8,
-    font: ctx.font,
-    color: rgb(0.4, 0.4, 0.4),
-  });
-  yCaja -= 13;
-  filaCaja('Desde :', formatoFecha(datos.periodStart));
-  filaCaja('Hasta :', formatoFecha(datos.periodEnd));
 
-  // The next element (the concept table) must clear whichever column runs
-  // LOWER on the page — the left column (`ctx.y`, five 13pt rows) or this
-  // box (`cajaAlto`, taller than the five rows). Advancing by only the left
-  // column's own height, as this used to, left the box's bottom BELOW where
-  // the table then started drawing — the table's own header collided with
-  // "Periodo/Hasta" here, "montados" on top of each other.
-  const cajaBottom = cajaYtope - cajaAlto;
-  ctx.y = Math.min(ctx.y, cajaBottom) - 14;
-}
+  const descuentoProps = datos.descuento
+    ? {
+        fechaLimite: datos.descuento.fechaLimite.toISOString(),
+        montoConDescuento: totalAPagar - datos.descuento.monto,
+      }
+    : undefined;
+  const notas = copropiedad.billingNotes?.trim() || null;
 
-/** Greedy word-wrap: splits `texto` into lines no wider than `maxWidth` at
- *  `size`. Good enough for a short note — this box was never meant to hold
- *  a paragraph. */
-function envolverTexto(
-  font: PDFFont,
-  texto: string,
-  size: number,
-  maxWidth: number,
-): string[] {
-  const palabras = texto.split(/\s+/).filter(Boolean);
-  const lineas: string[] = [];
-  let actual = '';
-  for (const palabra of palabras) {
-    const prueba = actual ? `${actual} ${palabra}` : palabra;
-    if (actual && font.widthOfTextAtSize(prueba, size) > maxWidth) {
-      lineas.push(actual);
-      actual = palabra;
-    } else {
-      actual = prueba;
-    }
-  }
-  if (actual) lineas.push(actual);
-  return lineas;
-}
-
-/** Centers `observaciones` (Copropiedad.billingNotes) inside the box
- *  `dibujarObservacionesCentradas`'s caller just drew — both horizontally
- *  (each line) and vertically (the whole block within the box). Draws
- *  nothing when there is no note (the box stays exactly as blank as before
- *  this feature). Lines beyond what the box can hold are dropped rather
- *  than overflowing its border — a coproperty with a long note should
- *  shorten it, not have this box bleed into the next page element. */
-function dibujarObservacionesCentradas(
-  ctx: PdfContext,
-  observaciones: string | null,
-  cajaAncho: number,
-  cajaAltura: number,
-): void {
-  const texto = observaciones?.trim();
-  if (!texto) return;
-
-  const size = 9;
-  const lineHeight = 12;
-  const padding = 10;
-  const maxLineas = Math.max(
-    1,
-    Math.floor((cajaAltura - padding) / lineHeight),
+  return createElement(
+    View,
+    null,
+    datos.marcaDuplicado
+      ? createElement(MarcaDuplicado, { fechaEmisionIso: datos.marcaDuplicado })
+      : null,
+    createElement(EncabezadoDocumento, {
+      copropiedad,
+      titulo: datos.titulo,
+    }),
+    createElement(DatosAdquiriente, {
+      inmuebleCodigo: datos.unitCode,
+      nombre: h?.name ?? '',
+      direccion: h?.address ?? '',
+      celular: null,
+      email: h?.email ?? null,
+      identificacion,
+      uso: null,
+      periodo,
+    }),
+    createElement(CuerpoFactura, {
+      cargos,
+      totalSaldoAnterior,
+      totalCargosDelMes,
+      totalNuevoSaldo,
+      totalAPagar,
+    }),
+    totalIva > 0
+      ? createElement(
+          Text,
+          { style: styles.iva },
+          `${etiquetaIva}: ${formatoPeso(totalIva)}`,
+        )
+      : null,
+    notas || descuentoProps
+      ? createElement(ObservacionesFactura, {
+          texto: notas,
+          descuento: descuentoProps,
+        })
+      : null,
+    createElement(CreditoWebsaco),
   );
-  const lineas = envolverTexto(
-    ctx.font,
-    texto,
-    size,
-    cajaAncho - padding * 2,
-  ).slice(0, maxLineas);
-
-  const bloqueAltura = lineas.length * lineHeight;
-  let y = ctx.y - (cajaAltura - bloqueAltura) / 2 - lineHeight * 0.8;
-  for (const linea of lineas) {
-    const anchoLinea = ctx.font.widthOfTextAtSize(linea, size);
-    ctx.page.drawText(linea, {
-      x: MARGIN_LEFT + (cajaAncho - anchoLinea) / 2,
-      y,
-      size,
-      font: ctx.font,
-      color: rgb(0.2, 0.2, 0.2),
-    });
-    y -= lineHeight;
-  }
 }
 
-/** Red, centered promo note in the space to the RIGHT of the observaciones
- *  box (the remaining 40% of `contentWidth`, same row) — "Si cancela antes
- *  del {fecha límite}" / "Cancele $: {total a pagar - descuento}". Draws
- *  nothing when `descuento` is null (see `calcularDescuentoProntoPago` for
- *  every reason that can be — no % configured, no Administración line, the
- *  rounded amount is 0, or this cycle already carries mora). */
-function dibujarDescuentoProntoPago(
-  ctx: PdfContext,
-  descuento: InfoDescuentoProntoPago | null,
-  lines: FacturaLinea[],
-  cajaAnchoObs: number,
-  cajaAltura: number,
-): void {
-  if (!descuento) return;
+/**
+ * One Factura's full page content (body + DIAN footer) — factored out of
+ * `generarPdfFactura` so `facturas-lote-pdf.ts` can reuse the exact same
+ * per-invoice content across N pages of one `<Document>`, instead of
+ * rendering N separate PDFs and merging bytes (pdf-lib's approach, with no
+ * react-pdf equivalent).
+ */
+export function paginaFactura(
+  factura: FacturaDocument,
+  resolucion: ResolucionFacturacionDocument | null,
+  copropiedad: CopropiedadDocument,
+  opciones?: { duplicado?: boolean },
+): ReactElement {
+  const titulo = `${resolucion?.displayName ?? 'Cobro Expensas Comunes'} ${factura.fullNumber}`;
+  const descuento =
+    factura.discountAmount > 0 && factura.discountDeadline
+      ? { fechaLimite: factura.discountDeadline, monto: factura.discountAmount }
+      : null;
 
-  const totalAPagar = lines.reduce((acc, l) => acc + l.balanceAfter, 0);
-  const cancele = totalAPagar - descuento.monto;
+  const datos: DatosDocumentoFacturacion = {
+    titulo,
+    unitCode: factura.unitCode,
+    holder: factura.holder,
+    issueDate: factura.issueDate,
+    dueDate: factura.dueDate,
+    periodStart: factura.periodStart,
+    periodEnd: factura.periodEnd,
+    lines: factura.lines,
+    descuento,
+    marcaDuplicado: opciones?.duplicado
+      ? factura.issueDate.toISOString()
+      : null,
+  };
 
-  const areaX = MARGIN_LEFT + cajaAnchoObs;
-  const areaAncho = MARGIN_LEFT + ctx.contentWidth - areaX;
-  const size = 9;
-  const lineHeight = 12;
-  const lineas = [
-    `Si cancela antes del ${formatoFecha(descuento.fechaLimite)}`,
-    `Cancele $: ${cancele.toLocaleString('es-CO', { maximumFractionDigits: 0 })}`,
-  ];
+  const pie = resolucion
+    ? createElement(
+        Text,
+        { style: styles.pieResolucion },
+        `Resolución de Facturación DIAN No. ${resolucion.resolutionNumber} ` +
+          `del ${formatoFecha(resolucion.validFrom)}. ` +
+          `Numeración autorizada de ${resolucion.prefix}${resolucion.rangeFrom} ` +
+          `a ${resolucion.prefix}${resolucion.rangeTo}` +
+          (resolucion.validUntil
+            ? ` vigente hasta ${formatoFecha(resolucion.validUntil)}`
+            : ''),
+      )
+    : null;
 
-  const bloqueAltura = lineas.length * lineHeight;
-  let y = ctx.y - (cajaAltura - bloqueAltura) / 2 - lineHeight * 0.8;
-  for (const linea of lineas) {
-    const anchoLinea = ctx.fontBold.widthOfTextAtSize(linea, size);
-    ctx.page.drawText(linea, {
-      x: areaX + (areaAncho - anchoLinea) / 2,
-      y,
-      size,
-      font: ctx.fontBold,
-      color: ROJO_DESCUENTO,
-    });
-    y -= lineHeight;
-  }
-}
-
-/** "Nombre del Cargo / Saldo Anterior / Cargos del Mes / Nuevo Saldo" —
- *  the per-concept running-balance table. No totals row inside the table
- *  itself — `dibujarSubtotal` draws that same total, aligned to these same
- *  four columns, right below the table (labeled "Totales" and always shown,
- *  not just a table footer) so it reads as one continuous summary with the
- *  IVA/Total a Pagar lines that follow it, instead of two separate totals
- *  rows on the page.
- *
- *  "Cargos del Mes" shows each line's `baseAmount`, NOT `totalAmount` — when
- *  a cargo carries IVA, the tax portion is broken out separately by
- *  `dibujarSubtotal` right below this table, so showing it again here would
- *  double it visually. "Nuevo Saldo" is `balanceBefore + baseAmount`, NOT
- *  the frozen `balanceAfter` — same reasoning: the tax this cargo added to
- *  real cartera is real and stays in `balanceAfter` for the NEXT invoice's
- *  own "Saldo Anterior", but showing it again here, on top of the separate
- *  IVA line below, would double-count it on the page. For an untaxed line
- *  `baseAmount === totalAmount` (`taxAmount` 0), so both of these are
- *  no-ops for the common case. A taxed cargo's name also gets its rate
- *  appended (`Pintura (19%)`) so the reader can see, per row, which cargo
- *  is contributing to the IVA line below. */
-function dibujarTablaConceptos(ctx: PdfContext, lines: FacturaLinea[]): void {
-  const columnas = [
-    'Nombre del Cargo',
-    'Saldo Anterior',
-    'Cargos del Mes',
-    'Nuevo Saldo',
-  ];
-  const filas = lines.map((l) => [
-    l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
-    formatoPeso(l.balanceBefore),
-    formatoPeso(l.baseAmount),
-    formatoPeso(l.balanceBefore + l.baseAmount),
-  ]);
-
-  // One extra line of breathing room above these headers before the table
-  // starts — otherwise they sit right against the Codigo del Inmueble/date
-  // box block right above.
-  ctx.y -= 14;
-  escribirTabla(ctx, columnas, filas, {
-    columnasNumericas: 3,
-    // Same gray as the rule above "Codigo del Inmueble" (dibujarEncabezadoFactura),
-    // so the whole page reads as one consistent line color instead of this
-    // table's rules standing out darker/heavier than everything around them.
-    colorLineas: rgb(0.6, 0.6, 0.6),
-    // A hair more room than the default half-line gap — at the default, the
-    // first cargo's text baseline landed close enough to the header
-    // underline to visually touch it.
-    espacioAntesDatos: 0.7,
-  });
-}
-
-/** "Totales" — ALWAYS drawn, one row aligned to the SAME four columns as
- *  `dibujarTablaConceptos`'s table right above it (Nombre del Cargo / Saldo
- *  Anterior / Cargos del Mes / Nuevo Saldo). Reads as the table's running
- *  continuation rather than a second, separate totals block.
- *
- *  "IVA (tasa%)" — sum of every line's `taxAmount` — is drawn right below,
- *  but ONLY when this invoice actually carries tax (`totalIva > 0`); an
- *  invoice with no taxed cargo shows Totales and skips straight to "Total a
- *  Pagar", same as before this feature. The rate shown is the one common
- *  `taxRate` among the taxed lines when they all agree; a coproperty that
- *  (unusually) mixes different rates on one invoice gets the generic "IVA"
- *  label instead of a misleading single percentage. */
-function dibujarSubtotal(ctx: PdfContext, lines: FacturaLinea[]): void {
-  const totalAnterior = lines.reduce((acc, l) => acc + l.balanceBefore, 0);
-  const totalCargos = lines.reduce((acc, l) => acc + l.baseAmount, 0);
-  const totalIva = lines.reduce((acc, l) => acc + l.taxAmount, 0);
-
-  const colWidth = ctx.contentWidth / 4;
-  const valores = [totalAnterior, totalCargos, totalAnterior + totalCargos];
-  ctx.page.drawText('Totales', {
-    x: MARGIN_LEFT + 4,
-    y: ctx.y,
-    size: 10,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  valores.forEach((valor, indice) => {
-    const texto = formatoPeso(valor);
-    const textWidth = ctx.fontBold.widthOfTextAtSize(texto, 10);
-    ctx.page.drawText(texto, {
-      x: MARGIN_LEFT + colWidth * (indice + 2) - textWidth - 4,
-      y: ctx.y,
-      size: 10,
-      font: ctx.fontBold,
-      color: rgb(0, 0, 0),
-    });
-  });
-  ctx.y -= 14;
-
-  if (totalIva <= 0) return;
-  const tasas = new Set(
-    lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
+  return createElement(
+    View,
+    null,
+    contenidoDocumentoFacturacion(datos, copropiedad),
+    pie,
   );
-  const etiquetaIva = tasas.size === 1 ? `IVA ${[...tasas][0]}%` : 'IVA';
-
-  ctx.y -= 4;
-  ctx.page.drawText(etiquetaIva, {
-    x: MARGIN_LEFT + 4,
-    y: ctx.y,
-    size: 10,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  const textoIva = formatoPeso(totalIva);
-  const anchoIva = ctx.fontBold.widthOfTextAtSize(textoIva, 10);
-  ctx.page.drawText(textoIva, {
-    // Right-aligned to the SAME column edge as Totales' "Nuevo Saldo"
-    // total right above it — `escribirLabelValor`'s own right margin (flush
-    // to `contentWidth`, no padding) put this a few points further right
-    // than that column, reading as "corrida a la derecha" against it.
-    x: MARGIN_LEFT + colWidth * 4 - anchoIva - 4,
-    y: ctx.y,
-    size: 10,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  ctx.y -= 14;
-}
-
-/** "Total a Pagar" — the sum of every concept's `nuevoSaldo`, i.e. the
- *  full amount now outstanding across the unit's whole cartera, not just
- *  what this document charges (matches the predecessor's own semantics). */
-function dibujarTotalAPagar(ctx: PdfContext, lines: FacturaLinea[]): void {
-  const totalAPagar = lines.reduce((acc, l) => acc + l.balanceAfter, 0);
-  ctx.y -= 8;
-
-  const barraAltura = 20;
-  ctx.page.drawRectangle({
-    x: MARGIN_LEFT,
-    y: ctx.y - barraAltura + 6,
-    width: ctx.contentWidth,
-    height: barraAltura,
-    color: GRIS_CLARO,
-  });
-  const texto = 'Total a Pagar $';
-  ctx.page.drawText(texto, {
-    x: MARGIN_LEFT + 10,
-    y: ctx.y - 8,
-    size: 11,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  const valor = formatoPeso(totalAPagar);
-  const valorAncho = ctx.fontBold.widthOfTextAtSize(valor, 11);
-  ctx.page.drawText(valor, {
-    x: MARGIN_LEFT + ctx.contentWidth - 10 - valorAncho,
-    y: ctx.y - 8,
-    size: 11,
-    font: ctx.fontBold,
-    color: rgb(0, 0, 0),
-  });
-  ctx.y -= barraAltura + 4;
 }
 
 /**
@@ -629,48 +245,17 @@ function dibujarTotalAPagar(ctx: PdfContext, lines: FacturaLinea[]): void {
  * `discountDeadline` directly — frozen at `consolidar()` time
  * (`LotesFacturacionService`), never recalculated here. No `lote` lookup
  * needed for this anymore (see `FacturasController.generarPdf`, which used
- * to load it solely for this).
+ * to load it solely for this). React-pdf, built directly (no pdf-lib
+ * version kept behind a `?version=` toggle — direct cutover, same as the
+ * rest of this migration).
  */
 export async function generarPdfFactura(
   factura: FacturaDocument,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },
-): Promise<Uint8Array> {
-  const titulo = `${resolucion?.displayName ?? 'Cobro Expensas Comunes'} ${factura.fullNumber}`;
-  const descuento =
-    factura.discountAmount > 0 && factura.discountDeadline
-      ? { fechaLimite: factura.discountDeadline, monto: factura.discountAmount }
-      : null;
-  const ctx = await generarContextoDocumentoFacturacion(
-    {
-      titulo,
-      unitCode: factura.unitCode,
-      holder: factura.holder,
-      issueDate: factura.issueDate,
-      dueDate: factura.dueDate,
-      periodStart: factura.periodStart,
-      periodEnd: factura.periodEnd,
-      lines: factura.lines,
-      descuento,
-      marcaDuplicado: opciones?.duplicado
-        ? factura.issueDate.toISOString()
-        : null,
-    },
-    copropiedad,
+): Promise<Buffer> {
+  return renderizarPdf(
+    reporteDocumento(paginaFactura(factura, resolucion, copropiedad, opciones)),
   );
-
-  if (resolucion) {
-    const vigenteHasta = resolucion.validUntil
-      ? ` vigente hasta ${formatoFecha(resolucion.validUntil)}`
-      : '';
-    const resolucionTexto =
-      `Resolución de Facturación DIAN No. ${resolucion.resolutionNumber} ` +
-      `del ${formatoFecha(resolucion.validFrom)}. ` +
-      `Numeración autorizada de ${resolucion.prefix}${resolucion.rangeFrom} ` +
-      `a ${resolucion.prefix}${resolucion.rangeTo}${vigenteHasta}`;
-    escribirLinea(ctx, resolucionTexto, { size: 8 });
-  }
-
-  return ctx.doc.save();
 }

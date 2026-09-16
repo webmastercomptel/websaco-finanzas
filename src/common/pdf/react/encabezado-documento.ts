@@ -41,18 +41,31 @@ const styles = StyleSheet.create({
     fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
+  derecha: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+  },
   titulo: {
     fontSize: 11,
     fontFamily: 'Helvetica-Bold',
     textAlign: 'right',
   },
+  subtitulo: {
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
+    color: '#4d4d4d',
+    textAlign: 'right',
+    marginTop: 2,
+  },
 });
 
 /**
- * Approved letterhead for Factura and Estado de Cuenta: gray banner with
- * the copropiedad's own name, then a label/value contact block (NIT,
- * Dirección, Celular, Email) on the left and the document's own title
- * (bold, right-aligned, same row as the contact block's top) on the right.
+ * Approved letterhead, standardized across every vertical (portrait)
+ * document and report: gray banner with the copropiedad's own name, then a
+ * label/value contact block (NIT, Dirección, Celular, Email) on the left
+ * and the document's own title — plus an optional subtitle, e.g. a cut-off
+ * date or period — bold, right-aligned, same row as the contact block's
+ * top, on the right.
  *
  * No WebSACO logo in this banner — support's own feedback was that clients
  * are protective of a document that represents THEIR building, not the
@@ -61,11 +74,11 @@ const styles = StyleSheet.create({
  * subtle "Generado por" footer credit instead — same idea a lot of SaaS
  * invoicing tools use, mention in the margin, not the masthead.
  *
- * Distinct from `EncabezadoReporte` (text-only, no banner — used by Cartera
- * General/Conciliación) and from pdf-lib's own `dibujarEncabezadoDocumento`
- * (same banner spirit, but only shows NIT, not the full contact block) —
- * this is the react-pdf port of the newly approved design, wider than
- * either predecessor.
+ * `EncabezadoInforme` is this same letterhead's horizontal/landscape
+ * counterpart (every "informe" — Cartera por Conceptos, Vencimientos,
+ * Movimiento Contable, …): same banner and title placement, but the left
+ * column drops to just NIT, since a wide report table already crowds the
+ * page and Dirección/Celular/Email add nothing a report reader needs.
  *
  * Ends with a thin rule separating it from whatever body comes next
  * (`DatosAdquiriente`, in practice) — self-contained here so every caller
@@ -74,8 +87,9 @@ const styles = StyleSheet.create({
 export function EncabezadoDocumento(props: {
   copropiedad: CopropiedadDocument;
   titulo: string;
+  subtitulo?: string;
 }): ReactElement {
-  const { copropiedad, titulo } = props;
+  const { copropiedad, titulo, subtitulo } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
@@ -110,7 +124,14 @@ export function EncabezadoDocumento(props: {
         filaDato('Celular', copropiedad.phone ?? '—'),
         filaDato('Email', copropiedad.email ?? '—'),
       ),
-      createElement(Text, { style: styles.titulo }, titulo),
+      createElement(
+        View,
+        { style: styles.derecha },
+        createElement(Text, { style: styles.titulo }, titulo),
+        subtitulo
+          ? createElement(Text, { style: styles.subtitulo }, subtitulo)
+          : null,
+      ),
     ),
     createElement(View, { style: styles.separador }),
   );

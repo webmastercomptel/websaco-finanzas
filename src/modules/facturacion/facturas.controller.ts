@@ -10,7 +10,6 @@ import { FacturasService } from './facturas.service';
 import { ListarFacturasDto } from './dto/listar-facturas.dto';
 import type { Factura, Paginado } from '../../contracts';
 import { generarPdfFactura } from '../../common/pdf/factura-pdf';
-import { generarPdfFacturaReactPdf } from '../../common/pdf/factura-pdf.react';
 import {
   ResolucionFacturacion,
   ResolucionFacturacionDocument,
@@ -60,9 +59,6 @@ export class FacturasController {
   async generarPdf(
     @Param('id') id: string,
     @Query('duplicado') duplicado: string | undefined,
-    // TEMPORARY — pdf-lib -> react-pdf migration QA toggle, ?version=new.
-    // Remove once react-pdf fully replaces generarPdfFactura.
-    @Query('version') version: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -89,14 +85,9 @@ export class FacturasController {
       );
     }
 
-    const bytes =
-      version === 'new'
-        ? await generarPdfFacturaReactPdf(factura, resolucion, copropiedad, {
-            duplicado: duplicado === 'true',
-          })
-        : await generarPdfFactura(factura, resolucion, copropiedad, {
-            duplicado: duplicado === 'true',
-          });
+    const bytes = await generarPdfFactura(factura, resolucion, copropiedad, {
+      duplicado: duplicado === 'true',
+    });
 
     res.set({
       'Content-Type': 'application/pdf',
