@@ -90,6 +90,7 @@ async function generarPorInmueble(
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
+    fechaGeneracion: new Date(),
   });
 
   if (reporte.grupos.length === 0) {
@@ -282,6 +283,7 @@ async function generarPorConcepto(
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
+    fechaGeneracion: new Date(),
   });
 
   const grupos = reporte.grupos

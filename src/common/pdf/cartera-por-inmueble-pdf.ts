@@ -27,6 +27,7 @@ export async function generarPdfCarteraPorInmueble(
     copropiedad,
     titulo: 'CARTERA POR INMUEBLE',
     subtitulo: `Inmueble ${reporte.inmuebleCodigo}${reporte.propietario ? ` — ${reporte.propietario}` : ''} — Corte al ${formatoFecha(reporte.fechaCorte)}`,
+    fechaGeneracion: new Date(),
   });
 
   const conceptosIndividuales = reporte.cargosPorConcepto.slice(

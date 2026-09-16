@@ -1,5 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFechaHora } from '../pdf-helpers';
 import type { CopropiedadDocument } from '../../../database/schemas/copropiedades/copropiedad.schema';
 
 const styles = StyleSheet.create({
@@ -26,6 +27,7 @@ const styles = StyleSheet.create({
   },
   dato: {
     flexDirection: 'row',
+    marginBottom: 2,
   },
   etiqueta: {
     fontSize: 8.5,
@@ -67,14 +69,25 @@ const styles = StyleSheet.create({
  * Repeats on every page for a manually-paginated report (see
  * `vencimientos-cartera-pdf.ts` and siblings) exactly like
  * `EncabezadoDocumento` would if it were reused per-page — one call per
- * page's own content, no `position: absolute`/`fixed` involved.
+ * page's own content, no `position: absolute`/`fixed` involved. Each
+ * caller computes its own `new Date()` once, before building any page, and
+ * passes it in as `fechaGeneracion` — never computed inside this
+ * component, so every page of one report shows the exact same instant
+ * instead of drifting by however long that page took to render.
+ *
+ * `fechaGeneracion` matters here specifically: these are live snapshots of
+ * current cartera/accounting state (unlike Factura/Recibo, each pinned to
+ * its own already-issued date) — printing exactly when a copy was produced
+ * is what keeps a re-run later, showing different numbers, from being
+ * passed off as the original.
  */
 export function EncabezadoInforme(props: {
   copropiedad: CopropiedadDocument;
   titulo: string;
   subtitulo?: string;
+  fechaGeneracion: Date;
 }): ReactElement {
-  const { copropiedad, titulo, subtitulo } = props;
+  const { copropiedad, titulo, subtitulo, fechaGeneracion } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
@@ -92,9 +105,23 @@ export function EncabezadoInforme(props: {
       { style: styles.filaInfo },
       createElement(
         View,
-        { style: styles.dato },
-        createElement(Text, { style: styles.etiqueta }, 'NIT:'),
-        createElement(Text, { style: styles.valor }, nit),
+        null,
+        createElement(
+          View,
+          { style: styles.dato },
+          createElement(Text, { style: styles.etiqueta }, 'NIT:'),
+          createElement(Text, { style: styles.valor }, nit),
+        ),
+        createElement(
+          View,
+          { style: styles.dato },
+          createElement(Text, { style: styles.etiqueta }, 'Generado:'),
+          createElement(
+            Text,
+            { style: styles.valor },
+            formatoFechaHora(fechaGeneracion),
+          ),
+        ),
       ),
       createElement(
         View,

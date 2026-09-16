@@ -202,6 +202,7 @@ export async function generarPdfVencimientosCartera(
     );
 
   const bloquesFilas = agruparEnPaginas(reporte.filas, FILAS_POR_PAGINA);
+  const fechaGeneracion = new Date();
 
   const paginas = bloquesFilas.map((bloque, indicePagina) => {
     const esUltima = indicePagina === bloquesFilas.length - 1;
@@ -213,6 +214,7 @@ export async function generarPdfVencimientosCartera(
         copropiedad,
         titulo: 'VENCIMIENTOS DE CARTERA',
         subtitulo,
+        fechaGeneracion,
       }),
       createElement(
         View,
