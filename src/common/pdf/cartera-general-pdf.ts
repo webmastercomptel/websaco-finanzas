@@ -96,6 +96,7 @@ export async function generarPdfCarteraGeneral(
             formatoPeso(c.saldo),
           ]),
           columnasNumericas: 1,
+          striped: true,
         }),
 
     createElement(
@@ -112,6 +113,7 @@ export async function generarPdfCarteraGeneral(
             formatoPeso(r.monto),
           ]),
           columnasNumericas: 1,
+          striped: true,
         }),
   );
 
