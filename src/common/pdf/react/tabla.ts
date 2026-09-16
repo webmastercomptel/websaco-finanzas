@@ -65,6 +65,11 @@ export function Tabla(props: {
    *  `CuerpoFactura` use) — off by default since not every table asked
    *  for it, on for Estado de Cuenta's Detalle de Movimientos. */
   striped?: boolean;
+  /** Overrides both the header and data cell font size (default 10) —
+   *  for a "detallado" layout with several extra fixed columns on top of
+   *  the usual concept columns, a smaller size keeps every cell's own
+   *  text from overflowing or wrapping into its neighbor. */
+  fontSize?: number;
 }): ReactElement {
   const { columnas, filas } = props;
   const numColumnas = columnas.length;
@@ -77,6 +82,7 @@ export function Tabla(props: {
     textAlign: i >= primeraNumerica ? 'right' : 'left',
     paddingRight: 4,
     ...(encabezado ? styles.celdaEncabezado : styles.celda),
+    ...(props.fontSize ? { fontSize: props.fontSize } : null),
   });
 
   return createElement(
