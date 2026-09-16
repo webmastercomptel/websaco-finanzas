@@ -19,6 +19,9 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
  * `SaldoDocumentoOrigen`'s own docblock). The caller resolves them (batch-read
  * from that live ledger) and passes them in here, same pattern `toFactura`
  * already uses for its own `saldoPendiente`.
+ *
+ * `montoOtrosIngresos`, unlike those two, IS read straight off the document
+ * — it's frozen at creation (`Recibo.otherIncomeAmount`), never recomputed.
  */
 export const toRecibo = (
   doc: ReciboDocument,
@@ -39,6 +42,7 @@ export const toRecibo = (
   observaciones: doc.notes,
   montoAplicado,
   montoSinAplicar,
+  montoOtrosIngresos: doc.otherIncomeAmount ?? 0,
   estado: doc.status,
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,

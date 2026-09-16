@@ -450,6 +450,12 @@ export interface Recibo {
   observaciones: string | null;
   montoAplicado: Monto;
   montoSinAplicar: Monto;
+  /** Portion of a payment SURPLUS the user sent to Otros Ingresos instead
+   *  of Anticipos (`destinoSobrante: 'otros_ingresos'`), manual mode only —
+   *  0 in every other case. Distinct from `montoAplicado`: this money never
+   *  touched cartera, so it can't be folded into it (see `RecibosService`'s
+   *  own note on the bug this field fixes). */
+  montoOtrosIngresos: Monto;
   estado: 'activo' | 'anulado';
   motivoAnulacion: MotivoAnulacionRecibo | null;
   detalleAnulacion: string | null;

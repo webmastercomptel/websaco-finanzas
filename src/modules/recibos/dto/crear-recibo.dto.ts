@@ -23,6 +23,8 @@ export const MEDIOS_PAGO = [
   'efectivo',
 ] as const;
 
+export const DESTINOS_SOBRANTE = ['anticipo', 'otros_ingresos'] as const;
+
 export class CrearReciboDto {
   /** Which configured tipo de documento (código, category IN) numbers this
    *  receipt — a building may have more than one, e.g. "RC" and "RT". */
@@ -73,4 +75,27 @@ export class CrearReciboDto {
   @IsOptional()
   @IsBoolean()
   aplicacionAutomatica?: boolean;
+
+  /** Explicit user confirmation (manual mode only — see
+   *  `RecibosService.crear()`'s own note) to send the shortfall between
+   *  `aplicaciones`' sum and `montoRecibido` to the coproperty's own
+   *  `discountsDebitAccount`, instead of rejecting the request outright.
+   *  Never inferred/automatic: a receipt short by a small amount could be a
+   *  digitación error, not a deliberate write-off — the caller must ask. */
+  @IsOptional()
+  @IsBoolean()
+  confirmarDescuentoFaltante?: boolean;
+
+  /** Manual mode only: where a payment SURPLUS goes (`montoRecibido` >
+   *  what `aplicaciones` asked for) — `'anticipo'` reproduces today's
+   *  always-silent behavior (client credit, re-appliable later);
+   *  `'otros_ingresos'` books it as revenue instead, to
+   *  `discountsCreditAccount`'s sibling `otherIncomeCreditAccount`, and it
+   *  stops being available for a future Nota de Anticipo. Required
+   *  whenever a manual submission produces a surplus — never inferred,
+   *  same reasoning as `confirmarDescuentoFaltante`. Automática/FIFO never
+   *  asks: leaving cash unapplied there is routine, not a caller decision. */
+  @IsOptional()
+  @IsIn(DESTINOS_SOBRANTE)
+  destinoSobrante?: (typeof DESTINOS_SOBRANTE)[number];
 }

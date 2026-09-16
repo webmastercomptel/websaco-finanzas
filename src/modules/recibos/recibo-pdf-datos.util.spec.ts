@@ -236,6 +236,31 @@ describe('construirDatosImpresionRecibo', () => {
     expect(totalDebito).toBe(totalCredito);
   });
 
+  it('con otherIncomeAmount > 0, credita Otros Ingresos en vez de Anticipos', async () => {
+    // Mismo recibo que el primer caso de anticipo (500000 recibidos, 300000
+    // aplicados, 200000 de sobrante) pero con ese sobrante confirmado como
+    // Otros Ingresos (`destinoSobrante: 'otros_ingresos'`) — la línea debe
+    // salir en SU cuenta (429505), nunca en Anticipos (210505), el bug
+    // reportado en vivo (screenshot: salió en 28050501 "Anticipos").
+    const aplicacion = aplicacionFV({ amountApplied: 300000 });
+    const datos = await construirDatosImpresionRecibo(
+      reciboBase({ receivedAmount: 500000, otherIncomeAmount: 200000 }),
+      [aplicacion],
+      copropiedadBase({ otherIncomeCreditAccount: '429505' }),
+      COP,
+      modelosVacios() as never,
+    );
+
+    expect(datos.lineas.some((l) => l.cuentaCodigo === '210505')).toBe(false);
+    const filaOtrosIngresos = datos.lineas.find(
+      (l) => l.cuentaCodigo === '429505',
+    );
+    expect(filaOtrosIngresos).toMatchObject({
+      credito: 200000,
+      tipoDocumento: null,
+    });
+  });
+
   it('no agrega línea de anticipo cuando el recibo se aplicó por completo', async () => {
     const aplicacion = aplicacionFV({ amountApplied: 500000 });
     const datos = await construirDatosImpresionRecibo(

@@ -46,6 +46,11 @@ export interface ModelosDatosImpresionRecibo {
  * amount. A balancing débito line for the discount (mirroring
  * `construirAsientoCruce`'s own `descuento` debit) is added when this
  * Recibo absorbed one.
+ *
+ * The leftover line itself credits `advancesAccount` OR
+ * `otherIncomeCreditAccount` depending on `recibo.otherIncomeAmount` — same
+ * choice `postearAsientoRecibo` made at creation (`destinoSobrante`), never
+ * unconditionally Anticipos.
  */
 export async function construirDatosImpresionRecibo(
   recibo: ReciboDocument,
@@ -56,6 +61,8 @@ export async function construirDatosImpresionRecibo(
 ): Promise<DatosReciboImpresion> {
   const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaOtrosIngresos =
+    copropiedad.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaDescuentos =
     copropiedad.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
 
@@ -148,9 +155,17 @@ export async function construirDatosImpresionRecibo(
   );
   const anticipo = recibo.receivedAmount - (totalAplicado - totalDescuento);
   if (anticipo > 0) {
-    codigosUsados.add(cuentaAnticipos);
+    // A Recibo never splits its leftover between the two — `destinoSobrante`
+    // is one choice for the whole surplus (see `RecibosService.crear`'s own
+    // `enviarAOtrosIngresos`) — so `otherIncomeAmount > 0` alone decides
+    // which account this ONE line credits. Same account this Recibo's own
+    // creation asiento actually posted to (`postearAsientoRecibo`), never
+    // unconditionally Anticipos as before.
+    const cuentaLeftover =
+      recibo.otherIncomeAmount > 0 ? cuentaOtrosIngresos : cuentaAnticipos;
+    codigosUsados.add(cuentaLeftover);
     lineas.push({
-      cuentaCodigo: cuentaAnticipos,
+      cuentaCodigo: cuentaLeftover,
       cuentaNombre: '',
       tipoDocumento: null,
       numeroDocumento: null,

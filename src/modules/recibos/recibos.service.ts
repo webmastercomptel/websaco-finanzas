@@ -62,6 +62,7 @@ import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
   ajustarSaldosCarteraPorDistribucion,
+  decrementarSaldoDocumentoOrigen,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
@@ -259,10 +260,40 @@ export class RecibosService {
       (acc, a) => acc + a.montoAplicado,
       0,
     );
-    if (sumaSolicitada > dto.montoRecibido) {
+    // A shortfall (paying $848.000 against $849.000 of aplicaciones, say)
+    // is rejected UNLESS the caller explicitly confirmed sending the
+    // difference to the coproperty's own cuenta de Descuentos — never
+    // inferred, since it could just as easily be a digitación error. Manual
+    // mode only: `aplicacionAutomatica`'s own FIFO walk never over-applies
+    // beyond `montoRecibido` in the first place, so this never fires there.
+    const diferenciaSolicitada = sumaSolicitada - dto.montoRecibido;
+    if (diferenciaSolicitada > 0 && !dto.confirmarDescuentoFaltante) {
       throw new BadRequestException(
-        `La suma de las aplicaciones (${sumaSolicitada}) no puede superar ` +
-          `el monto recibido (${dto.montoRecibido})`,
+        `La suma de las aplicaciones (${sumaSolicitada}) supera el monto recibido ` +
+          `(${dto.montoRecibido}) por ${diferenciaSolicitada}. Confirme el envío de ` +
+          `la diferencia a la cuenta de Descuentos para continuar.`,
+      );
+    }
+    const diferenciaConfirmada =
+      diferenciaSolicitada > 0 ? diferenciaSolicitada : 0;
+
+    // Mirror check for the OTHER sign: a manual submission that leaves cash
+    // over must say where it goes — Anticipos (today's only, silent
+    // behavior) or Otros Ingresos. A naive pre-transaction estimate, same
+    // caveat as `diferenciaSolicitada` above (an early-payment discount
+    // elsewhere in this same recibo could shift the real figure slightly;
+    // harmless either way, since the fallback stays Anticipos). Automática
+    // never asks — FIFO leaving cash unapplied is routine, not a decision.
+    const sobranteSolicitado = -diferenciaSolicitada;
+    if (
+      dto.aplicaciones?.length &&
+      sobranteSolicitado > 0 &&
+      !dto.destinoSobrante
+    ) {
+      throw new BadRequestException(
+        `Sobran ${sobranteSolicitado} de lo recibido (${dto.montoRecibido}) ` +
+          `frente a lo aplicado (${sumaSolicitada}). Indique si van a Anticipos ` +
+          `o a Otros Ingresos.`,
       );
     }
 
@@ -372,6 +403,7 @@ export class RecibosService {
           creado,
           dto.aplicaciones,
           accountId,
+          diferenciaConfirmada,
         );
         totalAplicadoAhora = resultado.creadas.reduce(
           (acc, a) => acc + a.amountApplied,
@@ -380,6 +412,8 @@ export class RecibosService {
         desglose = resultado.desglose;
         montoAplicadoMora = resultado.montoAplicadoMora;
         resumenAplicaciones = resultado.resumen;
+        // Already includes `diferenciaConfirmada` — `ejecutarAplicacionManual`
+        // folds it in (see that function's own `descuentoConfirmadoExtra`).
         montoDescuentoAhora = resultado.montoDescuentoTotal;
       } else if (dto.aplicacionAutomatica) {
         const resultado = await this.aplicarFifo(
@@ -398,6 +432,11 @@ export class RecibosService {
         resumenAplicaciones = resultado.resumen;
         montoDescuentoAhora = resultado.montoDescuentoTotal;
       }
+      // Don't claim "pronto pago" when (part of) the discount is really a
+      // manually confirmed shortfall — see `postearAsientoRecibo`'s own
+      // note on `descripcionDescuento`.
+      const descripcionDescuento =
+        diferenciaConfirmada > 0 ? 'Descuento — recibo de caja' : undefined;
 
       // `totalAplicadoAhora` already includes any early-payment discount
       // summed in (see `evaluarAplicacionConDescuento`, cruce.util.ts) — the
@@ -406,6 +445,12 @@ export class RecibosService {
       // over as anticipo" (Observaciones, `postearAsientoRecibo`'s
       // `montoSinAplicar`) must use this, never `totalAplicadoAhora` itself.
       const cashAplicadoAhora = totalAplicadoAhora - montoDescuentoAhora;
+      // 0 in the shortfall case (folded away above) — only positive for a
+      // genuine surplus, which only a Manual submission can leave (see the
+      // `sobranteSolicitado` guard).
+      const sobranteReal = dto.montoRecibido - cashAplicadoAhora;
+      const enviarAOtrosIngresos =
+        dto.destinoSobrante === 'otros_ingresos' && sobranteReal > 0;
 
       // Observaciones is redacted from the ACTUAL applications, never
       // whatever the frontend guessed beforehand — Automática mode only
@@ -414,20 +459,37 @@ export class RecibosService {
       // known. A caller-supplied `dto.observaciones` always wins verbatim
       // (a Manual submission already sent its own client-composed text; see
       // `recibo-nuevo.tsx`'s `observacionesSugeridas`).
+      const camposFrozen: Record<string, unknown> = {};
       if (!dto.observaciones) {
-        const generado = redactarObservaciones(
+        let generado = redactarObservaciones(
           resumenAplicaciones,
-          dto.montoRecibido - cashAplicadoAhora > 0,
+          !enviarAOtrosIngresos && sobranteReal > 0,
         );
-        if (generado) {
-          await this.recibos
-            .findOneAndUpdate(
-              { _id: creado._id, coPropertyId },
-              { $set: { notes: generado } },
-              { session },
-            )
-            .exec();
+        if (diferenciaConfirmada > 0) {
+          const nota = `Diferencia de ${diferenciaConfirmada} enviada a Descuentos`;
+          generado = generado ? `${generado} — ${nota}` : nota;
         }
+        if (enviarAOtrosIngresos) {
+          const nota = `Sobrante de ${sobranteReal} enviado a Otros Ingresos`;
+          generado = generado ? `${generado} — ${nota}` : nota;
+        }
+        if (generado) {
+          camposFrozen.notes = generado;
+        }
+      }
+      // Frozen alongside `notes` — see `Recibo.otherIncomeAmount`'s own
+      // docblock on why this can't be derived later the way a discount can.
+      if (enviarAOtrosIngresos) {
+        camposFrozen.otherIncomeAmount = sobranteReal;
+      }
+      if (Object.keys(camposFrozen).length > 0) {
+        await this.recibos
+          .findOneAndUpdate(
+            { _id: creado._id, coPropertyId },
+            { $set: camposFrozen },
+            { session },
+          )
+          .exec();
       }
 
       // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
@@ -444,20 +506,50 @@ export class RecibosService {
         coPropertyId,
         reciboActual!,
         totalAplicadoAhora,
-        dto.montoRecibido - cashAplicadoAhora,
+        sobranteReal,
         desglose,
         montoAplicadoMora,
         montoDescuentoAhora,
+        descripcionDescuento,
+        dto.destinoSobrante,
       );
+
+      if (enviarAOtrosIngresos) {
+        // Same reasoning as the shortfall's fold into `montoDescuentoAhora`
+        // above, mirrored: money booked as Otros Ingresos in the asiento
+        // above must stop being re-appliable as if it were a client
+        // anticipo — otherwise it would be counted twice (once as revenue
+        // today, once again if someone later applies a Nota de Anticipo
+        // against this same recibo).
+        await decrementarSaldoDocumentoOrigen(
+          this.recibos,
+          this.saldoDocumentoOrigen,
+          session,
+          coPropertyId,
+          creado._id,
+          sobranteReal,
+          'activo',
+        );
+      }
 
       const final = await this.recibos
         .findOne({ _id: creado._id, coPropertyId })
         .session(session)
         .exec();
+      // "Aplicado" is the full amount CREDITED TO CARTERA — cartera-cash
+      // plus whatever discount absorbed the rest (see `anular()`'s own
+      // `montoAplicadoCarteraTotal`, the established convention this
+      // mirrors: `recibo.appliedAmount` alone is cash-only, same trap).
+      // `totalAplicadoAhora` already includes any discount, confirmed or
+      // automatic — see its own comment above. Otros Ingresos is deliberately
+      // NEVER folded in here — it never touched cartera at all, so it's its
+      // own field (`montoOtrosIngresos`, read by `toRecibo` straight off
+      // `final.otherIncomeAmount`, just persisted above) instead of being
+      // added to "Aplicado", which previously made the two indistinguishable.
       return toRecibo(
         final!,
-        cashAplicadoAhora,
-        dto.montoRecibido - cashAplicadoAhora,
+        totalAplicadoAhora,
+        enviarAOtrosIngresos ? 0 : sobranteReal,
       );
     });
   }
@@ -675,15 +767,36 @@ export class RecibosService {
       // would leave that sum short of what was actually applied, silently
       // understating the reversal — the Recibo's own cached total is the
       // one number that is always right regardless of what `lines` shows
-      // today, months after the original application.
+      // today, months after the original application. `otherIncomeAmount`
+      // is subtracted for the same reason `findOne`/`findAll` subtract it:
+      // `recibo.appliedAmount` (from `SaldoDocumentoOrigen`) was decremented
+      // for it too, but it never touched cartera at all — see below, where
+      // it's reversed on the OTHER side of this entry instead.
+      const otherIncomeAmount = recibo.otherIncomeAmount ?? 0;
       const montoAplicadoCarteraTotal =
-        recibo.appliedAmount + montoDescuentoTotal;
+        recibo.appliedAmount - otherIncomeAmount + montoDescuentoTotal;
+      // A Recibo never has both a real anticipo leftover AND an Otros
+      // Ingresos amount (`crear()`'s `destinoSobrante` is a single choice
+      // per document) — whichever is nonzero picks which account/description
+      // this reversal's second debit line uses. `otherIncomeAmount === 0`
+      // (every Recibo before this feature, and every one that chose
+      // Anticipos) reproduces the original, untouched behavior exactly.
+      const reversaOtrosIngresos = otherIncomeAmount > 0;
+      const cuentaAnticiposReversar = reversaOtrosIngresos
+        ? (copropiedad?.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR)
+        : cuentaAnticipos;
+      const montoAnticiposReversar = reversaOtrosIngresos
+        ? otherIncomeAmount
+        : recibo.unappliedAmount;
+      const descripcionAnticiposReversar = reversaOtrosIngresos
+        ? 'Reversión de otros ingresos — anulación de recibo de caja'
+        : undefined;
       let entries = construirContraAsientoCruce(
         recibo.destinationAccount,
         cuentaCartera,
-        cuentaAnticipos,
+        cuentaAnticiposReversar,
         montoAplicadoCarteraTotal,
-        recibo.unappliedAmount,
+        montoAnticiposReversar,
         recibo.receivedAmount,
         'RC',
         cuentasOrdenDe(copropiedad),
@@ -692,6 +805,8 @@ export class RecibosService {
         montoDescuentoTotal > 0
           ? { cuenta: cuentaDescuentos, monto: montoDescuentoTotal }
           : undefined,
+        undefined,
+        descripcionAnticiposReversar,
       );
       entries = await this.conAuxiliares(
         session,
@@ -811,25 +926,54 @@ export class RecibosService {
     ]);
 
     const ids = documentos.map((d) => d._id);
-    const saldos = ids.length
-      ? await this.saldoDocumentoOrigen
-          .find({ documentoId: { $in: ids } })
-          .exec()
-      : [];
+    const [saldos, aplicacionesActivas] = await Promise.all([
+      ids.length
+        ? this.saldoDocumentoOrigen.find({ documentoId: { $in: ids } }).exec()
+        : [],
+      // Same discount-add-back this module's own `anular()`/`findOne` already
+      // document — `SaldoDocumentoOrigen` only tracks cash, so a discount
+      // (automatic or a confirmed shortfall) has to be summed back in
+      // separately for "Aplicado" to match what each document actually saw.
+      ids.length
+        ? this.aplicaciones
+            .find({
+              coPropertyId,
+              sourceType: 'RC',
+              sourceId: { $in: ids },
+              status: 'activa',
+            })
+            .exec()
+        : [],
+    ]);
     const saldoPorDocumento = new Map(
       saldos.map((s) => [
         s.documentoId.toString(),
         { montoOriginal: s.montoOriginal, saldoDisponible: s.saldoDisponible },
       ]),
     );
+    const descuentoPorRecibo = new Map<string, number>();
+    for (const a of aplicacionesActivas) {
+      const clave = a.sourceId.toString();
+      descuentoPorRecibo.set(
+        clave,
+        (descuentoPorRecibo.get(clave) ?? 0) + a.discountApplied,
+      );
+    }
 
     return {
       items: documentos.map((doc) => {
-        const saldo = saldoPorDocumento.get(doc._id.toString());
+        const idDoc = doc._id.toString();
+        const saldo = saldoPorDocumento.get(idDoc);
         const unappliedAmount = saldo?.saldoDisponible ?? 0;
-        const appliedAmount = saldo
+        const appliedAmountCash = saldo
           ? saldo.montoOriginal - saldo.saldoDisponible
           : 0;
+        // Subtract `otherIncomeAmount` for the same reason `findOne` does —
+        // `doc` already carries it, no extra query needed.
+        const appliedAmount =
+          appliedAmountCash -
+          (doc.otherIncomeAmount ?? 0) +
+          (descuentoPorRecibo.get(idDoc) ?? 0);
         return toRecibo(doc, appliedAmount, unappliedAmount);
       }),
       total,
@@ -853,13 +997,29 @@ export class RecibosService {
       .findOne({ documentoId: recibo._id })
       .exec();
     const unappliedAmount = saldoOrigen?.saldoDisponible ?? 0;
-    const appliedAmount = saldoOrigen
+    const appliedAmountCash = saldoOrigen
       ? saldoOrigen.montoOriginal - saldoOrigen.saldoDisponible
       : 0;
     const aplicaciones = await this.aplicaciones
       .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
       .exec();
+    // Same convention `anular()` already documents on its own
+    // `montoAplicadoCarteraTotal`: `appliedAmount` (from `SaldoDocumentoOrigen`)
+    // is cash-only — a discount (automatic pronto pago, or a confirmed
+    // shortfall) credited MORE to cartera than cash actually moved, so it has
+    // to be added back for "Aplicado" to match what each document's own
+    // `AplicacionCartera.amountApplied` row shows. `otherIncomeAmount` has to
+    // be SUBTRACTED for the opposite reason: `SaldoDocumentoOrigen` was
+    // decremented for it too (so it stays out of future anticipo
+    // reapplication), but it never touched cartera — it's `montoOtrosIngresos`
+    // on the contract, not part of "Aplicado" (see `crear()`'s own note).
+    const appliedAmount =
+      appliedAmountCash -
+      (recibo.otherIncomeAmount ?? 0) +
+      aplicaciones
+        .filter((a) => a.status === 'activa')
+        .reduce((acc, a) => acc + a.discountApplied, 0);
 
     // Batch-resolve each application's target document's own printed
     // number ("FV-1") for display — this row only stores `documentId`.
@@ -935,6 +1095,7 @@ export class RecibosService {
     recibo: ReciboDocument,
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
+    descuentoConfirmadoExtra = 0,
   ): Promise<{
     creadas: AplicacionCarteraDocument[];
     desglose: DesgloseCarteraAplicacion[];
@@ -961,6 +1122,7 @@ export class RecibosService {
         accountId,
       },
       solicitadas,
+      descuentoConfirmadoExtra,
     );
   }
 
@@ -1071,13 +1233,33 @@ export class RecibosService {
     desglose: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
     montoDescuento: number,
+    // Set only when part (or all) of `montoDescuento` came from a
+    // user-confirmed payment shortfall, not the automatic early-payment
+    // discount — see `crear()`'s own `diferenciaConfirmada`. Wording must
+    // not claim "pronto pago" when it wasn't.
+    descripcionDescuento?: string,
+    // User-confirmed destination for a payment SURPLUS (manual mode only
+    // — see `CrearReciboDto.destinoSobrante`'s own docblock). `undefined`/
+    // `'anticipo'` reproduces today's only behavior; `'otros_ingresos'`
+    // credits `otherIncomeCreditAccount` instead of `advancesAccount`, with
+    // its own description — `crear()` is what actually stops that money
+    // from staying re-appliable (`SaldoDocumentoOrigen`), this method only
+    // decides which account the journal entry credits.
+    destinoSobrante?: 'anticipo' | 'otros_ingresos',
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
       .session(session)
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos =
+      destinoSobrante === 'otros_ingresos'
+        ? (copropiedad?.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR)
+        : (copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR);
+    const descripcionAnticipo =
+      destinoSobrante === 'otros_ingresos'
+        ? 'Otros ingresos — recibo de caja'
+        : undefined;
     const cuentaDescuentos =
       copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
     // `cuenta: null` (no accountingReceivableAccount for that concepto, or a
@@ -1102,6 +1284,9 @@ export class RecibosService {
       montoDescuento > 0
         ? { cuenta: cuentaDescuentos, monto: montoDescuento }
         : undefined,
+      undefined,
+      descripcionDescuento,
+      descripcionAnticipo,
     );
     entries = await this.conAuxiliares(
       session,
