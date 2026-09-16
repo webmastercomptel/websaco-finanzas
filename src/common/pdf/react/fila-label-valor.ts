@@ -9,6 +9,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
   },
   valor: {
     fontSize: 10,

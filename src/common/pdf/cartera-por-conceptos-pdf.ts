@@ -1,11 +1,10 @@
-import {
-  crearContexto,
-  escribirEncabezado,
-  escribirLinea,
-  escribirTabla,
-  formatoFecha,
-  formatoPeso,
-} from './pdf-helpers';
+import { createElement } from 'react';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { reporteDocumento, renderizarPdf } from './react/document';
+import { EncabezadoReporte } from './react/encabezado-reporte';
+import { Tabla } from './react/tabla';
+import { CreditoWebsaco } from './react/credito-websaco';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaCarteraPorConceptos } from '../../contracts';
 
@@ -22,6 +21,13 @@ const ESTADO_LABELS: Record<'al_dia' | 'juridico' | 'dificil_recaudo', string> =
     dificil_recaudo: 'Difícil Recaudo',
     juridico: 'En Jurídico',
   };
+
+const styles = StyleSheet.create({
+  sinDatos: {
+    fontSize: 10,
+    fontFamily: 'Helvetica',
+  },
+});
 
 /** cargo/saldo * 100, or "—" when there is nothing to divide by (never
  *  happens for a real row — a document with saldo <= 0 is excluded
@@ -43,6 +49,9 @@ function formatoPorcentaje(cargo: number, saldo: number): string {
  * - One single collection status (`estado` given): the "Por Estado" tab's
  *   own layout — the same "Por Inmueble" one-column-per-concept table,
  *   filtered down to inmuebles carrying that `estadoCartera`.
+ *
+ * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
+ * toggle — direct cutover is the settled approach for this migration).
  */
 export async function generarPdfCarteraPorConceptos(
   reporte: RespuestaCarteraPorConceptos,
@@ -51,7 +60,7 @@ export async function generarPdfCarteraPorConceptos(
   tipo: 'resumido' | 'detallado',
   conceptoId?: string,
   estado?: 'al_dia' | 'juridico' | 'dificil_recaudo',
-): Promise<Uint8Array> {
+): Promise<Buffer> {
   if (estado) {
     const filtrado: RespuestaCarteraPorConceptos = {
       ...reporte,
@@ -76,19 +85,30 @@ async function generarPorInmueble(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   estadoLabel?: string,
-): Promise<Uint8Array> {
-  const ctx = await crearContexto({ orientacion: 'horizontal' });
-
-  escribirEncabezado(
-    ctx,
+): Promise<Buffer> {
+  const encabezado = createElement(EncabezadoReporte, {
     copropiedad,
-    'CARTERA POR CONCEPTOS',
-    `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
-  );
+    titulo: 'CARTERA POR CONCEPTOS',
+    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
+  });
 
   if (reporte.grupos.length === 0) {
-    escribirLinea(ctx, 'No hay cartera pendiente en esta copropiedad.');
-    return ctx.doc.save();
+    return renderizarPdf(
+      reporteDocumento(
+        createElement(
+          View,
+          null,
+          encabezado,
+          createElement(
+            Text,
+            { style: styles.sinDatos },
+            'No hay cartera pendiente en esta copropiedad.',
+          ),
+          createElement(CreditoWebsaco),
+        ),
+        { orientacion: 'horizontal' },
+      ),
+    );
   }
 
   const conceptosIndividuales = reporte.conceptos.slice(
@@ -134,6 +154,7 @@ async function generarPorInmueble(
     0,
   );
 
+  let tabla;
   if (tipo === 'resumido') {
     const columnas = [
       'Inmueble',
@@ -159,17 +180,20 @@ async function generarPorInmueble(
         ...cargosDe(cargosGrupo),
       ];
     });
-    filas.push([
-      'GRAN TOTAL',
-      '',
-      '',
-      formatoPeso(granTotalSaldo),
-      ...cargosDe(granTotalCargos),
-    ]);
 
-    escribirTabla(ctx, columnas, filas, {
+    tabla = createElement(Tabla, {
+      striped: true,
+      columnas,
+      filas,
       columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        ...cargosDe(granTotalCargos),
+      ],
     });
   } else {
     const columnas = [
@@ -205,24 +229,38 @@ async function generarPorInmueble(
         ...cargosDe(d.cargosPorConcepto),
       ]),
     );
-    filas.push([
-      'GRAN TOTAL',
-      '',
-      '',
-      '',
-      '',
-      '',
-      formatoPeso(granTotalSaldo),
-      ...cargosDe(granTotalCargos),
-    ]);
 
-    escribirTabla(ctx, columnas, filas, {
+    tabla = createElement(Tabla, {
+      striped: true,
+      columnas,
+      filas,
       columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        ...cargosDe(granTotalCargos),
+      ],
     });
   }
 
-  return ctx.doc.save();
+  return renderizarPdf(
+    reporteDocumento(
+      createElement(
+        View,
+        null,
+        encabezado,
+        tabla,
+        createElement(CreditoWebsaco),
+      ),
+      { orientacion: 'horizontal' },
+    ),
+  );
 }
 
 async function generarPorConcepto(
@@ -231,34 +269,43 @@ async function generarPorConcepto(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   conceptoId: string,
-): Promise<Uint8Array> {
-  const ctx = await crearContexto({ orientacion: 'horizontal' });
+): Promise<Buffer> {
   const nombreCargo =
     reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ??
     'Cargo';
 
-  escribirEncabezado(
-    ctx,
+  const encabezado = createElement(EncabezadoReporte, {
     copropiedad,
-    'CARTERA POR CONCEPTOS',
-    `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
-  );
+    titulo: 'CARTERA POR CONCEPTOS',
+    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
+  });
 
   const grupos = reporte.grupos
-    .map((g) => {
-      const documentos = g.documentos.filter(
+    .map((g) => ({
+      ...g,
+      documentos: g.documentos.filter(
         (d) => (d.cargosPorConcepto[conceptoId] ?? 0) > 0,
-      );
-      return { ...g, documentos };
-    })
+      ),
+    }))
     .filter((g) => g.documentos.length > 0);
 
   if (grupos.length === 0) {
-    escribirLinea(
-      ctx,
-      'No hay cartera pendiente para este cargo en esta copropiedad.',
+    return renderizarPdf(
+      reporteDocumento(
+        createElement(
+          View,
+          null,
+          encabezado,
+          createElement(
+            Text,
+            { style: styles.sinDatos },
+            'No hay cartera pendiente para este cargo en esta copropiedad.',
+          ),
+          createElement(CreditoWebsaco),
+        ),
+        { orientacion: 'horizontal' },
+      ),
     );
-    return ctx.doc.save();
   }
 
   const saldoDe = (documentos: { saldo: number }[]): number =>
@@ -274,6 +321,7 @@ async function generarPorConcepto(
   const granTotalSaldo = saldoDe(grupos.flatMap((g) => g.documentos));
   const granTotalCargo = cargoDe(grupos.flatMap((g) => g.documentos));
 
+  let tabla;
   if (tipo === 'resumido') {
     const columnas = [
       'Inmueble',
@@ -295,18 +343,21 @@ async function generarPorConcepto(
         formatoPorcentaje(cargo, saldo),
       ];
     });
-    filas.push([
-      'GRAN TOTAL',
-      '',
-      '',
-      formatoPeso(granTotalSaldo),
-      formatoPeso(granTotalCargo),
-      formatoPorcentaje(granTotalCargo, granTotalSaldo),
-    ]);
 
-    escribirTabla(ctx, columnas, filas, {
+    tabla = createElement(Tabla, {
+      striped: true,
+      columnas,
+      filas,
       columnasNumericas: 3,
       anchosRelativos: [0.8, 1.8, 1.1, 1.1, 1.1, 1.1],
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        formatoPeso(granTotalCargo),
+        formatoPorcentaje(granTotalCargo, granTotalSaldo),
+      ],
     });
   } else {
     const columnas = [
@@ -336,23 +387,37 @@ async function generarPorConcepto(
         ];
       }),
     );
-    filas.push([
-      'GRAN TOTAL',
-      '',
-      '',
-      '',
-      '',
-      '',
-      formatoPeso(granTotalSaldo),
-      formatoPeso(granTotalCargo),
-      formatoPorcentaje(granTotalCargo, granTotalSaldo),
-    ]);
 
-    escribirTabla(ctx, columnas, filas, {
+    tabla = createElement(Tabla, {
+      striped: true,
+      columnas,
+      filas,
       columnasNumericas: 3,
       anchosRelativos: [0.7, 1.4, 0.8, 0.6, 1, 0.8, 1, 1.1, 1.1],
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        formatoPeso(granTotalCargo),
+        formatoPorcentaje(granTotalCargo, granTotalSaldo),
+      ],
     });
   }
 
-  return ctx.doc.save();
+  return renderizarPdf(
+    reporteDocumento(
+      createElement(
+        View,
+        null,
+        encabezado,
+        tabla,
+        createElement(CreditoWebsaco),
+      ),
+      { orientacion: 'horizontal' },
+    ),
+  );
 }

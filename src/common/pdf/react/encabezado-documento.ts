@@ -1,27 +1,9 @@
 import { createElement, type ReactElement } from 'react';
-import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { CopropiedadDocument } from '../../../database/schemas/copropiedades/copropiedad.schema';
-
-/** Same asset `embebirLogoWebsaco` (pdf-lib) reads — one logo file, two
- *  renderers. A raw path string made react-pdf's `Image` try to `fetch()`
- *  it (fails in this environment, and is fragile on Windows paths anyway)
- *  — a pre-read Buffer skips that resolver entirely. Read once per process,
- *  same reasoning as pdf-lib's own `cargarLogoBytes` cache. */
-let logoBytesCache: Buffer | null = null;
-function logoBytes(): Buffer {
-  logoBytesCache ??= readFileSync(
-    join(__dirname, '../../assets/websaco-logo.png'),
-  );
-  return logoBytesCache;
-}
 
 const styles = StyleSheet.create({
   banner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     backgroundColor: '#e6e6e6',
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -30,9 +12,6 @@ const styles = StyleSheet.create({
   nombre: {
     fontSize: 14,
     fontFamily: 'Helvetica-Bold',
-  },
-  logo: {
-    width: 72,
   },
   filaInfo: {
     flexDirection: 'row',
@@ -50,14 +29,17 @@ const styles = StyleSheet.create({
   },
   dato: {
     flexDirection: 'row',
-    fontSize: 8.5,
     marginBottom: 2,
   },
   etiqueta: {
     width: 54,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   valor: {
     marginLeft: 5,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   titulo: {
     fontSize: 11,
@@ -68,15 +50,22 @@ const styles = StyleSheet.create({
 
 /**
  * Approved letterhead for Factura and Estado de Cuenta: gray banner with
- * copropiedad name + logo, then a label/value contact block (NIT,
+ * the copropiedad's own name, then a label/value contact block (NIT,
  * Dirección, Celular, Email) on the left and the document's own title
  * (bold, right-aligned, same row as the contact block's top) on the right.
  *
- * Distinct from `EncabezadoReporte` (text-only, no banner/logo — used by
- * Cartera General/Conciliación) and from pdf-lib's own
- * `dibujarEncabezadoDocumento` (same banner spirit, but only shows NIT, not
- * the full contact block) — this is the react-pdf port of the newly
- * approved design, wider than either predecessor.
+ * No WebSACO logo in this banner — support's own feedback was that clients
+ * are protective of a document that represents THEIR building, not the
+ * software that produced it; a vendor mark on their own letterhead reads
+ * as an intrusion. Any WebSACO branding now lives in `PieDocumento`'s
+ * subtle "Generado por" footer credit instead — same idea a lot of SaaS
+ * invoicing tools use, mention in the margin, not the masthead.
+ *
+ * Distinct from `EncabezadoReporte` (text-only, no banner — used by Cartera
+ * General/Conciliación) and from pdf-lib's own `dibujarEncabezadoDocumento`
+ * (same banner spirit, but only shows NIT, not the full contact block) —
+ * this is the react-pdf port of the newly approved design, wider than
+ * either predecessor.
  *
  * Ends with a thin rule separating it from whatever body comes next
  * (`DatosAdquiriente`, in practice) — self-contained here so every caller
@@ -109,7 +98,6 @@ export function EncabezadoDocumento(props: {
       View,
       { style: styles.banner },
       createElement(Text, { style: styles.nombre }, copropiedad.name),
-      createElement(Image, { style: styles.logo, src: logoBytes() }),
     ),
     createElement(
       View,

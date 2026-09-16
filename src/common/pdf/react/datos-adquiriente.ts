@@ -1,5 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { ROJO_DANGER } from './paleta';
 
 const styles = StyleSheet.create({
   contenedor: {
@@ -23,25 +24,26 @@ const styles = StyleSheet.create({
   tituloFechas: {
     fontSize: 7.5,
     fontFamily: 'Helvetica-Bold',
-    color: '#767a80',
     marginBottom: 5,
   },
   filaFecha: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    fontSize: 8.5,
     marginBottom: 3,
   },
   dt: {
-    color: '#767a80',
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   dd: {
-    color: '#292d33',
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   pillVence: {
     fontSize: 8.5,
-    color: '#c4401f',
+    fontFamily: 'Helvetica',
+    color: ROJO_DANGER,
     backgroundColor: '#f8e2dc',
     borderRadius: 7,
     paddingVertical: 1.5,
@@ -49,22 +51,26 @@ const styles = StyleSheet.create({
   },
   fila: {
     flexDirection: 'row',
-    fontSize: 8.5,
     marginBottom: 2,
   },
   etiqueta: {
     width: 110,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   valor: {
     marginLeft: 5,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   filaUso: {
     flexDirection: 'row',
-    fontSize: 8.5,
   },
   usoEtiqueta: {
     marginLeft: 20,
     marginRight: 5,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
 });
 

@@ -13,6 +13,7 @@ const styles = StyleSheet.create({
   },
   linea: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
     marginBottom: 3,
   },
   titulo: {
@@ -23,8 +24,8 @@ const styles = StyleSheet.create({
   },
   subtitulo: {
     fontSize: 10,
+    fontFamily: 'Helvetica',
     textAlign: 'center',
-    color: '#4d4d4d',
     marginTop: 4,
   },
 });
