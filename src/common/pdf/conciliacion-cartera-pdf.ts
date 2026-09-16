@@ -82,6 +82,7 @@ export async function generarPdfConciliacionCartera(
       ]),
       columnasNumericas: 2,
       anchosRelativos: [3, 1, 1, 1.3, 1.3],
+      striped: true,
     }),
 
     createElement(FilaLabelValor, {
@@ -141,6 +142,7 @@ export async function generarPdfConciliacionCartera(
             formatoPeso(a.valor),
           ]),
           columnasNumericas: 1,
+          striped: true,
         }),
   );
 

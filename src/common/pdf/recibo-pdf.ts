@@ -197,6 +197,7 @@ export function contenidoRecibo(
       ]),
       columnasNumericas: 2,
       anchosRelativos: ANCHOS_RELATIVOS,
+      striped: true,
       filaTotales: [
         'Totales',
         '',
