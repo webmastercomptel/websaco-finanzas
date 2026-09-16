@@ -301,6 +301,7 @@ export async function generarPdfMovimientoContable(
     copropiedad,
     titulo: 'MOVIMIENTO CONTABLE',
     subtitulo,
+    fechaGeneracion: new Date(),
   });
   const filaEncabezadoTabla = createElement(
     View,

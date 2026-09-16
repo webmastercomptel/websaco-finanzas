@@ -149,6 +149,7 @@ export async function generarPdfConsecutivos(
     copropiedad,
     titulo: 'CONSECUTIVOS',
     subtitulo,
+    fechaGeneracion: new Date(),
   });
   const filaEncabezadoTabla = createElement(
     View,
