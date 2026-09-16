@@ -158,6 +158,7 @@ export async function generarPdfConsultaFacturacion(
   );
 
   const subtitulo = `Listado de Facturación al día ${formatoFecha(reporte.fechaFacturacion)} — Período: ${formatoFecha(reporte.fechaFacturacion)} a ${formatoFecha(reporte.fechaVencimiento)}`;
+  const fechaGeneracion = new Date();
 
   const anchos = columnas.map((c) => c.peso);
 
@@ -236,6 +237,7 @@ export async function generarPdfConsultaFacturacion(
         copropiedad,
         titulo: 'CONSULTA DE FACTURACIÓN',
         subtitulo,
+        fechaGeneracion,
       }),
 
       createElement(

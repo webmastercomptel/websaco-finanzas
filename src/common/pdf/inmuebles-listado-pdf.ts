@@ -109,15 +109,6 @@ function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
   return paginas;
 }
 
-function formatoFechaHora(fecha: Date): string {
-  const dia = fecha.toLocaleDateString('es-CO');
-  const hora = fecha.toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-  return `${dia} ${hora}`;
-}
-
 /**
  * Generates a printable roster of every active unit in the coproperty: código,
  * titular, área, participación (coeficiente), and one column per recurring
@@ -192,7 +183,7 @@ export async function generarPdfListadoInmuebles(
       createElement(EncabezadoInforme, {
         copropiedad,
         titulo: 'LISTADO DE INMUEBLES',
-        subtitulo: formatoFechaHora(fechaGeneracion),
+        fechaGeneracion,
       }),
 
       createElement(

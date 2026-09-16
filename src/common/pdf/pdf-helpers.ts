@@ -24,3 +24,25 @@ const FORMATO_FECHA = new Intl.DateTimeFormat('es-CO', {
 export function formatoFecha(fecha: Date | string): string {
   return FORMATO_FECHA.format(new Date(fecha));
 }
+
+const FORMATO_FECHA_HORA = new Intl.DateTimeFormat('es-CO', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+  timeZone: 'America/Bogota',
+});
+
+/** Formats a live instant (`new Date()` at generation time — never a stored
+ *  business date, that's `formatoFecha`'s job) as `dd/mm/yyyy HH:mm:ss`,
+ *  pinned to `America/Bogota` so it reads correctly for a Colombian reader
+ *  regardless of which timezone Cloud Run actually runs the process in.
+ *  Used by every "informe" (report/listing) PDF to stamp exactly when it
+ *  was produced — a live snapshot re-generated later could show different
+ *  numbers, and this timestamp is what keeps that honest. */
+export function formatoFechaHora(fecha: Date): string {
+  return FORMATO_FECHA_HORA.format(fecha);
+}

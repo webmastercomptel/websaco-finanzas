@@ -90,6 +90,7 @@ async function generarPorInmueble(
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
+    fechaGeneracion: new Date(),
   });
 
   if (reporte.grupos.length === 0) {
@@ -236,6 +237,10 @@ async function generarPorInmueble(
       filas,
       columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
+      // Detallado carries three more fixed columns than resumido on top of
+      // the same concept columns — smaller text keeps every cell readable
+      // instead of overflowing or wrapping into its neighbor.
+      fontSize: 8,
       filaTotales: [
         'GRAN TOTAL',
         '',
@@ -278,6 +283,7 @@ async function generarPorConcepto(
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
+    fechaGeneracion: new Date(),
   });
 
   const grupos = reporte.grupos
@@ -394,6 +400,10 @@ async function generarPorConcepto(
       filas,
       columnasNumericas: 3,
       anchosRelativos: [0.7, 1.4, 0.8, 0.6, 1, 0.8, 1, 1.1, 1.1],
+      // Same reasoning as the "Por Inmueble" layout's own detallado
+      // branch — three extra fixed columns need the smaller size to stay
+      // readable without overflowing.
+      fontSize: 8,
       filaTotales: [
         'GRAN TOTAL',
         '',
