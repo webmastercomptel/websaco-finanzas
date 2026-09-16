@@ -4,6 +4,7 @@ import { formatoPeso, formatoFecha } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import { MarcaDuplicado } from './react/marca-duplicado';
+import { CreditoWebsaco } from './react/credito-websaco';
 import { Tabla } from './react/tabla';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
@@ -207,5 +208,6 @@ export function contenidoRecibo(
         formatoPeso(totalCredito),
       ],
     }),
+    createElement(CreditoWebsaco),
   );
 }
