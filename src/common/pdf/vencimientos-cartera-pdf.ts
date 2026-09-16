@@ -7,6 +7,7 @@ import {
   CONTENT_WIDTH_PT_HORIZONTAL,
 } from './react/document';
 import { CreditoWebsaco } from './react/credito-websaco';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { FONDO_ZEBRA } from './react/paleta';
 import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -114,23 +115,6 @@ function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
 }
 
 const styles = StyleSheet.create({
-  masthead: {
-    marginBottom: 8,
-  },
-  nombre: {
-    fontSize: 12,
-    fontFamily: 'Helvetica-Bold',
-    marginBottom: 4,
-  },
-  subtitulo: {
-    fontSize: 10,
-    fontFamily: 'Helvetica-Bold',
-    marginBottom: 6,
-  },
-  regla: {
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#999999',
-  },
   filaEncabezado: {
     flexDirection: 'row',
     backgroundColor: '#ededed',
@@ -201,7 +185,7 @@ export async function generarPdfVencimientosCartera(
   filtro: { inmuebleId?: string; rango?: RangoVencimiento } = {},
 ): Promise<Buffer> {
   const reporte = filtrarReporte(reporteCompleto, filtro);
-  const subtitulo = `Análisis de Vencimientos — Corte al ${formatoFecha(reporte.fechaCorte)}`;
+  const subtitulo = `Corte al ${formatoFecha(reporte.fechaCorte)}`;
   const totalPorRango = new Map(reporte.rangos.map((r) => [r.rango, r.valor]));
 
   const celda = (
@@ -225,13 +209,11 @@ export async function generarPdfVencimientosCartera(
     return createElement(
       View,
       null,
-      createElement(
-        View,
-        { style: styles.masthead },
-        createElement(Text, { style: styles.nombre }, copropiedad.name),
-        createElement(Text, { style: styles.subtitulo }, subtitulo),
-        createElement(View, { style: styles.regla }),
-      ),
+      createElement(EncabezadoInforme, {
+        copropiedad,
+        titulo: 'VENCIMIENTOS DE CARTERA',
+        subtitulo,
+      }),
       createElement(
         View,
         { style: styles.filaEncabezado, wrap: false },

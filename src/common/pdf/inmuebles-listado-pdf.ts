@@ -6,6 +6,7 @@ import {
   CONTENT_WIDTH_PT_HORIZONTAL,
 } from './react/document';
 import { CreditoWebsaco } from './react/credito-websaco';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { FONDO_ZEBRA } from './react/paleta';
 import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -29,8 +30,6 @@ export interface InmuebleListadoItem {
 }
 
 const FONT_SIZE = 8;
-const FONT_HEADER_NAME = 12;
-const FONT_HEADER_LINE = 9;
 
 /** Every column used to split the content width evenly, which starved
  *  "Titular" (a person's full name, the one column someone actually needs
@@ -77,37 +76,6 @@ function anchosDeColumna(cantidadConceptos: number): number[] {
 const FILAS_POR_PAGINA = 36;
 
 const styles = StyleSheet.create({
-  masthead: {
-    marginBottom: 6,
-  },
-  nombre: {
-    fontSize: FONT_HEADER_NAME,
-    fontFamily: 'Helvetica-Bold',
-  },
-  filaTitulo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  nit: {
-    fontSize: FONT_HEADER_LINE,
-    fontFamily: 'Helvetica',
-    marginTop: 2,
-  },
-  titulo: {
-    fontSize: FONT_HEADER_LINE,
-    fontFamily: 'Helvetica-Bold',
-  },
-  fecha: {
-    fontSize: FONT_HEADER_LINE,
-    fontFamily: 'Helvetica',
-    color: '#4d4d4d',
-  },
-  regla: {
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#000000',
-    marginTop: 4,
-  },
   filaEncabezado: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
@@ -221,31 +189,11 @@ export async function generarPdfListadoInmuebles(
     createElement(
       View,
       { key: indicePagina, style: { flexDirection: 'column', flexGrow: 1 } },
-      createElement(
-        View,
-        { style: styles.masthead },
-        createElement(Text, { style: styles.nombre }, copropiedad.name),
-        copropiedad.taxId
-          ? createElement(
-              Text,
-              { style: styles.nit },
-              copropiedad.taxIdVerificationDigit
-                ? `NIT ${copropiedad.taxId}-${copropiedad.taxIdVerificationDigit}`
-                : `NIT ${copropiedad.taxId}`,
-            )
-          : null,
-        createElement(
-          View,
-          { style: styles.filaTitulo },
-          createElement(Text, { style: styles.titulo }, 'LISTADO DE INMUEBLES'),
-          createElement(
-            Text,
-            { style: styles.fecha },
-            formatoFechaHora(fechaGeneracion),
-          ),
-        ),
-        createElement(View, { style: styles.regla }),
-      ),
+      createElement(EncabezadoInforme, {
+        copropiedad,
+        titulo: 'LISTADO DE INMUEBLES',
+        subtitulo: formatoFechaHora(fechaGeneracion),
+      }),
 
       createElement(
         View,

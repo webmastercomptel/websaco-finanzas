@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
-import { EncabezadoReporte } from './react/encabezado-reporte';
+import { EncabezadoDocumento } from './react/encabezado-documento';
 import { FilaLabelValor } from './react/fila-label-valor';
 import { Tabla } from './react/tabla';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -56,7 +56,7 @@ export async function generarPdfConciliacionCartera(
   const contenido = createElement(
     View,
     null,
-    createElement(EncabezadoReporte, {
+    createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: 'CONCILIACIÓN DE CARTERA',
       subtitulo: `Período ${formatoFecha(reporte.periodStart)} al ${formatoFecha(reporte.periodEnd)}`,
