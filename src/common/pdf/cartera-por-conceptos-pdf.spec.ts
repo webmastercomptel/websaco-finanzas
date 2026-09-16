@@ -36,6 +36,7 @@ function makeGrupo(
     inmuebleCodigo: '301',
     titular: 'Juan Pérez',
     celular: '3001234567',
+    estadoCartera: 'al_dia',
     documentos: [
       {
         documentoId: 'fac-1',

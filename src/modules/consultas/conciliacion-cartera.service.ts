@@ -114,8 +114,10 @@ export class ConciliacionCarteraService {
   async findPeriodos(): Promise<PeriodoFacturado[]> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
+    // Not status-filtered — see the "Facturación" row in findAll() for why
+    // an anulada Factura still belongs in this report.
     const facturas = await this.facturas
-      .find({ coPropertyId, status: 'emitida' })
+      .find({ coPropertyId })
       .sort({ periodStart: -1 })
       .exec();
 
@@ -198,12 +200,19 @@ export class ConciliacionCarteraService {
       totalCredito += valorCredito;
     };
 
-    // Facturación → débito
+    // Facturación → débito. NOT status-filtered, on purpose: voiding a
+    // Factura (AnularFacturaService) creates a full-amount Nota Crédito
+    // against it, which already lands as a crédito in the "Notas Crédito"
+    // row below — excluding the Factura's own débito here while its
+    // reversal still counts as a crédito is exactly what used to unbalance
+    // this report (bug real reportado: "no debes mermar las facturas
+    // anuladas"). `d.total` is frozen regardless of `status`, so an anulada
+    // invoice contributes the SAME charge it always did — its own Nota
+    // Crédito is what nets it back to zero, not omitting it here.
     {
       const docs = await this.facturas
         .find({
           coPropertyId,
-          status: 'emitida',
           issueDate: { $gte: desde, $lte: hasta },
         })
         .sort({ number: 1 })

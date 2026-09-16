@@ -21,7 +21,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   terceroId: tercero,
   facturaId: factura,
   fullNumber: 'NC-1',
-  reason: 'error_facturacion',
+  reason: 'ajuste_precio',
   totalAmount: 200000,
   distribution: [{ conceptoId: concepto, amount: 200000 }],
   unappliedAmount: 200000,

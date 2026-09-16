@@ -20,7 +20,12 @@ export function truncarTexto(
   fontSize: number,
   anchoPromedioChar = 0.52,
 ): string {
-  const maxChars = Math.max(1, Math.floor(maxWidthPt / (fontSize * anchoPromedioChar)));
+  const maxChars = Math.max(
+    1,
+    Math.floor(maxWidthPt / (fontSize * anchoPromedioChar)),
+  );
   if (texto.length <= maxChars) return texto;
-  return texto.length <= 1 ? texto : `${texto.slice(0, Math.max(1, maxChars - 1))}…`;
+  return texto.length <= 1
+    ? texto
+    : `${texto.slice(0, Math.max(1, maxChars - 1))}…`;
 }

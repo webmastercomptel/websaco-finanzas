@@ -136,6 +136,30 @@ describe('AuxiliarCarteraService', () => {
       });
     });
 
+    it('una Factura anulada TAMBIÉN produce su fila Débito — es un kardex histórico, nunca se filtra por status', async () => {
+      const f = facturaDoc({ status: 'anulada' });
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      expect(result.movimientos).toHaveLength(1);
+      expect(result.movimientos[0]).toMatchObject({
+        tipo: 'FC',
+        numeroCompleto: 'FV-001',
+        debito: 200000,
+        credito: null,
+      });
+    });
+
     it('una Nota Débito produce una fila Débito con su description', async () => {
       const nd = ndDoc();
       const svc = servicio({
@@ -299,6 +323,29 @@ describe('AuxiliarCarteraService', () => {
       expect(creditos[0].credito).toBe(30000);
       // Net zero effect on saldoFinal
       expect(result.saldoFinal).toBe(0);
+    });
+
+    it('una Nota Contable usa su propia issueDate, NUNCA createdAt — bug real reportado: una nota fechada en junio aparecía en septiembre', async () => {
+      const nt = ntDoc({
+        issueDate: new Date('2026-06-10'),
+        createdAt: new Date('2026-09-14'),
+      });
+      const svc = servicio({
+        notasContables: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([nt]),
+        },
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      expect(result.movimientos[0].fecha).toBe(
+        new Date('2026-06-10').toISOString(),
+      );
     });
   });
 

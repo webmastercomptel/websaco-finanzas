@@ -3,7 +3,10 @@ import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
-import { DatosAdquiriente, type PeriodoDocumento } from './react/datos-adquiriente';
+import {
+  DatosAdquiriente,
+  type PeriodoDocumento,
+} from './react/datos-adquiriente';
 import { CuerpoFactura, type CargoFactura } from './react/cuerpo-factura';
 import { ObservacionesFactura } from './react/observaciones-factura';
 import { MarcaDuplicado } from './react/marca-duplicado';
@@ -58,7 +61,8 @@ export function contenidoDocumentoFacturacion(
   const totalAPagar = datos.lines.reduce((acc, l) => acc + l.balanceAfter, 0);
 
   const cargos: CargoFactura[] = datos.lines.map((l) => ({
-    nombre: l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
+    nombre:
+      l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
     saldoAnterior: l.balanceBefore,
     cargosDelMes: l.baseAmount,
     nuevoSaldo: l.balanceBefore + l.baseAmount,
@@ -181,7 +185,12 @@ export function paginaFactura(
       )
     : null;
 
-  return createElement(View, null, contenidoDocumentoFacturacion(datos, copropiedad), pie);
+  return createElement(
+    View,
+    null,
+    contenidoDocumentoFacturacion(datos, copropiedad),
+    pie,
+  );
 }
 
 /**

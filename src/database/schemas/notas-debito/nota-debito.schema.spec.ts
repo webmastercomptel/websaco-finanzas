@@ -19,8 +19,10 @@ const base = (over: Record<string, unknown> = {}) => ({
   inmuebleId: inmueble,
   terceroId: tercero,
   conceptoId: concepto,
+  reason: 'intereses',
   fullNumber: 'ND-1',
   issueDate: new Date(),
+  dueDate: new Date(),
   total: 150000,
   outstandingBalance: 150000,
   generatedBy: cuenta,
@@ -65,6 +67,17 @@ describe('NotaDebitoSchema — forma', () => {
   it('exige conceptoId', async () => {
     const error = await validar({ conceptoId: undefined });
     expect(error?.message).toContain('conceptoId');
+  });
+
+  it('exige reason (el motivo DIAN de la corrección)', async () => {
+    const error = await validar({ reason: undefined });
+    expect(error?.message).toContain('reason');
+  });
+
+  it('rechaza un motivo fuera del catálogo DIAN', async () => {
+    await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(
+      Error,
+    );
   });
 
   it('exige issueDate', async () => {

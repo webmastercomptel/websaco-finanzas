@@ -279,6 +279,40 @@ describe('ConciliacionCarteraService', () => {
       expect(result.diferencia).toBe(0);
     });
 
+    it('reconciles to zero when a Factura is anulada by a full Nota Crédito in the same período — bug real reportado: "no debes mermar las facturas anuladas"', async () => {
+      // AnularFacturaService voids a Factura by creating a full-amount Nota
+      // Crédito against it — Factura.status flips to 'anulada', but `total`
+      // stays frozen (nothing financial is ever deleted). Excluding the
+      // Factura from the "Facturación" row (status: 'emitida' filter) while
+      // its own reversal still counted as a crédito under "Notas Crédito"
+      // is exactly what used to leave totalDebito short and `diferencia`
+      // non-zero.
+      const fId = id();
+      const ncId = id();
+      const f = facturaDoc({ _id: fId, total: 100000, status: 'anulada' });
+      const nc = ncDoc({ _id: ncId, issueDate: new Date('2026-09-14') });
+      const app = appDoc(ncId, 'NC', {
+        documentId: fId,
+        amountApplied: 100000,
+        appliedAt: new Date('2026-09-14'),
+      });
+
+      const svc = servicio({
+        facturas: [f],
+        notasCredito: [nc],
+        aplicaciones: [app],
+        saldosCartera: [],
+      });
+
+      const result = await svc.findAll(PERIODO);
+
+      expect(result.totalDebito).toBe(100000);
+      expect(result.totalCredito).toBe(100000);
+      expect(result.saldoCarteraCalculado).toBe(0);
+      expect(result.saldoCarteraReal).toBe(0);
+      expect(result.diferencia).toBe(0);
+    });
+
     it('saldoCarteraReal sums SaldoCartera.balance across every inmueble/concepto, never a fresh reconstruction', async () => {
       // Two rows (different inmueble/concepto) must both count — and a
       // Factura/aplicación fixture that would reconstruct to a DIFFERENT

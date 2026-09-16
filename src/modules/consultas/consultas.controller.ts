@@ -182,7 +182,11 @@ export class ConsultasController {
     const fechaCorte = query.fecha ?? new Date().toISOString();
     const bytes =
       version === 'new'
-        ? await generarPdfCarteraGeneralReactPdf(reporte, copropiedad, fechaCorte)
+        ? await generarPdfCarteraGeneralReactPdf(
+            reporte,
+            copropiedad,
+            fechaCorte,
+          )
         : await generarPdfCarteraGeneral(reporte, copropiedad, fechaCorte);
 
     res.set({
@@ -254,12 +258,17 @@ export class ConsultasController {
       fechaCorte,
       query.tipo,
       query.conceptoId,
+      query.estado,
     );
 
-    const sufijoConcepto = query.conceptoId ? '-concepto' : '';
+    const sufijo = query.conceptoId
+      ? '-concepto'
+      : query.estado
+        ? `-${query.estado}`
+        : '';
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="cartera-por-conceptos-${query.tipo}${sufijoConcepto}-${fechaCorte.slice(0, 10)}.pdf"`,
+      'Content-Disposition': `inline; filename="cartera-por-conceptos-${query.tipo}${sufijo}-${fechaCorte.slice(0, 10)}.pdf"`,
     });
     res.send(Buffer.from(bytes));
   }

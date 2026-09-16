@@ -8,10 +8,17 @@ import { Account } from '../cuentas/account.schema';
 
 export type NotaCreditoDocument = HydratedDocument<NotaCredito>;
 
+/** DIAN's own "Concepto de Corrección para Notas crédito" catalog (Anexo
+ *  1.8-2021 §13.3.4, `cac:DiscrepancyResponse/cbc:ResponseCode`) — codes
+ *  1-5 in that order: devolución parcial, anulación de factura electrónica,
+ *  rebaja o descuento, ajuste de precio, otros. Not this app's own
+ *  invention, so it is not free to add/reorder entries here independently
+ *  of that table. */
 export const MOTIVOS_NOTA_CREDITO = [
-  'error_facturacion',
-  'descuento_comercial',
-  'anulacion_documento',
+  'devolucion_parcial',
+  'anulacion_factura',
+  'descuento',
+  'ajuste_precio',
   'otro',
 ] as const;
 export type MotivoNotaCredito = (typeof MOTIVOS_NOTA_CREDITO)[number];

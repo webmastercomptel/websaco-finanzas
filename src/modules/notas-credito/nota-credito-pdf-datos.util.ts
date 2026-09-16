@@ -13,11 +13,16 @@ import type {
 } from '../../common/pdf/recibo-pdf';
 import { fechaNotaCredito } from './notas-credito.mapper';
 
+// DIAN's own "Concepto de Corrección para Notas crédito" labels (Anexo
+// 1.8-2021 §13.3.4) — see `MOTIVOS_NOTA_CREDITO`'s own docblock
+// (`nota-credito.schema.ts`) for the full citation.
 const MOTIVOS_LABELS: Record<string, string> = {
-  error_facturacion: 'Error de facturación',
-  descuento_comercial: 'Descuento comercial',
-  anulacion_documento: 'Anulación de documento',
-  otro: 'Otro',
+  devolucion_parcial:
+    'Devolución parcial de los bienes y/o no aceptación parcial del servicio',
+  anulacion_factura: 'Anulación de factura electrónica',
+  descuento: 'Rebaja o descuento parcial o total',
+  ajuste_precio: 'Ajuste de precio',
+  otro: 'Otros',
 };
 
 export interface ModelosDatosImpresionNotaCredito {

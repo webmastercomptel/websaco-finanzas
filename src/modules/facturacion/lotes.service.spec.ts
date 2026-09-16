@@ -598,6 +598,170 @@ describe('LotesFacturacionService.crear', () => {
   });
 });
 
+describe('LotesFacturacionService.crearIndividual', () => {
+  const INMUEBLE = new Types.ObjectId().toString();
+
+  const inmueblesCon = (encontrado: Record<string, unknown> | null) => ({
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(encontrado) })),
+  });
+
+  const servicioCon = (
+    lotes: ReturnType<typeof lotesModeloCon>,
+    inmuebles: ReturnType<typeof inmueblesCon>,
+    numeracion = numeracionCon(9),
+  ) =>
+    new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
+      {} as never, // asientos
+      {} as never, // conceptos
+      {} as never, // valoresRecurrentes
+      inmuebles as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracion,
+      {} as never, // connection
+    );
+
+  it('rechaza si ya hay un lote en curso', async () => {
+    const lotes = lotesModeloCon({ activo: {} });
+    const inmuebles = inmueblesCon({ _id: INMUEBLE });
+    const service = servicioCon(lotes, inmuebles);
+
+    await expect(
+      service.crearIndividual(CUENTA, { inmuebleId: INMUEBLE }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(lotes.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza si el inmueble no existe en esta copropiedad', async () => {
+    const lotes = lotesModeloCon();
+    const inmuebles = inmueblesCon(null);
+    const service = servicioCon(lotes, inmuebles);
+
+    await expect(
+      service.crearIndividual(CUENTA, { inmuebleId: INMUEBLE }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(lotes.create).not.toHaveBeenCalled();
+  });
+
+  it('rechaza si la copropiedad nunca consolidó un lote — no hay período actual al cual pertenecer', async () => {
+    const lotes = lotesModeloCon({ ultimoConsolidado: null });
+    const inmuebles = inmueblesCon({ _id: INMUEBLE });
+    const service = servicioCon(lotes, inmuebles);
+
+    await expect(
+      service.crearIndividual(CUENTA, { inmuebleId: INMUEBLE }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(lotes.create).not.toHaveBeenCalled();
+  });
+
+  it('copia fechas y parámetros del último lote consolidado, nunca de Copropiedad ni de un valor libre', async () => {
+    const ultimoConsolidado = {
+      billingDate: new Date('2026-08-27'),
+      dueDate: new Date('2026-08-31'),
+      periodStart: new Date('2026-08-01'),
+      periodEnd: new Date('2026-08-31'),
+      earlyPaymentDiscount: 5,
+      earlyPaymentDiscountFixedValue: 0,
+      discountGraceDays: 3,
+      lateInterestRate: 1.9,
+      lateInterestCap: 50000,
+      discountDeadline: new Date('2026-08-29'),
+      serviceSuspensionDate: new Date('2026-08-31'),
+    };
+    const lotes = lotesModeloCon({ ultimoConsolidado });
+    const inmuebles = inmueblesCon({ _id: INMUEBLE });
+    const service = servicioCon(lotes, inmuebles, numeracionCon(9));
+
+    await service.crearIndividual(CUENTA, { inmuebleId: INMUEBLE });
+
+    expect(lotes.escrituras[0]).toMatchObject({
+      coPropertyId: COP,
+      number: 9,
+      status: 'borrador',
+      inmuebleId: new Types.ObjectId(INMUEBLE),
+      generatedBy: CUENTA,
+      ...ultimoConsolidado,
+    });
+  });
+});
+
+describe('LotesFacturacionService.agregarNovedadLinea', () => {
+  const INMUEBLE_LOTE = new Types.ObjectId().toString();
+  const OTRO_INMUEBLE = new Types.ObjectId().toString();
+  const CONCEPTO = new Types.ObjectId().toString();
+
+  const servicioCon = (lote: Record<string, unknown>) => {
+    const lotesModelo = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc(lote)) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc(lote)),
+      })),
+    };
+    const inmueblesModelo = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve({ _id: OTRO_INMUEBLE }),
+      })),
+    };
+    const conceptosModelo = {
+      findOne: jest.fn(() => ({
+        exec: () => Promise.resolve({ _id: CONCEPTO, kind: 'administracion' }),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotesModelo as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
+      {} as never, // asientos
+      conceptosModelo as never,
+      {} as never, // valoresRecurrentes
+      inmueblesModelo as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+    return { service, lotesModelo };
+  };
+
+  it('rechaza un cargo para otro inmueble cuando el lote es una Factura Individual', async () => {
+    const { service, lotesModelo } = servicioCon({
+      inmuebleId: { toString: () => INMUEBLE_LOTE },
+    });
+
+    await expect(
+      service.agregarNovedadLinea('lote-1', {
+        inmuebleId: OTRO_INMUEBLE,
+        conceptoId: CONCEPTO,
+        amount: 100000,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(lotesModelo.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('un lote normal (sin inmuebleId) admite cargos de cualquier inmueble', async () => {
+    const { service, lotesModelo } = servicioCon({});
+
+    await service.agregarNovedadLinea('lote-1', {
+      inmuebleId: OTRO_INMUEBLE,
+      conceptoId: CONCEPTO,
+      amount: 100000,
+    });
+
+    expect(lotesModelo.findOneAndUpdate).toHaveBeenCalled();
+  });
+});
+
 describe('LotesFacturacionService.cargarNovedades', () => {
   const unidadCon = (id: string, codigo: string) => ({
     _id: id,
@@ -1376,6 +1540,77 @@ describe('LotesFacturacionService.liquidar', () => {
       (l: { source: string }) => l.source === 'interes',
     );
     expect(interes?.totalAmount).toBe(57000);
+  });
+
+  it('Factura Individual (lote.inmuebleId set): ignora ValorRecurrente y la mora automática — solo lo cargado a mano', async () => {
+    const m = construirModelos({
+      conceptos: [
+        concepto(), // con-1, kind: 'administracion'
+        concepto({
+          _id: { toString: () => 'con-intereses' },
+          name: 'Interés por mora',
+          kind: 'intereses',
+          cuentaCreditoId: { code: '413595' },
+        }),
+      ],
+      // Saldo vencido que, en un lote normal, SÍ dispararía mora automática
+      // (1.9% de 3,000,000 = 57,000, muy por encima del mínimo de 50,000).
+      saldos: [
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'con-1',
+          balance: 3000000,
+        },
+      ],
+      lote: {
+        inmuebleId: { toString: () => 'inm-1' },
+        lateInterestRate: 1.9,
+        lateInterestCap: 50000,
+        adjustments: [
+          {
+            _id: { toString: () => 'nov-1' },
+            inmuebleId: { toString: () => 'inm-1' },
+            conceptoId: { toString: () => 'con-1' },
+            amount: 300000,
+            note: 'Cargo manual',
+            overrides: null,
+          },
+        ],
+      },
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+
+    await service.liquidar('lote-1');
+
+    // ValorRecurrente nunca se consulta — todo se carga a mano.
+    expect(m.valoresRecurrentes.find).not.toHaveBeenCalled();
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const lineas = actualizacion.$set.preview[0].lines as Array<{
+      source: string;
+      totalAmount: number;
+    }>;
+    expect(lineas.some((l) => l.source === 'interes')).toBe(false);
+    expect(lineas.some((l) => l.source === 'recurrente')).toBe(false);
+    expect(lineas).toEqual([
+      expect.objectContaining({ source: 'novedad', totalAmount: 300000 }),
+    ]);
   });
 
   it('omite la mora cuando el saldo no alcanza el mínimo configurado', async () => {

@@ -18,11 +18,14 @@ import { DistribucionLineaDto } from './distribucion-linea.dto';
 /** Declared independently from the schema's own `MOTIVOS_NOTA_CREDITO` —
  *  same precedent as `CrearReciboDto`'s `MEDIOS_PAGO` vs. the schema's
  *  `PAYMENT_METHODS`: the DTO layer stays decoupled from persistence types,
- *  even when the literal values coincide. */
+ *  even when the literal values coincide. These 5 codes ARE DIAN's own
+ *  "Concepto de Corrección para Notas crédito" catalog (Anexo 1.8-2021
+ *  §13.3.4) — see the schema's own docblock for the full citation. */
 export const MOTIVOS_NOTA_CREDITO = [
-  'error_facturacion',
-  'descuento_comercial',
-  'anulacion_documento',
+  'devolucion_parcial',
+  'anulacion_factura',
+  'descuento',
+  'ajuste_precio',
   'otro',
 ] as const;
 

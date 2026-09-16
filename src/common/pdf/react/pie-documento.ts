@@ -38,8 +38,13 @@ export function PieDocumento(props: { contacto?: string }): ReactElement {
     createElement(Text, { style: styles.texto }, props.contacto ?? ''),
     createElement(Text, {
       style: styles.texto,
-      render: ({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>
-        `Página ${pageNumber}/${totalPages}`,
+      render: ({
+        pageNumber,
+        totalPages,
+      }: {
+        pageNumber: number;
+        totalPages: number;
+      }) => `Página ${pageNumber}/${totalPages}`,
     }),
   );
 }

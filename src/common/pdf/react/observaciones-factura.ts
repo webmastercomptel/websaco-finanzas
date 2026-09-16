@@ -113,7 +113,11 @@ export function ObservacionesFactura(props: {
       ? createElement(
           View,
           { style: styles.descuento },
-          createElement(Text, { style: styles.descuentoTitulo }, 'Descuento Pronto Pago'),
+          createElement(
+            Text,
+            { style: styles.descuentoTitulo },
+            'Descuento Pronto Pago',
+          ),
           createElement(
             Text,
             { style: styles.descuentoFecha },

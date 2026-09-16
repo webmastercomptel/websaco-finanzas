@@ -13,7 +13,16 @@ import type { RespuestaAuxiliarCartera } from '../../contracts';
  *  reused directly as relative flex weights. Concepto gets the lion's
  *  share as free text; Tipo/Nº Doc are short fixed identifiers. */
 const PESOS = [55, 30, 50, 140, 55, 60, 60, 62];
-const COLUMNAS = ['Fecha', 'Tipo', 'Nº Doc', 'Concepto', 'Ref/Cruce', 'Débito', 'Crédito', 'Saldo'];
+const COLUMNAS = [
+  'Fecha',
+  'Tipo',
+  'Nº Doc',
+  'Concepto',
+  'Ref/Cruce',
+  'Débito',
+  'Crédito',
+  'Saldo',
+];
 const PRIMERA_NUMERICA = 5;
 
 const styles = StyleSheet.create({
@@ -88,9 +97,13 @@ const styles = StyleSheet.create({
   },
 });
 
-const celdaStyle = (i: number, variante: 'encabezado' | 'normal' | 'barra') => ({
+const celdaStyle = (
+  i: number,
+  variante: 'encabezado' | 'normal' | 'barra',
+) => ({
   flexGrow: PESOS[i],
   flexBasis: 0,
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
   textAlign: (i >= PRIMERA_NUMERICA ? 'right' : 'left') as 'right' | 'left',
   paddingRight: 4,
   ...(variante === 'encabezado'
@@ -174,11 +187,27 @@ export async function generarPdfAuxiliarCartera(
       View,
       { style: styles.filaEncabezado, wrap: false },
       ...COLUMNAS.map((col, i) =>
-        createElement(Text, { key: i, style: celdaStyle(i, 'encabezado') }, col),
+        createElement(
+          Text,
+          { key: i, style: celdaStyle(i, 'encabezado') },
+          col,
+        ),
       ),
     ),
 
-    filaBarra(['', '', '', 'Saldo Anterior', '', '', '', formatoPeso(reporte.saldoInicial)], 'inicial'),
+    filaBarra(
+      [
+        '',
+        '',
+        '',
+        'Saldo Anterior',
+        '',
+        '',
+        '',
+        formatoPeso(reporte.saldoInicial),
+      ],
+      'inicial',
+    ),
 
     ...reporte.movimientos.map((m, i) =>
       createElement(
@@ -188,14 +217,38 @@ export async function generarPdfAuxiliarCartera(
           style: i % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
           wrap: false,
         },
-        createElement(Text, { style: celdaStyle(0, 'normal') }, formatoFecha(m.fecha)),
+        createElement(
+          Text,
+          { style: celdaStyle(0, 'normal') },
+          formatoFecha(m.fecha),
+        ),
         createElement(Text, { style: celdaStyle(1, 'normal') }, m.tipo),
-        createElement(Text, { style: celdaStyle(2, 'normal') }, m.numeroCompleto),
+        createElement(
+          Text,
+          { style: celdaStyle(2, 'normal') },
+          m.numeroCompleto,
+        ),
         createElement(Text, { style: celdaStyle(3, 'normal') }, m.concepto),
-        createElement(Text, { style: celdaStyle(4, 'normal') }, m.refCruce ?? ''),
-        createElement(Text, { style: celdaStyle(5, 'normal') }, m.debito ? formatoPeso(m.debito) : ''),
-        createElement(Text, { style: celdaStyle(6, 'normal') }, m.credito ? formatoPeso(m.credito) : ''),
-        createElement(Text, { style: celdaStyle(7, 'normal') }, formatoPeso(m.saldo)),
+        createElement(
+          Text,
+          { style: celdaStyle(4, 'normal') },
+          m.refCruce ?? '',
+        ),
+        createElement(
+          Text,
+          { style: celdaStyle(5, 'normal') },
+          m.debito ? formatoPeso(m.debito) : '',
+        ),
+        createElement(
+          Text,
+          { style: celdaStyle(6, 'normal') },
+          m.credito ? formatoPeso(m.credito) : '',
+        ),
+        createElement(
+          Text,
+          { style: celdaStyle(7, 'normal') },
+          formatoPeso(m.saldo),
+        ),
       ),
     ),
 

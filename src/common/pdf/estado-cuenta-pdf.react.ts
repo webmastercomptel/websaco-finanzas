@@ -69,9 +69,15 @@ export async function generarPdfEstadoCuentaReactPdf(
       label: 'Generado:',
       valor: `${ahora.toLocaleDateString('es-CO')} ${ahora.toLocaleTimeString('es-CO')}`,
     }),
-    createElement(FilaInfo, { label: 'Inmueble:', valor: estado.inmuebleCodigo }),
+    createElement(FilaInfo, {
+      label: 'Inmueble:',
+      valor: estado.inmuebleCodigo,
+    }),
     estado.propietario
-      ? createElement(FilaInfo, { label: 'Propietario:', valor: estado.propietario })
+      ? createElement(FilaInfo, {
+          label: 'Propietario:',
+          valor: estado.propietario,
+        })
       : null,
     createElement(FilaInfo, {
       label: 'Periodo:',
@@ -93,7 +99,11 @@ export async function generarPdfEstadoCuentaReactPdf(
           valor: `-${formatoPeso(estado.descuentosAjustes)}`,
           color: VERDE_OK,
         },
-        { label: 'Saldo actual', valor: formatoPeso(estado.saldoActual), destacada: true },
+        {
+          label: 'Saldo actual',
+          valor: formatoPeso(estado.saldoActual),
+          destacada: true,
+        },
         {
           label: 'Estado de la Cartera',
           valor: estadoTexto,

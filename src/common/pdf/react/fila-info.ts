@@ -27,7 +27,10 @@ const styles = StyleSheet.create({
  * `FilaLabelValor` stays reserved for values that actually need the
  * emphasis (Cartera General/Conciliación's KPI figures).
  */
-export function FilaInfo(props: { label: string; valor: string }): ReactElement {
+export function FilaInfo(props: {
+  label: string;
+  valor: string;
+}): ReactElement {
   return createElement(
     View,
     { style: styles.fila, wrap: false },

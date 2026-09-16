@@ -317,6 +317,7 @@ export class CarteraPorConceptosService {
         inmuebleCodigo: inmueble?.code ?? '',
         titular: holder?.name ?? null,
         celular: holder?.phone ?? null,
+        estadoCartera: inmueble?.collectionStatus ?? 'al_dia',
         documentos,
         saldoTotal: documentos.reduce((sum, d) => sum + d.saldo, 0),
       });

@@ -15,4 +15,12 @@ export class ConsultarCarteraPorConceptosPdfDto {
   @IsOptional()
   @IsMongoId()
   conceptoId?: string;
+
+  /** When given, filters to inmuebles carrying this collection status (the
+   *  "Por Estado" tab's own layout) — mutually exclusive with `conceptoId`
+   *  in practice (each tab sets only its own filter), but not enforced here
+   *  since the report degrades gracefully if both were somehow set. */
+  @IsOptional()
+  @IsIn(['al_dia', 'juridico', 'dificil_recaudo'])
+  estado?: 'al_dia' | 'juridico' | 'dificil_recaudo';
 }

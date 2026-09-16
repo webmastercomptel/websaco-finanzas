@@ -63,7 +63,9 @@ const COLUMNAS: ColumnaTabla[] = [
   { titulo: 'Base Gravable', peso: 1.0, numerica: true },
 ];
 const PESO_TOTAL = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
-const ANCHOS_PT = COLUMNAS.map((c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL);
+const ANCHOS_PT = COLUMNAS.map(
+  (c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL,
+);
 
 const FUENTE_DATOS = 6.5;
 
@@ -240,9 +242,13 @@ const styles = StyleSheet.create({
   },
 });
 
-const celdaEstilo = (i: number, variante: 'encabezado' | 'normal' | 'final') => ({
+const celdaEstilo = (
+  i: number,
+  variante: 'encabezado' | 'normal' | 'final',
+) => ({
   flexGrow: COLUMNAS[i].peso,
   flexBasis: 0,
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
   textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
   paddingRight: 3,
   ...(variante === 'encabezado'
@@ -294,11 +300,17 @@ export async function generarPdfMovimientoContable(
   const totalDebitoGeneral = filas.reduce((s, f) => s + (f.debito ?? 0), 0);
   const totalCreditoGeneral = filas.reduce((s, f) => s + (f.credito ?? 0), 0);
 
-  const celda = (texto: string, i: number, variante: 'encabezado' | 'normal' | 'final') =>
+  const celda = (
+    texto: string,
+    i: number,
+    variante: 'encabezado' | 'normal' | 'final',
+  ) =>
     createElement(
       Text,
       { key: i, style: celdaEstilo(i, variante) },
-      variante === 'normal' ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS) : texto,
+      variante === 'normal'
+        ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS)
+        : texto,
     );
 
   const masthead = createElement(
@@ -391,8 +403,8 @@ export async function generarPdfMovimientoContable(
         ? createElement(
             View,
             { style: styles.filaFinal, wrap: false },
-            ...filaSubtotalValores(totalDebitoGeneral, totalCreditoGeneral).map((v, i) =>
-              celda(v, i, 'final'),
+            ...filaSubtotalValores(totalDebitoGeneral, totalCreditoGeneral).map(
+              (v, i) => celda(v, i, 'final'),
             ),
           )
         : null,
@@ -401,5 +413,7 @@ export async function generarPdfMovimientoContable(
     );
   });
 
-  return renderizarPdf(reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }));
+  return renderizarPdf(
+    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  );
 }

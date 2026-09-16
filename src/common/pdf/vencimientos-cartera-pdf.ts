@@ -48,7 +48,9 @@ const PESO_TOTAL = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
 /** Absolute pt widths, precomputed from the same weights the flex columns
  *  use — needed by `truncarTexto`, which measures against a real width,
  *  not a flex ratio. */
-const ANCHOS_PT = COLUMNAS.map((c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL);
+const ANCHOS_PT = COLUMNAS.map(
+  (c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL,
+);
 
 const FUENTE_DATOS = 6.5;
 
@@ -165,9 +167,13 @@ const styles = StyleSheet.create({
   },
 });
 
-const celdaEstilo = (i: number, variante: 'encabezado' | 'normal' | 'final') => ({
+const celdaEstilo = (
+  i: number,
+  variante: 'encabezado' | 'normal' | 'final',
+) => ({
   flexGrow: COLUMNAS[i].peso,
   flexBasis: 0,
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
   textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
   paddingRight: 3,
   ...(variante === 'encabezado'
@@ -198,11 +204,17 @@ export async function generarPdfVencimientosCartera(
   const subtitulo = `Análisis de Vencimientos — Corte al ${formatoFecha(reporte.fechaCorte)}`;
   const totalPorRango = new Map(reporte.rangos.map((r) => [r.rango, r.valor]));
 
-  const celda = (texto: string, i: number, variante: 'encabezado' | 'normal' | 'final') =>
+  const celda = (
+    texto: string,
+    i: number,
+    variante: 'encabezado' | 'normal' | 'final',
+  ) =>
     createElement(
       Text,
       { key: i, style: celdaEstilo(i, variante) },
-      variante === 'normal' ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS) : texto,
+      variante === 'normal'
+        ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS)
+        : texto,
     );
 
   const bloquesFilas = agruparEnPaginas(reporte.filas, FILAS_POR_PAGINA);
@@ -236,13 +248,16 @@ export async function generarPdfVencimientosCartera(
           formatoFecha(f.vence),
           String(f.diasMora),
           formatoPesoCompacto(f.saldo),
-          ...RANGOS.map((r) => (f.rango === r.rango ? formatoPesoCompacto(f.saldo) : '')),
+          ...RANGOS.map((r) =>
+            f.rango === r.rango ? formatoPesoCompacto(f.saldo) : '',
+          ),
         ];
         return createElement(
           View,
           {
             key: filaIdx,
-            style: filaIdx % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
+            style:
+              filaIdx % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
             wrap: false,
           },
           ...valores.map((v, i) => celda(v, i, 'normal')),
@@ -262,7 +277,9 @@ export async function generarPdfVencimientosCartera(
               '',
               '',
               formatoPesoCompacto(reporte.totalCartera),
-              ...RANGOS.map((r) => formatoPesoCompacto(totalPorRango.get(r.rango) ?? 0)),
+              ...RANGOS.map((r) =>
+                formatoPesoCompacto(totalPorRango.get(r.rango) ?? 0),
+              ),
             ].map((v, i) => celda(v, i, 'final')),
           )
         : null,
@@ -271,5 +288,7 @@ export async function generarPdfVencimientosCartera(
     );
   });
 
-  return renderizarPdf(reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }));
+  return renderizarPdf(
+    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  );
 }

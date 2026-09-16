@@ -8,6 +8,8 @@ import { join } from 'path';
 let logoBytesCache: Buffer | null = null;
 
 export function logoBytesWebsaco(): Buffer {
-  logoBytesCache ??= readFileSync(join(__dirname, '../../assets/websaco-logo.png'));
+  logoBytesCache ??= readFileSync(
+    join(__dirname, '../../assets/websaco-logo.png'),
+  );
   return logoBytesCache;
 }

@@ -30,6 +30,7 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   number: 1,
   fullNumber: 'ND-1',
   issueDate: new Date('2026-09-01'),
+  dueDate: new Date('2026-09-30'),
   total: 50000,
   outstandingBalance: 50000,
   status: 'emitida',
@@ -228,8 +229,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
         descripcion: 'Cargo por multa',
       });
 
@@ -261,8 +264,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
@@ -285,8 +290,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
@@ -307,8 +314,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
@@ -362,8 +371,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
         descripcion: 'Cargo por multa',
       });
 
@@ -417,8 +428,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
@@ -467,8 +480,10 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
         total: 50000,
         fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
@@ -495,8 +510,10 @@ describe('NotasDebitoService', () => {
           codigo: 'ND',
           inmuebleId: INMUEBLE.toString(),
           conceptoId: CONCEPTO.toString(),
+          motivo: 'otro',
           total: 50000,
           fechaCargo: '2026-09-01',
+          fechaVencimiento: '2026-09-30',
         }),
       ).rejects.toThrow(NotFoundException);
     });
@@ -519,8 +536,10 @@ describe('NotasDebitoService', () => {
           codigo: 'ND',
           inmuebleId: INMUEBLE.toString(),
           conceptoId: CONCEPTO.toString(),
+          motivo: 'otro',
           total: 50000,
           fechaCargo: '2026-09-01',
+          fechaVencimiento: '2026-09-30',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -543,8 +562,10 @@ describe('NotasDebitoService', () => {
           codigo: 'ND',
           inmuebleId: INMUEBLE.toString(),
           conceptoId: CONCEPTO.toString(),
+          motivo: 'otro',
           total: 50000,
           fechaCargo: '2026-08-15',
+          fechaVencimiento: '2026-09-15',
         }),
       ).resolves.toBeDefined();
     });

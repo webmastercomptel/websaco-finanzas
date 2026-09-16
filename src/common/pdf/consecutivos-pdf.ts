@@ -57,7 +57,10 @@ export async function generarPdfConsecutivos(
   desde: string,
   hasta: string,
 ): Promise<Buffer> {
-  const conceptosIndividuales = reporte.conceptos.slice(0, MAX_CARGOS_INDIVIDUALES);
+  const conceptosIndividuales = reporte.conceptos.slice(
+    0,
+    MAX_CARGOS_INDIVIDUALES,
+  );
   const conceptosAgrupados = reporte.conceptos.slice(MAX_CARGOS_INDIVIDUALES);
   const hayOtros = conceptosAgrupados.length > 0;
 
@@ -67,12 +70,23 @@ export async function generarPdfConsecutivos(
     { titulo: 'Inmueble', peso: 0.9, numerica: false },
     { titulo: 'Fecha', peso: 0.9, numerica: false },
     { titulo: 'Valor Total', peso: 1.2, numerica: true },
-    ...conceptosIndividuales.map((c) => ({ titulo: c.nombre, peso: 1.1, numerica: true })),
-    ...(hayOtros ? [{ titulo: 'Otros Cargos', peso: 1.1, numerica: true }] : []),
+    ...conceptosIndividuales.map((c) => ({
+      titulo: c.nombre,
+      peso: 1.1,
+      numerica: true,
+    })),
+    ...(hayOtros
+      ? [{ titulo: 'Otros Cargos', peso: 1.1, numerica: true }]
+      : []),
   ];
   const pesoTotal = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
-  const anchosPt = COLUMNAS.map((c) => (c.peso / pesoTotal) * CONTENT_WIDTH_PT_HORIZONTAL);
-  const fuenteDatos = Math.max(5.5, 7 - Math.max(0, COLUMNAS.length - 10) * 0.3);
+  const anchosPt = COLUMNAS.map(
+    (c) => (c.peso / pesoTotal) * CONTENT_WIDTH_PT_HORIZONTAL,
+  );
+  const fuenteDatos = Math.max(
+    5.5,
+    7 - Math.max(0, COLUMNAS.length - 10) * 0.3,
+  );
   const fuenteTitulo = Math.max(6, 8 - Math.max(0, COLUMNAS.length - 10) * 0.2);
 
   const subtitulo = `Consecutivos ${codigo} — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
@@ -80,7 +94,11 @@ export async function generarPdfConsecutivos(
   const styles = StyleSheet.create({
     masthead: { marginBottom: 8 },
     nombre: { fontSize: 12, fontFamily: 'Helvetica-Bold', marginBottom: 4 },
-    subtitulo: { fontSize: fuenteTitulo + 3, fontFamily: 'Helvetica-Bold', marginBottom: 6 },
+    subtitulo: {
+      fontSize: fuenteTitulo + 3,
+      fontFamily: 'Helvetica-Bold',
+      marginBottom: 6,
+    },
     regla: { borderBottomWidth: 0.5, borderBottomColor: '#999999' },
     filaEncabezado: {
       flexDirection: 'row',
@@ -93,16 +111,25 @@ export async function generarPdfConsecutivos(
     },
     fila: { flexDirection: 'row', paddingVertical: 1.5 },
     filaPar: { backgroundColor: FONDO_ZEBRA },
-    filaFinal: { flexDirection: 'row', backgroundColor: '#ededed', paddingVertical: 3, marginTop: 2 },
+    filaFinal: {
+      flexDirection: 'row',
+      backgroundColor: '#ededed',
+      paddingVertical: 3,
+      marginTop: 2,
+    },
     celdaEncabezado: { fontSize: fuenteTitulo, fontFamily: 'Helvetica-Bold' },
     celda: { fontSize: fuenteDatos, fontFamily: 'Helvetica' },
     celdaFinal: { fontSize: fuenteDatos, fontFamily: 'Helvetica-Bold' },
     sinDatos: { fontSize: fuenteDatos + 2, fontFamily: 'Helvetica' },
   });
 
-  const celdaEstilo = (i: number, variante: 'encabezado' | 'normal' | 'final') => ({
+  const celdaEstilo = (
+    i: number,
+    variante: 'encabezado' | 'normal' | 'final',
+  ) => ({
     flexGrow: COLUMNAS[i].peso,
     flexBasis: 0,
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
     textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
     paddingRight: 3,
     ...(variante === 'encabezado'
@@ -112,11 +139,17 @@ export async function generarPdfConsecutivos(
         : styles.celda),
   });
 
-  const celda = (texto: string, i: number, variante: 'encabezado' | 'normal' | 'final') =>
+  const celda = (
+    texto: string,
+    i: number,
+    variante: 'encabezado' | 'normal' | 'final',
+  ) =>
     createElement(
       Text,
       { key: i, style: celdaEstilo(i, variante) },
-      variante === 'normal' ? truncarTexto(texto, anchosPt[i], fuenteDatos) : texto,
+      variante === 'normal'
+        ? truncarTexto(texto, anchosPt[i], fuenteDatos)
+        : texto,
     );
 
   const masthead = createElement(
@@ -159,7 +192,10 @@ export async function generarPdfConsecutivos(
   for (const f of reporte.filas) {
     for (const c of reporte.conceptos) {
       const monto = f.cargosPorConcepto[c.conceptoId] ?? 0;
-      totalesPorConcepto.set(c.conceptoId, (totalesPorConcepto.get(c.conceptoId) ?? 0) + monto);
+      totalesPorConcepto.set(
+        c.conceptoId,
+        (totalesPorConcepto.get(c.conceptoId) ?? 0) + monto,
+      );
     }
     totalGeneral += f.valorTotal;
   }
@@ -190,7 +226,9 @@ export async function generarPdfConsecutivos(
           f.inmuebleCodigo,
           formatoFecha(f.fecha),
           formatoPesoCompacto(f.valorTotal),
-          ...conceptosIndividuales.map((c) => formatoPesoCompacto(f.cargosPorConcepto[c.conceptoId] ?? 0)),
+          ...conceptosIndividuales.map((c) =>
+            formatoPesoCompacto(f.cargosPorConcepto[c.conceptoId] ?? 0),
+          ),
           ...(hayOtros ? [formatoPesoCompacto(otros)] : []),
         ];
         return createElement(
@@ -214,7 +252,9 @@ export async function generarPdfConsecutivos(
               '',
               '',
               formatoPesoCompacto(totalGeneral),
-              ...conceptosIndividuales.map((c) => formatoPesoCompacto(totalesPorConcepto.get(c.conceptoId) ?? 0)),
+              ...conceptosIndividuales.map((c) =>
+                formatoPesoCompacto(totalesPorConcepto.get(c.conceptoId) ?? 0),
+              ),
               ...(hayOtros ? [formatoPesoCompacto(totalOtros)] : []),
             ].map((v, i) => celda(v, i, 'final')),
           )
@@ -224,5 +264,7 @@ export async function generarPdfConsecutivos(
     );
   });
 
-  return renderizarPdf(reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }));
+  return renderizarPdf(
+    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  );
 }

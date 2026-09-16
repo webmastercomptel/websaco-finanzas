@@ -78,16 +78,19 @@ import {
   fechaNotaCredito,
 } from './notas-credito.mapper';
 import { toAplicacionCartera } from '../recibos/recibos.mapper';
+import { toFactura } from '../facturacion/facturas.mapper';
 import type {
   NotaCredito as NotaCreditoContract,
   NotaCreditoDetalle,
   Paginado,
   ResultadoAplicacion,
   ErrorAplicacion,
+  Factura as FacturaContract,
 } from '../../contracts';
 import type { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import type { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import type { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
+import type { AnularFacturaDto } from './dto/anular-factura.dto';
 import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
 import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 
@@ -326,30 +329,6 @@ export class NotasCreditoService {
         { session },
       );
 
-      // The débito side of the creation entry, per concepto's own
-      // `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`, frozen on
-      // the anchor Factura's line) — the SAME account originally credited
-      // when this concept was billed, so a credit note correctly reverses
-      // THAT revenue instead of lumping every concept into one shared
-      // "devoluciones" account (see `construirAsientoCruce`'s own
-      // `desgloseOrigen` docblock). Built from `dto.distribucion` directly
-      // (the user's FULL declared split, always summing to `dto.montoTotal`)
-      // — never scaled to `montoAAplicar` below: even the portion that
-      // becomes anticipo still reverses revenue for those same concepts, it
-      // just hasn't been applied against a specific invoice balance yet.
-      const desgloseOrigen: DesgloseCarteraAplicacion[] = [];
-      for (const linea of dto.distribucion) {
-        const facturaLinea = factura.lines.find((l) =>
-          l.conceptoId.equals(linea.conceptoId),
-        );
-        desgloseOrigen.push({
-          cuenta: facturaLinea?.accountingIncomeAccount ?? null,
-          monto: linea.monto,
-          tipoDocumento: 'FV',
-          numeroDocumento: factura.number,
-        });
-      }
-
       // Always exactly one target: the anchor invoice itself — never a
       // manual/FIFO choice like Recibos' crear() (design §5). Read from
       // `SaldoTotalDocumento` — no longer a field on the (now immutable)
@@ -362,6 +341,54 @@ export class NotasCreditoService {
         dto.montoTotal,
         saldoAncla?.saldoPendiente ?? 0,
       );
+      // Whether this note's ENTIRE distribution lands against the anchor
+      // invoice right now, with nothing left over to become anticipo — the
+      // only case where excluding an `intereses` línea from the normal
+      // CxC/Ingreso desglose below (see that comment) is provably still
+      // balanced: `ajustarSaldosCarteraPorDistribucion` (called below)
+      // returns `parte === linea.monto` for every line exactly when this is
+      // true, so the débito and crédito sides drop the identical amount. A
+      // PARTIAL application scales `partes` proportionally instead, which
+      // would make an unscaled desgloseOrigen exclusion (below) disagree
+      // with a scaled desglose exclusion and unbalance the entry — left as
+      // existing behavior for that narrower case rather than risk that.
+      const esAplicacionCompleta = montoAAplicar === dto.montoTotal;
+
+      // The débito side of the creation entry, per concepto's own
+      // `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`, frozen on
+      // the anchor Factura's line) — the SAME account originally credited
+      // when this concept was billed, so a credit note correctly reverses
+      // THAT revenue instead of lumping every concept into one shared
+      // "devoluciones" account (see `construirAsientoCruce`'s own
+      // `desgloseOrigen` docblock). Built from `dto.distribucion` directly
+      // (the user's FULL declared split, always summing to `dto.montoTotal`)
+      // — never scaled to `montoAAplicar` below: even the portion that
+      // becomes anticipo still reverses revenue for those same concepts, it
+      // just hasn't been applied against a specific invoice balance yet.
+      //
+      // An `intereses` línea is the one exception: its ORIGINAL charge never
+      // credited a real Ingreso account either — `construirMovimientos`
+      // posts it through cuentasOrden instead (memo accounts) — so
+      // reversing it through `accountingIncomeAccount` here would post a
+      // real movement that was never really posted. `montoAplicadoMora`
+      // below is what correctly reverses it, through cuentasOrden; skipped
+      // only when `esAplicacionCompleta` (see that constant's own comment).
+      const desgloseOrigen: DesgloseCarteraAplicacion[] = [];
+      for (const linea of dto.distribucion) {
+        const facturaLinea = factura.lines.find((l) =>
+          l.conceptoId.equals(linea.conceptoId),
+        );
+        if (esAplicacionCompleta && facturaLinea?.conceptKind === 'intereses') {
+          continue;
+        }
+        desgloseOrigen.push({
+          cuenta: facturaLinea?.accountingIncomeAccount ?? null,
+          monto: linea.monto,
+          tipoDocumento: 'FV',
+          numeroDocumento: factura.number,
+        });
+      }
+
       let totalAplicadoAhora = 0;
       // How much of THIS application landed on an `intereses` (mora) line —
       // the ONLY portion `cuentasOrden` may move (design §7 / see
@@ -414,15 +441,20 @@ export class NotasCreditoService {
           const linea = factura.lines.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
+          const esIntereses = linea?.conceptKind === 'intereses';
+          if (esIntereses) {
+            montoAplicadoMora += parte.parte;
+          }
+          // Same exclusion, same guard, as desgloseOrigen above — an
+          // intereses línea never credited a real CxC account either, only
+          // cuentasOrden (via montoAplicadoMora).
+          if (esIntereses && esAplicacionCompleta) continue;
           desglose.push({
             cuenta: linea?.accountingReceivableAccount ?? null,
             monto: parte.parte,
             tipoDocumento: 'FV',
             numeroDocumento: factura.number,
           });
-          if (linea?.conceptKind === 'intereses') {
-            montoAplicadoMora += parte.parte;
-          }
         }
         await this.aplicaciones.create(
           [
@@ -485,6 +517,118 @@ export class NotasCreditoService {
         dto.montoTotal - totalAplicadoAhora,
       );
     });
+  }
+
+  /**
+   * Voids a Factura by creating a full-amount Nota Crédito against it —
+   * never a bare `status` flip. Delegates to `crear()` above for the actual
+   * cartera adjustment and reversing accounting entry (same accounts that
+   * entry originally moved, opposite direction — see `postearAsientoCreacion`'s
+   * own docblock), so this method only adds the two things a plain creation
+   * doesn't do on its own: refusing an invoice that already has ANY abono
+   * (even one fully reverted since — the whole point of voiding is that the
+   * invoice was never really settled), and stamping the Factura's own void
+   * audit trail once that note exists.
+   *
+   * Lives here, not in `FacturasController`/`FacturasService`
+   * (`FacturacionModule`), purely to avoid a circular require() graph:
+   * `NotasCreditoModule` already imports `FacturacionModule` (for
+   * `LotesFacturacionService`), and `RecibosModule` — which
+   * `NotasCreditoModule` also imports — imports `FacturacionModule` too, so
+   * `FacturacionModule` importing `NotasCreditoModule` back (even guarded by
+   * `forwardRef`, which only defers NestJS's own provider resolution, not
+   * the underlying `import` statement) crashes Node's module loader at boot
+   * ("Cannot access 'FacturacionModule' before initialization" — confirmed
+   * by trying it). Exposed via `AnularFacturaController`, registered in
+   * `NotasCreditoModule`, routing `POST /facturas/:id/anular` despite living
+   * in this module.
+   */
+  async anularFactura(
+    id: string,
+    dto: AnularFacturaDto,
+    accountId: string,
+  ): Promise<FacturaContract> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const facturaId = new Types.ObjectId(id);
+
+    const factura = await this.facturas
+      .findOne({ _id: facturaId, coPropertyId })
+      .exec();
+    if (!factura) {
+      throw new NotFoundException(`No se encontró la factura ${id}`);
+    }
+    if (factura.status !== 'emitida') {
+      throw new ConflictException(
+        `La factura ${factura.fullNumber} ya está anulada`,
+      );
+    }
+
+    const tieneAbonos = await this.aplicaciones
+      .exists({ coPropertyId, documentType: 'FV', documentId: facturaId })
+      .exec();
+    if (tieneAbonos) {
+      throw new ConflictException(
+        `La factura ${factura.fullNumber} tiene abonos aplicados y no se puede anular`,
+      );
+    }
+
+    // Mirrors the invoice's own lines into the credit note's distribution,
+    // merged per concepto — a Factura can carry more than one line for the
+    // same concepto (a recurrente charge plus a novedad override, say), but
+    // `validarDistribucionNotaCredito` expects one cap per concepto.
+    const montosPorConcepto = new Map<string, number>();
+    for (const linea of factura.lines) {
+      const key = linea.conceptoId.toString();
+      montosPorConcepto.set(
+        key,
+        (montosPorConcepto.get(key) ?? 0) + linea.totalAmount,
+      );
+    }
+    const distribucion = [...montosPorConcepto.entries()].map(
+      ([conceptoId, monto]) => ({ conceptoId, monto }),
+    );
+
+    // `montoTotal: factura.total` against an untouched invoice (guarded
+    // above) always fully applies, so nothing becomes anticipo.
+    // `'anulacion_factura'` is DIAN's own code 2 ("Anulación de factura
+    // electrónica") — the one creation-time motivo built for exactly this
+    // case.
+    const notaCredito = await this.crear(accountId, {
+      codigo: dto.codigo,
+      inmuebleId: factura.inmuebleId.toString(),
+      facturaId: factura._id.toString(),
+      fecha: dto.fecha,
+      motivo: 'anulacion_factura',
+      montoTotal: factura.total,
+      distribucion,
+      observaciones: `Anulación de la factura ${factura.fullNumber}: ${dto.detalle}`,
+    });
+
+    // The note above already zeroed the invoice's cartera and posted its
+    // reversing entry. This is the other half `voidedByCreditNoteId`'s own
+    // docblock anticipated: flip `status` so Consecutivos (which filters
+    // strictly by status, never by live balance) stops counting this
+    // invoice, and stamp the void's own audit trail — separate from the
+    // note's own `reason`/`observaciones`, matching every other document
+    // type's anulación fields.
+    await this.facturas.updateOne(
+      { _id: facturaId, coPropertyId },
+      {
+        $set: {
+          status: 'anulada',
+          voidedReason: dto.motivo,
+          voidedDetail: dto.detalle,
+          voidedAt: new Date(dto.fecha),
+          voidedBy: accountId,
+          voidedByCreditNoteId: new Types.ObjectId(notaCredito.id),
+        },
+      },
+    );
+
+    const facturaFinal = await this.facturas
+      .findOne({ _id: facturaId, coPropertyId })
+      .exec();
+    return toFactura(facturaFinal!, 0, new Map());
   }
 
   /**

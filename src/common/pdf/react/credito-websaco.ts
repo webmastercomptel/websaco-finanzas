@@ -64,8 +64,13 @@ export function CreditoWebsaco(): ReactElement {
     ),
     createElement(Text, {
       style: styles.texto,
-      render: ({ pageNumber, totalPages }: { pageNumber: number; totalPages: number }) =>
-        `Página ${pageNumber}/${totalPages}`,
+      render: ({
+        pageNumber,
+        totalPages,
+      }: {
+        pageNumber: number;
+        totalPages: number;
+      }) => `Página ${pageNumber}/${totalPages}`,
     }),
   );
 }

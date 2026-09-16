@@ -129,6 +129,26 @@ export class LoteFacturacion {
   @Prop({ required: true })
   periodEnd: Date;
 
+  /**
+   * Set only for a "Factura Individual" — a one-off, single-unit run created
+   * outside the normal monthly cycle (`LotesFacturacionService.crearIndividual`),
+   * always pinned to the CURRENT period (copied from the last `consolidado`
+   * lote, never freely chosen — see that method's own docblock). `null` for
+   * an ordinary whole-coproperty lote.
+   *
+   * Everything else about this Lote works exactly the same either way — same
+   * status lifecycle, same `agregarNovedadLinea`/`liquidar`/`consolidar`
+   * routes, same one-open-lote-at-a-time index. The only behavioral
+   * difference lives in `construirPreview`: when this is set, the preview
+   * covers ONLY this one inmueble, and skips both the ValorRecurrente
+   * auto-population pass and the automatic mora calculation — every charge
+   * on a Factura Individual is added by hand (product decision: this
+   * sidesteps the double-charging risk of silently repeating a recurring
+   * charge the next regular cycle would also produce).
+   */
+  @Prop({ type: SchemaTypes.ObjectId, ref: Inmueble.name, default: null })
+  inmuebleId: Types.ObjectId | null;
+
   // Percentage form of the discount — mutually exclusive with
   // `earlyPaymentDiscountFixedValue` below (Parámetros de Facturación §4's
   // own rule: a fixed value only applies when there is no percentage).

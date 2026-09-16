@@ -225,7 +225,22 @@ export interface Factura {
    *  `montoDescuento` is 0. */
   fechaLimiteDescuento: IsoDate | null;
   estado: 'emitida' | 'anulada';
+  motivoAnulacion: MotivoAnulacionFactura | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
 }
+
+/** Why a Factura was voided — same catalog as a Nota Crédito's void (no
+ *  domain-specific list was requested for this document either). Voiding a
+ *  Factura always creates a Nota Crédito behind the scenes (see
+ *  `AnularFacturaService`) — this is the Factura's OWN void reason, distinct
+ *  from that note's `motivo` (always `'anulacion_factura'` for this path). */
+export type MotivoAnulacionFactura =
+  | 'error_digitacion'
+  | 'error_facturacion'
+  | 'duplicado'
+  | 'ajuste_contrato'
+  | 'otro';
 
 /**
  * One billing run. `previsualizacion` and `novedades` are intentionally NOT
@@ -255,6 +270,11 @@ export interface LoteFacturacion {
   topeInteresMora: number | null;
   fechaLimiteDescuento: IsoDate;
   fechaSuspension: IsoDate;
+  /** Set only for a "Factura Individual" — a one-off, single-unit lote
+   *  created outside the normal monthly cycle, always pinned to the current
+   *  period. `null` for an ordinary whole-coproperty lote. See
+   *  `LotesFacturacionService.crearIndividual`. */
+  inmuebleId: string | null;
   totalNovedades: number;
   totalPrevisualizacion: number;
   resumen: {
@@ -323,6 +343,7 @@ export interface ResultadoReinicioCiclo {
   saldosEliminados: number;
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
+  lotesContabilidadEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -556,10 +577,16 @@ export interface ResultadoAplicacion {
 
 /* ── Notas Crédito ─────────────────────────────────────────────── */
 
-/** Why a Nota Crédito was issued — a fixed list, matching the mockup's
- *  reason options (design §3.2). */
+/** Why a Nota Crédito was issued — DIAN's own "Concepto de Corrección para
+ *  Notas crédito" catalog (Anexo 1.8-2021 §13.3.4), not this app's own
+ *  invention. See the schema's own docblock (`nota-credito.schema.ts`) for
+ *  the full citation and the code-1-through-5 ordering these mirror. */
 export type MotivoNotaCredito =
-  'error_facturacion' | 'descuento_comercial' | 'anulacion_documento' | 'otro';
+  | 'devolucion_parcial'
+  | 'anulacion_factura'
+  | 'descuento'
+  | 'ajuste_precio'
+  | 'otro';
 
 /** Why a Nota Crédito was voided — same catalog as a Recibo's void (design
  *  §5/§8; no domain-specific list was requested for this document). */
@@ -622,6 +649,13 @@ export interface NotaCreditoDetalle extends NotaCredito {
 
 /* ── Notas Débito ─────────────────────────────────────────────── */
 
+/** Why a Nota Débito was issued — DIAN's own "Concepto de Corrección para
+ *  Notas débito" catalog (Anexo 1.8-2021 §13.2.5), not this app's own
+ *  invention. See the schema's own docblock (`nota-debito.schema.ts`) for
+ *  the full citation and the code-1-through-4 ordering these mirror. */
+export type MotivoNotaDebito =
+  'intereses' | 'gastos_por_cobrar' | 'cambio_valor' | 'otro';
+
 /** A debit note ("ND"), always issued against a concepto for an inmueble —
  *  used to charge amounts that are not part of a regular invoice (design §2). */
 export interface NotaDebito {
@@ -629,11 +663,13 @@ export interface NotaDebito {
   inmuebleId: string;
   terceroId: string | null;
   conceptoId: string;
+  motivo: MotivoNotaDebito;
   descripcion: string | null;
   prefijo: string;
   numero: number;
   numeroCompleto: string;
   fechaEmision: IsoDate;
+  fechaVencimiento: IsoDate;
   total: Monto;
   saldoPendiente: Monto;
   estado: 'emitida' | 'anulada';
@@ -875,6 +911,9 @@ export interface GrupoInmuebleCarteraPorConceptos {
   inmuebleCodigo: string;
   titular: string | null;
   celular: string | null;
+  /** The inmueble's own collection status — 'al_dia' reads as "Vigente" on
+   *  screen, the label used everywhere the enum value isn't shown raw. */
+  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
   documentos: DocumentoCarteraPorConceptos[];
   saldoTotal: number;
 }
@@ -1364,6 +1403,28 @@ export interface MovimientoContable {
 /** Response shape for both GET /consultas/movimiento-contable endpoints. */
 export interface RespuestaMovimientoContable {
   movimientos: MovimientoContable[];
+}
+
+/* ── Adición a Contabilidad ───────────────────────────────────── */
+
+/** One "Adición a Contabilidad" export — see `LoteContabilidad` (backend
+ *  schema) for what it records and why. */
+export interface LoteContabilidad {
+  id: string;
+  numero: number;
+  periodoDesde: IsoDate;
+  periodoHasta: IsoDate;
+  totalAsientos: number;
+  fechaGeneracion: IsoDate;
+}
+
+/** Response shape for `POST /adicion-contabilidad/generar` — the two CSV
+ *  files' full text content (small enough to embed directly; the frontend
+ *  triggers the actual downloads from these strings, no second request). */
+export interface RespuestaAdicionContabilidad {
+  lote: LoteContabilidad;
+  movmes: string;
+  movmesdo: string;
 }
 
 /* ── Panel de Control / Auditoría (§13) ──────────────────────── */

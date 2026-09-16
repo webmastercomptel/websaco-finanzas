@@ -59,5 +59,7 @@ export async function generarPdfPrefacturaReactPdf(
   lote: LoteFacturacionDocument,
   copropiedad: CopropiedadDocument,
 ): Promise<Buffer> {
-  return renderizarPdf(reporteDocumento(paginaPrefactura(preliminar, lote, copropiedad)));
+  return renderizarPdf(
+    reporteDocumento(paginaPrefactura(preliminar, lote, copropiedad)),
+  );
 }

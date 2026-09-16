@@ -15,6 +15,13 @@ import type { RespuestaCarteraPorConceptos } from '../../contracts';
  *  the "un solo concepto" layout never has more than its own one column. */
 const MAX_CARGOS_INDIVIDUALES = 8;
 
+const ESTADO_LABELS: Record<'al_dia' | 'juridico' | 'dificil_recaudo', string> =
+  {
+    al_dia: 'Vigente',
+    dificil_recaudo: 'Difícil Recaudo',
+    juridico: 'En Jurídico',
+  };
+
 const styles = StyleSheet.create({
   sinDatos: {
     fontSize: 10,
@@ -39,6 +46,9 @@ function formatoPorcentaje(cargo: number, saldo: number): string {
  *   layout — filtered to documents carrying that one charge, with a single
  *   named cargo column plus a "% Participación" column (cargo/saldo), same
  *   resumido/detallado split.
+ * - One single collection status (`estado` given): the "Por Estado" tab's
+ *   own layout — the same "Por Inmueble" one-column-per-concept table,
+ *   filtered down to inmuebles carrying that `estadoCartera`.
  *
  * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
  * toggle — direct cutover is the settled approach for this migration).
@@ -49,7 +59,21 @@ export async function generarPdfCarteraPorConceptos(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   conceptoId?: string,
+  estado?: 'al_dia' | 'juridico' | 'dificil_recaudo',
 ): Promise<Buffer> {
+  if (estado) {
+    const filtrado: RespuestaCarteraPorConceptos = {
+      ...reporte,
+      grupos: reporte.grupos.filter((g) => g.estadoCartera === estado),
+    };
+    return generarPorInmueble(
+      filtrado,
+      copropiedad,
+      fechaCorte,
+      tipo,
+      ESTADO_LABELS[estado],
+    );
+  }
   return conceptoId
     ? generarPorConcepto(reporte, copropiedad, fechaCorte, tipo, conceptoId)
     : generarPorInmueble(reporte, copropiedad, fechaCorte, tipo);
@@ -60,11 +84,12 @@ async function generarPorInmueble(
   copropiedad: CopropiedadDocument,
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
+  estadoLabel?: string,
 ): Promise<Buffer> {
   const encabezado = createElement(EncabezadoReporte, {
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
-    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}`,
+    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
   });
 
   if (reporte.grupos.length === 0) {
@@ -74,7 +99,11 @@ async function generarPorInmueble(
           View,
           null,
           encabezado,
-          createElement(Text, { style: styles.sinDatos }, 'No hay cartera pendiente en esta copropiedad.'),
+          createElement(
+            Text,
+            { style: styles.sinDatos },
+            'No hay cartera pendiente en esta copropiedad.',
+          ),
           createElement(CreditoWebsaco),
         ),
         { orientacion: 'horizontal' },
@@ -82,7 +111,10 @@ async function generarPorInmueble(
     );
   }
 
-  const conceptosIndividuales = reporte.conceptos.slice(0, MAX_CARGOS_INDIVIDUALES);
+  const conceptosIndividuales = reporte.conceptos.slice(
+    0,
+    MAX_CARGOS_INDIVIDUALES,
+  );
   const conceptosAgrupados = reporte.conceptos.slice(MAX_CARGOS_INDIVIDUALES);
   const hayOtros = conceptosAgrupados.length > 0;
 
@@ -90,30 +122,47 @@ async function generarPorInmueble(
     cargosPorConcepto: Record<string, number>,
     conceptos: { conceptoId: string }[],
   ): number =>
-    conceptos.reduce((acc, c) => acc + (cargosPorConcepto[c.conceptoId] ?? 0), 0);
+    conceptos.reduce(
+      (acc, c) => acc + (cargosPorConcepto[c.conceptoId] ?? 0),
+      0,
+    );
 
   const columnasCargos = [
     ...conceptosIndividuales.map((c) => c.nombre),
     ...(hayOtros ? ['Otros Cargos'] : []),
   ];
   const cargosDe = (cargosPorConcepto: Record<string, number>): string[] => [
-    ...conceptosIndividuales.map((c) => formatoPeso(cargosPorConcepto[c.conceptoId] ?? 0)),
-    ...(hayOtros ? [formatoPeso(sumaCargos(cargosPorConcepto, conceptosAgrupados))] : []),
+    ...conceptosIndividuales.map((c) =>
+      formatoPeso(cargosPorConcepto[c.conceptoId] ?? 0),
+    ),
+    ...(hayOtros
+      ? [formatoPeso(sumaCargos(cargosPorConcepto, conceptosAgrupados))]
+      : []),
   ];
 
   const granTotalCargos: Record<string, number> = {};
   for (const g of reporte.grupos) {
     for (const d of g.documentos) {
       for (const [conceptoId, monto] of Object.entries(d.cargosPorConcepto)) {
-        granTotalCargos[conceptoId] = (granTotalCargos[conceptoId] ?? 0) + monto;
+        granTotalCargos[conceptoId] =
+          (granTotalCargos[conceptoId] ?? 0) + monto;
       }
     }
   }
-  const granTotalSaldo = reporte.grupos.reduce((sum, g) => sum + g.saldoTotal, 0);
+  const granTotalSaldo = reporte.grupos.reduce(
+    (sum, g) => sum + g.saldoTotal,
+    0,
+  );
 
   let tabla;
   if (tipo === 'resumido') {
-    const columnas = ['Inmueble', 'Titular', 'Celular', 'Saldo', ...columnasCargos];
+    const columnas = [
+      'Inmueble',
+      'Titular',
+      'Celular',
+      'Saldo',
+      ...columnasCargos,
+    ];
     const anchosRelativos = [0.8, 1.6, 1, 1, ...columnasCargos.map(() => 1.1)];
 
     const filas = reporte.grupos.map((g) => {
@@ -123,7 +172,13 @@ async function generarPorInmueble(
           cargosGrupo[conceptoId] = (cargosGrupo[conceptoId] ?? 0) + monto;
         }
       }
-      return [g.inmuebleCodigo, g.titular ?? '—', g.celular ?? '—', formatoPeso(g.saldoTotal), ...cargosDe(cargosGrupo)];
+      return [
+        g.inmuebleCodigo,
+        g.titular ?? '—',
+        g.celular ?? '—',
+        formatoPeso(g.saldoTotal),
+        ...cargosDe(cargosGrupo),
+      ];
     });
 
     tabla = createElement(Tabla, {
@@ -132,11 +187,35 @@ async function generarPorInmueble(
       filas,
       columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
-      filaTotales: ['GRAN TOTAL', '', '', formatoPeso(granTotalSaldo), ...cargosDe(granTotalCargos)],
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        ...cargosDe(granTotalCargos),
+      ],
     });
   } else {
-    const columnas = ['Inmueble', 'Titular', 'Fecha', 'Tipo', 'Número', 'Vence', 'Saldo', ...columnasCargos];
-    const anchosRelativos = [0.7, 1.4, 0.8, 0.6, 1, 0.8, 1, ...columnasCargos.map(() => 1.1)];
+    const columnas = [
+      'Inmueble',
+      'Titular',
+      'Fecha',
+      'Tipo',
+      'Número',
+      'Vence',
+      'Saldo',
+      ...columnasCargos,
+    ];
+    const anchosRelativos = [
+      0.7,
+      1.4,
+      0.8,
+      0.6,
+      1,
+      0.8,
+      1,
+      ...columnasCargos.map(() => 1.1),
+    ];
 
     const filas = reporte.grupos.flatMap((g) =>
       g.documentos.map((d) => [
@@ -157,13 +236,28 @@ async function generarPorInmueble(
       filas,
       columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
-      filaTotales: ['GRAN TOTAL', '', '', '', '', '', formatoPeso(granTotalSaldo), ...cargosDe(granTotalCargos)],
+      filaTotales: [
+        'GRAN TOTAL',
+        '',
+        '',
+        '',
+        '',
+        '',
+        formatoPeso(granTotalSaldo),
+        ...cargosDe(granTotalCargos),
+      ],
     });
   }
 
   return renderizarPdf(
     reporteDocumento(
-      createElement(View, null, encabezado, tabla, createElement(CreditoWebsaco)),
+      createElement(
+        View,
+        null,
+        encabezado,
+        tabla,
+        createElement(CreditoWebsaco),
+      ),
       { orientacion: 'horizontal' },
     ),
   );
@@ -176,7 +270,9 @@ async function generarPorConcepto(
   tipo: 'resumido' | 'detallado',
   conceptoId: string,
 ): Promise<Buffer> {
-  const nombreCargo = reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ?? 'Cargo';
+  const nombreCargo =
+    reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ??
+    'Cargo';
 
   const encabezado = createElement(EncabezadoReporte, {
     copropiedad,
@@ -187,7 +283,9 @@ async function generarPorConcepto(
   const grupos = reporte.grupos
     .map((g) => ({
       ...g,
-      documentos: g.documentos.filter((d) => (d.cargosPorConcepto[conceptoId] ?? 0) > 0),
+      documentos: g.documentos.filter(
+        (d) => (d.cargosPorConcepto[conceptoId] ?? 0) > 0,
+      ),
     }))
     .filter((g) => g.documentos.length > 0);
 
@@ -198,7 +296,11 @@ async function generarPorConcepto(
           View,
           null,
           encabezado,
-          createElement(Text, { style: styles.sinDatos }, 'No hay cartera pendiente para este cargo en esta copropiedad.'),
+          createElement(
+            Text,
+            { style: styles.sinDatos },
+            'No hay cartera pendiente para este cargo en esta copropiedad.',
+          ),
           createElement(CreditoWebsaco),
         ),
         { orientacion: 'horizontal' },
@@ -208,19 +310,38 @@ async function generarPorConcepto(
 
   const saldoDe = (documentos: { saldo: number }[]): number =>
     documentos.reduce((sum, d) => sum + d.saldo, 0);
-  const cargoDe = (documentos: { cargosPorConcepto: Record<string, number> }[]): number =>
-    documentos.reduce((sum, d) => sum + (d.cargosPorConcepto[conceptoId] ?? 0), 0);
+  const cargoDe = (
+    documentos: { cargosPorConcepto: Record<string, number> }[],
+  ): number =>
+    documentos.reduce(
+      (sum, d) => sum + (d.cargosPorConcepto[conceptoId] ?? 0),
+      0,
+    );
 
   const granTotalSaldo = saldoDe(grupos.flatMap((g) => g.documentos));
   const granTotalCargo = cargoDe(grupos.flatMap((g) => g.documentos));
 
   let tabla;
   if (tipo === 'resumido') {
-    const columnas = ['Inmueble', 'Titular', 'Celular', 'Saldo', nombreCargo, '% Participación'];
+    const columnas = [
+      'Inmueble',
+      'Titular',
+      'Celular',
+      'Saldo',
+      nombreCargo,
+      '% Participación',
+    ];
     const filas = grupos.map((g) => {
       const saldo = saldoDe(g.documentos);
       const cargo = cargoDe(g.documentos);
-      return [g.inmuebleCodigo, g.titular ?? '—', g.celular ?? '—', formatoPeso(saldo), formatoPeso(cargo), formatoPorcentaje(cargo, saldo)];
+      return [
+        g.inmuebleCodigo,
+        g.titular ?? '—',
+        g.celular ?? '—',
+        formatoPeso(saldo),
+        formatoPeso(cargo),
+        formatoPorcentaje(cargo, saldo),
+      ];
     });
 
     tabla = createElement(Tabla, {
@@ -239,7 +360,17 @@ async function generarPorConcepto(
       ],
     });
   } else {
-    const columnas = ['Inmueble', 'Titular', 'Fecha', 'Tipo', 'Número', 'Vence', 'Saldo', nombreCargo, '% Participación'];
+    const columnas = [
+      'Inmueble',
+      'Titular',
+      'Fecha',
+      'Tipo',
+      'Número',
+      'Vence',
+      'Saldo',
+      nombreCargo,
+      '% Participación',
+    ];
     const filas = grupos.flatMap((g) =>
       g.documentos.map((d) => {
         const cargo = d.cargosPorConcepto[conceptoId] ?? 0;
@@ -279,7 +410,13 @@ async function generarPorConcepto(
 
   return renderizarPdf(
     reporteDocumento(
-      createElement(View, null, encabezado, tabla, createElement(CreditoWebsaco)),
+      createElement(
+        View,
+        null,
+        encabezado,
+        tabla,
+        createElement(CreditoWebsaco),
+      ),
       { orientacion: 'horizontal' },
     ),
   );

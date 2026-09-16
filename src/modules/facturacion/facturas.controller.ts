@@ -25,6 +25,11 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
  * Read-only: invoices are only ever created via a Lote's consolidación
  * (LotesController). There is no create/update/delete here, and there must
  * not be one — a Factura's fields are frozen by design.
+ *
+ * `POST /facturas/:id/anular` (the `annul` exception "the audit law" always
+ * allows) is NOT here — see `AnularFacturaController`
+ * (`modules/notas-credito/`) for why it lives in that module instead despite
+ * the route path.
  */
 @Controller('facturas')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
