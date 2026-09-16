@@ -1,3 +1,4 @@
+import type { Types } from 'mongoose';
 import type {
   NotaCredito as NotaCreditoContract,
   NotaCreditoDetalle,
@@ -5,6 +6,26 @@ import type {
 import type { NotaCreditoDocument } from '../../database/schemas/notas-credito/nota-credito.schema';
 import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import { toAplicacionCartera } from '../recibos/recibos.mapper';
+
+/** Which of `facturaId`/`notaDebitoId` is a note's real anchor — `null`
+ *  only for documents predating `tipoDocumentoAncla`, all of them
+ *  FV-anchored by construction back then (see the schema's own docblock).
+ *  Every reader of "what kind of document does this note correct" — this
+ *  mapper, `NotasCreditoService`, the PDF — must go through this, never
+ *  read `tipoDocumentoAncla` directly. */
+export const tipoAnclaDe = (doc: {
+  tipoDocumentoAncla: 'FV' | 'ND' | null;
+}): 'FV' | 'ND' => doc.tipoDocumentoAncla ?? 'FV';
+
+/** The anchor document's own id, picked from whichever of
+ *  `facturaId`/`notaDebitoId` `tipoAnclaDe` says is real — see that
+ *  function's own docblock. */
+export const idAnclaDe = (doc: {
+  tipoDocumentoAncla: 'FV' | 'ND' | null;
+  facturaId: Types.ObjectId | null;
+  notaDebitoId: Types.ObjectId | null;
+}): Types.ObjectId =>
+  tipoAnclaDe(doc) === 'FV' ? doc.facturaId! : doc.notaDebitoId!;
 
 /**
  * The note's own business date — `issueDate` when this document was created
@@ -36,17 +57,18 @@ export const toNotaCredito = (
   doc: NotaCreditoDocument,
   montoAplicado: number,
   montoSinAplicar: number,
-  // The anchor Factura's own printed number ("FV-1") — this document only
-  // stores `facturaId`. Optional: the lean listing (`findAll`) has no
-  // reason to pay for this lookup on every row, only `findOne`'s detail
-  // view (via `toNotaCreditoDetalle`) resolves and passes it.
-  numeroFactura: string | null = null,
+  // The anchor document's own printed number ("FV-1"/"ND-1") — this
+  // document only stores its id. Optional: the lean listing (`findAll`)
+  // has no reason to pay for this lookup on every row, only `findOne`'s
+  // detail view (via `toNotaCreditoDetalle`) resolves and passes it.
+  numeroDocumentoAncla: string | null = null,
 ): NotaCreditoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
-  facturaId: doc.facturaId.toString(),
-  numeroFactura,
+  tipoDocumentoAncla: tipoAnclaDe(doc),
+  documentoAnclaId: idAnclaDe(doc).toString(),
+  numeroDocumentoAncla,
   prefijo: doc.prefix,
   numero: doc.number,
   numeroCompleto: doc.fullNumber,
@@ -75,13 +97,14 @@ export const toNotaCredito = (
  * reusing `cruce.util.ts`).
  *
  * `numerosPorDocumento` is the caller's own batch-resolved
- * `documentId.toString() -> fullNumber` lookup — this module has no Factura
- * model of its own to resolve it here (same reasoning as
- * `toReciboDetalle`'s identical parameter). A Nota Crédito's `aplicaciones`
- * only ever target a Factura (`documentType: 'FV'`, never `'ND'`), but the
- * target isn't always THIS note's own anchor invoice — `aplicarManual`/
- * `aplicarFifo` can spend a later leftover against any open Factura of the
- * inmueble, exactly like a Recibo's anticipo.
+ * `documentId.toString() -> fullNumber` lookup — this module has no Factura/
+ * NotaDebito model of its own to resolve it here (same reasoning as
+ * `toReciboDetalle`'s identical parameter). The anchor can now be either a
+ * Factura or a Nota Débito (see `tipoAnclaDe`); every OTHER `aplicacion`
+ * still only ever targets a Factura (`documentType: 'FV'`) — `aplicarManual`/
+ * `aplicarFifo` (the deferred-leftover path) can spend a later application
+ * against any open Factura of the inmueble, exactly like a Recibo's
+ * anticipo, but never against a Nota Débito today.
  */
 export const toNotaCreditoDetalle = (
   doc: NotaCreditoDocument,
@@ -94,7 +117,7 @@ export const toNotaCreditoDetalle = (
     doc,
     montoAplicado,
     montoSinAplicar,
-    numerosPorDocumento.get(doc.facturaId.toString()) ?? null,
+    numerosPorDocumento.get(idAnclaDe(doc).toString()) ?? null,
   ),
   // Self-sourced: every `aplicacion` here was made BY this Nota Crédito, so
   // its own date — never `appliedAt`, the real cruce instant — is what a

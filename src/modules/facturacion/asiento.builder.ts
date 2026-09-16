@@ -564,6 +564,21 @@ export function construirAsientoCruce(
   montoCuentasOrden?: number,
   descuento?: { cuenta: string; monto: number },
   desgloseOrigen?: DesgloseCuenta[],
+  // Only RecibosService ever passes a non-empty `descuento` — this lets it
+  // say "no es (solo) pronto pago" when a user-confirmed payment shortfall
+  // contributed, without forcing every other caller (there are none today)
+  // to know this parameter exists.
+  descripcionDescuento = 'Descuento por pronto pago — recibo de caja',
+  // Same reasoning as `descripcionDescuento`, mirrored for the OTHER side
+  // of a Recibo's own leftover: RecibosService passes a different
+  // `cuentaAnticipos` (its own parameter, unchanged above) AND a different
+  // description together when the user confirmed a surplus is really
+  // "Otros Ingresos", not a client anticipo. `undefined` (every caller
+  // except that one case) falls back to `d.creacionCreditoAnticipo` below —
+  // NOT a fixed literal here, since that varies by `origen` (a Nota
+  // Crédito's own leftover reads "nota crédito sin aplicar", never "recibo
+  // de caja").
+  descripcionAnticipo?: string,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
@@ -596,7 +611,7 @@ export function construirAsientoCruce(
       account: descuento.cuenta,
       type: 'debito',
       amount: descuento.monto,
-      description: 'Descuento por pronto pago — recibo de caja',
+      description: descripcionDescuento,
     });
   }
 
@@ -631,7 +646,7 @@ export function construirAsientoCruce(
       account: cuentaAnticipos,
       type: 'credito',
       amount: montoSinAplicar,
-      description: d.creacionCreditoAnticipo,
+      description: descripcionAnticipo ?? d.creacionCreditoAnticipo,
     });
   }
 
@@ -857,6 +872,12 @@ export function construirContraAsientoCruce(
   // exactly what was credited" reasoning `desgloseCartera`'s own docblock
   // gives.
   desgloseOrigen?: DesgloseCuenta[],
+  // Mirrors `construirAsientoCruce`'s own `descripcionAnticipo`: RecibosService
+  // passes this together with a `cuentaAnticipos` already swapped to
+  // `otherIncomeCreditAccount` when voiding a Recibo whose surplus went to
+  // Otros Ingresos, not a client anticipo. `undefined` (every other caller)
+  // falls back to `d.contraDebitoAnticipo` below.
+  descripcionAnticipo?: string,
 ): Movimiento[] {
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [];
@@ -892,7 +913,7 @@ export function construirContraAsientoCruce(
       account: cuentaAnticipos,
       type: 'debito',
       amount: montoSinAplicar,
-      description: d.contraDebitoAnticipo,
+      description: descripcionAnticipo ?? d.contraDebitoAnticipo,
     });
   }
 

@@ -450,6 +450,12 @@ export interface Recibo {
   observaciones: string | null;
   montoAplicado: Monto;
   montoSinAplicar: Monto;
+  /** Portion of a payment SURPLUS the user sent to Otros Ingresos instead
+   *  of Anticipos (`destinoSobrante: 'otros_ingresos'`), manual mode only —
+   *  0 in every other case. Distinct from `montoAplicado`: this money never
+   *  touched cartera, so it can't be folded into it (see `RecibosService`'s
+   *  own note on the bug this field fixes). */
+  montoOtrosIngresos: Monto;
   estado: 'activo' | 'anulado';
   motivoAnulacion: MotivoAnulacionRecibo | null;
   detalleAnulacion: string | null;
@@ -580,7 +586,12 @@ export interface ResultadoAplicacion {
 /** Why a Nota Crédito was issued — DIAN's own "Concepto de Corrección para
  *  Notas crédito" catalog (Anexo 1.8-2021 §13.3.4), not this app's own
  *  invention. See the schema's own docblock (`nota-credito.schema.ts`) for
- *  the full citation and the code-1-through-5 ordering these mirror. */
+ *  the full citation and the code-1-through-5 ordering these mirror.
+ *  `anulacion_factura` ("Anulación de factura electrónica") is valid ONLY
+ *  when `NotaCredito.tipoDocumentoAncla === 'FV'` — it names the dedicated
+ *  `anularFactura()` flow, which has no Nota Débito equivalent
+ *  (`NotasDebitoService.anular()` already covers a full void). Rejected
+ *  server-side (`NotasCreditoService.crear()`) against a `'ND'` anchor. */
 export type MotivoNotaCredito =
   | 'devolucion_parcial'
   | 'anulacion_factura'
@@ -605,19 +616,24 @@ export interface DistribucionNotaCredito {
 }
 
 /**
- * A credit note ("NC"), always issued against exactly one anchor invoice —
- * unlike `Recibo` (design §3.2). `montoAplicado`/`montoSinAplicar` are the
- * only fields that move after creation, same pattern as `Recibo`.
+ * A credit note ("NC"), always issued against exactly one anchor document —
+ * a Factura OR a Nota Débito (unlike `Recibo`, design §3.2, which never
+ * requires one). `montoAplicado`/`montoSinAplicar` are the only fields that
+ * move after creation, same pattern as `Recibo`.
  */
 export interface NotaCredito {
   id: string;
   inmuebleId: string;
   terceroId: string | null;
-  facturaId: string;
-  /** The anchor Factura's own printed number ("FV-1") — `null` on the lean
-   *  listing (`GET /notas-credito`), which never resolves it; always set on
-   *  the detail view (`GET /notas-credito/:id`). */
-  numeroFactura: string | null;
+  /** Which kind of document `documentoAnclaId` points to. */
+  tipoDocumentoAncla: 'FV' | 'ND';
+  /** The anchor document's own id — a Factura's or a Nota Débito's,
+   *  according to `tipoDocumentoAncla`. */
+  documentoAnclaId: string;
+  /** The anchor document's own printed number ("FV-1"/"ND-1") — `null` on
+   *  the lean listing (`GET /notas-credito`), which never resolves it;
+   *  always set on the detail view (`GET /notas-credito/:id`). */
+  numeroDocumentoAncla: string | null;
   prefijo: string;
   numero: number;
   numeroCompleto: string;

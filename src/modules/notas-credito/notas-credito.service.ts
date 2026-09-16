@@ -19,6 +19,14 @@ import {
   FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
 import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
   SaldoCartera,
   SaldoCarteraDocument,
 } from '../../database/schemas/facturacion/saldo-cartera.schema';
@@ -53,6 +61,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
+import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   AplicacionInvalidaError,
@@ -60,6 +69,7 @@ import {
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoDocumentoOrigen,
   decrementarSaldoFactura,
+  decrementarSaldoNotaDebito,
   restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
 import {
@@ -76,6 +86,8 @@ import {
   toNotaCredito,
   toNotaCreditoDetalle,
   fechaNotaCredito,
+  tipoAnclaDe,
+  idAnclaDe,
 } from './notas-credito.mapper';
 import { toAplicacionCartera } from '../recibos/recibos.mapper';
 import { toFactura } from '../facturacion/facturas.mapper';
@@ -103,12 +115,33 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
  *  `tipoDocumento`/`numeroDocumento` are this application's own documento
  *  cruce — always the SPECIFIC Factura this line settled, never the note's
  *  own anchor (a deferred application can settle a completely different
- *  invoice). */
+ *  invoice). `aplicarManual`/`aplicarFifo` only ever settle a Factura today
+ *  (`tipoDocumento: 'FV'` in practice for those two), but `crear()`'s own
+ *  anchor-side desglose can now be `'ND'` too, so the type stays the full
+ *  union rather than narrowing it — same shape `cruce.util.ts`'s own
+ *  `DesgloseCarteraAplicacion` already declares. */
 type DesgloseCarteraAplicacion = {
   cuenta: string | null;
   monto: number;
-  tipoDocumento: 'FV';
+  tipoDocumento: 'FV' | 'ND';
   numeroDocumento: number;
+};
+
+/** One normalized "anchor line" — a Factura's own `FacturaLinea` shape when
+ *  the anchor is `'FV'`, or a synthetic single-element array built from a
+ *  Nota Débito's own `conceptoId` (resolved via `ConceptoCobro`, which a
+ *  Nota Débito never freezes onto itself the way a Factura line freezes its
+ *  own accounts) when the anchor is `'ND'` — see `resolverLineasAncla`.
+ *  Every place that used to read `factura.lines.find(...)` reads this
+ *  instead, so the rest of `crear()`/`anular()` never branches by document
+ *  type again past this point. */
+type LineaAncla = {
+  conceptoId: Types.ObjectId;
+  totalAmount: number;
+  accountingIncomeAccount: string | null;
+  accountingReceivableAccount: string | null;
+  conceptKind: 'administracion' | 'intereses' | 'otro';
+  conceptName: string;
 };
 
 /**
@@ -148,6 +181,10 @@ export class NotasCreditoService {
     private readonly lotes: LotesFacturacionService,
     @InjectModel(SaldoDocumentoOrigen.name)
     private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptosCobro: Model<ConceptoCobroDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
@@ -156,10 +193,11 @@ export class NotasCreditoService {
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
    *  `documentoCruce` is the UNIFORM case (creation and its own reversal,
-   *  which always reference the SAME anchor Factura) — `postearAsientoAplicacion`
-   *  (deferred excess application, which can target a DIFFERENT document per
-   *  línea) tags `tipoDocumento`/`numeroDocumento` per-línea instead, before
-   *  calling this. */
+   *  which always reference the SAME anchor document — now a Factura OR a
+   *  Nota Débito) — `postearAsientoAplicacion` (deferred excess
+   *  application, which can target a DIFFERENT Factura per línea) tags
+   *  `tipoDocumento`/`numeroDocumento` per-línea instead, before calling
+   *  this. */
   private async conAuxiliares(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
@@ -212,18 +250,87 @@ export class NotasCreditoService {
   }
 
   /**
+   * Normalizes a Factura's `lines` or a Nota Débito's single `conceptoId`
+   * into the common `LineaAncla` shape — see that type's own docblock.
+   * `documento` is whichever raw document the caller already fetched
+   * (never re-fetched here): a Factura's own lines are already frozen with
+   * every field `LineaAncla` needs, mapped verbatim; a Nota Débito freezes
+   * none of that on itself, so its one synthetic line resolves
+   * `cuentaCreditoId`/`cuentaDebitoId`/`kind` from `ConceptoCobro` — same
+   * populate-and-read pattern `NotasDebitoService.crear()` already uses for
+   * its own creation posting.
+   */
+  private async resolverLineasAncla(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    tipoDocumento: 'FV' | 'ND',
+    documento: FacturaDocument | NotaDebitoDocument,
+  ): Promise<LineaAncla[]> {
+    if (tipoDocumento === 'FV') {
+      const factura = documento as FacturaDocument;
+      return factura.lines.map((linea) => ({
+        conceptoId: linea.conceptoId,
+        totalAmount: linea.totalAmount,
+        accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
+        accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
+        conceptKind: linea.conceptKind,
+        conceptName: linea.conceptName,
+      }));
+    }
+    const notaDebito = documento as NotaDebitoDocument;
+    const concepto = await this.conceptosCobro
+      .findOne({ _id: notaDebito.conceptoId, coPropertyId })
+      .populate('cuentaCreditoId', 'code')
+      .populate('cuentaDebitoId', 'code')
+      .session(session)
+      .exec();
+    return [
+      {
+        conceptoId: notaDebito.conceptoId,
+        totalAmount: notaDebito.total,
+        accountingIncomeAccount: concepto
+          ? codigoDeCuentaContable(concepto.cuentaCreditoId)
+          : null,
+        accountingReceivableAccount: concepto
+          ? codigoDeCuentaContable(concepto.cuentaDebitoId)
+          : null,
+        conceptKind: concepto?.kind ?? 'otro',
+        conceptName: concepto?.name ?? notaDebito.description ?? 'Nota Débito',
+      },
+    ];
+  }
+
+  /**
    * Creates a Nota Crédito and ALWAYS applies it immediately against its own
-   * `facturaId` (design §5) — not optional, unlike Recibos: a Nota Crédito
-   * has no meaning without its anchor invoice. Applies
-   * `min(montoTotal, factura.outstandingBalance)`; any excess becomes
-   * `unappliedAmount`, exactly like a Recibo's anticipo.
+   * anchor document (design §5) — not optional, unlike Recibos: a Nota
+   * Crédito has no meaning without one. The anchor is a Factura OR a Nota
+   * Débito (`dto.tipoDocumento`) — structurally different (a Nota Débito
+   * has a single concepto, no `lines` array), normalized via
+   * `resolverLineasAncla` so the rest of this method never branches by type
+   * again after that point. Applies `min(montoTotal, saldoAncla.saldoPendiente)`;
+   * any excess becomes `unappliedAmount`, exactly like a Recibo's anticipo —
+   * this is what makes crediting an ALREADY fully-paid document a valid,
+   * intentional flow (the whole amount becomes anticipo instead of being
+   * refused), not a bug: confirmed as a real business need before this
+   * anchor generalization.
    */
   async crear(
     accountId: string,
     dto: CrearNotaCreditoDto,
   ): Promise<NotaCreditoContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    const facturaId = new Types.ObjectId(dto.facturaId);
+    const documentoId = new Types.ObjectId(dto.documentoId);
+
+    // DIAN's `anulacion_factura` motivo names the dedicated `anularFactura()`
+    // flow, which has no Nota Débito equivalent (`NotasDebitoService.anular()`
+    // already covers a full void) — a cheap check before any lookup, same
+    // placement as `aplicar()`'s own manual/automatic mutual-exclusion guard.
+    if (dto.tipoDocumento === 'ND' && dto.motivo === 'anulacion_factura') {
+      throw new BadRequestException(
+        'El motivo "Anulación de factura electrónica" solo aplica contra una ' +
+          'factura, no contra una nota débito',
+      );
+    }
 
     // The note's own date must fall in the same month/year as the last
     // consolidated billing run — same rule, same reasoning, same helper as
@@ -242,42 +349,109 @@ export class NotasCreditoService {
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
+    const etiquetaAncla =
+      dto.tipoDocumento === 'FV' ? 'La factura' : 'La nota débito';
+
     return this.transaccion(async (session) => {
-      const factura = await this.facturas
-        .findOne({ _id: facturaId, coPropertyId })
-        .session(session)
-        .exec();
-      if (!factura) {
+      const documentoAncla: FacturaDocument | NotaDebitoDocument | null =
+        dto.tipoDocumento === 'FV'
+          ? await this.facturas
+              .findOne({ _id: documentoId, coPropertyId })
+              .session(session)
+              .exec()
+          : await this.notasDebito
+              .findOne({ _id: documentoId, coPropertyId })
+              .session(session)
+              .exec();
+      if (!documentoAncla) {
         throw new NotFoundException(
-          `No se encontró la factura ${dto.facturaId}`,
+          dto.tipoDocumento === 'FV'
+            ? `No se encontró la factura ${dto.documentoId}`
+            : `No se encontró la nota débito ${dto.documentoId}`,
         );
       }
-      // A voided invoice no longer represents active debt — crediting it
+      // A voided anchor no longer represents active debt — crediting it
       // has no meaning (design §6).
-      if (factura.status !== 'emitida') {
+      if (documentoAncla.status !== 'emitida') {
         throw new ConflictException(
-          `La factura ${factura.fullNumber} está anulada y no admite una nota crédito`,
+          `${etiquetaAncla} ${documentoAncla.fullNumber} está anulada y no admite una nota crédito`,
         );
       }
 
       const inmuebleId = new Types.ObjectId(dto.inmuebleId);
-      if (!factura.inmuebleId.equals(inmuebleId)) {
+      if (!documentoAncla.inmuebleId.equals(inmuebleId)) {
         throw new ConflictException(
-          `La factura ${factura.fullNumber} pertenece a otro inmueble ` +
-            `(${factura.inmuebleId.toString()}) que el solicitado ` +
+          `${etiquetaAncla} ${documentoAncla.fullNumber} pertenece a otro inmueble ` +
+            `(${documentoAncla.inmuebleId.toString()}) que el solicitado ` +
             `(${inmuebleId.toString()})`,
         );
       }
 
+      // The anchor's own `terceroId` can be null — a Nota Débito issued to a
+      // unit that had no holder assigned yet, or one created before its own
+      // creation flow started resolving this (`NotasDebitoService.crear()`'s
+      // own fix; every note débito predating that fix has this frozen
+      // forever, by design — a financial document never changes after
+      // issuance). Rather than silently propagate that blank onto the Nota
+      // Crédito's own PDF too, fall back to the inmueble's CURRENT holder,
+      // same source (`Inmueble.holderId`) that fix reads.
+      const terceroId =
+        documentoAncla.terceroId ??
+        (
+          await this.inmuebles
+            ?.findOne({ _id: inmuebleId, coPropertyId })
+            .session(session)
+            .exec()
+        )?.holderId ??
+        null;
+
+      const lineasAncla = await this.resolverLineasAncla(
+        session,
+        coPropertyId,
+        dto.tipoDocumento,
+        documentoAncla,
+      );
+
+      // Every OTHER active Nota Crédito already issued against this SAME
+      // anchor document — a concepto's cap (below) is cumulative across
+      // every note that ever touched it, not just this one, or a second
+      // note can credit a concepto past its own face value simply by
+      // asking again (see `validarDistribucionNotaCredito`'s own
+      // docblock). A voided note is excluded on purpose: `anular()` fully
+      // reverses its credit, so the concepto's face value is available
+      // again.
+      const filtroAncla =
+        dto.tipoDocumento === 'FV'
+          ? { facturaId: documentoId }
+          : { notaDebitoId: documentoId };
+      const notasCreditoPrevias = await this.notasCredito
+        .find({ coPropertyId, ...filtroAncla, status: 'activo' })
+        .session(session)
+        .exec();
+      const yaCreditadoPorConcepto = new Map<string, number>();
+      for (const notaPrevia of notasCreditoPrevias) {
+        for (const linea of notaPrevia.distribution) {
+          const id = linea.conceptoId.toString();
+          yaCreditadoPorConcepto.set(
+            id,
+            (yaCreditadoPorConcepto.get(id) ?? 0) + linea.amount,
+          );
+        }
+      }
+
       // BadRequestException before ANY write — distribution shape is
-      // checked against the anchor invoice's OWN lines, never the database.
+      // checked against the anchor's OWN lines, never the database.
       validarDistribucionNotaCredito(
         dto.distribucion.map((l) => ({
           conceptoId: l.conceptoId,
           monto: l.monto,
         })),
         dto.montoTotal,
-        factura.lines,
+        lineasAncla.map((l) => ({
+          conceptoId: l.conceptoId,
+          totalAmount: l.totalAmount,
+        })),
+        yaCreditadoPorConcepto,
       );
 
       const numero = await this.numeracion.siguienteDocumento(
@@ -291,8 +465,10 @@ export class NotasCreditoService {
           {
             coPropertyId,
             inmuebleId,
-            terceroId: factura.terceroId,
-            facturaId,
+            terceroId,
+            facturaId: dto.tipoDocumento === 'FV' ? documentoId : null,
+            notaDebitoId: dto.tipoDocumento === 'ND' ? documentoId : null,
+            tipoDocumentoAncla: dto.tipoDocumento,
             issueDate: new Date(dto.fecha),
             prefix: numero.prefijo,
             number: numero.numero,
@@ -329,12 +505,14 @@ export class NotasCreditoService {
         { session },
       );
 
-      // Always exactly one target: the anchor invoice itself — never a
+      // Always exactly one target: the anchor document itself — never a
       // manual/FIFO choice like Recibos' crear() (design §5). Read from
       // `SaldoTotalDocumento` — no longer a field on the (now immutable)
-      // Factura itself, see that schema's own docblock.
+      // Factura/NotaDebito itself, see that schema's own docblock. Already
+      // agnostic to which type the anchor is: both `FacturasService`/
+      // `NotasDebitoService` seed a row here keyed only by `documentoId`.
       const saldoAncla = await this.saldoTotalDocumento
-        .findOne({ documentoId: facturaId })
+        .findOne({ documentoId })
         .session(session)
         .exec();
       const montoAAplicar = Math.min(
@@ -342,12 +520,12 @@ export class NotasCreditoService {
         saldoAncla?.saldoPendiente ?? 0,
       );
       // Whether this note's ENTIRE distribution lands against the anchor
-      // invoice right now, with nothing left over to become anticipo — the
+      // document right now, with nothing left over to become anticipo — the
       // only case where excluding an `intereses` línea from the normal
       // CxC/Ingreso desglose below (see that comment) is provably still
       // balanced: `ajustarSaldosCarteraPorDistribucion` (called below)
       // returns `parte === linea.monto` for every line exactly when this is
-      // true, so the débito and crédito sides drop the identical amount. A
+      // true, so the débito y crédito sides drop the identical amount. A
       // PARTIAL application scales `partes` proportionally instead, which
       // would make an unscaled desgloseOrigen exclusion (below) disagree
       // with a scaled desglose exclusion and unbalance the entry — left as
@@ -355,16 +533,17 @@ export class NotasCreditoService {
       const esAplicacionCompleta = montoAAplicar === dto.montoTotal;
 
       // The débito side of the creation entry, per concepto's own
-      // `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`, frozen on
-      // the anchor Factura's line) — the SAME account originally credited
-      // when this concept was billed, so a credit note correctly reverses
+      // `accountingIncomeAccount` — the SAME account originally credited
+      // when this concept was billed (a Factura line's own frozen account,
+      // or a Nota Débito's own `ConceptoCobro.cuentaCreditoId`, resolved
+      // above into `lineasAncla`), so a credit note correctly reverses
       // THAT revenue instead of lumping every concept into one shared
       // "devoluciones" account (see `construirAsientoCruce`'s own
       // `desgloseOrigen` docblock). Built from `dto.distribucion` directly
       // (the user's FULL declared split, always summing to `dto.montoTotal`)
       // — never scaled to `montoAAplicar` below: even the portion that
       // becomes anticipo still reverses revenue for those same concepts, it
-      // just hasn't been applied against a specific invoice balance yet.
+      // just hasn't been applied against a specific balance yet.
       //
       // An `intereses` línea is the one exception: its ORIGINAL charge never
       // credited a real Ingreso account either — `construirMovimientos`
@@ -375,17 +554,17 @@ export class NotasCreditoService {
       // only when `esAplicacionCompleta` (see that constant's own comment).
       const desgloseOrigen: DesgloseCarteraAplicacion[] = [];
       for (const linea of dto.distribucion) {
-        const facturaLinea = factura.lines.find((l) =>
+        const lineaAncla = lineasAncla.find((l) =>
           l.conceptoId.equals(linea.conceptoId),
         );
-        if (esAplicacionCompleta && facturaLinea?.conceptKind === 'intereses') {
+        if (esAplicacionCompleta && lineaAncla?.conceptKind === 'intereses') {
           continue;
         }
         desgloseOrigen.push({
-          cuenta: facturaLinea?.accountingIncomeAccount ?? null,
+          cuenta: lineaAncla?.accountingIncomeAccount ?? null,
           monto: linea.monto,
-          tipoDocumento: 'FV',
-          numeroDocumento: factura.number,
+          tipoDocumento: dto.tipoDocumento,
+          numeroDocumento: documentoAncla.number,
         });
       }
 
@@ -399,20 +578,31 @@ export class NotasCreditoService {
       const desglose: DesgloseCarteraAplicacion[] = [];
       if (montoAAplicar > 0) {
         // Needed now (unlike before per-concepto coding): each distribution
-        // line's own accountingReceivableAccount comes off the anchor
-        // Factura's own lines, matched by conceptoId.
-        await decrementarSaldoFactura(
-          this.facturas,
-          this.saldoTotalDocumento,
-          session,
-          coPropertyId,
-          facturaId,
-          montoAAplicar,
-        );
+        // line's own accountingReceivableAccount comes off `lineasAncla`,
+        // matched by conceptoId.
+        if (dto.tipoDocumento === 'FV') {
+          await decrementarSaldoFactura(
+            this.facturas,
+            this.saldoTotalDocumento,
+            session,
+            coPropertyId,
+            documentoId,
+            montoAAplicar,
+          );
+        } else {
+          await decrementarSaldoNotaDebito(
+            this.notasDebito,
+            this.saldoTotalDocumento,
+            session,
+            coPropertyId,
+            documentoId,
+            montoAAplicar,
+          );
+        }
         // Distribution-based, NOT the proportional-by-invoice-line split
         // `ajustarSaldosCartera` uses — this application is against the
-        // anchor invoice, whose concepto breakdown the user explicitly chose
-        // via `dto.distribucion` (Task 11 / review Finding 3).
+        // anchor document, whose concepto breakdown the user explicitly
+        // chose via `dto.distribucion` (Task 11 / review Finding 3).
         const partes = await ajustarSaldosCarteraPorDistribucion(
           this.saldos,
           this.carteraPorDocumento,
@@ -425,23 +615,23 @@ export class NotasCreditoService {
           })),
           montoAAplicar,
           -1,
-          { tipoDocumento: 'FV', documentoId: facturaId },
+          { tipoDocumento: dto.tipoDocumento, documentoId },
         );
         const detalleConceptos = partes.map((parte) => {
-          const linea = factura.lines.find((l) =>
+          const lineaAncla = lineasAncla.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
           return {
             conceptoId: parte.conceptoId,
-            conceptName: linea?.conceptName ?? 'Concepto',
+            conceptName: lineaAncla?.conceptName ?? 'Concepto',
             monto: parte.parte,
           };
         });
         for (const parte of partes) {
-          const linea = factura.lines.find((l) =>
+          const lineaAncla = lineasAncla.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
-          const esIntereses = linea?.conceptKind === 'intereses';
+          const esIntereses = lineaAncla?.conceptKind === 'intereses';
           if (esIntereses) {
             montoAplicadoMora += parte.parte;
           }
@@ -450,10 +640,10 @@ export class NotasCreditoService {
           // cuentasOrden (via montoAplicadoMora).
           if (esIntereses && esAplicacionCompleta) continue;
           desglose.push({
-            cuenta: linea?.accountingReceivableAccount ?? null,
+            cuenta: lineaAncla?.accountingReceivableAccount ?? null,
             monto: parte.parte,
-            tipoDocumento: 'FV',
-            numeroDocumento: factura.number,
+            tipoDocumento: dto.tipoDocumento,
+            numeroDocumento: documentoAncla.number,
           });
         }
         await this.aplicaciones.create(
@@ -462,8 +652,8 @@ export class NotasCreditoService {
               coPropertyId,
               sourceType: 'NC',
               sourceId: creada._id,
-              documentType: 'FV',
-              documentId: facturaId,
+              documentType: dto.tipoDocumento,
+              documentId: documentoId,
               amountApplied: montoAAplicar,
               // Same "per-concepto breakdown, for printing" purpose as
               // `ejecutarAplicacionManual`'s identical field (cruce.util.ts)
@@ -504,7 +694,8 @@ export class NotasCreditoService {
         desglose,
         desgloseOrigen,
         montoAplicadoMora,
-        factura.number,
+        dto.tipoDocumento,
+        documentoAncla.number,
       );
 
       const final = await this.notasCredito
@@ -529,6 +720,9 @@ export class NotasCreditoService {
    * (even one fully reverted since — the whole point of voiding is that the
    * invoice was never really settled), and stamping the Factura's own void
    * audit trail once that note exists.
+   *
+   * Always `tipoDocumento: 'FV'` — a Nota Débito's full void has its own
+   * dedicated flow (`NotasDebitoService.anular()`), never this one.
    *
    * Lives here, not in `FacturasController`/`FacturasService`
    * (`FacturacionModule`), purely to avoid a circular require() graph:
@@ -596,7 +790,8 @@ export class NotasCreditoService {
     const notaCredito = await this.crear(accountId, {
       codigo: dto.codigo,
       inmuebleId: factura.inmuebleId.toString(),
-      facturaId: factura._id.toString(),
+      tipoDocumento: 'FV',
+      documentoId: factura._id.toString(),
       fecha: dto.fecha,
       motivo: 'anulacion_factura',
       montoTotal: factura.total,
@@ -638,6 +833,13 @@ export class NotasCreditoService {
    * drift apart — same structure as `RecibosService.aplicar()`. Posts via
    * `postearAsientoAplicacion`, never `postearAsientoCreacion` — the
    * `montoTotal` was already booked at creation time.
+   *
+   * FV-only target today, regardless of what the note's own anchor is
+   * (`tipoDocumentoAncla`) — `aplicarManual`/`aplicarFifo` below never
+   * touch `this.notasDebito`. Extending the deferred leftover to also pay
+   * off an open Nota Débito is a separate, tracked gap (mirrors
+   * `RecibosService`'s own FV+ND generalization in `cruce.util.ts`), not
+   * addressed by this anchor-generalization change.
    */
   async aplicar(
     id: string,
@@ -1009,11 +1211,17 @@ export class NotasCreditoService {
   /**
    * Voids a Nota Crédito, cascading unconditionally: every `activa`
    * `AplicacionCartera` it made (`sourceType: 'NC'`) is reversed, its
-   * `Factura`'s `outstandingBalance` is restored — even one already voided
-   * through another path, harmless bookkeeping, never "reopens" that
-   * document — and ONE consolidated reversing journal entry is always
+   * target document's `outstandingBalance` is restored — even one already
+   * voided through another path, harmless bookkeeping, never "reopens"
+   * that document — and ONE consolidated reversing journal entry is always
    * posted, using the Nota Crédito's OWN cached totals. Mirrors
    * `RecibosService.anular()` exactly.
+   *
+   * The note's own anchor (`tipoAnclaDe(nota)`) can now be a Factura or a
+   * Nota Débito; every OTHER application it ever made (via the deferred
+   * `aplicar()`) stays Factura-only (see that method's own docblock) — so
+   * only the loop's ANCHOR-matching branch below ever needs to read from
+   * `this.notasDebito`.
    */
   async anular(
     id: string,
@@ -1062,6 +1270,8 @@ export class NotasCreditoService {
           (saldoOrigenPrevio?.montoOriginal ?? 0) -
           (saldoOrigenPrevio?.saldoDisponible ?? 0),
       });
+      const anclaTipo = tipoAnclaDe(nota);
+      const anclaId = idAnclaDe(nota);
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
@@ -1080,51 +1290,112 @@ export class NotasCreditoService {
       // `montoAplicadoMora`, see `construirContraAsientoCruce`'s note).
       let montoAplicadoMoraTotal = 0;
       for (const aplicacion of aplicacionesActivas) {
-        const facturaDoc = await this.facturas
-          .findOne({ _id: aplicacion.documentId, coPropertyId })
-          .session(session)
-          .exec();
+        // The ANCHOR application — the one `crear()` made against the
+        // note's own anchor using distribution math — must be reversed
+        // with the SAME distribution math, or `SaldoCartera` drifts
+        // permanently on every void (Task 11 / review Finding 3). Every
+        // OTHER application (made later via `aplicar()`, always against a
+        // Factura — see that method's own docblock) was created with the
+        // proportional split and must keep being reversed that way,
+        // unchanged.
+        //
+        // INVARIANT this branch relies on: at most one ACTIVE application
+        // can ever target the anchor. Holds today because
+        // `decrementarSaldoFactura`/`decrementarSaldoNotaDebito`'s $expr
+        // guard refuses a second application once the anchor's
+        // outstandingBalance hits 0 (which is exactly when `crear()` stops
+        // applying against it) — so no code path in this module can create
+        // a second anchor-targeting row.
+        const esAncla =
+          aplicacion.documentType === anclaTipo &&
+          aplicacion.documentId.equals(anclaId);
 
-        if (facturaDoc) {
-          const saldoRestaurado = await restaurarSaldoTotalDocumento(
-            this.saldoTotalDocumento,
-            session,
-            facturaDoc._id,
-            aplicacion.amountApplied,
-          );
-          const factura = Object.assign(facturaDoc, {
-            outstandingBalance: saldoRestaurado?.saldoPendiente ?? 0,
-          });
-          // `detalleConceptos` is empty on an application predating that
-          // field (schema's own note) — contributes nothing to
-          // `montoAplicadoMoraTotal`, same "no known split" fallback the
-          // frontend already uses for those.
-          for (const detalle of aplicacion.detalleConceptos ?? []) {
-            const linea = factura.lines.find((l) =>
-              l.conceptoId.equals(detalle.conceptoId),
+        if (aplicacion.documentType === 'FV') {
+          const facturaDoc = await this.facturas
+            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (facturaDoc) {
+            const saldoRestaurado = await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              facturaDoc._id,
+              aplicacion.amountApplied,
             );
-            if (linea?.conceptKind === 'intereses') {
-              montoAplicadoMoraTotal += detalle.monto;
+            const factura = Object.assign(facturaDoc, {
+              outstandingBalance: saldoRestaurado?.saldoPendiente ?? 0,
+            });
+            // `detalleConceptos` is empty on an application predating that
+            // field (schema's own note) — contributes nothing to
+            // `montoAplicadoMoraTotal`, same "no known split" fallback the
+            // frontend already uses for those.
+            for (const detalle of aplicacion.detalleConceptos ?? []) {
+              const linea = factura.lines.find((l) =>
+                l.conceptoId.equals(detalle.conceptoId),
+              );
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMoraTotal += detalle.monto;
+              }
+            }
+            if (esAncla) {
+              await ajustarSaldosCarteraPorDistribucion(
+                this.saldos,
+                this.carteraPorDocumento,
+                session,
+                coPropertyId,
+                nota.inmuebleId,
+                nota.distribution.map((l) => ({
+                  conceptoId: l.conceptoId,
+                  monto: l.amount,
+                })),
+                aplicacion.amountApplied,
+                1,
+                { tipoDocumento: 'FV', documentoId: aplicacion.documentId },
+              );
+            } else {
+              await ajustarSaldosCartera(
+                this.saldos,
+                this.carteraPorDocumento,
+                session,
+                coPropertyId,
+                factura,
+                aplicacion.amountApplied,
+                1,
+              );
             }
           }
-          // The ANCHOR application — the one `crear()` made against
-          // `nota.facturaId` using distribution math — must be reversed with
-          // the SAME distribution math, or `SaldoCartera` drifts permanently
-          // on every void (Task 11 / review Finding 3). Every OTHER
-          // application (made later via `aplicar()` against a different
-          // invoice) was created with the proportional split and must keep
-          // being reversed that way, unchanged.
-          //
-          // INVARIANT this branch relies on: at most one ACTIVE application
-          // can ever target `nota.facturaId`. Holds today because
-          // `decrementarSaldoFactura`'s $expr guard refuses a second
-          // application once the anchor invoice's outstandingBalance hits 0
-          // (which is exactly when `crear()` stops applying against it) — so
-          // no code path in this module can create a second anchor-targeting
-          // row. If a future feature (e.g. a recargo) re-inflates a
-          // Factura's outstandingBalance after it reaches 0, re-check this
-          // invariant before trusting it again.
-          if (aplicacion.documentId.equals(nota.facturaId)) {
+        } else {
+          // `aplicacion.documentType === 'ND'` — only ever reachable when
+          // THIS row is the note's own anchor application (the deferred
+          // `aplicar()` path never targets a Nota Débito, see `aplicar()`'s
+          // own docblock), so this is always the `ajustarSaldosCarteraPorDistribucion`
+          // branch, never the proportional `ajustarSaldosCartera` cascade
+          // (which needs a `lines` array a Nota Débito doesn't have).
+          const notaDebitoDoc = await this.notasDebito
+            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (notaDebitoDoc) {
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              notaDebitoDoc._id,
+              aplicacion.amountApplied,
+            );
+            const lineasAncla = await this.resolverLineasAncla(
+              session,
+              coPropertyId,
+              'ND',
+              notaDebitoDoc,
+            );
+            for (const detalle of aplicacion.detalleConceptos ?? []) {
+              const linea = lineasAncla.find((l) =>
+                l.conceptoId.equals(detalle.conceptoId),
+              );
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMoraTotal += detalle.monto;
+              }
+            }
             await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
               this.carteraPorDocumento,
@@ -1137,17 +1408,7 @@ export class NotasCreditoService {
               })),
               aplicacion.amountApplied,
               1,
-              { tipoDocumento: 'FV', documentoId: aplicacion.documentId },
-            );
-          } else {
-            await ajustarSaldosCartera(
-              this.saldos,
-              this.carteraPorDocumento,
-              session,
-              coPropertyId,
-              factura,
-              aplicacion.amountApplied,
-              1,
+              { tipoDocumento: 'ND', documentoId: aplicacion.documentId },
             );
           }
         }
@@ -1173,20 +1434,34 @@ export class NotasCreditoService {
         copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
       // Restores the SAME per-concepto income accounts `postearAsientoCreacion`
       // actually debited — read fresh rather than reused from the loop above,
-      // since the anchor Factura is only touched there when an ACTIVE
-      // application against it exists (never true when its outstandingBalance
-      // was already 0 at creation), while this débito reversal always covers
+      // since the anchor is only touched there when an ACTIVE application
+      // against it exists (never true when its outstandingBalance was
+      // already 0 at creation), while this débito reversal always covers
       // the note's FULL `totalAmount`/`distribution`, applied or not.
-      const facturaAncla = await this.facturas
-        .findOne({ _id: nota.facturaId, coPropertyId })
-        .session(session)
-        .exec();
+      const documentoAncla =
+        anclaTipo === 'FV'
+          ? await this.facturas
+              .findOne({ _id: anclaId, coPropertyId })
+              .session(session)
+              .exec()
+          : await this.notasDebito
+              .findOne({ _id: anclaId, coPropertyId })
+              .session(session)
+              .exec();
+      const lineasAncla = documentoAncla
+        ? await this.resolverLineasAncla(
+            session,
+            coPropertyId,
+            anclaTipo,
+            documentoAncla,
+          )
+        : [];
       const desgloseOrigen = nota.distribution.map((linea) => {
-        const lineaFactura = facturaAncla?.lines.find((l) =>
+        const lineaAncla = lineasAncla.find((l) =>
           l.conceptoId.equals(linea.conceptoId),
         );
         return {
-          account: lineaFactura?.accountingIncomeAccount ?? cuentaDevoluciones,
+          account: lineaAncla?.accountingIncomeAccount ?? cuentaDevoluciones,
           monto: linea.amount,
         };
       });
@@ -1210,7 +1485,9 @@ export class NotasCreditoService {
         nota.inmuebleId,
         copropiedad,
         entries,
-        facturaAncla ? { tipo: 'FV', numero: facturaAncla.number } : null,
+        documentoAncla
+          ? { tipo: anclaTipo, numero: documentoAncla.number }
+          : null,
       );
       await this.asientos.create(
         [
@@ -1379,25 +1656,55 @@ export class NotasCreditoService {
       .sort({ appliedAt: 1 })
       .exec();
 
-    // Batch-resolve every Factura's own printed number ("FV-1") this note
-    // needs for display: its own anchor (`nota.facturaId`, always — a
+    // Batch-resolve every anchor/aplicación's own printed number ("FV-1"/
+    // "ND-1") this note needs for display: its own anchor (always — a
     // deferred application may have never touched it, e.g. its
     // outstandingBalance was already 0 at creation) plus every distinct
-    // Factura an `aplicacion` actually targeted (never necessarily the
-    // anchor — see `toNotaCreditoDetalle`'s own docblock). Same reasoning as
-    // `RecibosService.findOne`'s identical `numerosPorDocumento`.
-    const facturaIdsPorClave = new Map<string, Types.ObjectId>(
-      [nota.facturaId, ...aplicaciones.map((a) => a.documentId)].map((id) => [
-        id.toString(),
-        id,
+    // document an `aplicacion` actually targeted (never necessarily the
+    // anchor — see `toNotaCreditoDetalle`'s own docblock). The anchor can be
+    // a Factura or a Nota Débito; every OTHER aplicación stays Factura-only
+    // (`aplicar()`'s own docblock) — two id sets, two collections, same
+    // reasoning `recibo-pdf-datos.util.ts` already uses for its FV+ND
+    // aplicaciones.
+    const anclaTipo = tipoAnclaDe(nota);
+    const anclaId = idAnclaDe(nota);
+    const idsFacturaPorClave = new Map<string, Types.ObjectId>();
+    const idsNotaDebitoPorClave = new Map<string, Types.ObjectId>();
+    const agregarId = (tipo: 'FV' | 'ND', docId: Types.ObjectId): void => {
+      const mapa = tipo === 'FV' ? idsFacturaPorClave : idsNotaDebitoPorClave;
+      mapa.set(docId.toString(), docId);
+    };
+    agregarId(anclaTipo, anclaId);
+    for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
+
+    const [facturasDoc, notasDebitoDoc] = await Promise.all([
+      idsFacturaPorClave.size
+        ? this.facturas
+            .find({
+              coPropertyId,
+              _id: { $in: [...idsFacturaPorClave.values()] },
+            })
+            .exec()
+        : Promise.resolve([]),
+      idsNotaDebitoPorClave.size
+        ? this.notasDebito
+            .find({
+              coPropertyId,
+              _id: { $in: [...idsNotaDebitoPorClave.values()] },
+            })
+            .exec()
+        : Promise.resolve([]),
+    ]);
+    const numerosPorDocumento = new Map<string, string>([
+      ...facturasDoc.map((f): [string, string] => [
+        f._id.toString(),
+        f.fullNumber,
       ]),
-    );
-    const facturasDoc = await this.facturas
-      .find({ coPropertyId, _id: { $in: [...facturaIdsPorClave.values()] } })
-      .exec();
-    const numerosPorDocumento = new Map(
-      facturasDoc.map((f) => [f._id.toString(), f.fullNumber]),
-    );
+      ...notasDebitoDoc.map((n): [string, string] => [
+        n._id.toString(),
+        n.fullNumber,
+      ]),
+    ]);
 
     return toNotaCreditoDetalle(
       nota,
@@ -1484,7 +1791,7 @@ export class NotasCreditoService {
   /**
    * Posts the CREATION-time journal entry: debit `cuentaDevoluciones` for
    * the full `montoTotal`, credit cartera for whatever applied against the
-   * anchor invoice in this call (per concepto, via `desgloseCartera` — see
+   * anchor document in this call (per concepto, via `desgloseCartera` — see
    * `construirAsientoCruce`), credit `cuentaAnticipos` for whatever remains
    * unapplied (design §7). Shares `construirAsientoCruce` with Recibos —
    * only `origen: 'NC'` differs.
@@ -1494,6 +1801,9 @@ export class NotasCreditoService {
    * `montoAplicadoMora` enforces) — never omitted, or `construirAsientoCruce`
    * defaults to moving the memo pair for the note's WHOLE amount, even one
    * that never touched an `intereses` concept.
+   *
+   * `tipoDocumentoAncla`/`numeroDocumentoAncla` identify the anchor for
+   * `conAuxiliares`'s own `documentoCruce` — a Factura or a Nota Débito.
    */
   private async postearAsientoCreacion(
     session: ClientSession,
@@ -1504,7 +1814,8 @@ export class NotasCreditoService {
     desglose: DesgloseCarteraAplicacion[],
     desgloseOrigen: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
-    numeroFacturaAncla: number,
+    tipoDocumentoAncla: 'FV' | 'ND',
+    numeroDocumentoAncla: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(coPropertyId)
@@ -1550,7 +1861,7 @@ export class NotasCreditoService {
       nota.inmuebleId,
       copropiedad,
       entries,
-      { tipo: 'FV', numero: numeroFacturaAncla },
+      { tipo: tipoDocumentoAncla, numero: numeroDocumentoAncla },
     );
 
     await this.asientos.create(
@@ -1567,7 +1878,7 @@ export class NotasCreditoService {
           // instant, no caller-supplied date to prefer) — this is creation,
           // which does have one. Getting this wrong is exactly why a
           // backdated Nota Crédito could silently vanish from Consulta de
-          // Movimientos when queried by its own declared period.
+          // Movimientos when queried by its own declared período.
           date: fechaNotaCredito(nota),
           entries,
         },

@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { Style } from '@react-pdf/types';
 import { formatoFecha } from './pdf-helpers';
 import {
   reporteDocumentoMultiPagina,
@@ -97,19 +98,20 @@ interface FilaLinea {
   baseGravable: number | null;
 }
 
-/** Same ascending tipo-then-número ordering the on-screen table uses
+/** Same descending tipo-then-número ordering the on-screen table uses
  *  (`compararPorTipoYNumero` in `movimiento-contable.tsx`) — `numeric: true`
- *  compares "RC-10" after "RC-9", not before as a plain string compare
- *  would. `sort` is stable, so lines already grouped by document stay
- *  grouped after this. */
+ *  compares "RC-10" before "RC-9", not after as a plain string compare
+ *  would; comparing b against a instead of a against b flips the direction
+ *  without losing that. `sort` is stable, so lines already grouped by
+ *  document stay grouped after this. */
 const collator = new Intl.Collator('es', {
   numeric: true,
   sensitivity: 'base',
 });
 function compararPorTipoYNumero(a: FilaLinea, b: FilaLinea): number {
   return (
-    collator.compare(a.tipoDocumento, b.tipoDocumento) ||
-    collator.compare(a.numeroDocumento, b.numeroDocumento)
+    collator.compare(b.tipoDocumento, a.tipoDocumento) ||
+    collator.compare(b.numeroDocumento, a.numeroDocumento)
   );
 }
 
@@ -229,11 +231,10 @@ const styles = StyleSheet.create({
 const celdaEstilo = (
   i: number,
   variante: 'encabezado' | 'normal' | 'final',
-) => ({
+): Style => ({
   flexGrow: COLUMNAS[i].peso,
   flexBasis: 0,
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
-  textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
+  textAlign: COLUMNAS[i].numerica ? 'right' : 'left',
   paddingRight: 3,
   ...(variante === 'encabezado'
     ? styles.celdaEncabezado

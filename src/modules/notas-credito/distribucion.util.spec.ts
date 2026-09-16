@@ -73,6 +73,32 @@ describe('validarDistribucionNotaCredito', () => {
     ).not.toThrow();
   });
 
+  it('rechaza cuando el concepto ya fue acreditado por otra nota crédito activa y esta nueva se pasaría del tope combinado', () => {
+    // CONCEPTO_A cobra 300000 en la factura ancla. Una nota crédito previa
+    // (todavía activa) ya le acreditó 200000 — a esta nueva solo le quedan
+    // 100000 disponibles, aunque 250000 por sí solo sigue por debajo del
+    // tope DE LA FACTURA (300000).
+    expect(() =>
+      validarDistribucionNotaCredito(
+        [{ conceptoId: CONCEPTO_A, monto: 250000 }],
+        250000,
+        lineasFactura,
+        new Map([[CONCEPTO_A, 200000]]),
+      ),
+    ).toThrow(BadRequestException);
+  });
+
+  it('acepta cuando lo ya acreditado más la nueva solicitud cabe exacto dentro del tope combinado', () => {
+    expect(() =>
+      validarDistribucionNotaCredito(
+        [{ conceptoId: CONCEPTO_A, monto: 100000 }],
+        100000,
+        lineasFactura,
+        new Map([[CONCEPTO_A, 200000]]),
+      ),
+    ).not.toThrow();
+  });
+
   it('rechaza líneas duplicadas del mismo concepto en la solicitud cuya suma excede el tope, aunque cada línea individualmente esté por debajo', () => {
     // La factura ancla cobra 300000 por CONCEPTO_A. Cada línea solicitada
     // (300000 y 300000... o, más sutil, 150000 y 150000) queda por debajo

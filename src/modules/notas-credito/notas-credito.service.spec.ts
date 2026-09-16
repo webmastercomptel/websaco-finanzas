@@ -329,12 +329,22 @@ const modeloSaldoDocumentoOrigenUnico = (nota: Record<string, unknown>) => ({
   })),
 });
 
-const modeloNotasCredito = (creada: Record<string, unknown>) => ({
+const modeloNotasCredito = (
+  creada: Record<string, unknown>,
+  // Every OTHER active Nota Crédito already issued against the anchor
+  // invoice, as `crear()`'s own cumulative-cap check reads them — empty by
+  // default so every existing test (none of which cares about that check)
+  // keeps seeing "nothing credited yet".
+  notasPrevias: Record<string, unknown>[] = [],
+) => ({
   create: jest.fn(() => Promise.resolve([creada])),
   findOne: jest.fn(() => ({
     session: () => ({ exec: () => Promise.resolve(creada) }),
   })),
   findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(creada) })),
+  find: jest.fn(() => ({
+    session: () => ({ exec: () => Promise.resolve(notasPrevias) }),
+  })),
 });
 
 const modeloSaldos = () => ({
@@ -352,6 +362,14 @@ const modeloAplicaciones = () => ({
 });
 
 const modeloAsientos = () => ({ create: jest.fn(() => Promise.resolve([{}])) });
+
+// Every scenario in this file anchors its Nota Crédito on a Factura — these
+// two models exist only so `NotasCreditoService`'s constructor is satisfied
+// (`resolverLineasAncla`'s ND branch, the only caller of either, is never
+// exercised here); ND-anchor coverage lives in its own dedicated tests below,
+// which override these with real fixtures.
+const modeloNotaDebitoVacio = () => ({});
+const modeloConceptoCobroVacio = () => ({});
 
 const modeloCopropiedades = () => ({
   findById: jest.fn(() => ({
@@ -377,9 +395,20 @@ const construirServicio = (opts: {
    *  consolidated", so `crear()`'s period-match check on `dto.fecha` is a
    *  no-op — mirrors `recibos.service.spec.ts`'s identical override. */
   ultimoLoteConsolidado?: unknown;
+  /** Other active Notas Crédito already issued against the anchor invoice —
+   *  see `modeloNotasCredito`'s own comment. */
+  notasCreditoPrevias?: Record<string, unknown>[];
+  /** Real mocks for a Nota Débito-anchored scenario — omitted (the empty
+   *  stand-ins above) for every FV-anchored test, which never reaches
+   *  `resolverLineasAncla`'s ND branch. */
+  notasDebito?: Record<string, unknown>;
+  conceptosCobro?: Record<string, unknown>;
 }) => {
   const session = sesionFalsa();
-  const notasCredito = modeloNotasCredito(opts.notaCreada);
+  const notasCredito = modeloNotasCredito(
+    opts.notaCreada,
+    opts.notasCreditoPrevias,
+  );
   const factura = opts.factura ?? facturaDoc();
   const facturas = modeloFacturas(factura);
   const saldoTotalDocumento = modeloSaldoTotalDocumentoUnico(factura);
@@ -416,6 +445,8 @@ const construirServicio = (opts: {
     conexionCon(session),
     lotesFacturacionFalso(opts.ultimoLoteConsolidado ?? null),
     saldoDocumentoOrigen as never,
+    (opts.notasDebito ?? modeloNotaDebitoVacio()) as never,
+    (opts.conceptosCobro ?? modeloConceptoCobroVacio()) as never,
     cuentasContables as never,
     inmuebles as never,
   );
@@ -465,7 +496,8 @@ const notaCreditoCreada = (over: Record<string, unknown> = {}) => ({
 const dtoBase = (over: Record<string, unknown> = {}) => ({
   codigo: 'NC',
   inmuebleId: INMUEBLE.toString(),
-  facturaId: new Types.ObjectId().toString(),
+  tipoDocumento: 'FV' as const,
+  documentoId: new Types.ObjectId().toString(),
   fecha: '2026-01-15',
   motivo: 'ajuste_precio' as const,
   montoTotal: 200000,
@@ -846,6 +878,8 @@ describe('NotasCreditoService.crear', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(
@@ -870,6 +904,60 @@ describe('NotasCreditoService.crear', () => {
     await expect(
       service.crear('acc-1', dtoBase({ inmuebleId: INMUEBLE.toString() })),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza cuando, sumada a otras notas crédito activas ya emitidas contra la misma factura, el concepto se pasaría de su propio valor de emisión', async () => {
+    // La factura ancla cobra 200000 por CONCEPTO. Una nota crédito previa
+    // (todavía activa) ya le acreditó 150000 — a esta nueva, aunque 100000
+    // por sí solo no supera el tope DE LA FACTURA (200000), no le quedan
+    // más de 50000 disponibles.
+    const notaPrevia = {
+      facturaId: new Types.ObjectId(),
+      status: 'activo',
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+    };
+    const { service, notasCredito } = construirServicio({
+      notaCreada: {},
+      notasCreditoPrevias: [notaPrevia],
+    });
+
+    await expect(
+      service.crear(
+        'acc-1',
+        dtoBase({
+          montoTotal: 100000,
+          distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 100000 }],
+        }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // Solo cuenta lo emitido bajo la MISMA factura ancla, y solo mientras
+    // sigue activo — una nota anulada ya reversó su crédito.
+    expect(notasCredito.find).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'activo' }),
+    );
+  });
+
+  it('acepta cuando lo ya acreditado por otras notas crédito activas más esta nueva cabe exacto en el valor de emisión del concepto', async () => {
+    const notaPrevia = {
+      facturaId: new Types.ObjectId(),
+      status: 'activo',
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+    };
+    const notaCreada = notaCreditoCreada({ totalAmount: 50000 });
+    const { service } = construirServicio({
+      notaCreada,
+      notasCreditoPrevias: [notaPrevia],
+    });
+
+    await expect(
+      service.crear(
+        'acc-1',
+        dtoBase({
+          montoTotal: 50000,
+          distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 50000 }],
+        }),
+      ),
+    ).resolves.toBeDefined();
   });
 
   it('rechaza una nota crédito contra una factura ya anulada', async () => {
@@ -1051,6 +1139,191 @@ describe('NotasCreditoService.crear', () => {
   });
 });
 
+describe('NotasCreditoService.crear — ancla Nota Débito', () => {
+  const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
+    _id: new Types.ObjectId(),
+    coPropertyId: COP,
+    inmuebleId: INMUEBLE,
+    terceroId: TERCERO,
+    conceptoId: CONCEPTO,
+    status: 'emitida',
+    fullNumber: 'ND-1',
+    number: 1,
+    total: 150000,
+    outstandingBalance: 150000,
+    description: 'Multa por parqueo',
+    ...over,
+  });
+
+  const modeloNotaDebito = (nota: Record<string, unknown>) => ({
+    findOne: jest.fn(() => ({
+      session: () => ({ exec: () => Promise.resolve(nota) }),
+    })),
+  });
+
+  const modeloConceptoCobro = (concepto: Record<string, unknown> | null) => ({
+    findOne: jest.fn(() => ({
+      populate: () => ({
+        populate: () => ({
+          session: () => ({ exec: () => Promise.resolve(concepto) }),
+        }),
+      }),
+    })),
+  });
+
+  const dtoNotaDebito = (
+    notaDebito: { _id: Types.ObjectId },
+    over: Record<string, unknown> = {},
+  ) => ({
+    codigo: 'NC',
+    inmuebleId: INMUEBLE.toString(),
+    tipoDocumento: 'ND' as const,
+    documentoId: notaDebito._id.toString(),
+    fecha: '2026-01-15',
+    motivo: 'devolucion_parcial' as const,
+    montoTotal: 150000,
+    distribucion: [{ conceptoId: CONCEPTO.toString(), monto: 150000 }],
+    ...over,
+  });
+
+  it('crea la nota contra una Nota Débito, decrementando su saldo y guardando notaDebitoId (nunca facturaId)', async () => {
+    const notaDebito = notaDebitoDoc();
+    const notaCreada = notaCreditoCreada({
+      facturaId: null,
+      notaDebitoId: notaDebito._id,
+      tipoDocumentoAncla: 'ND',
+      totalAmount: 150000,
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+    });
+    const notasCredito = modeloNotasCredito(notaCreada);
+    const saldoTotalDocumento = modeloSaldoTotalDocumentoUnico(notaDebito);
+    const saldoDocumentoOrigen = modeloSaldoDocumentoOrigenUnico(notaCreada);
+    const concepto = {
+      _id: CONCEPTO,
+      name: 'Multa por parqueo',
+      kind: 'otro',
+      cuentaCreditoId: { code: '413595' },
+      cuentaDebitoId: { code: '130505' },
+    };
+
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      saldoDocumentoOrigen as never,
+      modeloNotaDebito(notaDebito) as never,
+      modeloConceptoCobro(concepto) as never,
+    );
+
+    await service.crear('acc-1', dtoNotaDebito(notaDebito));
+
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ documentoId: notaDebito._id }),
+      { $inc: { saldoPendiente: -150000 } },
+      expect.anything(),
+    );
+    const [[filas]] = notasCredito.create.mock.calls as unknown as [
+      Record<string, unknown>[],
+    ][];
+    expect(filas[0]).toMatchObject({
+      facturaId: null,
+      notaDebitoId: notaDebito._id,
+      tipoDocumentoAncla: 'ND',
+    });
+  });
+
+  it('cuando el ancla ND no trae terceroId (congelado null desde antes del propio fix de Notas Débito), cae al holderId ACTUAL del inmueble en vez de dejarlo en blanco', async () => {
+    const TITULAR = new Types.ObjectId();
+    const notaDebito = notaDebitoDoc({ terceroId: null });
+    const notaCreada = notaCreditoCreada({
+      facturaId: null,
+      notaDebitoId: notaDebito._id,
+      tipoDocumentoAncla: 'ND',
+      totalAmount: 150000,
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+    });
+    const notasCredito = modeloNotasCredito(notaCreada);
+    const concepto = {
+      _id: CONCEPTO,
+      name: 'Multa por parqueo',
+      kind: 'otro',
+      cuentaCreditoId: { code: '413595' },
+      cuentaDebitoId: { code: '130505' },
+    };
+    const inmuebles = {
+      findOne: jest.fn(() => ({
+        session: () => ({
+          exec: () => Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
+        }),
+      })),
+    };
+
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumentoUnico(notaDebito) as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigenUnico(notaCreada) as never,
+      modeloNotaDebito(notaDebito) as never,
+      modeloConceptoCobro(concepto) as never,
+      undefined,
+      inmuebles as never,
+    );
+
+    await service.crear('acc-1', dtoNotaDebito(notaDebito));
+
+    const [[filas]] = notasCredito.create.mock.calls as unknown as [
+      Record<string, unknown>[],
+    ][];
+    expect(filas[0].terceroId).toBe(TITULAR);
+  });
+
+  it('rechaza el motivo "anulacion_factura" contra una Nota Débito — ese motivo es exclusivo de Factura', async () => {
+    const notaDebito = notaDebitoDoc();
+    const service = new NotasCreditoService(
+      modeloNotasCredito({}) as never,
+      modeloAplicaciones() as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumentoUnico(notaDebito) as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebito(notaDebito) as never,
+      modeloConceptoCobro(null) as never,
+    );
+
+    await expect(
+      service.crear(
+        'acc-1',
+        dtoNotaDebito(notaDebito, { motivo: 'anulacion_factura' }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
 describe('NotasCreditoService.crear — fecha de la nota', () => {
   it('guarda dto.fecha como issueDate del documento creado', async () => {
     const { service, notasCredito } = construirServicio({
@@ -1211,6 +1484,8 @@ describe('NotasCreditoService.aplicar', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([nota]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     const resultado = await service.aplicar(
@@ -1303,6 +1578,8 @@ describe('NotasCreditoService.aplicar', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([nota]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.aplicar(
@@ -1395,6 +1672,8 @@ describe('NotasCreditoService.aplicar', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(
@@ -1426,6 +1705,8 @@ describe('NotasCreditoService.aplicar', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(
@@ -1445,6 +1726,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
+      documentType: 'FV',
       amountApplied: 120000,
       status: 'activa',
     };
@@ -1508,6 +1790,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     const resultado = await service.anular(
@@ -1547,6 +1831,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
+      documentType: 'FV',
       amountApplied: 130000,
       status: 'activa',
     };
@@ -1611,6 +1896,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.anular(
@@ -1657,6 +1944,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
+      documentType: 'FV',
       amountApplied: 130000,
       status: 'activa',
       detalleConceptos: [
@@ -1749,6 +2037,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.anular(
@@ -1787,6 +2077,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
       documentId: facturaId,
+      documentType: 'FV',
       amountApplied: 120000,
       status: 'activa',
     };
@@ -1831,6 +2122,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(
@@ -1873,6 +2166,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionAncla = {
       _id: new Types.ObjectId(),
       documentId: facturaAncla,
+      documentType: 'FV',
       amountApplied: 200000,
       status: 'activa',
     };
@@ -1881,6 +2175,7 @@ describe('NotasCreditoService.anular', () => {
     const aplicacionOtra = {
       _id: new Types.ObjectId(),
       documentId: facturaOtra,
+      documentType: 'FV',
       amountApplied: 80000,
       status: 'activa',
     };
@@ -1972,6 +2267,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.anular(
@@ -2041,6 +2338,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.anular(
@@ -2093,6 +2392,8 @@ describe('NotasCreditoService.anular', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(
@@ -2106,6 +2407,135 @@ describe('NotasCreditoService.anular', () => {
         'acc-1',
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('NotasCreditoService.anular — ancla Nota Débito', () => {
+  it('restaura el saldo de la Nota Débito ancla (nunca busca en facturas) y no revienta al reconstruir el débito por concepto', async () => {
+    const notaDebitoId = new Types.ObjectId();
+    const nota = notaActivaDoc({
+      facturaId: null,
+      notaDebitoId,
+      tipoDocumentoAncla: 'ND',
+      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+      totalAmount: 150000,
+      appliedAmount: 150000,
+      unappliedAmount: 0,
+    });
+    const notaDebitoFrozen = {
+      _id: notaDebitoId,
+      inmuebleId: INMUEBLE,
+      conceptoId: CONCEPTO,
+      total: 150000,
+      outstandingBalance: 0,
+      description: 'Multa por parqueo',
+      number: 1,
+      fullNumber: 'ND-1',
+    };
+    const aplicacionAncla = {
+      _id: new Types.ObjectId(),
+      documentId: notaDebitoId,
+      documentType: 'ND',
+      amountApplied: 150000,
+      status: 'activa',
+    };
+    const facturas = {
+      // Never consulted for an ND-anchored note — a call here (rather than
+      // to `notasDebito`) would be the exact regression this test guards
+      // against.
+      findOne: jest.fn(() => {
+        throw new Error('anular() no debe consultar facturas para un ancla ND');
+      }),
+    };
+    const notasDebito = {
+      findOne: jest.fn(() => ({
+        session: () => ({
+          exec: () => Promise.resolve({ ...notaDebitoFrozen }),
+        }),
+      })),
+    };
+    const conceptosCobro = {
+      findOne: jest.fn(() => ({
+        populate: () => ({
+          populate: () => ({
+            session: () => ({
+              exec: () =>
+                Promise.resolve({
+                  _id: CONCEPTO,
+                  name: 'Multa por parqueo',
+                  kind: 'otro',
+                  cuentaCreditoId: { code: '413595' },
+                  cuentaDebitoId: { code: '130505' },
+                }),
+            }),
+          }),
+        }),
+      })),
+    };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: notaDebitoId, outstandingBalance: 0 },
+    ]);
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_f: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(nota, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([aplicacionAncla]) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([
+      {
+        _id: nota._id,
+        totalAmount: nota.totalAmount,
+        unappliedAmount: nota.unappliedAmount,
+      },
+    ]);
+
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
+      modeloAsientos() as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      saldoDocumentoOrigen as never,
+      notasDebito as never,
+      conceptosCobro as never,
+    );
+
+    const resultado = await service.anular(
+      nota._id.toString(),
+      {
+        motivo: 'error_facturacion',
+        detalle: 'Nota crédito emitida por error, se anula',
+        fecha: '2026-01-20',
+      },
+      'acc-1',
+    );
+
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledWith(
+      { documentoId: notaDebitoId },
+      { $inc: { saldoPendiente: 150000 } },
+      { returnDocument: 'after', session: expect.anything() as unknown },
+    );
+    expect(resultado.estado).toBe('anulado');
   });
 });
 
@@ -2140,6 +2570,8 @@ describe('NotasCreditoService.findAll', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.findAll({
@@ -2198,6 +2630,8 @@ describe('NotasCreditoService.findAll', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([notaConAnticipo]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await service.findAll({ conAnticipoDisponible: true });
@@ -2234,6 +2668,8 @@ describe('NotasCreditoService.findOne', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     const detalle = await service.findOne(nota._id.toString());
@@ -2291,11 +2727,13 @@ describe('NotasCreditoService.findOne', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     const detalle = await service.findOne(nota._id.toString());
 
-    expect(detalle.numeroFactura).toBe('FV-0001');
+    expect(detalle.numeroDocumentoAncla).toBe('FV-0001');
     expect(detalle.aplicaciones[0]).toMatchObject({
       documentoId: facturaOtra.toString(),
       numeroDocumento: 'FV-0042',
@@ -2320,6 +2758,8 @@ describe('NotasCreditoService.findOne', () => {
       conexionCon(sesionFalsa()),
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
     );
 
     await expect(service.findOne('nc-ajena')).rejects.toBeInstanceOf(

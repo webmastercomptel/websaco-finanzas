@@ -27,6 +27,16 @@ function makeController(
   const terceros = {
     findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
+  const notasDebito = {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+  const conceptosCobro = {
+    find: jest.fn(() => ({
+      populate: () => ({
+        populate: () => ({ exec: () => Promise.resolve([]) }),
+      }),
+    })),
+  };
   const cuentasContables = {
     find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
   };
@@ -39,6 +49,8 @@ function makeController(
     facturas as never,
     inmuebles as never,
     terceros as never,
+    notasDebito as never,
+    conceptosCobro as never,
     cuentasContables as never,
   );
 }
@@ -58,7 +70,8 @@ describe('NotasCreditoController.crear', () => {
     await controller.crear(user, {
       codigo: 'NC',
       inmuebleId: new Types.ObjectId().toString(),
-      facturaId: new Types.ObjectId().toString(),
+      tipoDocumento: 'FV',
+      documentoId: new Types.ObjectId().toString(),
       fecha: '2026-01-15',
       motivo: 'ajuste_precio',
       montoTotal: 200000,

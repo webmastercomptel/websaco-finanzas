@@ -46,6 +46,14 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -74,6 +82,10 @@ export class NotasCreditoController {
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptosCobro: Model<ConceptoCobroDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables: Model<CuentaContableDocument>,
   ) {}
@@ -157,6 +169,8 @@ export class NotasCreditoController {
       coPropertyId,
       {
         facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        conceptosCobro: this.conceptosCobro,
         inmuebles: this.inmuebles,
         terceros: this.terceros,
         cuentasContables: this.cuentasContables,

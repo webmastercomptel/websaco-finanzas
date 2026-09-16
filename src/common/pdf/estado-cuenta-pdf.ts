@@ -131,6 +131,7 @@ export async function generarPdfEstadoCuenta(
             columnasNumericas: 2,
             anchosRelativos: ANCHOS_MOVIMIENTOS,
             striped: true,
+            fontSize: 8.5,
             filaTotales:
               estado.movimientos.length > 1
                 ? [
@@ -159,6 +160,7 @@ export async function generarPdfEstadoCuenta(
             ]),
             columnasNumericas: 1,
             striped: true,
+            fontSize: 8.5,
           }),
         )
       : null,

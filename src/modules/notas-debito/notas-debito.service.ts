@@ -128,10 +128,10 @@ export class NotasDebitoService {
     private readonly lotes: LotesFacturacionService,
     @InjectModel(SaldoDocumentoOrigen.name)
     private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
-    @InjectModel(Inmueble.name)
-    private readonly inmuebles?: Model<InmuebleDocument>,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -233,6 +233,23 @@ export class NotasDebitoService {
       );
     }
 
+    // A Nota Débito freezes the party it was issued to too, same as every
+    // other financial document (schema's own `terceroId` docblock) —
+    // resolve the unit's CURRENT titular (`Inmueble.holderId`) into a
+    // Tercero reference, same source `LotesFacturacionService` reads for a
+    // Factura's own `terceroId`. Also the only place this method verifies
+    // `dto.inmuebleId` actually belongs to this coproperty (the tenancy
+    // law) before creating anything against it.
+    const inmueble = await this.inmuebles
+      .findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    if (!inmueble) {
+      throw new NotFoundException(
+        `No se encontró el inmueble ${dto.inmuebleId}`,
+      );
+    }
+    const terceroId = inmueble.holderId;
+
     return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
@@ -245,7 +262,7 @@ export class NotasDebitoService {
           {
             coPropertyId,
             inmuebleId,
-            terceroId: null,
+            terceroId,
             conceptoId,
             reason: dto.motivo,
             description: dto.descripcion ?? null,

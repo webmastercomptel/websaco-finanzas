@@ -3,15 +3,22 @@ import type { NotaCreditoDocument } from '../../database/schemas/notas-credito/n
 import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
+import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import type { ConceptoCobroDocument } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
+import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
 } from '../../common/pdf/recibo-pdf';
-import { fechaNotaCredito } from './notas-credito.mapper';
+import {
+  fechaNotaCredito,
+  tipoAnclaDe,
+  idAnclaDe,
+} from './notas-credito.mapper';
 
 // DIAN's own "Concepto de Corrección para Notas crédito" labels (Anexo
 // 1.8-2021 §13.3.4) — see `MOTIVOS_NOTA_CREDITO`'s own docblock
@@ -27,6 +34,8 @@ const MOTIVOS_LABELS: Record<string, string> = {
 
 export interface ModelosDatosImpresionNotaCredito {
   facturas: Model<FacturaDocument>;
+  notasDebito: Model<NotaDebitoDocument>;
+  conceptosCobro: Model<ConceptoCobroDocument>;
   inmuebles: Model<InmuebleDocument>;
   terceros: Model<TerceroDocument>;
   cuentasContables: Model<CuentaContableDocument>;
@@ -40,14 +49,16 @@ export interface ModelosDatosImpresionNotaCredito {
  * closely; the differences are real, not cosmetic:
  *
  *  - The débito side is one line PER CONCEPTO in `nota.distribution`, each
- *    debiting that concept's own `accountingIncomeAccount` (frozen on the
- *    anchor Factura's line, `ConceptoCobro.cuentaCreditoId`) — the SAME
- *    account originally credited when the concept was billed, never a
- *    bank account (a Nota Crédito never moves cash) nor a single
- *    coproperty-wide "cuenta de devoluciones" lumping every concept
- *    together. Falls back to `cuentaDevoluciones` only for a concept with no
- *    income account configured — same role `cuentaCartera` plays as the
- *    fallback for an unattributed crédito line below. Mirrors exactly what
+ *    debiting that concept's own `accountingIncomeAccount` — the SAME
+ *    account originally credited when the concept was billed (a Factura
+ *    line's own frozen account, or a Nota Débito's own
+ *    `ConceptoCobro.cuentaCreditoId`, resolved fresh here since a Nota
+ *    Débito never freezes it onto itself) — never a bank account (a Nota
+ *    Crédito never moves cash) nor a single coproperty-wide "cuenta de
+ *    devoluciones" lumping every concept together. Falls back to
+ *    `cuentaDevoluciones` only for a concept with no income account
+ *    configured — same role `cuentaCartera` plays as the fallback for an
+ *    unattributed crédito line below. Mirrors exactly what
  *    `postearAsientoCreacion` now posts for real (`desgloseOrigen`, see
  *    `construirAsientoCruce`'s own docblock) — built from
  *    `nota.distribution` here too, for the same reason that function reads
@@ -62,6 +73,12 @@ export interface ModelosDatosImpresionNotaCredito {
  *    creation" snapshot to reconstruct here: the print always reflects the
  *    live `appliedAmount`/`unappliedAmount`, exactly like the JSON detail
  *    view already does.
+ *
+ * The anchor (`nota`'s own `tipoAnclaDe`/`idAnclaDe`) can be a Factura or a
+ * Nota Débito; every OTHER `aplicacion` this note ever made via the
+ * deferred `aplicar()` stays Factura-only (see that method's own docblock)
+ * — same two-collection resolution `recibo-pdf-datos.util.ts` already uses
+ * for its own FV+ND aplicaciones, branching on `aplicacion.documentType`.
  *
  * `aplicaciones` must be exactly what `findAplicacionesForSource('NC',
  * nota._id)` returns — every application this Nota Crédito ever made,
@@ -88,29 +105,77 @@ export async function construirDatosImpresionNotaCredito(
   const cuentaDevoluciones =
     copropiedad.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
 
-  // Every Factura this print needs a number/línea for: the anchor
-  // (`nota.facturaId`, always — an application may have never touched it,
-  // e.g. its outstandingBalance was already 0 at creation) plus every
-  // distinct Factura an `aplicacion` actually targeted (never necessarily
-  // the anchor — a later deferred application can spend the leftover
-  // against any open Factura of the inmueble).
-  const facturaIdsPorClave = new Map<string, Types.ObjectId>(
-    [nota.facturaId, ...aplicaciones.map((a) => a.documentId)].map((id) => [
+  const anclaTipo = tipoAnclaDe(nota);
+  const anclaId = idAnclaDe(nota);
+
+  // Every Factura/Nota Débito this print needs a number/línea for: the
+  // anchor (always — an application may have never touched it, e.g. its
+  // outstandingBalance was already 0 at creation) plus every distinct
+  // document an `aplicacion` actually targeted (never necessarily the
+  // anchor — a later deferred application can spend the leftover against
+  // any open Factura of the inmueble).
+  const facturaIdsPorClave = new Map<string, Types.ObjectId>();
+  const notaDebitoIdsPorClave = new Map<string, Types.ObjectId>();
+  const agregarId = (tipo: 'FV' | 'ND', id: Types.ObjectId): void => {
+    (tipo === 'FV' ? facturaIdsPorClave : notaDebitoIdsPorClave).set(
       id.toString(),
       id,
-    ]),
-  );
+    );
+  };
+  agregarId(anclaTipo, anclaId);
+  for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
 
-  const [facturas, inmueble, tercero] = await Promise.all([
-    modelos.facturas
-      .find({ coPropertyId, _id: { $in: [...facturaIdsPorClave.values()] } })
-      .exec(),
+  const [facturas, notasDebito, inmueble, tercero] = await Promise.all([
+    facturaIdsPorClave.size
+      ? modelos.facturas
+          .find({
+            coPropertyId,
+            _id: { $in: [...facturaIdsPorClave.values()] },
+          })
+          .exec()
+      : Promise.resolve([]),
+    notaDebitoIdsPorClave.size
+      ? modelos.notasDebito
+          .find({
+            coPropertyId,
+            _id: { $in: [...notaDebitoIdsPorClave.values()] },
+          })
+          .exec()
+      : Promise.resolve([]),
     modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
     nota.terceroId
       ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
       : Promise.resolve(null),
   ]);
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
+  const notaDebitoPorId = new Map(
+    notasDebito.map((n) => [n._id.toString(), n]),
+  );
+
+  // A Nota Débito never freezes its own concepto's accounts onto itself
+  // (unlike a Factura line) — resolve every involved ND's own concepto in
+  // one batch, same populate-and-read pattern `NotasCreditoService`'s own
+  // `resolverLineasAncla` uses.
+  const conceptoIds = notasDebito.map((n) => n.conceptoId);
+  const conceptos = conceptoIds.length
+    ? await modelos.conceptosCobro
+        .find({ coPropertyId, _id: { $in: conceptoIds } })
+        .populate('cuentaCreditoId', 'code')
+        .populate('cuentaDebitoId', 'code')
+        .exec()
+    : [];
+  const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
+  /** This Nota Débito's own single concepto's cuenta de ingreso — the same
+   *  fallback role `lineaFactura?.accountingIncomeAccount` plays for a
+   *  Factura line below. */
+  const cuentaIngresoDe = (n: NotaDebitoDocument): string | null => {
+    const concepto = conceptoPorId.get(n.conceptoId.toString());
+    return concepto ? codigoDeCuentaContable(concepto.cuentaCreditoId) : null;
+  };
+  const cuentaCarteraDe = (n: NotaDebitoDocument): string | null => {
+    const concepto = conceptoPorId.get(n.conceptoId.toString());
+    return concepto ? codigoDeCuentaContable(concepto.cuentaDebitoId) : null;
+  };
 
   const lineas: LineaAsientoImpresion[] = [];
   const codigosUsados = new Set<string>([cuentaDevoluciones]);
@@ -130,21 +195,43 @@ export async function construirDatosImpresionNotaCredito(
             },
           ];
 
-    const factura = facturaPorId.get(aplicacion.documentId.toString());
-    for (const detalle of detalles) {
-      const lineaFactura = detalle.conceptoId
-        ? factura?.lines.find((l) => l.conceptoId.equals(detalle.conceptoId))
-        : undefined;
-      const codigo = lineaFactura?.accountingReceivableAccount ?? cuentaCartera;
+    if (aplicacion.documentType === 'FV') {
+      const factura = facturaPorId.get(aplicacion.documentId.toString());
+      for (const detalle of detalles) {
+        const lineaFactura = detalle.conceptoId
+          ? factura?.lines.find((l) => l.conceptoId.equals(detalle.conceptoId))
+          : undefined;
+        const codigo =
+          lineaFactura?.accountingReceivableAccount ?? cuentaCartera;
+        codigosUsados.add(codigo);
+        lineas.push({
+          cuentaCodigo: codigo,
+          cuentaNombre: '',
+          tipoDocumento: 'FV',
+          numeroDocumento: factura?.number ?? null,
+          debito: 0,
+          credito: detalle.monto,
+        });
+      }
+    } else {
+      // Only ever reachable when THIS aplicación is the note's own anchor
+      // (the deferred `aplicar()` path never targets a Nota Débito — see
+      // this function's own docblock).
+      const notaDebito = notaDebitoPorId.get(aplicacion.documentId.toString());
+      const codigo = notaDebito
+        ? (cuentaCarteraDe(notaDebito) ?? cuentaCartera)
+        : cuentaCartera;
       codigosUsados.add(codigo);
-      lineas.push({
-        cuentaCodigo: codigo,
-        cuentaNombre: '',
-        tipoDocumento: 'FV',
-        numeroDocumento: factura?.number ?? null,
-        debito: 0,
-        credito: detalle.monto,
-      });
+      for (const detalle of detalles) {
+        lineas.push({
+          cuentaCodigo: codigo,
+          cuentaNombre: '',
+          tipoDocumento: 'ND',
+          numeroDocumento: notaDebito?.number ?? null,
+          debito: 0,
+          credito: detalle.monto,
+        });
+      }
     }
   }
 
@@ -162,12 +249,18 @@ export async function construirDatosImpresionNotaCredito(
 
   // Débito per concepto — see this function's own docblock on why
   // `nota.distribution` (not a scaled/applied amount) is the right source.
-  const facturaAncla = facturaPorId.get(nota.facturaId.toString());
+  const notaDebitoAncla =
+    anclaTipo === 'ND' ? notaDebitoPorId.get(anclaId.toString()) : undefined;
+  const facturaAncla =
+    anclaTipo === 'FV' ? facturaPorId.get(anclaId.toString()) : undefined;
   for (const linea of nota.distribution) {
     const lineaFactura = facturaAncla?.lines.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
-    const codigo = lineaFactura?.accountingIncomeAccount ?? cuentaDevoluciones;
+    const codigo =
+      lineaFactura?.accountingIncomeAccount ??
+      (notaDebitoAncla ? cuentaIngresoDe(notaDebitoAncla) : null) ??
+      cuentaDevoluciones;
     codigosUsados.add(codigo);
     lineas.push({
       cuentaCodigo: codigo,

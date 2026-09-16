@@ -12,6 +12,7 @@ const copropiedad = new Types.ObjectId();
 const inmueble = new Types.ObjectId();
 const tercero = new Types.ObjectId();
 const factura = new Types.ObjectId();
+const notaDebito = new Types.ObjectId();
 const concepto = new Types.ObjectId();
 const cuenta = new Types.ObjectId();
 
@@ -50,9 +51,20 @@ describe('NotaCreditoSchema — forma', () => {
     await expect(validar({ terceroId: null })).resolves.toBeNull();
   });
 
-  it('exige facturaId, a diferencia de un Recibo', async () => {
-    const error = await validar({ facturaId: undefined });
-    expect(error?.message).toContain('facturaId');
+  it('acepta un ancla en Nota Débito — facturaId null, notaDebitoId seteado', async () => {
+    await expect(
+      validar({
+        facturaId: null,
+        notaDebitoId: notaDebito,
+        tipoDocumentoAncla: 'ND',
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('tipoDocumentoAncla arranca null — solo una nota creada antes de este campo lo deja así (ancla siempre FV en ese caso)', () => {
+    const doc = new NotaCreditoModel(base());
+    expect(doc.tipoDocumentoAncla).toBeNull();
+    expect(doc.notaDebitoId).toBeNull();
   });
 
   it('arranca activo, con appliedAmount en cero y sin datos de anulación', () => {

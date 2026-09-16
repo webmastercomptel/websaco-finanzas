@@ -875,6 +875,19 @@ export interface ContextoAplicacion {
 export async function ejecutarAplicacionManual(
   ctx: ContextoAplicacion,
   solicitadas: AplicacionSolicitadaDto[],
+  // A user-confirmed payment shortfall (`RecibosService.crear()`'s own
+  // `confirmarDescuentoFaltante` flag) — widens the pre-check below (the
+  // request is allowed to exceed `ctx.recibo`'s own `unappliedAmount` by
+  // exactly this much), and gets attributed onto the LAST línea's own
+  // `AplicacionCartera.discountApplied`, exactly like an automatic
+  // pronto-pago discount would be — never left as an untraceable
+  // receipt-level adjustment: the accountant needs to see WHICH document
+  // absorbed it (Auxiliar de Cartera, the Recibo's own printed PDF). "Last"
+  // is an arbitrary but deterministic pick when more than one línea is
+  // being applied — this only ever fires for a Manual submission the user
+  // explicitly confirmed, never for `ejecutarAplicacionFifo` (that walk
+  // can't overshoot `montoDisponible` in the first place).
+  descuentoConfirmadoExtra = 0,
 ): Promise<{
   creadas: AplicacionCarteraDocument[];
   desglose: DesgloseCarteraAplicacion[];
@@ -917,7 +930,7 @@ export async function ejecutarAplicacionManual(
     (acc, a) => acc + a.montoAplicado,
     0,
   );
-  if (sumaSolicitada > unappliedAmountActual) {
+  if (sumaSolicitada > unappliedAmountActual + descuentoConfirmadoExtra) {
     throw new ConflictException(
       `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
         `del recibo ${recibo.fullNumber} (${unappliedAmountActual})`,
@@ -931,8 +944,12 @@ export async function ejecutarAplicacionManual(
   let sumaCashAplicada = 0;
   const resumen: ResumenAplicacion[] = [];
 
-  for (const solicitada of solicitadas) {
+  for (const [indice, solicitada] of solicitadas.entries()) {
     const documentoId = new Types.ObjectId(solicitada.documentoId);
+    // Only the LAST línea ever carries the confirmed-shortfall top-up —
+    // see this function's own docblock on `descuentoConfirmadoExtra`.
+    const descuentoLinea =
+      indice === solicitadas.length - 1 ? descuentoConfirmadoExtra : 0;
 
     if (solicitada.tipoDocumento === 'ND') {
       if (solicitada.distribucion?.length) {
@@ -975,7 +992,8 @@ export async function ejecutarAplicacionManual(
         tipoDocumento: 'ND',
         numeroDocumento: notaDebito.number,
       });
-      sumaCashAplicada += solicitada.montoAplicado;
+      sumaCashAplicada += solicitada.montoAplicado - descuentoLinea;
+      montoDescuentoTotal += descuentoLinea;
 
       const [creada] = await aplicaciones.create(
         [
@@ -986,7 +1004,7 @@ export async function ejecutarAplicacionManual(
             documentType: 'ND',
             documentId: documentoId,
             amountApplied: solicitada.montoAplicado,
-            discountApplied: 0,
+            discountApplied: descuentoLinea,
             detalleConceptos: [
               {
                 conceptoId: notaDebito.conceptoId,
@@ -1067,6 +1085,9 @@ export async function ejecutarAplicacionManual(
         solicitada.montoAplicado,
       ));
     }
+    // Folded in AFTER the automatic-discount decision above — a confirmed
+    // shortfall is independent of (and can coexist with) pronto pago.
+    montoDescuento += descuentoLinea;
 
     const factura = await decrementarSaldoFactura(
       facturas,
@@ -1181,6 +1202,10 @@ export async function ejecutarAplicacionManual(
     });
   }
 
+  // `sumaCashAplicada` already has the confirmed shortfall folded out (via
+  // `descuentoLinea` on the last línea, above) — same as the automatic
+  // discount's own `montoAFactura - montoDescuento`, no separate
+  // receipt-level subtraction needed here anymore.
   if (sumaCashAplicada > 0) {
     await decrementarSaldoDocumentoOrigen(
       recibos,

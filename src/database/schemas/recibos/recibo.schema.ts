@@ -100,6 +100,19 @@ export class Recibo {
   @Prop({ type: Date, default: null })
   voidedAt: Date | null;
 
+  /**
+   * Frozen at creation — the portion of a payment SURPLUS the user sent to
+   * Otros Ingresos instead of Anticipos (`CrearReciboDto.destinoSobrante`,
+   * manual mode only). Unlike a discount, which always attaches to a
+   * specific factura/ND line and so can be summed back from
+   * `AplicacionCartera.discountApplied`, this money never touched any
+   * document — there's nothing to derive it from, so it has to live here.
+   * Immutable after creation, same as the rest of a Recibo bar `status`,
+   * `voided*`, and the two `SaldoDocumentoOrigen`-derived caches.
+   */
+  @Prop({ required: true, default: 0 })
+  otherIncomeAmount: number;
+
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
 

@@ -40,8 +40,14 @@ export class CrearNotaCreditoDto {
   @IsMongoId()
   inmuebleId: string;
 
+  /** Which kind of document `documentoId` points to — the same
+   *  discriminator `AplicacionSolicitadaDto` already uses
+   *  (`recibos/dto/aplicacion-solicitada.dto.ts`). */
+  @IsIn(['FV', 'ND'])
+  tipoDocumento: 'FV' | 'ND';
+
   @IsMongoId()
-  facturaId: string;
+  documentoId: string;
 
   /** The date the user declares for this note — validated in the service
    *  against the coproperty's current billing period, mirroring

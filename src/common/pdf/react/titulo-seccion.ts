@@ -7,7 +7,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   titulo: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
     marginBottom: 4,
   },

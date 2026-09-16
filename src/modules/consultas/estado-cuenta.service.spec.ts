@@ -249,7 +249,7 @@ describe('EstadoCuentaService', () => {
       expect(result.pagosRecibidos).toBe(360000);
       expect(result.descuentosAjustes).toBe(40000);
       const filaDescuento = result.movimientos.find((m) =>
-        m.concepto.includes('Descuento Pronto Pago'),
+        m.concepto.includes('Descuento Aplicado'),
       );
       expect(filaDescuento).toMatchObject({
         abono: 40000,

@@ -14,7 +14,12 @@ import {
  * isolated to new files only, at the cost of more verbose component bodies.
  */
 
-const MARGIN = 50;
+/** Trimmed to the minimum comfortable for a printed page (0.33in ≈ 24pt is
+ *  a commonly cited minimum unprintable-area allowance for a laser
+ *  printer) from the previous 50pt, which had no documented reason for
+ *  being that wide and was simply eating into content space on every
+ *  report — same value on all four sides, vertical and horizontal alike. */
+const MARGIN = 24;
 
 export const PAGE_STYLES = StyleSheet.create({
   vertical: {

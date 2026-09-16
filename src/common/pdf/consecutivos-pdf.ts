@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import type { Style } from '@react-pdf/types';
 import { formatoFecha } from './pdf-helpers';
 import {
   reporteDocumentoMultiPagina,
@@ -119,11 +120,10 @@ export async function generarPdfConsecutivos(
   const celdaEstilo = (
     i: number,
     variante: 'encabezado' | 'normal' | 'final',
-  ) => ({
+  ): Style => ({
     flexGrow: COLUMNAS[i].peso,
     flexBasis: 0,
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- widened to `string` without it; only flagged as unnecessary because the rule ignores the downstream react-pdf Style prop context.
-    textAlign: (COLUMNAS[i].numerica ? 'right' : 'left') as 'right' | 'left',
+    textAlign: COLUMNAS[i].numerica ? 'right' : 'left',
     paddingRight: 3,
     ...(variante === 'encabezado'
       ? styles.celdaEncabezado

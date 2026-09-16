@@ -4,6 +4,7 @@ import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
 import { Factura } from '../facturacion/factura.schema';
+import { NotaDebito } from '../notas-debito/nota-debito.schema';
 import { Account } from '../cuentas/account.schema';
 
 export type NotaCreditoDocument = HydratedDocument<NotaCredito>;
@@ -76,13 +77,38 @@ export class NotaCredito {
   @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
+  /** The anchor Factura — set when `tipoDocumentoAncla` is `'FV'` (or on
+   *  every document predating `tipoDocumentoAncla`, all of them FV-anchored
+   *  by construction back then). Nullable now, was required — see
+   *  `notaDebitoId`'s own comment for why. */
   @Prop({
     type: SchemaTypes.ObjectId,
     ref: Factura.name,
-    required: true,
+    default: null,
     index: true,
   })
-  facturaId: Types.ObjectId;
+  facturaId: Types.ObjectId | null;
+
+  /** The anchor Nota Débito — set when `tipoDocumentoAncla` is `'ND'`.
+   *  Exactly one of `facturaId`/`notaDebitoId` is ever set on a given
+   *  document (see `tipoDocumentoAncla`'s own comment and
+   *  `idAnclaDe`/`tipoAnclaDe` in `notas-credito.mapper.ts`, the only
+   *  readers that should ever need to pick between them). */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: NotaDebito.name,
+    default: null,
+    index: true,
+  })
+  notaDebitoId: Types.ObjectId | null;
+
+  /** Which of `facturaId`/`notaDebitoId` is this note's real anchor.
+   *  Nullable ONLY for documents created before a Nota Crédito could anchor
+   *  on anything but a Factura — every one of those has `facturaId` set and
+   *  `notaDebitoId` null, so `tipoAnclaDe`'s `?? 'FV'` fallback is exact,
+   *  never a guess. Every new write always sets it. */
+  @Prop({ type: String, enum: ['FV', 'ND'], default: null })
+  tipoDocumentoAncla: 'FV' | 'ND' | null;
 
   /** The date the user declared for this note — validated at creation
    *  against the coproperty's current billing period, same role

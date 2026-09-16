@@ -753,6 +753,21 @@ export class NotasAnticipoService {
   }
 
   /**
+   * Returns the raw Mongoose document — used by PDF generation, same role
+   * `RecibosService`/`NotasCreditoService`'s own `findOneRaw` play.
+   */
+  async findOneRaw(id: string): Promise<NotaAnticipoDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.notasAnticipo
+      .findOne({ _id: id, coPropertyId })
+      .exec();
+    if (!nota) {
+      throw new NotFoundException(`No se encontró la nota de anticipo ${id}`);
+    }
+    return nota;
+  }
+
+  /**
    * Active applications this Nota de Anticipo made — used by PDF generation
    * (mirrors `RecibosService.findAplicacionesForSource`).
    */
