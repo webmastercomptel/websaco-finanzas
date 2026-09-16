@@ -6,6 +6,11 @@
 # ---- Builder: install everything and compile TypeScript -> dist/ ----
 FROM node:22-alpine AS builder
 WORKDIR /app
+# node:22-alpine bundles whatever npm shipped with that Node patch (currently
+# 10.9.8), independent of the npm used to generate package-lock.json locally.
+# npm ci on an older major than the one that wrote the lock can reject valid
+# transitive entries as "Missing from lock file" — pin to match.
+RUN npm install -g npm@11
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
