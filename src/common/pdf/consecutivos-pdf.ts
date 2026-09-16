@@ -7,6 +7,7 @@ import {
   CONTENT_WIDTH_PT_HORIZONTAL,
 } from './react/document';
 import { CreditoWebsaco } from './react/credito-websaco';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { FONDO_ZEBRA } from './react/paleta';
 import { truncarTexto } from './react/text-measure';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -89,17 +90,9 @@ export async function generarPdfConsecutivos(
   );
   const fuenteTitulo = Math.max(6, 8 - Math.max(0, COLUMNAS.length - 10) * 0.2);
 
-  const subtitulo = `Consecutivos ${codigo} — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
+  const subtitulo = `${codigo} — ${formatoFecha(desde)} al ${formatoFecha(hasta)}`;
 
   const styles = StyleSheet.create({
-    masthead: { marginBottom: 8 },
-    nombre: { fontSize: 12, fontFamily: 'Helvetica-Bold', marginBottom: 4 },
-    subtitulo: {
-      fontSize: fuenteTitulo + 3,
-      fontFamily: 'Helvetica-Bold',
-      marginBottom: 6,
-    },
-    regla: { borderBottomWidth: 0.5, borderBottomColor: '#999999' },
     filaEncabezado: {
       flexDirection: 'row',
       backgroundColor: '#ededed',
@@ -152,13 +145,11 @@ export async function generarPdfConsecutivos(
         : texto,
     );
 
-  const masthead = createElement(
-    View,
-    { style: styles.masthead },
-    createElement(Text, { style: styles.nombre }, copropiedad.name),
-    createElement(Text, { style: styles.subtitulo }, subtitulo),
-    createElement(View, { style: styles.regla }),
-  );
+  const masthead = createElement(EncabezadoInforme, {
+    copropiedad,
+    titulo: 'CONSECUTIVOS',
+    subtitulo,
+  });
   const filaEncabezadoTabla = createElement(
     View,
     { style: styles.filaEncabezado, wrap: false },

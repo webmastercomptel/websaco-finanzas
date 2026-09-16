@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
-import { EncabezadoReporte } from './react/encabezado-reporte';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { Tabla } from './react/tabla';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaCarteraPorInmueble } from '../../contracts';
@@ -23,7 +23,7 @@ export async function generarPdfCarteraPorInmueble(
   reporte: RespuestaCarteraPorInmueble,
   copropiedad: CopropiedadDocument,
 ): Promise<Buffer> {
-  const encabezado = createElement(EncabezadoReporte, {
+  const encabezado = createElement(EncabezadoInforme, {
     copropiedad,
     titulo: 'CARTERA POR INMUEBLE',
     subtitulo: `Inmueble ${reporte.inmuebleCodigo}${reporte.propietario ? ` — ${reporte.propietario}` : ''} — Corte al ${formatoFecha(reporte.fechaCorte)}`,

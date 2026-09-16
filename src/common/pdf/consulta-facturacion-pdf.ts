@@ -7,6 +7,7 @@ import {
   CONTENT_WIDTH_PT_HORIZONTAL,
 } from './react/document';
 import { CreditoWebsaco } from './react/credito-websaco';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { FONDO_ZEBRA } from './react/paleta';
 import { truncarTexto } from './react/text-measure';
 import { formatoFecha } from './pdf-helpers';
@@ -32,10 +33,6 @@ const FILAS_POR_PAGINA = 30;
  *  column header already says these are money. */
 function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
-}
-
-function formatoFechaHora(fecha: Date): string {
-  return `${fecha.toLocaleDateString('es-CO')} ${fecha.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'America/Bogota' })}`;
 }
 
 interface ColumnaTabla {
@@ -85,31 +82,6 @@ function construirColumnas(reporte: RespuestaConsultaFacturacion): {
 }
 
 const styles = StyleSheet.create({
-  masthead: {
-    marginBottom: 6,
-  },
-  filaNombre: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  nombre: {
-    fontSize: 12,
-    fontFamily: 'Helvetica-Bold',
-  },
-  generado: {
-    fontSize: 8,
-    fontFamily: 'Helvetica',
-    color: '#4d4d4d',
-  },
-  subtitulo: {
-    fontFamily: 'Helvetica-Bold',
-    marginTop: 2,
-  },
-  regla: {
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#999999',
-    marginTop: 4,
-  },
   filaEncabezado: {
     flexDirection: 'row',
     backgroundColor: '#ededed',
@@ -168,7 +140,6 @@ export async function generarPdfConsultaFacturacion(
   reporte: RespuestaConsultaFacturacion,
   copropiedad: CopropiedadDocument,
 ): Promise<Buffer> {
-  const generadoEl = new Date();
   const { columnas, conceptosIndividuales, conceptosAgrupados } =
     construirColumnas(reporte);
   const hayOtros = conceptosAgrupados.length > 0;
@@ -261,26 +232,11 @@ export async function generarPdfConsultaFacturacion(
     return createElement(
       View,
       { key: indicePagina },
-      createElement(
-        View,
-        { style: styles.masthead },
-        createElement(
-          View,
-          { style: styles.filaNombre },
-          createElement(Text, { style: styles.nombre }, copropiedad.name),
-          createElement(
-            Text,
-            { style: styles.generado },
-            `Generado: ${formatoFechaHora(generadoEl)}`,
-          ),
-        ),
-        createElement(
-          Text,
-          { style: [styles.subtitulo, { fontSize: fuenteTitulo }] },
-          subtitulo,
-        ),
-        createElement(View, { style: styles.regla }),
-      ),
+      createElement(EncabezadoInforme, {
+        copropiedad,
+        titulo: 'CONSULTA DE FACTURACIÓN',
+        subtitulo,
+      }),
 
       createElement(
         View,

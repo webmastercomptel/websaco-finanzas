@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
-import { EncabezadoReporte } from './react/encabezado-reporte';
+import { EncabezadoInforme } from './react/encabezado-informe';
 import { Tabla } from './react/tabla';
 import { CreditoWebsaco } from './react/credito-websaco';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -86,7 +86,7 @@ async function generarPorInmueble(
   tipo: 'resumido' | 'detallado',
   estadoLabel?: string,
 ): Promise<Buffer> {
-  const encabezado = createElement(EncabezadoReporte, {
+  const encabezado = createElement(EncabezadoInforme, {
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
@@ -274,7 +274,7 @@ async function generarPorConcepto(
     reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ??
     'Cargo';
 
-  const encabezado = createElement(EncabezadoReporte, {
+  const encabezado = createElement(EncabezadoInforme, {
     copropiedad,
     titulo: 'CARTERA POR CONCEPTOS',
     subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
