@@ -8,11 +8,11 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   label: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   valor: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
 });

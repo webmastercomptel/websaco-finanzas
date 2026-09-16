@@ -26,13 +26,14 @@ const MESES = [
 
 const styles = StyleSheet.create({
   seccionTitulo: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
     marginTop: 10,
     marginBottom: 2,
   },
   sinDatos: {
-    fontSize: 10,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
 });
 
@@ -97,6 +98,7 @@ export async function generarPdfCarteraGeneral(
           ]),
           columnasNumericas: 1,
           striped: true,
+          fontSize: 8.5,
         }),
 
     createElement(
@@ -114,6 +116,7 @@ export async function generarPdfCarteraGeneral(
           ]),
           columnasNumericas: 1,
           striped: true,
+          fontSize: 8.5,
         }),
   );
 

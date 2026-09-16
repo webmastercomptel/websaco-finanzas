@@ -1,7 +1,11 @@
-import { createElement } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
-import { reporteDocumento, renderizarPdf } from './react/document';
+import {
+  reporteDocumento,
+  reporteDocumentoMultiPagina,
+  renderizarPdf,
+} from './react/document';
 import { EncabezadoInforme } from './react/encabezado-informe';
 import { Tabla } from './react/tabla';
 import { CreditoWebsaco } from './react/credito-websaco';
@@ -9,11 +13,35 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 import type { RespuestaCarteraPorConceptos } from '../../contracts';
 
 /** Up to 8 concepts get their own column — narrower than Cartera por
- *  Inmueble's 11, since this report also carries an Inmueble/Titular column
+ *  Inmueble's 11, since this report also carries an Inmueble column
  *  (detallado) that one doesn't. Anything beyond is summed into one final
  *  "Otros Cargos" column. Only used in the "todos los conceptos" layout —
  *  the "un solo concepto" layout never has more than its own one column. */
 const MAX_CARGOS_INDIVIDUALES = 8;
+
+/** Rows per page, computed by hand rather than left to react-pdf's
+ *  automatic `wrap` pagination — same reasoning and same approach as
+ *  `vencimientos-cartera-pdf.ts`'s own `FILAS_POR_PAGINA`: a masthead +
+ *  table header repeated via `fixed` doesn't reserve its own height
+ *  against react-pdf's row-fitting estimate, so manual per-page `<Page>`
+ *  elements (`reporteDocumentoMultiPagina`) are the only reliable way to
+ *  guarantee the masthead, table header AND `CreditoWebsaco` footer all
+ *  repeat correctly once a report runs past one page.
+ *
+ *  612pt (landscape height) − 48pt (24pt top+bottom margin, see
+ *  `document.ts`) ≈ 564pt usable. Budget: ~80pt masthead
+ *  (`EncabezadoInforme`'s banner + info row + rule) + ~18pt table header
+ *  (10pt text × ~1.2 line-height + 3pt padding + 3pt margin) + ~24pt
+ *  footer (`CreditoWebsaco`, in-flow) ≈ 442pt left for rows, ÷ ~14pt/row
+ *  (10pt text + 2pt vertical padding) ≈ 31 — kept well under that (24) for
+ *  headroom against line-height estimate error and any cell wrapping to a
+ *  second line at these column widths, since there's no way to render and
+ *  visually verify the actual output from here. */
+const FILAS_POR_PAGINA_RESUMIDO = 24;
+/** Same budget, `fontSize: 8` table (see the "detallado" `Tabla` calls) —
+ *  a shorter header (~15.6pt) and shorter rows (~12pt) fit a few more,
+ *  kept at 28 for the same headroom reasoning as the resumido constant. */
+const FILAS_POR_PAGINA_DETALLADO = 28;
 
 const ESTADO_LABELS: Record<'al_dia' | 'juridico' | 'dificil_recaudo', string> =
   {
@@ -34,6 +62,57 @@ const styles = StyleSheet.create({
  *  upstream — but a totals row is a derived sum worth guarding on its own). */
 function formatoPorcentaje(cargo: number, saldo: number): string {
   return saldo > 0 ? `${((cargo / saldo) * 100).toFixed(1)}%` : '—';
+}
+
+function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
+  if (items.length === 0) return [[]];
+  const paginas: T[][] = [];
+  for (let i = 0; i < items.length; i += porPagina) {
+    paginas.push(items.slice(i, i + porPagina));
+  }
+  return paginas;
+}
+
+/**
+ * Splits `filas` into page-sized chunks and builds one multi-page PDF, each
+ * page carrying its own masthead (`crearEncabezado`), its own full `Tabla`
+ * (same `columnas`/widths every page — only the last page gets
+ * `filaTotales`), and its own `CreditoWebsaco` — see `FILAS_POR_PAGINA_*`'s
+ * own docblock for why this can't be react-pdf's automatic `wrap` instead.
+ */
+function construirPdfPaginado(
+  crearEncabezado: () => ReactElement,
+  filas: string[][],
+  filasPorPagina: number,
+  tabla: {
+    columnas: string[];
+    anchosRelativos: number[];
+    columnasNumericas: number;
+    fontSize?: number;
+    filaTotales: string[];
+  },
+): Promise<Buffer> {
+  const bloques = agruparEnPaginas(filas, filasPorPagina);
+  const paginas = bloques.map((bloque, i) =>
+    createElement(
+      View,
+      null,
+      crearEncabezado(),
+      createElement(Tabla, {
+        striped: true,
+        columnas: tabla.columnas,
+        filas: bloque,
+        columnasNumericas: tabla.columnasNumericas,
+        anchosRelativos: tabla.anchosRelativos,
+        fontSize: tabla.fontSize,
+        filaTotales: i === bloques.length - 1 ? tabla.filaTotales : undefined,
+      }),
+      createElement(CreditoWebsaco),
+    ),
+  );
+  return renderizarPdf(
+    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  );
 }
 
 /**
@@ -86,12 +165,17 @@ async function generarPorInmueble(
   tipo: 'resumido' | 'detallado',
   estadoLabel?: string,
 ): Promise<Buffer> {
-  const encabezado = createElement(EncabezadoInforme, {
-    copropiedad,
-    titulo: 'CARTERA POR CONCEPTOS',
-    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
-    fechaGeneracion: new Date(),
-  });
+  // Computed once, outside any page — `EncabezadoInforme`'s own docblock:
+  // every page of one report must show the exact same instant, never one
+  // that drifts by however long that page took to render.
+  const fechaGeneracion = new Date();
+  const crearEncabezado = (): ReactElement =>
+    createElement(EncabezadoInforme, {
+      copropiedad,
+      titulo: 'CARTERA POR CONCEPTOS',
+      subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
+      fechaGeneracion,
+    });
 
   if (reporte.grupos.length === 0) {
     return renderizarPdf(
@@ -99,7 +183,7 @@ async function generarPorInmueble(
         createElement(
           View,
           null,
-          encabezado,
+          crearEncabezado(),
           createElement(
             Text,
             { style: styles.sinDatos },
@@ -155,16 +239,9 @@ async function generarPorInmueble(
     0,
   );
 
-  let tabla;
   if (tipo === 'resumido') {
-    const columnas = [
-      'Inmueble',
-      'Titular',
-      'Celular',
-      'Saldo',
-      ...columnasCargos,
-    ];
-    const anchosRelativos = [0.8, 1.6, 1, 1, ...columnasCargos.map(() => 1.1)];
+    const columnas = ['Inmueble', 'Celular', 'Saldo', ...columnasCargos];
+    const anchosRelativos = [0.8, 1, 1, ...columnasCargos.map(() => 1.1)];
 
     const filas = reporte.grupos.map((g) => {
       const cargosGrupo: Record<string, number> = {};
@@ -175,69 +252,67 @@ async function generarPorInmueble(
       }
       return [
         g.inmuebleCodigo,
-        g.titular ?? '—',
         g.celular ?? '—',
         formatoPeso(g.saldoTotal),
         ...cargosDe(cargosGrupo),
       ];
     });
 
-    tabla = createElement(Tabla, {
-      striped: true,
-      columnas,
+    return construirPdfPaginado(
+      crearEncabezado,
       filas,
-      columnasNumericas: 1 + columnasCargos.length,
-      anchosRelativos,
-      filaTotales: [
-        'GRAN TOTAL',
-        '',
-        '',
-        formatoPeso(granTotalSaldo),
-        ...cargosDe(granTotalCargos),
-      ],
-    });
-  } else {
-    const columnas = [
-      'Inmueble',
-      'Titular',
-      'Fecha',
-      'Tipo',
-      'Número',
-      'Vence',
-      'Saldo',
-      ...columnasCargos,
-    ];
-    const anchosRelativos = [
-      0.7,
-      1.4,
-      0.8,
-      0.6,
-      1,
-      0.8,
-      1,
-      ...columnasCargos.map(() => 1.1),
-    ];
-
-    const filas = reporte.grupos.flatMap((g) =>
-      g.documentos.map((d) => [
-        g.inmuebleCodigo,
-        g.titular ?? '—',
-        formatoFecha(d.fecha),
-        d.tipo,
-        d.numeroCompleto,
-        d.vence ? formatoFecha(d.vence) : '—',
-        formatoPeso(d.saldo),
-        ...cargosDe(d.cargosPorConcepto),
-      ]),
+      FILAS_POR_PAGINA_RESUMIDO,
+      {
+        columnas,
+        anchosRelativos,
+        columnasNumericas: 1 + columnasCargos.length,
+        filaTotales: [
+          'GRAN TOTAL',
+          '',
+          formatoPeso(granTotalSaldo),
+          ...cargosDe(granTotalCargos),
+        ],
+      },
     );
+  }
 
-    tabla = createElement(Tabla, {
-      striped: true,
+  const columnas = [
+    'Inmueble',
+    'Número',
+    'Fecha',
+    'Vence',
+    'Saldo',
+    ...columnasCargos,
+  ];
+  const anchosRelativos = [
+    0.7,
+    1,
+    0.8,
+    0.8,
+    1,
+    ...columnasCargos.map(() => 1.1),
+  ];
+
+  const filas = reporte.grupos.flatMap((g) =>
+    g.documentos.map((d) => [
+      g.inmuebleCodigo,
+      d.numeroCompleto,
+      formatoFecha(d.fecha),
+      d.vence ? formatoFecha(d.vence) : '—',
+      formatoPeso(d.saldo),
+      ...cargosDe(d.cargosPorConcepto),
+    ]),
+  );
+
+  return construirPdfPaginado(
+    crearEncabezado,
+    filas,
+    FILAS_POR_PAGINA_DETALLADO,
+    {
       columnas,
-      filas,
-      columnasNumericas: 1 + columnasCargos.length,
       anchosRelativos,
-      // Detallado carries three more fixed columns than resumido on top of
+      columnasNumericas: 1 + columnasCargos.length,
+      // Detallado carries two more fixed columns than resumido on top of
       // the same concept columns — smaller text keeps every cell readable
       // instead of overflowing or wrapping into its neighbor.
       fontSize: 8,
@@ -245,26 +320,10 @@ async function generarPorInmueble(
         'GRAN TOTAL',
         '',
         '',
-        '',
-        '',
-        '',
         formatoPeso(granTotalSaldo),
         ...cargosDe(granTotalCargos),
       ],
-    });
-  }
-
-  return renderizarPdf(
-    reporteDocumento(
-      createElement(
-        View,
-        null,
-        encabezado,
-        tabla,
-        createElement(CreditoWebsaco),
-      ),
-      { orientacion: 'horizontal' },
-    ),
+    },
   );
 }
 
@@ -279,12 +338,15 @@ async function generarPorConcepto(
     reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ??
     'Cargo';
 
-  const encabezado = createElement(EncabezadoInforme, {
-    copropiedad,
-    titulo: 'CARTERA POR CONCEPTOS',
-    subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
-    fechaGeneracion: new Date(),
-  });
+  // Same "computed once outside any page" reasoning as `generarPorInmueble`.
+  const fechaGeneracion = new Date();
+  const crearEncabezado = (): ReactElement =>
+    createElement(EncabezadoInforme, {
+      copropiedad,
+      titulo: 'CARTERA POR CONCEPTOS',
+      subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
+      fechaGeneracion,
+    });
 
   const grupos = reporte.grupos
     .map((g) => ({
@@ -301,7 +363,7 @@ async function generarPorConcepto(
         createElement(
           View,
           null,
-          encabezado,
+          crearEncabezado(),
           createElement(
             Text,
             { style: styles.sinDatos },
@@ -327,11 +389,9 @@ async function generarPorConcepto(
   const granTotalSaldo = saldoDe(grupos.flatMap((g) => g.documentos));
   const granTotalCargo = cargoDe(grupos.flatMap((g) => g.documentos));
 
-  let tabla;
   if (tipo === 'resumido') {
     const columnas = [
       'Inmueble',
-      'Titular',
       'Celular',
       'Saldo',
       nombreCargo,
@@ -342,7 +402,6 @@ async function generarPorConcepto(
       const cargo = cargoDe(g.documentos);
       return [
         g.inmuebleCodigo,
-        g.titular ?? '—',
         g.celular ?? '—',
         formatoPeso(saldo),
         formatoPeso(cargo),
@@ -350,84 +409,69 @@ async function generarPorConcepto(
       ];
     });
 
-    tabla = createElement(Tabla, {
-      striped: true,
-      columnas,
+    return construirPdfPaginado(
+      crearEncabezado,
       filas,
-      columnasNumericas: 3,
-      anchosRelativos: [0.8, 1.8, 1.1, 1.1, 1.1, 1.1],
-      filaTotales: [
-        'GRAN TOTAL',
-        '',
-        '',
-        formatoPeso(granTotalSaldo),
-        formatoPeso(granTotalCargo),
-        formatoPorcentaje(granTotalCargo, granTotalSaldo),
-      ],
-    });
-  } else {
-    const columnas = [
-      'Inmueble',
-      'Titular',
-      'Fecha',
-      'Tipo',
-      'Número',
-      'Vence',
-      'Saldo',
-      nombreCargo,
-      '% Participación',
-    ];
-    const filas = grupos.flatMap((g) =>
-      g.documentos.map((d) => {
-        const cargo = d.cargosPorConcepto[conceptoId] ?? 0;
-        return [
-          g.inmuebleCodigo,
-          g.titular ?? '—',
-          formatoFecha(d.fecha),
-          d.tipo,
-          d.numeroCompleto,
-          d.vence ? formatoFecha(d.vence) : '—',
-          formatoPeso(d.saldo),
-          formatoPeso(cargo),
-          formatoPorcentaje(cargo, d.saldo),
-        ];
-      }),
+      FILAS_POR_PAGINA_RESUMIDO,
+      {
+        columnas,
+        anchosRelativos: [0.8, 1.1, 1.1, 1.1, 1.1],
+        columnasNumericas: 3,
+        filaTotales: [
+          'GRAN TOTAL',
+          '',
+          formatoPeso(granTotalSaldo),
+          formatoPeso(granTotalCargo),
+          formatoPorcentaje(granTotalCargo, granTotalSaldo),
+        ],
+      },
     );
+  }
 
-    tabla = createElement(Tabla, {
-      striped: true,
+  const columnas = [
+    'Inmueble',
+    'Número',
+    'Fecha',
+    'Vence',
+    'Saldo',
+    nombreCargo,
+    '% Participación',
+  ];
+  const filas = grupos.flatMap((g) =>
+    g.documentos.map((d) => {
+      const cargo = d.cargosPorConcepto[conceptoId] ?? 0;
+      return [
+        g.inmuebleCodigo,
+        d.numeroCompleto,
+        formatoFecha(d.fecha),
+        d.vence ? formatoFecha(d.vence) : '—',
+        formatoPeso(d.saldo),
+        formatoPeso(cargo),
+        formatoPorcentaje(cargo, d.saldo),
+      ];
+    }),
+  );
+
+  return construirPdfPaginado(
+    crearEncabezado,
+    filas,
+    FILAS_POR_PAGINA_DETALLADO,
+    {
       columnas,
-      filas,
+      anchosRelativos: [0.7, 1, 0.8, 0.8, 1, 1.1, 1.1],
       columnasNumericas: 3,
-      anchosRelativos: [0.7, 1.4, 0.8, 0.6, 1, 0.8, 1, 1.1, 1.1],
       // Same reasoning as the "Por Inmueble" layout's own detallado
-      // branch — three extra fixed columns need the smaller size to stay
+      // branch — two extra fixed columns need the smaller size to stay
       // readable without overflowing.
       fontSize: 8,
       filaTotales: [
         'GRAN TOTAL',
         '',
         '',
-        '',
-        '',
-        '',
         formatoPeso(granTotalSaldo),
         formatoPeso(granTotalCargo),
         formatoPorcentaje(granTotalCargo, granTotalSaldo),
       ],
-    });
-  }
-
-  return renderizarPdf(
-    reporteDocumento(
-      createElement(
-        View,
-        null,
-        encabezado,
-        tabla,
-        createElement(CreditoWebsaco),
-      ),
-      { orientacion: 'horizontal' },
-    ),
+    },
   );
 }

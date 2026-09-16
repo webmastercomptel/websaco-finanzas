@@ -18,16 +18,17 @@ const COLUMNAS = [
 
 const styles = StyleSheet.create({
   seccionTitulo: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
     marginTop: 10,
     marginBottom: 2,
   },
   sinDatos: {
-    fontSize: 10,
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
   },
   alerta: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
     color: '#b30000',
     marginTop: 6,
@@ -83,6 +84,7 @@ export async function generarPdfConciliacionCartera(
       columnasNumericas: 2,
       anchosRelativos: [3, 1, 1, 1.3, 1.3],
       striped: true,
+      fontSize: 8.5,
     }),
 
     createElement(FilaLabelValor, {
@@ -143,6 +145,7 @@ export async function generarPdfConciliacionCartera(
           ]),
           columnasNumericas: 1,
           striped: true,
+          fontSize: 8.5,
         }),
   );
 

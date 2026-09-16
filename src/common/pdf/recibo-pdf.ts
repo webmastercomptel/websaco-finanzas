@@ -75,23 +75,27 @@ const styles = StyleSheet.create({
   },
   etiqueta: {
     width: 95,
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
   valor: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   derecha: {
     flexDirection: 'column',
     alignItems: 'flex-end',
   },
+  // Deliberately NOT dropped to the shared 8.5 with the rest of this
+  // file's body text — a Recibo has no charges table to anchor on the way
+  // Factura's own "Total a Pagar" band does, so the amount itself carries
+  // the document's main emphasis instead.
   monto: {
     fontSize: 18,
     fontFamily: 'Helvetica-Bold',
   },
   fecha: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
     marginTop: 8,
   },
@@ -199,6 +203,9 @@ export function contenidoRecibo(
       columnasNumericas: 2,
       anchosRelativos: ANCHOS_RELATIVOS,
       striped: true,
+      // Matches Factura's own body size — see the sibling font-size pass
+      // across this file and the other vertical (portrait) PDFs.
+      fontSize: 8.5,
       filaTotales: [
         'Totales',
         '',

@@ -5,6 +5,8 @@ const notaDoc = (over: Record<string, unknown> = {}) => ({
   inmuebleId: { toString: () => 'inm-1' },
   terceroId: { toString: () => 'ter-1' },
   facturaId: { toString: () => 'fac-1' },
+  notaDebitoId: null,
+  tipoDocumentoAncla: null,
   prefix: 'NC',
   number: 12,
   fullNumber: 'NC-12',
@@ -43,8 +45,9 @@ describe('toNotaCredito', () => {
       id: 'nc-1',
       inmuebleId: 'inm-1',
       terceroId: 'ter-1',
-      facturaId: 'fac-1',
-      numeroFactura: null,
+      tipoDocumentoAncla: 'FV',
+      documentoAnclaId: 'fac-1',
+      numeroDocumentoAncla: null,
       prefijo: 'NC',
       numero: 12,
       numeroCompleto: 'NC-12',
@@ -66,6 +69,20 @@ describe('toNotaCredito', () => {
     expect(
       toNotaCredito(notaDoc({ issueDate: null }) as never, 150000, 50000).fecha,
     ).toBe('2026-07-01T00:00:00.000Z');
+  });
+
+  it('resuelve el ancla desde notaDebitoId cuando tipoDocumentoAncla es ND, nunca facturaId', () => {
+    const nota = toNotaCredito(
+      notaDoc({
+        facturaId: null,
+        notaDebitoId: { toString: () => 'nd-1' },
+        tipoDocumentoAncla: 'ND',
+      }) as never,
+      150000,
+      50000,
+    );
+    expect(nota.tipoDocumentoAncla).toBe('ND');
+    expect(nota.documentoAnclaId).toBe('nd-1');
   });
 
   it('mapea terceroId null cuando la factura ancla no tiene Tercero vinculado', () => {
@@ -94,7 +111,7 @@ describe('toNotaCredito', () => {
 });
 
 describe('toNotaCreditoDetalle', () => {
-  it('resuelve numeroFactura (la ancla) y numeroDocumento de cada aplicación desde numerosPorDocumento', () => {
+  it('resuelve numeroDocumentoAncla y numeroDocumento de cada aplicación desde numerosPorDocumento', () => {
     // `notaDoc().facturaId` y `aplicacionDoc().documentId` resuelven ambos a
     // "fac-1" en estos fixtures — una sola entrada cubre las dos lecturas.
     const numerosPorDocumento = new Map([['fac-1', 'FV-0001']]);
@@ -106,7 +123,7 @@ describe('toNotaCreditoDetalle', () => {
       numerosPorDocumento,
     );
 
-    expect(detalle.numeroFactura).toBe('FV-0001');
+    expect(detalle.numeroDocumentoAncla).toBe('FV-0001');
     expect(detalle.aplicaciones[0].numeroDocumento).toBe('FV-0001');
   });
 

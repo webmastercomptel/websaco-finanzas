@@ -195,6 +195,13 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         exec: jest.fn(() => Promise.resolve({ saldoDisponible: 0 })),
       })),
     },
+    // `crear()`'s own terceroId resolution (`Inmueble.holderId`) — no
+    // titular by default; tests exercising a real one override this.
+    inmuebles: {
+      findOne: jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve({ _id: INMUEBLE, holderId: null })),
+      })),
+    },
   };
 
   const merged = { ...defaults, ...overrides };
@@ -216,8 +223,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     merged.connection as never,
     merged.lotes as never,
     merged.saldoDocumentoOrigen as never,
-    merged.cuentasContables as never,
     merged.inmuebles as never,
+    merged.cuentasContables as never,
   );
 };
 
@@ -237,6 +244,66 @@ describe('NotasDebitoService', () => {
       });
 
       expect(resultado.saldoPendiente).toBe(50000);
+    });
+
+    it('congela terceroId desde el holderId ACTUAL del inmueble, nunca null a secas — el titular impreso en el PDF depende de esto', async () => {
+      const TITULAR = new Types.ObjectId();
+      const notasDebitoMock = {
+        create: jest.fn((filas: Record<string, unknown>[]) =>
+          Promise.resolve([{ ...notaDebitoDoc(), ...filas[0] }]),
+        ),
+        findOne: jest.fn(() => ({
+          session: jest.fn().mockReturnThis(),
+          exec: jest.fn(() => Promise.resolve(notaDebitoDoc())),
+        })),
+      };
+      const svc = servicio({
+        notasDebito: notasDebitoMock,
+        inmuebles: {
+          findOne: jest.fn(() => ({
+            exec: jest.fn(() =>
+              Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        motivo: 'otro',
+        total: 50000,
+        fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
+      });
+
+      const [[filas]] = notasDebitoMock.create.mock.calls as unknown as [
+        Record<string, unknown>[],
+      ][];
+      expect(filas[0].terceroId).toBe(TITULAR);
+    });
+
+    it('rechaza un inmueble que no existe bajo este tenant — nunca crea la nota débito huérfana', async () => {
+      const svc = servicio({
+        inmuebles: {
+          findOne: jest.fn(() => ({
+            exec: jest.fn(() => Promise.resolve(null)),
+          })),
+        },
+      });
+
+      await expect(
+        svc.crear(CUENTA.toString(), {
+          codigo: 'ND',
+          inmuebleId: INMUEBLE.toString(),
+          conceptoId: CONCEPTO.toString(),
+          motivo: 'otro',
+          total: 50000,
+          fechaCargo: '2026-09-01',
+          fechaVencimiento: '2026-09-30',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('codifica el débito con la cuenta débito propia del concepto (cuentaDebitoId), no la cartera genérica de la copropiedad', async () => {
@@ -363,6 +430,11 @@ describe('NotasDebitoService', () => {
           findById: jest.fn(() => ({
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() => Promise.resolve({ code: '1304' })),
+          })),
+          findOne: jest.fn(() => ({
+            exec: jest.fn(() =>
+              Promise.resolve({ _id: INMUEBLE, holderId: null }),
+            ),
           })),
         },
       });

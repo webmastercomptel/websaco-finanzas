@@ -34,19 +34,22 @@ const styles = StyleSheet.create({
     paddingTop: 5,
   },
   label: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   valor: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
+  // Same size as every other row — Factura's own "Totales" row (see
+  // `CuerpoFactura`) carries its emphasis through weight and a rule, never
+  // a bigger font, so "destacada" follows that same convention here.
   labelDestacada: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
   valorDestacada: {
-    fontSize: 10,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
 });

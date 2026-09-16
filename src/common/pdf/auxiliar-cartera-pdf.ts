@@ -41,22 +41,22 @@ const styles = StyleSheet.create({
   },
   filaSimpleLabel: {
     width: 55,
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   filaSimpleValor: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   periodo: {
     flexDirection: 'row',
   },
   periodoLabel: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   periodoValor: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   filaEncabezado: {
@@ -80,19 +80,19 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
   celdaEncabezado: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
   celda: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
   celdaBarra: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica-Bold',
   },
   sinMovimientos: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: 'Helvetica',
     marginVertical: 6,
   },
