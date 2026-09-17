@@ -117,6 +117,10 @@ import {
   ConsecutivoLoteContabilidad,
   ConsecutivoLoteContabilidadSchema,
 } from './schemas/contabilidad/consecutivo-lote-contabilidad.schema';
+import {
+  PresentacionDocumento,
+  PresentacionDocumentoSchema,
+} from './schemas/documentos/presentacion-documento.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -156,6 +160,10 @@ const models = [
   {
     name: ConsecutivoLoteContabilidad.name,
     schema: ConsecutivoLoteContabilidadSchema,
+  },
+  {
+    name: PresentacionDocumento.name,
+    schema: PresentacionDocumentoSchema,
   },
 ];
 

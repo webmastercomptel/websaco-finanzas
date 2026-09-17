@@ -158,17 +158,6 @@ export class Factura {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Account', default: null })
   voidedBy: Types.ObjectId | null;
-
-  /**
-   * The frozen presentation tree for this invoice's PDF — a serialized
-   * react-pdf element tree (see `serializarArbol`), built once at
-   * `consolidar()` time and rendered client-side from then on. Opaque
-   * presentation data, not business data — passed through the API contract
-   * unchanged, outside "the contract law"'s usual field-by-field Spanish
-   * mapping.
-   */
-  @Prop({ type: SchemaTypes.Mixed, default: null })
-  documentDefinition: Record<string, unknown> | null;
 }
 
 export const FacturaSchema = SchemaFactory.createForClass(Factura);

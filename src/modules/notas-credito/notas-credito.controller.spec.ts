@@ -1,57 +1,16 @@
 import { Types } from 'mongoose';
 import { NotasCreditoController } from './notas-credito.controller';
-import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-
-const COP = new Types.ObjectId();
 
 function makeController(
   notasCredito: Record<string, unknown>,
-  recibos: Record<string, unknown> = {},
-  copropiedades: Record<string, unknown> = {
-    findById: jest.fn(() => ({
-      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
-    })),
+  presentacionDocumento: Record<string, unknown> = {
+    buscar: jest.fn(() => Promise.resolve(null)),
   },
 ) {
-  // `facturas`/`inmuebles`/`terceros`/`cuentasContables` back
-  // `construirDatosImpresionNotaCredito` (`generarPdf`'s own assembly step)
-  // — every test here that never calls `generarPdf` never touches them, so
-  // an empty-result stub is enough.
-  const facturas = {
-    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
-  };
-  const inmuebles = {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
-  };
-  const terceros = {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
-  };
-  const notasDebito = {
-    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
-  };
-  const conceptosCobro = {
-    find: jest.fn(() => ({
-      populate: () => ({
-        populate: () => ({ exec: () => Promise.resolve([]) }),
-      }),
-    })),
-  };
-  const cuentasContables = {
-    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
-  };
-
   return new NotasCreditoController(
     notasCredito as never,
-    recibos as never,
-    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
-    copropiedades as never,
-    facturas as never,
-    inmuebles as never,
-    terceros as never,
-    notasDebito as never,
-    conceptosCobro as never,
-    cuentasContables as never,
+    presentacionDocumento as never,
   );
 }
 
@@ -166,40 +125,43 @@ describe('NotasCreditoController.findAll / findOne', () => {
   });
 });
 
-describe('NotasCreditoController.generarPdf', () => {
+describe('NotasCreditoController.obtenerDocumento', () => {
   const notaFixture = () => ({
     _id: new Types.ObjectId(),
-    inmuebleId: new Types.ObjectId(),
-    terceroId: new Types.ObjectId(),
-    facturaId: new Types.ObjectId(),
     fullNumber: 'NC-001-0001',
-    issueDate: new Date('2026-08-10'),
-    totalAmount: 100000,
-    reason: 'error_facturacion',
-    notes: null,
-    appliedAmount: 100000,
-    unappliedAmount: 0,
-    distribution: [],
   });
 
-  it('responde con Content-Type application/pdf y bytes reales', async () => {
+  it('devuelve el documentDefinition congelado, leído por (tipoDocumento, documentoId)', async () => {
+    const nota = notaFixture();
+    const notasCredito = {
+      findOneRaw: jest.fn(() => Promise.resolve(nota)),
+    };
+    const presentacionDocumento = {
+      buscar: jest.fn(() =>
+        Promise.resolve({ type: 'VIEW', props: {} } as Record<string, unknown>),
+      ),
+    };
+    const controller = makeController(notasCredito, presentacionDocumento);
+
+    const respuesta = await controller.obtenerDocumento('nc-1');
+
+    expect(presentacionDocumento.buscar).toHaveBeenCalledWith('NC', nota._id);
+    expect(respuesta).toEqual({
+      documentDefinition: { type: 'VIEW', props: {} },
+    });
+  });
+
+  it('devuelve documentDefinition: null cuando nada fue congelado todavía, sin lanzar', async () => {
     const notasCredito = {
       findOneRaw: jest.fn(() => Promise.resolve(notaFixture())),
-      findOne: jest.fn(() => Promise.resolve({ montoSinAplicar: 0 })),
     };
-    const recibos = {
-      findAplicacionesForSource: jest.fn(() => Promise.resolve([])),
+    const presentacionDocumento = {
+      buscar: jest.fn(() => Promise.resolve(null)),
     };
-    const controller = makeController(notasCredito, recibos);
-    const set = jest.fn();
-    const send = jest.fn();
+    const controller = makeController(notasCredito, presentacionDocumento);
 
-    await controller.generarPdf('nc-1', undefined, { set, send } as never);
+    const respuesta = await controller.obtenerDocumento('nc-1');
 
-    expect(set).toHaveBeenCalledWith(
-      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
-    );
-    const bytes = (send.mock.calls[0] as [Buffer])[0];
-    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
+    expect(respuesta).toEqual({ documentDefinition: null });
   });
 });

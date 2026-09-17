@@ -14,6 +14,7 @@ import {
   CarteraPorDocumentoDocument,
 } from '../../database/schemas/facturacion/cartera-por-documento.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type { Factura as FacturaContract, Paginado } from '../../contracts';
 import { toFactura } from './facturas.mapper';
@@ -31,6 +32,13 @@ export class FacturasService {
     @InjectModel(CarteraPorDocumento.name)
     private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
     private readonly tenant: TenantContextService,
+    // Optional — same convention as `LotesFacturacionService`'s own trailing
+    // optional deps (`cuentasContables`/`resoluciones`): in the real app
+    // this is always injected; left `undefined` only by the many existing
+    // tests that construct this service positionally without it, in which
+    // case `findOne` simply resolves `documentDefinition` as `null` instead
+    // of throwing.
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   /** Batch-resolves each document's own live per-concepto breakdown from
@@ -109,18 +117,20 @@ export class FacturasService {
     );
 
     return {
-      // `documentDefinition` nulled out here on purpose — a listing page
-      // (default 50/página) has no use for each row's full frozen
+      // `documentDefinition` passed as `null` here on purpose — a listing
+      // page (default 50/página) has no use for each row's full frozen
       // presentation tree, and shipping it here would multiply the payload
-      // for no reason. `findOne` below is the only place that needs it.
-      items: documentos.map((doc) => ({
-        ...toFactura(
+      // for no reason. Not even worth querying `presentacion_documento` for
+      // the list case, since the result is nulled either way — `findOne`
+      // below is the only place that needs the real lookup.
+      items: documentos.map((doc) =>
+        toFactura(
           doc,
           saldoPorDocumento.get(doc._id.toString()) ?? 0,
           carteraPorDoc.get(doc._id.toString()) ?? new Map<string, number>(),
+          null,
         ),
-        documentDefinition: null,
-      })),
+      ),
       total,
       pagina,
       porPagina,
@@ -135,14 +145,18 @@ export class FacturasService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    const [saldoTotal, carteraPorDoc] = await Promise.all([
+    const [saldoTotal, carteraPorDoc, documentDefinition] = await Promise.all([
       this.saldoTotalDocumento.findOne({ documentoId: documento._id }).exec(),
       this.carteraPorConceptoDe([documento._id]),
+      this.presentacionDocumento
+        ? this.presentacionDocumento.buscar('FV', documento._id)
+        : Promise.resolve(null),
     ]);
     return toFactura(
       documento,
       saldoTotal?.saldoPendiente ?? 0,
       carteraPorDoc.get(documento._id.toString()) ?? new Map<string, number>(),
+      documentDefinition,
     );
   }
 

@@ -13,7 +13,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { pipeline } from 'node:stream/promises';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
@@ -38,11 +37,14 @@ import type {
   ResultadoCargaNovedades,
   RespuestaConsultaFacturacion,
   DocumentoFacturaLote,
+  DocumentoPrefactura,
+  DocumentoPrefacturaLote,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
-import { generarPdfPrefacturasLote } from '../../common/pdf/prefacturas-lote-pdf';
+import { paginaPrefactura } from '../../common/pdf/prefactura-pdf';
+import { serializarArbol } from '../../common/pdf/react/serializar-arbol';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import {
   Copropiedad,
   CopropiedadDocument,
@@ -65,6 +67,7 @@ export class LotesController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    private readonly presentacionDocumento: PresentacionDocumentoService,
   ) {}
 
   @Get()
@@ -156,13 +159,20 @@ export class LotesController {
     return this.lotes.editarNovedadLinea(id, novedadId, dto);
   }
 
-  @Get(':id/inmuebles/:inmuebleId/prefactura.pdf')
+  /**
+   * One unit's prefactura, as a react-pdf presentation tree the browser
+   * renders — same idea as `Factura.documentDefinition`, but with no moment
+   * to freeze it at: a Prefactura previews a not-yet-issued invoice, so this
+   * is computed FRESH on every call from the lote's current `preview`,
+   * never cached. Route renamed from `.../prefactura.pdf` — no PDF is built
+   * here anymore, the browser renders this client-side.
+   */
+  @Get(':id/inmuebles/:inmuebleId/prefactura/documento')
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  async generarPrefacturaPdf(
+  async obtenerDocumentoPrefactura(
     @Param('id') id: string,
     @Param('inmuebleId') inmuebleId: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
+  ): Promise<DocumentoPrefactura> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
     const preliminar = lote.preview.find(
@@ -180,30 +190,33 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfPrefactura(preliminar, lote, copropiedad);
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="prefactura-${preliminar.unitCode}.pdf"`,
-    });
-    res.send(Buffer.from(bytes));
+    return {
+      // `paginaPrefactura` always returns a single element (never the array
+      // branch `serializarArbol` also allows for) — same cast pattern
+      // `consolidar()` uses when it freezes each Factura's own tree
+      // (`lotes.service.ts`, `presentacionDocumento.guardarVarios`).
+      documentDefinition: serializarArbol(
+        paginaPrefactura(preliminar, lote, copropiedad),
+      ) as DocumentoPrefactura['documentDefinition'],
+    };
   }
 
   /**
-   * Every unit's prefactura from the lote's CURRENT previsualización,
-   * bundled into one PDF — the Liquidación screen's full-batch preview,
-   * reachable before consolidación even exists (unlike
-   * `:id/facturas/documentos` below, which needs real Facturas). Reflects
-   * whatever `preview` holds
-   * right now, edits included, since it is generated fresh on every call
-   * rather than cached.
+   * Every unit's prefactura from the lote's CURRENT previsualización, each
+   * as its own presentation tree for the browser to render — the
+   * Liquidación screen's full-batch preview, reachable before consolidación
+   * even exists (unlike `:id/facturas/documentos`, which needs real
+   * Facturas). Computed FRESH on every call, one entry per unit — there is
+   * no frozen field to read back, unlike `Factura.documentDefinition`: a
+   * Prefactura always reflects whatever `preview` holds right now, edits
+   * included. Route renamed from `.../prefacturas.pdf` — no PDF is built
+   * here anymore.
    */
-  @Get(':id/prefacturas.pdf')
+  @Get(':id/prefacturas/documentos')
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  async generarPdfPrefacturas(
+  async obtenerDocumentosPrefacturas(
     @Param('id') id: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
+  ): Promise<DocumentoPrefacturaLote[]> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
     if (lote.preview.length === 0) {
@@ -218,32 +231,26 @@ export class LotesController {
       );
     }
 
-    const stream = await generarPdfPrefacturasLote(
-      lote.preview,
-      lote,
-      copropiedad,
-    );
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="prefacturas-lote-${lote.number}.pdf"`,
-    });
-    // Piped, not buffered — `generarPdfPrefacturasLote` streams the render so
-    // an N-unit batch never sits fully in memory before it reaches the client.
-    // `pipeline` (not raw `.pipe`) so a client disconnect mid-download destroys
-    // the render stream too, instead of leaving the request hung forever.
-    await pipeline(stream, res);
+    return lote.preview.map((preliminar) => ({
+      inmuebleId: preliminar.inmuebleId.toString(),
+      // Same "always a single element" cast as the single-unit route above.
+      documentDefinition: serializarArbol(
+        paginaPrefactura(preliminar, lote, copropiedad),
+      ) as DocumentoPrefacturaLote['documentDefinition'],
+    }));
   }
 
   /**
    * Every Factura this lote's consolidación produced, as its own frozen
    * `documentDefinition` — one entry per invoice, in the exact layout
-   * `GET /facturas/:id/pdf` already shows for one at a time (both read the
-   * same field, frozen once by `LotesFacturacionService.consolidar()`; see
-   * `serializarArbol`). No PDF is built here anymore — the browser renders
-   * each entry client-side — so there's nothing left to stream: `.lean()`
-   * (`findAllRawPorLote`) already keeps this cheap for a lote with hundreds
-   * of invoices, the way `.lean()` + streaming used to for the PDF version.
+   * `GET /facturas/:id` already shows for one at a time (both read the same
+   * `presentacion_documento` row, frozen once by
+   * `LotesFacturacionService.consolidar()`; see `serializarArbol`). No PDF is
+   * built here anymore — the browser renders each entry client-side — so
+   * there's nothing left to stream: `.lean()` (`findAllRawPorLote`) already
+   * keeps the Factura fetch cheap for a lote with hundreds of invoices, and
+   * `buscarVarios` batches the presentation lookup into one query instead of
+   * one per invoice.
    *
    * Route renamed from `:id/facturas.pdf` — the old `.pdf` suffix would be
    * actively misleading on a JSON response.
@@ -264,11 +271,16 @@ export class LotesController {
       );
     }
 
+    const documentDefinitions = await this.presentacionDocumento.buscarVarios(
+      'FV',
+      facturas.map((factura) => factura._id),
+    );
+
     return facturas.map((factura) => ({
       id: factura._id.toString(),
       // Opaque blob, passed through unchanged — same cast `toFactura`
       // (`facturas.mapper.ts`) uses for the same field.
-      documentDefinition: (factura.documentDefinition ??
+      documentDefinition: (documentDefinitions.get(factura._id.toString()) ??
         null) as DocumentoFacturaLote['documentDefinition'],
     }));
   }

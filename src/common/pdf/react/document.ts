@@ -4,7 +4,6 @@ import {
   Page,
   StyleSheet,
   renderToBuffer,
-  renderToStream,
   type DocumentProps,
 } from '@react-pdf/renderer';
 
@@ -76,8 +75,7 @@ export function reporteDocumento(
 /**
  * Builds a multi-page Letter document, one Page per content element — the
  * react-pdf replacement for pdf-lib's "generate N PDFs, then `copyPages`
- * them into one" batch pattern (`prefacturas-lote-pdf.ts`,
- * `recibos-lote-pdf.ts`). React-pdf has no
+ * them into one" batch pattern. React-pdf has no
  * byte-level merge API; a batch here is one `<Document>` repeating the same
  * per-item content across N `<Page>`s instead of stitching N independently
  * rendered PDFs together.
@@ -112,14 +110,4 @@ export async function renderizarPdf(
   documento: ReactElement<DocumentProps>,
 ): Promise<Buffer> {
   return renderToBuffer(documento);
-}
-
-/** Renders a document tree to a stream instead of a Buffer — `renderToBuffer`
- *  internally awaits the whole stream and `Buffer.concat`s every chunk before
- *  returning, so an N-page batch lote PDF would sit fully in memory twice
- *  over; the batch builders pipe this straight to the response instead. */
-export async function renderizarPdfStream(
-  documento: ReactElement<DocumentProps>,
-): Promise<NodeJS.ReadableStream> {
-  return renderToStream(documento);
 }

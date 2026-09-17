@@ -1,4 +1,7 @@
-import type { NotaContable as NotaContableContract } from '../../contracts';
+import type {
+  NodoDocumentoFactura,
+  NotaContable as NotaContableContract,
+} from '../../contracts';
 import type { NotaContableDocument } from '../../database/schemas/notas-contables/nota-contable.schema';
 
 /**
@@ -17,9 +20,16 @@ export const fechaNotaContable = (doc: {
  * Maps a nota contable document to the Spanish API contract. Persistence is
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toNotaCredito`.
+ *
+ * `documentDefinition` is resolved by the caller from the shared, permanent
+ * `presentacion_documento` table — same pattern `toRecibo`/`toNotaDebito`
+ * use for their own field of the same name. Defaults to `null` so
+ * `crear()`'s own immediate return, `anular()`, and the listing don't need
+ * to pass it explicitly.
  */
 export const toNotaContable = (
   doc: NotaContableDocument,
+  documentDefinition: Record<string, unknown> | null = null,
 ): NotaContableContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -37,4 +47,7 @@ export const toNotaContable = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
+  // its own field of the same name.
+  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
 });

@@ -90,6 +90,7 @@ import {
   type MarcasCuentaContable,
 } from './asiento.builder';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -119,8 +120,18 @@ import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-
  * Same reasoning as `cuentasContables` — optional so every existing
  * positional test keeps compiling; a `consolidar()` call with it left
  * `undefined` (test-only) simply skips building `documentDefinition`
- * entirely rather than throwing, since that step is a presentation cache,
- * never something the financial write path depends on.
+ * entirely rather than throwing, since that step freezes a presentation
+ * record, never something the financial write path depends on.
+ *
+ * `presentacionDocumento` was APPENDED as a fifteenth argument when
+ * `documentDefinition` moved off `Factura` itself onto the shared,
+ * permanent `presentacion_documento` table (see that schema's docblock: a
+ * frozen record, not a regenerable cache) — `consolidar()` now upserts each
+ * freshly-issued Factura's frozen tree through this service
+ * (`guardarVarios('FV', ...)`) instead of a `bulkWrite` against
+ * `this.facturas`. Same optional-trailing-argument reasoning as
+ * `cuentasContables`/`resoluciones`: undefined in a test simply skips the
+ * step.
  */
 @Injectable()
 export class LotesFacturacionService {
@@ -157,6 +168,7 @@ export class LotesFacturacionService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(ResolucionFacturacion.name)
     private readonly resoluciones?: Model<ResolucionFacturacionDocument>,
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   /**
@@ -1579,25 +1591,28 @@ export class LotesFacturacionService {
       }
     }
 
-    // Presentation cache — built once here, outside any transaction and
-    // AFTER every row above has already committed (or not): a Factura's own
+    // Frozen presentation record — built once here, outside any transaction
+    // and AFTER every row above has already committed (or not): a Factura's own
     // financial correctness never depends on this succeeding. Same frozen-
     // at-emission principle already applied to `discountAmount`/
     // `TitularCongelado` above, extended to the whole printed page (see
     // `serializarArbol`'s docblock and the plan this implements). Guarded on
-    // both optional pieces it needs — `resoluciones` (see the canonical
-    // constructor docblock) and a real `copropiedad` (already looked up,
-    // above, for the accounting entries; `?.` there means it can be null) —
-    // so this step simply no-ops instead of throwing wherever either is
-    // missing, exactly like `cuentasContables` already does for auxiliares.
+    // every optional piece it needs — `resoluciones`/`presentacionDocumento`
+    // (see the canonical constructor docblock) and a real `copropiedad`
+    // (already looked up, above, for the accounting entries; `?.` there
+    // means it can be null) — so this step simply no-ops instead of
+    // throwing wherever any is missing, exactly like `cuentasContables`
+    // already does for auxiliares.
     // Wrapped in try/catch on purpose: every Factura here is already
     // committed and can never be deleted (the audit law), so a failure
-    // building the print cache must never stop the Lote from reaching
-    // `consolidado` below — it would otherwise strand real invoices behind
-    // an apparently-failed run with no way to retry just this step.
+    // freezing the presentation record must never stop the Lote from
+    // reaching `consolidado` below — it would otherwise strand real
+    // invoices behind an apparently-failed run with no way to retry just
+    // this step.
     if (
       facturasCreadasEnEsteIntento.length &&
       this.resoluciones &&
+      this.presentacionDocumento &&
       copropiedad
     ) {
       try {
@@ -1633,33 +1648,29 @@ export class LotesFacturacionService {
           resolucionesParaPdf.map((r) => [r._id.toString(), r]),
         );
 
-        // One round-trip for every Factura this run created, same reason
-        // `saldos.bulkWrite` above is one call instead of one per line.
-        await this.facturas.bulkWrite(
+        // One round-trip for every Factura this run created (`guardarVarios`
+        // is a single `bulkWrite` of upserts against `presentacion_documento`)
+        // — same reason `saldos.bulkWrite` above is one call instead of one
+        // per line, now against the shared, permanent presentation table
+        // instead of a `documentDefinition` field on `Factura` itself (see
+        // `PresentacionDocumento`'s docblock for why Factura moved onto this
+        // shared table).
+        await this.presentacionDocumento.guardarVarios(
+          'FV',
           facturasCreadasEnEsteIntento.map((factura) => ({
-            updateOne: {
-              filter: { _id: factura._id },
-              update: {
-                $set: {
-                  // `paginaFactura` always returns a single element here (never
-                  // the array branch `serializarArbol` also allows for) — cast
-                  // to match `Factura.documentDefinition`'s own Mixed-blob type
-                  // (see the schema's docblock: opaque presentation data, not
-                  // something this layer re-validates field by field).
-                  documentDefinition: serializarArbol(
-                    paginaFactura(
-                      factura,
-                      factura.resolucionId
-                        ? (resolucionesPorId.get(
-                            factura.resolucionId.toString(),
-                          ) ?? null)
-                        : null,
-                      copropiedad,
-                    ),
-                  ) as Record<string, unknown> | null,
-                },
-              },
-            },
+            documentoId: factura._id,
+            // `paginaFactura` always returns a single element here (never the
+            // array branch `serializarArbol` also allows for).
+            arbol: serializarArbol(
+              paginaFactura(
+                factura,
+                factura.resolucionId
+                  ? (resolucionesPorId.get(factura.resolucionId.toString()) ??
+                      null)
+                  : null,
+                copropiedad,
+              ),
+            ),
           })),
         );
       } catch (error) {
