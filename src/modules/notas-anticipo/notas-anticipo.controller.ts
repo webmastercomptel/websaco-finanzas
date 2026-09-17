@@ -44,6 +44,10 @@ import {
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
 import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
+import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
@@ -79,6 +83,8 @@ export class NotasAnticipoController {
     private readonly notasDebito: Model<NotaDebitoDocument>,
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo: Model<SaldoInicialAnticipoDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Tercero.name)
@@ -150,6 +156,7 @@ export class NotasAnticipoController {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
         recibos: this.recibos,
+        saldosInicialesAnticipo: this.saldosInicialesAnticipo,
         inmuebles: this.inmuebles,
         terceros: this.terceros,
         cuentasContables: this.cuentasContables,

@@ -915,20 +915,49 @@ export function evaluarAplicacionConDescuento(
 }
 
 /**
+ * The subset of a "source of money" document `cruce.util.ts` itself actually
+ * reads — deliberately narrow (never the full `ReciboDocument` shape) so
+ * `ContextoAplicacion.recibo` can also be a `SaldoInicialAnticipoDocument`
+ * (an imported opening anticipo balance, see that schema's own docblock)
+ * without this file importing that schema or knowing it exists. Both
+ * documents name their fields identically on purpose — `fullNumber`,
+ * `receivedDate` — precisely so either one satisfies this shape with no
+ * adapter.
+ */
+export interface OrigenAplicacion {
+  _id: Types.ObjectId;
+  inmuebleId: Types.ObjectId;
+  terceroId: Types.ObjectId | null;
+  fullNumber: string;
+  receivedDate: Date;
+}
+
+/**
  * Shared context every cruce-execution call needs — models, the session,
  * and WHO this application event is (`sourceType`/`sourceId`), always
- * anchored to the Recibo whose `unappliedAmount` is being drawn down.
+ * anchored to the ORIGIN document whose leftover balance is being drawn
+ * down.
  *
  * `recibo` is always the source of the money, whether the caller is
  * `RecibosService` (applying at creation or, historically, right after —
  * `sourceType: 'RC'`, `sourceId: recibo._id`) or `NotasAnticipoService`
- * (applying a Recibo's LEFTOVER anticipo later, as its own document —
- * `sourceType: 'NA'`, `sourceId` the new Nota de Anticipo's `_id`). Either
- * way, the balance that actually decreases is the Recibo's own
- * `unappliedAmount` — a Nota de Anticipo has no running balance of its
- * own, it is one complete record of a single application event.
+ * (applying a leftover anticipo LATER, as its own document — `sourceType:
+ * 'NA'`, `sourceId` the new Nota de Anticipo's `_id`). Either way, the
+ * balance that actually decreases is the origin's own `unappliedAmount` — a
+ * Nota de Anticipo has no running balance of its own, it is one complete
+ * record of a single application event.
+ *
+ * Generic over `TOrigen` (default `ReciboDocument`, the only origin
+ * `RecibosService` ever uses) so `NotasAnticipoService` can instantiate this
+ * with a `SaldoInicialAnticipoDocument` instead when `origenTipo: 'SI'` —
+ * see that field's own docblock on `NotaAnticipo`. `decrementarSaldoDocumentoOrigen`/
+ * `restaurarSaldoDocumentoOrigen` already worked this way (generic over `T`,
+ * or not parametrized by origin type at all) — this just extends the same
+ * generalization to the context every OTHER cruce function shares.
  */
-export interface ContextoAplicacion {
+export interface ContextoAplicacion<
+  TOrigen extends OrigenAplicacion = ReciboDocument,
+> {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
   /** Optional only so the many callers/tests that predate Saldos Iniciales
@@ -943,10 +972,10 @@ export interface ContextoAplicacion {
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>;
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>;
   saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>;
-  recibos: Model<ReciboDocument>;
+  recibos: Model<TOrigen>;
   session: ClientSession;
   coPropertyId: Types.ObjectId;
-  recibo: ReciboDocument;
+  recibo: TOrigen;
   sourceType: 'RC' | 'NA';
   sourceId: Types.ObjectId;
   /** The source document's own declared business date — `recibo.receivedDate`
@@ -975,8 +1004,10 @@ export interface ContextoAplicacion {
  * under a Nota de Anticipo instead. Both `RecibosService.aplicarManual` and
  * `NotasAnticipoService.crear()` are now thin wrappers around this.
  */
-export async function ejecutarAplicacionManual(
-  ctx: ContextoAplicacion,
+export async function ejecutarAplicacionManual<
+  TOrigen extends OrigenAplicacion = ReciboDocument,
+>(
+  ctx: ContextoAplicacion<TOrigen>,
   solicitadas: AplicacionSolicitadaDto[],
   // A user-confirmed payment shortfall (`RecibosService.crear()`'s own
   // `confirmarDescuentoFaltante` flag) — widens the pre-check below (the
@@ -1494,8 +1525,10 @@ export async function ejecutarAplicacionManual(
  * own note on why, and on what `ctx.recibo`/`ctx.sourceType`/`ctx.sourceId`
  * mean here.
  */
-export async function ejecutarAplicacionFifo(
-  ctx: ContextoAplicacion,
+export async function ejecutarAplicacionFifo<
+  TOrigen extends OrigenAplicacion = ReciboDocument,
+>(
+  ctx: ContextoAplicacion<TOrigen>,
   montoDisponible: number,
 ): Promise<{
   aplicadas: AplicacionCarteraDocument[];

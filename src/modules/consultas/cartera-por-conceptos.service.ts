@@ -211,7 +211,10 @@ export class CarteraPorConceptosService {
     const agregar = (
       inmuebleId: Types.ObjectId,
       documentoId: Types.ObjectId,
-      tipo: 'FV' | 'ND' | 'SI',
+      // A Saldo Inicial call site passes its own original code (e.g. "FV",
+      // "ND") here instead of the literal "SI" — see
+      // `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock.
+      tipo: 'FV' | 'ND' | 'SI' | (string & {}),
       numeroCompleto: string,
       numero: number,
       fechaDoc: Date,
@@ -324,7 +327,7 @@ export class CarteraPorConceptosService {
       agregar(
         si.inmuebleId,
         si._id,
-        'SI',
+        si.tipoDocumentoOriginal,
         si.numeroOriginal,
         si.number,
         si.fecha,

@@ -230,11 +230,13 @@ export class AuxiliarCarteraService {
       });
     }
 
-    // Saldos Iniciales → Débito
+    // Saldos Iniciales → Débito. `tipo` shows the client's own original code
+    // (e.g. "FV", "ND") from their previous system, never the literal "SI"
+    // — see `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock.
     for (const si of saldosIniciales) {
       rows.push({
         fecha: si.fecha,
-        tipo: 'SI',
+        tipo: si.tipoDocumentoOriginal,
         numeroCompleto: si.numeroOriginal,
         concepto: 'Saldo Inicial',
         refCruce: null,

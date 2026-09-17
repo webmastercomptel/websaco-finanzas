@@ -110,6 +110,34 @@ export interface ResultadoImportacionInmuebles {
   bloqueadosPorFactura: string[];
 }
 
+/** One column of the coproperty-wide "Listado de Inmuebles" roster — one
+ *  recurring charge concept in the catalog. `intereses` is never included:
+ *  it is computed from overdue balances, never a flat recurring amount. */
+export interface ConceptoListadoInmuebles {
+  conceptoId: string;
+  nombre: string;
+}
+
+/** One unit's row in the roster — its recurring cargo amounts keyed by
+ *  `conceptoId`, same "absent key reads as 0" convention as
+ *  `DocumentoCarteraPorInmueble.cargosPorConcepto`. */
+export interface ItemListadoInmuebles {
+  codigo: string;
+  titular: string | null;
+  area: number | null;
+  coeficiente: number | null;
+  valores: Record<string, Monto>;
+}
+
+/** Response shape for GET /inmuebles/listado — the same roster
+ *  `GET /inmuebles/listado.pdf` prints, as JSON: what the frontend's Excel
+ *  export button builds its workbook from. */
+export interface RespuestaListadoInmuebles {
+  copropiedadCodigo: string;
+  conceptos: ConceptoListadoInmuebles[];
+  items: ItemListadoInmuebles[];
+}
+
 /* ── Terceros ──────────────────────────────────────────────────── */
 
 /**
@@ -329,9 +357,10 @@ export interface ErrorConsolidacion {
 
 /**
  * Result of wiping every financial document (Lotes/Facturas, Recibos, Notas
- * Crédito/Débito/Anticipo/Contables, and their derived asientos/saldos) of
- * the one hardcoded test coproperty, so its billing cycle can be replayed
- * from a blank slate. See `ReiniciarCicloService` for the safety checks.
+ * Crédito/Débito/Anticipo/Contables, Saldos Iniciales, and their derived
+ * asientos/saldos) of the one hardcoded test coproperty, so its billing
+ * cycle can be replayed from a blank slate. See `ReiniciarCicloService` for
+ * the safety checks.
  */
 export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
@@ -348,6 +377,11 @@ export interface ResultadoReinicioCiclo {
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
   lotesContabilidadEliminados: number;
+  saldosInicialesEliminados: number;
+  lotesSaldoInicialEliminados: number;
+  saldoTotalDocumentoEliminado: number;
+  saldosInicialesAnticipoEliminados: number;
+  lotesSaldoInicialAnticipoEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -715,15 +749,19 @@ export type MotivoAnulacionNotaAnticipo =
   'error_digitacion' | 'ajuste_contrato' | 'otro';
 
 /**
- * A "Nota de Anticipo" ("NA") — applies a Recibo's leftover
- * `montoSinAplicar` against open cartera LATER, as its own auditable
- * document, from the Anticipos module (never from the Recibo itself — see
- * `Recibo`'s own note on why there is no `/recibos/:id/aplicar`).
+ * A "Nota de Anticipo" ("NA") — applies a leftover `montoSinAplicar` against
+ * open cartera LATER, as its own auditable document, from the Anticipos
+ * module (never from the origin document itself — see `Recibo`'s own note
+ * on why there is no `/recibos/:id/aplicar`). `origenTipo` says which
+ * collection `reciboOrigenId` points into: `'RC'` a real Recibo, or `'SI'`
+ * an opening anticipo balance imported from the client's previous system
+ * (`SaldoInicialAnticipo`).
  */
 export interface NotaAnticipo {
   id: string;
   inmuebleId: string;
   terceroId: string | null;
+  origenTipo: 'RC' | 'SI';
   reciboOrigenId: string;
   prefijo: string;
   numero: number;
@@ -805,6 +843,46 @@ export interface ResultadoImportacionSaldosIniciales {
   errores: ErrorImportacionSaldoInicial[];
 }
 
+/* ── Saldos Iniciales de Anticipo (opening credit balances) ───── */
+
+/** Same narrow catalog as `MotivoAnulacionSaldoInicial`, same reasoning: an
+ *  opening anticipo balance is only ever loaded once, at onboarding. */
+export type MotivoAnulacionSaldoInicialAnticipo =
+  'error_digitacion' | 'duplicado' | 'otro';
+
+/**
+ * An opening ANTICIPO (credit) balance brought from the client's previous
+ * system — a unit had already paid ahead, and `saldoDisponible` is what a
+ * future Nota de Anticipo can still draw down against open cartera. Never a
+ * synthetic Recibo (see `SaldoInicialAnticipo`'s own schema docblock) —
+ * `tipoDocumentoOriginal`/`numeroOriginal` are the free text the client
+ * typed for their own previous receipt (typically `'RC'` and its number).
+ */
+export interface SaldoInicialAnticipo {
+  id: string;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  tipoDocumentoOriginal: string;
+  numeroOriginal: string;
+  fecha: IsoDate;
+  monto: Monto;
+  saldoDisponible: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionSaldoInicialAnticipo | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * Result of importing a Saldos Iniciales de Anticipo file — same
+ * independent-rows behavior as `ResultadoImportacionSaldosIniciales`.
+ */
+export interface ResultadoImportacionSaldosInicialesAnticipo {
+  total: number;
+  importados: number;
+  errores: ErrorImportacionSaldoInicial[];
+}
+
 /* ── Notas Contables ──────────────────────────────────────────── */
 
 /**
@@ -836,8 +914,13 @@ export interface NotaContable {
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
 
+/** `'SI'` rows carry the client's own original code (e.g. "FV", "ND") from
+ *  their previous system instead of the literal `'SI'` — see
+ *  `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock. The
+ *  `(string & {})` member keeps autocomplete on the six real system codes
+ *  while still accepting that free text. */
 export type TipoDocumentoKardex =
-  'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA' | 'SI';
+  'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA' | 'SI' | (string & {});
 
 /** One row in the chronological ledger for an inmueble. */
 export interface MovimientoKardex {
@@ -893,7 +976,10 @@ export interface FilaVencimientoCartera {
   inmuebleId: string;
   inmuebleCodigo: string;
   propietario: string | null;
-  tipo: 'FV' | 'ND' | 'SI';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string;
@@ -930,7 +1016,10 @@ export interface DocumentoCarteraPorInmueble {
   /** This document's own `_id` — what a Nota Contable's `documentoId` must
    *  reference to reclassify against it specifically. */
   documentoId: string;
-  tipo: 'FV' | 'ND' | 'SI';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string | null;
@@ -977,7 +1066,10 @@ export interface ConceptoColumnaCarteraPorConceptos {
  *  read as 0 on the frontend. */
 export interface DocumentoCarteraPorConceptos {
   documentoId: string;
-  tipo: 'FV' | 'ND' | 'SI';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string | null;

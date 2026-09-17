@@ -81,6 +81,34 @@ import {
   ConsecutivoLoteContabilidad,
   ConsecutivoLoteContabilidadDocument,
 } from '../../database/schemas/contabilidad/consecutivo-lote-contabilidad.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
+  LoteSaldoInicial,
+  LoteSaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/lote-saldo-inicial.schema';
+import {
+  ConsecutivoSaldoInicial,
+  ConsecutivoSaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/consecutivo-saldo-inicial.schema';
+import {
+  SaldoTotalDocumento,
+  SaldoTotalDocumentoDocument,
+} from '../../database/schemas/facturacion/saldo-total-documento.schema';
+import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
+import {
+  LoteSaldoInicialAnticipo,
+  LoteSaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/lote-saldo-inicial-anticipo.schema';
+import {
+  ConsecutivoSaldoInicialAnticipo,
+  ConsecutivoSaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/consecutivo-saldo-inicial-anticipo.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ResultadoReinicioCiclo } from '../../contracts';
 
@@ -95,16 +123,17 @@ const CODIGO_COPROPIEDAD_PRUEBA = '0001';
 /**
  * Wipes EVERY financial document of the one hardcoded test coproperty —
  * Lotes/Facturas, Recibos (and their own Lotes de Recibos batch uploads),
- * Notas Crédito/Débito/Anticipo/Contables, everything they moved
- * (AplicacionCartera, asientos contables, SaldoCartera, and the two
+ * Notas Crédito/Débito/Anticipo/Contables, Saldos Iniciales de cargo AND de
+ * anticipo (and their own, independent Lotes batch uploads), everything they
+ * moved (AplicacionCartera, asientos contables, SaldoCartera, and the three
  * per-document cartera ledgers — `CarteraPorDocumento`,
- * `SaldoDocumentoOrigen`), and every past "Adición a Contabilidad" export
- * (`LoteContabilidad`) — and rewinds
+ * `SaldoDocumentoOrigen`, `SaldoTotalDocumento`), and every past "Adición a
+ * Contabilidad" export (`LoteContabilidad`) — and rewinds
  * every document's numbering back to zero, so the whole billing cycle can be
  * replayed from a blank slate as many times as needed. Nothing is left
  * half-deleted for a caller to clean up by hand: every document type this
  * system knows how to issue is wiped together, so there is never a leftover
- * Recibo/Nota pointing at a Factura that no longer exists.
+ * Recibo/Nota/Saldo Inicial pointing at a Factura that no longer exists.
  *
  * A stray `LoteRecibos` left in `borrador`/`cargado` state is not merely
  * clutter: `LoteRecibosSchema`'s own partial unique index allows at most one
@@ -165,6 +194,20 @@ export class ReiniciarCicloService {
     private readonly lotesContabilidad: Model<LoteContabilidadDocument>,
     @InjectModel(ConsecutivoLoteContabilidad.name)
     private readonly consecutivoLoteContabilidad: Model<ConsecutivoLoteContabilidadDocument>,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    @InjectModel(LoteSaldoInicial.name)
+    private readonly lotesSaldoInicial: Model<LoteSaldoInicialDocument>,
+    @InjectModel(ConsecutivoSaldoInicial.name)
+    private readonly consecutivoSaldoInicial: Model<ConsecutivoSaldoInicialDocument>,
+    @InjectModel(SaldoTotalDocumento.name)
+    private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo: Model<SaldoInicialAnticipoDocument>,
+    @InjectModel(LoteSaldoInicialAnticipo.name)
+    private readonly lotesSaldoInicialAnticipo: Model<LoteSaldoInicialAnticipoDocument>,
+    @InjectModel(ConsecutivoSaldoInicialAnticipo.name)
+    private readonly consecutivoSaldoInicialAnticipo: Model<ConsecutivoSaldoInicialAnticipoDocument>,
     private readonly tenant: TenantContextService,
   ) {}
 
@@ -191,6 +234,10 @@ export class ReiniciarCicloService {
       recibosEliminados,
       loteRecibosEliminados,
       lotesContabilidadEliminados,
+      saldosInicialesEliminados,
+      lotesSaldoInicialEliminados,
+      saldosInicialesAnticipoEliminados,
+      lotesSaldoInicialAnticipoEliminados,
     ] = await Promise.all([
       this.aplicaciones.deleteMany({ coPropertyId }).exec(),
       this.notasCredito.deleteMany({ coPropertyId }).exec(),
@@ -200,6 +247,10 @@ export class ReiniciarCicloService {
       this.recibos.deleteMany({ coPropertyId }).exec(),
       this.loteRecibos.deleteMany({ coPropertyId }).exec(),
       this.lotesContabilidad.deleteMany({ coPropertyId }).exec(),
+      this.saldosIniciales.deleteMany({ coPropertyId }).exec(),
+      this.lotesSaldoInicial.deleteMany({ coPropertyId }).exec(),
+      this.saldosInicialesAnticipo.deleteMany({ coPropertyId }).exec(),
+      this.lotesSaldoInicialAnticipo.deleteMany({ coPropertyId }).exec(),
     ]);
 
     const [
@@ -207,13 +258,18 @@ export class ReiniciarCicloService {
       saldosEliminados,
       carteraPorDocumentoEliminada,
       saldosDocumentoOrigenEliminados,
+      saldoTotalDocumentoEliminado,
     ] = await Promise.all([
       // Every asiento, regardless of anchor (Factura/Recibo/NC/ND/NT/NA) —
       // every one of those anchors is wiped above too.
       this.asientos.deleteMany({ coPropertyId }).exec(),
       this.saldos.deleteMany({ coPropertyId }).exec(),
+      // Unfiltered by tipoDocumento on purpose — its FV/ND/SI rows are ALL
+      // orphaned by this same reset (their anchor documents are wiped
+      // above/below), so all three go together.
       this.carteraPorDocumento.deleteMany({ coPropertyId }).exec(),
       this.saldosDocumentoOrigen.deleteMany({ coPropertyId }).exec(),
+      this.saldoTotalDocumento.deleteMany({ coPropertyId }).exec(),
     ]);
 
     const facturasEliminadas = await this.facturas
@@ -246,6 +302,17 @@ export class ReiniciarCicloService {
     await this.consecutivoLoteContabilidad
       .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
       .exec();
+    // Same reasoning again — Saldos Iniciales numbers off its own internal
+    // ordinal (ConsecutivoSaldoInicial), never ConsecutivoDocumento.
+    await this.consecutivoSaldoInicial
+      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .exec();
+    // Same reasoning again — Saldos Iniciales de Anticipo has its own
+    // independent ordinal, separate from ConsecutivoSaldoInicial (cargos and
+    // anticipos are two different document collections).
+    await this.consecutivoSaldoInicialAnticipo
+      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .exec();
     const resolucionActiva = await this.resoluciones
       .findOne({ coPropertyId, status: 'active' })
       .exec();
@@ -274,6 +341,13 @@ export class ReiniciarCicloService {
       saldosDocumentoOrigenEliminados:
         saldosDocumentoOrigenEliminados.deletedCount,
       lotesContabilidadEliminados: lotesContabilidadEliminados.deletedCount,
+      saldosInicialesEliminados: saldosInicialesEliminados.deletedCount,
+      lotesSaldoInicialEliminados: lotesSaldoInicialEliminados.deletedCount,
+      saldoTotalDocumentoEliminado: saldoTotalDocumentoEliminado.deletedCount,
+      saldosInicialesAnticipoEliminados:
+        saldosInicialesAnticipoEliminados.deletedCount,
+      lotesSaldoInicialAnticipoEliminados:
+        lotesSaldoInicialAnticipoEliminados.deletedCount,
     };
   }
 }

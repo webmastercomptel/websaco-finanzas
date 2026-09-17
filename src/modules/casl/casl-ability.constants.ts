@@ -57,6 +57,12 @@ export const SUBJECTS = [
   // a role can be granted "import Saldos Iniciales" without also gaining
   // any power over real Facturas.
   'SaldoInicial',
+  // Opening ANTICIPO (credit) balances imported the same way — its own
+  // subject rather than folded into `SaldoInicial` (a different action
+  // grants importing cargos vs. importing anticipos) or `NotaAnticipo` (a
+  // role that can create a Nota de Anticipo against real cartera should not
+  // automatically be able to import historical opening credit balances).
+  'SaldoInicialAnticipo',
   'Anulacion',
   'Consulta',
   'Configuracion',

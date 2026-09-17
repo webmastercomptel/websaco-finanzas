@@ -13,6 +13,7 @@ export const TIPOS_IMPORTACION = [
   'inmuebles',
   'valores-recurrentes',
   'saldos-iniciales',
+  'saldos-iniciales-anticipo',
 ] as const;
 export type TipoImportacion = (typeof TIPOS_IMPORTACION)[number];
 

@@ -35,6 +35,7 @@ import type {
   ProgresoImportacion,
   ResultadoImportacionInmuebles,
   ResultadoImportacionValoresRecurrentes,
+  RespuestaListadoInmuebles,
   ValorRecurrente,
   ValorRecurrenteMasivo,
 } from '../../contracts';
@@ -89,6 +90,18 @@ export class InmueblesController {
       'Content-Disposition': 'inline; filename="listado-inmuebles.pdf"',
     });
     res.send(Buffer.from(bytes));
+  }
+
+  /**
+   * Same roster as `listado.pdf`, as JSON — what the frontend's Excel
+   * export button builds its workbook from, so it never falls behind the
+   * PDF's own numbers. Route sits before `:id`, same reasoning as
+   * `listado.pdf` above.
+   */
+  @Get('listado')
+  @CheckAbility({ action: 'read', subject: 'Inmueble' })
+  obtenerListado(): Promise<RespuestaListadoInmuebles> {
+    return this.reporte.obtenerListado();
   }
 
   /**

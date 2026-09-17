@@ -3,7 +3,6 @@ import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
-import { Recibo } from '../recibos/recibo.schema';
 import { Account } from '../cuentas/account.schema';
 
 export type NotaAnticipoDocument = HydratedDocument<NotaAnticipo>;
@@ -17,15 +16,15 @@ export type VoidReasonNotaAnticipo =
   (typeof VOID_REASONS_NOTA_ANTICIPO)[number];
 
 /**
- * A "Nota de Anticipo" ("NA") — the document that applies a Recibo's
- * leftover `unappliedAmount` against open cartera LATER, as its own
- * auditable event, instead of a second call mutating the Recibo directly
+ * A "Nota de Anticipo" ("NA") — the document that applies a leftover
+ * unapplied balance against open cartera LATER, as its own auditable event,
+ * instead of a second call mutating the source document directly
  * (`RecibosService` deliberately has no `/aplicar` route — see its
- * controller docblock). One Recibo can have many Notas de Anticipo over
- * time, each drawing down a bit more of its `unappliedAmount`, exactly like
- * a Recibo itself can be applied against several Facturas.
+ * controller docblock). One origin document can have many Notas de Anticipo
+ * over time, each drawing down a bit more of its leftover balance, exactly
+ * like a Recibo itself can be applied against several Facturas.
  *
- * `inmuebleId`/`terceroId` are copied from `reciboOrigenId` at creation —
+ * `inmuebleId`/`terceroId` are copied from the origin document at creation —
  * same reasoning as `NotaDebito.terceroId`: frozen at the moment that
  * matters, never re-derived later.
  *
@@ -58,9 +57,26 @@ export class NotaAnticipo {
   @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
+  /** Which collection `reciboOrigenId` points into — `'RC'` (a real Recibo,
+   *  the only value that existed before this field) or `'SI'` (a
+   *  `SaldoInicialAnticipo`, an opening anticipo balance imported from a
+   *  client's previous system). Defaults to `'RC'` so every Nota de Anticipo
+   *  created before this field existed keeps resolving exactly as it always
+   *  did. Kept as a companion field rather than renaming `reciboOrigenId`
+   *  itself — the ID field's own name predates this generalization, and
+   *  renaming it would be a breaking API-contract change for no behavioral
+   *  gain (see root CLAUDE.md's note on shape changes touching both
+   *  projects). */
+  @Prop({ type: String, enum: ['RC', 'SI'], default: 'RC' })
+  origenTipo: 'RC' | 'SI';
+
+  /** The origin document's own `_id` — a `Recibo` when `origenTipo` is
+   *  `'RC'`, a `SaldoInicialAnticipo` when `'SI'`. Both freeze a
+   *  `fullNumber`/`receivedDate` under those exact names, so
+   *  `cruce.util.ts`'s `OrigenAplicacion` shape reads either one with no
+   *  branching — see that file's own docblock. */
   @Prop({
     type: SchemaTypes.ObjectId,
-    ref: Recibo.name,
     required: true,
     index: true,
   })

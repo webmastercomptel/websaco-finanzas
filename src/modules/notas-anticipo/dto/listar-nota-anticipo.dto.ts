@@ -7,6 +7,10 @@ export class ListarNotaAnticipoDto {
   reciboOrigenId?: string;
 
   @IsOptional()
+  @IsIn(['RC', 'SI'])
+  origenTipo?: 'RC' | 'SI';
+
+  @IsOptional()
   @IsMongoId()
   inmuebleId?: string;
 

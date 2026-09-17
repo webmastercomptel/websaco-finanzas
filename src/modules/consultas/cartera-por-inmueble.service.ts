@@ -384,7 +384,10 @@ export class CarteraPorInmuebleService {
 
       documentos.push({
         documentoId: si._id.toString(),
-        tipo: 'SI',
+        // The client's own original code (e.g. "FV", "ND") from their
+        // previous system, never the literal "SI" — see
+        // `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock.
+        tipo: si.tipoDocumentoOriginal,
         numeroCompleto: si.numeroOriginal,
         fecha: si.fecha.toISOString(),
         vence: si.fechaVencimiento.toISOString(),

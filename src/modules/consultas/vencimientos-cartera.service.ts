@@ -140,7 +140,10 @@ export class VencimientosCarteraService {
 
     type FilaRaw = {
       inmuebleId: Types.ObjectId;
-      tipo: 'FV' | 'ND' | 'SI';
+      /** A Saldo Inicial row carries its own original code (e.g. "FV",
+       *  "ND") here instead of the literal "SI" — see
+       *  `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock. */
+      tipo: 'FV' | 'ND' | 'SI' | (string & {});
       numeroCompleto: string;
       fecha: Date;
       vence: Date;
@@ -197,7 +200,7 @@ export class VencimientosCarteraService {
 
       filasRaw.push({
         inmuebleId: si.inmuebleId,
-        tipo: 'SI',
+        tipo: si.tipoDocumentoOriginal,
         numeroCompleto: si.numeroOriginal,
         fecha: si.fecha,
         vence: si.fechaVencimiento,

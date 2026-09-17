@@ -5,6 +5,7 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
+import type { SaldoInicialAnticipoDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -18,6 +19,7 @@ export interface ModelosDatosImpresionNotaAnticipo {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
   recibos: Model<ReciboDocument>;
+  saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>;
   inmuebles: Model<InmuebleDocument>;
   terceros: Model<TerceroDocument>;
   cuentasContables: Model<CuentaContableDocument>;
@@ -48,8 +50,9 @@ export interface ModelosDatosImpresionNotaAnticipo {
  *
  * `aplicaciones` must be exactly what `NotasAnticipoService.findAplicaciones`
  * returns — every application THIS Nota de Anticipo made, active only.
- * `concepto` names the origin Recibo (`reciboOrigen.fullNumber`), the same
- * thing this document's own "Recibo de Origen" link shows in the JSON detail
+ * `concepto` names the origin document (`reciboOrigen.fullNumber`, or
+ * `saldoInicialAnticipoOrigen.fullNumber` when `nota.origenTipo` is `'SI'`),
+ * the same thing this document's own "Origen" link shows in the JSON detail
  * view — a Nota de Anticipo has no `notes`/`reason` field of its own to draw
  * from, unlike a Recibo or a Nota Crédito.
  */
@@ -70,14 +73,30 @@ export async function construirDatosImpresionNotaAnticipo(
     .filter((a) => a.documentType === 'ND')
     .map((a) => a.documentId);
 
-  const [facturas, notas, reciboOrigen, inmueble, tercero] = await Promise.all([
+  const [
+    facturas,
+    notas,
+    reciboOrigen,
+    saldoInicialAnticipoOrigen,
+    inmueble,
+    tercero,
+  ] = await Promise.all([
     facturaIds.length > 0
       ? modelos.facturas.find({ _id: { $in: facturaIds }, coPropertyId }).exec()
       : Promise.resolve([]),
     notaIds.length > 0
       ? modelos.notasDebito.find({ _id: { $in: notaIds }, coPropertyId }).exec()
       : Promise.resolve([]),
-    modelos.recibos.findOne({ _id: nota.reciboOrigenId, coPropertyId }).exec(),
+    nota.origenTipo === 'SI'
+      ? Promise.resolve(null)
+      : modelos.recibos
+          .findOne({ _id: nota.reciboOrigenId, coPropertyId })
+          .exec(),
+    nota.origenTipo === 'SI'
+      ? (modelos.saldosInicialesAnticipo
+          ?.findOne({ _id: nota.reciboOrigenId, coPropertyId })
+          .exec() ?? Promise.resolve(null))
+      : Promise.resolve(null),
     modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
     nota.terceroId
       ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
@@ -163,9 +182,11 @@ export async function construirDatosImpresionNotaAnticipo(
     fecha: nota.issueDate,
     inmuebleCodigo: inmueble?.code ?? '—',
     titularNombre: tercero?.name ?? '—',
-    concepto: reciboOrigen
-      ? `Aplicación de anticipo — recibo ${reciboOrigen.fullNumber}`
-      : 'Aplicación de anticipo',
+    concepto: saldoInicialAnticipoOrigen
+      ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.fullNumber}`
+      : reciboOrigen
+        ? `Aplicación de anticipo — recibo ${reciboOrigen.fullNumber}`
+        : 'Aplicación de anticipo',
     monto: nota.appliedAmount,
     lineas,
   };

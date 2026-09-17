@@ -326,3 +326,44 @@ describe('permisos de SaldoInicial (saldos iniciales de cartera)', () => {
     expect(ability.can('create', 'SaldoInicial')).toBe(false);
   });
 });
+
+describe('permisos de SaldoInicialAnticipo (saldos iniciales de anticipo)', () => {
+  it('saldos-iniciales-anticipo.crear concede importar (create) sobre SaldoInicialAnticipo', () => {
+    const ability = abilityFor(['saldos-iniciales-anticipo.crear']);
+
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('saldos-iniciales-anticipo.anular concede anulación sobre SaldoInicialAnticipo', () => {
+    const ability = abilityFor(['saldos-iniciales-anticipo.anular']);
+
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('permisos de SaldoInicialAnticipo no cruzan con SaldoInicial, Factura ni NotaAnticipo', () => {
+    const ability = abilityFor([
+      'saldos-iniciales-anticipo.ver',
+      'saldos-iniciales-anticipo.crear',
+      'saldos-iniciales-anticipo.anular',
+    ]);
+
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('read', 'SaldoInicial')).toBe(false);
+    expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('read', 'NotaAnticipo')).toBe(false);
+  });
+
+  it('permisos de otros documentos no conceden acceso a SaldoInicialAnticipo', () => {
+    const ability = abilityFor([
+      'saldos-iniciales.ver',
+      'saldos-iniciales.crear',
+      'notas-anticipo.crear',
+    ]);
+
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+  });
+});

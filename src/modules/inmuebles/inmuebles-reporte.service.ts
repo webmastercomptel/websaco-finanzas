@@ -20,15 +20,27 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { generarPdfListadoInmuebles } from '../../common/pdf/inmuebles-listado-pdf';
+import type { RespuestaListadoInmuebles } from '../../contracts';
 
 /** The shape `holderId` arrives in when the query populated it — same
  *  minimal pick `inmuebles.mapper.ts`'s own `titularDe` reads. */
 type TitularPoblado = { name: string };
 
+/** One active unit, already joined with its recurring cargo amounts —
+ *  shared by the PDF and JSON/Excel roster, so the two never drift apart. */
+interface ItemListado {
+  codigo: string;
+  titular: string | null;
+  area: number | null;
+  coeficiente: number | null;
+  /** Keyed by `conceptoId`. */
+  valores: Record<string, number>;
+}
+
 /**
- * Builds the "Listado de Inmuebles" PDF: one row per active unit, with its
- * código, titular, área, coeficiente, and one column per recurring charge —
- * a separate service from `InmueblesService` because assembling a
+ * Builds the "Listado de Inmuebles" roster: one row per active unit, with
+ * its código, titular, área, coeficiente, and one column per recurring
+ * charge — a separate service from `InmueblesService` because assembling a
  * multi-collection report is a different concern from unit CRUD, and giving
  * it its own constructor means neither grows dependencies the other
  * doesn't need.
@@ -47,7 +59,13 @@ export class InmueblesReporteService {
     private readonly tenant: TenantContextService,
   ) {}
 
-  async generarListadoPdf(): Promise<Uint8Array> {
+  /** Shared assembly for the PDF and JSON/Excel roster — the only
+   *  difference between the two is the shape their caller renders it into. */
+  private async construirListado(): Promise<{
+    copropiedad: CopropiedadDocument;
+    items: ItemListado[];
+    conceptos: { id: string; nombre: string }[];
+  }> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     const [copropiedad, inmuebles, conceptos, valores] = await Promise.all([
@@ -94,7 +112,7 @@ export class InmueblesReporteService {
       }
       return {
         codigo: inm.code,
-        titular: holder?.name ?? '',
+        titular: holder?.name ?? null,
         area: inm.area,
         coeficiente: inm.participationFactor,
         valores: valoresPorConcepto,
@@ -106,6 +124,26 @@ export class InmueblesReporteService {
       nombre: c.name,
     }));
 
-    return generarPdfListadoInmuebles(copropiedad, items, conceptosParaPdf);
+    return { copropiedad, items, conceptos: conceptosParaPdf };
+  }
+
+  async generarListadoPdf(): Promise<Uint8Array> {
+    const { copropiedad, items, conceptos } = await this.construirListado();
+    // The PDF renderer prints an empty titular as "", never `null` — kept
+    // as its own mapping here so the JSON/Excel roster below can tell
+    // "sin titular" apart from an actual empty string.
+    const itemsParaPdf = items.map((i) => ({ ...i, titular: i.titular ?? '' }));
+    return generarPdfListadoInmuebles(copropiedad, itemsParaPdf, conceptos);
+  }
+
+  /** Same roster as `generarListadoPdf`, as JSON — what the Excel export
+   *  button builds its workbook from. */
+  async obtenerListado(): Promise<RespuestaListadoInmuebles> {
+    const { copropiedad, items, conceptos } = await this.construirListado();
+    return {
+      copropiedadCodigo: copropiedad.code,
+      conceptos: conceptos.map((c) => ({ conceptoId: c.id, nombre: c.nombre })),
+      items,
+    };
   }
 }

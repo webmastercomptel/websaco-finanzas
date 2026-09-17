@@ -26,6 +26,9 @@ function makeController(
   const recibos = {
     findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
+  const saldosInicialesAnticipo = {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
   const inmuebles = {
     findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
@@ -43,6 +46,7 @@ function makeController(
     facturas as never,
     notasDebito as never,
     recibos as never,
+    saldosInicialesAnticipo as never,
     inmuebles as never,
     terceros as never,
     cuentasContables as never,

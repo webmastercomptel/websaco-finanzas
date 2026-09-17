@@ -17,6 +17,7 @@ export const toNotaAnticipo = (
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
+  origenTipo: doc.origenTipo,
   reciboOrigenId: doc.reciboOrigenId.toString(),
   prefijo: doc.prefix,
   numero: doc.number,

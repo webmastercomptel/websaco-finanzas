@@ -30,13 +30,43 @@ const mesDosDigitos = (fecha: Date): string =>
 const limpiarTexto = (valor: string): string =>
   valor.replace(/[\r\n,]+/g, ' ').trim();
 
-const campo = (valor: string | number | null): string => {
+/** Wraps a value already padded to a fixed width so `campo` skips `.trim()`
+ *  — plain `limpiarTexto` would eat the very padding spaces these fields
+ *  exist to carry (e.g. a short/absent `tercero` pads with trailing spaces
+ *  that would otherwise be stripped, silently shrinking the field). */
+class CampoFijo {
+  constructor(public readonly valor: string) {}
+}
+const campoFijo = (valor: string): CampoFijo => new CampoFijo(valor);
+
+/** Same comma/newline guard as `limpiarTexto`, without the trim. */
+const limpiarSinTrim = (valor: string): string =>
+  valor.replace(/[\r\n,]+/g, ' ');
+
+const campo = (valor: string | number | null | CampoFijo): string => {
   if (valor === null) return '';
+  if (valor instanceof CampoFijo) return limpiarSinTrim(valor.valor);
   return typeof valor === 'number' ? String(valor) : limpiarTexto(valor);
 };
 
-const filaCsv = (campos: (string | number | null)[]): string =>
+const filaCsv = (campos: (string | number | null | CampoFijo)[]): string =>
   campos.map(campo).join(',');
+
+const TIPO_DOCUMENTO_ANCHO = 4;
+const NUMERO_DOCUMENTO_ANCHO = 15;
+const CUENTA_ANCHO = 10;
+const TERCERO_ANCHO = 15;
+
+const encajarIzquierda = (valor: string, ancho: number): string =>
+  valor.slice(0, ancho).padEnd(ancho);
+
+/** MOVMES column 3 / MOVMESDO column 2 — the fixed-width key the target
+ *  importer cross-references a detail line back to its header with: tipo
+ *  documento left-padded to 4 chars + número right-justified to 15, e.g.
+ *  "FV             4152" (19 chars total, no separator between the two). */
+export const documentoCruce = (tipoDocumento: string, numero: number): string =>
+  encajarIzquierda(tipoDocumento, TIPO_DOCUMENTO_ANCHO) +
+  String(numero).padStart(NUMERO_DOCUMENTO_ANCHO);
 
 export interface FilaMovmes {
   tipoDocumento: string;
@@ -48,7 +78,9 @@ export interface FilaMovmes {
 
 /**
  * MOVMES.csv — one row per documento (AsientoContable), 17 columns:
- * 1 tipo documento, 2 número, 3-4 blank, 5 fecha (dd/mm/aaaa), 6 número
+ * 1 tipo documento, 2 número, 3 tipo+número documento (fixed-width, see
+ * `documentoCruce` — MOVMESDO column 2 repeats this exact value to cross-
+ * reference back to this row), 4 blank, 5 fecha (dd/mm/aaaa), 6 número
  * lote, 7 mes (2 dígitos), 8 año, 9 detalle, 10-16 blank (7 columns), 17 "3"
  * (a fixed literal the target importer requires).
  */
@@ -57,7 +89,7 @@ export function construirMovmes(filas: FilaMovmes[]): string {
     filaCsv([
       f.tipoDocumento,
       f.numero,
-      '',
+      campoFijo(documentoCruce(f.tipoDocumento, f.numero)),
       '',
       fechaDdMmAaaa(f.fecha),
       f.numeroLote,
@@ -78,6 +110,8 @@ export function construirMovmes(filas: FilaMovmes[]): string {
 }
 
 export interface FilaMovmesdo {
+  tipoDocumento: string;
+  numero: number;
   cuenta: string;
   centroCosto: string | null;
   tercero: string | null;
@@ -91,18 +125,25 @@ export interface FilaMovmesdo {
 
 /**
  * MOVMESDO.csv — one row per transacción (Movimiento/entries line), 18
- * columns: 1-2 blank, 3 código de cuenta, 4 centro de utilidad, 5 centro de
- * destino (same value as 4 — the underlying data model carries one
- * `centroCosto`, not two distinct centres), 6 tercero, 7 detalle, 8 base de
- * impuesto, 9 valor débito, 10 valor crédito, 11 comprobante, 12-13 blank,
- * 14 número doc cruce, 15-17 blank, 18 "3" (a fixed literal the target
- * importer requires).
+ * columns: 1 código de cuenta + tercero (fixed-width: cuenta padded to 10
+ * chars + tercero padded to 15, 25 chars total — the target importer's own
+ * concatenated account/tercero key), 2 tipo+número documento (same fixed-
+ * width value as MOVMES column 3, via `documentoCruce` — ties this detail
+ * line back to its header row), 3 código de cuenta, 4 centro de utilidad,
+ * 5 centro de destino (same value as 4 — the underlying data model carries
+ * one `centroCosto`, not two distinct centres), 6 tercero, 7 detalle, 8 base
+ * de impuesto, 9 valor débito, 10 valor crédito, 11 comprobante, 12-13
+ * blank, 14 número doc cruce, 15-17 blank, 18 "3" (a fixed literal the
+ * target importer requires).
  */
 export function construirMovmesdo(filas: FilaMovmesdo[]): string {
   const lineas = filas.map((f) =>
     filaCsv([
-      '',
-      '',
+      campoFijo(
+        encajarIzquierda(f.cuenta, CUENTA_ANCHO) +
+          encajarIzquierda(f.tercero ?? '', TERCERO_ANCHO),
+      ),
+      campoFijo(documentoCruce(f.tipoDocumento, f.numero)),
       f.cuenta,
       f.centroCosto,
       f.centroCosto,

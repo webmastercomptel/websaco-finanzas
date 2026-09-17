@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
 
-export const ORIGEN_TYPES = ['RC', 'NC'] as const;
+export const ORIGEN_TYPES = ['RC', 'NC', 'SI'] as const;
 export type OrigenType = (typeof ORIGEN_TYPES)[number];
 
 export type SaldoDocumentoOrigenDocument =
@@ -10,7 +10,9 @@ export type SaldoDocumentoOrigenDocument =
 
 /**
  * The live "how much of this SOURCE document is still unapplied" ledger —
- * one row per Recibo or Nota Crédito, replacing their own
+ * one row per Recibo, Nota Crédito, or Saldo Inicial de Anticipo (`'SI'` —
+ * an opening credit balance imported from a client's previous system, see
+ * `SaldoInicialAnticipo`'s own schema docblock), replacing their own
  * `appliedAmount`/`unappliedAmount` fields so those documents can be truly
  * immutable once issued, same reasoning as `CarteraPorDocumento` on the
  * charge side.
@@ -42,8 +44,8 @@ export class SaldoDocumentoOrigen {
   @Prop({ type: String, required: true, enum: ORIGEN_TYPES })
   tipoDocumento: OrigenType;
 
-  /** The Recibo's or NotaCredito's own `_id` — which collection to look in
-   *  is determined by `tipoDocumento`. */
+  /** The Recibo's, NotaCredito's, or SaldoInicialAnticipo's own `_id` — which
+   *  collection to look in is determined by `tipoDocumento`. */
   @Prop({ type: SchemaTypes.ObjectId, required: true })
   documentoId: Types.ObjectId;
 
