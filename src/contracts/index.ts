@@ -60,6 +60,10 @@ export interface TitularResumen {
 export interface Inmueble {
   id: string;
   codigo: string;
+  /** Free-text cross-reference to an external record — e.g. a cadastral id
+   *  or the building-management system's own id for this unit, when there
+   *  is one. Never used to look anything up internally. */
+  referencia: string | null;
   bloque: string | null;
   zona: string | null;
   uso: string | null;
@@ -74,7 +78,7 @@ export interface Inmueble {
   titular: TitularResumen | null;
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
-  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
   /** Free-text notes — see the note on `Inmueble.notes` in the schema. */
   observaciones: string | null;
   /** ISO 8601 — when this unit's record was last saved. */
@@ -104,6 +108,34 @@ export interface ResultadoImportacionInmuebles {
   /** Codes left untouched because they already have a Factura issued —
    *  never deleted, only skipped. */
   bloqueadosPorFactura: string[];
+}
+
+/** One column of the coproperty-wide "Listado de Inmuebles" roster — one
+ *  recurring charge concept in the catalog. `intereses` is never included:
+ *  it is computed from overdue balances, never a flat recurring amount. */
+export interface ConceptoListadoInmuebles {
+  conceptoId: string;
+  nombre: string;
+}
+
+/** One unit's row in the roster — its recurring cargo amounts keyed by
+ *  `conceptoId`, same "absent key reads as 0" convention as
+ *  `DocumentoCarteraPorInmueble.cargosPorConcepto`. */
+export interface ItemListadoInmuebles {
+  codigo: string;
+  titular: string | null;
+  area: number | null;
+  coeficiente: number | null;
+  valores: Record<string, Monto>;
+}
+
+/** Response shape for GET /inmuebles/listado — the same roster
+ *  `GET /inmuebles/listado.pdf` prints, as JSON: what the frontend's Excel
+ *  export button builds its workbook from. */
+export interface RespuestaListadoInmuebles {
+  copropiedadCodigo: string;
+  conceptos: ConceptoListadoInmuebles[];
+  items: ItemListadoInmuebles[];
 }
 
 /* ── Terceros ──────────────────────────────────────────────────── */
@@ -198,16 +230,6 @@ export interface FacturaLinea {
   saldoPendiente: Monto;
 }
 
-/**
- * One node of a frozen react-pdf presentation tree — see
- * `Factura.documentDefinition` below. Kept as a local, minimal type instead
- * of importing `NodoSerializado` from `common/pdf/react/serializar-arbol`:
- * this file is the Spanish API surface, not a place that reaches into
- * `common/pdf`'s internals.
- */
-export type NodoDocumentoFactura =
-  string | number | null | { type: string; props: Record<string, unknown> };
-
 /** A sales invoice ("FV"), only ever created already numbered. */
 export interface Factura {
   id: string;
@@ -238,35 +260,6 @@ export interface Factura {
   motivoAnulacion: MotivoAnulacionFactura | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `consolidar()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  an invoice whose consolidación ran before this field existed, or
-   *  whose presentation-cache step failed — the invoice itself is still
-   *  valid either way, this is presentation, not business data. */
-  documentDefinition: NodoDocumentoFactura | null;
-}
-
-/** One entry of `GET /lotes/:id/facturas/documentos` — a lote's invoices,
- *  each as its own frozen presentation tree, for the browser to render.
- *  See `Factura.documentDefinition`. */
-export interface DocumentoFacturaLote {
-  id: string;
-  documentDefinition: NodoDocumentoFactura | null;
-}
-
-/** Response of `GET /lotes/:id/inmuebles/:inmuebleId/prefactura/documento`
- *  — a Prefactura has no issuance moment to freeze at, so this is computed
- *  fresh on every request instead of read from a stored field. */
-export interface DocumentoPrefactura {
-  documentDefinition: NodoDocumentoFactura | null;
-}
-
-/** One entry of `GET /lotes/:id/prefacturas/documentos` — same idea as
- *  `DocumentoFacturaLote`, but always computed live: a Prefactura reflects
- *  the lote's current previsualización, edits included, never cached. */
-export interface DocumentoPrefacturaLote {
-  inmuebleId: string;
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** Why a Factura was voided — same catalog as a Nota Crédito's void (no
@@ -364,9 +357,10 @@ export interface ErrorConsolidacion {
 
 /**
  * Result of wiping every financial document (Lotes/Facturas, Recibos, Notas
- * Crédito/Débito/Anticipo/Contables, and their derived asientos/saldos) of
- * the one hardcoded test coproperty, so its billing cycle can be replayed
- * from a blank slate. See `ReiniciarCicloService` for the safety checks.
+ * Crédito/Débito/Anticipo/Contables, Saldos Iniciales, and their derived
+ * asientos/saldos) of the one hardcoded test coproperty, so its billing
+ * cycle can be replayed from a blank slate. See `ReiniciarCicloService` for
+ * the safety checks.
  */
 export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
@@ -383,6 +377,11 @@ export interface ResultadoReinicioCiclo {
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
   lotesContabilidadEliminados: number;
+  saldosInicialesEliminados: number;
+  lotesSaldoInicialEliminados: number;
+  saldoTotalDocumentoEliminado: number;
+  saldosInicialesAnticipoEliminados: number;
+  lotesSaldoInicialAnticipoEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */
@@ -499,12 +498,6 @@ export interface Recibo {
   motivoAnulacion: MotivoAnulacionRecibo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a receipt whose creation ran before this field existed, or whose
-   *  presentation-cache step failed — the receipt itself is still valid
-   *  either way, this is presentation, not business data. */
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -528,7 +521,7 @@ export interface AplicacionCartera {
   id: string;
   sourceType: 'RC' | 'NC' | 'NA';
   sourceId: string;
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   documentoId: string;
   /** The target document's own printed number (e.g. "FV-1") — resolved for
    *  display, never stored on this row itself. `null` when the document
@@ -551,14 +544,6 @@ export interface AplicacionCartera {
  */
 export interface ReciboDetalle extends Recibo {
   aplicaciones: AplicacionCartera[];
-}
-
-/** One entry of `GET /lotes-recibos/:id/documentos` — a batch's receipts,
- *  each as its own frozen presentation tree, for the browser to render. See
- *  `Recibo.documentDefinition`; mirrors `DocumentoFacturaLote`. */
-export interface DocumentoReciboLote {
-  id: string;
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** One row of a Recibos-por-lote upload. */
@@ -611,7 +596,7 @@ export interface ErrorAplicacionLoteRecibos {
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
  *  caller's requested cruce against one document. */
 export interface AplicacionSolicitada {
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   documentoId: string;
   montoAplicado: Monto;
 }
@@ -679,7 +664,7 @@ export interface NotaCredito {
   inmuebleId: string;
   terceroId: string | null;
   /** Which kind of document `documentoAnclaId` points to. */
-  tipoDocumentoAncla: 'FV' | 'ND';
+  tipoDocumentoAncla: 'FV' | 'ND' | 'SI';
   /** The anchor document's own id — a Factura's or a Nota Débito's,
    *  according to `tipoDocumentoAncla`. */
   documentoAnclaId: string;
@@ -705,22 +690,6 @@ export interface NotaCredito {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-}
-
-/**
- * Response of `GET /notas-credito/:id/documento` — this note's own frozen
- * react-pdf presentation tree, for the browser to render. Unlike
- * `Factura.documentDefinition` (frozen once, at `consolidar()` time), this
- * is refrozen every time `aplicar()` runs (see
- * `NotasCreditoService.congelarPresentacion`) — `crear()` never freezes it,
- * since the business flow always calls `aplicar()` right after `crear()`, so
- * a note is never viewed before its first freeze. `null` should therefore
- * not normally happen in practice; handled defensively anyway (the frontend
- * already treats `documentDefinition: null` as "not available"), same as
- * `Factura`'s equivalent field.
- */
-export interface DocumentoNotaCredito {
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -761,11 +730,6 @@ export interface NotaDebito {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -785,15 +749,19 @@ export type MotivoAnulacionNotaAnticipo =
   'error_digitacion' | 'ajuste_contrato' | 'otro';
 
 /**
- * A "Nota de Anticipo" ("NA") — applies a Recibo's leftover
- * `montoSinAplicar` against open cartera LATER, as its own auditable
- * document, from the Anticipos module (never from the Recibo itself — see
- * `Recibo`'s own note on why there is no `/recibos/:id/aplicar`).
+ * A "Nota de Anticipo" ("NA") — applies a leftover `montoSinAplicar` against
+ * open cartera LATER, as its own auditable document, from the Anticipos
+ * module (never from the origin document itself — see `Recibo`'s own note
+ * on why there is no `/recibos/:id/aplicar`). `origenTipo` says which
+ * collection `reciboOrigenId` points into: `'RC'` a real Recibo, or `'SI'`
+ * an opening anticipo balance imported from the client's previous system
+ * (`SaldoInicialAnticipo`).
  */
 export interface NotaAnticipo {
   id: string;
   inmuebleId: string;
   terceroId: string | null;
+  origenTipo: 'RC' | 'SI';
   reciboOrigenId: string;
   prefijo: string;
   numero: number;
@@ -804,11 +772,6 @@ export interface NotaAnticipo {
   motivoAnulacion: MotivoAnulacionNotaAnticipo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -818,6 +781,106 @@ export interface NotaAnticipo {
  */
 export interface NotaAnticipoDetalle extends NotaAnticipo {
   aplicaciones: AplicacionCartera[];
+}
+
+/* ── Saldos Iniciales (opening cartera balances) ──────────────── */
+
+/** One cargo (concepto) line of a Saldo Inicial's own breakdown. */
+export interface SaldoInicialLinea {
+  conceptoId: string;
+  nombreConcepto: string;
+  monto: Monto;
+}
+
+/** Why a Saldo Inicial was voided — a narrower catalog than the other
+ *  documents' (design consistency): an opening balance is only ever loaded
+ *  once, right when a coproperty is onboarded, so the realistic reasons to
+ *  undo one are a typo or a duplicate upload. */
+export type MotivoAnulacionSaldoInicial =
+  'error_digitacion' | 'duplicado' | 'otro';
+
+/**
+ * A THIRD cartera charge document, alongside Factura and Nota Débito — one
+ * opening balance brought from the client's previous system, aged and
+ * collectible exactly like a Factura, but never consuming its numbering.
+ * `tipoDocumentoOriginal`/`numeroOriginal` are free text the client typed;
+ * `saldoPendiente` is what a future Recibo/Nota Crédito can still collect.
+ */
+export interface SaldoInicial {
+  id: string;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  tipoDocumentoOriginal: string;
+  numeroOriginal: string;
+  fecha: IsoDate;
+  fechaVencimiento: IsoDate;
+  lineas: SaldoInicialLinea[];
+  total: Monto;
+  saldoPendiente: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionSaldoInicial | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/** One row of a bulk Saldos Iniciales import that could not be applied. */
+export interface ErrorImportacionSaldoInicial {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  inmuebleCodigo: string | null;
+  mensaje: string;
+}
+
+/**
+ * Result of importing a Saldos Iniciales file — rows are independent, one
+ * bad row (an unknown código de copropiedad or inmueble, a total that
+ * doesn't match its own cargos) never aborts the rest. Mirrors
+ * `ResultadoImportacionValoresRecurrentes`'s own shape.
+ */
+export interface ResultadoImportacionSaldosIniciales {
+  total: number;
+  importados: number;
+  errores: ErrorImportacionSaldoInicial[];
+}
+
+/* ── Saldos Iniciales de Anticipo (opening credit balances) ───── */
+
+/** Same narrow catalog as `MotivoAnulacionSaldoInicial`, same reasoning: an
+ *  opening anticipo balance is only ever loaded once, at onboarding. */
+export type MotivoAnulacionSaldoInicialAnticipo =
+  'error_digitacion' | 'duplicado' | 'otro';
+
+/**
+ * An opening ANTICIPO (credit) balance brought from the client's previous
+ * system — a unit had already paid ahead, and `saldoDisponible` is what a
+ * future Nota de Anticipo can still draw down against open cartera. Never a
+ * synthetic Recibo (see `SaldoInicialAnticipo`'s own schema docblock) —
+ * `tipoDocumentoOriginal`/`numeroOriginal` are the free text the client
+ * typed for their own previous receipt (typically `'RC'` and its number).
+ */
+export interface SaldoInicialAnticipo {
+  id: string;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  tipoDocumentoOriginal: string;
+  numeroOriginal: string;
+  fecha: IsoDate;
+  monto: Monto;
+  saldoDisponible: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionSaldoInicialAnticipo | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/**
+ * Result of importing a Saldos Iniciales de Anticipo file — same
+ * independent-rows behavior as `ResultadoImportacionSaldosIniciales`.
+ */
+export interface ResultadoImportacionSaldosInicialesAnticipo {
+  total: number;
+  importados: number;
+  errores: ErrorImportacionSaldoInicial[];
 }
 
 /* ── Notas Contables ──────────────────────────────────────────── */
@@ -847,16 +910,17 @@ export interface NotaContable {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
 
-export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+/** `'SI'` rows carry the client's own original code (e.g. "FV", "ND") from
+ *  their previous system instead of the literal `'SI'` — see
+ *  `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock. The
+ *  `(string & {})` member keeps autocomplete on the six real system codes
+ *  while still accepting that free text. */
+export type TipoDocumentoKardex =
+  'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA' | 'SI' | (string & {});
 
 /** One row in the chronological ledger for an inmueble. */
 export interface MovimientoKardex {
@@ -912,7 +976,10 @@ export interface FilaVencimientoCartera {
   inmuebleId: string;
   inmuebleCodigo: string;
   propietario: string | null;
-  tipo: 'FV' | 'ND';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string;
@@ -949,7 +1016,10 @@ export interface DocumentoCarteraPorInmueble {
   /** This document's own `_id` — what a Nota Contable's `documentoId` must
    *  reference to reclassify against it specifically. */
   documentoId: string;
-  tipo: 'FV' | 'ND';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string | null;
@@ -996,7 +1066,10 @@ export interface ConceptoColumnaCarteraPorConceptos {
  *  read as 0 on the frontend. */
 export interface DocumentoCarteraPorConceptos {
   documentoId: string;
-  tipo: 'FV' | 'ND';
+  /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
+   *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
+   *  comment. */
+  tipo: 'FV' | 'ND' | 'SI' | (string & {});
   numeroCompleto: string;
   fecha: string;
   vence: string | null;
@@ -1011,9 +1084,9 @@ export interface GrupoInmuebleCarteraPorConceptos {
   inmuebleCodigo: string;
   titular: string | null;
   celular: string | null;
-  /** The inmueble's own collection status — 'al_dia' reads as "Vigente" on
+  /** The inmueble's own collection status — 'vigente' reads as "Vigente" on
    *  screen, the label used everywhere the enum value isn't shown raw. */
-  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
   documentos: DocumentoCarteraPorConceptos[];
   saldoTotal: number;
 }
@@ -1385,6 +1458,51 @@ export interface ValorRecurrente {
   monto: Monto;
 }
 
+/**
+ * One unit's recurring amounts, for the coproperty-wide bulk export/import
+ * screen ("Valores Recurrentes" en Inmuebles) — the per-unit `ValorRecurrente`
+ * list above, keyed to the unit that owns it, `intereses` excluded (never a
+ * flat amount, see the note above). `codigo` is what the file's rows are
+ * matched by on import, `inmuebleId` is what the export uses to fetch each
+ * unit's amounts in one shot instead of one request per unit.
+ */
+export interface ValorRecurrenteMasivo {
+  inmuebleId: string;
+  codigo: string;
+  valores: { conceptoId: string; monto: Monto }[];
+}
+
+/** One row's outcome from a bulk valores-recurrentes load that could not be
+ *  applied — almost always a `codigo` with no matching inmueble. */
+export interface ErrorImportacionValorRecurrente {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string | null;
+  mensaje: string;
+}
+
+/**
+ * Result of a bulk valores-recurrentes load. Rows are independent: one bad
+ * code does not abort the rest. Never creates, deletes or otherwise touches
+ * an inmueble — only the `ValorRecurrente` rows of the ones it matched.
+ */
+export interface ResultadoImportacionValoresRecurrentes {
+  total: number;
+  actualizados: number;
+  errores: ErrorImportacionValorRecurrente[];
+}
+
+/**
+ * A coarse, throttled progress signal for a bulk import in flight — same
+ * shape as `LoteFacturacion.progreso`, generalised beyond consolidar(). Null
+ * means no import of that kind is currently running for the active
+ * coproperty; the frontend's cue to stop polling.
+ */
+export interface ProgresoImportacion {
+  actual: number;
+  total: number;
+}
+
 /* ── Usuarios (platform config) ───────────────────────────────────
  *
  * Who may sign in and operate this system, and where. Platform-operator
@@ -1480,7 +1598,7 @@ export interface LineaMovimientoContable {
   /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
    *  a receivable against (Factura, Nota Débito) — present only when this
    *  line's account is flagged `requiresCrossDocument`. */
-  documentoCruce: { tipo: 'FV' | 'ND'; numero: number } | null;
+  documentoCruce: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null;
 }
 
 /** One journal entry card in the accounting journal view. */

@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -56,18 +55,18 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
   ajustarSaldosCarteraPorDistribucion,
+  cuentaCarteraDeLinea,
   decrementarSaldoDocumentoOrigen,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
@@ -85,7 +84,6 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toRecibo, toReciboDetalle } from './recibos.mapper';
-import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
@@ -126,6 +124,12 @@ const redactarObservaciones = (
   const notasAbonadas = resumen
     .filter((r) => r.tipo === 'ND' && !r.completa)
     .map((r) => r.numero);
+  const saldosInicialesCancelados = resumen
+    .filter((r) => r.tipo === 'SI' && r.completa)
+    .map((r) => r.numero);
+  const saldosInicialesAbonados = resumen
+    .filter((r) => r.tipo === 'SI' && !r.completa)
+    .map((r) => r.numero);
 
   const clausula = (
     verbo: string,
@@ -142,6 +146,18 @@ const redactarObservaciones = (
     clausula('Abona a', 'factura', 'facturas', facturasAbonadas),
     clausula('Cancela', 'nota débito', 'notas débito', notasCanceladas),
     clausula('Abona a', 'nota débito', 'notas débito', notasAbonadas),
+    clausula(
+      'Cancela',
+      'saldo inicial',
+      'saldos iniciales',
+      saldosInicialesCancelados,
+    ),
+    clausula(
+      'Abona a',
+      'saldo inicial',
+      'saldos iniciales',
+      saldosInicialesAbonados,
+    ),
   ].filter((p): p is string => p !== null);
 
   if (partes.length === 0) {
@@ -186,20 +202,9 @@ const redactarObservaciones = (
  * the (now immutable) document — `SaldoDocumentoOrigen` is where
  * `decrementarSaldoDocumentoOrigen`/`restaurarSaldoDocumentoOrigen` now read
  * and write that balance (see that schema's own docblock).
- *
- * `terceros` and `presentacionDocumento` were APPENDED, trailing and
- * optional (same reasoning as `cuentasContables`/`inmuebles` right above),
- * when `crear()` took over freezing this Recibo's own `documentDefinition`
- * into the shared `presentacion_documento` table — see
- * `congelarPresentacionRecibo`. `terceros` is needed only for that step
- * (`construirDatosImpresionRecibo`'s own `modelos.terceros`); every existing
- * positional test keeps compiling with both left `undefined`, in which case
- * `congelarPresentacionRecibo` simply no-ops.
  */
 @Injectable()
 export class RecibosService {
-  private readonly logger = new Logger(RecibosService.name);
-
   constructor(
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
@@ -230,9 +235,15 @@ export class RecibosService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros?: Model<TerceroDocument>,
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — see the class docblock's own append
+    // discipline. Optional (unlike every other model here) so the many
+    // existing hand-rolled-mock tests that stop their positional argument
+    // list before this one keep compiling; `ejecutarAplicacionFifo`
+    // (cruce.util.ts) treats "not provided" as "no Saldos Iniciales exist
+    // for this tenant" (an empty candidate list), never a crash — real
+    // requests always get it from Nest's own DI.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   /**
@@ -365,7 +376,7 @@ export class RecibosService {
       );
     }
 
-    const resultado = await this.transaccion(async (session) => {
+    return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
         dto.codigo,
@@ -573,100 +584,6 @@ export class RecibosService {
         enviarAOtrosIngresos ? 0 : sobranteReal,
       );
     });
-
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: a Recibo's own financial
-    // correctness never depends on this succeeding. Same frozen-at-emission
-    // principle `LotesFacturacionService.consolidar()` already applies to
-    // Factura, extended to this document (see `congelarPresentacionRecibo`
-    // and `PresentacionDocumento`'s own schema docblock).
-    await this.congelarPresentacionRecibo(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
-    return resultado;
-  }
-
-  /**
-   * Freezes this Recibo's react-pdf presentation tree into the shared,
-   * permanent `presentacion_documento` table — called AFTER `crear()`'s own
-   * transaction has already committed (never from inside it: a failure here
-   * must never roll back a real financial document). No-ops when any
-   * optional dependency it needs is missing (test-only construction — see
-   * this class's own canonical-constructor docblock). Wrapped in try/catch,
-   * log-and-continue, never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
-   */
-  private async congelarPresentacionRecibo(
-    coPropertyId: Types.ObjectId,
-    reciboId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.inmuebles ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
-    }
-    try {
-      const [reciboRaw, aplicacionesActivas, copropiedad] = await Promise.all([
-        this.recibos.findOne({ _id: reciboId, coPropertyId }).exec(),
-        this.aplicaciones
-          .find({
-            coPropertyId,
-            sourceType: 'RC',
-            sourceId: reciboId,
-            status: 'activa',
-          })
-          .sort({ appliedAt: 1 })
-          .exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!reciboRaw || !copropiedad) return;
-
-      const datos = await construirDatosImpresionRecibo(
-        reciboRaw,
-        aplicacionesActivas,
-        copropiedad,
-        coPropertyId,
-        {
-          facturas: this.facturas,
-          notasDebito: this.notasDebito,
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          cuentasContables: this.cuentasContables,
-        },
-      );
-
-      // Deferred import — `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load. A static import at
-      // the top of this file would make that load happen just from
-      // importing `RecibosService` for DI, breaking every spec that
-      // references this service even though none of them touch PDFs — same
-      // reasoning `LotesFacturacionService.consolidar()` documents for its
-      // own identical dynamic import.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'RC',
-        reciboRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para el recibo ${reciboId.toString()} — el recibo ya quedó creado, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
   }
 
   /**
@@ -741,6 +658,15 @@ export class RecibosService {
         .session(session)
         .exec();
 
+      // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
+      // below, where the ORIGINAL code read it) because the desglose loop
+      // right below needs `usesMemorandumAccounts` too, via
+      // `cuentaCarteraDeLinea` — same one Mongoose call now serves both.
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+
       // Mirrors `aplicarManual`'s own two accumulators, in reverse: which
       // specific accounts the reversal must debit BACK (the same ones the
       // original application credited, not the shared cuentaCartera — see
@@ -752,6 +678,72 @@ export class RecibosService {
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
+        if (aplicacion.documentType === 'SI') {
+          // Replays the EXACT recorded split (`detalleConceptos`), same as
+          // every OTHER reversal here (never re-derives one via a fresh
+          // waterfall) — the original application may have been a
+          // user-chosen manual distribución, and `ajustarSaldosCartera`'s
+          // cascade has no way to reproduce that. No `remanentesPorLinea`/
+          // `actualizarRemanentesLinea` — those write to a Factura-only
+          // `lines[].remainingAmount` field a Saldo Inicial doesn't have.
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              saldoInicialDoc._id,
+              aplicacion.amountApplied,
+            );
+            const partes = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              saldoInicialDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
+            );
+            for (const parte of partes) {
+              const linea = saldoInicialDoc.lines.find((l) =>
+                l.conceptoId.equals(parte.conceptoId),
+              );
+              if (parte.parte !== 0) {
+                desglose.push({
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
+                  monto: parte.parte,
+                  tipoDocumento: 'SI',
+                  numeroDocumento: saldoInicialDoc.number,
+                });
+              }
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMora += parte.parte;
+              }
+            }
+          }
+
+          await this.aplicaciones
+            .findOneAndUpdate(
+              { _id: aplicacion._id, coPropertyId },
+              { $set: { status: 'revertida', revertedAt: new Date() } },
+              { session },
+            )
+            .exec();
+
+          montoDescuentoTotal += aplicacion.discountApplied ?? 0;
+          continue;
+        }
+
         // `facturaDoc` is null exactly when this aplicación targeted a Nota
         // Débito instead (never a genuinely missing Factura — nothing
         // financial is ever hard-deleted, see the audit law) — the `else`
@@ -819,7 +811,10 @@ export class RecibosService {
             );
             if (parte.parte !== 0) {
               desglose.push({
-                cuenta: linea?.accountingReceivableAccount ?? null,
+                cuenta: cuentaCarteraDeLinea(
+                  linea,
+                  copropiedad?.usesMemorandumAccounts ?? false,
+                ),
                 monto: parte.parte,
                 tipoDocumento: 'FV',
                 numeroDocumento: factura.number,
@@ -834,12 +829,52 @@ export class RecibosService {
             .findOne({ _id: aplicacion.documentId, coPropertyId })
             .session(session)
             .exec();
-          desglose.push({
-            cuenta: null,
-            monto: aplicacion.amountApplied,
-            tipoDocumento: 'ND',
-            numeroDocumento: notaDebitoDoc?.number ?? 0,
-          });
+          if (notaDebitoDoc) {
+            // Pre-existing bug fixed here: this branch used to only build
+            // the accounting `desglose` entry and never actually restored
+            // the cartera balance — a Nota Débito paid off by a Recibo that
+            // later got voided stayed permanently "fully applied"
+            // (`SaldoTotalDocumento.saldoPendiente` never went back up, so
+            // it could never be collected again) and `SaldoCartera` stayed
+            // permanently understated by that same amount. Mirrors the `FV`
+            // branch above and `NotaCreditoService.anular()`'s own `ND`
+            // branch: `restaurarSaldoTotalDocumento` first (the atomic
+            // "can this be paid again" guard), then
+            // `ajustarSaldosCarteraPorDistribucion` replaying the EXACT
+            // recorded split (`detalleConceptos`) — never a fresh
+            // derivation. No `remanentesPorLinea`/`actualizarRemanentesLinea`
+            // — a Nota Débito has a single concepto, no per-línea
+            // `remainingAmount` field to keep in sync.
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              notaDebitoDoc._id,
+              aplicacion.amountApplied,
+            );
+            const partesNd = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              notaDebitoDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'ND', documentoId: notaDebitoDoc._id },
+            );
+            for (const parte of partesNd) {
+              if (parte.parte === 0) continue;
+              desglose.push({
+                cuenta: null,
+                monto: parte.parte,
+                tipoDocumento: 'ND',
+                numeroDocumento: notaDebitoDoc.number,
+              });
+            }
+          }
         }
 
         await this.aplicaciones
@@ -856,11 +891,8 @@ export class RecibosService {
       // ALWAYS posted (no `if (totalRevertido > 0)` gate — that gate was
       // part of the bug this task corrects): uses the Recibo's own cached
       // totals, captured BEFORE the $set below zeroes them, not a sum
-      // replayed from the loop above.
-      const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
-        .session(session)
-        .exec();
+      // replayed from the loop above. `copropiedad` was already fetched
+      // above, for the desglose loop's own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
@@ -1161,22 +1193,12 @@ export class RecibosService {
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
     }
 
-    // Also the frontend's source for rendering this Recibo's PDF
-    // client-side — frozen once by `congelarPresentacionRecibo`, read back
-    // here the same way `FacturasService.findOne` reads its own
-    // `documentDefinition`. `null` for a receipt whose creation ran before
-    // this field existed, or whose presentation-cache step failed.
-    const documentDefinition = this.presentacionDocumento
-      ? await this.presentacionDocumento.buscar('RC', recibo._id)
-      : null;
-
     return toReciboDetalle(
       recibo,
       appliedAmount,
       unappliedAmount,
       aplicaciones,
       numerosPorDocumento,
-      documentDefinition,
     );
   }
 
@@ -1228,10 +1250,15 @@ export class RecibosService {
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
   }> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
     return ejecutarAplicacionManual(
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
@@ -1245,6 +1272,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
+        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
       },
       solicitadas,
       descuentoConfirmadoExtra,
@@ -1273,10 +1301,15 @@ export class RecibosService {
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
   }> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
     return ejecutarAplicacionFifo(
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
@@ -1290,6 +1323,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
+        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
       },
       montoDisponible,
     );

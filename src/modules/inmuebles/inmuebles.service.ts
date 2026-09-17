@@ -15,11 +15,14 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
 import { CatalogosService } from '../catalogos/catalogos.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
+import {
+  ProgresoImportacionService,
+  type ProgresoActual,
+} from './progreso-importacion.service';
 import type {
   Inmueble as InmuebleContract,
   Paginado,
@@ -44,9 +47,9 @@ export class InmueblesService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
-    private readonly valoresRecurrentes: ValoresRecurrentesService,
     private readonly catalogos: CatalogosService,
     private readonly eliminacion: InmueblesEliminacionService,
+    private readonly progreso: ProgresoImportacionService,
   ) {}
 
   /**
@@ -233,53 +236,65 @@ export class InmueblesService {
     const errores: ResultadoImportacionInmuebles['errores'] = [];
     let creados = 0;
 
-    for (const [indice, fila] of dto.filas.entries()) {
-      try {
-        const yaExiste = await this.inmuebles
-          .exists({ coPropertyId, code: fila.codigo })
-          .exec();
-        if (yaExiste) {
-          throw new Error(
-            `Ya existe un inmueble con el código ${fila.codigo} en esta copropiedad`,
-          );
-        }
+    // Coarse progress signal for the frontend to poll while this request is
+    // in flight — see ProgresoImportacionService's own note. Cleared in
+    // `finally` so a thrown error never leaves a stuck row behind.
+    const total = dto.filas.length;
+    const intervalo = this.progreso.intervalo(total);
+    await this.progreso.iniciar(coPropertyId, 'inmuebles', total);
 
-        const holderId = await this.resolverTitular(coPropertyId, fila);
+    try {
+      for (const [indice, fila] of dto.filas.entries()) {
+        try {
+          const yaExiste = await this.inmuebles
+            .exists({ coPropertyId, code: fila.codigo })
+            .exec();
+          if (yaExiste) {
+            throw new Error(
+              `Ya existe un inmueble con el código ${fila.codigo} en esta copropiedad`,
+            );
+          }
 
-        const creado = await this.inmuebles.create({
-          coPropertyId,
-          code: fila.codigo,
-          block: fila.bloque,
-          zone: fila.zona,
-          usage: fila.uso,
-          area: fila.area,
-          participationFactor: fila.coeficiente,
-          holderId,
-          holderKind: fila.tipoTitular ?? 'propietario',
-          holderResides: fila.resideEnElInmueble ?? false,
-          collectionStatus: fila.estadoCartera ?? 'al_dia',
-          contactName: fila.contacto,
-          notes: fila.observaciones,
-        });
+          const holderId = await this.resolverTitular(coPropertyId, fila);
 
-        // Same call the "Valores Recurrentes" tab makes — the row's cargo-N
-        // columns already arrive resolved to real conceptoIds (see the note
-        // on FilaImportarInmuebleDto.cargos), so this is just the ordinary
-        // save, not a special import-only path.
-        if (fila.cargos?.length) {
-          await this.valoresRecurrentes.guardar(creado._id.toString(), {
-            valores: fila.cargos,
+          await this.inmuebles.create({
+            coPropertyId,
+            code: fila.codigo,
+            reference: fila.referencia,
+            block: fila.bloque,
+            zone: fila.zona,
+            usage: fila.uso,
+            area: fila.area,
+            participationFactor: fila.coeficiente,
+            holderId,
+            holderKind: fila.tipoTitular ?? 'propietario',
+            holderResides: fila.resideEnElInmueble ?? false,
+            collectionStatus: fila.estadoCartera ?? 'vigente',
+            contactName: fila.contacto,
+            notes: fila.observaciones,
+          });
+
+          creados += 1;
+        } catch (err) {
+          errores.push({
+            fila: indice + 1,
+            codigo: fila.codigo ?? null,
+            mensaje: err instanceof Error ? err.message : 'Error desconocido',
           });
         }
 
-        creados += 1;
-      } catch (err) {
-        errores.push({
-          fila: indice + 1,
-          codigo: fila.codigo ?? null,
-          mensaje: err instanceof Error ? err.message : 'Error desconocido',
-        });
+        const completadas = indice + 1;
+        if (completadas % intervalo === 0 || completadas === total) {
+          await this.progreso.actualizar(
+            coPropertyId,
+            'inmuebles',
+            completadas,
+            total,
+          );
+        }
       }
+    } finally {
+      await this.progreso.finalizar(coPropertyId, 'inmuebles');
     }
 
     return {
@@ -289,6 +304,13 @@ export class InmueblesService {
       eliminadosAntes: eliminados,
       bloqueadosPorFactura: bloqueados,
     };
+  }
+
+  /** Null while no import is currently running for the active coproperty —
+   *  see `ProgresoImportacionService.obtener`. */
+  async obtenerProgresoImportacion(): Promise<ProgresoActual | null> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    return this.progreso.obtener(coPropertyId, 'inmuebles');
   }
 
   /**
@@ -458,6 +480,7 @@ export class InmueblesService {
     };
 
     set('code', dto.codigo);
+    set('reference', dto.referencia);
     set('block', dto.bloque);
     set('zone', dto.zona);
     set('usage', dto.uso);

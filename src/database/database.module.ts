@@ -118,9 +118,33 @@ import {
   ConsecutivoLoteContabilidadSchema,
 } from './schemas/contabilidad/consecutivo-lote-contabilidad.schema';
 import {
-  PresentacionDocumento,
-  PresentacionDocumentoSchema,
-} from './schemas/documentos/presentacion-documento.schema';
+  SaldoInicial,
+  SaldoInicialSchema,
+} from './schemas/saldos-iniciales/saldo-inicial.schema';
+import {
+  LoteSaldoInicial,
+  LoteSaldoInicialSchema,
+} from './schemas/saldos-iniciales/lote-saldo-inicial.schema';
+import {
+  ConsecutivoSaldoInicial,
+  ConsecutivoSaldoInicialSchema,
+} from './schemas/saldos-iniciales/consecutivo-saldo-inicial.schema';
+import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoSchema,
+} from './schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
+import {
+  LoteSaldoInicialAnticipo,
+  LoteSaldoInicialAnticipoSchema,
+} from './schemas/saldos-iniciales/lote-saldo-inicial-anticipo.schema';
+import {
+  ConsecutivoSaldoInicialAnticipo,
+  ConsecutivoSaldoInicialAnticipoSchema,
+} from './schemas/saldos-iniciales/consecutivo-saldo-inicial-anticipo.schema';
+import {
+  ProgresoImportacion,
+  ProgresoImportacionSchema,
+} from './schemas/importaciones/progreso-importacion.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -161,10 +185,22 @@ const models = [
     name: ConsecutivoLoteContabilidad.name,
     schema: ConsecutivoLoteContabilidadSchema,
   },
+  { name: LoteSaldoInicial.name, schema: LoteSaldoInicialSchema },
+  { name: SaldoInicial.name, schema: SaldoInicialSchema },
   {
-    name: PresentacionDocumento.name,
-    schema: PresentacionDocumentoSchema,
+    name: ConsecutivoSaldoInicial.name,
+    schema: ConsecutivoSaldoInicialSchema,
   },
+  {
+    name: LoteSaldoInicialAnticipo.name,
+    schema: LoteSaldoInicialAnticipoSchema,
+  },
+  { name: SaldoInicialAnticipo.name, schema: SaldoInicialAnticipoSchema },
+  {
+    name: ConsecutivoSaldoInicialAnticipo.name,
+    schema: ConsecutivoSaldoInicialAnticipoSchema,
+  },
+  { name: ProgresoImportacion.name, schema: ProgresoImportacionSchema },
 ];
 
 /**

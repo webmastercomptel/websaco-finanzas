@@ -1,7 +1,6 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -66,16 +65,11 @@ import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
-import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import { restaurarSaldoDocumentoOrigen } from '../recibos/cruce.util';
 import {
@@ -87,7 +81,6 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toNotaDebito, toNotaDebitoDetalle } from './notas-debito.mapper';
-import { construirDatosImpresionNotaDebito } from './nota-debito-pdf-datos.util';
 import type {
   NotaDebito as NotaDebitoContract,
   NotaDebitoDetalle,
@@ -101,20 +94,9 @@ import type { ListarNotaDebitoDto } from './dto/listar-nota-debito.dto';
  * Service for Nota Débito: manual additional charges against a property's
  * cartera. Architecturally a payable document (like Factura), not a credit
  * source (like Recibo/NotaCredito).
- *
- * `terceros` and `presentacionDocumento` were APPENDED, trailing and
- * optional (same reasoning as `cuentasContables` right above), when
- * `crear()` took over freezing this Nota Débito's own `documentDefinition`
- * into the shared `presentacion_documento` table — see
- * `congelarPresentacionNotaDebito`. `terceros` is needed only for that step
- * (`construirDatosImpresionNotaDebito`'s own `modelos.terceros`); every
- * existing positional test keeps compiling with both left `undefined`, in
- * which case `congelarPresentacionNotaDebito` simply no-ops.
  */
 @Injectable()
 export class NotasDebitoService {
-  private readonly logger = new Logger(NotasDebitoService.name);
-
   constructor(
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
@@ -150,9 +132,6 @@ export class NotasDebitoService {
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros?: Model<TerceroDocument>,
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -271,7 +250,7 @@ export class NotasDebitoService {
     }
     const terceroId = inmueble.holderId;
 
-    const resultado = await this.transaccion(async (session) => {
+    return this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
         dto.codigo,
@@ -382,84 +361,6 @@ export class NotasDebitoService {
       // Just seeded above, still full — no need to re-read SaldoTotalDocumento.
       return toNotaDebito(final!, dto.total);
     });
-
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: this Nota Débito's own
-    // financial correctness never depends on this succeeding. Same
-    // frozen-at-emission principle `LotesFacturacionService.consolidar()`
-    // already applies to Factura, extended to this document (see
-    // `congelarPresentacionNotaDebito`).
-    await this.congelarPresentacionNotaDebito(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
-    return resultado;
-  }
-
-  /**
-   * Freezes this Nota Débito's react-pdf presentation tree into the shared,
-   * permanent `presentacion_documento` table — called AFTER `crear()`'s own
-   * transaction has already committed (never from inside it). No-ops when
-   * any optional dependency it needs is missing (test-only construction —
-   * see this class's own docblock). Wrapped in try/catch, log-and-continue,
-   * never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
-   */
-  private async congelarPresentacionNotaDebito(
-    coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
-    }
-    try {
-      const [notaRaw, copropiedad] = await Promise.all([
-        this.notasDebito.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!notaRaw || !copropiedad) return;
-
-      const datos = await construirDatosImpresionNotaDebito(
-        notaRaw,
-        copropiedad,
-        coPropertyId,
-        {
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          conceptos: this.conceptos,
-          asientos: this.asientos,
-          cuentasContables: this.cuentasContables,
-        },
-      );
-
-      // Deferred import — see `RecibosService.congelarPresentacionRecibo`'s
-      // own identical comment: `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load statically.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'ND',
-        notaRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota débito ${notaId.toString()} — la nota ya quedó creada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
   }
 
   /**
@@ -585,20 +486,11 @@ export class NotasDebitoService {
       ]),
     ]);
 
-    // Also the frontend's source for rendering this Nota Débito's PDF
-    // client-side — frozen once by `congelarPresentacionNotaDebito`, read
-    // back the same way `RecibosService.findOne` reads its own
-    // `documentDefinition`.
-    const documentDefinition = this.presentacionDocumento
-      ? await this.presentacionDocumento.buscar('ND', nota._id)
-      : null;
-
     return toNotaDebitoDetalle(
       nota,
       saldoTotal?.saldoPendiente ?? 0,
       aplicaciones,
       fechasPorSourceId,
-      documentDefinition,
     );
   }
 

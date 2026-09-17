@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -60,12 +59,11 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
@@ -75,6 +73,7 @@ import {
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoDocumentoOrigen,
   decrementarSaldoFactura,
+  decrementarSaldoInicial,
   decrementarSaldoNotaDebito,
   restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
@@ -88,10 +87,6 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
-import {
-  construirDatosImpresionNotaCredito,
-  type ModelosDatosImpresionNotaCredito,
-} from './nota-credito-pdf-datos.util';
 import {
   toNotaCredito,
   toNotaCreditoDetalle,
@@ -133,7 +128,7 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 type DesgloseCarteraAplicacion = {
   cuenta: string | null;
   monto: number;
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   numeroDocumento: number;
 };
 
@@ -168,8 +163,6 @@ type LineaAncla = {
  */
 @Injectable()
 export class NotasCreditoService {
-  private readonly logger = new Logger(NotasCreditoService.name);
-
   constructor(
     @InjectModel(NotaCredito.name)
     private readonly notasCredito: Model<NotaCreditoDocument>,
@@ -201,16 +194,9 @@ export class NotasCreditoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
-    // Both APPENDED last, optional (`?`) — same convention as
-    // `cuentasContables`/`inmuebles` above — so `notas-credito.service.spec.ts`,
-    // which constructs this service positionally without these two, keeps
-    // compiling. `terceros` backs `construirDatosImpresionNotaCredito`'s own
-    // `modelos.terceros` (the printed titular's name); `presentacionDocumento`
-    // is where `aplicar()` freezes the printable tree — see
-    // `congelarPresentacion`'s own docblock.
-    @InjectModel(Tercero.name)
-    private readonly terceros?: Model<TerceroDocument>,
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — see `RecibosService`'s own identical append.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -229,7 +215,7 @@ export class NotasCreditoService {
       cashFlowCode: string | null;
     } | null,
     entries: ReturnType<typeof construirAsientoCruce>,
-    documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
+    documentoCruce?: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null,
   ): Promise<ReturnType<typeof construirAsientoCruce>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
@@ -285,14 +271,29 @@ export class NotasCreditoService {
   private async resolverLineasAncla(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
-    tipoDocumento: 'FV' | 'ND',
-    documento: FacturaDocument | NotaDebitoDocument,
+    tipoDocumento: 'FV' | 'ND' | 'SI',
+    documento: FacturaDocument | NotaDebitoDocument | SaldoInicialDocument,
   ): Promise<LineaAncla[]> {
     if (tipoDocumento === 'FV') {
       const factura = documento as FacturaDocument;
       return factura.lines.map((linea) => ({
         conceptoId: linea.conceptoId,
         totalAmount: linea.totalAmount,
+        accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
+        accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
+        conceptKind: linea.conceptKind,
+        conceptName: linea.conceptName,
+      }));
+    }
+    if (tipoDocumento === 'SI') {
+      // Already frozen at import time, same fields a Factura line freezes —
+      // see `SaldoInicialLinea`'s own schema docblock on why
+      // `accountingIncomeAccount` is deliberately `null` here (nothing was
+      // ever posted as income in THIS system for an opening balance).
+      const saldoInicial = documento as SaldoInicialDocument;
+      return saldoInicial.lines.map((linea) => ({
+        conceptoId: linea.conceptoId,
+        totalAmount: linea.montoOriginal,
         accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
         accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
         conceptKind: linea.conceptKind,
@@ -372,38 +373,62 @@ export class NotasCreditoService {
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     const etiquetaAncla =
-      dto.tipoDocumento === 'FV' ? 'La factura' : 'La nota débito';
+      dto.tipoDocumento === 'FV'
+        ? 'La factura'
+        : dto.tipoDocumento === 'ND'
+          ? 'La nota débito'
+          : 'El saldo inicial';
 
     return this.transaccion(async (session) => {
-      const documentoAncla: FacturaDocument | NotaDebitoDocument | null =
+      const documentoAncla:
+        FacturaDocument | NotaDebitoDocument | SaldoInicialDocument | null =
         dto.tipoDocumento === 'FV'
           ? await this.facturas
               .findOne({ _id: documentoId, coPropertyId })
               .session(session)
               .exec()
-          : await this.notasDebito
-              .findOne({ _id: documentoId, coPropertyId })
-              .session(session)
-              .exec();
+          : dto.tipoDocumento === 'ND'
+            ? await this.notasDebito
+                .findOne({ _id: documentoId, coPropertyId })
+                .session(session)
+                .exec()
+            : ((await this.saldosIniciales
+                ?.findOne({ _id: documentoId, coPropertyId })
+                .session(session)
+                .exec()) ?? null);
       if (!documentoAncla) {
         throw new NotFoundException(
           dto.tipoDocumento === 'FV'
             ? `No se encontró la factura ${dto.documentoId}`
-            : `No se encontró la nota débito ${dto.documentoId}`,
+            : dto.tipoDocumento === 'ND'
+              ? `No se encontró la nota débito ${dto.documentoId}`
+              : `No se encontró el saldo inicial ${dto.documentoId}`,
         );
       }
-      // A voided anchor no longer represents active debt — crediting it
-      // has no meaning (design §6).
-      if (documentoAncla.status !== 'emitida') {
+      // A Saldo Inicial uses `'activo'/'anulado'`, never `'emitida'/'anulada'`
+      // — same "voided anchor no longer represents active debt" check (design
+      // §6), just the enum this document's own schema actually declares.
+      const anclaVigente =
+        dto.tipoDocumento === 'SI'
+          ? (documentoAncla as SaldoInicialDocument).status === 'activo'
+          : documentoAncla.status === 'emitida';
+      // `numeroDocumentoAncla` — a Saldo Inicial has no `fullNumber` (see its
+      // own schema docblock); `numeroOriginal` is the closest equivalent for
+      // an error message a human reads.
+      const numeroDocumentoAncla =
+        dto.tipoDocumento === 'SI'
+          ? (documentoAncla as SaldoInicialDocument).numeroOriginal
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).fullNumber;
+      if (!anclaVigente) {
         throw new ConflictException(
-          `${etiquetaAncla} ${documentoAncla.fullNumber} está anulada y no admite una nota crédito`,
+          `${etiquetaAncla} ${numeroDocumentoAncla} está anulada y no admite una nota crédito`,
         );
       }
 
       const inmuebleId = new Types.ObjectId(dto.inmuebleId);
       if (!documentoAncla.inmuebleId.equals(inmuebleId)) {
         throw new ConflictException(
-          `${etiquetaAncla} ${documentoAncla.fullNumber} pertenece a otro inmueble ` +
+          `${etiquetaAncla} ${numeroDocumentoAncla} pertenece a otro inmueble ` +
             `(${documentoAncla.inmuebleId.toString()}) que el solicitado ` +
             `(${inmuebleId.toString()})`,
         );
@@ -414,11 +439,16 @@ export class NotasCreditoService {
       // creation flow started resolving this (`NotasDebitoService.crear()`'s
       // own fix; every note débito predating that fix has this frozen
       // forever, by design — a financial document never changes after
-      // issuance). Rather than silently propagate that blank onto the Nota
-      // Crédito's own PDF too, fall back to the inmueble's CURRENT holder,
-      // same source (`Inmueble.holderId`) that fix reads.
+      // issuance). A Saldo Inicial never carries one at all (no `terceroId`
+      // field — see its own schema). Rather than silently propagate that
+      // blank onto the Nota Crédito's own PDF too, fall back to the
+      // inmueble's CURRENT holder, same source (`Inmueble.holderId`) that
+      // fix reads.
       const terceroId =
-        documentoAncla.terceroId ??
+        (dto.tipoDocumento === 'SI'
+          ? null
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument)
+              .terceroId) ??
         (
           await this.inmuebles
             ?.findOne({ _id: inmuebleId, coPropertyId })
@@ -445,7 +475,9 @@ export class NotasCreditoService {
       const filtroAncla =
         dto.tipoDocumento === 'FV'
           ? { facturaId: documentoId }
-          : { notaDebitoId: documentoId };
+          : dto.tipoDocumento === 'ND'
+            ? { notaDebitoId: documentoId }
+            : { saldoInicialId: documentoId };
       const notasCreditoPrevias = await this.notasCredito
         .find({ coPropertyId, ...filtroAncla, status: 'activo' })
         .session(session)
@@ -490,6 +522,7 @@ export class NotasCreditoService {
             terceroId,
             facturaId: dto.tipoDocumento === 'FV' ? documentoId : null,
             notaDebitoId: dto.tipoDocumento === 'ND' ? documentoId : null,
+            saldoInicialId: dto.tipoDocumento === 'SI' ? documentoId : null,
             tipoDocumentoAncla: dto.tipoDocumento,
             issueDate: new Date(dto.fecha),
             prefix: numero.prefijo,
@@ -605,6 +638,15 @@ export class NotasCreditoService {
         if (dto.tipoDocumento === 'FV') {
           await decrementarSaldoFactura(
             this.facturas,
+            this.saldoTotalDocumento,
+            session,
+            coPropertyId,
+            documentoId,
+            montoAAplicar,
+          );
+        } else if (dto.tipoDocumento === 'SI') {
+          await decrementarSaldoInicial(
+            this.saldosIniciales!,
             this.saldoTotalDocumento,
             session,
             coPropertyId,
@@ -845,13 +887,7 @@ export class NotasCreditoService {
     const facturaFinal = await this.facturas
       .findOne({ _id: facturaId, coPropertyId })
       .exec();
-    // `documentDefinition` not resolved here (mechanical `null` to match
-    // `toFactura`'s signature after Factura's frozen presentation record
-    // moved to the shared `presentacion_documento` table) — same as
-    // `saldoPendiente: 0` above, this return value is just the just-voided
-    // Factura's own updated status fields, not a place that reads its
-    // printout.
-    return toFactura(facturaFinal!, 0, new Map(), null);
+    return toFactura(facturaFinal!, 0, new Map());
   }
 
   /**
@@ -887,7 +923,7 @@ export class NotasCreditoService {
 
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
-    const resultadoAplicacion = await this.transaccion(async (session) => {
+    return this.transaccion(async (session) => {
       const notaDoc = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
         .session(session)
@@ -971,126 +1007,6 @@ export class NotasCreditoService {
         errores: resultado.errores,
       };
     });
-
-    // AFTER the transaction has committed — never inside it (see
-    // `congelarPresentacion`'s own docblock). `crear()` deliberately never
-    // calls this: it has its own fully independent application logic
-    // (inline in `crear()`'s own transaction, never routed through
-    // `aplicarManual`/`aplicarFifo`), so there is no shared helper between
-    // the two methods to hook this into instead.
-    await this.congelarPresentacion(coPropertyId, new Types.ObjectId(id));
-
-    return resultadoAplicacion;
-  }
-
-  /**
-   * Freezes this Nota Crédito's printable presentation tree into the shared
-   * `presentacion_documento` table (`tipoDocumento: 'NC'`) — called ONLY
-   * from `aplicar()`, never from `crear()`. `crear()` never freezes anything
-   * because the business flow always calls `aplicar()` right after it (a
-   * Nota Crédito is never viewed/printed in the gap between the two,
-   * confirmed with the user) — freezing twice would be redundant, and
-   * freezing only in `crear()` would go stale the moment a LATER `aplicar()`
-   * changes `montoSinAplicar`/the applied breakdown, which is exactly what
-   * this document must show live. Because a Nota Crédito can be applied
-   * more than once over its life (deferred cruce), this method re-freezes
-   * — overwrites, via `PresentacionDocumentoService.guardar`'s own upsert —
-   * unconditionally on every `aplicar()` run, never just the first.
-   *
-   * Runs strictly AFTER the caller's own transaction has already committed,
-   * and is best-effort: any failure here is logged and swallowed, never
-   * rethrown — a presentation-cache failure must never make the caller
-   * believe the real cruce (already committed) failed. Skips silently when
-   * any optional collaborator it needs (`presentacionDocumento`/`terceros`/
-   * `cuentasContables`/`inmuebles`) is absent — relevant only to a unit test
-   * that builds this service without every optional dependency, same
-   * defensive style `conAuxiliares` already uses for `cuentasContables`.
-   */
-  private async congelarPresentacion(
-    coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.terceros ||
-      !this.cuentasContables ||
-      !this.inmuebles
-    ) {
-      return;
-    }
-    try {
-      const [nota, copropiedad] = await Promise.all([
-        this.notasCredito.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!nota || !copropiedad) return;
-
-      // Live balance, not a cached field — see `NotaCredito.unappliedAmount`
-      // (gone from the schema) and `aplicar()`'s own identical read above.
-      const saldoOrigen = await this.saldoDocumentoOrigen
-        .findOne({ documentoId: nota._id })
-        .exec();
-      const montoSinAplicar = saldoOrigen?.saldoDisponible ?? 0;
-
-      // Every application this note has EVER made — same query
-      // `NotasCreditoController`'s retired `generarPdf` route used to run
-      // via `RecibosService.findAplicacionesForSource('NC', nota._id)`, run
-      // directly here instead (this service already owns `this.aplicaciones`,
-      // no need to reach into `RecibosService` for it).
-      const aplicaciones = await this.aplicaciones
-        .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
-        .sort({ appliedAt: 1 })
-        .exec();
-
-      const datosImpresion: ModelosDatosImpresionNotaCredito = {
-        facturas: this.facturas,
-        notasDebito: this.notasDebito,
-        conceptosCobro: this.conceptosCobro,
-        inmuebles: this.inmuebles,
-        terceros: this.terceros,
-        cuentasContables: this.cuentasContables,
-      };
-      const datos = await construirDatosImpresionNotaCredito(
-        nota,
-        montoSinAplicar,
-        aplicaciones,
-        copropiedad,
-        coPropertyId,
-        datosImpresion,
-      );
-
-      // `contenidoRecibo` returns page content only (no `<Document>`/`<Page>`
-      // wrapper) — same split `paginaFactura` uses for Factura, the frontend
-      // wraps it in its own `<Page>` at hydration time. No `opciones` passed:
-      // a frozen tree has no room for a per-request `duplicado` watermark
-      // anymore (see this note's own docblock on `?duplicado=true`).
-      //
-      // Dynamic import, not a top-level one: `recibo-pdf.ts`/`serializar-arbol.ts`
-      // pull in `@react-pdf/renderer` (ESM), which Jest's CJS environment
-      // can't load. A static import here made that load happen just from
-      // importing `NotasCreditoService` for DI — breaking both this
-      // service's own spec and its controller's spec transitively. Same fix
-      // as `LotesFacturacionService.consolidar()` (`lotes.service.ts`).
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'NC',
-        nota._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota crédito ${notaId.toString()} — la aplicación ya quedó registrada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
   }
 
   /** Mirrors `RecibosService.aplicarManual` exactly — `sourceType: 'NC'` in
@@ -1512,6 +1428,52 @@ export class NotasCreditoService {
               );
             }
           }
+        } else if (aplicacion.documentType === 'SI') {
+          // Only ever reachable as the note's own anchor application — the
+          // deferred `aplicar()` path never targets a Saldo Inicial (see
+          // that method's own docblock), same reasoning as the `'ND'`
+          // branch below — always `ajustarSaldosCarteraPorDistribucion`
+          // with `nota.distribution`, never the proportional cascade.
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              saldoInicialDoc._id,
+              aplicacion.amountApplied,
+            );
+            const lineasAncla = await this.resolverLineasAncla(
+              session,
+              coPropertyId,
+              'SI',
+              saldoInicialDoc,
+            );
+            for (const detalle of aplicacion.detalleConceptos ?? []) {
+              const linea = lineasAncla.find((l) =>
+                l.conceptoId.equals(detalle.conceptoId),
+              );
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMoraTotal += detalle.monto;
+              }
+            }
+            await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              nota.inmuebleId,
+              nota.distribution.map((l) => ({
+                conceptoId: l.conceptoId,
+                monto: l.amount,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: aplicacion.documentId },
+            );
+          }
         } else {
           // `aplicacion.documentType === 'ND'` — only ever reachable when
           // THIS row is the note's own anchor application (the deferred
@@ -1592,10 +1554,15 @@ export class NotasCreditoService {
               .findOne({ _id: anclaId, coPropertyId })
               .session(session)
               .exec()
-          : await this.notasDebito
-              .findOne({ _id: anclaId, coPropertyId })
-              .session(session)
-              .exec();
+          : anclaTipo === 'SI'
+            ? await this.saldosIniciales
+                ?.findOne({ _id: anclaId, coPropertyId })
+                .session(session)
+                .exec()
+            : await this.notasDebito
+                .findOne({ _id: anclaId, coPropertyId })
+                .session(session)
+                .exec();
       const lineasAncla = documentoAncla
         ? await this.resolverLineasAncla(
             session,
@@ -1818,31 +1785,50 @@ export class NotasCreditoService {
     const anclaId = idAnclaDe(nota);
     const idsFacturaPorClave = new Map<string, Types.ObjectId>();
     const idsNotaDebitoPorClave = new Map<string, Types.ObjectId>();
-    const agregarId = (tipo: 'FV' | 'ND', docId: Types.ObjectId): void => {
-      const mapa = tipo === 'FV' ? idsFacturaPorClave : idsNotaDebitoPorClave;
+    const idsSaldoInicialPorClave = new Map<string, Types.ObjectId>();
+    const agregarId = (
+      tipo: 'FV' | 'ND' | 'SI',
+      docId: Types.ObjectId,
+    ): void => {
+      const mapa =
+        tipo === 'FV'
+          ? idsFacturaPorClave
+          : tipo === 'SI'
+            ? idsSaldoInicialPorClave
+            : idsNotaDebitoPorClave;
       mapa.set(docId.toString(), docId);
     };
     agregarId(anclaTipo, anclaId);
     for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
 
-    const [facturasDoc, notasDebitoDoc] = await Promise.all([
-      idsFacturaPorClave.size
-        ? this.facturas
-            .find({
-              coPropertyId,
-              _id: { $in: [...idsFacturaPorClave.values()] },
-            })
-            .exec()
-        : Promise.resolve([]),
-      idsNotaDebitoPorClave.size
-        ? this.notasDebito
-            .find({
-              coPropertyId,
-              _id: { $in: [...idsNotaDebitoPorClave.values()] },
-            })
-            .exec()
-        : Promise.resolve([]),
-    ]);
+    const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
+      [
+        idsFacturaPorClave.size
+          ? this.facturas
+              .find({
+                coPropertyId,
+                _id: { $in: [...idsFacturaPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+        idsNotaDebitoPorClave.size
+          ? this.notasDebito
+              .find({
+                coPropertyId,
+                _id: { $in: [...idsNotaDebitoPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+        idsSaldoInicialPorClave.size
+          ? this.saldosIniciales
+              ?.find({
+                coPropertyId,
+                _id: { $in: [...idsSaldoInicialPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+      ],
+    );
     const numerosPorDocumento = new Map<string, string>([
       ...facturasDoc.map((f): [string, string] => [
         f._id.toString(),
@@ -1851,6 +1837,10 @@ export class NotasCreditoService {
       ...notasDebitoDoc.map((n): [string, string] => [
         n._id.toString(),
         n.fullNumber,
+      ]),
+      ...(saldosInicialesDoc ?? []).map((s): [string, string] => [
+        s._id.toString(),
+        s.numeroOriginal,
       ]),
     ]);
 
@@ -1962,7 +1952,7 @@ export class NotasCreditoService {
     desglose: DesgloseCarteraAplicacion[],
     desgloseOrigen: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
-    tipoDocumentoAncla: 'FV' | 'ND',
+    tipoDocumentoAncla: 'FV' | 'ND' | 'SI',
     numeroDocumentoAncla: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades

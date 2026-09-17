@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoPeso, formatoFecha } from './pdf-helpers';
+import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import { MarcaDuplicado } from './react/marca-duplicado';
 import { CreditoWebsaco } from './react/credito-websaco';
@@ -18,7 +19,7 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 export interface LineaAsientoImpresion {
   cuentaCodigo: string;
   cuentaNombre: string;
-  tipoDocumento: 'FV' | 'ND' | null;
+  tipoDocumento: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento: number | null;
   debito: number;
   credito: number;
@@ -137,7 +138,7 @@ function BloqueRecibo(props: { datos: DatosReciboImpresion }): ReactElement {
 }
 
 /**
- * A Recibo (cash receipt) or Nota Crédito's page content
+ * Generates a real PDF for a Recibo (cash receipt) or a Nota Crédito
  * (`datos.tituloDocumento` picks which), styled after the predecessor
  * system's own printed layout: a gray banner with the copropiedad name, the
  * document number top-right, a two-column info block (inmueble/titular/
@@ -145,16 +146,22 @@ function BloqueRecibo(props: { datos: DatosReciboImpresion }): ReactElement {
  * journal entry as a débito/crédito table — not a generic "aplicaciones"
  * list, since what a resident wants to see on either document is exactly
  * what the old system showed: which account absorbed the money, against
- * which document.
- *
- * Page content only, no `<Document>`/`<Page>` wrapper — same split as
- * `contenidoDocumentoFacturacion`/`paginaFactura` in `factura-pdf.ts`. Never
- * rendered to bytes here: every one of the five document types this shape
- * serves (Recibo, Nota Crédito/Débito/Anticipo/Contable) freezes its
- * `documentDefinition` via `serializarArbol` at its own moment of emission
- * (or, for Nota Crédito, at `aplicar()` — see that service's own docblock)
- * instead of rendering a PDF server-side on every download.
+ * which document. React-pdf, built directly (no pdf-lib version kept
+ * behind a `?version=` toggle).
  */
+export async function generarPdfRecibo(
+  datos: DatosReciboImpresion,
+  copropiedad: CopropiedadDocument,
+  opciones?: { duplicado?: boolean },
+): Promise<Buffer> {
+  return renderizarPdf(
+    reporteDocumento(contenidoRecibo(datos, copropiedad, opciones)),
+  );
+}
+
+/** Page content only, no `<Document>`/`<Page>` wrapper — shared with
+ *  `generarPdfRecibosLote`, same split as `contenidoDocumentoFacturacion`/
+ *  `paginaFactura` in `factura-pdf.ts`. */
 export function contenidoRecibo(
   datos: DatosReciboImpresion,
   copropiedad: CopropiedadDocument,

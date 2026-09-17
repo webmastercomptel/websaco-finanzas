@@ -18,6 +18,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   NotaContable,
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
@@ -103,6 +107,8 @@ export class ConciliacionCarteraService {
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   /**
@@ -152,6 +158,7 @@ export class ConciliacionCarteraService {
         {
           facturas: this.facturas,
           notasDebito: this.notasDebito,
+          saldosIniciales: this.saldosIniciales,
           aplicaciones: this.aplicaciones,
         },
         coPropertyId,

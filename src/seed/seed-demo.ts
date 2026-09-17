@@ -229,7 +229,7 @@ async function seedDemo(): Promise<void> {
                   ? 'juridico'
                   : i % 11 === 0
                     ? 'dificil_recaudo'
-                    : 'al_dia',
+                    : 'vigente',
               status: i % 17 === 0 ? 'inactive' : 'active',
             },
           },

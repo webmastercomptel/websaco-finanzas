@@ -40,6 +40,7 @@ const titularDe = (holderId: unknown): TitularResumen | null => {
 export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   id: doc._id.toString(),
   codigo: doc.code,
+  referencia: doc.reference,
   bloque: doc.block,
   zona: doc.zone,
   uso: doc.usage,

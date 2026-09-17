@@ -17,6 +17,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     saldosCartera: find(),
     conceptosCobro: find(),
     tenant: { resolveCoPropertyId: () => COP },
+    saldosIniciales: find(),
   };
   const m = { ...defaults, ...overrides };
   return new CarteraGeneralService(
@@ -26,6 +27,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.saldosCartera as never,
     m.conceptosCobro as never,
     m.tenant as never,
+    m.saldosIniciales as never,
   );
 };
 

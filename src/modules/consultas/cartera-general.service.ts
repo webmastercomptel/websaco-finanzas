@@ -10,6 +10,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -67,6 +71,8 @@ export class CarteraGeneralService {
     @InjectModel(ConceptoCobro.name)
     private readonly conceptosCobro: Model<ConceptoCobroDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   async findAll(
@@ -90,6 +96,7 @@ export class CarteraGeneralService {
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
       coPropertyId,
@@ -171,6 +178,7 @@ export class CarteraGeneralService {
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
       coPropertyId,

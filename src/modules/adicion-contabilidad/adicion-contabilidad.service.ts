@@ -256,6 +256,8 @@ export class AdicionContabilidadService {
 
         for (const entry of asiento.entries) {
           filasMovmesdo.push({
+            tipoDocumento,
+            numero: anchor?.number ?? 0,
             cuenta: entry.account,
             centroCosto: entry.centroCosto ?? null,
             tercero: entry.tercero ?? null,

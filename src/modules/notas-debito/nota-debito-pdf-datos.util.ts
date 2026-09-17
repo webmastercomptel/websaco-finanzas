@@ -22,7 +22,7 @@ export interface ModelosDatosImpresionNotaDebito {
 /**
  * Assembles everything the Nota Débito PDF needs to draw its journal-entry
  * table — same shape and same drawing code as a Recibo/Nota Crédito's own
- * print (`contenidoRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what
+ * print (`generarPdfRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what
  * tells the renderer which one this is). Replaces the old
  * `generarPdfNotaDebito` (a bare label/value listing, no journal table).
  *

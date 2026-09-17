@@ -28,6 +28,11 @@ import {
 class CamposInmuebleDto {
   @IsOptional()
   @IsString()
+  @MaxLength(40)
+  referencia?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(60)
   bloque?: string;
 
@@ -73,8 +78,8 @@ class CamposInmuebleDto {
   resideEnElInmueble?: boolean;
 
   @IsOptional()
-  @IsIn(['al_dia', 'juridico', 'dificil_recaudo'])
-  estadoCartera?: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
+  estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo';
 
   @IsOptional()
   @IsString()

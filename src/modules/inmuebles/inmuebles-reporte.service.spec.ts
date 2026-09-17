@@ -133,3 +133,73 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
     ]);
   });
 });
+
+describe('InmueblesReporteService.obtenerListado', () => {
+  it('devuelve el mismo renglón que generarListadoPdf, como JSON con el código de la copropiedad', async () => {
+    const service = new InmueblesReporteService(
+      modeloInmuebles([
+        {
+          _id: INMUEBLE_1,
+          code: '301',
+          area: 72,
+          participationFactor: 1.8452,
+          holderId: { name: 'Ana Pérez' },
+        },
+        {
+          _id: INMUEBLE_2,
+          code: '302',
+          area: 60,
+          participationFactor: 1.2,
+          holderId: null,
+        },
+      ]) as never,
+      modeloConceptos([
+        { _id: CONCEPTO_ADMIN, name: 'Administración' },
+      ]) as never,
+      modeloValores([
+        { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, amount: 350000 },
+      ]) as never,
+      modeloCopropiedades({ name: 'Prueba', code: 'PRU' }) as never,
+      tenant,
+    );
+
+    const respuesta = await service.obtenerListado();
+
+    expect(respuesta).toEqual({
+      copropiedadCodigo: 'PRU',
+      conceptos: [
+        { conceptoId: CONCEPTO_ADMIN.toString(), nombre: 'Administración' },
+      ],
+      items: [
+        {
+          codigo: '301',
+          titular: 'Ana Pérez',
+          area: 72,
+          coeficiente: 1.8452,
+          valores: { [CONCEPTO_ADMIN.toString()]: 350000 },
+        },
+        {
+          codigo: '302',
+          titular: null,
+          area: 60,
+          coeficiente: 1.2,
+          valores: { [CONCEPTO_ADMIN.toString()]: 0 },
+        },
+      ],
+    });
+  });
+
+  it('responde "no existe" cuando la copropiedad activa no aparece', async () => {
+    const service = new InmueblesReporteService(
+      modeloInmuebles([]) as never,
+      modeloConceptos([]) as never,
+      modeloValores([]) as never,
+      modeloCopropiedades(null) as never,
+      tenant,
+    );
+
+    await expect(service.obtenerListado()).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});

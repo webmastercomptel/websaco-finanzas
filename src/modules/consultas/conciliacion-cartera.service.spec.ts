@@ -186,6 +186,7 @@ const servicio = (
     aplicaciones?: Doc[];
     saldosCartera?: Doc[];
     inmuebles?: Doc[];
+    saldosIniciales?: Doc[];
   } = {},
 ) =>
   new ConciliacionCarteraService(
@@ -199,6 +200,7 @@ const servicio = (
     coleccion(data.saldosCartera ?? []) as never,
     coleccion(data.inmuebles ?? []) as never,
     { resolveCoPropertyId: () => COP } as never,
+    coleccion(data.saldosIniciales ?? []) as never,
   );
 
 const PERIODO = {

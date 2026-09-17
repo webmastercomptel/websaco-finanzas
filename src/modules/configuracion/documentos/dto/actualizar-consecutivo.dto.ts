@@ -7,9 +7,11 @@ export class ActualizarConsecutivoDto {
   @MaxLength(20)
   prefijo?: string;
 
+  /** The last number issued under this code — 0 is valid (none issued
+   *  yet). See the schema's note on `ConsecutivoDocumento.nextNumber`. */
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   numeroSiguiente?: number;
 
   @IsOptional()

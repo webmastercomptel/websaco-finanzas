@@ -124,7 +124,11 @@ export class DocumentosService {
       category: categoria,
       code: dto.codigo,
       prefix: dto.prefijo ?? dto.codigo,
-      nextNumber: dto.numeroInicial ?? 1,
+      // 0, not 1: `nextNumber` holds the last number ISSUED, and
+      // NumeracionService.siguienteDocumento increments before handing one
+      // out — a fresh row starting at 1 would skip straight to 2 on its
+      // first real document. See the schema's own note on `nextNumber`.
+      nextNumber: dto.numeroInicial ?? 0,
       displayName: dto.nombreDocumento ?? null,
       accountingVoucherCode: dto.comprobanteContable ?? null,
     });

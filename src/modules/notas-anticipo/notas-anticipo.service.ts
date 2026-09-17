@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -61,23 +60,29 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
   ajustarSaldosCarteraPorDistribucion,
+  cuentaCarteraDeLinea,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
   restaurarSaldoDocumentoOrigen,
   restaurarSaldoTotalDocumento,
+  type ContextoAplicacion,
   type DesgloseCarteraAplicacion,
+  type OrigenAplicacion,
 } from '../recibos/cruce.util';
 import {
   construirContraAsientoAplicacionAnticipo,
@@ -88,7 +93,6 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toNotaAnticipo, toNotaAnticipoDetalle } from './notas-anticipo.mapper';
-import { construirDatosImpresionNotaAnticipo } from './nota-anticipo-pdf-datos.util';
 import type {
   NotaAnticipo as NotaAnticipoContract,
   NotaAnticipoDetalle,
@@ -104,19 +108,9 @@ import type { ListarNotaAnticipoDto } from './dto/listar-nota-anticipo.dto';
  * the removed `POST /recibos/:id/aplicar` (see `RecibosController`'s own
  * docblock on why that route no longer exists). One Recibo can have many
  * Notas de Anticipo over time, each drawing the balance down further.
- *
- * `terceros` was APPENDED, trailing and optional (same reasoning as
- * `cuentasContables`/`inmuebles` right above), alongside
- * `presentacionDocumento`, when `crear()` took over freezing this Nota de
- * Anticipo's own `documentDefinition` into the shared
- * `presentacion_documento` table — see `congelarPresentacionNotaAnticipo`.
- * Every existing positional test keeps compiling with both left
- * `undefined`, in which case that step simply no-ops.
  */
 @Injectable()
 export class NotasAnticipoService {
-  private readonly logger = new Logger(NotasAnticipoService.name);
-
   constructor(
     @InjectModel(NotaAnticipo.name)
     private readonly notasAnticipo: Model<NotaAnticipoDocument>,
@@ -148,9 +142,11 @@ export class NotasAnticipoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros?: Model<TerceroDocument>,
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — see `RecibosService`'s own identical append.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
   ) {}
 
   private async transaccion<T>(
@@ -249,241 +245,214 @@ export class NotasAnticipoService {
       'La fecha de la nota',
     );
 
-    const resultado = await this.transaccion(async (session) => {
-      const reciboDoc = await this.recibos
-        .findOne({
-          _id: dto.reciboOrigenId,
+    const origenTipo: 'RC' | 'SI' = dto.origenTipo ?? 'RC';
+    const fechaEmision = new Date(dto.fechaEmision);
+
+    return this.transaccion(async (session) => {
+      if (origenTipo === 'SI') {
+        if (!this.saldosInicialesAnticipo) {
+          throw new NotFoundException(
+            `No se encontró el saldo inicial de anticipo ${dto.reciboOrigenId}`,
+          );
+        }
+        const origenDoc = await this.saldosInicialesAnticipo
+          .findOne({ _id: dto.reciboOrigenId, coPropertyId, status: 'activo' })
+          .session(session)
+          .exec();
+        if (!origenDoc) {
+          throw new NotFoundException(
+            `No se encontró el saldo inicial de anticipo ${dto.reciboOrigenId}`,
+          );
+        }
+        return this.crearSobreOrigen(
+          session,
           coPropertyId,
-          status: 'activo',
-        })
+          accountId,
+          dto,
+          fechaEmision,
+          origenTipo,
+          this.saldosInicialesAnticipo,
+          origenDoc,
+        );
+      }
+
+      const origenDoc = await this.recibos
+        .findOne({ _id: dto.reciboOrigenId, coPropertyId, status: 'activo' })
         .session(session)
         .exec();
-      if (!reciboDoc) {
+      if (!origenDoc) {
         throw new NotFoundException(
           `No se encontró el recibo ${dto.reciboOrigenId}`,
         );
       }
-      // `unappliedAmount` is no longer a live field on the (now immutable)
-      // Recibo — merged in fresh from `SaldoDocumentoOrigen`, same pattern
-      // `decrementarSaldoFactura` uses for its own return value. This Recibo
-      // may have already been drawn down by an earlier Nota de Anticipo, so
-      // the frozen field alone would always read as "fully available".
-      const saldoOrigen = await this.saldoDocumentoOrigen
-        .findOne({ documentoId: reciboDoc._id })
-        .session(session)
-        .exec();
-      const recibo = Object.assign(reciboDoc, {
-        unappliedAmount: saldoOrigen?.saldoDisponible ?? 0,
-      });
-      if (recibo.unappliedAmount <= 0) {
-        throw new ConflictException(
-          `El recibo ${recibo.fullNumber} no tiene anticipo pendiente por aplicar`,
-        );
-      }
-
-      const numero = await this.numeracion.siguienteDocumento(
-        coPropertyId.toString(),
-        dto.codigo,
-        session,
-      );
-
-      const fechaEmision = new Date(dto.fechaEmision);
-
-      const [creada] = await this.notasAnticipo.create(
-        [
-          {
-            coPropertyId,
-            inmuebleId: recibo.inmuebleId,
-            terceroId: recibo.terceroId,
-            reciboOrigenId: recibo._id,
-            prefix: numero.prefijo,
-            number: numero.numero,
-            fullNumber: numero.completo,
-            issueDate: fechaEmision,
-            appliedAmount: 0,
-            status: 'activo',
-            generatedBy: accountId,
-          },
-        ],
-        { session },
-      );
-
-      const ctx = {
-        facturas: this.facturas,
-        notasDebito: this.notasDebito,
-        aplicaciones: this.aplicaciones,
-        saldos: this.saldos,
-        carteraPorDocumento: this.carteraPorDocumento,
-        saldoTotalDocumento: this.saldoTotalDocumento,
-        saldoDocumentoOrigen: this.saldoDocumentoOrigen,
-        recibos: this.recibos,
+      return this.crearSobreOrigen(
         session,
         coPropertyId,
-        recibo,
-        sourceType: 'NA' as const,
-        sourceId: creada._id,
-        // The Nota de Anticipo's OWN declared date — never the original
-        // recibo's `receivedDate`, which can be much earlier: this document
-        // is applying the leftover LATER, as its own separately dated event
-        // (see `ContextoAplicacion.sourceDate`'s own docblock).
-        sourceDate: fechaEmision,
         accountId,
-      };
-
-      const { totalAplicado, desglose, montoAplicadoMora } = dto.aplicaciones
-        ?.length
-        ? await (async () => {
-            const resultado = await ejecutarAplicacionManual(
-              ctx,
-              dto.aplicaciones!,
-            );
-            return {
-              totalAplicado: resultado.creadas.reduce(
-                (acc, a) => acc + a.amountApplied,
-                0,
-              ),
-              desglose: resultado.desglose,
-              montoAplicadoMora: resultado.montoAplicadoMora,
-            };
-          })()
-        : await (async () => {
-            const resultado = await ejecutarAplicacionFifo(
-              ctx,
-              recibo.unappliedAmount,
-            );
-            return {
-              totalAplicado: resultado.aplicadas.reduce(
-                (acc, a) => acc + a.amountApplied,
-                0,
-              ),
-              desglose: resultado.desglose,
-              montoAplicadoMora: resultado.montoAplicadoMora,
-            };
-          })();
-
-      // Nothing to apply (e.g. FIFO found no open cartera for this
-      // inmueble) — refuse rather than leave a zero-amount document sitting
-      // in the ledger with no effect.
-      if (totalAplicado === 0) {
-        throw new ConflictException(
-          `No hay cartera abierta contra la cual aplicar el anticipo del recibo ${recibo.fullNumber}`,
-        );
-      }
-
-      await this.notasAnticipo
-        .findOneAndUpdate(
-          { _id: creada._id, coPropertyId },
-          { $set: { appliedAmount: totalAplicado } },
-          { session },
-        )
-        .exec();
-
-      await this.postearAsientoCreacion(
-        session,
-        coPropertyId,
-        { _id: creada._id, inmuebleId: recibo.inmuebleId },
+        dto,
         fechaEmision,
-        totalAplicado,
-        desglose,
-        montoAplicadoMora,
+        origenTipo,
+        this.recibos,
+        origenDoc,
       );
-
-      const final = await this.notasAnticipo
-        .findOne({ _id: creada._id, coPropertyId })
-        .session(session)
-        .exec();
-      return toNotaAnticipo(final!);
     });
-
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: this Nota de Anticipo's own
-    // financial correctness never depends on this succeeding. Same
-    // frozen-at-emission principle `LotesFacturacionService.consolidar()`
-    // already applies to Factura, extended to this document (see
-    // `congelarPresentacionNotaAnticipo`).
-    await this.congelarPresentacionNotaAnticipo(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
-    return resultado;
   }
 
   /**
-   * Freezes this Nota de Anticipo's react-pdf presentation tree into the
-   * shared, permanent `presentacion_documento` table — called AFTER
-   * `crear()`'s own transaction has already committed (never from inside
-   * it). No-ops when any optional dependency it needs is missing (test-only
-   * construction — see this class's own docblock). Wrapped in try/catch,
-   * log-and-continue, never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
+   * The actual creation logic, generic over the origin document's type —
+   * `TOrigen` is `ReciboDocument` when `origenTipo: 'RC'`,
+   * `SaldoInicialAnticipoDocument` when `'SI'`. Split out from `crear()` so
+   * each branch stays concretely typed (a union of the two Mongoose models
+   * doesn't structurally satisfy `Model<TOrigen>` for a single `TOrigen`),
+   * rather than because the two callers differ in what they do — they don't.
    */
-  private async congelarPresentacionNotaAnticipo(
+  private async crearSobreOrigen<TOrigen extends OrigenAplicacion>(
+    session: ClientSession,
     coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.inmuebles ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
+    accountId: string,
+    dto: CrearNotaAnticipoDto,
+    fechaEmision: Date,
+    origenTipo: 'RC' | 'SI',
+    origenModel: Model<TOrigen>,
+    origenDoc: TOrigen,
+  ): Promise<NotaAnticipoContract> {
+    // `unappliedAmount` is no longer a live field on the (now immutable)
+    // origin document — merged in fresh from `SaldoDocumentoOrigen`, same
+    // pattern `decrementarSaldoFactura` uses for its own return value. This
+    // origin may have already been drawn down by an earlier Nota de
+    // Anticipo, so the frozen field alone would always read as "fully
+    // available".
+    const saldoOrigen = await this.saldoDocumentoOrigen
+      .findOne({ documentoId: origenDoc._id })
+      .session(session)
+      .exec();
+    const origen = Object.assign(origenDoc, {
+      unappliedAmount: saldoOrigen?.saldoDisponible ?? 0,
+    });
+    if (origen.unappliedAmount <= 0) {
+      throw new ConflictException(
+        `El documento ${origen.fullNumber} no tiene anticipo pendiente por aplicar`,
+      );
     }
-    try {
-      const [notaRaw, aplicacionesActivas, copropiedad] = await Promise.all([
-        this.notasAnticipo.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.aplicaciones
-          .find({
-            coPropertyId,
-            sourceType: 'NA',
-            sourceId: notaId,
-            status: 'activa',
-          })
-          .sort({ appliedAt: 1 })
-          .exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!notaRaw || !copropiedad) return;
 
-      const datos = await construirDatosImpresionNotaAnticipo(
-        notaRaw,
-        aplicacionesActivas,
-        copropiedad,
-        coPropertyId,
+    const numero = await this.numeracion.siguienteDocumento(
+      coPropertyId.toString(),
+      dto.codigo,
+      session,
+    );
+
+    const [creada] = await this.notasAnticipo.create(
+      [
         {
-          facturas: this.facturas,
-          notasDebito: this.notasDebito,
-          recibos: this.recibos,
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          cuentasContables: this.cuentasContables,
+          coPropertyId,
+          inmuebleId: origen.inmuebleId,
+          terceroId: origen.terceroId,
+          origenTipo,
+          reciboOrigenId: origen._id,
+          prefix: numero.prefijo,
+          number: numero.numero,
+          fullNumber: numero.completo,
+          issueDate: fechaEmision,
+          appliedAmount: 0,
+          status: 'activo',
+          generatedBy: accountId,
         },
-      );
+      ],
+      { session },
+    );
 
-      // Deferred import — see `RecibosService.congelarPresentacionRecibo`'s
-      // own identical comment: `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load statically.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
 
-      await this.presentacionDocumento.guardar(
-        'NA',
-        notaRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota de anticipo ${notaId.toString()} — la nota ya quedó creada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
+    const ctx: ContextoAplicacion<TOrigen> = {
+      facturas: this.facturas,
+      notasDebito: this.notasDebito,
+      saldosIniciales: this.saldosIniciales,
+      aplicaciones: this.aplicaciones,
+      saldos: this.saldos,
+      carteraPorDocumento: this.carteraPorDocumento,
+      saldoTotalDocumento: this.saldoTotalDocumento,
+      saldoDocumentoOrigen: this.saldoDocumentoOrigen,
+      recibos: origenModel,
+      session,
+      coPropertyId,
+      recibo: origen,
+      sourceType: 'NA' as const,
+      sourceId: creada._id,
+      // The Nota de Anticipo's OWN declared date — never the origin's own
+      // `receivedDate`, which can be much earlier: this document is
+      // applying the leftover LATER, as its own separately dated event (see
+      // `ContextoAplicacion.sourceDate`'s own docblock).
+      sourceDate: fechaEmision,
+      accountId,
+      usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
+    };
+
+    const { totalAplicado, desglose, montoAplicadoMora } = dto.aplicaciones
+      ?.length
+      ? await (async () => {
+          const resultado = await ejecutarAplicacionManual(
+            ctx,
+            dto.aplicaciones!,
+          );
+          return {
+            totalAplicado: resultado.creadas.reduce(
+              (acc, a) => acc + a.amountApplied,
+              0,
+            ),
+            desglose: resultado.desglose,
+            montoAplicadoMora: resultado.montoAplicadoMora,
+          };
+        })()
+      : await (async () => {
+          const resultado = await ejecutarAplicacionFifo(
+            ctx,
+            origen.unappliedAmount,
+          );
+          return {
+            totalAplicado: resultado.aplicadas.reduce(
+              (acc, a) => acc + a.amountApplied,
+              0,
+            ),
+            desglose: resultado.desglose,
+            montoAplicadoMora: resultado.montoAplicadoMora,
+          };
+        })();
+
+    // Nothing to apply (e.g. FIFO found no open cartera for this inmueble)
+    // — refuse rather than leave a zero-amount document sitting in the
+    // ledger with no effect.
+    if (totalAplicado === 0) {
+      throw new ConflictException(
+        `No hay cartera abierta contra la cual aplicar el anticipo del documento ${origen.fullNumber}`,
       );
     }
+
+    await this.notasAnticipo
+      .findOneAndUpdate(
+        { _id: creada._id, coPropertyId },
+        { $set: { appliedAmount: totalAplicado } },
+        { session },
+      )
+      .exec();
+
+    await this.postearAsientoCreacion(
+      session,
+      coPropertyId,
+      { _id: creada._id, inmuebleId: origen.inmuebleId },
+      fechaEmision,
+      totalAplicado,
+      desglose,
+      montoAplicadoMora,
+    );
+
+    const final = await this.notasAnticipo
+      .findOne({ _id: creada._id, coPropertyId })
+      .session(session)
+      .exec();
+    return toNotaAnticipo(final!);
   }
 
   /** Lean listing — mirrors `NotasDebitoService.findAll`. */
@@ -493,6 +462,7 @@ export class NotasAnticipoService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { coPropertyId };
     if (query.reciboOrigenId) filtro.reciboOrigenId = query.reciboOrigenId;
+    if (query.origenTipo) filtro.origenTipo = query.origenTipo;
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
 
@@ -509,15 +479,7 @@ export class NotasAnticipoService {
       this.notasAnticipo.countDocuments(filtro).exec(),
     ]);
 
-    // Never a bare `.map(toNotaAnticipo)` — `Array.map` would leak its own
-    // `index` into `toNotaAnticipo`'s second (`documentDefinition`) param,
-    // same gotcha `toAplicacionCartera`'s own docblock already warns about.
-    return {
-      items: documentos.map((doc) => toNotaAnticipo(doc)),
-      total,
-      pagina,
-      porPagina,
-    };
+    return { items: documentos.map(toNotaAnticipo), total, pagina, porPagina };
   }
 
   /** Full detail, cargo por cargo — mirrors `RecibosService.findOne`. */
@@ -540,36 +502,37 @@ export class NotasAnticipoService {
     const notaDebitoIds = aplicaciones
       .filter((a) => a.documentType === 'ND')
       .map((a) => a.documentId);
-    const [facturasDoc, notasDebitoDoc] = await Promise.all([
-      facturaIds.length
-        ? this.facturas.find({ coPropertyId, _id: { $in: facturaIds } }).exec()
-        : [],
-      notaDebitoIds.length
-        ? this.notasDebito
-            .find({ coPropertyId, _id: { $in: notaDebitoIds } })
-            .exec()
-        : [],
-    ]);
+    const saldoInicialIds = aplicaciones
+      .filter((a) => a.documentType === 'SI')
+      .map((a) => a.documentId);
+    const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
+      [
+        facturaIds.length
+          ? this.facturas
+              .find({ coPropertyId, _id: { $in: facturaIds } })
+              .exec()
+          : [],
+        notaDebitoIds.length
+          ? this.notasDebito
+              .find({ coPropertyId, _id: { $in: notaDebitoIds } })
+              .exec()
+          : [],
+        saldoInicialIds.length
+          ? this.saldosIniciales
+              ?.find({ coPropertyId, _id: { $in: saldoInicialIds } })
+              .exec()
+          : [],
+      ],
+    );
     const numerosPorDocumento = new Map<string, string>();
     for (const f of facturasDoc)
       numerosPorDocumento.set(f._id.toString(), f.fullNumber);
     for (const nd of notasDebitoDoc)
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
+    for (const si of saldosInicialesDoc ?? [])
+      numerosPorDocumento.set(si._id.toString(), si.numeroOriginal);
 
-    // Also the frontend's source for rendering this Nota de Anticipo's PDF
-    // client-side — frozen once by `congelarPresentacionNotaAnticipo`, read
-    // back the same way `RecibosService.findOne` reads its own
-    // `documentDefinition`.
-    const documentDefinition = this.presentacionDocumento
-      ? await this.presentacionDocumento.buscar('NA', nota._id)
-      : null;
-
-    return toNotaAnticipoDetalle(
-      nota,
-      aplicaciones,
-      numerosPorDocumento,
-      documentDefinition,
-    );
+    return toNotaAnticipoDetalle(nota, aplicaciones, numerosPorDocumento);
   }
 
   /**
@@ -621,6 +584,14 @@ export class NotasAnticipoService {
         .session(session)
         .exec();
 
+      // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
+      // below, where the ORIGINAL code read it) — the desglose loop right
+      // below needs `usesMemorandumAccounts` too, via `cuentaCarteraDeLinea`.
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+
       const desglose: DesgloseCarteraAplicacion[] = [];
       let montoAplicadoMora = 0;
 
@@ -642,6 +613,55 @@ export class NotasAnticipoService {
             tipoDocumento: 'ND',
             numeroDocumento: notaDebitoDoc?.number ?? 0,
           });
+        } else if (aplicacion.documentType === 'SI') {
+          // Replays the EXACT recorded split (`detalleConceptos`), same
+          // reasoning as `RecibosService.anular()`'s own identical SI
+          // branch — never a fresh waterfall.
+          await restaurarSaldoTotalDocumento(
+            this.saldoTotalDocumento,
+            session,
+            aplicacion.documentId,
+            aplicacion.amountApplied,
+          );
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            const partesSI = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              saldoInicialDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
+            );
+            for (const parte of partesSI) {
+              const linea = saldoInicialDoc.lines.find((l) =>
+                l.conceptoId.equals(parte.conceptoId),
+              );
+              if (parte.parte !== 0) {
+                desglose.push({
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
+                  monto: parte.parte,
+                  tipoDocumento: 'SI',
+                  numeroDocumento: saldoInicialDoc.number,
+                });
+              }
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMora += parte.parte;
+              }
+            }
+          }
         } else {
           const facturaDoc = await this.facturas
             .findOne({ _id: aplicacion.documentId, coPropertyId })
@@ -704,7 +724,10 @@ export class NotasAnticipoService {
               );
               if (parte.parte !== 0) {
                 desglose.push({
-                  cuenta: linea?.accountingReceivableAccount ?? null,
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
                   monto: parte.parte,
                   tipoDocumento: 'FV',
                   numeroDocumento: factura.number,
@@ -743,10 +766,8 @@ export class NotasAnticipoService {
         nota.appliedAmount,
       );
 
-      const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
-        .session(session)
-        .exec();
+      // `copropiedad` was already fetched above, for the desglose loop's
+      // own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =

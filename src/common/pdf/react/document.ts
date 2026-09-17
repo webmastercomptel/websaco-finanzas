@@ -75,7 +75,8 @@ export function reporteDocumento(
 /**
  * Builds a multi-page Letter document, one Page per content element — the
  * react-pdf replacement for pdf-lib's "generate N PDFs, then `copyPages`
- * them into one" batch pattern. React-pdf has no
+ * them into one" batch pattern (`facturas-lote-pdf.ts`,
+ * `prefacturas-lote-pdf.ts`, `recibos-lote-pdf.ts`). React-pdf has no
  * byte-level merge API; a batch here is one `<Document>` repeating the same
  * per-item content across N `<Page>`s instead of stitching N independently
  * rendered PDFs together.

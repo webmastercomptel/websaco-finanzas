@@ -51,6 +51,18 @@ export const SUBJECTS = [
   'NotaContable',
   'OtraNota',
   'NotaAnticipo',
+  // Opening cartera balances imported from a client's previous system — a
+  // THIRD cartera charge document (see `SaldoInicial`'s own schema
+  // docblock), kept as its own subject rather than folded into `Factura` so
+  // a role can be granted "import Saldos Iniciales" without also gaining
+  // any power over real Facturas.
+  'SaldoInicial',
+  // Opening ANTICIPO (credit) balances imported the same way — its own
+  // subject rather than folded into `SaldoInicial` (a different action
+  // grants importing cargos vs. importing anticipos) or `NotaAnticipo` (a
+  // role that can create a Nota de Anticipo against real cartera should not
+  // automatically be able to import historical opening credit balances).
+  'SaldoInicialAnticipo',
   'Anulacion',
   'Consulta',
   'Configuracion',

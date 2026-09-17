@@ -1,9 +1,54 @@
 import { Types } from 'mongoose';
 import { NotasContablesController } from './notas-contables.controller';
+import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(notasContables: Record<string, unknown>) {
-  return new NotasContablesController(notasContables as never);
+const COP = new Types.ObjectId();
+
+const conceptoDocStub = (code = '413501') => ({
+  findOne: jest.fn(() => ({
+    populate: jest.fn().mockReturnThis(),
+    exec: () => Promise.resolve({ cuentaCreditoId: { code } }),
+  })),
+});
+
+function makeController(
+  notasContables: Record<string, unknown>,
+  overrides: {
+    copropiedades?: Record<string, unknown>;
+    conceptos?: Record<string, unknown>;
+    inmuebles?: Record<string, unknown>;
+    terceros?: Record<string, unknown>;
+    cuentasContables?: Record<string, unknown>;
+  } = {},
+) {
+  const copropiedades = overrides.copropiedades ?? {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: 'COP-1', name: 'Copropiedad Test' }),
+    })),
+  };
+  const conceptos = overrides.conceptos ?? conceptoDocStub();
+  const inmuebles = overrides.inmuebles ?? {
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ code: '301', holderId: null }),
+    })),
+  };
+  const terceros = overrides.terceros ?? {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+  };
+  const cuentasContables = overrides.cuentasContables ?? {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+
+  return new NotasContablesController(
+    notasContables as never,
+    { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+    copropiedades as never,
+    conceptos as never,
+    inmuebles as never,
+    terceros as never,
+    cuentasContables as never,
+  );
 }
 
 describe('NotasContablesController.crear', () => {
@@ -78,16 +123,42 @@ describe('NotasContablesController.findAll / findOne', () => {
     expect(notasContables.findAll).toHaveBeenCalledWith({ estado: 'activo' });
   });
 
-  it('findOne delega el id en el servicio — incluye documentDefinition, no hay ruta :id/pdf separada', async () => {
+  it('findOne delega el id en el servicio', async () => {
     const notasContables = {
-      findOne: jest.fn(() =>
-        Promise.resolve({ id: 'nt-1', documentDefinition: null }),
-      ),
+      findOne: jest.fn(() => Promise.resolve({ id: 'nt-1' })),
     };
     const controller = makeController(notasContables);
 
     await controller.findOne('nt-1');
 
     expect(notasContables.findOne).toHaveBeenCalledWith('nt-1');
+  });
+});
+
+describe('NotasContablesController.generarPdf', () => {
+  it('responde con Content-Type application/pdf y bytes reales', async () => {
+    const notasContables = {
+      findOneRaw: jest.fn(() =>
+        Promise.resolve({
+          fullNumber: 'NT-001-0001',
+          createdAt: new Date('2026-08-20'),
+          monto: 30000,
+          description: 'Reclasificación',
+          conceptoOrigenId: new Types.ObjectId(),
+          conceptoDestinoId: new Types.ObjectId(),
+        }),
+      ),
+    };
+    const controller = makeController(notasContables);
+    const set = jest.fn();
+    const send = jest.fn();
+
+    await controller.generarPdf('nt-1', undefined, { set, send } as never);
+
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ 'Content-Type': 'application/pdf' }),
+    );
+    const bytes = (send.mock.calls[0] as [Buffer])[0];
+    expect(bytes.subarray(0, 5).toString('utf-8')).toBe('%PDF-');
   });
 });

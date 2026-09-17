@@ -20,7 +20,6 @@ import { AccesoService } from './acceso/acceso.service';
 import { CuentaService } from './cuentas/cuenta.service';
 import { NumeracionService } from './numeracion/numeracion.service';
 import { PeriodoService } from './contabilidad/periodo.service';
-import { PresentacionDocumentoService } from './documentos/presentacion-documento.service';
 
 /**
  * Global module for cross-cutting providers: the shared Redis client, the
@@ -44,7 +43,6 @@ import { PresentacionDocumentoService } from './documentos/presentacion-document
     CuentaService,
     NumeracionService,
     PeriodoService,
-    PresentacionDocumentoService,
   ],
   exports: [
     REDIS_CLIENT,
@@ -57,7 +55,6 @@ import { PresentacionDocumentoService } from './documentos/presentacion-document
     CuentaService,
     NumeracionService,
     PeriodoService,
-    PresentacionDocumentoService,
   ],
 })
 export class CommonModule implements OnApplicationShutdown {

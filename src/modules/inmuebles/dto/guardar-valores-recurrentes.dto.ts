@@ -9,7 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-class ValorRecurrenteLineaDto {
+export class ValorRecurrenteLineaDto {
   @IsMongoId()
   conceptoId: string;
 

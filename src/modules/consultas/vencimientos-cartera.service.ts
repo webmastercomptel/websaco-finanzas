@@ -10,6 +10,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -83,6 +87,8 @@ export class VencimientosCarteraService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   async findAll(
@@ -101,18 +107,22 @@ export class VencimientosCarteraService {
       ? finDelDiaCorte(new Date(query.fecha))
       : fecha;
 
-    const [facturas, notasDebito] = await Promise.all([
+    const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
         .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
       this.notasDebito
         .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
+      this.saldosIniciales
+        .find({ coPropertyId, status: 'activo', fecha: { $lte: fecha } })
+        .exec(),
     ]);
 
     const docIds = [
       ...facturas.map((f) => f._id),
       ...notasDebito.map((nd) => nd._id),
+      ...saldosIniciales.map((s) => s._id),
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
@@ -130,7 +140,10 @@ export class VencimientosCarteraService {
 
     type FilaRaw = {
       inmuebleId: Types.ObjectId;
-      tipo: 'FV' | 'ND';
+      /** A Saldo Inicial row carries its own original code (e.g. "FV",
+       *  "ND") here instead of the literal "SI" — see
+       *  `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock. */
+      tipo: 'FV' | 'ND' | 'SI' | (string & {});
       numeroCompleto: string;
       fecha: Date;
       vence: Date;
@@ -173,6 +186,24 @@ export class VencimientosCarteraService {
         numeroCompleto: nd.fullNumber,
         fecha: nd.issueDate,
         vence: nd.issueDate,
+        saldo,
+      });
+    }
+
+    for (const si of saldosIniciales) {
+      const apps = appsByDoc.get(si._id.toString()) ?? [];
+      const aplicadoActivo = apps
+        .filter((a) => activeAsOf(a, fechaCorte))
+        .reduce((sum, a) => sum + a.amountApplied, 0);
+      const saldo = Math.max(0, si.total - aplicadoActivo);
+      if (saldo <= 0) continue;
+
+      filasRaw.push({
+        inmuebleId: si.inmuebleId,
+        tipo: si.tipoDocumentoOriginal,
+        numeroCompleto: si.numeroOriginal,
+        fecha: si.fecha,
+        vence: si.fechaVencimiento,
         saldo,
       });
     }

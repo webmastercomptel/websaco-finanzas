@@ -4,6 +4,7 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import type { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import type { ConceptoCobroDocument } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
@@ -35,6 +36,7 @@ const MOTIVOS_LABELS: Record<string, string> = {
 export interface ModelosDatosImpresionNotaCredito {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
+  saldosIniciales?: Model<SaldoInicialDocument>;
   conceptosCobro: Model<ConceptoCobroDocument>;
   inmuebles: Model<InmuebleDocument>;
   terceros: Model<TerceroDocument>;
@@ -44,7 +46,7 @@ export interface ModelosDatosImpresionNotaCredito {
 /**
  * Assembles everything the Nota Crédito PDF needs to draw its journal-entry
  * table — same shape and same drawing code as a Recibo's own print
- * (`contenidoRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what tells the
+ * (`generarPdfRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what tells the
  * renderer which one this is). Mirrors `construirDatosImpresionRecibo`
  * closely; the differences are real, not cosmetic:
  *
@@ -116,40 +118,56 @@ export async function construirDatosImpresionNotaCredito(
   // any open Factura of the inmueble).
   const facturaIdsPorClave = new Map<string, Types.ObjectId>();
   const notaDebitoIdsPorClave = new Map<string, Types.ObjectId>();
-  const agregarId = (tipo: 'FV' | 'ND', id: Types.ObjectId): void => {
-    (tipo === 'FV' ? facturaIdsPorClave : notaDebitoIdsPorClave).set(
-      id.toString(),
-      id,
-    );
+  const saldoInicialIdsPorClave = new Map<string, Types.ObjectId>();
+  const agregarId = (tipo: 'FV' | 'ND' | 'SI', id: Types.ObjectId): void => {
+    const mapa =
+      tipo === 'FV'
+        ? facturaIdsPorClave
+        : tipo === 'SI'
+          ? saldoInicialIdsPorClave
+          : notaDebitoIdsPorClave;
+    mapa.set(id.toString(), id);
   };
   agregarId(anclaTipo, anclaId);
   for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
 
-  const [facturas, notasDebito, inmueble, tercero] = await Promise.all([
-    facturaIdsPorClave.size
-      ? modelos.facturas
-          .find({
-            coPropertyId,
-            _id: { $in: [...facturaIdsPorClave.values()] },
-          })
-          .exec()
-      : Promise.resolve([]),
-    notaDebitoIdsPorClave.size
-      ? modelos.notasDebito
-          .find({
-            coPropertyId,
-            _id: { $in: [...notaDebitoIdsPorClave.values()] },
-          })
-          .exec()
-      : Promise.resolve([]),
-    modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
-    nota.terceroId
-      ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
-      : Promise.resolve(null),
-  ]);
+  const [facturas, notasDebito, saldosIniciales, inmueble, tercero] =
+    await Promise.all([
+      facturaIdsPorClave.size
+        ? modelos.facturas
+            .find({
+              coPropertyId,
+              _id: { $in: [...facturaIdsPorClave.values()] },
+            })
+            .exec()
+        : Promise.resolve([]),
+      notaDebitoIdsPorClave.size
+        ? modelos.notasDebito
+            .find({
+              coPropertyId,
+              _id: { $in: [...notaDebitoIdsPorClave.values()] },
+            })
+            .exec()
+        : Promise.resolve([]),
+      saldoInicialIdsPorClave.size
+        ? modelos.saldosIniciales
+            ?.find({
+              coPropertyId,
+              _id: { $in: [...saldoInicialIdsPorClave.values()] },
+            })
+            .exec()
+        : Promise.resolve([]),
+      modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
+      nota.terceroId
+        ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
+        : Promise.resolve(null),
+    ]);
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
   const notaDebitoPorId = new Map(
     notasDebito.map((n) => [n._id.toString(), n]),
+  );
+  const saldoInicialPorId = new Map(
+    (saldosIniciales ?? []).map((s) => [s._id.toString(), s]),
   );
 
   // A Nota Débito never freezes its own concepto's accounts onto itself
@@ -213,6 +231,31 @@ export async function construirDatosImpresionNotaCredito(
           credito: detalle.monto,
         });
       }
+    } else if (aplicacion.documentType === 'SI') {
+      // Only ever reachable when THIS aplicación is the note's own anchor
+      // (the deferred `aplicar()` path never targets a Saldo Inicial —
+      // see this function's own docblock). Already frozen per-línea, same
+      // as a Factura.
+      const saldoInicial = saldoInicialPorId.get(
+        aplicacion.documentId.toString(),
+      );
+      for (const detalle of detalles) {
+        const lineaSI = detalle.conceptoId
+          ? saldoInicial?.lines.find((l) =>
+              l.conceptoId.equals(detalle.conceptoId),
+            )
+          : undefined;
+        const codigo = lineaSI?.accountingReceivableAccount ?? cuentaCartera;
+        codigosUsados.add(codigo);
+        lineas.push({
+          cuentaCodigo: codigo,
+          cuentaNombre: '',
+          tipoDocumento: 'SI',
+          numeroDocumento: saldoInicial?.number ?? null,
+          debito: 0,
+          credito: detalle.monto,
+        });
+      }
     } else {
       // Only ever reachable when THIS aplicación is the note's own anchor
       // (the deferred `aplicar()` path never targets a Nota Débito — see
@@ -253,12 +296,23 @@ export async function construirDatosImpresionNotaCredito(
     anclaTipo === 'ND' ? notaDebitoPorId.get(anclaId.toString()) : undefined;
   const facturaAncla =
     anclaTipo === 'FV' ? facturaPorId.get(anclaId.toString()) : undefined;
+  const saldoInicialAncla =
+    anclaTipo === 'SI' ? saldoInicialPorId.get(anclaId.toString()) : undefined;
   for (const linea of nota.distribution) {
     const lineaFactura = facturaAncla?.lines.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
+    // A Saldo Inicial's own `accountingIncomeAccount` is deliberately
+    // always `null` (see its schema docblock — nothing was ever posted as
+    // income in this system for an opening balance), so this falls straight
+    // through to `cuentaDevoluciones`, same as an unconfigured Factura/ND
+    // concept.
+    const lineaSaldoInicial = saldoInicialAncla?.lines.find((l) =>
+      l.conceptoId.equals(linea.conceptoId),
+    );
     const codigo =
       lineaFactura?.accountingIncomeAccount ??
+      lineaSaldoInicial?.accountingIncomeAccount ??
       (notaDebitoAncla ? cuentaIngresoDe(notaDebitoAncla) : null) ??
       cuentaDevoluciones;
     codigosUsados.add(codigo);

@@ -1,6 +1,7 @@
 import { Model, Types } from 'mongoose';
 import { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { AplicacionCarteraDocument } from '../../database/schemas/recibos/aplicacion-cartera.schema';
 
 /**
@@ -71,7 +72,7 @@ export function limiteEmisionParaCorte(fecha: Date): Date {
  */
 export interface DocumentoConSaldoAFecha {
   inmuebleId: Types.ObjectId;
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   montoPendiente: number;
   fechaReferencia: Date;
 }
@@ -176,6 +177,7 @@ export async function calcularDocumentosConSaldoAFecha(
   models: {
     facturas: Model<FacturaDocument>;
     notasDebito: Model<NotaDebitoDocument>;
+    saldosIniciales?: Model<SaldoInicialDocument>;
     aplicaciones: Model<AplicacionCarteraDocument>;
   },
   coPropertyId: Types.ObjectId,
@@ -193,25 +195,41 @@ export async function calcularDocumentosConSaldoAFecha(
     status: 'emitida',
     issueDate: { $lte: limiteEmision },
   };
+  // A Saldo Inicial's own `fecha` is its equivalent of `issueDate` — always
+  // in the past relative to any real period this coproperty runs in this
+  // system (see `SaldoInicial`'s own schema docblock), but filtered the same
+  // way for consistency and to correctly exclude one from a cutoff BEFORE
+  // its own declared date.
+  const siFilter: Record<string, unknown> = {
+    coPropertyId,
+    status: 'activo',
+    fecha: { $lte: limiteEmision },
+  };
 
   if (opciones?.inmuebleId) {
     facturasFilter.inmuebleId = opciones.inmuebleId;
     ndFilter.inmuebleId = opciones.inmuebleId;
+    siFilter.inmuebleId = opciones.inmuebleId;
   }
   if (opciones?.conceptoId) {
     facturasFilter['lines.conceptoId'] = opciones.conceptoId;
     ndFilter.conceptoId = opciones.conceptoId;
+    siFilter['lines.conceptoId'] = opciones.conceptoId;
   }
 
-  const [facturas, notasDebito] = await Promise.all([
+  const [facturas, notasDebito, saldosIniciales] = await Promise.all([
     models.facturas.find(facturasFilter).exec(),
     models.notasDebito.find(ndFilter).exec(),
+    models.saldosIniciales
+      ? models.saldosIniciales.find(siFilter).exec()
+      : Promise.resolve([]),
   ]);
 
   // Collect document IDs to find their applications
   const facturaIds = facturas.map((f) => f._id);
   const ndIds = notasDebito.map((nd) => nd._id);
-  const docIds = [...facturaIds, ...ndIds];
+  const siIds = saldosIniciales.map((s) => s._id);
+  const docIds = [...facturaIds, ...ndIds, ...siIds];
 
   const aplicaciones = docIds.length
     ? await models.aplicaciones
@@ -252,6 +270,19 @@ export async function calcularDocumentosConSaldoAFecha(
         tipo: 'ND',
         montoPendiente: monto,
         fechaReferencia: nd.issueDate,
+      });
+    }
+  }
+
+  for (const si of saldosIniciales) {
+    const docApps = appsByDoc.get(si._id.toString()) ?? [];
+    const monto = saldoDocumentoAFecha(si.total, docApps, fecha);
+    if (monto > 0) {
+      resultado.push({
+        inmuebleId: si.inmuebleId,
+        tipo: 'SI',
+        montoPendiente: monto,
+        fechaReferencia: si.fechaVencimiento,
       });
     }
   }

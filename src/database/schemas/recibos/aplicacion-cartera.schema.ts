@@ -8,7 +8,10 @@ export type AplicacionCarteraDocument = HydratedDocument<AplicacionCartera>;
 export const SOURCE_TYPES = ['RC', 'NC', 'NA'] as const;
 export type SourceType = (typeof SOURCE_TYPES)[number];
 
-export const DOCUMENT_TYPES = ['FV', 'ND'] as const;
+/** `'SI'` — Saldo Inicial, a THIRD cartera charge document alongside Factura
+ *  and Nota Débito, seeded only by importing opening balances (see
+ *  `SaldoInicial`'s own schema docblock) — never created by any other flow. */
+export const DOCUMENT_TYPES = ['FV', 'ND', 'SI'] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 /**

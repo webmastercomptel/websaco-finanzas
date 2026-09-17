@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Get,
-  NotFoundException,
   Param,
   Post,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import { Types } from 'mongoose';
+import type { Response } from 'express';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -15,13 +17,43 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoteRecibosService } from './lote-recibos.service';
 import { CrearLoteRecibosDto } from './dto/crear-lote-recibos.dto';
 import { CargarFilasLoteRecibosDto } from './dto/cargar-filas-lote-recibos.dto';
-import type {
-  DocumentoReciboLote,
-  LoteRecibos,
-  ErrorAplicacionLoteRecibos,
-} from '../../contracts';
+import type { LoteRecibos, ErrorAplicacionLoteRecibos } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  Factura,
+  FacturaDocument,
+} from '../../database/schemas/facturacion/factura.schema';
+import {
+  NotaDebito,
+  NotaDebitoDocument,
+} from '../../database/schemas/notas-debito/nota-debito.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  Recibo,
+  ReciboDocument,
+} from '../../database/schemas/recibos/recibo.schema';
+import {
+  AplicacionCartera,
+  AplicacionCarteraDocument,
+} from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import { generarPdfRecibosLote } from '../../common/pdf/recibos-lote-pdf';
+import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
 
 /** `subject: 'Recibo'` throughout — a Recibos-por-lote batch never touches
  *  cartera on its own, every row becomes a real Recibo through
@@ -32,7 +64,23 @@ import { PresentacionDocumentoService } from '../../common/documentos/presentaci
 export class LoteRecibosController {
   constructor(
     private readonly loteRecibos: LoteRecibosService,
-    private readonly presentacionDocumento: PresentacionDocumentoService,
+    private readonly tenant: TenantContextService,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Factura.name)
+    private readonly facturas: Model<FacturaDocument>,
+    @InjectModel(NotaDebito.name)
+    private readonly notasDebito: Model<NotaDebitoDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
+    @InjectModel(Recibo.name)
+    private readonly recibos: Model<ReciboDocument>,
+    @InjectModel(AplicacionCartera.name)
+    private readonly aplicaciones: Model<AplicacionCarteraDocument>,
   ) {}
 
   @Get()
@@ -82,47 +130,62 @@ export class LoteRecibosController {
     return this.loteRecibos.aplicar(id, user.accountId!);
   }
 
-  /**
-   * Every Recibo this batch's `aplicar()` produced, as its own frozen
-   * `documentDefinition` — one entry per row with a real Recibo, in the
-   * exact layout `GET /recibos/:id` already shows for one at a time (both
-   * read the same `presentacion_documento` row, frozen once by
-   * `RecibosService.congelarPresentacionRecibo`, called from inside
-   * `crear()` — see that method's own docblock). No PDF is built here
-   * anymore — the browser renders each entry client-side — so there's
-   * nothing left to stream.
-   *
-   * Route renamed from `:id/pdf` — same conversion as
-   * `LotesController.obtenerDocumentosFacturas`'s own `:id/facturas.pdf` ->
-   * `:id/facturas/documentos` rename.
-   */
-  @Get(':id/recibos/documentos')
+  @Get(':id/pdf')
   @CheckAbility({ action: 'read', subject: 'Recibo' })
-  async obtenerDocumentos(
+  async generarPdf(
     @Param('id') id: string,
-  ): Promise<DocumentoReciboLote[]> {
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
     const lote = await this.loteRecibos.findOne(id);
+
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new Error(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
 
     const reciboIds = lote.filas
       .map((f) => f.reciboId)
       .filter((rid): rid is string => rid !== null);
-    if (reciboIds.length === 0) {
-      throw new NotFoundException(
-        `El lote de recibos ${id} todavía no tiene recibos generados`,
-      );
-    }
+    const recibosDoc = await this.recibos
+      .find({ coPropertyId, _id: { $in: reciboIds } })
+      .exec();
 
-    const documentDefinitions = await this.presentacionDocumento.buscarVarios(
-      'RC',
-      reciboIds.map((rid) => new Types.ObjectId(rid)),
+    const datos = await Promise.all(
+      recibosDoc.map(async (recibo) => {
+        const aplicaciones = await this.aplicaciones
+          .find({
+            coPropertyId,
+            sourceType: 'RC',
+            sourceId: recibo._id,
+            status: 'activa',
+          })
+          .sort({ appliedAt: 1 })
+          .exec();
+        return construirDatosImpresionRecibo(
+          recibo,
+          aplicaciones,
+          copropiedad,
+          coPropertyId,
+          {
+            facturas: this.facturas,
+            notasDebito: this.notasDebito,
+            inmuebles: this.inmuebles,
+            terceros: this.terceros,
+            cuentasContables: this.cuentasContables,
+          },
+        );
+      }),
     );
 
-    return reciboIds.map((rid) => ({
-      id: rid,
-      // Opaque blob, passed through unchanged — same cast
-      // `LotesController.obtenerDocumentosFacturas` uses for the same field.
-      documentDefinition: (documentDefinitions.get(rid) ??
-        null) as DocumentoReciboLote['documentDefinition'],
-    }));
+    const bytes = await generarPdfRecibosLote(datos, copropiedad);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="lote-recibos-${lote.numero}.pdf"`,
+    });
+    res.send(Buffer.from(bytes));
   }
 }

@@ -247,7 +247,7 @@ export interface MarcasCuentaContable {
  *  never the prefixed `fullNumber`, same convention `LineaAsientoImpresion`
  *  already uses for its own `numeroDocumento`. */
 export interface DocumentoCruce {
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   numero: number;
 }
 
@@ -430,7 +430,7 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
 export interface DesgloseCuenta {
   account: string;
   monto: number;
-  tipoDocumento?: 'FV' | 'ND' | null;
+  tipoDocumento?: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento?: number | null;
 }
 
@@ -448,7 +448,7 @@ export interface DesgloseCuenta {
 function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
   account: string;
   monto: number;
-  tipoDocumento: 'FV' | 'ND' | null;
+  tipoDocumento: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento: number | null;
 }[] {
   const porClave = new Map<
@@ -456,7 +456,7 @@ function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
     {
       account: string;
       monto: number;
-      tipoDocumento: 'FV' | 'ND' | null;
+      tipoDocumento: 'FV' | 'ND' | 'SI' | null;
       numeroDocumento: number | null;
     }
   >();

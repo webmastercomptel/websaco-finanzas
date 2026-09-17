@@ -22,6 +22,7 @@ import { NotasCreditoModule } from './modules/notas-credito/notas-credito.module
 import { NotasDebitoModule } from './modules/notas-debito/notas-debito.module';
 import { NotasContablesModule } from './modules/notas-contables/notas-contables.module';
 import { NotasAnticipoModule } from './modules/notas-anticipo/notas-anticipo.module';
+import { SaldosInicialesModule } from './modules/saldos-iniciales/saldos-iniciales.module';
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { ConsultasModule } from './modules/consultas/consultas.module';
@@ -68,6 +69,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
     NotasDebitoModule,
     NotasContablesModule,
     NotasAnticipoModule,
+    SaldosInicialesModule,
     EntidadesModule,
     CopropiedadesModule,
     ConceptosModule,

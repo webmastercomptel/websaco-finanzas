@@ -1,5 +1,9 @@
 // src/modules/copropiedades/copropiedades.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
@@ -18,8 +22,22 @@ import {
   Account,
   AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
+import {
+  ConsecutivoDocumento,
+  ConsecutivoDocumentoDocument,
+  type CategoriaDocumento,
+} from '../../database/schemas/numeracion/consecutivo-documento.schema';
+import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  ConceptoCobro,
+  ConceptoCobroDocument,
+} from '../../database/schemas/conceptos/concepto-cobro.schema';
 import type {
   Copropiedad as CopropiedadContract,
+  CopropiedadResumen as CopropiedadResumenContract,
   Paginado,
 } from '../../contracts';
 import { toCopropiedad } from './copropiedades.mapper';
@@ -28,6 +46,7 @@ import type {
   ActualizarCopropiedadDto,
   CrearCopropiedadDto,
 } from './dto/guardar-copropiedad.dto';
+import type { CopiarConfiguracionDto } from './dto/copiar-configuracion.dto';
 import { escapeRegex } from '../../common/utils/query.utils';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { ConceptosService } from '../conceptos/conceptos.service';
@@ -53,6 +72,12 @@ export class CopropiedadesService {
     private readonly accounts: Model<AccountDocument>,
     private readonly auditoria: AuditoriaService,
     private readonly conceptos: ConceptosService,
+    @InjectModel(ConsecutivoDocumento.name)
+    private readonly consecutivos: Model<ConsecutivoDocumentoDocument>,
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables: Model<CuentaContableDocument>,
+    @InjectModel(ConceptoCobro.name)
+    private readonly conceptosCobro: Model<ConceptoCobroDocument>,
   ) {}
 
   async findAll(
@@ -66,6 +91,11 @@ export class CopropiedadesService {
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
       filtro.$or = [{ code: patron }, { name: patron }];
+    }
+    if (query.entidadAdministradoraId) {
+      filtro.managingEntityId = new Types.ObjectId(
+        query.entidadAdministradoraId,
+      );
     }
 
     const pagina = query.pagina ?? 1;
@@ -171,6 +201,35 @@ export class CopropiedadesService {
   }
 
   /**
+   * Other active coproperties under the SAME entidad administradora as
+   * `coPropertyId`, for the "copiar configuración" picker — used both by the
+   * platform-admin screen (any `:id`) and by `MiCopropiedadController` (the
+   * caller's own active coproperty). Empty when `coPropertyId` has no
+   * managing entity on file: there is no "sibling" concept without one.
+   */
+  async listarHermanas(
+    coPropertyId: Types.ObjectId,
+  ): Promise<CopropiedadResumenContract[]> {
+    const propia = await this.copropiedades.findById(coPropertyId).exec();
+    if (!propia?.managingEntityId) return [];
+
+    const hermanas = await this.copropiedades
+      .find({
+        managingEntityId: propia.managingEntityId,
+        status: 'active',
+        _id: { $ne: coPropertyId },
+      })
+      .sort({ code: 1 })
+      .exec();
+
+    return hermanas.map((h) => ({
+      id: h._id.toString(),
+      codigo: h.code,
+      nombre: h.name,
+    }));
+  }
+
+  /**
    * The account(s) with an active Asignación scoped directly to each given
    * coproperty — one batch query for the page, not one per row. Callers
    * only pass ids of buildings with no `managingEntityId`: an entidad grant
@@ -255,9 +314,85 @@ export class CopropiedadesService {
       });
     }
 
+    await this.crearDocumentosSistema(creada._id);
+
     // Re-read populated: the created document holds a raw id for the managing
     // entity, and the contract promises its name.
     return this.findOne(creada._id.toString());
+  }
+
+  /**
+   * Seeds the six ConsecutivoDocumento rows every coproperty needs before it
+   * can issue anything — same reasoning as the three system cargos right
+   * above: without them, the first invoice/receipt/nota an operator tries to
+   * issue fails on "tipo de documento no configurado" instead of just
+   * working. `nextNumber: 0` on every row — see the schema's own note: it is
+   * the LAST number issued, so 0 means "none yet" and the first document
+   * gets 1, never 0.
+   *
+   * NA (Nota de Anticipo) is filed under category NT, same as NT itself —
+   * see the schema comment on `ConsecutivoDocumento.category` and
+   * `DocumentosService.getHighestIssuedNumber`'s note on why NA's real
+   * documents still live in their own collection despite the shared category.
+   */
+  private async crearDocumentosSistema(
+    coPropertyId: Types.ObjectId,
+  ): Promise<void> {
+    const documentos: {
+      category: CategoriaDocumento;
+      code: string;
+      displayName: string;
+      accountingVoucherCode: string | null;
+    }[] = [
+      {
+        category: 'FV',
+        code: 'FV',
+        displayName: 'Cobro Expensas Comunes',
+        accountingVoucherCode: '01',
+      },
+      {
+        category: 'IN',
+        code: 'RC',
+        displayName: 'Recibo de Caja',
+        accountingVoucherCode: null,
+      },
+      {
+        category: 'NC',
+        code: 'NC',
+        displayName: 'Nota Credito',
+        accountingVoucherCode: null,
+      },
+      {
+        category: 'ND',
+        code: 'ND',
+        displayName: 'Nota Debito',
+        accountingVoucherCode: null,
+      },
+      {
+        category: 'NT',
+        code: 'NA',
+        displayName: 'Nota de Anticipo',
+        accountingVoucherCode: null,
+      },
+      {
+        category: 'NT',
+        code: 'NT',
+        displayName: 'Nota Contable',
+        accountingVoucherCode: null,
+      },
+    ];
+
+    await this.consecutivos.insertMany(
+      documentos.map((doc) => ({
+        coPropertyId,
+        category: doc.category,
+        code: doc.code,
+        prefix: doc.code,
+        displayName: doc.displayName,
+        accountingVoucherCode: doc.accountingVoucherCode,
+        nextNumber: 0,
+      })),
+    );
   }
 
   /**
@@ -293,6 +428,212 @@ export class CopropiedadesService {
     });
 
     return this.findOne(actualizada._id.toString());
+  }
+
+  /**
+   * Fills a coproperty's maestro de cuentas, cargos and parámetros de
+   * facturación from a sibling coproperty of the SAME entidad
+   * administradora — a shortcut for a managing company opening a new
+   * building that should start from the chart of accounts and charges it
+   * already uses everywhere else, instead of retyping them by hand.
+   *
+   * Deliberately ADDITIVE, never destructive: an account is copied only when
+   * `destino` has no account with that `code` yet, a cargo only when it has
+   * no cargo with that `name` yet (the three system cargos every coproperty
+   * is born with are never touched, `origen`'s own copies of them are always
+   * skipped), and a parámetro field is overwritten only while it still sits
+   * at its schema default (null/0/false) — never over a value someone
+   * already configured. Safe to run more than once, and safe on a
+   * coproperty that already has some of its own configuration.
+   */
+  async copiarConfiguracion(
+    destinoId: string,
+    dto: CopiarConfiguracionDto,
+    actor: { accountId: string; nombre: string },
+  ): Promise<CopropiedadContract> {
+    if (destinoId === dto.origenId) {
+      throw new ConflictException(
+        'La copropiedad de origen no puede ser la misma que la de destino',
+      );
+    }
+
+    const [destino, origen] = await Promise.all([
+      this.copropiedades.findById(destinoId).exec(),
+      this.copropiedades.findById(dto.origenId).exec(),
+    ]);
+    if (!destino) {
+      throw new NotFoundException(`No se encontró la copropiedad ${destinoId}`);
+    }
+    if (!origen) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${dto.origenId}`,
+      );
+    }
+    if (
+      !destino.managingEntityId ||
+      !origen.managingEntityId ||
+      !destino.managingEntityId.equals(origen.managingEntityId)
+    ) {
+      throw new ConflictException(
+        'Ambas copropiedades deben pertenecer a la misma entidad administradora',
+      );
+    }
+
+    const destinoOid = destino._id;
+
+    // 1) Maestro de cuentas — copy any origen account whose code isn't
+    // already in destino.
+    const [cuentasOrigen, cuentasDestinoExistentes] = await Promise.all([
+      this.cuentasContables.find({ coPropertyId: origen._id }).exec(),
+      this.cuentasContables
+        .find({ coPropertyId: destinoOid })
+        .distinct('code')
+        .exec(),
+    ]);
+    const codigosDestino = new Set(cuentasDestinoExistentes);
+    const cuentasACopiar = cuentasOrigen.filter(
+      (c) => !codigosDestino.has(c.code),
+    );
+    if (cuentasACopiar.length > 0) {
+      await this.cuentasContables.insertMany(
+        cuentasACopiar.map((c) => ({
+          coPropertyId: destinoOid,
+          code: c.code,
+          name: c.name,
+          requiresTercero: c.requiresTercero,
+          isBank: c.isBank,
+          cashFlow: c.cashFlow,
+          profitCenter: c.profitCenter,
+          destinationCenter: c.destinationCenter,
+          requiresCrossDocument: c.requiresCrossDocument,
+          appliesTax: c.appliesTax,
+          taxRate: c.taxRate,
+          active: c.active,
+        })),
+      );
+    }
+
+    // Every account destino now has, by code — pre-existing plus what was
+    // just copied — to remap a cargo's cuenta references below.
+    const cuentasDestino = await this.cuentasContables
+      .find({ coPropertyId: destinoOid })
+      .exec();
+    const idDestinoPorCodigo = new Map(
+      cuentasDestino.map((c) => [c.code, c._id.toString()]),
+    );
+    const codigoPorIdOrigen = new Map(
+      cuentasOrigen.map((c) => [c._id.toString(), c.code]),
+    );
+    const remapCuenta = (id: Types.ObjectId | null): string | undefined => {
+      if (!id) return undefined;
+      const codigo = codigoPorIdOrigen.get(id.toString());
+      if (!codigo) return undefined;
+      return idDestinoPorCodigo.get(codigo);
+    };
+
+    // 2) Cargos — copy any non-system origen concepto whose name isn't
+    // already in destino. Reuses ConceptosService.create so the copy gets
+    // exactly the same validation (name/kind uniqueness, sortOrder) a
+    // manually-typed cargo would — a conflict on one row (e.g. a stray
+    // non-system 'administracion'/'intereses' kind) skips only that row.
+    const [conceptosOrigen, nombresDestinoExistentes] = await Promise.all([
+      this.conceptosCobro
+        .find({ coPropertyId: origen._id, isSystem: { $ne: true } })
+        .sort({ sortOrder: 1 })
+        .exec(),
+      this.conceptosCobro
+        .find({ coPropertyId: destinoOid })
+        .distinct('name')
+        .exec(),
+    ]);
+    const nombresDestino = new Set(nombresDestinoExistentes);
+    let cargosCopiados = 0;
+    for (const concepto of conceptosOrigen) {
+      if (nombresDestino.has(concepto.name)) continue;
+      try {
+        await this.conceptos.create(destinoId, {
+          nombre: concepto.name,
+          tipo: concepto.kind,
+          tasaImpuesto: concepto.taxRate,
+          cuentaDebitoId: remapCuenta(concepto.cuentaDebitoId),
+          cuentaCreditoId: remapCuenta(concepto.cuentaCreditoId),
+          cuentaImpuestoId: remapCuenta(concepto.cuentaImpuestoId),
+          liquidaMora: concepto.liquidaMora,
+          cargaXls: concepto.availableAsNovedad,
+        });
+        cargosCopiados += 1;
+      } catch {
+        // Skipped, not aborted — same "one bad row doesn't stop the rest"
+        // convention as every other bulk operation in this codebase.
+      }
+    }
+
+    // 3) Parámetros de facturación — only the fields still at their schema
+    // default on destino, never overwriting something already configured.
+    const camposParametrosTexto: (keyof Copropiedad)[] = [
+      'defaultBankAccountCode',
+      'billingNotes',
+      'defaultCostCentre',
+      'otherIncomeDebitAccount',
+      'otherIncomeCreditAccount',
+      'discountsDebitAccount',
+      'discountsCreditAccount',
+      'memorandumDebitAccount',
+      'memorandumCreditAccount',
+      'cashFlowCode',
+    ];
+    const camposParametrosNumero: (keyof Copropiedad)[] = [
+      'discountPercentage',
+      'discountFixedValue',
+      'discountGraceDays',
+      'lateFeeInterestRate',
+    ];
+    const camposParametrosBooleano: (keyof Copropiedad)[] = [
+      'discountEnabled',
+      'discountAppliesWithLateFee',
+      'lateFeeEnabled',
+      'usesMemorandumAccounts',
+    ];
+
+    const setParametros: Record<string, unknown> = {};
+    for (const campo of camposParametrosTexto) {
+      if (destino[campo] === null && origen[campo] !== null) {
+        setParametros[campo] = origen[campo];
+      }
+    }
+    for (const campo of camposParametrosNumero) {
+      if (destino[campo] === 0 && origen[campo] !== 0) {
+        setParametros[campo] = origen[campo];
+      }
+    }
+    for (const campo of camposParametrosBooleano) {
+      if (destino[campo] === false && origen[campo] === true) {
+        setParametros[campo] = true;
+      }
+    }
+    if (
+      destino.lateFeeValueLimit === null &&
+      origen.lateFeeValueLimit !== null
+    ) {
+      setParametros.lateFeeValueLimit = origen.lateFeeValueLimit;
+    }
+
+    if (Object.keys(setParametros).length > 0) {
+      await this.copropiedades
+        .updateOne({ _id: destinoOid }, { $set: setParametros })
+        .exec();
+    }
+
+    await this.auditoria.registrar({
+      actorAccountId: actor.accountId,
+      actorNombre: actor.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'copropiedad',
+      entidadId: destinoId,
+      entidadEtiqueta: `${destino.name} — configuración copiada desde ${origen.name} (${cuentasACopiar.length} cuentas, ${cargosCopiados} cargos)`,
+    });
+
+    return this.findOne(destinoId);
   }
 
   /**

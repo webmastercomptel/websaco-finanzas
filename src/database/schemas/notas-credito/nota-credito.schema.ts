@@ -5,6 +5,7 @@ import { Inmueble } from '../copropiedades/inmueble.schema';
 import { Tercero } from '../terceros/tercero.schema';
 import { Factura } from '../facturacion/factura.schema';
 import { NotaDebito } from '../notas-debito/nota-debito.schema';
+import { SaldoInicial } from '../saldos-iniciales/saldo-inicial.schema';
 import { Account } from '../cuentas/account.schema';
 
 export type NotaCreditoDocument = HydratedDocument<NotaCredito>;
@@ -102,13 +103,25 @@ export class NotaCredito {
   })
   notaDebitoId: Types.ObjectId | null;
 
-  /** Which of `facturaId`/`notaDebitoId` is this note's real anchor.
-   *  Nullable ONLY for documents created before a Nota Crédito could anchor
-   *  on anything but a Factura — every one of those has `facturaId` set and
-   *  `notaDebitoId` null, so `tipoAnclaDe`'s `?? 'FV'` fallback is exact,
-   *  never a guess. Every new write always sets it. */
-  @Prop({ type: String, enum: ['FV', 'ND'], default: null })
-  tipoDocumentoAncla: 'FV' | 'ND' | null;
+  /** The anchor Saldo Inicial — set when `tipoDocumentoAncla` is `'SI'`.
+   *  Exactly one of `facturaId`/`notaDebitoId`/`saldoInicialId` is ever set
+   *  on a given document — same "which anchor" reasoning as
+   *  `notaDebitoId`'s own comment. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: SaldoInicial.name,
+    default: null,
+    index: true,
+  })
+  saldoInicialId: Types.ObjectId | null;
+
+  /** Which of `facturaId`/`notaDebitoId`/`saldoInicialId` is this note's
+   *  real anchor. Nullable ONLY for documents created before a Nota Crédito
+   *  could anchor on anything but a Factura — every one of those has
+   *  `facturaId` set and the other two null, so `tipoAnclaDe`'s `?? 'FV'`
+   *  fallback is exact, never a guess. Every new write always sets it. */
+  @Prop({ type: String, enum: ['FV', 'ND', 'SI'], default: null })
+  tipoDocumentoAncla: 'FV' | 'ND' | 'SI' | null;
 
   /** The date the user declared for this note — validated at creation
    *  against the coproperty's current billing period, same role

@@ -21,6 +21,6 @@ export class ConsultarCarteraPorConceptosPdfDto {
    *  in practice (each tab sets only its own filter), but not enforced here
    *  since the report degrades gracefully if both were somehow set. */
   @IsOptional()
-  @IsIn(['al_dia', 'juridico', 'dificil_recaudo'])
-  estado?: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
+  estado?: 'vigente' | 'juridico' | 'dificil_recaudo';
 }

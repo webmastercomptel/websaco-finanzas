@@ -18,10 +18,19 @@ import {
   ValorRecurrente,
   ValorRecurrenteDocument,
 } from '../../database/schemas/conceptos/valor-recurrente.schema';
-import type { ValorRecurrente as ValorRecurrenteContract } from '../../contracts';
+import type {
+  ResultadoImportacionValoresRecurrentes,
+  ValorRecurrente as ValorRecurrenteContract,
+  ValorRecurrenteMasivo,
+} from '../../contracts';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { toValorRecurrente } from './valores-recurrentes.mapper';
 import type { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
+import type { ImportarValoresRecurrentesMasivoDto } from './dto/importar-valores-recurrentes.dto';
+import {
+  ProgresoImportacionService,
+  type ProgresoActual,
+} from './progreso-importacion.service';
 
 /**
  * Manages one unit's recurring monthly amounts — the "Datos Financieros" tab
@@ -39,6 +48,7 @@ export class ValoresRecurrentesService {
     @InjectModel(ValorRecurrente.name)
     private readonly valoresRecurrentes: Model<ValorRecurrenteDocument>,
     private readonly tenant: TenantContextService,
+    private readonly progreso: ProgresoImportacionService,
   ) {}
 
   private async exigirInmueble(inmuebleId: string): Promise<{
@@ -148,5 +158,114 @@ export class ValoresRecurrentesService {
     );
 
     return this.obtener(inmuebleId);
+  }
+
+  /**
+   * Every active unit's recurring amounts in one shot — what the
+   * coproperty-wide "Valores Recurrentes" export builds its editable
+   * template from, instead of one request per unit. `intereses` excluded,
+   * same reasoning as `obtener`: it is never a flat amount to export/import.
+   */
+  async obtenerTodos(): Promise<ValorRecurrenteMasivo[]> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    const [unidades, valores] = await Promise.all([
+      this.inmuebles
+        .find({ coPropertyId, status: 'active' })
+        .sort({ code: 1 })
+        .exec(),
+      this.valoresRecurrentes.find({ coPropertyId }).exec(),
+    ]);
+
+    const valoresPorInmueble = new Map<string, Map<string, number>>();
+    for (const v of valores) {
+      const inmuebleKey = v.inmuebleId.toString();
+      const porConcepto =
+        valoresPorInmueble.get(inmuebleKey) ?? new Map<string, number>();
+      porConcepto.set(v.conceptoId.toString(), v.amount);
+      valoresPorInmueble.set(inmuebleKey, porConcepto);
+    }
+
+    return unidades.map((u) => ({
+      inmuebleId: u._id.toString(),
+      codigo: u.code,
+      valores: [
+        ...(valoresPorInmueble.get(u._id.toString()) ??
+          new Map<string, number>()),
+      ].map(([conceptoId, monto]) => ({ conceptoId, monto })),
+    }));
+  }
+
+  /**
+   * Bulk-loads recurring amounts across many units by their `codigo`, from a
+   * file exported/edited elsewhere and parsed into rows on the frontend (see
+   * the note on `ImportarValoresRecurrentesMasivoDto`). Reuses `guardar` per
+   * matched row — same validation (the `intereses` guard, upsert-or-delete on
+   * zero) a manual edit of one unit's tab would get — so a bad row (an
+   * unknown code, or a flat amount against `intereses`) fails only that row.
+   *
+   * Deliberately never creates, deletes or otherwise edits an `Inmueble` —
+   * only the ones a code actually matches get their `ValorRecurrente` rows
+   * touched, unlike `InmueblesService.importar`'s full-roster replace.
+   */
+  async importarMasivo(
+    dto: ImportarValoresRecurrentesMasivoDto,
+  ): Promise<ResultadoImportacionValoresRecurrentes> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const errores: ResultadoImportacionValoresRecurrentes['errores'] = [];
+    let actualizados = 0;
+
+    // Coarse progress signal for the frontend to poll while this request is
+    // in flight — see ProgresoImportacionService's own note.
+    const total = dto.filas.length;
+    const intervalo = this.progreso.intervalo(total);
+    await this.progreso.iniciar(coPropertyId, 'valores-recurrentes', total);
+
+    try {
+      for (const [indice, fila] of dto.filas.entries()) {
+        try {
+          const inmueble = await this.inmuebles
+            .findOne({ coPropertyId, code: fila.codigo })
+            .exec();
+          if (!inmueble) {
+            throw new Error(
+              `No existe un inmueble con el código ${fila.codigo} en esta copropiedad`,
+            );
+          }
+
+          await this.guardar(inmueble._id.toString(), {
+            valores: fila.valores,
+          });
+          actualizados += 1;
+        } catch (err) {
+          errores.push({
+            fila: indice + 1,
+            codigo: fila.codigo ?? null,
+            mensaje: err instanceof Error ? err.message : 'Error desconocido',
+          });
+        }
+
+        const completadas = indice + 1;
+        if (completadas % intervalo === 0 || completadas === total) {
+          await this.progreso.actualizar(
+            coPropertyId,
+            'valores-recurrentes',
+            completadas,
+            total,
+          );
+        }
+      }
+    } finally {
+      await this.progreso.finalizar(coPropertyId, 'valores-recurrentes');
+    }
+
+    return { total: dto.filas.length, actualizados, errores };
+  }
+
+  /** Null while no bulk valores-recurrentes import is currently running for
+   *  the active coproperty — see `ProgresoImportacionService.obtener`. */
+  async obtenerProgresoImportacion(): Promise<ProgresoActual | null> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    return this.progreso.obtener(coPropertyId, 'valores-recurrentes');
   }
 }

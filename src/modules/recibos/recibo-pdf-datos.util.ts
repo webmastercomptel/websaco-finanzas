@@ -29,7 +29,7 @@ export interface ModelosDatosImpresionRecibo {
  * at application time — see `cruce.util.ts`), a leftover-anticipo row when
  * this Recibo generated one, and the bank debit row — plus the inmueble/
  * titular header info the print's own layout needs. No PDF drawing here;
- * `contenidoRecibo` (recibo-pdf.ts) only draws what this returns.
+ * `generarPdfRecibo` (recibo-pdf.ts) only draws what this returns.
  *
  * `aplicaciones` must be exactly what `findAplicacionesForSource('RC',
  * recibo._id)` returns — every application THIS Recibo made, active only.

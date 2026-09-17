@@ -30,6 +30,16 @@ const inmueblesModeloCon = (existentes: string[] = []) => {
   };
 };
 
+/** A working no-op progreso tracker — `importar()` calls it unconditionally,
+ *  so every test here needs a real (if inert) implementation rather than
+ *  `{} as never`. */
+const progresoModeloCon = () => ({
+  intervalo: jest.fn(() => 1),
+  iniciar: jest.fn().mockResolvedValue(undefined),
+  actualizar: jest.fn().mockResolvedValue(undefined),
+  finalizar: jest.fn().mockResolvedValue(undefined),
+});
+
 /** `porIdentificacion` maps an existing party's identification to its id. */
 const tercerosModeloCon = (porIdentificacion: Record<string, string> = {}) => {
   const creados: Record<string, unknown>[] = [];
@@ -87,32 +97,18 @@ const eliminacionModeloCon = (
   eliminarTodosEliminables: jest.fn(() => Promise.resolve(respuesta)),
 });
 
-/** Records every `guardar` call — the DTO's `cargos` line, unchanged, is
- *  what a row's import must forward. */
-const valoresRecurrentesModeloCon = () => {
-  const llamadas: { inmuebleId: string; valores: unknown }[] = [];
-  return {
-    llamadas,
-    guardar: jest.fn((inmuebleId: string, dto: { valores: unknown }) => {
-      llamadas.push({ inmuebleId, valores: dto.valores });
-      return Promise.resolve([]);
-    }),
-  };
-};
-
 describe('InmueblesService.importar', () => {
   it('crea cada fila como un inmueble, contando el total', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     const resultado = await service.importar({
@@ -134,15 +130,14 @@ describe('InmueblesService.importar', () => {
     // resubirse entero.
     const inmuebles = inmueblesModeloCon(['301']);
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     const resultado = await service.importar({
@@ -158,15 +153,14 @@ describe('InmueblesService.importar', () => {
   it('reutiliza un tercero existente por identificación, sin duplicarlo', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon({ '123456': 'ter-1' });
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -190,15 +184,14 @@ describe('InmueblesService.importar', () => {
     // viejos si el archivo trae una ciudad o un tipo de documento nuevos.
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon({ '123456': 'ter-1' });
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       catalogos as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -233,15 +226,14 @@ describe('InmueblesService.importar', () => {
   it('reimportar sin nombre en la fila no borra el nombre ya guardado del titular', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon({ '123456': 'ter-1' });
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -263,15 +255,14 @@ describe('InmueblesService.importar', () => {
   it('crea un tercero nuevo cuando la identificación no coincide con ninguno', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -288,15 +279,14 @@ describe('InmueblesService.importar', () => {
   it('concatena nom1Titular/ape1Titular en name para un titular persona natural', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -324,15 +314,14 @@ describe('InmueblesService.importar', () => {
   it('usa razonSocialTitular para un titular persona jurídica', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -349,15 +338,14 @@ describe('InmueblesService.importar', () => {
   it('deja el inmueble sin titular cuando la fila no trae ninguno: se carga antes que sus papeles', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
@@ -369,15 +357,14 @@ describe('InmueblesService.importar', () => {
   it('escribe siempre la copropiedad activa, nunca una de la fila', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
@@ -385,61 +372,17 @@ describe('InmueblesService.importar', () => {
     expect(inmuebles.escrituras[0]).toMatchObject({ coPropertyId: COP });
   });
 
-  it('guarda los cargos de la fila contra el inmueble recién creado', async () => {
-    const inmuebles = inmueblesModeloCon();
-    const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
-    const eliminacion = eliminacionModeloCon();
-    const service = new InmueblesService(
-      inmuebles as never,
-      terceros as never,
-      tenant,
-      valoresRecurrentes as never,
-      {} as never,
-      eliminacion as never,
-    );
-    const cargos = [{ conceptoId: 'con-1', monto: 350000 }];
-
-    await service.importar({ filas: [fila({ codigo: '301', cargos })] });
-
-    expect(valoresRecurrentes.guardar).toHaveBeenCalledTimes(1);
-    expect(valoresRecurrentes.llamadas[0]).toEqual({
-      inmuebleId: 'inm-nuevo',
-      valores: cargos,
-    });
-  });
-
-  it('una fila sin cargos no llama a guardar los valores recurrentes', async () => {
-    const inmuebles = inmueblesModeloCon();
-    const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
-    const eliminacion = eliminacionModeloCon();
-    const service = new InmueblesService(
-      inmuebles as never,
-      terceros as never,
-      tenant,
-      valoresRecurrentes as never,
-      {} as never,
-      eliminacion as never,
-    );
-
-    await service.importar({ filas: [fila({ codigo: '301' })] });
-
-    expect(valoresRecurrentes.guardar).not.toHaveBeenCalled();
-  });
-
   it('guarda la dirección del titular tal cual viene en la fila', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       catalogos as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -460,15 +403,14 @@ describe('InmueblesService.importar', () => {
   it('resuelve el código de ciudad a su nombre y el código de su departamento', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       catalogos as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({
@@ -491,15 +433,14 @@ describe('InmueblesService.importar', () => {
   it('una fila con un código de ciudad inexistente falla sola, sin abortar el resto', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       catalogos as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     const resultado = await service.importar({
@@ -520,15 +461,14 @@ describe('InmueblesService.importar', () => {
   it('una fila con un código de tipo de identificación inexistente falla sola', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       catalogos as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     const resultado = await service.importar({
@@ -549,15 +489,14 @@ describe('InmueblesService.importar', () => {
   it('borra los inmuebles eliminables ANTES de crear la primera fila: cada import reemplaza el listado', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
@@ -568,7 +507,6 @@ describe('InmueblesService.importar', () => {
   it('reporta cuántos inmuebles se borraron y cuáles quedaron por tener factura', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon();
-    const valoresRecurrentes = valoresRecurrentesModeloCon();
     const eliminacion = eliminacionModeloCon({
       eliminados: 12,
       bloqueados: ['101', '203'],
@@ -577,9 +515,9 @@ describe('InmueblesService.importar', () => {
       inmuebles as never,
       terceros as never,
       tenant,
-      valoresRecurrentes as never,
       {} as never,
       eliminacion as never,
+      progresoModeloCon() as never,
     );
 
     const resultado = await service.importar({

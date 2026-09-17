@@ -10,6 +10,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -104,6 +108,8 @@ export class CarteraPorInmuebleService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   async findOne(
@@ -144,7 +150,7 @@ export class CarteraPorInmuebleService {
     }
 
     const limiteEmision = limiteEmisionParaCorte(fecha);
-    const [facturas, notasDebito] = await Promise.all([
+    const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
         .find({
           coPropertyId,
@@ -161,11 +167,20 @@ export class CarteraPorInmuebleService {
           issueDate: { $lte: limiteEmision },
         })
         .exec(),
+      this.saldosIniciales
+        .find({
+          coPropertyId,
+          inmuebleId,
+          status: 'activo',
+          fecha: { $lte: limiteEmision },
+        })
+        .exec(),
     ]);
 
     const docIds = [
       ...facturas.map((f) => f._id),
       ...notasDebito.map((nd) => nd._id),
+      ...saldosIniciales.map((s) => s._id),
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
@@ -324,6 +339,58 @@ export class CarteraPorInmuebleService {
         numeroCompleto: nd.fullNumber,
         fecha: nd.issueDate.toISOString(),
         vence: null,
+        saldo,
+        cargosPorConcepto: cargosDoc,
+      });
+    }
+
+    for (const si of saldosIniciales) {
+      const apps = appsByDoc.get(si._id.toString()) ?? [];
+      const saldoVivoSi = saldoTotalById.get(si._id.toString());
+      const saldo =
+        esConsultaVigente && saldoVivoSi !== undefined
+          ? saldoVivoSi
+          : Math.max(
+              0,
+              si.total -
+                apps
+                  .filter((a) => activeAsOf(a, fecha))
+                  .reduce((sum, a) => sum + a.amountApplied, 0),
+            );
+      if (saldo <= 0) continue;
+
+      const carteraDoc = carteraDocById.get(si._id.toString());
+      let cargosDoc: Record<string, number>;
+      if (carteraDoc && carteraDoc.size > 0) {
+        cargosDoc = {};
+        for (const [conceptoId, monto] of carteraDoc) {
+          if (monto <= 0) continue;
+          cargosDoc[conceptoId] = monto;
+          totalesDocumentos.set(
+            conceptoId,
+            (totalesDocumentos.get(conceptoId) ?? 0) + monto,
+          );
+        }
+      } else {
+        const factor = si.total > 0 ? saldo / si.total : 0;
+        cargosDoc = {};
+        for (const line of si.lines) {
+          const key = line.conceptoId.toString();
+          const monto = line.montoOriginal * factor;
+          cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
+          totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + monto);
+        }
+      }
+
+      documentos.push({
+        documentoId: si._id.toString(),
+        // The client's own original code (e.g. "FV", "ND") from their
+        // previous system, never the literal "SI" — see
+        // `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock.
+        tipo: si.tipoDocumentoOriginal,
+        numeroCompleto: si.numeroOriginal,
+        fecha: si.fecha.toISOString(),
+        vence: si.fechaVencimiento.toISOString(),
         saldo,
         cargosPorConcepto: cargosDoc,
       });

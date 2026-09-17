@@ -41,6 +41,11 @@ const makeModelos = (over: {
     carteraPorDocumento: number;
     saldosDocumentoOrigen: number;
     lotesContabilidad: number;
+    saldosIniciales: number;
+    lotesSaldoInicial: number;
+    saldoTotalDocumento: number;
+    saldosInicialesAnticipo: number;
+    lotesSaldoInicialAnticipo: number;
   }>;
 }) => {
   const counts = {
@@ -58,6 +63,11 @@ const makeModelos = (over: {
     carteraPorDocumento: 0,
     saldosDocumentoOrigen: 0,
     lotesContabilidad: 0,
+    saldosIniciales: 0,
+    lotesSaldoInicial: 0,
+    saldoTotalDocumento: 0,
+    saldosInicialesAnticipo: 0,
+    lotesSaldoInicialAnticipo: 0,
     ...over.deletedCounts,
   };
 
@@ -84,6 +94,15 @@ const makeModelos = (over: {
   const carteraPorDocumento = deleteManyMock(counts.carteraPorDocumento);
   const saldosDocumentoOrigen = deleteManyMock(counts.saldosDocumentoOrigen);
   const lotesContabilidad = deleteManyMock(counts.lotesContabilidad);
+  const saldosIniciales = deleteManyMock(counts.saldosIniciales);
+  const lotesSaldoInicial = deleteManyMock(counts.lotesSaldoInicial);
+  const saldoTotalDocumento = deleteManyMock(counts.saldoTotalDocumento);
+  const saldosInicialesAnticipo = deleteManyMock(
+    counts.saldosInicialesAnticipo,
+  );
+  const lotesSaldoInicialAnticipo = deleteManyMock(
+    counts.lotesSaldoInicialAnticipo,
+  );
 
   const consecutivoLote = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
@@ -95,6 +114,12 @@ const makeModelos = (over: {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const consecutivoLoteContabilidad = {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const consecutivoSaldoInicial = {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const consecutivoSaldoInicialAnticipo = {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
   };
   const resoluciones = {
@@ -125,6 +150,13 @@ const makeModelos = (over: {
     saldosDocumentoOrigen,
     lotesContabilidad,
     consecutivoLoteContabilidad,
+    saldosIniciales,
+    lotesSaldoInicial,
+    consecutivoSaldoInicial,
+    saldoTotalDocumento,
+    saldosInicialesAnticipo,
+    lotesSaldoInicialAnticipo,
+    consecutivoSaldoInicialAnticipo,
   };
 };
 
@@ -153,6 +185,13 @@ const makeService = (
     modelos.notasContables as never,
     modelos.lotesContabilidad as never,
     modelos.consecutivoLoteContabilidad as never,
+    modelos.saldosIniciales as never,
+    modelos.lotesSaldoInicial as never,
+    modelos.consecutivoSaldoInicial as never,
+    modelos.saldoTotalDocumento as never,
+    modelos.saldosInicialesAnticipo as never,
+    modelos.lotesSaldoInicialAnticipo as never,
+    modelos.consecutivoSaldoInicialAnticipo as never,
     tenantQueDevuelve(coPropertyId),
   );
 
@@ -240,6 +279,11 @@ describe('ReiniciarCicloService.reiniciar', () => {
       carteraPorDocumentoEliminada: 0,
       saldosDocumentoOrigenEliminados: 0,
       lotesContabilidadEliminados: 0,
+      saldosInicialesEliminados: 0,
+      lotesSaldoInicialEliminados: 0,
+      saldoTotalDocumentoEliminado: 0,
+      saldosInicialesAnticipoEliminados: 0,
+      lotesSaldoInicialAnticipoEliminados: 0,
     });
   });
 
@@ -260,6 +304,74 @@ describe('ReiniciarCicloService.reiniciar', () => {
       { $set: { nextNumber: 0 } },
     );
     expect(resultado.lotesContabilidadEliminados).toBe(3);
+  });
+
+  it('borra los Saldos Iniciales y sus lotes, y reinicia su propio consecutivo', async () => {
+    // Regresión: el reinicio se escribió antes de que existiera el módulo de
+    // Saldos Iniciales — sin esto, la "cartera" quedaba en cero pero el
+    // documento fuente seguía apareciendo en el listado, y una nueva
+    // importación seguía numerando donde iba en vez de reiniciar en 1.
+    const modelos = makeModelos({
+      deletedCounts: { saldosIniciales: 5, lotesSaldoInicial: 2 },
+    });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.saldosIniciales.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.lotesSaldoInicial.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.consecutivoSaldoInicial.updateOne).toHaveBeenCalledWith(
+      { coPropertyId: COP },
+      { $set: { nextNumber: 0 } },
+    );
+    expect(resultado.saldosInicialesEliminados).toBe(5);
+    expect(resultado.lotesSaldoInicialEliminados).toBe(2);
+  });
+
+  it('borra los Saldos Iniciales de Anticipo y sus lotes, y reinicia su propio consecutivo', async () => {
+    // Regresión: el reinicio se escribió antes de que existiera Saldos
+    // Iniciales de Anticipo — sin esto, un anticipo importado sobrevivía al
+    // reinicio con su saldo disponible ya en cero (por el borrado sin
+    // filtrar de SaldoDocumentoOrigen), quedando huérfano en el listado.
+    const modelos = makeModelos({
+      deletedCounts: {
+        saldosInicialesAnticipo: 3,
+        lotesSaldoInicialAnticipo: 1,
+      },
+    });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.saldosInicialesAnticipo.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(modelos.lotesSaldoInicialAnticipo.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(
+      modelos.consecutivoSaldoInicialAnticipo.updateOne,
+    ).toHaveBeenCalledWith({ coPropertyId: COP }, { $set: { nextNumber: 0 } });
+    expect(resultado.saldosInicialesAnticipoEliminados).toBe(3);
+    expect(resultado.lotesSaldoInicialAnticipoEliminados).toBe(1);
+  });
+
+  it('borra SaldoTotalDocumento sin filtrar por tipo, junto con los otros libros por documento', async () => {
+    const modelos = makeModelos({
+      deletedCounts: { saldoTotalDocumento: 11 },
+    });
+    const service = makeService(modelos);
+
+    const resultado = await service.reiniciar();
+
+    expect(modelos.saldoTotalDocumento.deleteMany).toHaveBeenCalledWith({
+      coPropertyId: COP,
+    });
+    expect(resultado.saldoTotalDocumentoEliminado).toBe(11);
   });
 
   it('borra TODOS los asientos contables, sin filtrar por tipo de ancla', async () => {

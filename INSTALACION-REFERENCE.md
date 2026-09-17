@@ -119,7 +119,7 @@
 | `holderId` | ObjectId → Tercero | nullable, indexed | null | Titular responsable |
 | `holderKind` | enum | required | 'propietario' | `'propietario'` \| `'arrendatario'` |
 | `holderResides` | boolean | required | true | Reside en el inmueble |
-| `collectionStatus` | enum | required | 'al_dia' | `'al_dia'` \| `'juridico'` \| `'dificil_recaudo'` |
+| `collectionStatus` | enum | required | 'vigente' | `'vigente'` \| `'juridico'` \| `'dificil_recaudo'` |
 | `contactName` | string | nullable, trim | null | Persona de contacto |
 | `notes` | string | nullable, trim | null | Observaciones |
 | `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
@@ -458,7 +458,7 @@ Account (Cuenta)
   titularId?: MongoId
   tipoTitular?: 'propietario' | 'arrendatario'
   resideEnElInmueble?: boolean
-  estadoCartera?: 'al_dia' | 'juridico' | 'dificil_recaudo'
+  estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo'
   contacto?: string                // max:120
   observaciones?: string           // max:2000
   // coPropertyId viene del tenant context (no del body)
@@ -803,7 +803,7 @@ type Inmueble = {
   titular: TitularResumen | null;
   tipoTitular: "propietario" | "arrendatario";
   resideEnElInmueble: boolean;
-  estadoCartera: "al_dia" | "juridico" | "dificil_recaudo";
+  estadoCartera: "vigente" | "juridico" | "dificil_recaudo";
   estado: "activo" | "inactivo";
 };
 ```

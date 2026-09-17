@@ -74,6 +74,27 @@ const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
   ...over,
 });
 
+// Same shape as `ReciboFixture` on purpose — `SaldoInicialAnticipo` freezes
+// `fullNumber`/`receivedDate` under the exact names `cruce.util.ts`'s
+// `OrigenAplicacion` reads, precisely so it can stand in for a Recibo here
+// with no adapter, same as in production.
+type SaldoInicialAnticipoFixture = ReciboFixture;
+
+const saldoInicialAnticipoDoc = (
+  over: Partial<SaldoInicialAnticipoFixture> = {},
+): SaldoInicialAnticipoFixture => ({
+  _id: new Types.ObjectId(),
+  coPropertyId: COP,
+  inmuebleId: INMUEBLE,
+  terceroId: TERCERO,
+  fullNumber: 'RC 4152',
+  status: 'activo',
+  unappliedAmount: 300000,
+  appliedAmount: 0,
+  montoOriginal: 300000,
+  ...over,
+});
+
 const facturaDoc = (over: Partial<FacturaFixture> = {}): FacturaFixture => ({
   _id: new Types.ObjectId(),
   coPropertyId: COP,
@@ -97,6 +118,7 @@ const facturaDoc = (over: Partial<FacturaFixture> = {}): FacturaFixture => ({
 const construirServicio = (
   opciones: {
     recibo?: ReciboFixture;
+    saldoInicialAnticipo?: SaldoInicialAnticipoFixture;
     facturas?: FacturaFixture[];
     notaAnticipo?: NotaAnticipoFixture;
     ultimoLoteConsolidado?: unknown;
@@ -104,6 +126,14 @@ const construirServicio = (
 ) => {
   const session = sesionFalsa();
   const recibo = opciones.recibo ?? reciboDoc();
+  const saldoInicialAnticipo = opciones.saldoInicialAnticipo;
+  // Both possible origins a Nota de Anticipo can draw from in this fixture
+  // set — `saldoDocumentoOrigen` below is keyed by `documentoId`, agnostic
+  // to which one it actually is, same as in production.
+  const origenes = [
+    recibo,
+    ...(saldoInicialAnticipo ? [saldoInicialAnticipo] : []),
+  ];
   const facturasState = opciones.facturas ?? [facturaDoc()];
   let notaCreada: Record<string, unknown> = opciones.notaAnticipo ?? {};
   const aplicacionesCreadas: Record<string, unknown>[] = [];
@@ -181,6 +211,14 @@ const construirServicio = (
     })),
   };
 
+  const saldosInicialesAnticipo = {
+    findOne: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve(saldoInicialAnticipo ?? null),
+      }),
+    })),
+  };
+
   // The atomic guard/restore for the Recibo's own leftover now lives here,
   // not on `recibos` itself — see `SaldoDocumentoOrigen`'s own docblock.
   // Reuses `recibo`'s own `unappliedAmount` field as the shared backing
@@ -193,43 +231,48 @@ const construirServicio = (
         update: { $inc?: { saldoDisponible: number } },
       ) => ({
         exec: () => {
-          if (String(filtro.documentoId) !== String(recibo._id)) {
-            return Promise.resolve(null);
-          }
+          const origen = origenes.find(
+            (o) => String(o._id) === String(filtro.documentoId),
+          );
+          if (!origen) return Promise.resolve(null);
           if (filtro.$expr) {
             const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-            if (recibo.unappliedAmount < monto) {
+            if (origen.unappliedAmount < monto) {
               return Promise.resolve(null);
             }
-            recibo.unappliedAmount -= monto;
+            origen.unappliedAmount -= monto;
           } else if (update.$inc) {
-            recibo.unappliedAmount += update.$inc.saldoDisponible;
+            origen.unappliedAmount += update.$inc.saldoDisponible;
           }
           // Kept in sync purely for this fixture's own convenience — real
           // production code derives `appliedAmount` on read (see
           // `decrementarSaldoDocumentoOrigen`'s own `Object.assign`), it
-          // never writes it back onto the (immutable) Recibo.
-          recibo.appliedAmount = recibo.montoOriginal - recibo.unappliedAmount;
+          // never writes it back onto the (immutable) origin document.
+          origen.appliedAmount = origen.montoOriginal - origen.unappliedAmount;
           return Promise.resolve({
-            documentoId: recibo._id,
-            montoOriginal: recibo.montoOriginal,
-            saldoDisponible: recibo.unappliedAmount,
+            documentoId: origen._id,
+            montoOriginal: origen.montoOriginal,
+            saldoDisponible: origen.unappliedAmount,
           });
         },
       }),
     ),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: () => ({
-        exec: () =>
-          Promise.resolve(
-            String(filtro.documentoId) === String(recibo._id)
+        exec: () => {
+          const origen = origenes.find(
+            (o) => String(o._id) === String(filtro.documentoId),
+          );
+          return Promise.resolve(
+            origen
               ? {
-                  documentoId: recibo._id,
-                  montoOriginal: recibo.montoOriginal,
-                  saldoDisponible: recibo.unappliedAmount,
+                  documentoId: origen._id,
+                  montoOriginal: origen.montoOriginal,
+                  saldoDisponible: origen.unappliedAmount,
                 }
               : null,
-          ),
+          );
+        },
       }),
     })),
   };
@@ -381,15 +424,21 @@ const construirServicio = (
     conexionCon(session),
     lotesFacturacionFalso(opciones.ultimoLoteConsolidado ?? null),
     saldoDocumentoOrigen as never,
+    undefined,
+    undefined,
+    undefined,
+    saldosInicialesAnticipo as never,
   );
 
   return {
     service,
     recibo,
+    saldoInicialAnticipo,
     facturasState,
     asientosStore,
     notasAnticipo,
     recibos,
+    saldosInicialesAnticipo,
     saldoDocumentoOrigen,
   };
 };
@@ -612,6 +661,73 @@ describe('NotasAnticipoService.crear', () => {
     expect(resultado.montoAplicado).toBe(100000);
     // Intereses queda saldado, Administración sigue intacta.
     expect(factura.outstandingBalance).toBe(200000);
+  });
+});
+
+describe('NotasAnticipoService.crear (origenTipo: SI — Saldo Inicial de Anticipo)', () => {
+  it('aplica FIFO contra la factura abierta usando un Saldo Inicial de Anticipo como origen, nunca el modelo de Recibo', async () => {
+    const saldoInicialAnticipo = saldoInicialAnticipoDoc();
+    const {
+      service,
+      facturasState,
+      asientosStore,
+      recibos,
+      saldosInicialesAnticipo,
+    } = construirServicio({ saldoInicialAnticipo });
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      origenTipo: 'SI',
+      reciboOrigenId: saldoInicialAnticipo._id.toString(),
+      fechaEmision: '2026-09-01',
+      aplicacionAutomatica: true,
+    });
+
+    expect(resultado.montoAplicado).toBe(200000);
+    expect(resultado.origenTipo).toBe('SI');
+    expect(saldoInicialAnticipo.unappliedAmount).toBe(100000);
+    expect(facturasState[0].outstandingBalance).toBe(0);
+    // Nunca consulta el modelo de Recibo para un origen 'SI'.
+    expect(recibos.findOne).not.toHaveBeenCalled();
+    expect(saldosInicialesAnticipo.findOne).toHaveBeenCalled();
+
+    expect(asientosStore).toHaveLength(1);
+    const debitos = (
+      asientosStore[0].entries as Array<{ type: string; amount: number }>
+    ).filter((m) => m.type === 'debito');
+    expect(debitos).toHaveLength(1);
+    expect(debitos[0].amount).toBe(200000);
+  });
+
+  it('lanza NotFoundException si el saldo inicial de anticipo no existe o no está activo', async () => {
+    const { service } = construirServicio();
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        codigo: 'NA',
+        origenTipo: 'SI',
+        reciboOrigenId: new Types.ObjectId().toString(),
+        fechaEmision: '2026-09-01',
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rechaza si el saldo inicial de anticipo no tiene anticipo pendiente', async () => {
+    const saldoInicialAnticipo = saldoInicialAnticipoDoc({
+      unappliedAmount: 0,
+    });
+    const { service } = construirServicio({ saldoInicialAnticipo });
+
+    await expect(
+      service.crear(CUENTA.toString(), {
+        codigo: 'NA',
+        origenTipo: 'SI',
+        reciboOrigenId: saldoInicialAnticipo._id.toString(),
+        fechaEmision: '2026-09-01',
+        aplicacionAutomatica: true,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

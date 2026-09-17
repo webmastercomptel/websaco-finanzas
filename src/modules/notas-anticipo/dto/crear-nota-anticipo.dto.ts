@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
+  IsIn,
   IsMongoId,
   IsOptional,
   IsString,
@@ -31,6 +32,15 @@ export class CrearNotaAnticipoDto {
   @MinLength(1)
   @MaxLength(20)
   codigo: string;
+
+  /** Which collection `reciboOrigenId` points into. Defaults to `'RC'`
+   *  (a real Recibo) when omitted — the only case that existed before
+   *  Saldos Iniciales de Anticipo. `'SI'` targets a `SaldoInicialAnticipo`
+   *  instead, an opening credit balance imported from the client's
+   *  previous system. */
+  @IsOptional()
+  @IsIn(['RC', 'SI'])
+  origenTipo?: 'RC' | 'SI';
 
   @IsMongoId()
   reciboOrigenId: string;
