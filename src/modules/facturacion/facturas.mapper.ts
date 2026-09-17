@@ -1,6 +1,7 @@
 import type {
   Factura as FacturaContract,
   FacturaLinea as FacturaLineaContract,
+  NodoDocumentoFactura,
   TitularFactura,
 } from '../../contracts';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
@@ -90,4 +91,7 @@ export const toFactura = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  // Opaque blob, passed through unchanged — see "the contract law" note on
+  // `Factura.documentDefinition` (contracts/index.ts).
+  documentDefinition: doc.documentDefinition as NodoDocumentoFactura | null,
 });

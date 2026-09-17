@@ -37,20 +37,16 @@ import type {
   LoteFacturacionDetalle,
   ResultadoCargaNovedades,
   RespuestaConsultaFacturacion,
+  DocumentoFacturaLote,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfPrefactura } from '../../common/pdf/prefactura-pdf';
 import { generarPdfPrefacturasLote } from '../../common/pdf/prefacturas-lote-pdf';
-import { generarPdfFacturasLote } from '../../common/pdf/facturas-lote-pdf';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
-import {
-  ResolucionFacturacion,
-  ResolucionFacturacionDocument,
-} from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
@@ -69,8 +65,6 @@ export class LotesController {
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
-    @InjectModel(ResolucionFacturacion.name)
-    private readonly resoluciones: Model<ResolucionFacturacionDocument>,
   ) {}
 
   @Get()
@@ -198,8 +192,9 @@ export class LotesController {
   /**
    * Every unit's prefactura from the lote's CURRENT previsualización,
    * bundled into one PDF — the Liquidación screen's full-batch preview,
-   * reachable before consolidación even exists (unlike `:id/facturas.pdf`
-   * below, which needs real Facturas). Reflects whatever `preview` holds
+   * reachable before consolidación even exists (unlike
+   * `:id/facturas/documentos` below, which needs real Facturas). Reflects
+   * whatever `preview` holds
    * right now, edits included, since it is generated fresh on every call
    * rather than cached.
    */
@@ -241,18 +236,26 @@ export class LotesController {
   }
 
   /**
-   * Every Factura this lote's consolidación produced, bundled into one PDF —
-   * one invoice per page, in the exact layout `GET /facturas/:id/pdf`
-   * already shows for one at a time. See `generarPdfFacturasLote`.
+   * Every Factura this lote's consolidación produced, as its own frozen
+   * `documentDefinition` — one entry per invoice, in the exact layout
+   * `GET /facturas/:id/pdf` already shows for one at a time (both read the
+   * same field, frozen once by `LotesFacturacionService.consolidar()`; see
+   * `serializarArbol`). No PDF is built here anymore — the browser renders
+   * each entry client-side — so there's nothing left to stream: `.lean()`
+   * (`findAllRawPorLote`) already keeps this cheap for a lote with hundreds
+   * of invoices, the way `.lean()` + streaming used to for the PDF version.
+   *
+   * Route renamed from `:id/facturas.pdf` — the old `.pdf` suffix would be
+   * actively misleading on a JSON response.
    */
-  @Get(':id/facturas.pdf')
+  @Get(':id/facturas/documentos')
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  async generarPdfFacturas(
+  async obtenerDocumentosFacturas(
     @Param('id') id: string,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOneRaw(id);
+  ): Promise<DocumentoFacturaLote[]> {
+    // Confirms the lote exists (and belongs to this tenant) before reporting
+    // "no facturas emitidas" instead of a plain empty array either way.
+    await this.lotes.findOneRaw(id);
 
     const facturas = await this.facturas.findAllRawPorLote(id);
     if (facturas.length === 0) {
@@ -261,45 +264,13 @@ export class LotesController {
       );
     }
 
-    const idsResolucion = [
-      ...new Set(
-        facturas
-          .map((f) => f.resolucionId?.toString())
-          .filter((x): x is string => Boolean(x)),
-      ),
-    ];
-    const resoluciones = idsResolucion.length
-      ? await this.resoluciones
-          .find({ _id: { $in: idsResolucion }, coPropertyId })
-          .exec()
-      : [];
-    const resolucionesPorId = new Map(
-      resoluciones.map((r) => [r._id.toString(), r]),
-    );
-
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
-    if (!copropiedad) {
-      throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
-      );
-    }
-
-    const stream = await generarPdfFacturasLote(
-      facturas,
-      resolucionesPorId,
-      copropiedad,
-    );
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="facturas-lote-${lote.number}.pdf"`,
-    });
-    // Piped, not buffered — `generarPdfFacturasLote` streams the render so a
-    // lote with hundreds of invoices never sits fully in memory before it
-    // reaches the client. `pipeline` (not raw `.pipe`) so a client disconnect
-    // mid-download destroys the render stream too, instead of leaving the
-    // request hung forever.
-    await pipeline(stream, res);
+    return facturas.map((factura) => ({
+      id: factura._id.toString(),
+      // Opaque blob, passed through unchanged — same cast `toFactura`
+      // (`facturas.mapper.ts`) uses for the same field.
+      documentDefinition: (factura.documentDefinition ??
+        null) as DocumentoFacturaLote['documentDefinition'],
+    }));
   }
 
   /**

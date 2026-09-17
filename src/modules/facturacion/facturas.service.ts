@@ -109,13 +109,18 @@ export class FacturasService {
     );
 
     return {
-      items: documentos.map((doc) =>
-        toFactura(
+      // `documentDefinition` nulled out here on purpose — a listing page
+      // (default 50/página) has no use for each row's full frozen
+      // presentation tree, and shipping it here would multiply the payload
+      // for no reason. `findOne` below is the only place that needs it.
+      items: documentos.map((doc) => ({
+        ...toFactura(
           doc,
           saldoPorDocumento.get(doc._id.toString()) ?? 0,
           carteraPorDoc.get(doc._id.toString()) ?? new Map<string, number>(),
         ),
-      ),
+        documentDefinition: null,
+      })),
       total,
       pagina,
       porPagina,
@@ -142,32 +147,18 @@ export class FacturasService {
   }
 
   /**
-   * Returns the raw Mongoose document — used by PDF generation which needs
-   * fields like `resolucionId` that the mapped contract intentionally omits.
-   */
-  async findOneRaw(id: string): Promise<FacturaDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const documento = await this.facturas
-      .findOne({ _id: id, coPropertyId })
-      .exec();
-    if (!documento) {
-      throw new NotFoundException(`No se encontró la factura ${id}`);
-    }
-    return documento;
-  }
-
-  /**
-   * Every Factura one lote's consolidación produced, raw — used by the
-   * "todas las facturas" bulk PDF (`LotesController`), same reason
-   * `findOneRaw` skips the mapped contract: PDF generation needs
-   * `resolucionId` and the other fields the Spanish contract omits.
+   * Every Factura one lote's consolidación produced, raw — used by
+   * `LotesController.obtenerDocumentosFacturas` to hand the browser each
+   * invoice's own frozen `documentDefinition` (the mapped contract skips
+   * that field's raw shape; this reads it as `.lean()` gave it to us).
    * Ordered by unit code, the same order the roster and the Liquidación
-   * table already use, so a printed batch reads in a predictable sequence.
+   * table already use, so a batch reads in a predictable sequence.
    *
-   * `.lean()` on purpose: a lote can carry hundreds of Facturas, and the PDF
-   * renderer (`paginaFactura`) only ever reads plain fields (see
-   * `FacturaLean` below) — hydrating full Mongoose documents here is pure
-   * overhead this batch PDF can't afford under Cloud Run's memory ceiling.
+   * `.lean()` on purpose: a lote can carry hundreds of Facturas, and this
+   * only ever needs plain fields (see `FacturaLean` below, also used by
+   * `paginaFactura` when `consolidar()` first builds each `documentDefinition`)
+   * — hydrating full Mongoose documents here is pure overhead this batch
+   * endpoint can't afford under Cloud Run's memory ceiling.
    */
   async findAllRawPorLote(loteId: string) {
     const coPropertyId = this.tenant.resolveCoPropertyId();

@@ -11,12 +11,13 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 
 /**
  * Bundles every FacturaPreliminar of a lote's previsualización into a single
- * PDF, one prefactura per unit per page — same one-`<Document>`-many-`<Page>`s
- * approach as `generarPdfFacturasLote`, built on `paginaPrefactura`.
+ * PDF, one prefactura per unit per page — one `<Document>` with many
+ * `<Page>`s, built on `paginaPrefactura`.
  *
- * Streams the render (`renderizarPdfStream`) rather than buffering it, same
- * reason as `generarPdfFacturasLote` — a lote's full previsualización can run
- * into the hundreds of units.
+ * Streams the render (`renderizarPdfStream`) rather than buffering it — a
+ * lote's full previsualización can run into the hundreds of units, and
+ * `renderToBuffer` would hold the whole rendered PDF in memory twice over
+ * before returning.
  */
 export async function generarPdfPrefacturasLote(
   previsualizacion: FacturaPreliminar[],

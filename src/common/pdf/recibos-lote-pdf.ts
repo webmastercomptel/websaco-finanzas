@@ -5,7 +5,7 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 /**
  * Bundles every Recibo of one Recibos-por-lote batch into a single PDF, one
  * receipt per page — same one-`<Document>`-many-`<Page>`s approach as
- * `generarPdfFacturasLote`, built on `contenidoRecibo`.
+ * `generarPdfPrefacturasLote`, built on `contenidoRecibo`.
  */
 export async function generarPdfRecibosLote(
   datos: DatosReciboImpresion[],

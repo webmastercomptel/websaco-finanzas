@@ -1,7 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
-import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import {
   DatosAdquiriente,
@@ -15,7 +14,6 @@ import type {
   FacturaLinea,
   TitularCongelado,
 } from '../../database/schemas/facturacion/factura-linea.schema';
-import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { FacturaLean } from '../../modules/facturacion/facturas.service';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -76,9 +74,9 @@ const styles = StyleSheet.create({
  * charges AND their running balance per concept, exactly like the WebSaco
  * original. Composed from Bernardo's approved layout components
  * (`EncabezadoDocumento`, `DatosAdquiriente`, `CuerpoFactura`,
- * `ObservacionesFactura`). Returns page content only — `generarPdfFactura`
- * still appends the DIAN footer on top before rendering; `generarPdfPrefactura`
- * uses this as-is.
+ * `ObservacionesFactura`). Returns page content only — `paginaFactura`
+ * still appends the DIAN footer on top; `paginaPrefactura`
+ * (`prefactura-pdf.ts`) uses this as-is.
  *
  * The IVA breakout row (only when `totalIva > 0`) isn't part of
  * `CuerpoFactura` — that component is Bernardo's in-flight file, so this adds
@@ -178,16 +176,17 @@ export function contenidoDocumentoFacturacion(
 }
 
 /**
- * One Factura's full page content (body + DIAN footer) — factored out of
- * `generarPdfFactura` so `facturas-lote-pdf.ts` can reuse the exact same
- * per-invoice content across N pages of one `<Document>`, instead of
- * rendering N separate PDFs and merging bytes (pdf-lib's approach, with no
- * react-pdf equivalent).
+ * One Factura's full page content (body + DIAN footer). Its output feeds two
+ * consumers: `LotesFacturacionService.consolidar()` serializes it once, per
+ * invoice, into the frozen `documentDefinition` the browser later renders
+ * (see `serializarArbol`); `paginaPrefactura` (`prefactura-pdf.ts`) mirrors
+ * its shape but is NOT built from it, since a prefactura has no real Factura
+ * behind it yet.
  *
  * Accepts `FacturaLean` (not `FacturaDocument`) — a real hydrated document is
  * structurally assignable to the plain-fields lean shape, so this only reads
- * what it always read; widened so `generarPdfFacturasLote` can pass
- * `.lean()`-fetched invoices for an entire lote without hydrating each one.
+ * what it always read; widened so a whole lote's invoices (`.lean()`-fetched,
+ * not hydrated) can be passed through just as easily as one at a time.
  */
 export function paginaFactura(
   factura: FacturaLean,
@@ -235,33 +234,5 @@ export function paginaFactura(
     null,
     contenidoDocumentoFacturacion(datos, copropiedad),
     pie,
-  );
-}
-
-/**
- * Generates a real PDF for a Factura (sales invoice) already numbered and
- * consolidada. `resolucion` supplies both the document's own printed name
- * (`displayName`, e.g. "Cobro Expensas Comunes") and the DIAN authorisation
- * footer legally required on Colombian invoices that file electronic
- * invoicing — null for a coproperty with no active resolution, where a
- * generic Spanish title is used instead and the footer is skipped. When
- * `duplicado` is true, stamps the "DUPLICADO" mark.
- *
- * The early-payment discount note reads `factura.discountAmount`/
- * `discountDeadline` directly — frozen at `consolidar()` time
- * (`LotesFacturacionService`), never recalculated here. No `lote` lookup
- * needed for this anymore (see `FacturasController.generarPdf`, which used
- * to load it solely for this). React-pdf, built directly (no pdf-lib
- * version kept behind a `?version=` toggle — direct cutover, same as the
- * rest of this migration).
- */
-export async function generarPdfFactura(
-  factura: FacturaDocument,
-  resolucion: ResolucionFacturacionDocument | null,
-  copropiedad: CopropiedadDocument,
-  opciones?: { duplicado?: boolean },
-): Promise<Buffer> {
-  return renderizarPdf(
-    reporteDocumento(paginaFactura(factura, resolucion, copropiedad, opciones)),
   );
 }

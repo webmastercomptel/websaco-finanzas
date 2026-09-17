@@ -49,9 +49,10 @@ export function paginaPrefactura(
 
 /**
  * Generates a preview PDF for one unit's not-yet-issued FacturaPreliminar.
- * Same layout as `generarPdfFactura` — per product decision, a prefactura
- * and a factura must look identical — built through the same shared
- * renderer (`contenidoDocumentoFacturacion`); the only visible difference is
+ * Same layout as a Factura's own page (`paginaFactura`, `factura-pdf.ts`) —
+ * per product decision, a prefactura and a factura must look identical —
+ * built through the same shared renderer (`contenidoDocumentoFacturacion`);
+ * the only visible difference is
  * the "PREFACTURA" title in place of the document's real name. Dates come
  * from the parent Lote — a preliminar itself carries none — and there is no
  * DIAN footer or duplicado stamp, since nothing has been issued yet to

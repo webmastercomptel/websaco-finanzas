@@ -198,6 +198,16 @@ export interface FacturaLinea {
   saldoPendiente: Monto;
 }
 
+/**
+ * One node of a frozen react-pdf presentation tree — see
+ * `Factura.documentDefinition` below. Kept as a local, minimal type instead
+ * of importing `NodoSerializado` from `common/pdf/react/serializar-arbol`:
+ * this file is the Spanish API surface, not a place that reaches into
+ * `common/pdf`'s internals.
+ */
+export type NodoDocumentoFactura =
+  string | number | null | { type: string; props: Record<string, unknown> };
+
 /** A sales invoice ("FV"), only ever created already numbered. */
 export interface Factura {
   id: string;
@@ -228,6 +238,20 @@ export interface Factura {
   motivoAnulacion: MotivoAnulacionFactura | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `consolidar()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  an invoice whose consolidación ran before this field existed, or
+   *  whose presentation-cache step failed — the invoice itself is still
+   *  valid either way, this is presentation, not business data. */
+  documentDefinition: NodoDocumentoFactura | null;
+}
+
+/** One entry of `GET /lotes/:id/facturas/documentos` — a lote's invoices,
+ *  each as its own frozen presentation tree, for the browser to render.
+ *  See `Factura.documentDefinition`. */
+export interface DocumentoFacturaLote {
+  id: string;
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** Why a Factura was voided — same catalog as a Nota Crédito's void (no
