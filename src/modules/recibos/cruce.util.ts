@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import type { ClientSession, Model } from 'mongoose';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import type { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import type { SaldoCarteraDocument } from '../../database/schemas/facturacion/saldo-cartera.schema';
 import type { CarteraPorDocumentoDocument } from '../../database/schemas/facturacion/cartera-por-documento.schema';
 import type { SaldoTotalDocumentoDocument } from '../../database/schemas/facturacion/saldo-total-documento.schema';
@@ -160,6 +161,56 @@ export async function decrementarSaldoNotaDebito(
   }
 
   return Object.assign(notaDebito, {
+    outstandingBalance: saldoActualizado.saldoPendiente,
+  });
+}
+
+/**
+ * Atomically decrements one Saldo Inicial's `SaldoTotalDocumento` row by
+ * `amount`, inside `session`, refusing (throwing) if that would push it
+ * below zero — sibling to `decrementarSaldoFactura`/`decrementarSaldoNotaDebito`,
+ * same discipline. Unlike a Nota Débito, a Saldo Inicial has several
+ * conceptos (like a Factura) — its `outstandingBalance` is settled through
+ * the SAME `ajustarSaldosCartera`/`ajustarSaldosCarteraPorDistribucion`
+ * functions a Factura uses, just retargeted via their `tipoDocumento`
+ * parameter, never a separate cascade written for this document.
+ */
+export async function decrementarSaldoInicial(
+  saldosIniciales: Model<SaldoInicialDocument>,
+  saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  saldoInicialId: Types.ObjectId,
+  amount: number,
+): Promise<ConSaldoPendiente<SaldoInicialDocument>> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new AplicacionInvalidaError(saldoInicialId.toString(), amount);
+  }
+
+  const saldoActualizado = await saldoTotalDocumento
+    .findOneAndUpdate(
+      {
+        documentoId: saldoInicialId,
+        $expr: { $gte: ['$saldoPendiente', amount] },
+      },
+      { $inc: { saldoPendiente: -amount } },
+      { returnDocument: 'after', session },
+    )
+    .exec();
+
+  if (!saldoActualizado) {
+    throw new AplicacionInvalidaError(saldoInicialId.toString(), amount);
+  }
+
+  const saldoInicial = await saldosIniciales
+    .findOne({ _id: saldoInicialId, coPropertyId, status: 'activo' })
+    .session(session)
+    .exec();
+  if (!saldoInicial) {
+    throw new AplicacionInvalidaError(saldoInicialId.toString(), amount);
+  }
+
+  return Object.assign(saldoInicial, {
     outstandingBalance: saldoActualizado.saldoPendiente,
   });
 }
@@ -412,6 +463,12 @@ export async function ajustarSaldosCartera(
   },
   montoTotal: number,
   signo: 1 | -1,
+  // Which kind of document `factura` actually is — defaults to `'FV'` so
+  // every pre-existing call site (all of them against a real Factura) keeps
+  // compiling unchanged. `SaldoInicial` reuses this SAME waterfall (see that
+  // schema's own docblock) by passing `'SI'` here — never a duplicated
+  // function.
+  tipoDocumento: DocumentType = 'FV',
 ): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
   if (factura.lines.length === 0 || factura.total === 0 || montoTotal === 0) {
     return [];
@@ -477,7 +534,7 @@ export async function ajustarSaldosCartera(
       session,
       coPropertyId,
       factura.inmuebleId,
-      'FV',
+      tipoDocumento,
       factura._id,
       linea.conceptoId,
       parte,
@@ -736,7 +793,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
  * negative — `=== 0` is unambiguous, no epsilon needed).
  */
 export type ResumenAplicacion = {
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   numero: number;
   completa: boolean;
 };
@@ -750,10 +807,45 @@ export type ResumenAplicacion = {
  *  line's own documento cruce — the SPECIFIC Factura/Nota Débito it settled,
  *  never merged across documents even when several share the same `cuenta`
  *  (see `agruparPorCuentaYDocumento`, asiento.builder.ts). */
+/** The minimal per-línea shape `cuentaCarteraDeLinea` needs — matches
+ *  `FacturaLinea`/`SaldoInicialLinea` structurally, kept minimal so it isn't
+ *  tied to either Mongoose subdocument type. */
+interface LineaParaDesglose {
+  conceptKind?: 'administracion' | 'intereses' | 'otro';
+  accountingReceivableAccount?: string | null;
+  accountingIncomeAccount?: string | null;
+}
+
+/**
+ * Which account a payment applied against `linea` credits, to zero out
+ * whatever was posted for it at invoice time — mirrors
+ * `construirMovimientos`'s own `usaCuentasOrden` check (asiento.builder.ts):
+ * an `intereses` (mora) línea, on a coproperty that `usesMemorandumAccounts`,
+ * was NEVER debited to its own `accountingReceivableAccount` when invoiced —
+ * `construirMovimientos` posted the memorandum pair there instead, since
+ * mora income isn't recognized until it's actually collected. So collecting
+ * it now must credit `accountingIncomeAccount` (the Cargos tab's crédito
+ * account, recognizing the income for the first time), never
+ * `accountingReceivableAccount` (nothing was ever debited there to zero
+ * out). Every other línea — administración/otro always, and intereses too
+ * when the coproperty doesn't use memorandum accounts — was debited to its
+ * own `accountingReceivableAccount` at invoice time, same as always, so
+ * that's still the right account to credit here.
+ */
+export function cuentaCarteraDeLinea(
+  linea: LineaParaDesglose | null | undefined,
+  usesMemorandumAccounts: boolean,
+): string | null {
+  if (linea?.conceptKind === 'intereses' && usesMemorandumAccounts) {
+    return linea.accountingIncomeAccount ?? null;
+  }
+  return linea?.accountingReceivableAccount ?? null;
+}
+
 export type DesgloseCarteraAplicacion = {
   cuenta: string | null;
   monto: number;
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   numeroDocumento: number;
 };
 
@@ -839,6 +931,13 @@ export function evaluarAplicacionConDescuento(
 export interface ContextoAplicacion {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
+  /** Optional only so the many callers/tests that predate Saldos Iniciales
+   *  keep compiling without passing one — "not provided" is treated as "no
+   *  Saldos Iniciales exist for this tenant" (see `ejecutarAplicacionFifo`),
+   *  never a crash. A caller that explicitly requests `tipoDocumento: 'SI'`
+   *  (`ejecutarAplicacionManual`) without one is a real caller error, not a
+   *  tenant with none. */
+  saldosIniciales?: Model<SaldoInicialDocument>;
   aplicaciones: Model<AplicacionCarteraDocument>;
   saldos: Model<SaldoCarteraDocument>;
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>;
@@ -858,6 +957,10 @@ export interface ContextoAplicacion {
    *  field's own schema docblock for why. */
   sourceDate: Date;
   accountId: string;
+  /** The coproperty's `usesMemorandumAccounts` (Copropiedad schema) — decides
+   *  which account an `intereses` línea's desglose entry credits, see
+   *  `cuentaCarteraDeLinea`'s own docblock. */
+  usesMemorandumAccounts: boolean;
 }
 
 /**
@@ -898,6 +1001,7 @@ export async function ejecutarAplicacionManual(
   const {
     facturas,
     notasDebito,
+    saldosIniciales,
     aplicaciones,
     saldos,
     carteraPorDocumento,
@@ -911,6 +1015,7 @@ export async function ejecutarAplicacionManual(
     sourceId,
     sourceDate,
     accountId,
+    usesMemorandumAccounts,
   } = ctx;
 
   // `recibo.unappliedAmount` is no longer a field the (now immutable)
@@ -1025,6 +1130,155 @@ export async function ejecutarAplicacionManual(
         tipo: 'ND',
         numero: notaDebito.number,
         completa: notaDebito.outstandingBalance === 0,
+      });
+      continue;
+    }
+
+    if (solicitada.tipoDocumento === 'SI') {
+      if (!saldosIniciales) {
+        throw new BadRequestException(
+          'Esta operación no tiene configurado el modelo de Saldos Iniciales',
+        );
+      }
+      // A Saldo Inicial has several conceptos, like a Factura — same
+      // waterfall/distribucion choice, never the ND single-concepto path.
+      const saldoInicialDoc = await saldosIniciales
+        .findOne({ _id: documentoId, coPropertyId, status: 'activo' })
+        .session(session)
+        .exec();
+      if (!saldoInicialDoc) {
+        throw new AplicacionInvalidaError(
+          documentoId.toString(),
+          solicitada.montoAplicado,
+        );
+      }
+      const saldoPrevioInicial = await saldoTotalDocumento
+        .findOne({ documentoId })
+        .session(session)
+        .exec();
+      // Adapted shape, `lines[].totalAmount` in place of `.montoOriginal` —
+      // `ajustarSaldosCartera`/`remanentesPorLinea` are duck-typed against
+      // Factura's own field names; a Saldo Inicial never carries a
+      // persisted per-línea `remainingAmount` (no Factura-style lazy
+      // migration field), so remainders always derive fresh from the
+      // aggregate, same as a legacy Factura línea that predates that field.
+      const saldoInicialActual = {
+        _id: saldoInicialDoc._id,
+        inmuebleId: saldoInicialDoc.inmuebleId,
+        total: saldoInicialDoc.total,
+        outstandingBalance: saldoPrevioInicial?.saldoPendiente ?? 0,
+        lines: saldoInicialDoc.lines.map((l) => ({
+          conceptoId: l.conceptoId,
+          totalAmount: l.montoOriginal,
+        })),
+      };
+      const repartoElegidoSI = solicitada.distribucion?.length
+        ? solicitada.distribucion
+        : null;
+      if (repartoElegidoSI) {
+        validarDistribucionManual(
+          repartoElegidoSI,
+          solicitada.montoAplicado,
+          remanentesPorLinea(saldoInicialActual),
+        );
+      }
+
+      const saldoInicial = await decrementarSaldoInicial(
+        saldosIniciales,
+        saldoTotalDocumento,
+        session,
+        coPropertyId,
+        documentoId,
+        solicitada.montoAplicado,
+      );
+
+      if (!saldoInicial.inmuebleId.equals(recibo.inmuebleId)) {
+        throw new ConflictException(
+          `El saldo inicial ${documentoId.toString()} pertenece a otro ` +
+            `inmueble (${saldoInicial.inmuebleId.toString()}) que el recibo ` +
+            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+        );
+      }
+
+      const partesSI = repartoElegidoSI
+        ? await ajustarSaldosCarteraPorDistribucion(
+            saldos,
+            carteraPorDocumento,
+            session,
+            coPropertyId,
+            saldoInicial.inmuebleId,
+            repartoElegidoSI.map((l) => ({
+              conceptoId: new Types.ObjectId(l.conceptoId),
+              monto: l.monto,
+            })),
+            solicitada.montoAplicado,
+            -1,
+            { tipoDocumento: 'SI', documentoId: saldoInicial._id },
+          )
+        : await ajustarSaldosCartera(
+            saldos,
+            carteraPorDocumento,
+            session,
+            coPropertyId,
+            saldoInicialActual,
+            solicitada.montoAplicado,
+            -1,
+            'SI',
+          );
+
+      const detalleConceptosSI = partesSI.map((parte) => {
+        const linea = saldoInicial.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        return {
+          conceptoId: parte.conceptoId,
+          conceptName: linea?.conceptName ?? 'Concepto',
+          monto: parte.parte,
+        };
+      });
+      for (const parte of partesSI) {
+        const linea = saldoInicial.lines.find((l) =>
+          l.conceptoId.equals(parte.conceptoId),
+        );
+        if (parte.parte !== 0) {
+          desglose.push({
+            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+            monto: parte.parte,
+            tipoDocumento: 'SI',
+            numeroDocumento: saldoInicial.number,
+          });
+        }
+        if (linea?.conceptKind === 'intereses') {
+          montoAplicadoMora += parte.parte;
+        }
+      }
+      sumaCashAplicada += solicitada.montoAplicado - descuentoLinea;
+      montoDescuentoTotal += descuentoLinea;
+
+      const [creadaSI] = await aplicaciones.create(
+        [
+          {
+            coPropertyId,
+            sourceType,
+            sourceId,
+            documentType: 'SI',
+            documentId: documentoId,
+            amountApplied: solicitada.montoAplicado,
+            discountApplied: descuentoLinea,
+            detalleConceptos: detalleConceptosSI,
+            status: 'activa',
+            appliedAt: new Date(),
+            sourceDate,
+            appliedBy: accountId,
+          },
+        ],
+        { session },
+      );
+      creadas.push(creadaSI);
+      resumen.push({
+        tipo: 'SI',
+        numero: saldoInicial.number,
+        completa: saldoInicial.outstandingBalance === 0,
       });
       continue;
     }
@@ -1162,7 +1416,7 @@ export async function ejecutarAplicacionManual(
       );
       if (parte.parte !== 0) {
         desglose.push({
-          cuenta: linea?.accountingReceivableAccount ?? null,
+          cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
           monto: parte.parte,
           tipoDocumento: 'FV',
           numeroDocumento: factura.number,
@@ -1255,6 +1509,7 @@ export async function ejecutarAplicacionFifo(
   const {
     facturas,
     notasDebito,
+    saldosIniciales,
     aplicaciones,
     saldos,
     carteraPorDocumento,
@@ -1268,13 +1523,18 @@ export async function ejecutarAplicacionFifo(
     sourceId,
     sourceDate,
     accountId,
+    usesMemorandumAccounts,
   } = ctx;
 
   // Candidate documents are bounded to this ONE inmueble (a small set) —
   // fetched first, THEN cross-referenced against `SaldoTotalDocumento` for
   // which still have a positive balance, instead of a field filter that no
   // longer exists on the (now immutable) Factura/NotaDebito documents.
-  const [facturasDelInmueble, notasDebitoDelInmueble] = await Promise.all([
+  const [
+    facturasDelInmueble,
+    notasDebitoDelInmueble,
+    saldoInicialesDelInmueble,
+  ] = await Promise.all([
     facturas
       .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
@@ -1283,10 +1543,21 @@ export async function ejecutarAplicacionFifo(
       .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
       .exec(),
+    saldosIniciales
+      ? saldosIniciales
+          .find({
+            coPropertyId,
+            inmuebleId: recibo.inmuebleId,
+            status: 'activo',
+          })
+          .session(session)
+          .exec()
+      : Promise.resolve([]),
   ]);
   const idsDelInmueble = [
     ...facturasDelInmueble.map((f) => f._id),
     ...notasDebitoDelInmueble.map((n) => n._id),
+    ...saldoInicialesDelInmueble.map((s) => s._id),
   ];
   const saldosTotales = idsDelInmueble.length
     ? await saldoTotalDocumento
@@ -1310,6 +1581,11 @@ export async function ejecutarAplicacionFifo(
   const notasDebitoAbiertas = notasDebitoDelInmueble
     .filter((n) => saldoPorDocumento.has(n._id.toString()))
     .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
+  const saldoInicialesAbiertos = saldoInicialesDelInmueble
+    .filter((s) => saldoPorDocumento.has(s._id.toString()))
+    .sort(
+      (a, b) => a.fechaVencimiento.getTime() - b.fechaVencimiento.getTime(),
+    );
 
   type Candidato =
     | {
@@ -1321,6 +1597,12 @@ export async function ejecutarAplicacionFifo(
     | {
         tipo: 'ND';
         doc: NotaDebitoDocument;
+        saldoPendiente: number;
+        prioridad: Date;
+      }
+    | {
+        tipo: 'SI';
+        doc: SaldoInicialDocument;
         saldoPendiente: number;
         prioridad: Date;
       };
@@ -1337,6 +1619,12 @@ export async function ejecutarAplicacionFifo(
       doc: nota,
       saldoPendiente: saldoPorDocumento.get(nota._id.toString())!,
       prioridad: nota.issueDate,
+    })),
+    ...saldoInicialesAbiertos.map((saldoInicial): Candidato => ({
+      tipo: 'SI',
+      doc: saldoInicial,
+      saldoPendiente: saldoPorDocumento.get(saldoInicial._id.toString())!,
+      prioridad: saldoInicial.fechaVencimiento,
     })),
   ].sort((a, b) => {
     const porFecha = a.prioridad.getTime() - b.prioridad.getTime();
@@ -1447,6 +1735,100 @@ export async function ejecutarAplicacionFifo(
         continue;
       }
 
+      if (candidato.tipo === 'SI') {
+        // Several conceptos, like a Factura — same waterfall cascade,
+        // reused via `ajustarSaldosCartera`'s own `tipoDocumento` parameter
+        // (see `decrementarSaldoInicial`'s own docblock), never a discount
+        // (a Saldo Inicial never carries `discountAmount`/`discountDeadline`
+        // — `montoDescuento` is already 0 for it, from the ternary above).
+        // Non-null: reaching this branch means `saldoInicialesAbiertos` was
+        // non-empty, which only happens when `saldosIniciales` was truthy at
+        // fetch time above.
+        const saldoInicialActualizado = await decrementarSaldoInicial(
+          saldosIniciales!,
+          saldoTotalDocumento,
+          session,
+          coPropertyId,
+          candidato.doc._id,
+          monto,
+        );
+        const partesSI = await ajustarSaldosCartera(
+          saldos,
+          carteraPorDocumento,
+          session,
+          coPropertyId,
+          {
+            _id: saldoInicialActualizado._id,
+            inmuebleId: saldoInicialActualizado.inmuebleId,
+            total: saldoInicialActualizado.total,
+            outstandingBalance: saldoInicialActualizado.outstandingBalance,
+            lines: saldoInicialActualizado.lines.map((l) => ({
+              conceptoId: l.conceptoId,
+              totalAmount: l.montoOriginal,
+            })),
+          },
+          monto,
+          -1,
+          'SI',
+        );
+        const detalleConceptosSI = partesSI.map((parte) => {
+          const linea = saldoInicialActualizado.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          return {
+            conceptoId: parte.conceptoId,
+            conceptName: linea?.conceptName ?? 'Concepto',
+            monto: parte.parte,
+          };
+        });
+        for (const parte of partesSI) {
+          const linea = saldoInicialActualizado.lines.find((l) =>
+            l.conceptoId.equals(parte.conceptoId),
+          );
+          if (parte.parte !== 0) {
+            desglose.push({
+              cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+              monto: parte.parte,
+              tipoDocumento: 'SI',
+              numeroDocumento: saldoInicialActualizado.number,
+            });
+          }
+          if (linea?.conceptKind === 'intereses') {
+            montoAplicadoMora += parte.parte;
+          }
+        }
+
+        const [creadaSI] = await aplicaciones.create(
+          [
+            {
+              coPropertyId,
+              sourceType,
+              sourceId,
+              documentType: 'SI',
+              documentId: candidato.doc._id,
+              amountApplied: monto,
+              discountApplied: 0,
+              detalleConceptos: detalleConceptosSI,
+              status: 'activa',
+              appliedAt: new Date(),
+              sourceDate,
+              appliedBy: accountId,
+            },
+          ],
+          { session },
+        );
+
+        aplicadas.push(creadaSI);
+        resumen.push({
+          tipo: 'SI',
+          numero: saldoInicialActualizado.number,
+          completa: saldoInicialActualizado.outstandingBalance === 0,
+        });
+        restante -= cashUsado;
+        totalAplicado += cashUsado;
+        continue;
+      }
+
       const facturaActualizada = await decrementarSaldoFactura(
         facturas,
         saldoTotalDocumento,
@@ -1480,7 +1862,7 @@ export async function ejecutarAplicacionFifo(
         );
         if (parte.parte !== 0) {
           desglose.push({
-            cuenta: linea?.accountingReceivableAccount ?? null,
+            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
             monto: parte.parte,
             tipoDocumento: 'FV',
             numeroDocumento: facturaActualizada.number,

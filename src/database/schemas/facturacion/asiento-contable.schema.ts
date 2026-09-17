@@ -63,8 +63,8 @@ export class Movimiento {
    *  (asiento.builder.ts) for the uniform (self/anchor) case and
    *  `construirAsientoCruce`/`construirMovimientosAplicacionAnticipo` for the
    *  per-línea case (a Recibo can settle several documents in one entry). */
-  @Prop({ type: String, enum: ['FV', 'ND'], default: null })
-  tipoDocumento?: 'FV' | 'ND' | null;
+  @Prop({ type: String, enum: ['FV', 'ND', 'SI'], default: null })
+  tipoDocumento?: 'FV' | 'ND' | 'SI' | null;
 
   @Prop({ type: Number, default: null })
   numeroDocumento?: number | null;

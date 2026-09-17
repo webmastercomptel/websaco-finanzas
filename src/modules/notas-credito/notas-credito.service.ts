@@ -58,6 +58,10 @@ import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
@@ -69,6 +73,7 @@ import {
   ajustarSaldosCarteraPorDistribucion,
   decrementarSaldoDocumentoOrigen,
   decrementarSaldoFactura,
+  decrementarSaldoInicial,
   decrementarSaldoNotaDebito,
   restaurarSaldoTotalDocumento,
 } from '../recibos/cruce.util';
@@ -123,7 +128,7 @@ import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 type DesgloseCarteraAplicacion = {
   cuenta: string | null;
   monto: number;
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   numeroDocumento: number;
 };
 
@@ -189,6 +194,9 @@ export class NotasCreditoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
+    // APPENDED LAST, optional — see `RecibosService`'s own identical append.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -207,7 +215,7 @@ export class NotasCreditoService {
       cashFlowCode: string | null;
     } | null,
     entries: ReturnType<typeof construirAsientoCruce>,
-    documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
+    documentoCruce?: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null,
   ): Promise<ReturnType<typeof construirAsientoCruce>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
@@ -263,14 +271,29 @@ export class NotasCreditoService {
   private async resolverLineasAncla(
     session: ClientSession,
     coPropertyId: Types.ObjectId,
-    tipoDocumento: 'FV' | 'ND',
-    documento: FacturaDocument | NotaDebitoDocument,
+    tipoDocumento: 'FV' | 'ND' | 'SI',
+    documento: FacturaDocument | NotaDebitoDocument | SaldoInicialDocument,
   ): Promise<LineaAncla[]> {
     if (tipoDocumento === 'FV') {
       const factura = documento as FacturaDocument;
       return factura.lines.map((linea) => ({
         conceptoId: linea.conceptoId,
         totalAmount: linea.totalAmount,
+        accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
+        accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
+        conceptKind: linea.conceptKind,
+        conceptName: linea.conceptName,
+      }));
+    }
+    if (tipoDocumento === 'SI') {
+      // Already frozen at import time, same fields a Factura line freezes —
+      // see `SaldoInicialLinea`'s own schema docblock on why
+      // `accountingIncomeAccount` is deliberately `null` here (nothing was
+      // ever posted as income in THIS system for an opening balance).
+      const saldoInicial = documento as SaldoInicialDocument;
+      return saldoInicial.lines.map((linea) => ({
+        conceptoId: linea.conceptoId,
+        totalAmount: linea.montoOriginal,
         accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
         accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
         conceptKind: linea.conceptKind,
@@ -350,38 +373,62 @@ export class NotasCreditoService {
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
     const etiquetaAncla =
-      dto.tipoDocumento === 'FV' ? 'La factura' : 'La nota débito';
+      dto.tipoDocumento === 'FV'
+        ? 'La factura'
+        : dto.tipoDocumento === 'ND'
+          ? 'La nota débito'
+          : 'El saldo inicial';
 
     return this.transaccion(async (session) => {
-      const documentoAncla: FacturaDocument | NotaDebitoDocument | null =
+      const documentoAncla:
+        FacturaDocument | NotaDebitoDocument | SaldoInicialDocument | null =
         dto.tipoDocumento === 'FV'
           ? await this.facturas
               .findOne({ _id: documentoId, coPropertyId })
               .session(session)
               .exec()
-          : await this.notasDebito
-              .findOne({ _id: documentoId, coPropertyId })
-              .session(session)
-              .exec();
+          : dto.tipoDocumento === 'ND'
+            ? await this.notasDebito
+                .findOne({ _id: documentoId, coPropertyId })
+                .session(session)
+                .exec()
+            : ((await this.saldosIniciales
+                ?.findOne({ _id: documentoId, coPropertyId })
+                .session(session)
+                .exec()) ?? null);
       if (!documentoAncla) {
         throw new NotFoundException(
           dto.tipoDocumento === 'FV'
             ? `No se encontró la factura ${dto.documentoId}`
-            : `No se encontró la nota débito ${dto.documentoId}`,
+            : dto.tipoDocumento === 'ND'
+              ? `No se encontró la nota débito ${dto.documentoId}`
+              : `No se encontró el saldo inicial ${dto.documentoId}`,
         );
       }
-      // A voided anchor no longer represents active debt — crediting it
-      // has no meaning (design §6).
-      if (documentoAncla.status !== 'emitida') {
+      // A Saldo Inicial uses `'activo'/'anulado'`, never `'emitida'/'anulada'`
+      // — same "voided anchor no longer represents active debt" check (design
+      // §6), just the enum this document's own schema actually declares.
+      const anclaVigente =
+        dto.tipoDocumento === 'SI'
+          ? (documentoAncla as SaldoInicialDocument).status === 'activo'
+          : documentoAncla.status === 'emitida';
+      // `numeroDocumentoAncla` — a Saldo Inicial has no `fullNumber` (see its
+      // own schema docblock); `numeroOriginal` is the closest equivalent for
+      // an error message a human reads.
+      const numeroDocumentoAncla =
+        dto.tipoDocumento === 'SI'
+          ? (documentoAncla as SaldoInicialDocument).numeroOriginal
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).fullNumber;
+      if (!anclaVigente) {
         throw new ConflictException(
-          `${etiquetaAncla} ${documentoAncla.fullNumber} está anulada y no admite una nota crédito`,
+          `${etiquetaAncla} ${numeroDocumentoAncla} está anulada y no admite una nota crédito`,
         );
       }
 
       const inmuebleId = new Types.ObjectId(dto.inmuebleId);
       if (!documentoAncla.inmuebleId.equals(inmuebleId)) {
         throw new ConflictException(
-          `${etiquetaAncla} ${documentoAncla.fullNumber} pertenece a otro inmueble ` +
+          `${etiquetaAncla} ${numeroDocumentoAncla} pertenece a otro inmueble ` +
             `(${documentoAncla.inmuebleId.toString()}) que el solicitado ` +
             `(${inmuebleId.toString()})`,
         );
@@ -392,11 +439,16 @@ export class NotasCreditoService {
       // creation flow started resolving this (`NotasDebitoService.crear()`'s
       // own fix; every note débito predating that fix has this frozen
       // forever, by design — a financial document never changes after
-      // issuance). Rather than silently propagate that blank onto the Nota
-      // Crédito's own PDF too, fall back to the inmueble's CURRENT holder,
-      // same source (`Inmueble.holderId`) that fix reads.
+      // issuance). A Saldo Inicial never carries one at all (no `terceroId`
+      // field — see its own schema). Rather than silently propagate that
+      // blank onto the Nota Crédito's own PDF too, fall back to the
+      // inmueble's CURRENT holder, same source (`Inmueble.holderId`) that
+      // fix reads.
       const terceroId =
-        documentoAncla.terceroId ??
+        (dto.tipoDocumento === 'SI'
+          ? null
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument)
+              .terceroId) ??
         (
           await this.inmuebles
             ?.findOne({ _id: inmuebleId, coPropertyId })
@@ -423,7 +475,9 @@ export class NotasCreditoService {
       const filtroAncla =
         dto.tipoDocumento === 'FV'
           ? { facturaId: documentoId }
-          : { notaDebitoId: documentoId };
+          : dto.tipoDocumento === 'ND'
+            ? { notaDebitoId: documentoId }
+            : { saldoInicialId: documentoId };
       const notasCreditoPrevias = await this.notasCredito
         .find({ coPropertyId, ...filtroAncla, status: 'activo' })
         .session(session)
@@ -468,6 +522,7 @@ export class NotasCreditoService {
             terceroId,
             facturaId: dto.tipoDocumento === 'FV' ? documentoId : null,
             notaDebitoId: dto.tipoDocumento === 'ND' ? documentoId : null,
+            saldoInicialId: dto.tipoDocumento === 'SI' ? documentoId : null,
             tipoDocumentoAncla: dto.tipoDocumento,
             issueDate: new Date(dto.fecha),
             prefix: numero.prefijo,
@@ -583,6 +638,15 @@ export class NotasCreditoService {
         if (dto.tipoDocumento === 'FV') {
           await decrementarSaldoFactura(
             this.facturas,
+            this.saldoTotalDocumento,
+            session,
+            coPropertyId,
+            documentoId,
+            montoAAplicar,
+          );
+        } else if (dto.tipoDocumento === 'SI') {
+          await decrementarSaldoInicial(
+            this.saldosIniciales!,
             this.saldoTotalDocumento,
             session,
             coPropertyId,
@@ -1364,6 +1428,52 @@ export class NotasCreditoService {
               );
             }
           }
+        } else if (aplicacion.documentType === 'SI') {
+          // Only ever reachable as the note's own anchor application — the
+          // deferred `aplicar()` path never targets a Saldo Inicial (see
+          // that method's own docblock), same reasoning as the `'ND'`
+          // branch below — always `ajustarSaldosCarteraPorDistribucion`
+          // with `nota.distribution`, never the proportional cascade.
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              saldoInicialDoc._id,
+              aplicacion.amountApplied,
+            );
+            const lineasAncla = await this.resolverLineasAncla(
+              session,
+              coPropertyId,
+              'SI',
+              saldoInicialDoc,
+            );
+            for (const detalle of aplicacion.detalleConceptos ?? []) {
+              const linea = lineasAncla.find((l) =>
+                l.conceptoId.equals(detalle.conceptoId),
+              );
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMoraTotal += detalle.monto;
+              }
+            }
+            await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              nota.inmuebleId,
+              nota.distribution.map((l) => ({
+                conceptoId: l.conceptoId,
+                monto: l.amount,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: aplicacion.documentId },
+            );
+          }
         } else {
           // `aplicacion.documentType === 'ND'` — only ever reachable when
           // THIS row is the note's own anchor application (the deferred
@@ -1444,10 +1554,15 @@ export class NotasCreditoService {
               .findOne({ _id: anclaId, coPropertyId })
               .session(session)
               .exec()
-          : await this.notasDebito
-              .findOne({ _id: anclaId, coPropertyId })
-              .session(session)
-              .exec();
+          : anclaTipo === 'SI'
+            ? await this.saldosIniciales
+                ?.findOne({ _id: anclaId, coPropertyId })
+                .session(session)
+                .exec()
+            : await this.notasDebito
+                .findOne({ _id: anclaId, coPropertyId })
+                .session(session)
+                .exec();
       const lineasAncla = documentoAncla
         ? await this.resolverLineasAncla(
             session,
@@ -1670,31 +1785,50 @@ export class NotasCreditoService {
     const anclaId = idAnclaDe(nota);
     const idsFacturaPorClave = new Map<string, Types.ObjectId>();
     const idsNotaDebitoPorClave = new Map<string, Types.ObjectId>();
-    const agregarId = (tipo: 'FV' | 'ND', docId: Types.ObjectId): void => {
-      const mapa = tipo === 'FV' ? idsFacturaPorClave : idsNotaDebitoPorClave;
+    const idsSaldoInicialPorClave = new Map<string, Types.ObjectId>();
+    const agregarId = (
+      tipo: 'FV' | 'ND' | 'SI',
+      docId: Types.ObjectId,
+    ): void => {
+      const mapa =
+        tipo === 'FV'
+          ? idsFacturaPorClave
+          : tipo === 'SI'
+            ? idsSaldoInicialPorClave
+            : idsNotaDebitoPorClave;
       mapa.set(docId.toString(), docId);
     };
     agregarId(anclaTipo, anclaId);
     for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
 
-    const [facturasDoc, notasDebitoDoc] = await Promise.all([
-      idsFacturaPorClave.size
-        ? this.facturas
-            .find({
-              coPropertyId,
-              _id: { $in: [...idsFacturaPorClave.values()] },
-            })
-            .exec()
-        : Promise.resolve([]),
-      idsNotaDebitoPorClave.size
-        ? this.notasDebito
-            .find({
-              coPropertyId,
-              _id: { $in: [...idsNotaDebitoPorClave.values()] },
-            })
-            .exec()
-        : Promise.resolve([]),
-    ]);
+    const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
+      [
+        idsFacturaPorClave.size
+          ? this.facturas
+              .find({
+                coPropertyId,
+                _id: { $in: [...idsFacturaPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+        idsNotaDebitoPorClave.size
+          ? this.notasDebito
+              .find({
+                coPropertyId,
+                _id: { $in: [...idsNotaDebitoPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+        idsSaldoInicialPorClave.size
+          ? this.saldosIniciales
+              ?.find({
+                coPropertyId,
+                _id: { $in: [...idsSaldoInicialPorClave.values()] },
+              })
+              .exec()
+          : Promise.resolve([]),
+      ],
+    );
     const numerosPorDocumento = new Map<string, string>([
       ...facturasDoc.map((f): [string, string] => [
         f._id.toString(),
@@ -1703,6 +1837,10 @@ export class NotasCreditoService {
       ...notasDebitoDoc.map((n): [string, string] => [
         n._id.toString(),
         n.fullNumber,
+      ]),
+      ...(saldosInicialesDoc ?? []).map((s): [string, string] => [
+        s._id.toString(),
+        s.numeroOriginal,
       ]),
     ]);
 
@@ -1814,7 +1952,7 @@ export class NotasCreditoService {
     desglose: DesgloseCarteraAplicacion[],
     desgloseOrigen: DesgloseCarteraAplicacion[],
     montoAplicadoMora: number,
-    tipoDocumentoAncla: 'FV' | 'ND',
+    tipoDocumentoAncla: 'FV' | 'ND' | 'SI',
     numeroDocumentoAncla: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades

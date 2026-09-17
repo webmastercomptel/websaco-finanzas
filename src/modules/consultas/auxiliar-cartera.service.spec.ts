@@ -94,6 +94,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     inmuebles: find(),
     terceros: find(),
     tenant: { resolveCoPropertyId: () => COP },
+    saldosIniciales: find(),
   };
   const m = { ...defaults, ...overrides };
   return new AuxiliarCarteraService(
@@ -107,6 +108,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.inmuebles as never,
     m.terceros as never,
     m.tenant as never,
+    m.saldosIniciales as never,
   );
 };
 

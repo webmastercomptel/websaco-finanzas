@@ -75,6 +75,7 @@ const crearServicio = (opts: {
     modeloConceptos(opts.conceptos ?? [conceptoDoc()]) as never,
     modeloValoresRecurrentes(opts.valores ?? []) as never,
     tenantQueDevuelve(COP),
+    {} as never,
   );
 
 describe('ValoresRecurrentesService.obtener', () => {
@@ -169,6 +170,7 @@ describe('ValoresRecurrentesService.guardar', () => {
       modeloConceptos([conceptoDoc()]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.guardar(INMUEBLE_ID, {
@@ -189,6 +191,7 @@ describe('ValoresRecurrentesService.guardar', () => {
       modeloConceptos([conceptoDoc()]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.guardar(INMUEBLE_ID, {
@@ -225,6 +228,7 @@ describe('ValoresRecurrentesService.guardar', () => {
       ]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await expect(
@@ -252,6 +256,7 @@ describe('ValoresRecurrentesService.guardar', () => {
       ]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
+      {} as never,
     );
 
     await service.guardar(INMUEBLE_ID, {

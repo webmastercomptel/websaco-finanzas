@@ -28,11 +28,15 @@ import {
 } from './dto/guardar-inmueble.dto';
 import { ImportarInmueblesDto } from './dto/importar-inmuebles.dto';
 import { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
+import { ImportarValoresRecurrentesMasivoDto } from './dto/importar-valores-recurrentes.dto';
 import type {
   Inmueble,
   Paginado,
+  ProgresoImportacion,
   ResultadoImportacionInmuebles,
+  ResultadoImportacionValoresRecurrentes,
   ValorRecurrente,
+  ValorRecurrenteMasivo,
 } from '../../contracts';
 
 /**
@@ -87,6 +91,43 @@ export class InmueblesController {
     res.send(Buffer.from(bytes));
   }
 
+  /**
+   * Every active unit's recurring amounts, coproperty-wide — what the bulk
+   * "Valores Recurrentes" export builds its editable template from. Route
+   * sits before `:id`, same reasoning as `listado.pdf` above: otherwise
+   * "valores-recurrentes" is read as an id.
+   */
+  @Get('valores-recurrentes')
+  @CheckAbility({ action: 'read', subject: 'Inmueble' })
+  obtenerValoresRecurrentesMasivo(): Promise<ValorRecurrenteMasivo[]> {
+    return this.valoresRecurrentes.obtenerTodos();
+  }
+
+  /**
+   * Bulk-loads recurring amounts by unit código, from a file parsed on the
+   * frontend. Gated by `update`, not `create`: unlike `POST /importar`,
+   * this never creates or deletes an Inmueble, only edits ValorRecurrente
+   * rows of units that already exist — see `ValoresRecurrentesService.importarMasivo`.
+   */
+  @Post('valores-recurrentes/importar')
+  @CheckAbility({ action: 'update', subject: 'Inmueble' })
+  importarValoresRecurrentesMasivo(
+    @Body() dto: ImportarValoresRecurrentesMasivoDto,
+  ): Promise<ResultadoImportacionValoresRecurrentes> {
+    return this.valoresRecurrentes.importarMasivo(dto);
+  }
+
+  /**
+   * Polled while `POST valores-recurrentes/importar` is in flight — same
+   * reasoning as `obtenerProgresoImportacion` above, separate row (see
+   * `TipoImportacion`) so the two bulk imports never share progress state.
+   */
+  @Get('valores-recurrentes/importar/progreso')
+  @CheckAbility({ action: 'update', subject: 'Inmueble' })
+  obtenerProgresoImportacionValoresRecurrentes(): Promise<ProgresoImportacion | null> {
+    return this.valoresRecurrentes.obtenerProgresoImportacion();
+  }
+
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'Inmueble' })
   findOne(@Param('id') id: string): Promise<Inmueble> {
@@ -114,6 +155,17 @@ export class InmueblesController {
     @Body() dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
     return this.inmuebles.importar(dto);
+  }
+
+  /**
+   * Polled while `POST /importar` is in flight — null once nothing is
+   * running (either it finished, or nothing was ever started). See
+   * `ProgresoImportacionService`.
+   */
+  @Get('importar/progreso')
+  @CheckAbility({ action: 'create', subject: 'Inmueble' })
+  obtenerProgresoImportacion(): Promise<ProgresoImportacion | null> {
+    return this.inmuebles.obtenerProgresoImportacion();
   }
 
   /** Partial edit. */

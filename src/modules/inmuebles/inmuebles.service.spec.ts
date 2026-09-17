@@ -18,7 +18,7 @@ const documento = (over: Record<string, unknown> = {}) => ({
   holderId: null,
   holderKind: 'propietario',
   holderResides: true,
-  collectionStatus: 'al_dia',
+  collectionStatus: 'vigente',
   status: 'active',
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...over,

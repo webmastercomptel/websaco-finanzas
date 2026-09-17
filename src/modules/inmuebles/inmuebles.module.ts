@@ -5,6 +5,7 @@ import { InmueblesService } from './inmuebles.service';
 import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { InmueblesReporteService } from './inmuebles-reporte.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
+import { ProgresoImportacionService } from './progreso-importacion.service';
 import { CatalogosModule } from '../catalogos/catalogos.module';
 
 /**
@@ -20,6 +21,7 @@ import { CatalogosModule } from '../catalogos/catalogos.module';
     ValoresRecurrentesService,
     InmueblesReporteService,
     InmueblesEliminacionService,
+    ProgresoImportacionService,
   ],
 })
 export class InmueblesModule {}

@@ -60,6 +60,10 @@ export interface TitularResumen {
 export interface Inmueble {
   id: string;
   codigo: string;
+  /** Free-text cross-reference to an external record — e.g. a cadastral id
+   *  or the building-management system's own id for this unit, when there
+   *  is one. Never used to look anything up internally. */
+  referencia: string | null;
   bloque: string | null;
   zona: string | null;
   uso: string | null;
@@ -74,7 +78,7 @@ export interface Inmueble {
   titular: TitularResumen | null;
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
-  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
   /** Free-text notes — see the note on `Inmueble.notes` in the schema. */
   observaciones: string | null;
   /** ISO 8601 — when this unit's record was last saved. */
@@ -483,7 +487,7 @@ export interface AplicacionCartera {
   id: string;
   sourceType: 'RC' | 'NC' | 'NA';
   sourceId: string;
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   documentoId: string;
   /** The target document's own printed number (e.g. "FV-1") — resolved for
    *  display, never stored on this row itself. `null` when the document
@@ -558,7 +562,7 @@ export interface ErrorAplicacionLoteRecibos {
 /** One line of `aplicaciones` in `CrearReciboDto`/`AplicarReciboDto` — the
  *  caller's requested cruce against one document. */
 export interface AplicacionSolicitada {
-  tipoDocumento: 'FV' | 'ND';
+  tipoDocumento: 'FV' | 'ND' | 'SI';
   documentoId: string;
   montoAplicado: Monto;
 }
@@ -626,7 +630,7 @@ export interface NotaCredito {
   inmuebleId: string;
   terceroId: string | null;
   /** Which kind of document `documentoAnclaId` points to. */
-  tipoDocumentoAncla: 'FV' | 'ND';
+  tipoDocumentoAncla: 'FV' | 'ND' | 'SI';
   /** The anchor document's own id — a Factura's or a Nota Débito's,
    *  according to `tipoDocumentoAncla`. */
   documentoAnclaId: string;
@@ -741,6 +745,66 @@ export interface NotaAnticipoDetalle extends NotaAnticipo {
   aplicaciones: AplicacionCartera[];
 }
 
+/* ── Saldos Iniciales (opening cartera balances) ──────────────── */
+
+/** One cargo (concepto) line of a Saldo Inicial's own breakdown. */
+export interface SaldoInicialLinea {
+  conceptoId: string;
+  nombreConcepto: string;
+  monto: Monto;
+}
+
+/** Why a Saldo Inicial was voided — a narrower catalog than the other
+ *  documents' (design consistency): an opening balance is only ever loaded
+ *  once, right when a coproperty is onboarded, so the realistic reasons to
+ *  undo one are a typo or a duplicate upload. */
+export type MotivoAnulacionSaldoInicial =
+  'error_digitacion' | 'duplicado' | 'otro';
+
+/**
+ * A THIRD cartera charge document, alongside Factura and Nota Débito — one
+ * opening balance brought from the client's previous system, aged and
+ * collectible exactly like a Factura, but never consuming its numbering.
+ * `tipoDocumentoOriginal`/`numeroOriginal` are free text the client typed;
+ * `saldoPendiente` is what a future Recibo/Nota Crédito can still collect.
+ */
+export interface SaldoInicial {
+  id: string;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  tipoDocumentoOriginal: string;
+  numeroOriginal: string;
+  fecha: IsoDate;
+  fechaVencimiento: IsoDate;
+  lineas: SaldoInicialLinea[];
+  total: Monto;
+  saldoPendiente: Monto;
+  estado: 'activo' | 'anulado';
+  motivoAnulacion: MotivoAnulacionSaldoInicial | null;
+  detalleAnulacion: string | null;
+  fechaAnulacion: IsoDate | null;
+}
+
+/** One row of a bulk Saldos Iniciales import that could not be applied. */
+export interface ErrorImportacionSaldoInicial {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  inmuebleCodigo: string | null;
+  mensaje: string;
+}
+
+/**
+ * Result of importing a Saldos Iniciales file — rows are independent, one
+ * bad row (an unknown código de copropiedad or inmueble, a total that
+ * doesn't match its own cargos) never aborts the rest. Mirrors
+ * `ResultadoImportacionValoresRecurrentes`'s own shape.
+ */
+export interface ResultadoImportacionSaldosIniciales {
+  total: number;
+  importados: number;
+  errores: ErrorImportacionSaldoInicial[];
+}
+
 /* ── Notas Contables ──────────────────────────────────────────── */
 
 /**
@@ -772,7 +836,8 @@ export interface NotaContable {
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */
 
-export type TipoDocumentoKardex = 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+export type TipoDocumentoKardex =
+  'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA' | 'SI';
 
 /** One row in the chronological ledger for an inmueble. */
 export interface MovimientoKardex {
@@ -828,7 +893,7 @@ export interface FilaVencimientoCartera {
   inmuebleId: string;
   inmuebleCodigo: string;
   propietario: string | null;
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   numeroCompleto: string;
   fecha: string;
   vence: string;
@@ -865,7 +930,7 @@ export interface DocumentoCarteraPorInmueble {
   /** This document's own `_id` — what a Nota Contable's `documentoId` must
    *  reference to reclassify against it specifically. */
   documentoId: string;
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   numeroCompleto: string;
   fecha: string;
   vence: string | null;
@@ -912,7 +977,7 @@ export interface ConceptoColumnaCarteraPorConceptos {
  *  read as 0 on the frontend. */
 export interface DocumentoCarteraPorConceptos {
   documentoId: string;
-  tipo: 'FV' | 'ND';
+  tipo: 'FV' | 'ND' | 'SI';
   numeroCompleto: string;
   fecha: string;
   vence: string | null;
@@ -927,9 +992,9 @@ export interface GrupoInmuebleCarteraPorConceptos {
   inmuebleCodigo: string;
   titular: string | null;
   celular: string | null;
-  /** The inmueble's own collection status — 'al_dia' reads as "Vigente" on
+  /** The inmueble's own collection status — 'vigente' reads as "Vigente" on
    *  screen, the label used everywhere the enum value isn't shown raw. */
-  estadoCartera: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
   documentos: DocumentoCarteraPorConceptos[];
   saldoTotal: number;
 }
@@ -1301,6 +1366,51 @@ export interface ValorRecurrente {
   monto: Monto;
 }
 
+/**
+ * One unit's recurring amounts, for the coproperty-wide bulk export/import
+ * screen ("Valores Recurrentes" en Inmuebles) — the per-unit `ValorRecurrente`
+ * list above, keyed to the unit that owns it, `intereses` excluded (never a
+ * flat amount, see the note above). `codigo` is what the file's rows are
+ * matched by on import, `inmuebleId` is what the export uses to fetch each
+ * unit's amounts in one shot instead of one request per unit.
+ */
+export interface ValorRecurrenteMasivo {
+  inmuebleId: string;
+  codigo: string;
+  valores: { conceptoId: string; monto: Monto }[];
+}
+
+/** One row's outcome from a bulk valores-recurrentes load that could not be
+ *  applied — almost always a `codigo` with no matching inmueble. */
+export interface ErrorImportacionValorRecurrente {
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string | null;
+  mensaje: string;
+}
+
+/**
+ * Result of a bulk valores-recurrentes load. Rows are independent: one bad
+ * code does not abort the rest. Never creates, deletes or otherwise touches
+ * an inmueble — only the `ValorRecurrente` rows of the ones it matched.
+ */
+export interface ResultadoImportacionValoresRecurrentes {
+  total: number;
+  actualizados: number;
+  errores: ErrorImportacionValorRecurrente[];
+}
+
+/**
+ * A coarse, throttled progress signal for a bulk import in flight — same
+ * shape as `LoteFacturacion.progreso`, generalised beyond consolidar(). Null
+ * means no import of that kind is currently running for the active
+ * coproperty; the frontend's cue to stop polling.
+ */
+export interface ProgresoImportacion {
+  actual: number;
+  total: number;
+}
+
 /* ── Usuarios (platform config) ───────────────────────────────────
  *
  * Who may sign in and operate this system, and where. Platform-operator
@@ -1396,7 +1506,7 @@ export interface LineaMovimientoContable {
   /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
    *  a receivable against (Factura, Nota Débito) — present only when this
    *  line's account is flagged `requiresCrossDocument`. */
-  documentoCruce: { tipo: 'FV' | 'ND'; numero: number } | null;
+  documentoCruce: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null;
 }
 
 /** One journal entry card in the accounting journal view. */

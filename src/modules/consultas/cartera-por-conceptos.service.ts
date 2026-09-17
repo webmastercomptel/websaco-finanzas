@@ -10,6 +10,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   AplicacionCartera,
   AplicacionCarteraDocument,
 } from '../../database/schemas/recibos/aplicacion-cartera.schema';
@@ -82,6 +86,8 @@ export class CarteraPorConceptosService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   async findAll(
@@ -107,7 +113,7 @@ export class CarteraPorConceptosService {
     }));
 
     const limiteEmision = limiteEmisionParaCorte(fecha);
-    const [facturas, notasDebito] = await Promise.all([
+    const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
         .find({
           coPropertyId,
@@ -122,11 +128,19 @@ export class CarteraPorConceptosService {
           issueDate: { $lte: limiteEmision },
         })
         .exec(),
+      this.saldosIniciales
+        .find({
+          coPropertyId,
+          status: 'activo',
+          fecha: { $lte: limiteEmision },
+        })
+        .exec(),
     ]);
 
     const docIds = [
       ...facturas.map((f) => f._id),
       ...notasDebito.map((nd) => nd._id),
+      ...saldosIniciales.map((s) => s._id),
     ];
     if (docIds.length === 0) {
       return { conceptos: conceptosContract, grupos: [] };
@@ -197,7 +211,7 @@ export class CarteraPorConceptosService {
     const agregar = (
       inmuebleId: Types.ObjectId,
       documentoId: Types.ObjectId,
-      tipo: 'FV' | 'ND',
+      tipo: 'FV' | 'ND' | 'SI',
       numeroCompleto: string,
       numero: number,
       fechaDoc: Date,
@@ -290,6 +304,35 @@ export class CarteraPorConceptosService {
         { [nd.conceptoId.toString()]: saldoActivo },
       );
     }
+    for (const si of saldosIniciales) {
+      const apps = appsByDoc.get(si._id.toString()) ?? [];
+      const saldoActivo = Math.max(
+        0,
+        si.total -
+          apps
+            .filter((a) => activeAsOf(a, fecha))
+            .reduce((sum, a) => sum + a.amountApplied, 0),
+      );
+      const factor = si.total > 0 ? saldoActivo / si.total : 0;
+      const cargosFallback: Record<string, number> = {};
+      for (const line of si.lines) {
+        const key = line.conceptoId.toString();
+        cargosFallback[key] =
+          (cargosFallback[key] ?? 0) + line.montoOriginal * factor;
+      }
+
+      agregar(
+        si.inmuebleId,
+        si._id,
+        'SI',
+        si.numeroOriginal,
+        si.number,
+        si.fecha,
+        si.fechaVencimiento,
+        saldoActivo,
+        cargosFallback,
+      );
+    }
 
     const grupos: GrupoInmuebleCarteraPorConceptos[] = [];
     for (const [inmuebleId, documentosInternos] of docsPorInmueble) {
@@ -317,7 +360,7 @@ export class CarteraPorConceptosService {
         inmuebleCodigo: inmueble?.code ?? '',
         titular: holder?.name ?? null,
         celular: holder?.phone ?? null,
-        estadoCartera: inmueble?.collectionStatus ?? 'al_dia',
+        estadoCartera: inmueble?.collectionStatus ?? 'vigente',
         documentos,
         saldoTotal: documentos.reduce((sum, d) => sum + d.saldo, 0),
       });

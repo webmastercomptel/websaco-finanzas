@@ -15,8 +15,8 @@ import { DistribucionLineaDto } from '../../notas-credito/dto/distribucion-linea
  *  immediate application at creation) and AplicarReciboDto (a deferred
  *  cruce), so both stay identical instead of drifting. */
 export class AplicacionSolicitadaDto {
-  @IsIn(['FV', 'ND'])
-  tipoDocumento: 'FV' | 'ND';
+  @IsIn(['FV', 'ND', 'SI'])
+  tipoDocumento: 'FV' | 'ND' | 'SI';
 
   @IsMongoId()
   documentoId: string;

@@ -52,6 +52,7 @@ function makeController(
     notasDebito as never,
     conceptosCobro as never,
     cuentasContables as never,
+    {} as never,
   );
 }
 

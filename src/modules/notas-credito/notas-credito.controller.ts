@@ -50,6 +50,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
@@ -88,6 +92,8 @@ export class NotasCreditoController {
     private readonly conceptosCobro: Model<ConceptoCobroDocument>,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables: Model<CuentaContableDocument>,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   @Get()
@@ -170,6 +176,7 @@ export class NotasCreditoController {
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         conceptosCobro: this.conceptosCobro,
         inmuebles: this.inmuebles,
         terceros: this.terceros,

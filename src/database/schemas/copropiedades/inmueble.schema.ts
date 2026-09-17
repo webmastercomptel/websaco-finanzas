@@ -38,6 +38,12 @@ export class Inmueble {
   @Prop({ required: true, trim: true })
   code: string;
 
+  /** Free-text cross-reference to an external record — e.g. this unit's id
+   *  in a cadastral registry or the building-management system, when there
+   *  is one. Never used to look anything up internally, unlike `code`. */
+  @Prop({ type: String, default: null, trim: true })
+  reference: string | null;
+
   /** Tower, block or stage. Null where the property has no such division. */
   @Prop({ type: String, default: null, trim: true })
   block: string | null;
@@ -94,14 +100,18 @@ export class Inmueble {
   /**
    * Collection status, used to steer follow-up rather than to block billing.
    * A unit in legal proceedings keeps accruing charges; what changes is who
-   * chases it.
+   * chases it. `vigente` means "not escalated to jurídico or difícil
+   * recaudo" — it does NOT mean "no arrears": a unit can be a few days
+   * overdue and still be `vigente`. Renamed from `al_dia` (Task: aligning
+   * the value with that actual meaning — "al día" reads as "no mora",
+   * which this status never guaranteed).
    */
   @Prop({
     required: true,
-    enum: ['al_dia', 'juridico', 'dificil_recaudo'],
-    default: 'al_dia',
+    enum: ['vigente', 'juridico', 'dificil_recaudo'],
+    default: 'vigente',
   })
-  collectionStatus: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  collectionStatus: 'vigente' | 'juridico' | 'dificil_recaudo';
 
   /**
    * Who to call about this unit, when that is not the holder — a caretaker, a

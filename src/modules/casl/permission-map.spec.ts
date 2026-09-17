@@ -286,3 +286,43 @@ describe('permisos de CicloFacturacionPrueba (reinicio de datos de prueba)', () 
     expect(ability.can('reiniciar', 'CicloFacturacionPrueba')).toBe(false);
   });
 });
+
+describe('permisos de SaldoInicial (saldos iniciales de cartera)', () => {
+  it('saldos-iniciales.crear concede importar (create) sobre SaldoInicial', () => {
+    const ability = abilityFor(['saldos-iniciales.crear']);
+
+    expect(ability.can('create', 'SaldoInicial')).toBe(true);
+    expect(ability.can('annul', 'SaldoInicial')).toBe(false);
+    expect(ability.can('read', 'SaldoInicial')).toBe(false);
+  });
+
+  it('saldos-iniciales.anular concede anulación sobre SaldoInicial', () => {
+    const ability = abilityFor(['saldos-iniciales.anular']);
+
+    expect(ability.can('annul', 'SaldoInicial')).toBe(true);
+    expect(ability.can('create', 'SaldoInicial')).toBe(false);
+  });
+
+  it('permisos de SaldoInicial no cruzan con Factura ni Recibo', () => {
+    const ability = abilityFor([
+      'saldos-iniciales.ver',
+      'saldos-iniciales.crear',
+      'saldos-iniciales.anular',
+    ]);
+
+    expect(ability.can('read', 'SaldoInicial')).toBe(true);
+    expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('read', 'Recibo')).toBe(false);
+  });
+
+  it('permisos de otros documentos no conceden acceso a SaldoInicial', () => {
+    const ability = abilityFor([
+      'facturas.ver',
+      'facturas.crear',
+      'facturas.gestionar',
+    ]);
+
+    expect(ability.can('read', 'SaldoInicial')).toBe(false);
+    expect(ability.can('create', 'SaldoInicial')).toBe(false);
+  });
+});

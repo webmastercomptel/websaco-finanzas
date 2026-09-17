@@ -71,8 +71,16 @@ export class ConsecutivoDocumento {
   @Prop({ type: Number, default: null })
   electronicNumber: number | null;
 
-  /** The next number to hand out. Moves forward only. */
-  @Prop({ required: true, default: 1 })
+  /**
+   * The last number actually issued under this code — 0 while none has been.
+   * Moves forward only. `NumeracionService.siguienteDocumento` (and the
+   * plain-consecutivo FV fallback in `siguienteFactura`/
+   * `reservarBloqueFacturas`) increments this before handing a number out,
+   * so the next document issued is always `nextNumber + 1` — a fresh row at
+   * 0 hands out 1 first, never 0. Named `nextNumber` for historical reasons;
+   * the API contract and UI call it "Último" (see `DocumentoAdmin.numero`).
+   */
+  @Prop({ required: true, default: 0 })
   nextNumber: number;
 }
 

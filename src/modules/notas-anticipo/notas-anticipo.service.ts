@@ -59,6 +59,10 @@ import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
@@ -66,6 +70,7 @@ import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
   ajustarSaldosCarteraPorDistribucion,
+  cuentaCarteraDeLinea,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
   remanentesPorLinea,
@@ -131,6 +136,9 @@ export class NotasAnticipoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
+    // APPENDED LAST, optional — see `RecibosService`'s own identical append.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   private async transaccion<T>(
@@ -288,9 +296,15 @@ export class NotasAnticipoService {
         { session },
       );
 
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+
       const ctx = {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
@@ -308,6 +322,7 @@ export class NotasAnticipoService {
         // (see `ContextoAplicacion.sourceDate`'s own docblock).
         sourceDate: fechaEmision,
         accountId,
+        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
       };
 
       const { totalAplicado, desglose, montoAplicadoMora } = dto.aplicaciones
@@ -422,21 +437,35 @@ export class NotasAnticipoService {
     const notaDebitoIds = aplicaciones
       .filter((a) => a.documentType === 'ND')
       .map((a) => a.documentId);
-    const [facturasDoc, notasDebitoDoc] = await Promise.all([
-      facturaIds.length
-        ? this.facturas.find({ coPropertyId, _id: { $in: facturaIds } }).exec()
-        : [],
-      notaDebitoIds.length
-        ? this.notasDebito
-            .find({ coPropertyId, _id: { $in: notaDebitoIds } })
-            .exec()
-        : [],
-    ]);
+    const saldoInicialIds = aplicaciones
+      .filter((a) => a.documentType === 'SI')
+      .map((a) => a.documentId);
+    const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
+      [
+        facturaIds.length
+          ? this.facturas
+              .find({ coPropertyId, _id: { $in: facturaIds } })
+              .exec()
+          : [],
+        notaDebitoIds.length
+          ? this.notasDebito
+              .find({ coPropertyId, _id: { $in: notaDebitoIds } })
+              .exec()
+          : [],
+        saldoInicialIds.length
+          ? this.saldosIniciales
+              ?.find({ coPropertyId, _id: { $in: saldoInicialIds } })
+              .exec()
+          : [],
+      ],
+    );
     const numerosPorDocumento = new Map<string, string>();
     for (const f of facturasDoc)
       numerosPorDocumento.set(f._id.toString(), f.fullNumber);
     for (const nd of notasDebitoDoc)
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
+    for (const si of saldosInicialesDoc ?? [])
+      numerosPorDocumento.set(si._id.toString(), si.numeroOriginal);
 
     return toNotaAnticipoDetalle(nota, aplicaciones, numerosPorDocumento);
   }
@@ -490,6 +519,14 @@ export class NotasAnticipoService {
         .session(session)
         .exec();
 
+      // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
+      // below, where the ORIGINAL code read it) — the desglose loop right
+      // below needs `usesMemorandumAccounts` too, via `cuentaCarteraDeLinea`.
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+
       const desglose: DesgloseCarteraAplicacion[] = [];
       let montoAplicadoMora = 0;
 
@@ -511,6 +548,55 @@ export class NotasAnticipoService {
             tipoDocumento: 'ND',
             numeroDocumento: notaDebitoDoc?.number ?? 0,
           });
+        } else if (aplicacion.documentType === 'SI') {
+          // Replays the EXACT recorded split (`detalleConceptos`), same
+          // reasoning as `RecibosService.anular()`'s own identical SI
+          // branch — never a fresh waterfall.
+          await restaurarSaldoTotalDocumento(
+            this.saldoTotalDocumento,
+            session,
+            aplicacion.documentId,
+            aplicacion.amountApplied,
+          );
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            const partesSI = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              saldoInicialDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
+            );
+            for (const parte of partesSI) {
+              const linea = saldoInicialDoc.lines.find((l) =>
+                l.conceptoId.equals(parte.conceptoId),
+              );
+              if (parte.parte !== 0) {
+                desglose.push({
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
+                  monto: parte.parte,
+                  tipoDocumento: 'SI',
+                  numeroDocumento: saldoInicialDoc.number,
+                });
+              }
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMora += parte.parte;
+              }
+            }
+          }
         } else {
           const facturaDoc = await this.facturas
             .findOne({ _id: aplicacion.documentId, coPropertyId })
@@ -573,7 +659,10 @@ export class NotasAnticipoService {
               );
               if (parte.parte !== 0) {
                 desglose.push({
-                  cuenta: linea?.accountingReceivableAccount ?? null,
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
                   monto: parte.parte,
                   tipoDocumento: 'FV',
                   numeroDocumento: factura.number,
@@ -612,10 +701,8 @@ export class NotasAnticipoService {
         nota.appliedAmount,
       );
 
-      const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
-        .session(session)
-        .exec();
+      // `copropiedad` was already fetched above, for the desglose loop's
+      // own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =

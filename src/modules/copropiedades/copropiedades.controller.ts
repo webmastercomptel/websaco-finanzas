@@ -19,6 +19,7 @@ import {
   ActualizarCopropiedadDto,
   CrearCopropiedadDto,
 } from './dto/guardar-copropiedad.dto';
+import { CopiarConfiguracionDto } from './dto/copiar-configuracion.dto';
 import type { Copropiedad, Paginado } from '../../contracts';
 
 /**
@@ -64,6 +65,24 @@ export class CopropiedadesController {
     @CurrentUser() user: IRequestUser,
   ): Promise<Copropiedad> {
     return this.copropiedades.create(dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
+  }
+
+  /**
+   * Fills `:id`'s maestro de cuentas, cargos and parámetros de facturación
+   * from `dto.origenId` — a sibling coproperty of the same entidad
+   * administradora. See `CopropiedadesService.copiarConfiguracion` for what
+   * "fills" means (additive, never overwrites something already set).
+   */
+  @Post(':id/copiar-configuracion')
+  copiarConfiguracion(
+    @Param('id') id: string,
+    @Body() dto: CopiarConfiguracionDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Copropiedad> {
+    return this.copropiedades.copiarConfiguracion(id, dto, {
       accountId: user.accountId!,
       nombre: user.nombre ?? user.email,
     });

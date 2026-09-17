@@ -23,7 +23,14 @@ export const toNotaContable = (
 ): NotaContableContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
-  tipoDocumento: doc.tipoDocumento ?? null,
+  // Nota Contable's `tipoDocumento` shares the generic `DocumentType` enum
+  // (now `'FV'|'ND'|'SI'`) with every other cartera document, but nothing
+  // creates one anchored on a Saldo Inicial — reclassifying against one is
+  // out of scope (see `SaldoInicial`'s own schema docblock) — so that value
+  // can never actually occur here; narrowed defensively rather than
+  // widening this contract field for a case that can't happen.
+  tipoDocumento:
+    doc.tipoDocumento === 'SI' ? null : (doc.tipoDocumento ?? null),
   documentoId: doc.documentoId ? doc.documentoId.toString() : null,
   conceptoOrigenId: doc.conceptoOrigenId.toString(),
   conceptoDestinoId: doc.conceptoDestinoId.toString(),

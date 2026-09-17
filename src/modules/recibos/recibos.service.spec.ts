@@ -1112,6 +1112,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
           conceptKind: 'intereses',
           totalAmount: 40000,
           accountingReceivableAccount: '130599',
+          accountingIncomeAccount: '413505',
         },
       ],
     });
@@ -1181,6 +1182,16 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     // mora — el par de cuentas de orden debe reflejar 40.000, no 240.000.
     expect(entries.find((m) => m.account === '831505')?.amount).toBe(40000);
     expect(entries.find((m) => m.account === '831510')?.amount).toBe(40000);
+    // La mora nunca se debitó a su `accountingReceivableAccount` (130599)
+    // al facturar — cuentas de orden ocupó ese lugar (par memo arriba). Al
+    // recaudarla, el crédito real de ingreso debe ir a la cuenta CRÉDITO de
+    // Cargos (`accountingIncomeAccount`, 413505), nunca a la cuenta
+    // db/cartera (130599) — ese es justamente el bug que esta prueba cubre.
+    expect(
+      entries.find((m) => m.account === '413505' && m.type === 'credito')
+        ?.amount,
+    ).toBe(40000);
+    expect(entries.some((m) => m.account === '130599')).toBe(false);
   });
 
   it('con cuentas de orden habilitadas, no agrega el par memo cuando nada se aplicó a mora', async () => {
@@ -2813,6 +2824,92 @@ describe('RecibosService.anular', () => {
         description: expect.any(String) as string,
       },
     ]);
+  });
+
+  it('revierte una aplicación contra Nota Débito: restaura SaldoTotalDocumento y SaldoCartera, no solo el asiento', async () => {
+    // Bug real corregido: esta rama solo armaba el `desglose` contable y
+    // nunca restauraba ningún saldo — una Nota Débito pagada por un Recibo
+    // luego anulado quedaba "aplicada por completo" para siempre (nunca se
+    // podía volver a cobrar) y `SaldoCartera` quedaba subestimado
+    // permanentemente por ese mismo monto.
+    const notaDebitoId = new Types.ObjectId();
+    const conceptoNd = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentId: notaDebitoId,
+      amountApplied: 200000,
+      status: 'activa',
+      detalleConceptos: [{ conceptoId: conceptoNd, monto: 200000 }],
+    };
+    // `facturas.findOne` resuelve null — la aplicación revertida no apunta a
+    // una Factura, así que el servicio cae a la rama de Nota Débito.
+    const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(null) }),
+      })),
+    };
+    const notaDebitoFrozen = {
+      _id: notaDebitoId,
+      inmuebleId: INMUEBLE,
+      number: 7,
+      conceptoId: conceptoNd,
+      total: 200000,
+    };
+    const notasDebito = modeloNotasDebito([notaDebitoFrozen]);
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: notaDebitoId, outstandingBalance: 0 },
+    ]);
+    const saldos = modeloSaldos();
+    const carteraPorDocumento = modeloCarteraPorDocumento();
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const session = sesionFalsa();
+
+    const service = new RecibosService(
+      recibos as never,
+      modeloAplicacionesActivas([aplicacionActiva]) as never,
+      facturas as never,
+      saldos as never,
+      carteraPorDocumento as never,
+      saldoTotalDocumento as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      notasDebito as never,
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
+    );
+
+    await service.anular(
+      recibo._id.toString(),
+      {
+        motivo: 'duplicado',
+        detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
+        fecha: '2026-09-01',
+      },
+      CUENTA.toString(),
+    );
+
+    // El "can this be paid again" guard vuelve a subir — la Nota Débito
+    // puede volver a cobrarse.
+    expect(saldoTotalDocumento.findOneAndUpdate).toHaveBeenCalledWith(
+      { documentoId: notaDebitoId },
+      { $inc: { saldoPendiente: 200000 } },
+      expect.objectContaining({ returnDocument: 'after' }),
+    );
+    // El acumulado por concepto también vuelve a subir — antes de este fix
+    // ninguna de las dos llamadas siguientes ocurría.
+    expect(saldos.findOneAndUpdate).toHaveBeenCalled();
+    expect(carteraPorDocumento.findOneAndUpdate).toHaveBeenCalled();
   });
 
   it('debita de vuelta la cuenta propia del concepto, no la cuenta plana de cartera', async () => {

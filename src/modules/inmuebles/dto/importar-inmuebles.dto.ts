@@ -5,7 +5,6 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
-  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -27,6 +26,11 @@ export class FilaImportarInmuebleDto {
   @MinLength(1)
   @MaxLength(40)
   codigo: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  referencia?: string;
 
   @IsOptional()
   @IsString()
@@ -65,8 +69,8 @@ export class FilaImportarInmuebleDto {
   resideEnElInmueble?: boolean;
 
   @IsOptional()
-  @IsIn(['al_dia', 'juridico', 'dificil_recaudo'])
-  estadoCartera?: 'al_dia' | 'juridico' | 'dificil_recaudo';
+  @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
+  estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo';
 
   @IsOptional()
   @IsString()
@@ -161,29 +165,6 @@ export class FilaImportarInmuebleDto {
   @IsString()
   @MaxLength(10)
   ciudadTitular?: string;
-
-  /**
-   * Recurring monthly amounts, same pair shape `ValoresRecurrentesService`
-   * already uses — the frontend resolves each sheet column ("cargo-1",
-   * "cargo-2"…) to a `conceptoId` using the coproperty's own concept order
-   * before this DTO ever sees it (see `inmuebles-importar.tsx`); this side
-   * only ever deals in real ids, never column positions.
-   */
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CargoImportadoDto)
-  cargos?: CargoImportadoDto[];
-}
-
-class CargoImportadoDto {
-  @IsMongoId()
-  conceptoId: string;
-
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  monto: number;
 }
 
 /**

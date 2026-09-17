@@ -105,6 +105,7 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
     (overrides.terceros ?? mockFindOne()) as never,
     (overrides.copropiedades ?? mockFindById()) as never,
     { resolveCoPropertyId: () => COP } as never,
+    (overrides.saldosIniciales ?? mockFind()) as never,
   );
 
 const svcDefaults = (overrides: Record<string, unknown> = {}) => ({

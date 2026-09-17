@@ -45,6 +45,10 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { fechaNotaContable } from '../notas-contables/notas-contables.mapper';
@@ -79,6 +83,7 @@ const ETIQUETA_DOCUMENTO: Record<TipoDocumentoKardex, string> = {
   ND: 'Nota Débito',
   NT: 'Nota Contable',
   NA: 'Nota de Anticipo',
+  SI: 'Saldo Inicial',
 };
 
 /** Compute days overdue AS OF `corte`: max(0, floor((corte - vence) / day)).
@@ -128,6 +133,8 @@ export class EstadoCuentaService {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   /**
@@ -224,6 +231,7 @@ export class EstadoCuentaService {
     const [
       facturas,
       notasDebito,
+      saldosIniciales,
       recibos,
       notasCredito,
       notasContables,
@@ -233,6 +241,11 @@ export class EstadoCuentaService {
       this.notasDebito
         .find({ coPropertyId, inmuebleId, status: 'emitida' })
         .exec(),
+      // Not status-filtered by `activo` — same reasoning as Facturas above:
+      // an `anulado` Saldo Inicial is voided by reversing whatever balance
+      // was still pending (never a full credit note), so excluding it here
+      // would silently drop history that's still true (it WAS imported).
+      this.saldosIniciales.find({ coPropertyId, inmuebleId }).exec(),
       this.recibos.find({ coPropertyId, inmuebleId }).exec(),
       this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
       this.notasContables
@@ -308,6 +321,22 @@ export class EstadoCuentaService {
         numeroCompleto: nd.fullNumber,
         concepto: ETIQUETA_DOCUMENTO.ND,
         cargo: nd.total,
+        abono: null,
+        categoria: null,
+      });
+    }
+
+    // Saldos Iniciales → débito, dated by their own historical `fecha`
+    // (always before this coproperty's first real period in this system —
+    // see `SaldoInicial`'s own schema docblock) — `numeroOriginal` in place
+    // of a `fullNumber` it never had.
+    for (const si of saldosIniciales) {
+      rows.push({
+        fecha: si.fecha,
+        tipo: 'SI',
+        numeroCompleto: si.numeroOriginal,
+        concepto: ETIQUETA_DOCUMENTO.SI,
+        cargo: si.total,
         abono: null,
         categoria: null,
       });
@@ -486,6 +515,7 @@ export class EstadoCuentaService {
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
       coPropertyId,

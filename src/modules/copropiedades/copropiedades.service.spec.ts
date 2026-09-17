@@ -23,6 +23,26 @@ const mockConceptos = () => ({
   create: jest.fn().mockResolvedValue({}),
 });
 
+const mockConsecutivos = () => ({
+  insertMany: jest.fn().mockResolvedValue([]),
+  find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+});
+
+const mockCuentasContables = () => ({
+  find: jest.fn(() => ({
+    exec: () => Promise.resolve([]),
+    distinct: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  })),
+  insertMany: jest.fn().mockResolvedValue([]),
+});
+
+const mockConceptosCobro = () => ({
+  find: jest.fn(() => ({
+    sort: () => ({ exec: () => Promise.resolve([]) }),
+    distinct: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  })),
+});
+
 const mockAsignaciones = (filas: Record<string, unknown>[] = []) => ({
   find: jest.fn(() => ({ exec: () => Promise.resolve(filas) })),
 });
@@ -108,6 +128,9 @@ describe('CopropiedadesService.findAll', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await expect(service.findAll({})).resolves.toBeDefined();
@@ -126,6 +149,9 @@ describe('CopropiedadesService.findAll', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -147,6 +173,9 @@ describe('CopropiedadesService.findAll', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -173,6 +202,9 @@ describe('CopropiedadesService.findAll', () => {
       accounts as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -203,6 +235,9 @@ describe('CopropiedadesService.findAll', () => {
       accounts as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -224,6 +259,9 @@ describe('CopropiedadesService.findAll', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -241,6 +279,9 @@ describe('CopropiedadesService.findAll', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     const { items } = await service.findAll({});
@@ -260,6 +301,9 @@ describe('CopropiedadesService.create', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.create({ nombre: 'Nueva Copro' }, ACTOR);
@@ -279,6 +323,9 @@ describe('CopropiedadesService.create', () => {
       mockAccounts() as never,
       auditoria as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.create({ nombre: 'Nueva Copro' }, ACTOR);
@@ -305,6 +352,9 @@ describe('CopropiedadesService.create', () => {
       mockAccounts() as never,
       auditoria as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await expect(
@@ -323,6 +373,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
@@ -339,6 +392,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { entidadAdministradoraId: 'ent-9' }, ACTOR);
@@ -358,6 +414,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { nombreAdministrador: 'Portería' }, ACTOR);
@@ -377,6 +436,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { estado: 'inactivo' }, ACTOR);
@@ -396,6 +458,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await expect(
@@ -413,6 +478,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       auditoria as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
@@ -439,6 +507,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       auditoria as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await expect(
@@ -455,6 +526,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { cuentaContableCartera: '130501' }, ACTOR);
@@ -473,6 +547,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { cuentaAnticipos: '210505' }, ACTOR);
@@ -491,6 +568,9 @@ describe('CopropiedadesService.update', () => {
       mockAccounts() as never,
       mockAuditoria() as never,
       mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
     );
 
     await service.update('cop-1', { cuentaDevoluciones: '413595' }, ACTOR);

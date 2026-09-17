@@ -14,18 +14,23 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
  *  mapper, `NotasCreditoService`, the PDF — must go through this, never
  *  read `tipoDocumentoAncla` directly. */
 export const tipoAnclaDe = (doc: {
-  tipoDocumentoAncla: 'FV' | 'ND' | null;
-}): 'FV' | 'ND' => doc.tipoDocumentoAncla ?? 'FV';
+  tipoDocumentoAncla: 'FV' | 'ND' | 'SI' | null;
+}): 'FV' | 'ND' | 'SI' => doc.tipoDocumentoAncla ?? 'FV';
 
 /** The anchor document's own id, picked from whichever of
- *  `facturaId`/`notaDebitoId` `tipoAnclaDe` says is real — see that
- *  function's own docblock. */
+ *  `facturaId`/`notaDebitoId`/`saldoInicialId` `tipoAnclaDe` says is real —
+ *  see that function's own docblock. */
 export const idAnclaDe = (doc: {
-  tipoDocumentoAncla: 'FV' | 'ND' | null;
+  tipoDocumentoAncla: 'FV' | 'ND' | 'SI' | null;
   facturaId: Types.ObjectId | null;
   notaDebitoId: Types.ObjectId | null;
-}): Types.ObjectId =>
-  tipoAnclaDe(doc) === 'FV' ? doc.facturaId! : doc.notaDebitoId!;
+  saldoInicialId: Types.ObjectId | null;
+}): Types.ObjectId => {
+  const tipo = tipoAnclaDe(doc);
+  if (tipo === 'FV') return doc.facturaId!;
+  if (tipo === 'ND') return doc.notaDebitoId!;
+  return doc.saldoInicialId!;
+};
 
 /**
  * The note's own business date — `issueDate` when this document was created

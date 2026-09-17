@@ -18,6 +18,10 @@ import {
   NotaDebitoDocument,
 } from '../../database/schemas/notas-debito/nota-debito.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
   NotaContable,
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
@@ -85,6 +89,8 @@ export class AuxiliarCarteraService {
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales: Model<SaldoInicialDocument>,
   ) {}
 
   async findAll(
@@ -125,6 +131,7 @@ export class AuxiliarCarteraService {
     const [
       facturas,
       notasDebito,
+      saldosIniciales,
       recibos,
       notasCredito,
       notasContables,
@@ -134,6 +141,7 @@ export class AuxiliarCarteraService {
       this.notasDebito
         .find({ coPropertyId, inmuebleId, status: 'emitida' })
         .exec(),
+      this.saldosIniciales.find({ coPropertyId, inmuebleId }).exec(),
       this.recibos.find({ coPropertyId, inmuebleId }).exec(),
       this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
       this.notasContables
@@ -164,6 +172,9 @@ export class AuxiliarCarteraService {
     );
     const ndMap = new Map(
       notasDebito.map((nd) => [nd._id.toString(), nd.fullNumber]),
+    );
+    const siMap = new Map(
+      saldosIniciales.map((si) => [si._id.toString(), si.numeroOriginal]),
     );
     // Each carries the source document's own business date — never
     // `AplicacionCartera.appliedAt`, which is always `new Date()` at cruce
@@ -219,6 +230,19 @@ export class AuxiliarCarteraService {
       });
     }
 
+    // Saldos Iniciales → Débito
+    for (const si of saldosIniciales) {
+      rows.push({
+        fecha: si.fecha,
+        tipo: 'SI',
+        numeroCompleto: si.numeroOriginal,
+        concepto: 'Saldo Inicial',
+        refCruce: null,
+        debito: si.total,
+        credito: null,
+      });
+    }
+
     // AplicacionCartera → Crédito
     const mapaPorTipo: Record<
       'RC' | 'NC' | 'NA',
@@ -237,7 +261,12 @@ export class AuxiliarCarteraService {
       const origen = mapa.get(app.sourceId.toString());
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
 
-      const targetMap = app.documentType === 'FV' ? facturaMap : ndMap;
+      const targetMap =
+        app.documentType === 'FV'
+          ? facturaMap
+          : app.documentType === 'SI'
+            ? siMap
+            : ndMap;
       const refCruce = targetMap.get(app.documentId.toString()) ?? null;
 
       rows.push({

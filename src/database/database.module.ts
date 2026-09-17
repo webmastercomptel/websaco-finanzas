@@ -117,6 +117,22 @@ import {
   ConsecutivoLoteContabilidad,
   ConsecutivoLoteContabilidadSchema,
 } from './schemas/contabilidad/consecutivo-lote-contabilidad.schema';
+import {
+  SaldoInicial,
+  SaldoInicialSchema,
+} from './schemas/saldos-iniciales/saldo-inicial.schema';
+import {
+  LoteSaldoInicial,
+  LoteSaldoInicialSchema,
+} from './schemas/saldos-iniciales/lote-saldo-inicial.schema';
+import {
+  ConsecutivoSaldoInicial,
+  ConsecutivoSaldoInicialSchema,
+} from './schemas/saldos-iniciales/consecutivo-saldo-inicial.schema';
+import {
+  ProgresoImportacion,
+  ProgresoImportacionSchema,
+} from './schemas/importaciones/progreso-importacion.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -157,6 +173,13 @@ const models = [
     name: ConsecutivoLoteContabilidad.name,
     schema: ConsecutivoLoteContabilidadSchema,
   },
+  { name: LoteSaldoInicial.name, schema: LoteSaldoInicialSchema },
+  { name: SaldoInicial.name, schema: SaldoInicialSchema },
+  {
+    name: ConsecutivoSaldoInicial.name,
+    schema: ConsecutivoSaldoInicialSchema,
+  },
+  { name: ProgresoImportacion.name, schema: ProgresoImportacionSchema },
 ];
 
 /**

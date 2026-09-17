@@ -21,9 +21,12 @@ export class CrearConsecutivoDto {
   @MaxLength(20)
   prefijo?: string;
 
+  /** Last number already issued under this code before this row existed —
+   *  0 (the default applied when omitted) means none yet, so the next
+   *  document issued gets number 1. See the schema's note on `nextNumber`. */
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   numeroInicial?: number;
 
   @IsOptional()

@@ -43,8 +43,8 @@ export class CrearNotaCreditoDto {
   /** Which kind of document `documentoId` points to — the same
    *  discriminator `AplicacionSolicitadaDto` already uses
    *  (`recibos/dto/aplicacion-solicitada.dto.ts`). */
-  @IsIn(['FV', 'ND'])
-  tipoDocumento: 'FV' | 'ND';
+  @IsIn(['FV', 'ND', 'SI'])
+  tipoDocumento: 'FV' | 'ND' | 'SI';
 
   @IsMongoId()
   documentoId: string;

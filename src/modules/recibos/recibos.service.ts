@@ -54,6 +54,10 @@ import {
   Inmueble,
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
@@ -62,6 +66,7 @@ import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
   ajustarSaldosCarteraPorDistribucion,
+  cuentaCarteraDeLinea,
   decrementarSaldoDocumentoOrigen,
   ejecutarAplicacionFifo,
   ejecutarAplicacionManual,
@@ -119,6 +124,12 @@ const redactarObservaciones = (
   const notasAbonadas = resumen
     .filter((r) => r.tipo === 'ND' && !r.completa)
     .map((r) => r.numero);
+  const saldosInicialesCancelados = resumen
+    .filter((r) => r.tipo === 'SI' && r.completa)
+    .map((r) => r.numero);
+  const saldosInicialesAbonados = resumen
+    .filter((r) => r.tipo === 'SI' && !r.completa)
+    .map((r) => r.numero);
 
   const clausula = (
     verbo: string,
@@ -135,6 +146,18 @@ const redactarObservaciones = (
     clausula('Abona a', 'factura', 'facturas', facturasAbonadas),
     clausula('Cancela', 'nota débito', 'notas débito', notasCanceladas),
     clausula('Abona a', 'nota débito', 'notas débito', notasAbonadas),
+    clausula(
+      'Cancela',
+      'saldo inicial',
+      'saldos iniciales',
+      saldosInicialesCancelados,
+    ),
+    clausula(
+      'Abona a',
+      'saldo inicial',
+      'saldos iniciales',
+      saldosInicialesAbonados,
+    ),
   ].filter((p): p is string => p !== null);
 
   if (partes.length === 0) {
@@ -212,6 +235,15 @@ export class RecibosService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
+    // APPENDED LAST, optional — see the class docblock's own append
+    // discipline. Optional (unlike every other model here) so the many
+    // existing hand-rolled-mock tests that stop their positional argument
+    // list before this one keep compiling; `ejecutarAplicacionFifo`
+    // (cruce.util.ts) treats "not provided" as "no Saldos Iniciales exist
+    // for this tenant" (an empty candidate list), never a crash — real
+    // requests always get it from Nest's own DI.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   /**
@@ -626,6 +658,15 @@ export class RecibosService {
         .session(session)
         .exec();
 
+      // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
+      // below, where the ORIGINAL code read it) because the desglose loop
+      // right below needs `usesMemorandumAccounts` too, via
+      // `cuentaCarteraDeLinea` — same one Mongoose call now serves both.
+      const copropiedad = await this.copropiedades
+        .findById(coPropertyId)
+        .session(session)
+        .exec();
+
       // Mirrors `aplicarManual`'s own two accumulators, in reverse: which
       // specific accounts the reversal must debit BACK (the same ones the
       // original application credited, not the shared cuentaCartera — see
@@ -637,6 +678,72 @@ export class RecibosService {
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
+        if (aplicacion.documentType === 'SI') {
+          // Replays the EXACT recorded split (`detalleConceptos`), same as
+          // every OTHER reversal here (never re-derives one via a fresh
+          // waterfall) — the original application may have been a
+          // user-chosen manual distribución, and `ajustarSaldosCartera`'s
+          // cascade has no way to reproduce that. No `remanentesPorLinea`/
+          // `actualizarRemanentesLinea` — those write to a Factura-only
+          // `lines[].remainingAmount` field a Saldo Inicial doesn't have.
+          const saldoInicialDoc = await this.saldosIniciales
+            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            .session(session)
+            .exec();
+          if (saldoInicialDoc) {
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              saldoInicialDoc._id,
+              aplicacion.amountApplied,
+            );
+            const partes = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              saldoInicialDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
+            );
+            for (const parte of partes) {
+              const linea = saldoInicialDoc.lines.find((l) =>
+                l.conceptoId.equals(parte.conceptoId),
+              );
+              if (parte.parte !== 0) {
+                desglose.push({
+                  cuenta: cuentaCarteraDeLinea(
+                    linea,
+                    copropiedad?.usesMemorandumAccounts ?? false,
+                  ),
+                  monto: parte.parte,
+                  tipoDocumento: 'SI',
+                  numeroDocumento: saldoInicialDoc.number,
+                });
+              }
+              if (linea?.conceptKind === 'intereses') {
+                montoAplicadoMora += parte.parte;
+              }
+            }
+          }
+
+          await this.aplicaciones
+            .findOneAndUpdate(
+              { _id: aplicacion._id, coPropertyId },
+              { $set: { status: 'revertida', revertedAt: new Date() } },
+              { session },
+            )
+            .exec();
+
+          montoDescuentoTotal += aplicacion.discountApplied ?? 0;
+          continue;
+        }
+
         // `facturaDoc` is null exactly when this aplicación targeted a Nota
         // Débito instead (never a genuinely missing Factura — nothing
         // financial is ever hard-deleted, see the audit law) — the `else`
@@ -704,7 +811,10 @@ export class RecibosService {
             );
             if (parte.parte !== 0) {
               desglose.push({
-                cuenta: linea?.accountingReceivableAccount ?? null,
+                cuenta: cuentaCarteraDeLinea(
+                  linea,
+                  copropiedad?.usesMemorandumAccounts ?? false,
+                ),
                 monto: parte.parte,
                 tipoDocumento: 'FV',
                 numeroDocumento: factura.number,
@@ -719,12 +829,52 @@ export class RecibosService {
             .findOne({ _id: aplicacion.documentId, coPropertyId })
             .session(session)
             .exec();
-          desglose.push({
-            cuenta: null,
-            monto: aplicacion.amountApplied,
-            tipoDocumento: 'ND',
-            numeroDocumento: notaDebitoDoc?.number ?? 0,
-          });
+          if (notaDebitoDoc) {
+            // Pre-existing bug fixed here: this branch used to only build
+            // the accounting `desglose` entry and never actually restored
+            // the cartera balance — a Nota Débito paid off by a Recibo that
+            // later got voided stayed permanently "fully applied"
+            // (`SaldoTotalDocumento.saldoPendiente` never went back up, so
+            // it could never be collected again) and `SaldoCartera` stayed
+            // permanently understated by that same amount. Mirrors the `FV`
+            // branch above and `NotaCreditoService.anular()`'s own `ND`
+            // branch: `restaurarSaldoTotalDocumento` first (the atomic
+            // "can this be paid again" guard), then
+            // `ajustarSaldosCarteraPorDistribucion` replaying the EXACT
+            // recorded split (`detalleConceptos`) — never a fresh
+            // derivation. No `remanentesPorLinea`/`actualizarRemanentesLinea`
+            // — a Nota Débito has a single concepto, no per-línea
+            // `remainingAmount` field to keep in sync.
+            await restaurarSaldoTotalDocumento(
+              this.saldoTotalDocumento,
+              session,
+              notaDebitoDoc._id,
+              aplicacion.amountApplied,
+            );
+            const partesNd = await ajustarSaldosCarteraPorDistribucion(
+              this.saldos,
+              this.carteraPorDocumento,
+              session,
+              coPropertyId,
+              notaDebitoDoc.inmuebleId,
+              aplicacion.detalleConceptos.map((d) => ({
+                conceptoId: d.conceptoId,
+                monto: d.monto,
+              })),
+              aplicacion.amountApplied,
+              1,
+              { tipoDocumento: 'ND', documentoId: notaDebitoDoc._id },
+            );
+            for (const parte of partesNd) {
+              if (parte.parte === 0) continue;
+              desglose.push({
+                cuenta: null,
+                monto: parte.parte,
+                tipoDocumento: 'ND',
+                numeroDocumento: notaDebitoDoc.number,
+              });
+            }
+          }
         }
 
         await this.aplicaciones
@@ -741,11 +891,8 @@ export class RecibosService {
       // ALWAYS posted (no `if (totalRevertido > 0)` gate — that gate was
       // part of the bug this task corrects): uses the Recibo's own cached
       // totals, captured BEFORE the $set below zeroes them, not a sum
-      // replayed from the loop above.
-      const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
-        .session(session)
-        .exec();
+      // replayed from the loop above. `copropiedad` was already fetched
+      // above, for the desglose loop's own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
@@ -1103,10 +1250,15 @@ export class RecibosService {
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
   }> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
     return ejecutarAplicacionManual(
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
@@ -1120,6 +1272,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
+        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
       },
       solicitadas,
       descuentoConfirmadoExtra,
@@ -1148,10 +1301,15 @@ export class RecibosService {
     resumen: ResumenAplicacion[];
     montoDescuentoTotal: number;
   }> {
+    const copropiedad = await this.copropiedades
+      .findById(coPropertyId)
+      .session(session)
+      .exec();
     return ejecutarAplicacionFifo(
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
         saldos: this.saldos,
         carteraPorDocumento: this.carteraPorDocumento,
@@ -1165,6 +1323,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
+        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
       },
       montoDisponible,
     );

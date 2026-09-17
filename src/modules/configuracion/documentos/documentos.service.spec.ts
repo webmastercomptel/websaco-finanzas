@@ -197,7 +197,7 @@ describe('DocumentosService.crearConsecutivo', () => {
       category: 'NC',
       code: 'NC',
       prefix: 'NC',
-      nextNumber: 1,
+      nextNumber: 0,
       displayName: null,
       accountingVoucherCode: null,
     });

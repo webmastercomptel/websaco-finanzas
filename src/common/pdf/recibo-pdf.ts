@@ -19,7 +19,7 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 export interface LineaAsientoImpresion {
   cuentaCodigo: string;
   cuentaNombre: string;
-  tipoDocumento: 'FV' | 'ND' | null;
+  tipoDocumento: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento: number | null;
   debito: number;
   credito: number;

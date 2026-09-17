@@ -43,12 +43,14 @@ const FILAS_POR_PAGINA_RESUMIDO = 24;
  *  kept at 28 for the same headroom reasoning as the resumido constant. */
 const FILAS_POR_PAGINA_DETALLADO = 28;
 
-const ESTADO_LABELS: Record<'al_dia' | 'juridico' | 'dificil_recaudo', string> =
-  {
-    al_dia: 'Vigente',
-    dificil_recaudo: 'Difícil Recaudo',
-    juridico: 'En Jurídico',
-  };
+const ESTADO_LABELS: Record<
+  'vigente' | 'juridico' | 'dificil_recaudo',
+  string
+> = {
+  vigente: 'Vigente',
+  dificil_recaudo: 'Difícil Recaudo',
+  juridico: 'En Jurídico',
+};
 
 const styles = StyleSheet.create({
   sinDatos: {
@@ -138,7 +140,7 @@ export async function generarPdfCarteraPorConceptos(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   conceptoId?: string,
-  estado?: 'al_dia' | 'juridico' | 'dificil_recaudo',
+  estado?: 'vigente' | 'juridico' | 'dificil_recaudo',
 ): Promise<Buffer> {
   if (estado) {
     const filtrado: RespuestaCarteraPorConceptos = {

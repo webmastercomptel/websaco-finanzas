@@ -22,6 +22,7 @@ export const MODULE_TO_SUBJECT = {
   'notas-contables': 'NotaContable',
   'otras-notas': 'OtraNota',
   'notas-anticipo': 'NotaAnticipo',
+  'saldos-iniciales': 'SaldoInicial',
   anulaciones: 'Anulacion',
   consultas: 'Consulta',
   'cuentas-contables': 'Configuracion',
