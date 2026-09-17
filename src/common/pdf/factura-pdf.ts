@@ -16,6 +16,7 @@ import type {
   TitularCongelado,
 } from '../../database/schemas/facturacion/factura-linea.schema';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
+import type { FacturaLean } from '../../modules/facturacion/facturas.service';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
@@ -182,9 +183,14 @@ export function contenidoDocumentoFacturacion(
  * per-invoice content across N pages of one `<Document>`, instead of
  * rendering N separate PDFs and merging bytes (pdf-lib's approach, with no
  * react-pdf equivalent).
+ *
+ * Accepts `FacturaLean` (not `FacturaDocument`) — a real hydrated document is
+ * structurally assignable to the plain-fields lean shape, so this only reads
+ * what it always read; widened so `generarPdfFacturasLote` can pass
+ * `.lean()`-fetched invoices for an entire lote without hydrating each one.
  */
 export function paginaFactura(
-  factura: FacturaDocument,
+  factura: FacturaLean,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },

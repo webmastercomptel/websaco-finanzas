@@ -4,6 +4,7 @@ import {
   Page,
   StyleSheet,
   renderToBuffer,
+  renderToStream,
   type DocumentProps,
 } from '@react-pdf/renderer';
 
@@ -111,4 +112,14 @@ export async function renderizarPdf(
   documento: ReactElement<DocumentProps>,
 ): Promise<Buffer> {
   return renderToBuffer(documento);
+}
+
+/** Renders a document tree to a stream instead of a Buffer — `renderToBuffer`
+ *  internally awaits the whole stream and `Buffer.concat`s every chunk before
+ *  returning, so an N-page batch lote PDF would sit fully in memory twice
+ *  over; the batch builders pipe this straight to the response instead. */
+export async function renderizarPdfStream(
+  documento: ReactElement<DocumentProps>,
+): Promise<NodeJS.ReadableStream> {
+  return renderToStream(documento);
 }

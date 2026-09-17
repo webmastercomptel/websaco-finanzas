@@ -222,7 +222,7 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfPrefacturasLote(
+    const stream = await generarPdfPrefacturasLote(
       lote.preview,
       lote,
       copropiedad,
@@ -232,7 +232,13 @@ export class LotesController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="prefacturas-lote-${lote.number}.pdf"`,
     });
-    res.send(Buffer.from(bytes));
+    // Piped, not buffered — `generarPdfPrefacturasLote` streams the render so
+    // an N-unit batch never sits fully in memory before it reaches the client.
+    await new Promise<void>((resolve, reject) => {
+      stream.pipe(res);
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
   }
 
   /**
@@ -279,7 +285,7 @@ export class LotesController {
       );
     }
 
-    const bytes = await generarPdfFacturasLote(
+    const stream = await generarPdfFacturasLote(
       facturas,
       resolucionesPorId,
       copropiedad,
@@ -289,7 +295,14 @@ export class LotesController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="facturas-lote-${lote.number}.pdf"`,
     });
-    res.send(Buffer.from(bytes));
+    // Piped, not buffered — `generarPdfFacturasLote` streams the render so a
+    // lote with hundreds of invoices never sits fully in memory before it
+    // reaches the client.
+    await new Promise<void>((resolve, reject) => {
+      stream.pipe(res);
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
   }
 
   /**

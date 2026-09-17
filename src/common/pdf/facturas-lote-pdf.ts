@@ -1,6 +1,9 @@
-import { reporteDocumentoMultiPagina, renderizarPdf } from './react/document';
+import {
+  reporteDocumentoMultiPagina,
+  renderizarPdfStream,
+} from './react/document';
 import { paginaFactura } from './factura-pdf';
-import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
+import type { FacturaLean } from '../../modules/facturacion/facturas.service';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
@@ -16,12 +19,18 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
  * always matches what downloading one factura at a time would show, page for
  * page. React-pdf, built directly (no pdf-lib version kept behind a
  * `?version=` toggle — direct cutover, same as the rest of this migration).
+ *
+ * Takes `FacturaLean[]` (from `FacturasService.findAllRawPorLote`'s `.lean()`
+ * query) rather than hydrated documents, and streams the render
+ * (`renderizarPdfStream`) instead of buffering it — a lote can run into the
+ * hundreds of invoices, and neither hydrating every one nor holding the whole
+ * rendered PDF in memory at once is safe under Cloud Run's memory ceiling.
  */
 export async function generarPdfFacturasLote(
-  facturas: FacturaDocument[],
+  facturas: FacturaLean[],
   resolucionesPorId: Map<string, ResolucionFacturacionDocument>,
   copropiedad: CopropiedadDocument,
-): Promise<Buffer> {
+): Promise<NodeJS.ReadableStream> {
   const paginas = facturas.map((factura) => {
     const resolucion = factura.resolucionId
       ? (resolucionesPorId.get(factura.resolucionId.toString()) ?? null)
@@ -29,5 +38,5 @@ export async function generarPdfFacturasLote(
     return paginaFactura(factura, resolucion, copropiedad);
   });
 
-  return renderizarPdf(reporteDocumentoMultiPagina(paginas));
+  return renderizarPdfStream(reporteDocumentoMultiPagina(paginas));
 }

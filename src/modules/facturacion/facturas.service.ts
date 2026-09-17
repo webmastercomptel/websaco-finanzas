@@ -163,12 +163,29 @@ export class FacturasService {
    * `resolucionId` and the other fields the Spanish contract omits.
    * Ordered by unit code, the same order the roster and the Liquidación
    * table already use, so a printed batch reads in a predictable sequence.
+   *
+   * `.lean()` on purpose: a lote can carry hundreds of Facturas, and the PDF
+   * renderer (`paginaFactura`) only ever reads plain fields (see
+   * `FacturaLean` below) — hydrating full Mongoose documents here is pure
+   * overhead this batch PDF can't afford under Cloud Run's memory ceiling.
    */
-  async findAllRawPorLote(loteId: string): Promise<FacturaDocument[]> {
+  async findAllRawPorLote(loteId: string) {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     return this.facturas
       .find({ coPropertyId, loteId })
       .sort({ unitCode: 1 })
+      .lean()
       .exec();
   }
 }
+
+/**
+ * Plain-object shape `.lean()` resolves for a Factura — every field a
+ * consumer of `findAllRawPorLote` can rely on, without the full Mongoose
+ * document's methods/getters. Derived from the method's own inferred return
+ * type rather than a hand-rolled `LeanDocument<...>` (removed in Mongoose
+ * 6+) — see `findAllRawPorLote` above.
+ */
+export type FacturaLean = Awaited<
+  ReturnType<FacturasService['findAllRawPorLote']>
+>[number];
