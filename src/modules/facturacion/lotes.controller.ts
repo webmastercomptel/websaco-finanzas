@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { pipeline } from 'node:stream/promises';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
@@ -234,11 +235,9 @@ export class LotesController {
     });
     // Piped, not buffered — `generarPdfPrefacturasLote` streams the render so
     // an N-unit batch never sits fully in memory before it reaches the client.
-    await new Promise<void>((resolve, reject) => {
-      stream.pipe(res);
-      stream.on('end', resolve);
-      stream.on('error', reject);
-    });
+    // `pipeline` (not raw `.pipe`) so a client disconnect mid-download destroys
+    // the render stream too, instead of leaving the request hung forever.
+    await pipeline(stream, res);
   }
 
   /**
@@ -297,12 +296,10 @@ export class LotesController {
     });
     // Piped, not buffered — `generarPdfFacturasLote` streams the render so a
     // lote with hundreds of invoices never sits fully in memory before it
-    // reaches the client.
-    await new Promise<void>((resolve, reject) => {
-      stream.pipe(res);
-      stream.on('end', resolve);
-      stream.on('error', reject);
-    });
+    // reaches the client. `pipeline` (not raw `.pipe`) so a client disconnect
+    // mid-download destroys the render stream too, instead of leaving the
+    // request hung forever.
+    await pipeline(stream, res);
   }
 
   /**
