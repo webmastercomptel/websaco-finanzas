@@ -380,7 +380,7 @@ export class NotasDebitoService {
         .session(session)
         .exec();
       // Just seeded above, still full — no need to re-read SaldoTotalDocumento.
-      return toNotaDebito(final!, dto.total);
+      return toNotaDebito(final!, dto.total, inmueble.code);
     });
 
     // Frozen presentation record — built once here, outside the transaction
@@ -510,9 +510,26 @@ export class NotasDebitoService {
       saldos.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
     );
 
+    // Batched — one query for the whole page, never one per row.
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((idInmueble) => new Types.ObjectId(idInmueble));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          .find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      inmuebles.map((i) => [i._id.toString(), i.code]),
+    );
+
     return {
       items: documentos.map((d) =>
-        toNotaDebito(d, saldoPorDocumento.get(d._id.toString()) ?? 0),
+        toNotaDebito(
+          d,
+          saldoPorDocumento.get(d._id.toString()) ?? 0,
+          codigoPorInmueble.get(d.inmuebleId.toString()) ?? '',
+        ),
       ),
       total,
       pagina,
@@ -597,6 +614,7 @@ export class NotasDebitoService {
       nota,
       saldoTotal?.saldoPendiente ?? 0,
       aplicaciones,
+      await this.resolverInmuebleCodigo(nota.inmuebleId),
       fechasPorSourceId,
       documentDefinition,
     );
@@ -614,6 +632,20 @@ export class NotasDebitoService {
       throw new NotFoundException(`No se encontró la nota débito ${id}`);
     }
     return nota;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `NotaDebito` itself (unlike `Factura.unitCode`),
+   * so every reader looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /**
@@ -814,7 +846,11 @@ export class NotasDebitoService {
         .session(session)
         .exec();
       // Just forced to 0 above (Step 4).
-      return toNotaDebito(final!, 0);
+      return toNotaDebito(
+        final!,
+        0,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 

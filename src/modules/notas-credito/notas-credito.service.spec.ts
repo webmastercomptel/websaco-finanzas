@@ -429,6 +429,11 @@ const construirServicio = (opts: {
         exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
       }),
     })),
+    // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
+    // `findById` above (called outside any transaction).
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+    })),
   };
 
   const service = new NotasCreditoService(
@@ -1264,6 +1269,11 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
         session: () => ({
           exec: () => Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
         }),
+        // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain,
+        // unlike the terceroId resolution above (called inside a
+        // transaction).
+        exec: () =>
+          Promise.resolve({ _id: INMUEBLE, holderId: TITULAR, code: '1304' }),
       })),
     };
 

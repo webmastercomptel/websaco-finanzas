@@ -62,6 +62,10 @@ export const toNotaCredito = (
   doc: NotaCreditoDocument,
   montoAplicado: number,
   montoSinAplicar: number,
+  // Live-resolved by the caller from `inmuebleId` — no frozen field for it
+  // exists on this document (unlike `Factura.unitCode`), same reasoning as
+  // `CarteraPorConceptosService`'s identical live-resolve.
+  inmuebleCodigo: string,
   // The anchor document's own printed number ("FV-1"/"ND-1") — this
   // document only stores its id. Optional: the lean listing (`findAll`)
   // has no reason to pay for this lookup on every row, only `findOne`'s
@@ -70,6 +74,7 @@ export const toNotaCredito = (
 ): NotaCreditoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
+  inmuebleCodigo,
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
   tipoDocumentoAncla: tipoAnclaDe(doc),
   documentoAnclaId: idAnclaDe(doc).toString(),
@@ -116,12 +121,14 @@ export const toNotaCreditoDetalle = (
   montoAplicado: number,
   montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
+  inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
 ): NotaCreditoDetalle => ({
   ...toNotaCredito(
     doc,
     montoAplicado,
     montoSinAplicar,
+    inmuebleCodigo,
     numerosPorDocumento.get(idAnclaDe(doc).toString()) ?? null,
   ),
   // Self-sourced: every `aplicacion` here was made BY this Nota Crédito, so

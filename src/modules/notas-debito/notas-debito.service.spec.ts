@@ -197,9 +197,14 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     },
     // `crear()`'s own terceroId resolution (`Inmueble.holderId`) — no
     // titular by default; tests exercising a real one override this.
+    // `find` backs `findAll`'s own batched `inmuebleCodigo` resolve — empty
+    // by default, same reasoning tests that don't care about it stay green.
     inmuebles: {
       findOne: jest.fn(() => ({
         exec: jest.fn(() => Promise.resolve({ _id: INMUEBLE, holderId: null })),
+      })),
+      find: jest.fn(() => ({
+        exec: jest.fn(() => Promise.resolve([])),
       })),
     },
   };

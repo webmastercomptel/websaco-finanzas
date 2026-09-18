@@ -137,6 +137,11 @@ const construirServicio = (opts: {
         exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
       }),
     })),
+    // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
+    // `findById` above (called outside any transaction).
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+    })),
   };
 
   // Mock the origin concepto's per-document balance for the balance check

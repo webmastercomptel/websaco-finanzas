@@ -114,11 +114,12 @@ export class NotasCreditoController {
     @Param('id') id: string,
   ): Promise<DocumentoNotaCredito> {
     const nota = await this.notasCredito.findOneRaw(id);
-    const documentDefinition = await this.presentacionDocumento.buscar(
-      'NC',
-      nota._id,
-    );
+    const [documentDefinition, inmuebleCodigo] = await Promise.all([
+      this.presentacionDocumento.buscar('NC', nota._id),
+      this.notasCredito.resolverInmuebleCodigo(nota.inmuebleId),
+    ]);
     return {
+      inmuebleCodigo,
       documentDefinition:
         documentDefinition as DocumentoNotaCredito['documentDefinition'],
     };

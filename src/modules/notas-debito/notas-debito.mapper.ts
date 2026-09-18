@@ -20,10 +20,14 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
 export const toNotaDebito = (
   doc: NotaDebitoDocument,
   saldoPendiente: number,
+  // Live-resolved by the caller from `inmuebleId` — no frozen field for it
+  // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
+  inmuebleCodigo: string,
   documentDefinition: Record<string, unknown> | null = null,
 ): NotaDebitoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
+  inmuebleCodigo,
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
   conceptoId: doc.conceptoId.toString(),
   motivo: doc.reason,
@@ -61,10 +65,11 @@ export const toNotaDebitoDetalle = (
   doc: NotaDebitoDocument,
   saldoPendiente: number,
   aplicaciones: AplicacionCarteraDocument[],
+  inmuebleCodigo: string,
   fechasPorSourceId: Map<string, Date> = new Map(),
   documentDefinition: Record<string, unknown> | null = null,
 ): NotaDebitoDetalle => ({
-  ...toNotaDebito(doc, saldoPendiente, documentDefinition),
+  ...toNotaDebito(doc, saldoPendiente, inmuebleCodigo, documentDefinition),
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,

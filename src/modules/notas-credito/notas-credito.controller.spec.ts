@@ -135,6 +135,7 @@ describe('NotasCreditoController.obtenerDocumento', () => {
     const nota = notaFixture();
     const notasCredito = {
       findOneRaw: jest.fn(() => Promise.resolve(nota)),
+      resolverInmuebleCodigo: jest.fn(() => Promise.resolve('A-101')),
     };
     const presentacionDocumento = {
       buscar: jest.fn(() =>
@@ -147,6 +148,7 @@ describe('NotasCreditoController.obtenerDocumento', () => {
 
     expect(presentacionDocumento.buscar).toHaveBeenCalledWith('NC', nota._id);
     expect(respuesta).toEqual({
+      inmuebleCodigo: 'A-101',
       documentDefinition: { type: 'VIEW', props: {} },
     });
   });
@@ -154,6 +156,7 @@ describe('NotasCreditoController.obtenerDocumento', () => {
   it('devuelve documentDefinition: null cuando nada fue congelado todavía, sin lanzar', async () => {
     const notasCredito = {
       findOneRaw: jest.fn(() => Promise.resolve(notaFixture())),
+      resolverInmuebleCodigo: jest.fn(() => Promise.resolve('A-101')),
     };
     const presentacionDocumento = {
       buscar: jest.fn(() => Promise.resolve(null)),
@@ -162,6 +165,9 @@ describe('NotasCreditoController.obtenerDocumento', () => {
 
     const respuesta = await controller.obtenerDocumento('nc-1');
 
-    expect(respuesta).toEqual({ documentDefinition: null });
+    expect(respuesta).toEqual({
+      inmuebleCodigo: 'A-101',
+      documentDefinition: null,
+    });
   });
 });

@@ -316,7 +316,10 @@ export class NotasContablesService {
         .findOne({ _id: creada._id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaContable(final!);
+      return toNotaContable(
+        final!,
+        await this.resolverInmuebleCodigo(inmuebleId),
+      );
     });
 
     // Frozen presentation record — built once here, outside the transaction
@@ -446,11 +449,29 @@ export class NotasContablesService {
       this.notasContables.countDocuments(filtro).exec(),
     ]);
 
+    // Batched — one query for the whole page, never one per row.
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((idInmueble) => new Types.ObjectId(idInmueble));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+    );
+
     return {
       // Never a bare `.map(toNotaContable)` — `Array.map` would leak its
-      // own `index` into `toNotaContable`'s second (`documentDefinition`)
-      // param, same gotcha `toAplicacionCartera`'s own docblock warns about.
-      items: documentos.map((doc) => toNotaContable(doc)),
+      // own `index` into `toNotaContable`'s second (`inmuebleCodigo`) param,
+      // same gotcha `toAplicacionCartera`'s own docblock warns about.
+      items: documentos.map((doc) =>
+        toNotaContable(
+          doc,
+          codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+        ),
+      ),
       total,
       pagina,
       porPagina,
@@ -476,7 +497,11 @@ export class NotasContablesService {
     const documentDefinition = this.presentacionDocumento
       ? await this.presentacionDocumento.buscar('NT', nota._id)
       : null;
-    return toNotaContable(nota, documentDefinition);
+    return toNotaContable(
+      nota,
+      await this.resolverInmuebleCodigo(nota.inmuebleId),
+      documentDefinition,
+    );
   }
 
   /**
@@ -491,6 +516,20 @@ export class NotasContablesService {
       throw new NotFoundException(`No se encontró la nota contable ${id}`);
     }
     return nota;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `NotaContable` itself (unlike `Factura.unitCode`),
+   * so every reader looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /**
@@ -595,7 +634,10 @@ export class NotasContablesService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaContable(final!);
+      return toNotaContable(
+        final!,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 

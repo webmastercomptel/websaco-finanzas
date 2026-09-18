@@ -35,10 +35,14 @@ export const toRecibo = (
   doc: ReciboDocument,
   montoAplicado: number,
   montoSinAplicar: number,
+  // Live-resolved by the caller from `inmuebleId` — no frozen field for it
+  // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
+  inmuebleCodigo: string,
   documentDefinition: Record<string, unknown> | null = null,
 ): ReciboContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
+  inmuebleCodigo,
   terceroId: doc.terceroId.toString(),
   prefijo: doc.prefix,
   numero: doc.number,
@@ -120,10 +124,17 @@ export const toReciboDetalle = (
   montoAplicado: number,
   montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
+  inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
   documentDefinition: Record<string, unknown> | null = null,
 ): ReciboDetalle => ({
-  ...toRecibo(doc, montoAplicado, montoSinAplicar, documentDefinition),
+  ...toRecibo(
+    doc,
+    montoAplicado,
+    montoSinAplicar,
+    inmuebleCodigo,
+    documentDefinition,
+  ),
   // Self-sourced: every `aplicacion` here was made BY this Recibo, so its
   // own `receivedDate` — never `appliedAt` — is what a person means by "the
   // date of this movement".

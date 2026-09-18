@@ -797,6 +797,7 @@ export class NotasCreditoService {
         final!,
         totalAplicadoAhora,
         dto.montoTotal - totalAplicadoAhora,
+        await this.resolverInmuebleCodigo(inmuebleId),
       );
     });
 
@@ -1833,7 +1834,12 @@ export class NotasCreditoService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaCredito(final!, 0, 0);
+      return toNotaCredito(
+        final!,
+        0,
+        0,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 
@@ -1906,6 +1912,20 @@ export class NotasCreditoService {
       ]),
     );
 
+    // Batched — one query for the whole page, never one per row (the
+    // tenancy/tenancy-adjacent "no query in a loop" rule).
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((id) => new Types.ObjectId(id));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+    );
+
     return {
       items: documentos.map((doc) => {
         const saldo = saldoPorDocumento.get(doc._id.toString());
@@ -1913,7 +1933,12 @@ export class NotasCreditoService {
         const montoAplicado = saldo
           ? saldo.montoOriginal - saldo.saldoDisponible
           : 0;
-        return toNotaCredito(doc, montoAplicado, montoSinAplicar);
+        return toNotaCredito(
+          doc,
+          montoAplicado,
+          montoSinAplicar,
+          codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+        );
       }),
       total,
       pagina,
@@ -2024,6 +2049,7 @@ export class NotasCreditoService {
       montoAplicado,
       montoSinAplicar,
       aplicaciones,
+      await this.resolverInmuebleCodigo(nota.inmuebleId),
       numerosPorDocumento,
     );
   }
@@ -2040,6 +2066,21 @@ export class NotasCreditoService {
       throw new NotFoundException(`No se encontró la nota crédito ${id}`);
     }
     return nota;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `NotaCredito` itself (unlike `Factura.unitCode`),
+   * so every reader (`findOne`, the controller's own `obtenerDocumento`)
+   * looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,

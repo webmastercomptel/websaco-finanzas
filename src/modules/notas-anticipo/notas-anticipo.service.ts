@@ -490,7 +490,10 @@ export class NotasAnticipoService {
       .findOne({ _id: creada._id, coPropertyId })
       .session(session)
       .exec();
-    return toNotaAnticipo(final!);
+    return toNotaAnticipo(
+      final!,
+      await this.resolverInmuebleCodigo(final!.inmuebleId),
+    );
   }
 
   /**
@@ -594,11 +597,29 @@ export class NotasAnticipoService {
       this.notasAnticipo.countDocuments(filtro).exec(),
     ]);
 
+    // Batched — one query for the whole page, never one per row.
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((idInmueble) => new Types.ObjectId(idInmueble));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+    );
+
     // Never a bare `.map(toNotaAnticipo)` — `Array.map` would leak its own
-    // `index` into `toNotaAnticipo`'s second (`documentDefinition`) param,
-    // same gotcha `toAplicacionCartera`'s own docblock already warns about.
+    // `index` into `toNotaAnticipo`'s second (`inmuebleCodigo`) param, same
+    // gotcha `toAplicacionCartera`'s own docblock already warns about.
     return {
-      items: documentos.map((doc) => toNotaAnticipo(doc)),
+      items: documentos.map((doc) =>
+        toNotaAnticipo(
+          doc,
+          codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+        ),
+      ),
       total,
       pagina,
       porPagina,
@@ -666,6 +687,7 @@ export class NotasAnticipoService {
     return toNotaAnticipoDetalle(
       nota,
       aplicaciones,
+      await this.resolverInmuebleCodigo(nota.inmuebleId),
       numerosPorDocumento,
       documentDefinition,
     );
@@ -972,7 +994,10 @@ export class NotasAnticipoService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaAnticipo(final!);
+      return toNotaAnticipo(
+        final!,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 
@@ -1053,6 +1078,20 @@ export class NotasAnticipoService {
       throw new NotFoundException(`No se encontró la nota de anticipo ${id}`);
     }
     return nota;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `NotaAnticipo` itself (unlike `Factura.unitCode`),
+   * so every reader looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /**
