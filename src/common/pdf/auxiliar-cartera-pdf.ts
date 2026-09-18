@@ -140,7 +140,7 @@ const filaSimple = (label: string, valor: string, key: string) =>
  * movements across all five document types for a date range, opening on
  * "Saldo Anterior" and closing on "Saldo Final". React-pdf, built directly
  * (no pdf-lib version kept behind a `?version=` toggle — see the migration
- * notes in `../../../CLAUDE.md`'s "Decisions pending Engram save" once
+ * notes in `../../../CLAUDE.md`'s "Decisions pending claude-mem save" once
  * this lands: direct cutover, not a dual-path stage, is the settled
  * approach for the rest of this migration).
  *

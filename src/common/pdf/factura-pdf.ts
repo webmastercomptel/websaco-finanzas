@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { formatoFecha } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import {
@@ -69,13 +69,6 @@ export interface InfoDescuentoProntoPago {
 }
 
 const styles = StyleSheet.create({
-  iva: {
-    fontSize: 10,
-    fontFamily: 'Helvetica-Bold',
-    textAlign: 'right',
-    marginTop: -6,
-    marginBottom: 8,
-  },
   pieResolucion: {
     fontSize: 8,
     fontFamily: 'Helvetica',
@@ -94,10 +87,6 @@ const styles = StyleSheet.create({
  * `ObservacionesFactura`). Returns page content only — `generarPdfFactura`
  * still appends the DIAN footer on top before rendering; `generarPdfPrefactura`
  * uses this as-is.
- *
- * The IVA breakout row (only when `totalIva > 0`) isn't part of
- * `CuerpoFactura` — that component is Bernardo's in-flight file, so this adds
- * it as a sibling line right below instead of editing his component.
  */
 export function contenidoDocumentoFacturacion(
   datos: DatosDocumentoFacturacion,
@@ -143,7 +132,8 @@ export function contenidoDocumentoFacturacion(
   const descuentoProps = datos.descuento
     ? {
         fechaLimite: datos.descuento.fechaLimite.toISOString(),
-        montoConDescuento: totalAPagar - datos.descuento.monto,
+        montoConDescuento:
+          totalAPagar - datos.descuento.monto - datos.totalAnticipos,
       }
     : undefined;
   const notas = copropiedad.billingNotes?.trim() || null;
@@ -176,21 +166,19 @@ export function contenidoDocumentoFacturacion(
       totalNuevoSaldo,
       totalAPagar,
       totalAnticipos: datos.totalAnticipos,
+      totalIva,
+      etiquetaIva,
     }),
-    totalIva > 0
-      ? createElement(
-          Text,
-          { style: styles.iva },
-          `${etiquetaIva}: ${formatoPeso(totalIva)}`,
-        )
-      : null,
     notas || descuentoProps
       ? createElement(ObservacionesFactura, {
           texto: notas,
           descuento: descuentoProps,
         })
       : null,
-    createElement(CreditoWebsaco, { idInmueble: datos.unitCode }),
+    createElement(CreditoWebsaco, {
+      idInmueble: datos.unitCode,
+      creditoComptel: true,
+    }),
   );
 }
 

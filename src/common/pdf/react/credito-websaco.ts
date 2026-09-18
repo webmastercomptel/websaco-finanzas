@@ -22,6 +22,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica',
     marginRight: 4,
   },
+  textoConMargenIzquierdo: {
+    fontSize: 7,
+    fontFamily: 'Helvetica',
+    marginLeft: 4,
+  },
   logo: {
     width: 28,
   },
@@ -56,11 +61,18 @@ const styles = StyleSheet.create({
  * "Generado por" — the unit-code field a Factura/Prefactura used to show
  * elsewhere and was later dropped; restored here rather than in the body,
  * per product decision. Every other caller omits it and sees no change.
+ *
+ * `creditoComptel`, when true, appends "Comptel-System Ltda, NIT
+ * 800.010.333-2" right after the WebSACO mark — Comptel-System is the
+ * reseller of record and its NIT is required on the invoice itself, per
+ * product decision. Only `factura-pdf.ts` passes it; every other caller
+ * omits it and sees no change.
  */
 export function CreditoWebsaco(props: {
   idInmueble?: string | null;
+  creditoComptel?: boolean;
 }): ReactElement {
-  const { idInmueble } = props;
+  const { idInmueble, creditoComptel } = props;
   return createElement(
     View,
     { style: styles.contenedor },
@@ -76,6 +88,13 @@ export function CreditoWebsaco(props: {
         : null,
       createElement(Text, { style: styles.textoConMargen }, 'Generado por'),
       createElement(Image, { style: styles.logo, src: logoBytesWebsaco() }),
+      creditoComptel
+        ? createElement(
+            Text,
+            { style: styles.textoConMargenIzquierdo },
+            '· Comptel-System Ltda, NIT 800.010.333-2',
+          )
+        : null,
     ),
     createElement(Text, {
       style: styles.texto,

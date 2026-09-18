@@ -126,12 +126,12 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 
 BullMQ queues and the mailer (`app.module.ts` still just has comments where they'll attach). Verify against `src/modules/` and `src/database/schemas/` before assuming any other module is missing — this list drifts fast.
 
-## Decisions pending Engram save
+## Decisions pending claude-mem save
 
-> Verified true in this codebase but not yet persisted via `mem_save`
-> (Engram was disconnected when these were written up). A human or a future
-> Engram-connected session should save each as `type: decision` and then
-> delete it from here.
+> Verified true in this codebase but not yet persisted via `observation_add`
+> (claude-mem was not installed when these were written up). A human or a
+> future claude-mem-connected session should save each with `kind: decision`
+> and then delete it from here.
 
 - **Builder: `nest-cli.json` sets `"builder": "swc"` with `"typeCheck": false`.**
   What: the default Nest/tsc build path is bypassed; `npm run typecheck`
