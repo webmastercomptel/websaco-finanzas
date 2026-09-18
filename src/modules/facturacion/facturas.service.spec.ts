@@ -54,6 +54,7 @@ const modeloCon = (filas: unknown[], total = filas.length) => {
     sort: () => cadena,
     skip: () => cadena,
     limit: () => cadena,
+    lean: () => cadena,
     exec: () => Promise.resolve(filas),
   };
   return {

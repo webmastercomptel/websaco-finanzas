@@ -44,9 +44,10 @@ const SIN_DESCUENTO: DescuentoProntoPago = {
  *
  * The result is computed ONCE — at a real invoice's `consolidar()` time,
  * frozen onto `Factura.discountAmount`/`discountDeadline` forever after
- * (same immutability as every other invoice fact) — or live, every render,
- * for a still-editable `FacturaPreliminar` (`generarPdfPrefactura`), which
- * has nothing to freeze yet.
+ * (same immutability as every other invoice fact) — or live, every call,
+ * for a still-editable `FacturaPreliminar` (`paginaPrefactura`, called
+ * fresh on every request — see `LotesController`'s prefactura routes),
+ * which has nothing to freeze yet.
  */
 export function calcularDescuentoProntoPago(
   lines: LineaParaDescuento[],

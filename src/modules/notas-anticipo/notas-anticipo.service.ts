@@ -479,7 +479,12 @@ export class NotasAnticipoService {
       this.notasAnticipo.countDocuments(filtro).exec(),
     ]);
 
-    return { items: documentos.map(toNotaAnticipo), total, pagina, porPagina };
+    return {
+      items: documentos.map((doc) => toNotaAnticipo(doc)),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   /** Full detail, cargo por cargo — mirrors `RecibosService.findOne`. */

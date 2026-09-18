@@ -1,4 +1,5 @@
 import type {
+  NodoDocumentoFactura,
   NotaDebito as NotaDebitoContract,
   NotaDebitoDetalle,
 } from '../../contracts';
@@ -10,10 +11,16 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
  * Maps a debit note document to the Spanish API contract. Persistence is
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toNotaCredito`.
+ *
+ * `documentDefinition` is resolved by the caller from the shared, permanent
+ * `presentacion_documento` table — same pattern `toRecibo` uses for its own
+ * field of the same name. Defaults to `null` so `crear()`'s own immediate
+ * return, `anular()`, and the listing don't need to pass it explicitly.
  */
 export const toNotaDebito = (
   doc: NotaDebitoDocument,
   saldoPendiente: number,
+  documentDefinition: Record<string, unknown> | null = null,
 ): NotaDebitoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -32,6 +39,9 @@ export const toNotaDebito = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
+  // its own field of the same name.
+  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
 });
 
 /**
@@ -52,8 +62,9 @@ export const toNotaDebitoDetalle = (
   saldoPendiente: number,
   aplicaciones: AplicacionCarteraDocument[],
   fechasPorSourceId: Map<string, Date> = new Map(),
+  documentDefinition: Record<string, unknown> | null = null,
 ): NotaDebitoDetalle => ({
-  ...toNotaDebito(doc, saldoPendiente),
+  ...toNotaDebito(doc, saldoPendiente, documentDefinition),
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,

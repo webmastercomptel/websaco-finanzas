@@ -46,7 +46,7 @@ export interface ModelosDatosImpresionNotaCredito {
 /**
  * Assembles everything the Nota Crédito PDF needs to draw its journal-entry
  * table — same shape and same drawing code as a Recibo's own print
- * (`generarPdfRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what tells the
+ * (`contenidoRecibo`, `recibo-pdf.ts`; `tituloDocumento` is what tells the
  * renderer which one this is). Mirrors `construirDatosImpresionRecibo`
  * closely; the differences are real, not cosmetic:
  *

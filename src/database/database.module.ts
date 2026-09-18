@@ -145,6 +145,10 @@ import {
   ProgresoImportacion,
   ProgresoImportacionSchema,
 } from './schemas/importaciones/progreso-importacion.schema';
+import {
+  PresentacionDocumento,
+  PresentacionDocumentoSchema,
+} from './schemas/documentos/presentacion-documento.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -201,6 +205,7 @@ const models = [
     schema: ConsecutivoSaldoInicialAnticipoSchema,
   },
   { name: ProgresoImportacion.name, schema: ProgresoImportacionSchema },
+  { name: PresentacionDocumento.name, schema: PresentacionDocumentoSchema },
 ];
 
 /**

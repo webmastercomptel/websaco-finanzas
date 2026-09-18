@@ -5,64 +5,26 @@ import {
   Param,
   Post,
   Query,
-  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasCreditoService } from './notas-credito.service';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
 import type {
+  DocumentoNotaCredito,
   NotaCredito,
   NotaCreditoDetalle,
   Paginado,
   ResultadoAplicacion,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
-import { construirDatosImpresionNotaCredito } from './nota-credito-pdf-datos.util';
-import {
-  Copropiedad,
-  CopropiedadDocument,
-} from '../../database/schemas/copropiedades/copropiedad.schema';
-import {
-  Factura,
-  FacturaDocument,
-} from '../../database/schemas/facturacion/factura.schema';
-import {
-  Inmueble,
-  InmuebleDocument,
-} from '../../database/schemas/copropiedades/inmueble.schema';
-import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
-import {
-  NotaDebito,
-  NotaDebitoDocument,
-} from '../../database/schemas/notas-debito/nota-debito.schema';
-import {
-  SaldoInicial,
-  SaldoInicialDocument,
-} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
-import {
-  ConceptoCobro,
-  ConceptoCobroDocument,
-} from '../../database/schemas/conceptos/concepto-cobro.schema';
-import {
-  CuentaContable,
-  CuentaContableDocument,
-} from '../../database/schemas/contabilidad/cuenta-contable.schema';
-import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { RecibosService } from '../recibos/recibos.service';
 
 /**
  * `subject: 'NotaCredito'` throughout, `create`/`read`/`update`/`annul` per
@@ -76,24 +38,7 @@ import { RecibosService } from '../recibos/recibos.service';
 export class NotasCreditoController {
   constructor(
     private readonly notasCredito: NotasCreditoService,
-    private readonly recibos: RecibosService,
-    private readonly tenant: TenantContextService,
-    @InjectModel(Copropiedad.name)
-    private readonly copropiedades: Model<CopropiedadDocument>,
-    @InjectModel(Factura.name)
-    private readonly facturas: Model<FacturaDocument>,
-    @InjectModel(Inmueble.name)
-    private readonly inmuebles: Model<InmuebleDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros: Model<TerceroDocument>,
-    @InjectModel(NotaDebito.name)
-    private readonly notasDebito: Model<NotaDebitoDocument>,
-    @InjectModel(ConceptoCobro.name)
-    private readonly conceptosCobro: Model<ConceptoCobroDocument>,
-    @InjectModel(CuentaContable.name)
-    private readonly cuentasContables: Model<CuentaContableDocument>,
-    @InjectModel(SaldoInicial.name)
-    private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    private readonly presentacionDocumento: PresentacionDocumentoService,
   ) {}
 
   @Get()
@@ -142,56 +87,43 @@ export class NotasCreditoController {
     return this.notasCredito.anular(id, dto, user.accountId!);
   }
 
-  @Get(':id/pdf')
+  /**
+   * This note's own frozen react-pdf presentation tree, for the browser to
+   * render — same idea as `Factura.documentDefinition`, but refrozen every
+   * time `aplicar()` runs instead of once at creation (see
+   * `NotasCreditoService.congelarPresentacion`'s own docblock for why
+   * `crear()` never freezes this): `montoSinAplicar` and the applied
+   * breakdown are live, not fixed at issuance, and a later deferred
+   * `aplicar()` call changes what must print.
+   *
+   * A `null` `documentDefinition` should not normally happen in practice —
+   * the business flow always calls `aplicar()` right after `crear()`, so a
+   * Nota Crédito is never viewed before its first freeze — but this stays
+   * defensive rather than throwing, same as `Factura`'s equivalent route:
+   * the frontend already treats `documentDefinition: null` as "not
+   * available".
+   *
+   * Route renamed from `.../pdf` — no PDF is built here anymore, the
+   * browser renders this client-side. Lost in the move: `?duplicado=true`
+   * used to stamp a "DUPLICADO" watermark dynamically on every request; a
+   * frozen `documentDefinition` has no room for that anymore (the exact
+   * same loss already accepted for Factura) — reprinting a duplicate copy
+   * is now a client-side concern, not something this route does
+   * server-side.
+   */
+  @Get(':id/documento')
   @CheckAbility({ action: 'read', subject: 'NotaCredito' })
-  async generarPdf(
+  async obtenerDocumento(
     @Param('id') id: string,
-    @Query('duplicado') duplicado: string | undefined,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-
-    const [nota, detalle, copropiedad] = await Promise.all([
-      this.notasCredito.findOneRaw(id),
-      this.notasCredito.findOne(id),
-      this.copropiedades.findById(coPropertyId).exec(),
-    ]);
-    const aplicaciones = await this.recibos.findAplicacionesForSource(
+  ): Promise<DocumentoNotaCredito> {
+    const nota = await this.notasCredito.findOneRaw(id);
+    const documentDefinition = await this.presentacionDocumento.buscar(
       'NC',
       nota._id,
     );
-
-    if (!copropiedad) {
-      throw new Error(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
-      );
-    }
-
-    const datos = await construirDatosImpresionNotaCredito(
-      nota,
-      detalle.montoSinAplicar,
-      aplicaciones,
-      copropiedad,
-      coPropertyId,
-      {
-        facturas: this.facturas,
-        notasDebito: this.notasDebito,
-        saldosIniciales: this.saldosIniciales,
-        conceptosCobro: this.conceptosCobro,
-        inmuebles: this.inmuebles,
-        terceros: this.terceros,
-        cuentasContables: this.cuentasContables,
-      },
-    );
-
-    const bytes = await generarPdfRecibo(datos, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="${nota.fullNumber}.pdf"`,
-    });
-    res.send(Buffer.from(bytes));
+    return {
+      documentDefinition:
+        documentDefinition as DocumentoNotaCredito['documentDefinition'],
+    };
   }
 }
