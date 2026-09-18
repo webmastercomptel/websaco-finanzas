@@ -1300,12 +1300,24 @@ export interface RespuestaEstadoCuenta {
   fechaEmision: string;
   saldoAnterior: number;
   cargosDelMes: number;
-  /** Pagos en efectivo (Recibo) y anticipos aplicados (Nota de Anticipo)
-   *  recibidos en el período — el nombre del campo se quedó corto una vez
-   *  Nota de Anticipo entró a sumar acá también; el label en pantalla/PDF
-   *  ya dice "Pagos y Anticipos Aplicados". */
-  pagosRecibidos: number;
+  /** Monto BRUTO (`Recibo.receivedAmount`, nunca el neto aplicado de una
+   *  aplicación individual) de cada Recibo ACTIVO cuya `receivedDate` cae
+   *  dentro del período — una sola vez por Recibo, sin importar contra
+   *  cuántas facturas se cruzó ni cuántas veces. Un Recibo recibido en el
+   *  período pero aún sin ningún cruce (parqueado como anticipo) también
+   *  cuenta acá. */
+  pagosDelMes: number;
+  /** Suma de la porción en efectivo (`amountApplied - discountApplied`) de
+   *  cada cruce de Nota de Anticipo dentro del período — el reaplicar más
+   *  tarde el saldo sobrante de un Recibo YA contado en un `pagosDelMes`
+   *  anterior, nunca una entrada de dinero nueva este período, por eso vive
+   *  separado de `pagosDelMes` en vez de sumado a él. */
+  anticiposAplicados: number;
   descuentosAjustes: number;
+  /** `saldoAnterior + cargosDelMes - pagosDelMes - anticiposAplicados -
+   *  descuentosAjustes`. Puede quedar negativo (saldo a favor del
+   *  propietario) — no se recorta acá; el PDF/pantalla lo rotulan
+   *  "(A Favor)" en vez de forzarlo a cero. */
   saldoActual: number;
   /** "Vencida" cuando al menos una Factura/Nota Débito de este inmueble
    *  (sin importar el período) sigue con saldo pendiente A LA FECHA DE

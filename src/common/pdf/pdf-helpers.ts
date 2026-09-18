@@ -6,6 +6,17 @@ export function formatoPeso(valor: number): string {
   return `$ ${valor.toLocaleString('es-CO', { maximumFractionDigits: 0 })}`;
 }
 
+/** Appends "(A Favor)" to an already-`formatoPeso`-formatted value when the
+ *  raw number behind it is negative — Estado de Cuenta's own "Saldo actual"
+ *  row is the only caller: a negative `saldoActual` there is a real credit
+ *  balance the propietario is owed, not an error state, and the sign itself
+ *  is never flipped (the printed figure still literally matches the number).
+ *  Wraps `formatoPeso` rather than living inside it — every OTHER caller of
+ *  `formatoPeso` still wants the plain peso string, never this suffix. */
+export function formatoSaldoConFavor(valor: number): string {
+  return valor < 0 ? `${formatoPeso(valor)} (A Favor)` : formatoPeso(valor);
+}
+
 const FORMATO_FECHA = new Intl.DateTimeFormat('es-CO', {
   day: '2-digit',
   month: '2-digit',
