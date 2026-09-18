@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -60,6 +61,10 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
@@ -70,6 +75,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
@@ -93,6 +99,7 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toNotaAnticipo, toNotaAnticipoDetalle } from './notas-anticipo.mapper';
+import { construirDatosImpresionNotaAnticipo } from './nota-anticipo-pdf-datos.util';
 import type {
   NotaAnticipo as NotaAnticipoContract,
   NotaAnticipoDetalle,
@@ -108,9 +115,19 @@ import type { ListarNotaAnticipoDto } from './dto/listar-nota-anticipo.dto';
  * the removed `POST /recibos/:id/aplicar` (see `RecibosController`'s own
  * docblock on why that route no longer exists). One Recibo can have many
  * Notas de Anticipo over time, each drawing the balance down further.
+ *
+ * `terceros` was APPENDED, trailing and optional (same reasoning as
+ * `cuentasContables`/`inmuebles` right above), alongside
+ * `presentacionDocumento`, when `crear()` took over freezing this Nota de
+ * Anticipo's own `documentDefinition` into the shared
+ * `presentacion_documento` table — see `congelarPresentacionNotaAnticipo`.
+ * Every existing positional test keeps compiling with both left
+ * `undefined`, in which case that step simply no-ops.
  */
 @Injectable()
 export class NotasAnticipoService {
+  private readonly logger = new Logger(NotasAnticipoService.name);
+
   constructor(
     @InjectModel(NotaAnticipo.name)
     private readonly notasAnticipo: Model<NotaAnticipoDocument>,
@@ -142,11 +159,19 @@ export class NotasAnticipoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
-    // APPENDED LAST, optional — see `RecibosService`'s own identical append.
+    // Gerencia's own positional order — `notas-anticipo.service.spec.ts`'s
+    // SI tests construct this service positionally and stop right after
+    // `saldosInicialesAnticipo`, so these two must stay exactly here (not
+    // interleaved with `terceros`/`presentacionDocumento` below) or those
+    // tests silently receive the wrong mock in the wrong slot.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
     @InjectModel(SaldoInicialAnticipo.name)
     private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
+    // APPENDED LAST, optional — see this class's own docblock.
+    @InjectModel(Tercero.name)
+    private readonly terceros?: Model<TerceroDocument>,
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   private async transaccion<T>(
@@ -248,7 +273,7 @@ export class NotasAnticipoService {
     const origenTipo: 'RC' | 'SI' = dto.origenTipo ?? 'RC';
     const fechaEmision = new Date(dto.fechaEmision);
 
-    return this.transaccion(async (session) => {
+    const resultado = await this.transaccion(async (session) => {
       if (origenTipo === 'SI') {
         if (!this.saldosInicialesAnticipo) {
           throw new NotFoundException(
@@ -296,6 +321,19 @@ export class NotasAnticipoService {
         origenDoc,
       );
     });
+
+    // Frozen presentation record — built once here, outside the transaction
+    // above and AFTER it has already committed: this Nota de Anticipo's own
+    // financial correctness never depends on this succeeding. Same
+    // frozen-at-emission principle `LotesFacturacionService.consolidar()`
+    // already applies to Factura, extended to this document (see
+    // `congelarPresentacionNotaAnticipo`).
+    await this.congelarPresentacionNotaAnticipo(
+      coPropertyId,
+      new Types.ObjectId(resultado.id),
+    );
+
+    return resultado;
   }
 
   /**
@@ -455,6 +493,83 @@ export class NotasAnticipoService {
     return toNotaAnticipo(final!);
   }
 
+  /**
+   * Freezes this Nota de Anticipo's react-pdf presentation tree into the
+   * shared, permanent `presentacion_documento` table — called AFTER
+   * `crear()`'s own transaction has already committed (never from inside
+   * it). No-ops when any optional dependency it needs is missing (test-only
+   * construction — see this class's own docblock). Wrapped in try/catch,
+   * log-and-continue, never rethrown — same placement/reasoning as
+   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
+   */
+  private async congelarPresentacionNotaAnticipo(
+    coPropertyId: Types.ObjectId,
+    notaId: Types.ObjectId,
+  ): Promise<void> {
+    if (
+      !this.presentacionDocumento ||
+      !this.inmuebles ||
+      !this.terceros ||
+      !this.cuentasContables
+    ) {
+      return;
+    }
+    try {
+      const [notaRaw, aplicacionesActivas, copropiedad] = await Promise.all([
+        this.notasAnticipo.findOne({ _id: notaId, coPropertyId }).exec(),
+        this.aplicaciones
+          .find({
+            coPropertyId,
+            sourceType: 'NA',
+            sourceId: notaId,
+            status: 'activa',
+          })
+          .sort({ appliedAt: 1 })
+          .exec(),
+        this.copropiedades.findById(coPropertyId).exec(),
+      ]);
+      if (!notaRaw || !copropiedad) return;
+
+      const datos = await construirDatosImpresionNotaAnticipo(
+        notaRaw,
+        aplicacionesActivas,
+        copropiedad,
+        coPropertyId,
+        {
+          facturas: this.facturas,
+          notasDebito: this.notasDebito,
+          recibos: this.recibos,
+          inmuebles: this.inmuebles,
+          terceros: this.terceros,
+          cuentasContables: this.cuentasContables,
+        },
+      );
+
+      // Deferred import — see `RecibosService.congelarPresentacionRecibo`'s
+      // own identical comment: `recibo-pdf.ts` pulls in `@react-pdf/renderer`
+      // (ESM), which Jest's CJS environment can't load statically.
+      const {
+        contenidoRecibo,
+      }: typeof import('../../common/pdf/recibo-pdf.js') =
+        await import('../../common/pdf/recibo-pdf.js');
+      const {
+        serializarArbol,
+      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
+        await import('../../common/pdf/react/serializar-arbol.js');
+
+      await this.presentacionDocumento.guardar(
+        'NA',
+        notaRaw._id,
+        serializarArbol(contenidoRecibo(datos, copropiedad)),
+      );
+    } catch (error) {
+      this.logger.error(
+        `No se pudo congelar documentDefinition para la nota de anticipo ${notaId.toString()} — la nota ya quedó creada, se puede reintentar aparte.`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
+  }
+
   /** Lean listing — mirrors `NotasDebitoService.findAll`. */
   async findAll(
     query: ListarNotaAnticipoDto,
@@ -479,6 +594,9 @@ export class NotasAnticipoService {
       this.notasAnticipo.countDocuments(filtro).exec(),
     ]);
 
+    // Never a bare `.map(toNotaAnticipo)` — `Array.map` would leak its own
+    // `index` into `toNotaAnticipo`'s second (`documentDefinition`) param,
+    // same gotcha `toAplicacionCartera`'s own docblock already warns about.
     return {
       items: documentos.map((doc) => toNotaAnticipo(doc)),
       total,
@@ -537,7 +655,20 @@ export class NotasAnticipoService {
     for (const si of saldosInicialesDoc ?? [])
       numerosPorDocumento.set(si._id.toString(), si.numeroOriginal);
 
-    return toNotaAnticipoDetalle(nota, aplicaciones, numerosPorDocumento);
+    // Also the frontend's source for rendering this Nota de Anticipo's PDF
+    // client-side — frozen once by `congelarPresentacionNotaAnticipo`, read
+    // back the same way `RecibosService.findOne` reads its own
+    // `documentDefinition`.
+    const documentDefinition = this.presentacionDocumento
+      ? await this.presentacionDocumento.buscar('NA', nota._id)
+      : null;
+
+    return toNotaAnticipoDetalle(
+      nota,
+      aplicaciones,
+      numerosPorDocumento,
+      documentDefinition,
+    );
   }
 
   /**

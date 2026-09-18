@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -59,11 +60,16 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
@@ -87,6 +93,10 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { validarDistribucionNotaCredito } from './distribucion.util';
+import {
+  construirDatosImpresionNotaCredito,
+  type ModelosDatosImpresionNotaCredito,
+} from './nota-credito-pdf-datos.util';
 import {
   toNotaCredito,
   toNotaCreditoDetalle,
@@ -163,6 +173,8 @@ type LineaAncla = {
  */
 @Injectable()
 export class NotasCreditoService {
+  private readonly logger = new Logger(NotasCreditoService.name);
+
   constructor(
     @InjectModel(NotaCredito.name)
     private readonly notasCredito: Model<NotaCreditoDocument>,
@@ -194,6 +206,16 @@ export class NotasCreditoService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
+    // Both APPENDED last, optional (`?`) — same convention as
+    // `cuentasContables`/`inmuebles` above — so `notas-credito.service.spec.ts`,
+    // which constructs this service positionally without these two, keeps
+    // compiling. `terceros` backs `construirDatosImpresionNotaCredito`'s own
+    // `modelos.terceros` (the printed titular's name); `presentacionDocumento`
+    // is where `aplicar()` freezes the printable tree — see
+    // `congelarPresentacion`'s own docblock.
+    @InjectModel(Tercero.name)
+    private readonly terceros?: Model<TerceroDocument>,
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
     // APPENDED LAST, optional — see `RecibosService`'s own identical append.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
@@ -887,7 +909,13 @@ export class NotasCreditoService {
     const facturaFinal = await this.facturas
       .findOne({ _id: facturaId, coPropertyId })
       .exec();
-    return toFactura(facturaFinal!, 0, new Map());
+    // `documentDefinition` not resolved here (mechanical `null` to match
+    // `toFactura`'s signature after Factura's frozen presentation record
+    // moved to the shared `presentacion_documento` table) — same as
+    // `saldoPendiente: 0` above, this return value is just the just-voided
+    // Factura's own updated status fields, not a place that reads its
+    // printout.
+    return toFactura(facturaFinal!, 0, new Map(), null);
   }
 
   /**
@@ -923,7 +951,7 @@ export class NotasCreditoService {
 
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
-    return this.transaccion(async (session) => {
+    const resultadoAplicacion = await this.transaccion(async (session) => {
       const notaDoc = await this.notasCredito
         .findOne({ _id: id, coPropertyId })
         .session(session)
@@ -1007,6 +1035,126 @@ export class NotasCreditoService {
         errores: resultado.errores,
       };
     });
+
+    // AFTER the transaction has committed — never inside it (see
+    // `congelarPresentacion`'s own docblock). `crear()` deliberately never
+    // calls this: it has its own fully independent application logic
+    // (inline in `crear()`'s own transaction, never routed through
+    // `aplicarManual`/`aplicarFifo`), so there is no shared helper between
+    // the two methods to hook this into instead.
+    await this.congelarPresentacion(coPropertyId, new Types.ObjectId(id));
+
+    return resultadoAplicacion;
+  }
+
+  /**
+   * Freezes this Nota Crédito's printable presentation tree into the shared
+   * `presentacion_documento` table (`tipoDocumento: 'NC'`) — called ONLY
+   * from `aplicar()`, never from `crear()`. `crear()` never freezes anything
+   * because the business flow always calls `aplicar()` right after it (a
+   * Nota Crédito is never viewed/printed in the gap between the two,
+   * confirmed with the user) — freezing twice would be redundant, and
+   * freezing only in `crear()` would go stale the moment a LATER `aplicar()`
+   * changes `montoSinAplicar`/the applied breakdown, which is exactly what
+   * this document must show live. Because a Nota Crédito can be applied
+   * more than once over its life (deferred cruce), this method re-freezes
+   * — overwrites, via `PresentacionDocumentoService.guardar`'s own upsert —
+   * unconditionally on every `aplicar()` run, never just the first.
+   *
+   * Runs strictly AFTER the caller's own transaction has already committed,
+   * and is best-effort: any failure here is logged and swallowed, never
+   * rethrown — a presentation-cache failure must never make the caller
+   * believe the real cruce (already committed) failed. Skips silently when
+   * any optional collaborator it needs (`presentacionDocumento`/`terceros`/
+   * `cuentasContables`/`inmuebles`) is absent — relevant only to a unit test
+   * that builds this service without every optional dependency, same
+   * defensive style `conAuxiliares` already uses for `cuentasContables`.
+   */
+  private async congelarPresentacion(
+    coPropertyId: Types.ObjectId,
+    notaId: Types.ObjectId,
+  ): Promise<void> {
+    if (
+      !this.presentacionDocumento ||
+      !this.terceros ||
+      !this.cuentasContables ||
+      !this.inmuebles
+    ) {
+      return;
+    }
+    try {
+      const [nota, copropiedad] = await Promise.all([
+        this.notasCredito.findOne({ _id: notaId, coPropertyId }).exec(),
+        this.copropiedades.findById(coPropertyId).exec(),
+      ]);
+      if (!nota || !copropiedad) return;
+
+      // Live balance, not a cached field — see `NotaCredito.unappliedAmount`
+      // (gone from the schema) and `aplicar()`'s own identical read above.
+      const saldoOrigen = await this.saldoDocumentoOrigen
+        .findOne({ documentoId: nota._id })
+        .exec();
+      const montoSinAplicar = saldoOrigen?.saldoDisponible ?? 0;
+
+      // Every application this note has EVER made — same query
+      // `NotasCreditoController`'s retired `generarPdf` route used to run
+      // via `RecibosService.findAplicacionesForSource('NC', nota._id)`, run
+      // directly here instead (this service already owns `this.aplicaciones`,
+      // no need to reach into `RecibosService` for it).
+      const aplicaciones = await this.aplicaciones
+        .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
+        .sort({ appliedAt: 1 })
+        .exec();
+
+      const datosImpresion: ModelosDatosImpresionNotaCredito = {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        conceptosCobro: this.conceptosCobro,
+        inmuebles: this.inmuebles,
+        terceros: this.terceros,
+        cuentasContables: this.cuentasContables,
+      };
+      const datos = await construirDatosImpresionNotaCredito(
+        nota,
+        montoSinAplicar,
+        aplicaciones,
+        copropiedad,
+        coPropertyId,
+        datosImpresion,
+      );
+
+      // `contenidoRecibo` returns page content only (no `<Document>`/`<Page>`
+      // wrapper) — same split `paginaFactura` uses for Factura, the frontend
+      // wraps it in its own `<Page>` at hydration time. No `opciones` passed:
+      // a frozen tree has no room for a per-request `duplicado` watermark
+      // anymore (see this note's own docblock on `?duplicado=true`).
+      //
+      // Dynamic import, not a top-level one: `recibo-pdf.ts`/`serializar-arbol.ts`
+      // pull in `@react-pdf/renderer` (ESM), which Jest's CJS environment
+      // can't load. A static import here made that load happen just from
+      // importing `NotasCreditoService` for DI — breaking both this
+      // service's own spec and its controller's spec transitively. Same fix
+      // as `LotesFacturacionService.consolidar()` (`lotes.service.ts`).
+      const {
+        contenidoRecibo,
+      }: typeof import('../../common/pdf/recibo-pdf.js') =
+        await import('../../common/pdf/recibo-pdf.js');
+      const {
+        serializarArbol,
+      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
+        await import('../../common/pdf/react/serializar-arbol.js');
+
+      await this.presentacionDocumento.guardar(
+        'NC',
+        nota._id,
+        serializarArbol(contenidoRecibo(datos, copropiedad)),
+      );
+    } catch (error) {
+      this.logger.error(
+        `No se pudo congelar documentDefinition para la nota crédito ${notaId.toString()} — la aplicación ya quedó registrada, se puede reintentar aparte.`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
   }
 
   /** Mirrors `RecibosService.aplicarManual` exactly — `sourceType: 'NC'` in

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -55,6 +56,10 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
+import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
@@ -62,6 +67,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
   actualizarRemanentesLinea,
@@ -84,6 +90,7 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toRecibo, toReciboDetalle } from './recibos.mapper';
+import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
@@ -202,9 +209,20 @@ const redactarObservaciones = (
  * the (now immutable) document — `SaldoDocumentoOrigen` is where
  * `decrementarSaldoDocumentoOrigen`/`restaurarSaldoDocumentoOrigen` now read
  * and write that balance (see that schema's own docblock).
+ *
+ * `terceros` and `presentacionDocumento` were APPENDED, trailing and
+ * optional (same reasoning as `cuentasContables`/`inmuebles` right above),
+ * when `crear()` took over freezing this Recibo's own `documentDefinition`
+ * into the shared `presentacion_documento` table — see
+ * `congelarPresentacionRecibo`. `terceros` is needed only for that step
+ * (`construirDatosImpresionRecibo`'s own `modelos.terceros`); every existing
+ * positional test keeps compiling with both left `undefined`, in which case
+ * `congelarPresentacionRecibo` simply no-ops.
  */
 @Injectable()
 export class RecibosService {
+  private readonly logger = new Logger(RecibosService.name);
+
   constructor(
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
@@ -235,6 +253,9 @@ export class RecibosService {
     private readonly cuentasContables?: Model<CuentaContableDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles?: Model<InmuebleDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros?: Model<TerceroDocument>,
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
     // APPENDED LAST, optional — see the class docblock's own append
     // discipline. Optional (unlike every other model here) so the many
     // existing hand-rolled-mock tests that stop their positional argument
@@ -376,7 +397,7 @@ export class RecibosService {
       );
     }
 
-    return this.transaccion(async (session) => {
+    const resultado = await this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
         coPropertyId.toString(),
         dto.codigo,
@@ -584,6 +605,100 @@ export class RecibosService {
         enviarAOtrosIngresos ? 0 : sobranteReal,
       );
     });
+
+    // Frozen presentation record — built once here, outside the transaction
+    // above and AFTER it has already committed: a Recibo's own financial
+    // correctness never depends on this succeeding. Same frozen-at-emission
+    // principle `LotesFacturacionService.consolidar()` already applies to
+    // Factura, extended to this document (see `congelarPresentacionRecibo`
+    // and `PresentacionDocumento`'s own schema docblock).
+    await this.congelarPresentacionRecibo(
+      coPropertyId,
+      new Types.ObjectId(resultado.id),
+    );
+
+    return resultado;
+  }
+
+  /**
+   * Freezes this Recibo's react-pdf presentation tree into the shared,
+   * permanent `presentacion_documento` table — called AFTER `crear()`'s own
+   * transaction has already committed (never from inside it: a failure here
+   * must never roll back a real financial document). No-ops when any
+   * optional dependency it needs is missing (test-only construction — see
+   * this class's own canonical-constructor docblock). Wrapped in try/catch,
+   * log-and-continue, never rethrown — same placement/reasoning as
+   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
+   */
+  private async congelarPresentacionRecibo(
+    coPropertyId: Types.ObjectId,
+    reciboId: Types.ObjectId,
+  ): Promise<void> {
+    if (
+      !this.presentacionDocumento ||
+      !this.inmuebles ||
+      !this.terceros ||
+      !this.cuentasContables
+    ) {
+      return;
+    }
+    try {
+      const [reciboRaw, aplicacionesActivas, copropiedad] = await Promise.all([
+        this.recibos.findOne({ _id: reciboId, coPropertyId }).exec(),
+        this.aplicaciones
+          .find({
+            coPropertyId,
+            sourceType: 'RC',
+            sourceId: reciboId,
+            status: 'activa',
+          })
+          .sort({ appliedAt: 1 })
+          .exec(),
+        this.copropiedades.findById(coPropertyId).exec(),
+      ]);
+      if (!reciboRaw || !copropiedad) return;
+
+      const datos = await construirDatosImpresionRecibo(
+        reciboRaw,
+        aplicacionesActivas,
+        copropiedad,
+        coPropertyId,
+        {
+          facturas: this.facturas,
+          notasDebito: this.notasDebito,
+          inmuebles: this.inmuebles,
+          terceros: this.terceros,
+          cuentasContables: this.cuentasContables,
+        },
+      );
+
+      // Deferred import — `recibo-pdf.ts` pulls in `@react-pdf/renderer`
+      // (ESM), which Jest's CJS environment can't load. A static import at
+      // the top of this file would make that load happen just from
+      // importing `RecibosService` for DI, breaking every spec that
+      // references this service even though none of them touch PDFs — same
+      // reasoning `LotesFacturacionService.consolidar()` documents for its
+      // own identical dynamic import.
+      const {
+        contenidoRecibo,
+      }: typeof import('../../common/pdf/recibo-pdf.js') =
+        await import('../../common/pdf/recibo-pdf.js');
+      const {
+        serializarArbol,
+      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
+        await import('../../common/pdf/react/serializar-arbol.js');
+
+      await this.presentacionDocumento.guardar(
+        'RC',
+        reciboRaw._id,
+        serializarArbol(contenidoRecibo(datos, copropiedad)),
+      );
+    } catch (error) {
+      this.logger.error(
+        `No se pudo congelar documentDefinition para el recibo ${reciboId.toString()} — el recibo ya quedó creado, se puede reintentar aparte.`,
+        error instanceof Error ? error.stack : error,
+      );
+    }
   }
 
   /**
@@ -1193,12 +1308,22 @@ export class RecibosService {
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
     }
 
+    // Also the frontend's source for rendering this Recibo's PDF
+    // client-side — frozen once by `congelarPresentacionRecibo`, read back
+    // here the same way `FacturasService.findOne` reads its own
+    // `documentDefinition`. `null` for a receipt whose creation ran before
+    // this field existed, or whose presentation-cache step failed.
+    const documentDefinition = this.presentacionDocumento
+      ? await this.presentacionDocumento.buscar('RC', recibo._id)
+      : null;
+
     return toReciboDetalle(
       recibo,
       appliedAmount,
       unappliedAmount,
       aplicaciones,
       numerosPorDocumento,
+      documentDefinition,
     );
   }
 
