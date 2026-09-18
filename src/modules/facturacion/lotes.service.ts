@@ -91,6 +91,8 @@ import {
 } from './asiento.builder';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { FacturasService } from './facturas.service';
+import type { DatosVisualesFactura } from '../../common/pdf/factura-pdf';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -132,6 +134,17 @@ import { PresentacionDocumentoService } from '../../common/documentos/presentaci
  * `this.facturas`. Same optional-trailing-argument reasoning as
  * `cuentasContables`/`resoluciones`: undefined in a test simply skips the
  * step.
+ *
+ * `facturasService` was APPENDED as a sixteenth argument so `consolidar()`
+ * can freeze each Factura's referencia de pago / saldo a favor
+ * (`FacturasService.datosVisualesPdf`, the same "cosmetic, live-read" data
+ * `LotesController`'s old per-request PDF route used to fetch) into its
+ * `documentDefinition` at issuance time — read once, here, then frozen like
+ * everything else in that tree; not re-read on every later view. Same
+ * optional-trailing-argument reasoning as `resoluciones`/
+ * `presentacionDocumento`: undefined in a test simply omits that data from
+ * `documentDefinition`, exactly like `paginaFactura` already degrades when
+ * `datosVisuales` is omitted.
  */
 @Injectable()
 export class LotesFacturacionService {
@@ -169,6 +182,7 @@ export class LotesFacturacionService {
     @InjectModel(ResolucionFacturacion.name)
     private readonly resoluciones?: Model<ResolucionFacturacionDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
+    private readonly facturasService?: FacturasService,
   ) {}
 
   /**
@@ -1648,6 +1662,19 @@ export class LotesFacturacionService {
           resolucionesParaPdf.map((r) => [r._id.toString(), r]),
         );
 
+        // Same referencia/saldo-a-favor lookup `LotesController`'s old
+        // per-request PDF route used to do — read once, here, then frozen
+        // into each Factura's own `documentDefinition` below, never
+        // re-queried on a later view. `facturasService` is optional (see
+        // the canonical constructor docblock), so this simply omits the
+        // data when undefined, matching `paginaFactura`'s own graceful
+        // degradation.
+        const datosVisualesPorInmueble = this.facturasService
+          ? await this.facturasService.datosVisualesPdf(
+              facturasCreadasEnEsteIntento.map((f) => f.inmuebleId),
+            )
+          : new Map<string, DatosVisualesFactura>();
+
         // One round-trip for every Factura this run created (`guardarVarios`
         // is a single `bulkWrite` of upserts against `presentacion_documento`)
         // — same reason `saldos.bulkWrite` above is one call instead of one
@@ -1669,6 +1696,7 @@ export class LotesFacturacionService {
                       null)
                   : null,
                 copropiedad,
+                datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
               ),
             ),
           })),

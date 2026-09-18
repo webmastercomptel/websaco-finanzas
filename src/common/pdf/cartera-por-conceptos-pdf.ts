@@ -109,7 +109,7 @@ function construirPdfPaginado(
         fontSize: tabla.fontSize,
         filaTotales: i === bloques.length - 1 ? tabla.filaTotales : undefined,
       }),
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     ),
   );
   return renderizarPdf(
@@ -191,7 +191,7 @@ async function generarPorInmueble(
             { style: styles.sinDatos },
             'No hay cartera pendiente en esta copropiedad.',
           ),
-          createElement(CreditoWebsaco),
+          createElement(CreditoWebsaco, {}),
         ),
         { orientacion: 'horizontal' },
       ),
@@ -371,7 +371,7 @@ async function generarPorConcepto(
             { style: styles.sinDatos },
             'No hay cartera pendiente para este cargo en esta copropiedad.',
           ),
-          createElement(CreditoWebsaco),
+          createElement(CreditoWebsaco, {}),
         ),
         { orientacion: 'horizontal' },
       ),

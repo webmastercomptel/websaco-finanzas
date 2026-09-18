@@ -205,7 +205,7 @@ export async function generarPdfListadoInmuebles(
         ),
       ),
 
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     ),
   );
 

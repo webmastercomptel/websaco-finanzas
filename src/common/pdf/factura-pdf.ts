@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { formatoFecha } from './pdf-helpers';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import {
   DatosAdquiriente,
@@ -39,6 +39,22 @@ export interface DatosDocumentoFacturacion {
    *  real number/label painted afterward lands on top of it and stays
    *  legible; the stamp only shows through blank space. */
   marcaDuplicado: string | null;
+  /** The unit's own `Inmueble.reference`, read live (see
+   *  `DatosVisualesFactura`) — printed below the title, never frozen onto
+   *  the document itself. */
+  referenciaPago: string | null;
+  /** This unit's currently pending anticipo balance, read live — purely a
+   *  display adjustment on the printed "Total a Pagar", never written back
+   *  into `Factura.total`/`outstandingBalance` or any cartera balance. */
+  totalAnticipos: number;
+}
+
+/** Cosmetic, live-read data the PDF prints alongside a Factura/Prefactura's
+ *  own frozen fields — see `FacturasService.datosVisualesPdf`, the only
+ *  place that computes it. */
+export interface DatosVisualesFactura {
+  referencia: string | null;
+  totalAnticipos: number;
 }
 
 /** Display shape `ObservacionesFactura` draws — the Spanish-named
@@ -52,13 +68,6 @@ export interface InfoDescuentoProntoPago {
 }
 
 const styles = StyleSheet.create({
-  iva: {
-    fontSize: 10,
-    fontFamily: 'Helvetica-Bold',
-    textAlign: 'right',
-    marginTop: -6,
-    marginBottom: 8,
-  },
   pieResolucion: {
     fontSize: 8,
     fontFamily: 'Helvetica',
@@ -77,10 +86,6 @@ const styles = StyleSheet.create({
  * `ObservacionesFactura`). Returns page content only — `paginaFactura`
  * still appends the DIAN footer on top; `paginaPrefactura`
  * (`prefactura-pdf.ts`) uses this as-is.
- *
- * The IVA breakout row (only when `totalIva > 0`) isn't part of
- * `CuerpoFactura` — that component is Bernardo's in-flight file, so this adds
- * it as a sibling line right below instead of editing his component.
  */
 export function contenidoDocumentoFacturacion(
   datos: DatosDocumentoFacturacion,
@@ -126,7 +131,8 @@ export function contenidoDocumentoFacturacion(
   const descuentoProps = datos.descuento
     ? {
         fechaLimite: datos.descuento.fechaLimite.toISOString(),
-        montoConDescuento: totalAPagar - datos.descuento.monto,
+        montoConDescuento:
+          totalAPagar - datos.descuento.monto - datos.totalAnticipos,
       }
     : undefined;
   const notas = copropiedad.billingNotes?.trim() || null;
@@ -140,6 +146,7 @@ export function contenidoDocumentoFacturacion(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: datos.titulo,
+      referenciaPago: datos.referenciaPago,
     }),
     createElement(DatosAdquiriente, {
       inmuebleCodigo: datos.unitCode,
@@ -157,21 +164,20 @@ export function contenidoDocumentoFacturacion(
       totalCargosDelMes,
       totalNuevoSaldo,
       totalAPagar,
+      totalAnticipos: datos.totalAnticipos,
+      totalIva,
+      etiquetaIva,
     }),
-    totalIva > 0
-      ? createElement(
-          Text,
-          { style: styles.iva },
-          `${etiquetaIva}: ${formatoPeso(totalIva)}`,
-        )
-      : null,
     notas || descuentoProps
       ? createElement(ObservacionesFactura, {
           texto: notas,
           descuento: descuentoProps,
         })
       : null,
-    createElement(CreditoWebsaco),
+    createElement(CreditoWebsaco, {
+      idInmueble: datos.unitCode,
+      creditoComptel: true,
+    }),
   );
 }
 
@@ -192,6 +198,7 @@ export function paginaFactura(
   factura: FacturaLean,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
+  datosVisuales?: DatosVisualesFactura,
   opciones?: { duplicado?: boolean },
 ): ReactElement {
   const titulo = `${resolucion?.displayName ?? 'Cobro Expensas Comunes'} ${factura.fullNumber}`;
@@ -213,6 +220,8 @@ export function paginaFactura(
     marcaDuplicado: opciones?.duplicado
       ? factura.issueDate.toISOString()
       : null,
+    referenciaPago: datosVisuales?.referencia ?? null,
+    totalAnticipos: datosVisuales?.totalAnticipos ?? 0,
   };
 
   const pie = resolucion

@@ -183,7 +183,10 @@ export class LotesController {
         `El lote ${id} no tiene una previsualización para el inmueble ${inmuebleId}`,
       );
     }
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf([preliminar.inmuebleId]),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -196,7 +199,12 @@ export class LotesController {
       // `consolidar()` uses when it freezes each Factura's own tree
       // (`lotes.service.ts`, `presentacionDocumento.guardarVarios`).
       documentDefinition: serializarArbol(
-        paginaPrefactura(preliminar, lote, copropiedad),
+        paginaPrefactura(
+          preliminar,
+          lote,
+          copropiedad,
+          datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
+        ),
       ) as DocumentoPrefactura['documentDefinition'],
     };
   }
@@ -224,7 +232,10 @@ export class LotesController {
         `El lote ${id} todavía no tiene una previsualización generada`,
       );
     }
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf(lote.preview.map((p) => p.inmuebleId)),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -235,7 +246,12 @@ export class LotesController {
       inmuebleId: preliminar.inmuebleId.toString(),
       // Same "always a single element" cast as the single-unit route above.
       documentDefinition: serializarArbol(
-        paginaPrefactura(preliminar, lote, copropiedad),
+        paginaPrefactura(
+          preliminar,
+          lote,
+          copropiedad,
+          datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
+        ),
       ) as DocumentoPrefacturaLote['documentDefinition'],
     }));
   }

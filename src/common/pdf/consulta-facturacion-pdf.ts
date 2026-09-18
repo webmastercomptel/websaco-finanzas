@@ -267,7 +267,7 @@ export async function generarPdfConsultaFacturacion(
           )
         : null,
 
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     );
   });
 

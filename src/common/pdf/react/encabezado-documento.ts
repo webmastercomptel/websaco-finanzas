@@ -57,6 +57,12 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 2,
   },
+  referenciaPago: {
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
+    textAlign: 'right',
+    marginTop: 2,
+  },
 });
 
 /**
@@ -88,8 +94,13 @@ export function EncabezadoDocumento(props: {
   copropiedad: CopropiedadDocument;
   titulo: string;
   subtitulo?: string;
+  /** The unit's payment reference (`Inmueble.reference`), printed right
+   *  below the title in the same plain style the "Emisión" date uses
+   *  (`DatosAdquiriente`'s `dd` style) — omitted (null/undefined) whenever
+   *  the document has no unit to reference, or the unit has none set. */
+  referenciaPago?: string | null;
 }): ReactElement {
-  const { copropiedad, titulo, subtitulo } = props;
+  const { copropiedad, titulo, subtitulo, referenciaPago } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
@@ -130,6 +141,13 @@ export function EncabezadoDocumento(props: {
         createElement(Text, { style: styles.titulo }, titulo),
         subtitulo
           ? createElement(Text, { style: styles.subtitulo }, subtitulo)
+          : null,
+        referenciaPago
+          ? createElement(
+              Text,
+              { style: styles.referenciaPago },
+              `Referencia de Pago: ${referenciaPago}`,
+            )
           : null,
       ),
     ),

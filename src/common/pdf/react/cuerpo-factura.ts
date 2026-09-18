@@ -82,9 +82,11 @@ export interface CargoFactura {
 /**
  * Factura's own charges table: one row per concepto (Nombre del Cargo,
  * Saldo Anterior, Cargos del Mes, Nuevo Saldo), a bold "Totales" row closed
- * by a rule, then a full-width shaded "Total a Pagar $" band — approved
- * design. Kept as its own component (not the generic `Tabla`) because
- * `Tabla` has no notion of a bold totals row or a banner row after it.
+ * by a rule — optionally followed by a "Saldo a Favor" row when the unit
+ * has a pending anticipo — then a full-width shaded "Total a Pagar $" band
+ * — approved design. Kept as its own component (not the generic `Tabla`)
+ * because `Tabla` has no notion of a bold totals row or a banner row after
+ * it.
  */
 export function CuerpoFactura(props: {
   cargos: CargoFactura[];
@@ -92,6 +94,21 @@ export function CuerpoFactura(props: {
   totalCargosDelMes: number;
   totalNuevoSaldo: number;
   totalAPagar: number;
+  /** This unit's currently pending anticipo balance (live, see
+   *  `DatosVisualesFactura`) — when greater than 0, draws a "Saldo a Favor"
+   *  row under the Totales row and subtracts it from the "Total a Pagar"
+   *  band. Purely a print-time adjustment: `totalAPagar` itself, and
+   *  everything it's derived from, is untouched. */
+  totalAnticipos?: number;
+  /** Sum of every line's `taxAmount` — when greater than 0, draws an IVA
+   *  row right under the Totales row, same bold size-8.5 style as every
+   *  other totals row (label left, value right), instead of the
+   *  disconnected small right-aligned line this used to be. */
+  totalIva?: number;
+  /** "IVA 19%" when every taxed line shares one rate, plain "IVA"
+   *  otherwise — computed by the caller (`factura-pdf.ts`), which already
+   *  has the per-line tax rates. */
+  etiquetaIva?: string;
 }): ReactElement {
   const {
     cargos,
@@ -99,7 +116,11 @@ export function CuerpoFactura(props: {
     totalCargosDelMes,
     totalNuevoSaldo,
     totalAPagar,
+    totalAnticipos = 0,
+    totalIva = 0,
+    etiquetaIva = 'IVA',
   } = props;
+  const totalAPagarConAnticipos = totalAPagar - totalAnticipos;
 
   const columnas = [
     'Nombre del Cargo',
@@ -177,6 +198,42 @@ export function CuerpoFactura(props: {
           formatoPeso(totalNuevoSaldo),
         ),
       ),
+      totalIva > 0
+        ? createElement(
+            View,
+            { style: styles.filaTotales, wrap: false },
+            createElement(
+              Text,
+              { style: celdaStyle(0, styles.celdaTotales) },
+              etiquetaIva,
+            ),
+            createElement(Text, { style: celdaStyle(1, styles.celdaTotales) }),
+            createElement(Text, { style: celdaStyle(2, styles.celdaTotales) }),
+            createElement(
+              Text,
+              { style: celdaStyle(3, styles.celdaTotales) },
+              formatoPeso(totalIva),
+            ),
+          )
+        : null,
+      totalAnticipos > 0
+        ? createElement(
+            View,
+            { style: styles.filaTotales, wrap: false },
+            createElement(
+              Text,
+              { style: celdaStyle(0, styles.celdaTotales) },
+              'Saldo a Favor',
+            ),
+            createElement(Text, { style: celdaStyle(1, styles.celdaTotales) }),
+            createElement(Text, { style: celdaStyle(2, styles.celdaTotales) }),
+            createElement(
+              Text,
+              { style: celdaStyle(3, styles.celdaTotales) },
+              `- ${formatoPeso(totalAnticipos)}`,
+            ),
+          )
+        : null,
     ),
     createElement(
       View,
@@ -185,7 +242,7 @@ export function CuerpoFactura(props: {
       createElement(
         Text,
         { style: styles.valorPagar },
-        formatoPeso(totalAPagar).replace('$ ', ''),
+        formatoPeso(totalAPagarConAnticipos).replace('$ ', ''),
       ),
     ),
   );

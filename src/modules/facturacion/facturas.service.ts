@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import {
   Factura,
   FacturaDocument,
@@ -13,12 +13,25 @@ import {
   CarteraPorDocumento,
   CarteraPorDocumentoDocument,
 } from '../../database/schemas/facturacion/cartera-por-documento.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
+  Recibo,
+  ReciboDocument,
+} from '../../database/schemas/recibos/recibo.schema';
+import {
+  SaldoDocumentoOrigen,
+  SaldoDocumentoOrigenDocument,
+} from '../../database/schemas/recibos/saldo-documento-origen.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type { Factura as FacturaContract, Paginado } from '../../contracts';
 import { toFactura } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
+import type { DatosVisualesFactura } from '../../common/pdf/factura-pdf';
 
 export type { FacturaDocument };
 
@@ -31,6 +44,12 @@ export class FacturasService {
     private readonly saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
     @InjectModel(CarteraPorDocumento.name)
     private readonly carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Recibo.name)
+    private readonly recibos: Model<ReciboDocument>,
+    @InjectModel(SaldoDocumentoOrigen.name)
+    private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     private readonly tenant: TenantContextService,
     // Optional — same convention as `LotesFacturacionService`'s own trailing
     // optional deps (`cuentasContables`/`resoluciones`): in the real app
@@ -181,6 +200,68 @@ export class FacturasService {
       .sort({ unitCode: 1 })
       .lean()
       .exec();
+  }
+
+  /**
+   * Purely cosmetic data the Factura/Prefactura PDF prints alongside the
+   * document's own frozen fields — never persisted on the document itself,
+   * always read live: `referencia` off the current `Inmueble` row (per
+   * product decision, this is a live cross-reference, not a billing fact
+   * worth freezing the way `unitCode`/`holder` are), and `totalAnticipos`
+   * from that unit's own currently pending Recibo balances.
+   *
+   * `totalAnticipos` reuses the exact "anticipos pendientes" definition
+   * `EstadoCuentaService` already established: the sum of `saldoDisponible`
+   * (`SaldoDocumentoOrigen`, `tipoDocumento: 'RC'`) across this unit's
+   * `activo` Recibos — never Notas de Anticipo or Saldos Iniciales de
+   * Anticipo, which that same precedent excludes too.
+   */
+  async datosVisualesPdf(
+    inmuebleIds: Types.ObjectId[],
+  ): Promise<Map<string, DatosVisualesFactura>> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const ids = [...new Set(inmuebleIds.map((id) => id.toString()))].map(
+      (id) => new Types.ObjectId(id),
+    );
+    const resultado = new Map<string, DatosVisualesFactura>();
+    if (ids.length === 0) return resultado;
+
+    const [inmuebles, recibosActivos] = await Promise.all([
+      this.inmuebles.find({ _id: { $in: ids }, coPropertyId }).exec(),
+      this.recibos
+        .find({ coPropertyId, inmuebleId: { $in: ids }, status: 'activo' })
+        .exec(),
+    ]);
+
+    const saldos = recibosActivos.length
+      ? await this.saldoDocumentoOrigen
+          .find({
+            coPropertyId,
+            tipoDocumento: 'RC',
+            documentoId: { $in: recibosActivos.map((r) => r._id) },
+          })
+          .exec()
+      : [];
+    const saldoPorRecibo = new Map(
+      saldos.map((s) => [s.documentoId.toString(), s.saldoDisponible]),
+    );
+
+    const anticipoPorInmueble = new Map<string, number>();
+    for (const recibo of recibosActivos) {
+      const monto = saldoPorRecibo.get(recibo._id.toString()) ?? 0;
+      if (monto <= 0) continue;
+      const key = recibo.inmuebleId.toString();
+      anticipoPorInmueble.set(key, (anticipoPorInmueble.get(key) ?? 0) + monto);
+    }
+
+    for (const inmueble of inmuebles) {
+      const key = inmueble._id.toString();
+      resultado.set(key, {
+        referencia: inmueble.reference,
+        totalAnticipos: anticipoPorInmueble.get(key) ?? 0,
+      });
+    }
+    return resultado;
   }
 }
 

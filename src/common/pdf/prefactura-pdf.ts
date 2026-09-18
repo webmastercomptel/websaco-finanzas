@@ -1,7 +1,10 @@
 import type { ReactElement } from 'react';
 import { contenidoDocumentoFacturacion } from './factura-pdf';
 import { calcularDescuentoProntoPago } from '../facturacion/descuento-pronto-pago.util';
-import type { DatosDocumentoFacturacion } from './factura-pdf';
+import type {
+  DatosDocumentoFacturacion,
+  DatosVisualesFactura,
+} from './factura-pdf';
 import type {
   FacturaPreliminar,
   LoteFacturacionDocument,
@@ -20,6 +23,7 @@ export function paginaPrefactura(
   preliminar: FacturaPreliminar,
   lote: LoteFacturacionDocument,
   copropiedad: CopropiedadDocument,
+  datosVisuales?: DatosVisualesFactura,
 ): ReactElement {
   const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
     preliminar.lines,
@@ -44,6 +48,8 @@ export function paginaPrefactura(
     lines: preliminar.lines,
     descuento,
     marcaDuplicado: null,
+    referenciaPago: datosVisuales?.referencia ?? null,
+    totalAnticipos: datosVisuales?.totalAnticipos ?? 0,
   };
 
   return contenidoDocumentoFacturacion(datos, copropiedad);
