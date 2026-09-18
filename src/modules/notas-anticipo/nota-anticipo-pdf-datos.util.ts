@@ -27,7 +27,7 @@ export interface ModelosDatosImpresionNotaAnticipo {
 
 /**
  * Assembles what the Nota de Anticipo PDF needs to draw its journal-entry
- * table — same shared layout `generarPdfRecibo` already draws for a Recibo
+ * table — same shared layout `contenidoRecibo` already draws for a Recibo
  * or a Nota Crédito (`tituloDocumento` picks which). Mirrors
  * `construirDatosImpresionRecibo`'s crédito-per-concepto loop exactly (a
  * Nota de Anticipo settles cartera the same way a Recibo does — no

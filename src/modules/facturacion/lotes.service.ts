@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -55,6 +56,10 @@ import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  ResolucionFacturacion,
+  ResolucionFacturacionDocument,
+} from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
@@ -85,6 +90,7 @@ import {
   type MarcasCuentaContable,
 } from './asiento.builder';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -105,9 +111,32 @@ import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-
  * only tests that exercise `consolidar()`'s posted entries need to pass a
  * real mock. In the real app this is always injected; a `consolidar()` call
  * with it `undefined` (test-only) simply posts entries with no auxiliares.
+ *
+ * `resoluciones` was APPENDED the same way, as a fourteenth argument, when
+ * `consolidar()` took over building each freshly-issued Factura's frozen
+ * `documentDefinition` (see that step at the end of `consolidar()` below):
+ * it needs the DIAN resolution backing each invoice's own footer, the exact
+ * same lookup `LotesController`'s old per-request PDF route used to do.
+ * Same reasoning as `cuentasContables` — optional so every existing
+ * positional test keeps compiling; a `consolidar()` call with it left
+ * `undefined` (test-only) simply skips building `documentDefinition`
+ * entirely rather than throwing, since that step freezes a presentation
+ * record, never something the financial write path depends on.
+ *
+ * `presentacionDocumento` was APPENDED as a fifteenth argument when
+ * `documentDefinition` moved off `Factura` itself onto the shared,
+ * permanent `presentacion_documento` table (see that schema's docblock: a
+ * frozen record, not a regenerable cache) — `consolidar()` now upserts each
+ * freshly-issued Factura's frozen tree through this service
+ * (`guardarVarios('FV', ...)`) instead of a `bulkWrite` against
+ * `this.facturas`. Same optional-trailing-argument reasoning as
+ * `cuentasContables`/`resoluciones`: undefined in a test simply skips the
+ * step.
  */
 @Injectable()
 export class LotesFacturacionService {
+  private readonly logger = new Logger(LotesFacturacionService.name);
+
   constructor(
     @InjectModel(LoteFacturacion.name)
     private readonly lotes: Model<LoteFacturacionDocument>,
@@ -137,6 +166,9 @@ export class LotesFacturacionService {
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
+    @InjectModel(ResolucionFacturacion.name)
+    private readonly resoluciones?: Model<ResolucionFacturacionDocument>,
+    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   /**
@@ -1163,6 +1195,10 @@ export class LotesFacturacionService {
       facturasExistentes.map((f) => f.inmuebleId.toString()),
     );
     const facturaIds: string[] = [];
+    // Facturas actually created BY THIS RUN (never a resumed one from an
+    // earlier attempt) — the only ones this call still needs to build a
+    // `documentDefinition` for, once the transactional loop below is done.
+    const facturasCreadasEnEsteIntento: FacturaDocument[] = [];
     let montoTotal = 0;
     const errores: ErrorConsolidacion[] = [];
 
@@ -1526,6 +1562,7 @@ export class LotesFacturacionService {
         // inside the callback would double them on a retry even though only
         // one attempt's writes actually commit.
         facturaIds.push(facturaCreada._id.toString());
+        facturasCreadasEnEsteIntento.push(facturaCreada);
         montoTotal += preliminar.total;
         registrarNumero(facturaCreada.number, facturaCreada.fullNumber);
       } catch (err) {
@@ -1551,6 +1588,96 @@ export class LotesFacturacionService {
             },
           )
           .exec();
+      }
+    }
+
+    // Frozen presentation record — built once here, outside any transaction
+    // and AFTER every row above has already committed (or not): a Factura's own
+    // financial correctness never depends on this succeeding. Same frozen-
+    // at-emission principle already applied to `discountAmount`/
+    // `TitularCongelado` above, extended to the whole printed page (see
+    // `serializarArbol`'s docblock and the plan this implements). Guarded on
+    // every optional piece it needs — `resoluciones`/`presentacionDocumento`
+    // (see the canonical constructor docblock) and a real `copropiedad`
+    // (already looked up, above, for the accounting entries; `?.` there
+    // means it can be null) — so this step simply no-ops instead of
+    // throwing wherever any is missing, exactly like `cuentasContables`
+    // already does for auxiliares.
+    // Wrapped in try/catch on purpose: every Factura here is already
+    // committed and can never be deleted (the audit law), so a failure
+    // freezing the presentation record must never stop the Lote from
+    // reaching `consolidado` below — it would otherwise strand real
+    // invoices behind an apparently-failed run with no way to retry just
+    // this step.
+    if (
+      facturasCreadasEnEsteIntento.length &&
+      this.resoluciones &&
+      this.presentacionDocumento &&
+      copropiedad
+    ) {
+      try {
+        // Dynamic import, not a top-level one: `factura-pdf.ts`/`serializar-arbol.ts`
+        // pull in `@react-pdf/renderer` (ESM), which Jest's CJS environment can't
+        // load. A static import here would make that load happen just from
+        // importing `LotesFacturacionService` for DI — breaking every spec that
+        // references this service (notas-débito, recibos, adición-contabilidad,
+        // this file's own spec...) even though none of them touch PDFs. Deferring
+        // it to here means only an actual `consolidar()` run that reaches this
+        // branch pays that cost.
+        const {
+          paginaFactura,
+        }: typeof import('../../common/pdf/factura-pdf.js') =
+          await import('../../common/pdf/factura-pdf.js');
+        const {
+          serializarArbol,
+        }: typeof import('../../common/pdf/react/serializar-arbol.js') =
+          await import('../../common/pdf/react/serializar-arbol.js');
+        const idsResolucionParaPdf = [
+          ...new Set(
+            facturasCreadasEnEsteIntento
+              .map((f) => f.resolucionId?.toString())
+              .filter((x): x is string => Boolean(x)),
+          ),
+        ];
+        const resolucionesParaPdf = idsResolucionParaPdf.length
+          ? await this.resoluciones
+              .find({ _id: { $in: idsResolucionParaPdf }, coPropertyId })
+              .exec()
+          : [];
+        const resolucionesPorId = new Map(
+          resolucionesParaPdf.map((r) => [r._id.toString(), r]),
+        );
+
+        // One round-trip for every Factura this run created (`guardarVarios`
+        // is a single `bulkWrite` of upserts against `presentacion_documento`)
+        // — same reason `saldos.bulkWrite` above is one call instead of one
+        // per line, now against the shared, permanent presentation table
+        // instead of a `documentDefinition` field on `Factura` itself (see
+        // `PresentacionDocumento`'s docblock for why Factura moved onto this
+        // shared table).
+        await this.presentacionDocumento.guardarVarios(
+          'FV',
+          facturasCreadasEnEsteIntento.map((factura) => ({
+            documentoId: factura._id,
+            // `paginaFactura` always returns a single element here (never the
+            // array branch `serializarArbol` also allows for).
+            arbol: serializarArbol(
+              paginaFactura(
+                factura,
+                factura.resolucionId
+                  ? (resolucionesPorId.get(factura.resolucionId.toString()) ??
+                      null)
+                  : null,
+                copropiedad,
+              ),
+            ),
+          })),
+        );
+      } catch (error) {
+        this.logger.error(
+          `No se pudo congelar documentDefinition para el lote ${loteId} — las facturas ya quedaron consolidadas, se puede reintentar aparte.`,
+          error instanceof Error ? error.stack : error,
+        );
       }
     }
 

@@ -5,12 +5,8 @@ import {
   Param,
   Post,
   Query,
-  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Response } from 'express';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -21,33 +17,6 @@ import { AnularNotaDebitoDto } from './dto/anular-nota-debito.dto';
 import { ListarNotaDebitoDto } from './dto/listar-nota-debito.dto';
 import type { NotaDebito, NotaDebitoDetalle, Paginado } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { generarPdfRecibo } from '../../common/pdf/recibo-pdf';
-import { construirDatosImpresionNotaDebito } from './nota-debito-pdf-datos.util';
-import {
-  Copropiedad,
-  CopropiedadDocument,
-} from '../../database/schemas/copropiedades/copropiedad.schema';
-import {
-  Inmueble,
-  InmuebleDocument,
-} from '../../database/schemas/copropiedades/inmueble.schema';
-import {
-  Tercero,
-  TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
-import {
-  ConceptoCobro,
-  ConceptoCobroDocument,
-} from '../../database/schemas/conceptos/concepto-cobro.schema';
-import {
-  AsientoContable,
-  AsientoContableDocument,
-} from '../../database/schemas/facturacion/asiento-contable.schema';
-import {
-  CuentaContable,
-  CuentaContableDocument,
-} from '../../database/schemas/contabilidad/cuenta-contable.schema';
-import { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 /**
  * `subject: 'OtraNota'` throughout — already registered in
@@ -58,22 +27,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 @Controller('notas-debito')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class NotasDebitoController {
-  constructor(
-    private readonly notasDebito: NotasDebitoService,
-    private readonly tenant: TenantContextService,
-    @InjectModel(Copropiedad.name)
-    private readonly copropiedades: Model<CopropiedadDocument>,
-    @InjectModel(Inmueble.name)
-    private readonly inmuebles: Model<InmuebleDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros: Model<TerceroDocument>,
-    @InjectModel(ConceptoCobro.name)
-    private readonly conceptos: Model<ConceptoCobroDocument>,
-    @InjectModel(AsientoContable.name)
-    private readonly asientos: Model<AsientoContableDocument>,
-    @InjectModel(CuentaContable.name)
-    private readonly cuentasContables: Model<CuentaContableDocument>,
-  ) {}
+  constructor(private readonly notasDebito: NotasDebitoService) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'OtraNota' })
@@ -81,6 +35,14 @@ export class NotasDebitoController {
     return this.notasDebito.findAll(query);
   }
 
+  /**
+   * Also the frontend's source for rendering a Nota Débito's PDF
+   * client-side — `NotaDebito.documentDefinition` (frozen once, at
+   * `crear()` time — see `NotasDebitoService.congelarPresentacionNotaDebito`;
+   * no `?duplicado=true` variant baked in, reprinting a duplicate copy is a
+   * client-side concern now) is just another field on the same mapped
+   * contract, so there's no separate `:id/pdf` route anymore.
+   */
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'OtraNota' })
   findOne(@Param('id') id: string): Promise<NotaDebitoDetalle> {
@@ -104,49 +66,5 @@ export class NotasDebitoController {
     @Body() dto: AnularNotaDebitoDto,
   ): Promise<NotaDebito> {
     return this.notasDebito.anular(id, dto, user.accountId!);
-  }
-
-  @Get(':id/pdf')
-  @CheckAbility({ action: 'read', subject: 'OtraNota' })
-  async generarPdf(
-    @Param('id') id: string,
-    @Query('duplicado') duplicado: string | undefined,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-
-    const [nota, copropiedad] = await Promise.all([
-      this.notasDebito.findOneRaw(id),
-      this.copropiedades.findById(coPropertyId).exec(),
-    ]);
-
-    if (!copropiedad) {
-      throw new Error(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
-      );
-    }
-
-    const datos = await construirDatosImpresionNotaDebito(
-      nota,
-      copropiedad,
-      coPropertyId,
-      {
-        inmuebles: this.inmuebles,
-        terceros: this.terceros,
-        conceptos: this.conceptos,
-        asientos: this.asientos,
-        cuentasContables: this.cuentasContables,
-      },
-    );
-
-    const bytes = await generarPdfRecibo(datos, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="${nota.fullNumber}.pdf"`,
-    });
-    res.send(Buffer.from(bytes));
   }
 }

@@ -23,7 +23,7 @@ export interface ModelosDatosImpresionNotaContable {
 /**
  * Assembles what a Nota Contable's PDF needs to draw its journal-entry
  * table — same shape and same drawing code as a Recibo/Nota Crédito print
- * (`generarPdfRecibo`, `recibo-pdf.ts`; `tituloDocumento` tells the renderer
+ * (`contenidoRecibo`, `recibo-pdf.ts`; `tituloDocumento` tells the renderer
  * which one this is). Replaces this document's own former bespoke,
  * unfinished PDF (`nota-contable-pdf.ts`, now unused), which never resolved
  * concept names at all — printing the raw `conceptoOrigenId` ObjectId.

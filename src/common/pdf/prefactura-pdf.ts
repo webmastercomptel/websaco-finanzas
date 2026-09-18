@@ -1,5 +1,4 @@
 import type { ReactElement } from 'react';
-import { reporteDocumento, renderizarPdf } from './react/document';
 import { contenidoDocumentoFacturacion } from './factura-pdf';
 import { calcularDescuentoProntoPago } from '../facturacion/descuento-pronto-pago.util';
 import type { DatosDocumentoFacturacion } from './factura-pdf';
@@ -10,9 +9,12 @@ import type {
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
 /**
- * One Preliminar's page content — factored out so `prefacturas-lote-pdf.ts`
- * can reuse it across N pages of one `<Document>` instead of merging N
- * independently rendered PDFs (see `paginaFactura`'s docblock for why).
+ * One Preliminar's page content — reused both for a single unit's preview
+ * and, mapped across `lote.preview`, for the whole lote's batch (see
+ * `LotesController.obtenerDocumentoPrefactura`/`obtenerDocumentosPrefacturas`).
+ * Never rendered to bytes here: a Prefactura has no issuance moment to
+ * freeze, so each request serializes this tree fresh (`serializarArbol`)
+ * for the browser to render, same as `paginaFactura`'s frozen counterpart.
  */
 export function paginaPrefactura(
   preliminar: FacturaPreliminar,
@@ -45,26 +47,4 @@ export function paginaPrefactura(
   };
 
   return contenidoDocumentoFacturacion(datos, copropiedad);
-}
-
-/**
- * Generates a preview PDF for one unit's not-yet-issued FacturaPreliminar.
- * Same layout as `generarPdfFactura` — per product decision, a prefactura
- * and a factura must look identical — built through the same shared
- * renderer (`contenidoDocumentoFacturacion`); the only visible difference is
- * the "PREFACTURA" title in place of the document's real name. Dates come
- * from the parent Lote — a preliminar itself carries none — and there is no
- * DIAN footer or duplicado stamp, since nothing has been issued yet to
- * authorise or duplicate. React-pdf, built directly (no pdf-lib version kept
- * behind a `?version=` toggle — direct cutover, same as the rest of this
- * migration).
- */
-export async function generarPdfPrefactura(
-  preliminar: FacturaPreliminar,
-  lote: LoteFacturacionDocument,
-  copropiedad: CopropiedadDocument,
-): Promise<Buffer> {
-  return renderizarPdf(
-    reporteDocumento(paginaPrefactura(preliminar, lote, copropiedad)),
-  );
 }

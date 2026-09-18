@@ -1,5 +1,6 @@
 import type {
   AplicacionCartera as AplicacionCarteraContract,
+  NodoDocumentoFactura,
   Recibo as ReciboContract,
   ReciboDetalle,
 } from '../../contracts';
@@ -22,11 +23,19 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
  *
  * `montoOtrosIngresos`, unlike those two, IS read straight off the document
  * — it's frozen at creation (`Recibo.otherIncomeAmount`), never recomputed.
+ *
+ * `documentDefinition` is resolved by the caller from the shared, permanent
+ * `presentacion_documento` table (see that schema's own docblock: a frozen
+ * record, not a regenerable cache) — same pattern `toFactura` uses for its
+ * own field of the same name. Defaults to `null` so every call site that
+ * has nothing to freeze/resolve yet (`crear()`'s own immediate return,
+ * `anular()`, listing) doesn't need to pass it explicitly.
  */
 export const toRecibo = (
   doc: ReciboDocument,
   montoAplicado: number,
   montoSinAplicar: number,
+  documentDefinition: Record<string, unknown> | null = null,
 ): ReciboContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -47,6 +56,9 @@ export const toRecibo = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
+  // its own field of the same name.
+  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
 });
 
 /**
@@ -99,6 +111,9 @@ export const toAplicacionCartera = (
  * `numerosPorDocumento` is the caller's own batch-resolved
  * `documentId.toString() -> fullNumber` lookup (a Factura or Nota Débito) —
  * this module has no Factura/NotaDebito model of its own to resolve it here.
+ *
+ * `documentDefinition` forwards straight to `toRecibo` — see that
+ * function's own docblock.
  */
 export const toReciboDetalle = (
   doc: ReciboDocument,
@@ -106,8 +121,9 @@ export const toReciboDetalle = (
   montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
   numerosPorDocumento: Map<string, string> = new Map(),
+  documentDefinition: Record<string, unknown> | null = null,
 ): ReciboDetalle => ({
-  ...toRecibo(doc, montoAplicado, montoSinAplicar),
+  ...toRecibo(doc, montoAplicado, montoSinAplicar, documentDefinition),
   // Self-sourced: every `aplicacion` here was made BY this Recibo, so its
   // own `receivedDate` — never `appliedAt` — is what a person means by "the
   // date of this movement".

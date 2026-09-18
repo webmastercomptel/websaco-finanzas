@@ -230,6 +230,16 @@ export interface FacturaLinea {
   saldoPendiente: Monto;
 }
 
+/**
+ * One node of a frozen react-pdf presentation tree — see
+ * `Factura.documentDefinition` below. Kept as a local, minimal type instead
+ * of importing `NodoSerializado` from `common/pdf/react/serializar-arbol`:
+ * this file is the Spanish API surface, not a place that reaches into
+ * `common/pdf`'s internals.
+ */
+export type NodoDocumentoFactura =
+  string | number | null | { type: string; props: Record<string, unknown> };
+
 /** A sales invoice ("FV"), only ever created already numbered. */
 export interface Factura {
   id: string;
@@ -260,6 +270,35 @@ export interface Factura {
   motivoAnulacion: MotivoAnulacionFactura | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `consolidar()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  an invoice whose consolidación ran before this field existed, or
+   *  whose presentation-cache step failed — the invoice itself is still
+   *  valid either way, this is presentation, not business data. */
+  documentDefinition: NodoDocumentoFactura | null;
+}
+
+/** One entry of `GET /lotes/:id/facturas/documentos` — a lote's invoices,
+ *  each as its own frozen presentation tree, for the browser to render.
+ *  See `Factura.documentDefinition`. */
+export interface DocumentoFacturaLote {
+  id: string;
+  documentDefinition: NodoDocumentoFactura | null;
+}
+
+/** Response of `GET /lotes/:id/inmuebles/:inmuebleId/prefactura/documento`
+ *  — a Prefactura has no issuance moment to freeze at, so this is computed
+ *  fresh on every request instead of read from a stored field. */
+export interface DocumentoPrefactura {
+  documentDefinition: NodoDocumentoFactura | null;
+}
+
+/** One entry of `GET /lotes/:id/prefacturas/documentos` — same idea as
+ *  `DocumentoFacturaLote`, but always computed live: a Prefactura reflects
+ *  the lote's current previsualización, edits included, never cached. */
+export interface DocumentoPrefacturaLote {
+  inmuebleId: string;
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** Why a Factura was voided — same catalog as a Nota Crédito's void (no
@@ -498,6 +537,12 @@ export interface Recibo {
   motivoAnulacion: MotivoAnulacionRecibo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `crear()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  a receipt whose creation ran before this field existed, or whose
+   *  presentation-cache step failed — the receipt itself is still valid
+   *  either way, this is presentation, not business data. */
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -544,6 +589,14 @@ export interface AplicacionCartera {
  */
 export interface ReciboDetalle extends Recibo {
   aplicaciones: AplicacionCartera[];
+}
+
+/** One entry of `GET /lotes-recibos/:id/documentos` — a batch's receipts,
+ *  each as its own frozen presentation tree, for the browser to render. See
+ *  `Recibo.documentDefinition`; mirrors `DocumentoFacturaLote`. */
+export interface DocumentoReciboLote {
+  id: string;
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** One row of a Recibos-por-lote upload. */
@@ -693,6 +746,22 @@ export interface NotaCredito {
 }
 
 /**
+ * Response of `GET /notas-credito/:id/documento` — this note's own frozen
+ * react-pdf presentation tree, for the browser to render. Unlike
+ * `Factura.documentDefinition` (frozen once, at `consolidar()` time), this
+ * is refrozen every time `aplicar()` runs (see
+ * `NotasCreditoService.congelarPresentacion`) — `crear()` never freezes it,
+ * since the business flow always calls `aplicar()` right after `crear()`, so
+ * a note is never viewed before its first freeze. `null` should therefore
+ * not normally happen in practice; handled defensively anyway (the frontend
+ * already treats `documentDefinition: null` as "not available"), same as
+ * `Factura`'s equivalent field.
+ */
+export interface DocumentoNotaCredito {
+  documentDefinition: NodoDocumentoFactura | null;
+}
+
+/**
  * `NotaCredito` plus the full list of applications it has made — what
  * `GET /notas-credito/:id` returns. `GET /notas-credito` (the listing) keeps
  * using lean `NotaCredito`, same pattern as `ReciboDetalle`.
@@ -730,6 +799,11 @@ export interface NotaDebito {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `crear()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  a note whose creation ran before this field existed, or whose
+   *  presentation-cache step failed. */
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -772,6 +846,11 @@ export interface NotaAnticipo {
   motivoAnulacion: MotivoAnulacionNotaAnticipo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `crear()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  a note whose creation ran before this field existed, or whose
+   *  presentation-cache step failed. */
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /**
@@ -910,6 +989,11 @@ export interface NotaContable {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
+  /** Frozen at `crear()` time, rendered client-side — see
+   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
+   *  a note whose creation ran before this field existed, or whose
+   *  presentation-cache step failed. */
+  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */

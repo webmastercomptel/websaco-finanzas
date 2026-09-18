@@ -1,6 +1,7 @@
 import type {
   Factura as FacturaContract,
   FacturaLinea as FacturaLineaContract,
+  NodoDocumentoFactura,
   TitularFactura,
 } from '../../contracts';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
@@ -56,11 +57,20 @@ export const lineaDe = (
  * docblocks). Both are resolved by the caller — `FacturasService`, which
  * batch-reads them from those two live ledgers — and passed in here, same
  * pattern `toNotaDebito` already uses for its own `saldoPendiente`.
+ *
+ * `documentDefinition` is likewise no longer a field on `Factura` itself —
+ * it moved to the shared, permanent `presentacion_documento` table (see that
+ * schema's own docblock: a frozen record, not a regenerable cache) once
+ * Factura stopped being the one document type with its own bespoke field
+ * for this. `FacturasService` resolves it from `PresentacionDocumentoService`
+ * and passes it in here, same shape as `saldoPendiente`/`saldoPorConcepto`
+ * above.
  */
 export const toFactura = (
   doc: FacturaDocument,
   saldoPendiente: number,
   saldoPorConcepto: Map<string, number>,
+  documentDefinition: Record<string, unknown> | null,
 ): FacturaContract => ({
   id: doc._id.toString(),
   loteId: doc.loteId.toString(),
@@ -90,4 +100,7 @@ export const toFactura = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  // Opaque blob, passed through unchanged — resolved by the caller from
+  // `presentacion_documento`, see this function's own docblock.
+  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
 });
