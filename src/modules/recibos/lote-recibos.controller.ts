@@ -117,8 +117,23 @@ export class LoteRecibosController {
       reciboIds.map((rid) => new Types.ObjectId(rid)),
     );
 
+    // `lote.filas` already carries each row's own `inmuebleCodigo` (the file's
+    // own código, already resolved and validated against a real Inmueble by
+    // `cargarArchivo` — see `LoteRecibosService`'s own note on that field) —
+    // no separate Inmueble lookup needed, same "already have it in hand"
+    // reasoning as `DocumentoFacturaLote`/`DocumentoPrefacturaLote`'s own
+    // frozen `unitCode`.
+    const codigoPorRecibo = new Map(
+      lote.filas
+        .filter(
+          (f): f is typeof f & { reciboId: string } => f.reciboId !== null,
+        )
+        .map((f) => [f.reciboId, f.inmuebleCodigo]),
+    );
+
     return reciboIds.map((rid) => ({
       id: rid,
+      inmuebleCodigo: codigoPorRecibo.get(rid) ?? '',
       // Opaque blob, passed through unchanged — same cast
       // `LotesController.obtenerDocumentosFacturas` uses for the same field.
       documentDefinition: (documentDefinitions.get(rid) ??

@@ -244,6 +244,7 @@ export class LotesController {
 
     return lote.preview.map((preliminar) => ({
       inmuebleId: preliminar.inmuebleId.toString(),
+      inmuebleCodigo: preliminar.unitCode,
       // Same "always a single element" cast as the single-unit route above.
       documentDefinition: serializarArbol(
         paginaPrefactura(
@@ -294,6 +295,7 @@ export class LotesController {
 
     return facturas.map((factura) => ({
       id: factura._id.toString(),
+      inmuebleCodigo: factura.unitCode,
       // Opaque blob, passed through unchanged — same cast `toFactura`
       // (`facturas.mapper.ts`) uses for the same field.
       documentDefinition: (documentDefinitions.get(factura._id.toString()) ??

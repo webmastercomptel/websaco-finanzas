@@ -41,9 +41,10 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
 
 describe('toNotaCredito', () => {
   it('mapea el documento inglés al contrato español', () => {
-    expect(toNotaCredito(notaDoc() as never, 150000, 50000)).toEqual({
+    expect(toNotaCredito(notaDoc() as never, 150000, 50000, 'A-101')).toEqual({
       id: 'nc-1',
       inmuebleId: 'inm-1',
+      inmuebleCodigo: 'A-101',
       terceroId: 'ter-1',
       tipoDocumentoAncla: 'FV',
       documentoAnclaId: 'fac-1',
@@ -67,7 +68,12 @@ describe('toNotaCredito', () => {
 
   it('cae a createdAt cuando issueDate es null (nota creada antes de este campo)', () => {
     expect(
-      toNotaCredito(notaDoc({ issueDate: null }) as never, 150000, 50000).fecha,
+      toNotaCredito(
+        notaDoc({ issueDate: null }) as never,
+        150000,
+        50000,
+        'A-101',
+      ).fecha,
     ).toBe('2026-07-01T00:00:00.000Z');
   });
 
@@ -80,6 +86,7 @@ describe('toNotaCredito', () => {
       }) as never,
       150000,
       50000,
+      'A-101',
     );
     expect(nota.tipoDocumentoAncla).toBe('ND');
     expect(nota.documentoAnclaId).toBe('nd-1');
@@ -87,8 +94,12 @@ describe('toNotaCredito', () => {
 
   it('mapea terceroId null cuando la factura ancla no tiene Tercero vinculado', () => {
     expect(
-      toNotaCredito(notaDoc({ terceroId: null }) as never, 150000, 50000)
-        .terceroId,
+      toNotaCredito(
+        notaDoc({ terceroId: null }) as never,
+        150000,
+        50000,
+        'A-101',
+      ).terceroId,
     ).toBeNull();
   });
 
@@ -102,6 +113,7 @@ describe('toNotaCredito', () => {
       }) as never,
       0,
       0,
+      'A-101',
     );
 
     expect(anulada.estado).toBe('anulado');
@@ -120,6 +132,7 @@ describe('toNotaCreditoDetalle', () => {
       150000,
       50000,
       [aplicacionDoc() as never],
+      'A-101',
       numerosPorDocumento,
     );
 
@@ -128,9 +141,13 @@ describe('toNotaCreditoDetalle', () => {
   });
 
   it('agrega el arreglo de aplicaciones a la nota crédito', () => {
-    const detalle = toNotaCreditoDetalle(notaDoc() as never, 150000, 50000, [
-      aplicacionDoc() as never,
-    ]);
+    const detalle = toNotaCreditoDetalle(
+      notaDoc() as never,
+      150000,
+      50000,
+      [aplicacionDoc() as never],
+      'A-101',
+    );
 
     expect(detalle.id).toBe('nc-1');
     expect(detalle.aplicaciones).toHaveLength(1);

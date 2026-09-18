@@ -603,6 +603,7 @@ export class RecibosService {
         final!,
         totalAplicadoAhora,
         enviarAOtrosIngresos ? 0 : sobranteReal,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
       );
     });
 
@@ -1137,7 +1138,12 @@ export class RecibosService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toRecibo(final!, 0, 0);
+      return toRecibo(
+        final!,
+        0,
+        0,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 
@@ -1222,6 +1228,19 @@ export class RecibosService {
       );
     }
 
+    // Batched — one query for the whole page, never one per row.
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((idInmueble) => new Types.ObjectId(idInmueble));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+    );
+
     return {
       items: documentos.map((doc) => {
         const idDoc = doc._id.toString();
@@ -1236,7 +1255,12 @@ export class RecibosService {
           appliedAmountCash -
           (doc.otherIncomeAmount ?? 0) +
           (descuentoPorRecibo.get(idDoc) ?? 0);
-        return toRecibo(doc, appliedAmount, unappliedAmount);
+        return toRecibo(
+          doc,
+          appliedAmount,
+          unappliedAmount,
+          codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+        );
       }),
       total,
       pagina,
@@ -1322,6 +1346,7 @@ export class RecibosService {
       appliedAmount,
       unappliedAmount,
       aplicaciones,
+      await this.resolverInmuebleCodigo(recibo.inmuebleId),
       numerosPorDocumento,
       documentDefinition,
     );
@@ -1337,6 +1362,20 @@ export class RecibosService {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
     return recibo;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `Recibo` itself (unlike `Factura.unitCode`), so
+   * every reader looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /**

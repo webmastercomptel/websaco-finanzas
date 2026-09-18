@@ -89,19 +89,16 @@ export class NotasCreditoController {
 
   /**
    * This note's own frozen react-pdf presentation tree, for the browser to
-   * render — same idea as `Factura.documentDefinition`, but refrozen every
-   * time `aplicar()` runs instead of once at creation (see
-   * `NotasCreditoService.congelarPresentacion`'s own docblock for why
-   * `crear()` never freezes this): `montoSinAplicar` and the applied
-   * breakdown are live, not fixed at issuance, and a later deferred
-   * `aplicar()` call changes what must print.
+   * render — same idea as `Factura.documentDefinition`. Frozen first by
+   * `crear()` (every Nota Crédito applies immediately against its anchor,
+   * design §5), then refrozen by `aplicar()` whenever a later deferred
+   * cruce changes `montoSinAplicar`/the applied breakdown (see
+   * `NotasCreditoService.congelarPresentacion`'s own docblock).
    *
    * A `null` `documentDefinition` should not normally happen in practice —
-   * the business flow always calls `aplicar()` right after `crear()`, so a
-   * Nota Crédito is never viewed before its first freeze — but this stays
-   * defensive rather than throwing, same as `Factura`'s equivalent route:
-   * the frontend already treats `documentDefinition: null` as "not
-   * available".
+   * `crear()` always freezes one — but this stays defensive rather than
+   * throwing, same as `Factura`'s equivalent route: the frontend already
+   * treats `documentDefinition: null` as "not available".
    *
    * Route renamed from `.../pdf` — no PDF is built here anymore, the
    * browser renders this client-side. Lost in the move: `?duplicado=true`
@@ -117,11 +114,12 @@ export class NotasCreditoController {
     @Param('id') id: string,
   ): Promise<DocumentoNotaCredito> {
     const nota = await this.notasCredito.findOneRaw(id);
-    const documentDefinition = await this.presentacionDocumento.buscar(
-      'NC',
-      nota._id,
-    );
+    const [documentDefinition, inmuebleCodigo] = await Promise.all([
+      this.presentacionDocumento.buscar('NC', nota._id),
+      this.notasCredito.resolverInmuebleCodigo(nota.inmuebleId),
+    ]);
     return {
+      inmuebleCodigo,
       documentDefinition:
         documentDefinition as DocumentoNotaCredito['documentDefinition'],
     };

@@ -283,6 +283,7 @@ export interface Factura {
  *  See `Factura.documentDefinition`. */
 export interface DocumentoFacturaLote {
   id: string;
+  inmuebleCodigo: string;
   documentDefinition: NodoDocumentoFactura | null;
 }
 
@@ -298,6 +299,7 @@ export interface DocumentoPrefactura {
  *  the lote's current previsualización, edits included, never cached. */
 export interface DocumentoPrefacturaLote {
   inmuebleId: string;
+  inmuebleCodigo: string;
   documentDefinition: NodoDocumentoFactura | null;
 }
 
@@ -515,6 +517,7 @@ export type MotivoAnulacionRecibo =
 export interface Recibo {
   id: string;
   inmuebleId: string;
+  inmuebleCodigo: string;
   terceroId: string;
   prefijo: string;
   numero: number;
@@ -596,6 +599,7 @@ export interface ReciboDetalle extends Recibo {
  *  `Recibo.documentDefinition`; mirrors `DocumentoFacturaLote`. */
 export interface DocumentoReciboLote {
   id: string;
+  inmuebleCodigo: string;
   documentDefinition: NodoDocumentoFactura | null;
 }
 
@@ -715,6 +719,7 @@ export interface DistribucionNotaCredito {
 export interface NotaCredito {
   id: string;
   inmuebleId: string;
+  inmuebleCodigo: string;
   terceroId: string | null;
   /** Which kind of document `documentoAnclaId` points to. */
   tipoDocumentoAncla: 'FV' | 'ND' | 'SI';
@@ -758,6 +763,7 @@ export interface NotaCredito {
  * `Factura`'s equivalent field.
  */
 export interface DocumentoNotaCredito {
+  inmuebleCodigo: string;
   documentDefinition: NodoDocumentoFactura | null;
 }
 
@@ -784,6 +790,7 @@ export type MotivoNotaDebito =
 export interface NotaDebito {
   id: string;
   inmuebleId: string;
+  inmuebleCodigo: string;
   terceroId: string | null;
   conceptoId: string;
   motivo: MotivoNotaDebito;
@@ -834,6 +841,7 @@ export type MotivoAnulacionNotaAnticipo =
 export interface NotaAnticipo {
   id: string;
   inmuebleId: string;
+  inmuebleCodigo: string;
   terceroId: string | null;
   origenTipo: 'RC' | 'SI';
   reciboOrigenId: string;
@@ -972,6 +980,7 @@ export interface ResultadoImportacionSaldosInicialesAnticipo {
 export interface NotaContable {
   id: string;
   inmuebleId: string;
+  inmuebleCodigo: string;
   /** The specific Factura/NotaDebito this reclassification's per-document
    *  cartera effect landed on. Null on a note created before this field
    *  existed. */

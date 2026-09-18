@@ -41,7 +41,9 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
 
 describe('toRecibo', () => {
   it('mapea el documento inglés al contrato español', () => {
-    expect(toRecibo(reciboDoc() as never, 200000, 300000)).toMatchObject({
+    expect(
+      toRecibo(reciboDoc() as never, 200000, 300000, 'A-101'),
+    ).toMatchObject({
       id: 'rec-1',
       numeroCompleto: 'RC-84',
       montoRecibido: 500000,
@@ -49,6 +51,7 @@ describe('toRecibo', () => {
       montoSinAplicar: 300000,
       medioPago: 'transferencia',
       estado: 'activo',
+      inmuebleCodigo: 'A-101',
     });
   });
 
@@ -62,6 +65,7 @@ describe('toRecibo', () => {
       }) as never,
       0,
       0,
+      'A-101',
     );
 
     expect(anulado.estado).toBe('anulado');
@@ -143,9 +147,13 @@ describe('toAplicacionCartera', () => {
 
 describe('toReciboDetalle', () => {
   it('agrega el arreglo de aplicaciones al recibo', () => {
-    const detalle = toReciboDetalle(reciboDoc() as never, 200000, 300000, [
-      aplicacionDoc() as never,
-    ]);
+    const detalle = toReciboDetalle(
+      reciboDoc() as never,
+      200000,
+      300000,
+      [aplicacionDoc() as never],
+      'A-101',
+    );
 
     expect(detalle.id).toBe('rec-1');
     expect(detalle.aplicaciones).toHaveLength(1);
@@ -158,6 +166,7 @@ describe('toReciboDetalle', () => {
       200000,
       300000,
       [aplicacionDoc() as never],
+      'A-101',
       new Map([['fac-1', 'FV-1']]),
     );
 

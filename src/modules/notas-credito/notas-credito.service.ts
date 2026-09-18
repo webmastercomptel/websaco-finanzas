@@ -394,6 +394,10 @@ export class NotasCreditoService {
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
+    // Captured inside the transaction below, read after it commits — see
+    // the `congelarPresentacion` call at the end of this method.
+    let notaCreadaId!: Types.ObjectId;
+
     const etiquetaAncla =
       dto.tipoDocumento === 'FV'
         ? 'La factura'
@@ -401,7 +405,7 @@ export class NotasCreditoService {
           ? 'La nota débito'
           : 'El saldo inicial';
 
-    return this.transaccion(async (session) => {
+    const resultado = await this.transaccion(async (session) => {
       const documentoAncla:
         FacturaDocument | NotaDebitoDocument | SaldoInicialDocument | null =
         dto.tipoDocumento === 'FV'
@@ -568,6 +572,7 @@ export class NotasCreditoService {
         ],
         { session },
       );
+      notaCreadaId = creada._id;
 
       await this.saldoDocumentoOrigen.create(
         [
@@ -792,8 +797,22 @@ export class NotasCreditoService {
         final!,
         totalAplicadoAhora,
         dto.montoTotal - totalAplicadoAhora,
+        await this.resolverInmuebleCodigo(inmuebleId),
       );
     });
+
+    // AFTER the transaction has committed — never inside it (see
+    // `congelarPresentacion`'s own docblock). `crear()` always applies
+    // immediately against its anchor (design §5, this method's own
+    // docblock) — there is no separate `aplicar()` call in the normal
+    // creation flow (`useCrearNotaCredito` on the frontend never follows up
+    // with one), so THIS is the freeze point most Notas Crédito ever get.
+    // `aplicar()` re-freezes later only for the deferred-cruce case (a
+    // leftover `unappliedAmount` applied afterward) — its own call remains,
+    // freezing is idempotent (`PresentacionDocumentoService.guardar` upserts).
+    await this.congelarPresentacion(coPropertyId, notaCreadaId);
+
+    return resultado;
   }
 
   /**
@@ -1037,11 +1056,11 @@ export class NotasCreditoService {
     });
 
     // AFTER the transaction has committed — never inside it (see
-    // `congelarPresentacion`'s own docblock). `crear()` deliberately never
-    // calls this: it has its own fully independent application logic
-    // (inline in `crear()`'s own transaction, never routed through
-    // `aplicarManual`/`aplicarFifo`), so there is no shared helper between
-    // the two methods to hook this into instead.
+    // `congelarPresentacion`'s own docblock). Re-freezes what `crear()`
+    // already froze (idempotent upsert) — needed here too because THIS
+    // deferred-cruce path changes `montoSinAplicar`/the applied breakdown
+    // after that first freeze, which is exactly what the document must show
+    // live.
     await this.congelarPresentacion(coPropertyId, new Types.ObjectId(id));
 
     return resultadoAplicacion;
@@ -1049,17 +1068,26 @@ export class NotasCreditoService {
 
   /**
    * Freezes this Nota Crédito's printable presentation tree into the shared
-   * `presentacion_documento` table (`tipoDocumento: 'NC'`) — called ONLY
-   * from `aplicar()`, never from `crear()`. `crear()` never freezes anything
-   * because the business flow always calls `aplicar()` right after it (a
-   * Nota Crédito is never viewed/printed in the gap between the two,
-   * confirmed with the user) — freezing twice would be redundant, and
-   * freezing only in `crear()` would go stale the moment a LATER `aplicar()`
-   * changes `montoSinAplicar`/the applied breakdown, which is exactly what
-   * this document must show live. Because a Nota Crédito can be applied
-   * more than once over its life (deferred cruce), this method re-freezes
-   * — overwrites, via `PresentacionDocumentoService.guardar`'s own upsert —
-   * unconditionally on every `aplicar()` run, never just the first.
+   * `presentacion_documento` table (`tipoDocumento: 'NC'`). Called from
+   * `crear()` (every Nota Crédito applies immediately against its anchor at
+   * creation, design §5 — see `crear()`'s own docblock — so that first
+   * freeze is what makes the document viewable at all) AND from `aplicar()`
+   * (the deferred-cruce case: a leftover `unappliedAmount` applied later
+   * changes `montoSinAplicar`/the applied breakdown, which must re-freeze to
+   * stay accurate). Because a Nota Crédito can be applied more than once
+   * over its life, this method re-freezes — overwrites, via
+   * `PresentacionDocumentoService.guardar`'s own upsert — unconditionally on
+   * every call, never just the first.
+   *
+   * A previous version of this method ran ONLY from `aplicar()`, on the
+   * assumption that the business flow always calls `aplicar()` right after
+   * `crear()` — false: `crear()` applies inline and is never followed by a
+   * separate `aplicar()` call in the normal flow (confirmed against
+   * `useCrearNotaCredito` on the frontend, which never triggers one). That
+   * left `documentDefinition` permanently `null` for every Nota Crédito
+   * that never later went through a deferred-cruce `aplicar()` — including
+   * every one created via `anularFactura()`, which calls `crear()` and
+   * nothing else.
    *
    * Runs strictly AFTER the caller's own transaction has already committed,
    * and is best-effort: any failure here is logged and swallowed, never
@@ -1806,7 +1834,12 @@ export class NotasCreditoService {
         .findOne({ _id: id, coPropertyId })
         .session(session)
         .exec();
-      return toNotaCredito(final!, 0, 0);
+      return toNotaCredito(
+        final!,
+        0,
+        0,
+        await this.resolverInmuebleCodigo(final!.inmuebleId),
+      );
     });
   }
 
@@ -1879,6 +1912,20 @@ export class NotasCreditoService {
       ]),
     );
 
+    // Batched — one query for the whole page, never one per row (the
+    // tenancy/tenancy-adjacent "no query in a loop" rule).
+    const inmuebleIds = [
+      ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+    ].map((id) => new Types.ObjectId(id));
+    const inmuebles = inmuebleIds.length
+      ? await this.inmuebles
+          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .exec()
+      : [];
+    const codigoPorInmueble = new Map(
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+    );
+
     return {
       items: documentos.map((doc) => {
         const saldo = saldoPorDocumento.get(doc._id.toString());
@@ -1886,7 +1933,12 @@ export class NotasCreditoService {
         const montoAplicado = saldo
           ? saldo.montoOriginal - saldo.saldoDisponible
           : 0;
-        return toNotaCredito(doc, montoAplicado, montoSinAplicar);
+        return toNotaCredito(
+          doc,
+          montoAplicado,
+          montoSinAplicar,
+          codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+        );
       }),
       total,
       pagina,
@@ -1997,6 +2049,7 @@ export class NotasCreditoService {
       montoAplicado,
       montoSinAplicar,
       aplicaciones,
+      await this.resolverInmuebleCodigo(nota.inmuebleId),
       numerosPorDocumento,
     );
   }
@@ -2013,6 +2066,21 @@ export class NotasCreditoService {
       throw new NotFoundException(`No se encontró la nota crédito ${id}`);
     }
     return nota;
+  }
+
+  /**
+   * Live-resolves an inmueble's printable código from its id — no frozen
+   * field for it exists on `NotaCredito` itself (unlike `Factura.unitCode`),
+   * so every reader (`findOne`, the controller's own `obtenerDocumento`)
+   * looks it up here. Same fallback (`?? ''`) as
+   * `CarteraPorConceptosService`'s identical live-resolve.
+   */
+  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const inmueble = await this.inmuebles
+      ?.findOne({ _id: inmuebleId, coPropertyId })
+      .exec();
+    return inmueble?.code ?? '';
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,
