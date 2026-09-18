@@ -40,6 +40,22 @@ export interface DatosDocumentoFacturacion {
    *  real number/label painted afterward lands on top of it and stays
    *  legible; the stamp only shows through blank space. */
   marcaDuplicado: string | null;
+  /** The unit's own `Inmueble.reference`, read live (see
+   *  `DatosVisualesFactura`) — printed below the title, never frozen onto
+   *  the document itself. */
+  referenciaPago: string | null;
+  /** This unit's currently pending anticipo balance, read live — purely a
+   *  display adjustment on the printed "Total a Pagar", never written back
+   *  into `Factura.total`/`outstandingBalance` or any cartera balance. */
+  totalAnticipos: number;
+}
+
+/** Cosmetic, live-read data the PDF prints alongside a Factura/Prefactura's
+ *  own frozen fields — see `FacturasService.datosVisualesPdf`, the only
+ *  place that computes it. */
+export interface DatosVisualesFactura {
+  referencia: string | null;
+  totalAnticipos: number;
 }
 
 /** Display shape `ObservacionesFactura` draws — the Spanish-named
@@ -141,6 +157,7 @@ export function contenidoDocumentoFacturacion(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: datos.titulo,
+      referenciaPago: datos.referenciaPago,
     }),
     createElement(DatosAdquiriente, {
       inmuebleCodigo: datos.unitCode,
@@ -158,6 +175,7 @@ export function contenidoDocumentoFacturacion(
       totalCargosDelMes,
       totalNuevoSaldo,
       totalAPagar,
+      totalAnticipos: datos.totalAnticipos,
     }),
     totalIva > 0
       ? createElement(
@@ -172,7 +190,7 @@ export function contenidoDocumentoFacturacion(
           descuento: descuentoProps,
         })
       : null,
-    createElement(CreditoWebsaco),
+    createElement(CreditoWebsaco, { idInmueble: datos.unitCode }),
   );
 }
 
@@ -187,6 +205,7 @@ export function paginaFactura(
   factura: FacturaDocument,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
+  datosVisuales?: DatosVisualesFactura,
   opciones?: { duplicado?: boolean },
 ): ReactElement {
   const titulo = `${resolucion?.displayName ?? 'Cobro Expensas Comunes'} ${factura.fullNumber}`;
@@ -208,6 +227,8 @@ export function paginaFactura(
     marcaDuplicado: opciones?.duplicado
       ? factura.issueDate.toISOString()
       : null,
+    referenciaPago: datosVisuales?.referencia ?? null,
+    totalAnticipos: datosVisuales?.totalAnticipos ?? 0,
   };
 
   const pie = resolucion
@@ -248,14 +269,23 @@ export function paginaFactura(
  * to load it solely for this). React-pdf, built directly (no pdf-lib
  * version kept behind a `?version=` toggle — direct cutover, same as the
  * rest of this migration).
+ *
+ * `datosVisuales` (referencia de pago + anticipo pendiente) is optional and
+ * always live — see `DatosVisualesFactura`'s own docblock. Omitting it
+ * (e.g. a caller that hasn't been updated) degrades gracefully: no
+ * referencia line, no "Saldo a Favor" row, same output as before this was
+ * added.
  */
 export async function generarPdfFactura(
   factura: FacturaDocument,
   resolucion: ResolucionFacturacionDocument | null,
   copropiedad: CopropiedadDocument,
+  datosVisuales?: DatosVisualesFactura,
   opciones?: { duplicado?: boolean },
 ): Promise<Buffer> {
   return renderizarPdf(
-    reporteDocumento(paginaFactura(factura, resolucion, copropiedad, opciones)),
+    reporteDocumento(
+      paginaFactura(factura, resolucion, copropiedad, datosVisuales, opciones),
+    ),
   );
 }

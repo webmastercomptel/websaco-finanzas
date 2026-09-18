@@ -274,7 +274,7 @@ export async function generarPdfAuxiliarCartera(
       'final',
     ),
 
-    createElement(CreditoWebsaco),
+    createElement(CreditoWebsaco, {}),
   );
 
   return renderizarPdf(reporteDocumento(contenido));

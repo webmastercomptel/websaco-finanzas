@@ -178,14 +178,22 @@ export class LotesController {
         `El lote ${id} no tiene una previsualización para el inmueble ${inmuebleId}`,
       );
     }
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf([preliminar.inmuebleId]),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
 
-    const bytes = await generarPdfPrefactura(preliminar, lote, copropiedad);
+    const bytes = await generarPdfPrefactura(
+      preliminar,
+      lote,
+      copropiedad,
+      datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
+    );
 
     res.set({
       'Content-Type': 'application/pdf',
@@ -215,7 +223,10 @@ export class LotesController {
         `El lote ${id} todavía no tiene una previsualización generada`,
       );
     }
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf(lote.preview.map((p) => p.inmuebleId)),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -226,6 +237,7 @@ export class LotesController {
       lote.preview,
       lote,
       copropiedad,
+      datosVisualesPorInmueble,
     );
 
     res.set({
@@ -272,7 +284,10 @@ export class LotesController {
       resoluciones.map((r) => [r._id.toString(), r]),
     );
 
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf(facturas.map((f) => f.inmuebleId)),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -283,6 +298,7 @@ export class LotesController {
       facturas,
       resolucionesPorId,
       copropiedad,
+      datosVisualesPorInmueble,
     );
 
     res.set({

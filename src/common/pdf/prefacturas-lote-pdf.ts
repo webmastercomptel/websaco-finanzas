@@ -1,5 +1,6 @@
 import { reporteDocumentoMultiPagina, renderizarPdf } from './react/document';
 import { paginaPrefactura } from './prefactura-pdf';
+import type { DatosVisualesFactura } from './factura-pdf';
 import type {
   FacturaPreliminar,
   LoteFacturacionDocument,
@@ -15,9 +16,15 @@ export async function generarPdfPrefacturasLote(
   previsualizacion: FacturaPreliminar[],
   lote: LoteFacturacionDocument,
   copropiedad: CopropiedadDocument,
+  datosVisualesPorInmueble?: Map<string, DatosVisualesFactura>,
 ): Promise<Buffer> {
   const paginas = previsualizacion.map((preliminar) =>
-    paginaPrefactura(preliminar, lote, copropiedad),
+    paginaPrefactura(
+      preliminar,
+      lote,
+      copropiedad,
+      datosVisualesPorInmueble?.get(preliminar.inmuebleId.toString()),
+    ),
   );
 
   return renderizarPdf(reporteDocumentoMultiPagina(paginas));

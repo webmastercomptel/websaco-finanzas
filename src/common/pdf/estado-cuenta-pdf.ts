@@ -165,7 +165,7 @@ export async function generarPdfEstadoCuenta(
         )
       : null,
 
-    createElement(CreditoWebsaco),
+    createElement(CreditoWebsaco, {}),
   );
 
   return renderizarPdf(reporteDocumento(contenido));

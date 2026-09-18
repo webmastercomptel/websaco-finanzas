@@ -1,5 +1,6 @@
 import { reporteDocumentoMultiPagina, renderizarPdf } from './react/document';
 import { paginaFactura } from './factura-pdf';
+import type { DatosVisualesFactura } from './factura-pdf';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { ResolucionFacturacionDocument } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -21,12 +22,16 @@ export async function generarPdfFacturasLote(
   facturas: FacturaDocument[],
   resolucionesPorId: Map<string, ResolucionFacturacionDocument>,
   copropiedad: CopropiedadDocument,
+  datosVisualesPorInmueble?: Map<string, DatosVisualesFactura>,
 ): Promise<Buffer> {
   const paginas = facturas.map((factura) => {
     const resolucion = factura.resolucionId
       ? (resolucionesPorId.get(factura.resolucionId.toString()) ?? null)
       : null;
-    return paginaFactura(factura, resolucion, copropiedad);
+    const datosVisuales = datosVisualesPorInmueble?.get(
+      factura.inmuebleId.toString(),
+    );
+    return paginaFactura(factura, resolucion, copropiedad, datosVisuales);
   });
 
   return renderizarPdf(reporteDocumentoMultiPagina(paginas));

@@ -268,7 +268,7 @@ export async function generarPdfVencimientosCartera(
           )
         : null,
 
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     );
   });
 

@@ -51,14 +51,29 @@ const styles = StyleSheet.create({
  * clients are protective of a document representing THEIR building; a
  * vendor mark in the margin, not the letterhead, is the same understated
  * mention most SaaS invoicing tools use.
+ *
+ * `idInmueble`, when passed, prints "ID: <code>" immediately before
+ * "Generado por" — the unit-code field a Factura/Prefactura used to show
+ * elsewhere and was later dropped; restored here rather than in the body,
+ * per product decision. Every other caller omits it and sees no change.
  */
-export function CreditoWebsaco(): ReactElement {
+export function CreditoWebsaco(props: {
+  idInmueble?: string | null;
+}): ReactElement {
+  const { idInmueble } = props;
   return createElement(
     View,
     { style: styles.contenedor },
     createElement(
       View,
       { style: styles.marca },
+      idInmueble
+        ? createElement(
+            Text,
+            { style: styles.textoConMargen },
+            `ID: ${idInmueble}`,
+          )
+        : null,
       createElement(Text, { style: styles.textoConMargen }, 'Generado por'),
       createElement(Image, { style: styles.logo, src: logoBytesWebsaco() }),
     ),

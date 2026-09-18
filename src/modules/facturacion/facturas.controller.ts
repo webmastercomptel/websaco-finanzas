@@ -65,14 +65,16 @@ export class FacturasController {
 
     const factura = await this.facturas.findOneRaw(id);
 
-    const [resolucion, copropiedad] = await Promise.all([
-      factura.resolucionId
-        ? this.resoluciones
-            .findOne({ _id: factura.resolucionId, coPropertyId })
-            .exec()
-        : Promise.resolve(null),
-      this.copropiedades.findById(coPropertyId).exec(),
-    ]);
+    const [resolucion, copropiedad, datosVisualesPorInmueble] =
+      await Promise.all([
+        factura.resolucionId
+          ? this.resoluciones
+              .findOne({ _id: factura.resolucionId, coPropertyId })
+              .exec()
+          : Promise.resolve(null),
+        this.copropiedades.findById(coPropertyId).exec(),
+        this.facturas.datosVisualesPdf([factura.inmuebleId]),
+      ]);
 
     if (factura.resolucionId && !resolucion) {
       throw new Error(
@@ -85,9 +87,13 @@ export class FacturasController {
       );
     }
 
-    const bytes = await generarPdfFactura(factura, resolucion, copropiedad, {
-      duplicado: duplicado === 'true',
-    });
+    const bytes = await generarPdfFactura(
+      factura,
+      resolucion,
+      copropiedad,
+      datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
+      { duplicado: duplicado === 'true' },
+    );
 
     res.set({
       'Content-Type': 'application/pdf',

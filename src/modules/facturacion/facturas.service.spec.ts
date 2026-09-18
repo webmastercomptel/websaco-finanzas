@@ -157,10 +157,18 @@ const tenantQueDevuelve = (id: Types.ObjectId | null): TenantContextService =>
     },
   }) as unknown as TenantContextService;
 
+/** Empty `find().exec() => []` stub — enough for the models
+ *  `datosVisualesPdf` needs but the `findAll`/`findOne`/`findAllRawPorLote`
+ *  suites below never exercise. */
+const modeloVacio = () => ({
+  find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+});
+
 /** Builds a `FacturasService` wired against the SAME set of fixtures across
  *  all three of its models — `facturas`, `saldoTotalDocumento`,
  *  `carteraPorDocumento` — so a test only has to declare its documento(s)
- *  once. */
+ *  once. `inmuebles`/`recibos`/`saldoDocumentoOrigen` default to empty stubs
+ *  — only `construirServicioAnticipos` below wires those for real. */
 const construirServicio = (filas: ReturnType<typeof documento>[]) => {
   const facturas = modeloCon(filas);
   const saldoTotalDocumento = modeloSaldoTotalDocumento(filas);
@@ -169,6 +177,9 @@ const construirServicio = (filas: ReturnType<typeof documento>[]) => {
     facturas as never,
     saldoTotalDocumento as never,
     carteraPorDocumento as never,
+    modeloVacio() as never,
+    modeloVacio() as never,
+    modeloVacio() as never,
     tenantQueDevuelve(COP),
   );
   return { service, facturas, saldoTotalDocumento, carteraPorDocumento };
@@ -356,5 +367,96 @@ describe('FacturasService.findAllRawPorLote', () => {
     const resultado = await service.findAllRawPorLote('lote-1');
 
     expect(resultado[0]).toMatchObject({ fullNumber: 'CONJ-2026-1041' });
+  });
+});
+
+describe('FacturasService.datosVisualesPdf', () => {
+  const construirServicioAnticipos = (config: {
+    inmuebles: { _id: Types.ObjectId; reference: string | null }[];
+    recibos: {
+      _id: Types.ObjectId;
+      inmuebleId: Types.ObjectId;
+      status: 'activo' | 'anulado';
+    }[];
+    saldos: { documentoId: Types.ObjectId; saldoDisponible: number }[];
+  }) => {
+    const inmuebles = {
+      find: jest.fn(() => ({ exec: () => Promise.resolve(config.inmuebles) })),
+    };
+    const recibos = {
+      find: jest.fn((filtro: Filtro) => ({
+        exec: () =>
+          Promise.resolve(
+            config.recibos.filter((r) => r.status === filtro.status),
+          ),
+      })),
+    };
+    const saldoDocumentoOrigen = {
+      find: jest.fn(() => ({ exec: () => Promise.resolve(config.saldos) })),
+    };
+    const service = new FacturasService(
+      modeloCon([]) as never,
+      modeloSaldoTotalDocumento([]) as never,
+      modeloCarteraPorDocumento([]) as never,
+      inmuebles as never,
+      recibos as never,
+      saldoDocumentoOrigen as never,
+      tenantQueDevuelve(COP),
+    );
+    return { service, inmuebles, recibos, saldoDocumentoOrigen };
+  };
+
+  it('suma el saldo disponible de los recibos activos del inmueble como totalAnticipos', async () => {
+    const inmuebleId = new Types.ObjectId();
+    const recibo1 = new Types.ObjectId();
+    const recibo2 = new Types.ObjectId();
+    const { service } = construirServicioAnticipos({
+      inmuebles: [{ _id: inmuebleId, reference: 'REF-301' }],
+      recibos: [
+        { _id: recibo1, inmuebleId, status: 'activo' },
+        { _id: recibo2, inmuebleId, status: 'activo' },
+      ],
+      saldos: [
+        { documentoId: recibo1, saldoDisponible: 30000 },
+        { documentoId: recibo2, saldoDisponible: 20000 },
+      ],
+    });
+
+    const resultado = await service.datosVisualesPdf([inmuebleId]);
+
+    expect(resultado.get(inmuebleId.toString())).toEqual({
+      referencia: 'REF-301',
+      totalAnticipos: 50000,
+    });
+  });
+
+  it('devuelve totalAnticipos en 0 cuando el inmueble no tiene anticipo pendiente', async () => {
+    const inmuebleId = new Types.ObjectId();
+    const { service } = construirServicioAnticipos({
+      inmuebles: [{ _id: inmuebleId, reference: null }],
+      recibos: [],
+      saldos: [],
+    });
+
+    const resultado = await service.datosVisualesPdf([inmuebleId]);
+
+    expect(resultado.get(inmuebleId.toString())).toEqual({
+      referencia: null,
+      totalAnticipos: 0,
+    });
+  });
+
+  it('devuelve un mapa vacío sin consultar nada cuando no se piden inmuebles', async () => {
+    const { service, inmuebles, recibos } = construirServicioAnticipos({
+      inmuebles: [],
+      recibos: [],
+      saldos: [],
+    });
+
+    const resultado = await service.datosVisualesPdf([]);
+
+    expect(resultado.size).toBe(0);
+    expect(inmuebles.find).not.toHaveBeenCalled();
+    expect(recibos.find).not.toHaveBeenCalled();
   });
 });

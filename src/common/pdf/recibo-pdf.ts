@@ -215,6 +215,6 @@ export function contenidoRecibo(
         formatoPeso(totalCredito),
       ],
     }),
-    createElement(CreditoWebsaco),
+    createElement(CreditoWebsaco, {}),
   );
 }

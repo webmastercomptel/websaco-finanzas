@@ -171,7 +171,7 @@ export async function generarPdfConsecutivos(
               { style: styles.sinDatos },
               'No hay documentos de este tipo en el período seleccionado',
             ),
-            createElement(CreditoWebsaco),
+            createElement(CreditoWebsaco, {}),
           ),
         ],
         { orientacion: 'horizontal' },
@@ -252,7 +252,7 @@ export async function generarPdfConsecutivos(
           )
         : null,
 
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     );
   });
 

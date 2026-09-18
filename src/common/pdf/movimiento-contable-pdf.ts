@@ -324,7 +324,7 @@ export async function generarPdfMovimientoContable(
               { style: styles.sinDatos },
               'No hay transacciones contables en el período seleccionado',
             ),
-            createElement(CreditoWebsaco),
+            createElement(CreditoWebsaco, {}),
           ),
         ],
         { orientacion: 'horizontal' },
@@ -393,7 +393,7 @@ export async function generarPdfMovimientoContable(
           )
         : null,
 
-      createElement(CreditoWebsaco),
+      createElement(CreditoWebsaco, {}),
     );
   });
 
