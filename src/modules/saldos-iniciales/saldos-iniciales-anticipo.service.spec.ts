@@ -68,6 +68,14 @@ const construirServicio = () => {
         },
       }),
     ),
+    countDocuments: jest.fn((filtro: Record<string, unknown>) => ({
+      exec: () =>
+        Promise.resolve(
+          documentos.filter((d) =>
+            filtro.status ? d.status === filtro.status : true,
+          ).length,
+        ),
+    })),
   };
 
   const saldoDocumentoOrigen = {
@@ -174,13 +182,21 @@ const filaValida = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const dtoValido = (
+  filas: ReturnType<typeof filaValida>[],
+  over: Record<string, unknown> = {},
+) => ({
+  filas,
+  fechaCorte: '2026-01-31',
+  valorTotal: filas.reduce((sum, f) => sum + f.valor, 0),
+  ...over,
+});
+
 describe('SaldosInicialesAnticipoService.importar', () => {
   it('crea el documento y su fila de SaldoDocumentoOrigen con saldoDisponible igual al valor importado', async () => {
     const { service, documentos, saldosOrigen } = construirServicio();
 
-    const resultado = await service.importar(CUENTA, {
-      filas: [filaValida()],
-    });
+    const resultado = await service.importar(CUENTA, dtoValido([filaValida()]));
 
     expect(resultado.importados).toBe(1);
     expect(resultado.errores).toHaveLength(0);
@@ -200,24 +216,113 @@ describe('SaldosInicialesAnticipoService.importar', () => {
     });
   });
 
-  it('reporta la fila con error sin abortar el resto cuando el código de copropiedad no coincide', async () => {
+  it('rechaza el archivo completo sin persistir nada si el código de copropiedad de una fila no coincide', async () => {
     const { service, documentos } = construirServicio();
 
-    const resultado = await service.importar(CUENTA, {
-      filas: [filaValida({ codigoCopropiedad: 'OTRA' }), filaValida()],
-    });
+    // valorTotal set to only the VALID row's value on purpose — the bad row
+    // is excluded from the sum by design (an invalid row's amount never
+    // counts), so it must not also trip the total-mismatch check and mask
+    // which assertion below is actually exercising the código-de-
+    // copropiedad failure.
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([filaValida({ codigoCopropiedad: 'OTRA' }), filaValida()], {
+        valorTotal: 300000,
+      }),
+    );
 
-    expect(resultado.importados).toBe(1);
+    expect(resultado.importados).toBe(0);
     expect(resultado.errores).toHaveLength(1);
     expect(resultado.errores[0].fila).toBe(1);
-    expect(documentos).toHaveLength(1);
+    expect(documentos).toHaveLength(0);
+  });
+
+  it('rechaza el archivo completo sin persistir nada si un inmueble no existe', async () => {
+    const { service, documentos } = construirServicio();
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([
+        filaValida(),
+        filaValida({ codigoInmueble: 'NO-EXISTE', numero: '4153' }),
+      ]),
+    );
+
+    expect(resultado.importados).toBe(0);
+    expect(documentos).toHaveLength(0);
+  });
+
+  it('rechaza el archivo completo si una fecha es posterior a la fecha de corte', async () => {
+    const { service, documentos } = construirServicio();
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([filaValida({ fecha: '2026-02-15' })], {
+        fechaCorte: '2026-01-31',
+      }),
+    );
+
+    expect(resultado.importados).toBe(0);
+    expect(documentos).toHaveLength(0);
+  });
+
+  it('rechaza el archivo completo si el total no coincide con la suma de las filas', async () => {
+    const { service, documentos } = construirServicio();
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([filaValida()], { valorTotal: 999999 }),
+    );
+
+    expect(resultado.importados).toBe(0);
+    expect(resultado.errores.some((e) => e.fila === 0)).toBe(true);
+    expect(documentos).toHaveLength(0);
+  });
+
+  it('rechaza el archivo completo si dos filas repiten el mismo documento del mismo inmueble', async () => {
+    const { service, documentos } = construirServicio();
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([filaValida(), filaValida()]),
+    );
+
+    expect(resultado.importados).toBe(0);
+    expect(documentos).toHaveLength(0);
+  });
+
+  it('bloquea una segunda importación mientras existan saldos iniciales de anticipo activos', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    await expect(
+      service.importar(CUENTA, dtoValido([filaValida({ numero: '9999' })])),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('permite importar de nuevo una vez se anularon todos los activos', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+    const [{ id }] = await service.listar();
+    await service.anular(
+      id,
+      { motivo: 'duplicado', detalle: 'Archivo cargado con datos de prueba' },
+      CUENTA,
+    );
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([filaValida({ numero: '9999' })]),
+    );
+
+    expect(resultado.importados).toBe(1);
   });
 });
 
 describe('SaldosInicialesAnticipoService.listar', () => {
   it('resuelve saldoDisponible desde SaldoDocumentoOrigen, nunca desde el documento en sí', async () => {
     const { service } = construirServicio();
-    await service.importar(CUENTA, { filas: [filaValida()] });
+    await service.importar(CUENTA, dtoValido([filaValida()]));
 
     const [item] = await service.listar();
 
@@ -230,7 +335,7 @@ describe('SaldosInicialesAnticipoService.listar', () => {
 describe('SaldosInicialesAnticipoService.anular', () => {
   it('pone en cero el saldo disponible restante y marca el documento anulado', async () => {
     const { service } = construirServicio();
-    await service.importar(CUENTA, { filas: [filaValida()] });
+    await service.importar(CUENTA, dtoValido([filaValida()]));
     const [{ id }] = await service.listar();
 
     const anulado = await service.anular(
@@ -245,7 +350,7 @@ describe('SaldosInicialesAnticipoService.anular', () => {
 
   it('lanza ConflictException si ya está anulado', async () => {
     const { service } = construirServicio();
-    await service.importar(CUENTA, { filas: [filaValida()] });
+    await service.importar(CUENTA, dtoValido([filaValida()]));
     const [{ id }] = await service.listar();
 
     await service.anular(

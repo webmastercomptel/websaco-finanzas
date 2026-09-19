@@ -124,6 +124,94 @@ export class SaldosInicialesAnticipoService {
       );
     }
 
+    // One-shot guard — this import is meant to happen exactly once per
+    // coproperty. Voiding every existing active record (via `anular()`)
+    // clears this and allows a fresh attempt, without ever deleting
+    // anything.
+    const activos = await this.saldosInicialesAnticipo
+      .countDocuments({ coPropertyId, status: 'activo' })
+      .exec();
+    if (activos > 0) {
+      throw new ConflictException(
+        'Esta copropiedad ya tiene saldos iniciales de anticipo activos. Anulá los existentes antes de cargar un archivo nuevo.',
+      );
+    }
+
+    // Whole-file validation pass — no DB writes yet. Every problem found is
+    // collected, not just the first, and if anything fails NOTHING below
+    // this block runs: no lote, no rows, no progress tracking.
+    const codigos = [...new Set(dto.filas.map((f) => f.codigoInmueble))];
+    const inmueblesEncontrados = await this.inmuebles
+      .find({ coPropertyId, code: { $in: codigos } })
+      .exec();
+    const inmueblePorCodigo = new Map(
+      inmueblesEncontrados.map((i) => [i.code, i]),
+    );
+
+    const erroresValidacion: ResultadoImportacionSaldosInicialesAnticipo['errores'] =
+      [];
+    const vistos = new Set<string>();
+    let sumaValores = 0;
+
+    dto.filas.forEach((fila, indice) => {
+      const numeroFila = indice + 1;
+      if (fila.codigoCopropiedad !== copropiedad.code) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+        });
+        return;
+      }
+      if (!inmueblePorCodigo.has(fila.codigoInmueble)) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `No existe un inmueble con el código ${fila.codigoInmueble} en esta copropiedad`,
+        });
+        return;
+      }
+      if (new Date(fila.fecha).getTime() > new Date(dto.fechaCorte).getTime()) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `La fecha ${fila.fecha} es posterior a la fecha de corte (${dto.fechaCorte})`,
+        });
+        return;
+      }
+      const clave = `${fila.codigoInmueble}|${fila.tipoDocumento}|${fila.numero}`;
+      if (vistos.has(clave)) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `El documento ${fila.tipoDocumento} ${fila.numero} del inmueble ${fila.codigoInmueble} está repetido en este archivo`,
+        });
+        return;
+      }
+      vistos.add(clave);
+      sumaValores += fila.valor;
+    });
+
+    if (sumaValores !== dto.valorTotal) {
+      erroresValidacion.push({
+        fila: 0,
+        inmuebleCodigo: null,
+        mensaje: `La suma de los valores del archivo (${sumaValores}) no coincide con el valor total esperado (${dto.valorTotal})`,
+      });
+    }
+
+    if (erroresValidacion.length > 0) {
+      return {
+        total: dto.filas.length,
+        importados: 0,
+        errores: erroresValidacion,
+      };
+    }
+
+    // Validation passed — every row below is now expected to succeed. The
+    // per-row try/catch that follows stays only as a defensive safety net
+    // for genuine runtime failures (e.g. a transaction conflict), not as
+    // the primary validation path anymore.
     const [lote] = await this.lotes.create([
       {
         coPropertyId,
