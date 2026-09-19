@@ -147,6 +147,7 @@ export function contenidoDocumentoFacturacion(
       copropiedad,
       titulo: datos.titulo,
       referenciaPago: datos.referenciaPago,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     }),
     createElement(DatosAdquiriente, {
       inmuebleCodigo: datos.unitCode,

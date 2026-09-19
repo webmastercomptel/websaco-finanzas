@@ -13,6 +13,8 @@ const makeController = () => {
   const findPeriodosConciliacionCartera = jest.fn();
   const findAllConciliacionCartera = jest.fn();
   const findAllConsecutivos = jest.fn();
+  const findResumenInicio = jest.fn();
+  const findAllPistaAuditoria = jest.fn();
   const resolveCoPropertyId = jest.fn();
   const findByIdCopropiedad = jest.fn();
 
@@ -32,6 +34,8 @@ const makeController = () => {
       findAll: findAllConciliacionCartera,
     } as never,
     { findAll: findAllConsecutivos } as never,
+    { findResumen: findResumenInicio } as never,
+    { findAll: findAllPistaAuditoria } as never,
     { resolveCoPropertyId } as never,
     {
       findById: () => ({ exec: findByIdCopropiedad }),
@@ -52,6 +56,8 @@ const makeController = () => {
     findPeriodosConciliacionCartera,
     findAllConciliacionCartera,
     findAllConsecutivos,
+    findResumenInicio,
+    findAllPistaAuditoria,
     resolveCoPropertyId,
     findByIdCopropiedad,
   };
@@ -118,6 +124,45 @@ describe('ConsultasController', () => {
 
       expect(result).toBe(expected);
       expect(findAllConsecutivos).toHaveBeenCalledWith(query);
+    });
+  });
+
+  describe('inicio-resumen', () => {
+    it('delegates findResumen to InicioResumenService', async () => {
+      const { controller, findResumenInicio } = makeController();
+      const expected = {
+        periodo: null,
+        totalFacturado: 0,
+        facturadoPorConcepto: [],
+        totalIngresosRecibidos: 0,
+        recibidoPorConcepto: [],
+      };
+      findResumenInicio.mockResolvedValue(expected);
+
+      const result = await controller.findInicioResumen();
+
+      expect(result).toBe(expected);
+      expect(findResumenInicio).toHaveBeenCalledWith();
+    });
+  });
+
+  describe('pista-auditoria', () => {
+    it('delegates findAll to PistaAuditoriaService', async () => {
+      const { controller, findAllPistaAuditoria } = makeController();
+      const expected = {
+        items: [],
+        total: 0,
+        pagina: 1,
+        porPagina: 50,
+        usuarios: [],
+      };
+      findAllPistaAuditoria.mockResolvedValue(expected);
+
+      const query = { usuarioId: '507f1f77bcf86cd799439011' };
+      const result = await controller.findPistaAuditoria(query);
+
+      expect(result).toBe(expected);
+      expect(findAllPistaAuditoria).toHaveBeenCalledWith(query);
     });
   });
 });

@@ -49,6 +49,18 @@ export class Copropiedad {
   email: string | null;
 
   /**
+   * Whether the WebSACO mark prints on this coproperty's own financial
+   * documents (Factura, Recibo, Nota Crédito/Débito/Contable/Anticipo) —
+   * see `EncabezadoDocumento`'s own docblock for the layout and which
+   * document types read this. Default true so every coproperty that
+   * existed before this field was added keeps printing exactly what
+   * shipped when the logo was first added to those documents (product
+   * decision, 2026-09-19) — this field is an opt-OUT, not an opt-in.
+   */
+  @Prop({ required: true, default: true })
+  showLogoOnDocuments: boolean;
+
+  /**
    * The company that administers this building, when one does. Null when it
    * is administered directly — which is why this is nullable rather than
    * required — but "directly" never means unattended: a real person still

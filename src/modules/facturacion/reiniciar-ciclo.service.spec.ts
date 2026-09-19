@@ -196,7 +196,7 @@ const makeService = (
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
-  it('rechaza cuando la copropiedad activa no es la de pruebas (código distinto de 0001)', async () => {
+  it('rechaza cuando la copropiedad activa no está en la lista de pruebas (0001-0004)', async () => {
     const modelos = makeModelos({
       copropiedad: copropiedad({ code: 'COP-002' }),
     });
@@ -207,6 +207,22 @@ describe('ReiniciarCicloService.reiniciar', () => {
     );
     expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
   });
+
+  it.each(['0001', '0002', '0003', '0004'])(
+    'acepta la copropiedad de pruebas %s',
+    async (code) => {
+      const modelos = makeModelos({
+        copropiedad: copropiedad({ code }),
+        deletedCounts: { facturas: 1 },
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar()).resolves.toBeDefined();
+      expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
+        coPropertyId: COP,
+      });
+    },
+  );
 
   it('rechaza cuando la copropiedad no existe', async () => {
     const modelos = makeModelos({ copropiedad: null });

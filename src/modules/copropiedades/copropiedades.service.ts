@@ -663,6 +663,7 @@ export class CopropiedadesService {
     set('city', dto.ciudad);
     set('phone', dto.telefono);
     set('email', dto.email);
+    set('showLogoOnDocuments', dto.mostrarLogo);
     set('usesBuildingManagement', dto.usaGestionEdificios);
     set('receivablesAccount', dto.cuentaContableCartera);
     set('advancesAccount', dto.cuentaAnticipos);

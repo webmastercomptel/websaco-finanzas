@@ -65,6 +65,7 @@ export async function generarPdfEstadoCuenta(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: 'Estado de Cuenta',
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     }),
 
     createElement(FilaInfo, {
@@ -90,9 +91,9 @@ export async function generarPdfEstadoCuenta(
     createElement(TablaResumen, {
       filas: [
         { label: 'Saldo anterior', valor: formatoPeso(estado.saldoAnterior) },
-        { label: 'Cargos del mes', valor: formatoPeso(estado.cargosDelMes) },
+        { label: 'Cargos', valor: formatoPeso(estado.cargosDelMes) },
         {
-          label: 'Pagos del Mes',
+          label: 'Pagos',
           valor: `-${formatoPeso(estado.pagosDelMes)}`,
           color: VERDE_OK,
         },

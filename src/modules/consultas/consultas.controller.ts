@@ -26,6 +26,8 @@ import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
 import { ConciliacionCarteraService } from './conciliacion-cartera.service';
 import { ConsecutivosService } from './consecutivos.service';
+import { InicioResumenService } from './inicio-resumen.service';
+import { PistaAuditoriaService } from './pista-auditoria.service';
 import { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto';
 import { ConsultarVencimientosCarteraDto } from './dto/consultar-vencimientos-cartera.dto';
 import { ConsultarVencimientosCarteraPdfDto } from './dto/consultar-vencimientos-cartera-pdf.dto';
@@ -39,6 +41,7 @@ import { ConsultarMovimientoContableDto } from './dto/consultar-movimiento-conta
 import { ConsultarMovimientoContablePdfDto } from './dto/consultar-movimiento-contable-pdf.dto';
 import { ConsultarConciliacionCarteraDto } from './dto/consultar-conciliacion-cartera.dto';
 import { ConsultarConsecutivosDto } from './dto/consultar-consecutivos.dto';
+import { ConsultarPistaAuditoriaDto } from './dto/consultar-pista-auditoria.dto';
 import type {
   RespuestaAuxiliarCartera,
   RespuestaVencimientosCartera,
@@ -50,6 +53,8 @@ import type {
   RespuestaMovimientoContable,
   RespuestaConciliacionCartera,
   RespuestaConsecutivos,
+  RespuestaInicioResumen,
+  RespuestaPistaAuditoria,
 } from '../../contracts';
 import { generarPdfEstadoCuenta } from '../../common/pdf/estado-cuenta-pdf';
 import { generarPdfAuxiliarCartera } from '../../common/pdf/auxiliar-cartera-pdf';
@@ -78,6 +83,8 @@ export class ConsultasController {
     private readonly movimientoContable: MovimientoContableService,
     private readonly conciliacionCartera: ConciliacionCarteraService,
     private readonly consecutivos: ConsecutivosService,
+    private readonly inicioResumen: InicioResumenService,
+    private readonly pistaAuditoria: PistaAuditoriaService,
     private readonly tenant: TenantContextService,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
@@ -432,5 +439,25 @@ export class ConsultasController {
       'Content-Disposition': `inline; filename="consecutivos-${query.codigo}-${query.desde}.pdf"`,
     });
     res.send(Buffer.from(bytes));
+  }
+
+  /* ── Inicio (Copropiedad): resumen de KPIs ─────────────────────── */
+
+  /** Coproperty-wide, no query params — always reports on the active
+   *  coproperty's own "último periodo facturado". */
+  @Get('inicio-resumen')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findInicioResumen(): Promise<RespuestaInicioResumen> {
+    return this.inicioResumen.findResumen();
+  }
+
+  /* ── Pista de Auditoría ─────────────────────────────────────────── */
+
+  @Get('pista-auditoria')
+  @CheckAbility({ action: 'read', subject: 'Consulta' })
+  findPistaAuditoria(
+    @Query() query: ConsultarPistaAuditoriaDto,
+  ): Promise<RespuestaPistaAuditoria> {
+    return this.pistaAuditoria.findAll(query);
   }
 }

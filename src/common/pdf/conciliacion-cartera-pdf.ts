@@ -61,6 +61,7 @@ export async function generarPdfConciliacionCartera(
       copropiedad,
       titulo: 'CONCILIACIÓN DE CARTERA',
       subtitulo: `Período ${formatoFecha(reporte.periodStart)} al ${formatoFecha(reporte.periodEnd)}`,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     }),
 
     createElement(FilaLabelValor, {

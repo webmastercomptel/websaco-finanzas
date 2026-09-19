@@ -10,10 +10,16 @@ import { EstadoCuentaService } from './estado-cuenta.service';
 import { MovimientoContableService } from './movimiento-contable.service';
 import { ConciliacionCarteraService } from './conciliacion-cartera.service';
 import { ConsecutivosService } from './consecutivos.service';
+import { InicioResumenService } from './inicio-resumen.service';
+import { PistaAuditoriaService } from './pista-auditoria.service';
 import {
   Factura,
   FacturaSchema,
 } from '../../database/schemas/facturacion/factura.schema';
+import {
+  LoteFacturacion,
+  LoteFacturacionSchema,
+} from '../../database/schemas/facturacion/lote-facturacion.schema';
 import {
   Recibo,
   ReciboSchema,
@@ -66,11 +72,16 @@ import {
   CuentaContable,
   CuentaContableSchema,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  Account,
+  AccountSchema,
+} from '../../database/schemas/cuentas/account.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Factura.name, schema: FacturaSchema },
+      { name: LoteFacturacion.name, schema: LoteFacturacionSchema },
       { name: Recibo.name, schema: ReciboSchema },
       { name: NotaCredito.name, schema: NotaCreditoSchema },
       { name: NotaDebito.name, schema: NotaDebitoSchema },
@@ -84,6 +95,7 @@ import {
       { name: Copropiedad.name, schema: CopropiedadSchema },
       { name: AsientoContable.name, schema: AsientoContableSchema },
       { name: CuentaContable.name, schema: CuentaContableSchema },
+      { name: Account.name, schema: AccountSchema },
     ]),
   ],
   controllers: [ConsultasController],
@@ -97,6 +109,8 @@ import {
     MovimientoContableService,
     ConciliacionCarteraService,
     ConsecutivosService,
+    InicioResumenService,
+    PistaAuditoriaService,
   ],
 })
 export class ConsultasModule {}
