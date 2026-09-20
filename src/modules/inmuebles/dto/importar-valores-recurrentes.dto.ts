@@ -21,6 +21,16 @@ import { ValorRecurrenteLineaDto } from './guardar-valores-recurrentes.dto';
  * this is a separate endpoint.
  */
 export class FilaValorRecurrenteMasivoDto {
+  /** The active coproperty's own `Copropiedad.code` — a row-level safety
+   *  check on top of the tenancy law (never what resolves the tenant), same
+   *  convention `FilaSaldoInicialDto` uses, so a file meant for a different
+   *  building fails loudly per row instead of silently editing this one's
+   *  cargos — see `ValoresRecurrentesService.importarMasivo`. */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  codigoCopropiedad: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(40)

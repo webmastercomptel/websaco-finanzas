@@ -83,6 +83,7 @@ describe('InmueblesService.findAll', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -100,6 +101,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenantQueDevuelve(null),
       {} as never,
@@ -119,6 +121,7 @@ describe('InmueblesService.findAll', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -136,6 +139,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       terceroModeloCon() as never,
       tenantQueDevuelve(COP),
       {} as never,
@@ -155,6 +159,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([documento()], 137);
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       terceroModeloCon() as never,
       tenantQueDevuelve(COP),
       {} as never,
@@ -175,6 +180,7 @@ describe('InmueblesService.findAll', () => {
       const terceros = terceroModeloCon([terceroId]);
       const service = new InmueblesService(
         modelo as never,
+        {} as never,
         terceros as never,
         tenantQueDevuelve(COP),
         {} as never,
@@ -199,6 +205,7 @@ describe('InmueblesService.findAll', () => {
       const modelo = modeloCon([]);
       const service = new InmueblesService(
         modelo as never,
+        {} as never,
         terceroModeloCon([]) as never,
         tenantQueDevuelve(COP),
         {} as never,
@@ -217,6 +224,7 @@ describe('InmueblesService.findAll', () => {
     const modelo = modeloCon([documento()]);
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,
@@ -239,6 +247,7 @@ describe('InmueblesService.findAll', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -259,6 +268,7 @@ describe('InmueblesService.findOne', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
@@ -276,6 +286,7 @@ describe('InmueblesService.findOne', () => {
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenantQueDevuelve(COP),
       {} as never,

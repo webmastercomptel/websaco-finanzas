@@ -236,6 +236,8 @@ describe('CuentasContablesService.update', () => {
 });
 
 describe('CuentasContablesService.importar', () => {
+  const CODIGO_COPROPIEDAD = '0001';
+
   /** Records every code checked and every doc written; codes in `existentes`
    *  are reported as already taken — same shape as the inmuebles import
    *  spec's per-code model, since `importar` here is per-row, not a single
@@ -257,14 +259,42 @@ describe('CuentasContablesService.importar', () => {
     };
   };
 
+  /** `copropiedades.findById(coPropertyId).exec()` — the per-row
+   *  `codigoCopropiedad` check reads `.code` from this. Defaults to
+   *  matching every `fila` below so existing tests are unaffected; only the
+   *  mismatch test overrides it. */
+  const copropiedadModeloCon = (code: string = CODIGO_COPROPIEDAD) => ({
+    findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
+  });
+
+  const servicioImportar = (
+    modelo: ReturnType<typeof modeloImportarCon>,
+    codigoCopropiedad: string = CODIGO_COPROPIEDAD,
+  ): CuentasContablesService =>
+    new CuentasContablesService(
+      modelo as never,
+      {} as never,
+      {} as never,
+      copropiedadModeloCon(codigoCopropiedad) as never,
+      tenant(),
+    );
+
   it('crea cada fila como una cuenta, contando el total', async () => {
     const modelo = modeloImportarCon();
-    const service = crearServicio(modelo as never);
+    const service = servicioImportar(modelo);
 
     const resultado = await service.importar({
       filas: [
-        { codigo: '11050501', nombre: 'Caja' },
-        { codigo: '11050502', nombre: 'Banco' },
+        {
+          codigo: '11050501',
+          nombre: 'Caja',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
+        },
+        {
+          codigo: '11050502',
+          nombre: 'Banco',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
+        },
       ],
     });
 
@@ -276,12 +306,20 @@ describe('CuentasContablesService.importar', () => {
     // Un archivo de 400 filas con tres typos no debería tener que
     // resubirse entero.
     const modelo = modeloImportarCon(['11050501']);
-    const service = crearServicio(modelo as never);
+    const service = servicioImportar(modelo);
 
     const resultado = await service.importar({
       filas: [
-        { codigo: '11050501', nombre: 'Caja' },
-        { codigo: '11050502', nombre: 'Banco' },
+        {
+          codigo: '11050501',
+          nombre: 'Caja',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
+        },
+        {
+          codigo: '11050502',
+          nombre: 'Banco',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
+        },
       ],
     });
 
@@ -296,13 +334,14 @@ describe('CuentasContablesService.importar', () => {
 
   it('reenvía los flags booleanos y la tasa de impuesto de cada fila', async () => {
     const modelo = modeloImportarCon();
-    const service = crearServicio(modelo as never);
+    const service = servicioImportar(modelo);
 
     await service.importar({
       filas: [
         {
           codigo: '11050501',
           nombre: 'Caja',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
           aplicaImpuesto: true,
           tasaImpuesto: 19,
         },
@@ -313,6 +352,36 @@ describe('CuentasContablesService.importar', () => {
       appliesTax: true,
       taxRate: 19,
     });
+  });
+
+  it('una fila con código de copropiedad que no coincide falla sola, el resto sigue', async () => {
+    // A diferencia de InmueblesService.importar (que borra el listado antes
+    // de escribir), este import nunca borra nada — así que un código
+    // equivocado puede fallar fila por fila, igual que un código de cuenta
+    // repetido, sin necesidad de abortar el archivo entero primero.
+    const modelo = modeloImportarCon();
+    const service = servicioImportar(modelo, CODIGO_COPROPIEDAD);
+
+    const resultado = await service.importar({
+      filas: [
+        {
+          codigo: '11050501',
+          nombre: 'Caja',
+          codigoCopropiedad: CODIGO_COPROPIEDAD,
+        },
+        { codigo: '11050502', nombre: 'Banco', codigoCopropiedad: 'OTRA' },
+      ],
+    });
+
+    expect(resultado.creados).toBe(1);
+    expect(resultado.errores).toEqual([
+      {
+        fila: 2,
+        codigo: '11050502',
+        mensaje:
+          'El código de copropiedad "OTRA" no coincide con el de la copropiedad activa (0001)',
+      },
+    ]);
   });
 });
 

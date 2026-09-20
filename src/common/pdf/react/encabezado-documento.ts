@@ -10,9 +10,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginBottom: 8,
   },
+  filaBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   nombre: {
     fontSize: 14,
     fontFamily: 'Helvetica-Bold',
+  },
+  logoBanner: {
+    width: 42,
+    marginLeft: 8,
   },
   filaInfo: {
     flexDirection: 'row',
@@ -46,19 +55,10 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'flex-end',
   },
-  filaTitulo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
   titulo: {
     fontSize: 11,
     fontFamily: 'Helvetica-Bold',
     textAlign: 'right',
-  },
-  logoTitulo: {
-    width: 32,
-    marginLeft: 8,
   },
   subtitulo: {
     fontSize: 8.5,
@@ -89,10 +89,13 @@ const styles = StyleSheet.create({
  * letterhead reads as an intrusion. `PieDocumento`'s subtle "Generado por"
  * footer credit still carries that same understated branding for every
  * caller. `mostrarLogo` is the one deliberate exception (product decision,
- * 2026-09-19): the 6 financial documents (Factura, Recibo, Nota Crédito,
- * Nota Débito, Nota Contable, Nota de Anticipo) plus Auxiliar de Cartera,
- * Estado de Cuenta and Conciliación de Cartera (added same day, same
- * decision) print the WebSACO mark on the title's own line, to its right.
+ * 2026-09-19, repositioned 2026-09-20): the 6 financial documents (Factura,
+ * Recibo, Nota Crédito, Nota Débito, Nota Contable, Nota de Anticipo) plus
+ * Auxiliar de Cartera, Estado de Cuenta and Conciliación de Cartera (added
+ * same day, same decision) print the WebSACO mark inside the gray banner,
+ * to the right of the copropiedad's own name — not next to the document
+ * title, where an earlier pass mistakenly placed it (that spot is the
+ * title's own right-aligned line, which stays logo-free now).
  * Every one of those callers passes `copropiedad.showLogoOnDocuments`
  * straight through rather than a literal `true` — a coproperty can opt
  * back OUT per its own "Copropiedades" record (default on), since the
@@ -126,8 +129,9 @@ export function EncabezadoDocumento(props: {
    *  (`DatosAdquiriente`'s `dd` style) — omitted (null/undefined) whenever
    *  the document has no unit to reference, or the unit has none set. */
   referenciaPago?: string | null;
-  /** Prints the WebSACO mark on the title's own line, to its right —
-   *  see this component's own docblock for which callers opt in. */
+  /** Prints the WebSACO mark inside the gray banner, to the right of the
+   *  copropiedad's own name — see this component's own docblock for which
+   *  callers opt in. */
   mostrarLogo?: boolean;
   /** Prints "NIT: <taxId>-<dígito>" directly under the title — see this
    *  component's own docblock for which callers opt in (and why Factura
@@ -163,7 +167,17 @@ export function EncabezadoDocumento(props: {
     createElement(
       View,
       { style: styles.banner },
-      createElement(Text, { style: styles.nombre }, copropiedad.name),
+      createElement(
+        View,
+        { style: styles.filaBanner },
+        createElement(Text, { style: styles.nombre }, copropiedad.name),
+        mostrarLogo
+          ? createElement(Image, {
+              style: styles.logoBanner,
+              src: logoBytesWebsaco(),
+            })
+          : null,
+      ),
     ),
     createElement(
       View,
@@ -179,17 +193,7 @@ export function EncabezadoDocumento(props: {
       createElement(
         View,
         { style: styles.derecha },
-        createElement(
-          View,
-          { style: styles.filaTitulo },
-          createElement(Text, { style: styles.titulo }, titulo),
-          mostrarLogo
-            ? createElement(Image, {
-                style: styles.logoTitulo,
-                src: logoBytesWebsaco(),
-              })
-            : null,
-        ),
+        createElement(Text, { style: styles.titulo }, titulo),
         mostrarNitDebajoTitulo
           ? createElement(Text, { style: styles.subtitulo }, `NIT: ${nit}`)
           : null,

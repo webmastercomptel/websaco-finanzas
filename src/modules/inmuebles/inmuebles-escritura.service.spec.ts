@@ -76,6 +76,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -97,6 +98,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -114,6 +116,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -129,6 +132,7 @@ describe('InmueblesService.create', () => {
     const modelo = modeloCon();
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenantSinCopropiedad,
       {} as never,
@@ -150,6 +154,7 @@ describe('InmueblesService.update', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -168,6 +173,7 @@ describe('InmueblesService.update', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -183,6 +189,7 @@ describe('InmueblesService.update', () => {
     const modelo = modeloCon();
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenant,
       {} as never,
@@ -206,6 +213,7 @@ describe('InmueblesService.update', () => {
     })) as never;
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenant,
       {} as never,

@@ -11,6 +11,10 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
@@ -43,6 +47,8 @@ export class ValoresRecurrentesService {
   constructor(
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
     @InjectModel(ConceptoCobro.name)
     private readonly conceptos: Model<ConceptoCobroDocument>,
     @InjectModel(ValorRecurrente.name)
@@ -206,12 +212,26 @@ export class ValoresRecurrentesService {
    *
    * Deliberately never creates, deletes or otherwise edits an `Inmueble` —
    * only the ones a code actually matches get their `ValorRecurrente` rows
-   * touched, unlike `InmueblesService.importar`'s full-roster replace.
+   * touched, unlike `InmueblesService.importar`'s full-roster replace. Since
+   * nothing here is destructive, `codigoCopropiedad` is checked per row
+   * (like every other row-level rule below) rather than aborting the whole
+   * file the way `InmueblesService.importar` does — see
+   * `FilaValorRecurrenteMasivoDto.codigoCopropiedad`'s own note.
    */
   async importarMasivo(
     dto: ImportarValoresRecurrentesMasivoDto,
   ): Promise<ResultadoImportacionValoresRecurrentes> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap (see
+    // backend/CLAUDE.md's own note on this exact mistake).
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
     const errores: ResultadoImportacionValoresRecurrentes['errores'] = [];
     let actualizados = 0;
 
@@ -224,6 +244,12 @@ export class ValoresRecurrentesService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
+          if (fila.codigoCopropiedad !== copropiedad.code) {
+            throw new Error(
+              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+            );
+          }
+
           const inmueble = await this.inmuebles
             .findOne({ coPropertyId, code: fila.codigo })
             .exec();
