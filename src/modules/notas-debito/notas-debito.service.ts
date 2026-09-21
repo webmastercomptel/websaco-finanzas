@@ -721,13 +721,22 @@ export class NotasDebitoService {
         this.copropiedades.findById(coPropertyId).session(session).exec(),
         this.conceptos
           .findOne({ _id: nota.conceptoId, coPropertyId })
+          .populate('cuentaCreditoId', 'code')
           .session(session)
           .exec(),
       ]);
       const cuentaCartera =
         copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+      // Reverses the SAME income account `postearAsientoCreacion` credited
+      // (the concepto's own `cuentaCreditoId`, per `crear()`'s own comment
+      // above) — production bug (2026-09-21): this used to read
+      // `copropiedad.debitNotesAccount`, a coproperty-wide field nothing
+      // else in this document's own lifecycle writes to, landing on
+      // `CUENTA_SIN_ASIGNAR` whenever it was unset regardless of the
+      // concepto's real account. Same class of bug `NotasCreditoService`'s
+      // own `resolverLineasAncla` already guards against for NC.
       const cuentaIngreso =
-        copropiedad?.debitNotesAccount ?? CUENTA_SIN_ASIGNAR;
+        codigoDeCuentaContable(concepto?.cuentaCreditoId) ?? CUENTA_SIN_ASIGNAR;
       // `cuentasOrden` tracks `intereses` (mora) only — a Nota Débito has
       // exactly one concepto for its whole amount, so this is all-or-
       // nothing (never a partial `montoCuentasOrden` like NC/NT need):

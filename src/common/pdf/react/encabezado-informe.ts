@@ -80,17 +80,31 @@ const styles = StyleSheet.create({
  * its own already-issued date) — printing exactly when a copy was produced
  * is what keeps a re-run later, showing different numbers, from being
  * passed off as the original.
+ *
+ * `fechaGeneracionEnTitulo` prints "Generado: <fecha>" under the title, on
+ * the right, instead of under NIT on the left (product decision,
+ * 2026-09-20; `inmuebles-listado-pdf.ts` is the first caller to opt in) —
+ * every other report keeps the original left-column placement, so this
+ * defaults to `false` rather than moving it for everyone.
  */
 export function EncabezadoInforme(props: {
   copropiedad: CopropiedadDocument;
   titulo: string;
   subtitulo?: string;
   fechaGeneracion: Date;
+  fechaGeneracionEnTitulo?: boolean;
 }): ReactElement {
-  const { copropiedad, titulo, subtitulo, fechaGeneracion } = props;
+  const {
+    copropiedad,
+    titulo,
+    subtitulo,
+    fechaGeneracion,
+    fechaGeneracionEnTitulo,
+  } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
+  const textoGenerado = `Generado: ${formatoFechaHora(fechaGeneracion)}`;
 
   return createElement(
     View,
@@ -112,21 +126,26 @@ export function EncabezadoInforme(props: {
           createElement(Text, { style: styles.etiqueta }, 'NIT:'),
           createElement(Text, { style: styles.valor }, nit),
         ),
-        createElement(
-          View,
-          { style: styles.dato },
-          createElement(Text, { style: styles.etiqueta }, 'Generado:'),
-          createElement(
-            Text,
-            { style: styles.valor },
-            formatoFechaHora(fechaGeneracion),
-          ),
-        ),
+        fechaGeneracionEnTitulo
+          ? null
+          : createElement(
+              View,
+              { style: styles.dato },
+              createElement(Text, { style: styles.etiqueta }, 'Generado:'),
+              createElement(
+                Text,
+                { style: styles.valor },
+                formatoFechaHora(fechaGeneracion),
+              ),
+            ),
       ),
       createElement(
         View,
         { style: styles.derecha },
         createElement(Text, { style: styles.titulo }, titulo),
+        fechaGeneracionEnTitulo
+          ? createElement(Text, { style: styles.subtitulo }, textoGenerado)
+          : null,
         subtitulo
           ? createElement(Text, { style: styles.subtitulo }, subtitulo)
           : null,

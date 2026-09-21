@@ -113,12 +113,17 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import type { ResultadoReinicioCiclo } from '../../contracts';
 
 /**
- * The ONE coproperty this operation is allowed to touch, hardcoded on
- * purpose — never read from config, never overridable per-request. This is
- * the demo/sandbox building used to show prospective clients the billing
- * cycle end to end; it is never where real customer data lives.
+ * The ONLY coproperties this operation is allowed to touch, hardcoded on
+ * purpose — never read from config, never overridable per-request, and with
+ * no bypass for the platform administrator (this check runs unconditionally
+ * regardless of who is calling or what CASL permission they hold — see the
+ * class docblock's three-guard reasoning). These are demo/sandbox buildings
+ * used to show prospective clients the billing cycle end to end; none of
+ * them is ever where real customer data lives. Confirmed with the product
+ * owner (2026-09-19) that 0002-0004 are sandbox buildings exactly like 0001
+ * before this list was widened from a single code.
  */
-const CODIGO_COPROPIEDAD_PRUEBA = '0001';
+const CODIGOS_COPROPIEDAD_PRUEBA = ['0001', '0002', '0003', '0004'];
 
 /**
  * Wipes EVERY financial document of the one hardcoded test coproperty —
@@ -144,12 +149,13 @@ const CODIGO_COPROPIEDAD_PRUEBA = '0001';
  * This is a deliberate, narrow exception to "nothing financial is ever
  * deleted" (see backend/CLAUDE.md's audit law) — never a template for
  * anything else. Three independent guards keep it from ever touching real
- * data: (1) the hardcoded coproperty-code check below, enforced here
- * regardless of who holds the permission or which building is active on the
- * caller's screen; (2) the `CicloFacturacionPrueba`/`reiniciar` CASL pair,
- * which is its own subject/action, never `Factura`'s; (3) the frontend's
- * own type-to-confirm step. Losing any one of the three still leaves the
- * other two standing.
+ * data: (1) the hardcoded coproperty-code whitelist below, enforced here
+ * regardless of who holds the permission, which building is active on the
+ * caller's screen, or whether the caller is a platform administrator in
+ * support mode — there is no bypass for any role, on purpose; (2) the
+ * `CicloFacturacionPrueba`/`reiniciar` CASL pair, which is its own
+ * subject/action, never `Factura`'s; (3) the frontend's own type-to-confirm
+ * step. Losing any one of the three still leaves the other two standing.
  */
 @Injectable()
 export class ReiniciarCicloService {
@@ -216,9 +222,12 @@ export class ReiniciarCicloService {
 
     // `_id` IS the tenant id here — findById is correct, not the trap.
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
-    if (!copropiedad || copropiedad.code !== CODIGO_COPROPIEDAD_PRUEBA) {
+    if (
+      !copropiedad ||
+      !CODIGOS_COPROPIEDAD_PRUEBA.includes(copropiedad.code)
+    ) {
       throw new ForbiddenException(
-        'Esta operación solo está disponible en la copropiedad de pruebas.',
+        'Esta operación solo está disponible en las copropiedades de pruebas.',
       );
     }
 

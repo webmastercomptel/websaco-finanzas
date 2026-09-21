@@ -257,7 +257,7 @@ export class EstadoCuentaService {
     // Step 2: fetch active applications for RC + NC + NA sources — omitting
     // Notas de Anticipo here was a real bug: their applications (crediting
     // whatever cargo the leftover anticipo settled) never appeared on this
-    // statement at all, silently understating pagosRecibidos.
+    // statement at all, silently understating anticiposAplicados.
     const sourceIds = [
       ...recibos.map((r) => r._id),
       ...notasCredito.map((nc) => nc._id),
@@ -272,6 +272,11 @@ export class EstadoCuentaService {
           })
           .exec()
       : [];
+
+    // Recibos activos — reused both for the period-scoped "Recibo" rows in
+    // Detalle de Movimientos / `pagosDelMes` (Step 7) and for Anticipos
+    // Pendientes (Step 8b), same "active" definition as `Recibo.status`.
+    const recibosActivos = recibos.filter((r) => r.status === 'activo');
 
     // Step 3: build lookup maps. Each carries the source document's own
     // business date — never `AplicacionCartera.appliedAt`, which is always
@@ -435,10 +440,38 @@ export class EstadoCuentaService {
       .filter((r) => r.fecha < desde)
       .reduce((sum, r) => sum + (r.cargo ?? 0) - (r.abono ?? 0), 0);
 
-    // Step 7: movements within [periodStart, periodEnd]
-    const movimientosEnPeriodo = rows.filter(
-      (r) => r.fecha >= desde && r.fecha <= hasta,
+    // Step 7: movements within [periodStart, periodEnd].
+    //
+    // Recibo ("RC") "pago" rows built off `AplicacionCartera` cruces (Step
+    // 4) are dropped here and replaced by ONE row per ACTIVE Recibo whose
+    // OWN `receivedDate` falls in the period, at its full GROSS
+    // `receivedAmount` — never the applied/net `montoCash` a cruce leaves
+    // behind. Those per-cruce rows stay in `rows` above (unfiltered) purely
+    // so `saldoAnterior` (Step 6, computed over ALL history strictly before
+    // `desde`) keeps using the pre-existing applied/net logic untouched —
+    // only this period's own displayed detail and `pagosDelMes` change. A
+    // Recibo split across N cruces within this same period collapses from N
+    // rows to exactly one; a Recibo received in the period with zero
+    // cruces yet (fully parked as anticipo) now gets a row too, which it
+    // never did before (`RespuestaEstadoCuenta.pagosDelMes`'s own docblock).
+    const recibosDelPeriodo = recibosActivos.filter(
+      (r) => r.receivedDate >= desde && r.receivedDate <= hasta,
     );
+    const filasRecibo: RowRaw[] = recibosDelPeriodo.map((r) => ({
+      fecha: r.receivedDate,
+      tipo: 'RC',
+      numeroCompleto: r.fullNumber,
+      concepto: ETIQUETA_DOCUMENTO.RC,
+      cargo: null,
+      abono: r.receivedAmount,
+      categoria: 'pago',
+    }));
+
+    const movimientosEnPeriodo = rows
+      .filter((r) => r.fecha >= desde && r.fecha <= hasta)
+      .filter((r) => !(r.tipo === 'RC' && r.categoria === 'pago'))
+      .concat(filasRecibo)
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime());
 
     // Step 8: bucket into summary numbers. Nota Contable rows (tipo 'NT')
     // are excluded here even though one of their two paired rows carries a
@@ -447,27 +480,43 @@ export class EstadoCuentaService {
     const cargosDelMes = movimientosEnPeriodo
       .filter((r) => r.tipo !== 'NT')
       .reduce((sum, r) => sum + (r.cargo ?? 0), 0);
-    const pagosRecibidos = movimientosEnPeriodo
-      .filter((r) => r.categoria === 'pago')
+    // Gross cash actually received this period — one Recibo, one row
+    // (`filasRecibo` above), never the applied/net `montoCash` a cruce
+    // leaves behind.
+    const pagosDelMes = filasRecibo.reduce((sum, r) => sum + (r.abono ?? 0), 0);
+    // Isolated from `pagosDelMes` on purpose: this is the applied/net
+    // portion of a Nota de Anticipo cruce — an OLD, already-counted Recibo's
+    // leftover balance reapplied later (`NotaAnticipo`'s own schema
+    // docblock) — never a fresh cash inflow this period, so it can't be
+    // summed alongside the gross Recibo figure above.
+    const anticiposAplicados = movimientosEnPeriodo
+      .filter((r) => r.tipo === 'NA' && r.categoria === 'pago')
       .reduce((sum, r) => sum + (r.abono ?? 0), 0);
     const descuentosAjustes = movimientosEnPeriodo
       .filter((r) => r.categoria === 'descuento')
       .reduce((sum, r) => sum + (r.abono ?? 0), 0);
 
+    // Can go negative — a Recibo received for more than the period's own
+    // cargos leaves a credit balance. Not clamped here; rendered as
+    // "(A Favor)" at the PDF layer (`estado-cuenta-pdf.ts`) instead.
     const saldoActual =
-      saldoAnterior + cargosDelMes - pagosRecibidos - descuentosAjustes;
+      saldoAnterior +
+      cargosDelMes -
+      pagosDelMes -
+      anticiposAplicados -
+      descuentosAjustes;
 
     // Step 8b: anticipos pendientes — a live snapshot of this inmueble's own
     // Recibos still carrying a pending balance, same "pending anticipo"
     // definition the Anticipos bandeja uses. Never period-filtered: an
     // anticipo is a CURRENT balance, not a movement that happened during
     // the period being printed, so it stays visible regardless of which
-    // period the caller picked. `recibos` here is the same fetch from Step
-    // 1 (already scoped to this inmueble) — no extra query needed.
+    // period the caller picked. `recibosActivos` (computed above — Step 7
+    // reuses the same set) is already scoped to this inmueble, no extra
+    // query needed.
     // `unappliedAmount` is no longer a live field on the (now immutable)
     // Recibo — batch-resolved from `SaldoDocumentoOrigen` instead, same
     // live source the JSON detail view reads.
-    const recibosActivos = recibos.filter((r) => r.status === 'activo');
     const saldosOrigenRecibos = recibosActivos.length
       ? await this.saldoDocumentoOrigen
           .find({ documentoId: { $in: recibosActivos.map((r) => r._id) } })
@@ -555,7 +604,8 @@ export class EstadoCuentaService {
       fechaEmision,
       saldoAnterior,
       cargosDelMes,
-      pagosRecibidos,
+      pagosDelMes,
+      anticiposAplicados,
       descuentosAjustes,
       saldoActual,
       estado,

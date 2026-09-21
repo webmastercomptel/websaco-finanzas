@@ -11,6 +11,10 @@ import {
   InmuebleDocument,
 } from '../../database/schemas/copropiedades/inmueble.schema';
 import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
   Tercero,
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
@@ -44,6 +48,8 @@ export class InmueblesService {
   constructor(
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
@@ -62,12 +68,12 @@ export class InmueblesService {
     query: ListarInmueblesDto,
   ): Promise<Paginado<InmuebleContract>> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    // Every unit in a coproperty is active by definition — there is no
-    // `estado` filter to accept here anymore (see `ActualizarInmuebleDto`'s
-    // own note). `status` stays `active` on every document Mongo actually
-    // holds; this still names it explicitly rather than dropping the clause,
-    // matching `LotesFacturacionService`'s own billing-eligibility query.
-    const filtro: Record<string, unknown> = { coPropertyId, status: 'active' };
+    // Both `activo` and `inactivo` units show here (unlike
+    // `LotesFacturacionService`'s own billing-eligibility query, which
+    // filters to `status: 'active'` and only there — see `Inmueble.estado`'s
+    // own contract note): a unit marked `inactivo` still has to be findable
+    // and editable, if only to flip it back.
+    const filtro: Record<string, unknown> = { coPropertyId };
 
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
@@ -226,11 +232,48 @@ export class InmueblesService {
    * Rows are independent. One bad code or a repeated identification fails
    * only that row and keeps going, because asking somebody to re-upload a
    * 400-row file over three typos is not a serious answer.
+   *
+   * The one exception: `codigoCopropiedad` is checked against the WHOLE file
+   * before anything is wiped — see `FilaImportarInmuebleDto.codigoCopropiedad`'s
+   * own note. A file meant for a different building must never get the
+   * chance to erase this one's roster, so any row carrying the wrong code
+   * aborts the entire import with zero deletions, rather than being skipped
+   * like an ordinary bad row.
    */
   async importar(
     dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap (see
+    // backend/CLAUDE.md's own note on this exact mistake).
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const erroresCodigo: ResultadoImportacionInmuebles['errores'] = [];
+    dto.filas.forEach((fila, indice) => {
+      if (fila.codigoCopropiedad !== copropiedad.code) {
+        erroresCodigo.push({
+          fila: indice + 1,
+          codigo: fila.codigo ?? null,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+        });
+      }
+    });
+    if (erroresCodigo.length > 0) {
+      return {
+        total: dto.filas.length,
+        creados: 0,
+        errores: erroresCodigo,
+        eliminadosAntes: 0,
+        bloqueadosPorFactura: [],
+      };
+    }
+
     const { eliminados, bloqueados } =
       await this.eliminacion.eliminarTodosEliminables();
     const errores: ResultadoImportacionInmuebles['errores'] = [];
@@ -490,6 +533,9 @@ export class InmueblesService {
     set('holderKind', dto.tipoTitular);
     set('holderResides', dto.resideEnElInmueble);
     set('collectionStatus', dto.estadoCartera);
+    if (dto.estado !== undefined) {
+      doc.status = dto.estado === 'inactivo' ? 'inactive' : 'active';
+    }
     set('contactName', dto.contacto);
     set('notes', dto.observaciones);
 

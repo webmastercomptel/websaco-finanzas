@@ -58,4 +58,17 @@ export class ImportarSaldosInicialesAnticipoDto {
   @ValidateNested({ each: true })
   @Type(() => FilaSaldoInicialAnticipoDto)
   filas: FilaSaldoInicialAnticipoDto[];
+
+  /** No row's `fecha` may be later than this — the moment the new system
+   *  starts governing this coproperty's anticipo data. */
+  @IsDateString()
+  fechaCorte: string;
+
+  /** Must equal the exact sum of every row's `valor` — a hash-total check
+   *  the implementer types by hand, so a bad row is caught immediately by
+   *  the person who knows the right number, not inferred from the file. */
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  valorTotal: number;
 }

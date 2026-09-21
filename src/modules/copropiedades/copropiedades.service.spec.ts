@@ -67,6 +67,7 @@ const documento = (over: Record<string, unknown> = {}) => ({
   administratorName: null,
   status: 'active',
   usesBuildingManagement: false,
+  showLogoOnDocuments: true,
   ...over,
 });
 
@@ -381,6 +382,25 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({ city: 'Medellín' });
+  });
+
+  it('permite apagar el logo de WebSACO en los documentos de esta copropiedad', async () => {
+    const modelo = modeloCon([documento()]);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockContador() as never,
+      mockAsignaciones() as never,
+      mockAccounts() as never,
+      mockAuditoria() as never,
+      mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
+    );
+
+    await service.update('cop-1', { mostrarLogo: false }, ACTOR);
+
+    expect(modelo.escrituras[0]).toEqual({ showLogoOnDocuments: false });
   });
 
   it('nombrar una entidad administradora borra la nota interna', async () => {

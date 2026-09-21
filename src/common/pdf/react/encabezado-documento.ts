@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
-import { StyleSheet, Text, View } from '@react-pdf/renderer';
+import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { CopropiedadDocument } from '../../../database/schemas/copropiedades/copropiedad.schema';
+import { logoDataUriWebsaco } from './logo-websaco';
 
 const styles = StyleSheet.create({
   banner: {
@@ -9,9 +10,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginBottom: 8,
   },
+  filaBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   nombre: {
     fontSize: 14,
     fontFamily: 'Helvetica-Bold',
+  },
+  logoBanner: {
+    width: 42,
+    marginLeft: 8,
   },
   filaInfo: {
     flexDirection: 'row',
@@ -73,12 +83,32 @@ const styles = StyleSheet.create({
  * date or period — bold, right-aligned, same row as the contact block's
  * top, on the right.
  *
- * No WebSACO logo in this banner — support's own feedback was that clients
- * are protective of a document that represents THEIR building, not the
- * software that produced it; a vendor mark on their own letterhead reads
- * as an intrusion. Any WebSACO branding now lives in `PieDocumento`'s
- * subtle "Generado por" footer credit instead — same idea a lot of SaaS
- * invoicing tools use, mention in the margin, not the masthead.
+ * No WebSACO logo in this banner by default — support's own past feedback
+ * was that clients are protective of a document that represents THEIR
+ * building, not the software that produced it; a vendor mark on their own
+ * letterhead reads as an intrusion. `PieDocumento`'s subtle "Generado por"
+ * footer credit still carries that same understated branding for every
+ * caller. `mostrarLogo` is the one deliberate exception (product decision,
+ * 2026-09-19, repositioned 2026-09-20): the 6 financial documents (Factura,
+ * Recibo, Nota Crédito, Nota Débito, Nota Contable, Nota de Anticipo) plus
+ * Auxiliar de Cartera, Estado de Cuenta and Conciliación de Cartera (added
+ * same day, same decision) print the WebSACO mark inside the gray banner,
+ * to the right of the copropiedad's own name — not next to the document
+ * title, where an earlier pass mistakenly placed it (that spot is the
+ * title's own right-aligned line, which stays logo-free now).
+ * Every one of those callers passes `copropiedad.showLogoOnDocuments`
+ * straight through rather than a literal `true` — a coproperty can opt
+ * back OUT per its own "Copropiedades" record (default on), since the
+ * earlier product feedback that removed the logo in the first place came
+ * from specific clients, not every one of them. Cartera General (the other
+ * `EncabezadoDocumento` caller) still defaults to none — no product
+ * decision has opted it in, so don't assume that's an oversight.
+ *
+ * `soloNit` drops Dirección/Celular/Email from the left-hand contact block,
+ * leaving just NIT — the 5 documents this shape serves (Recibo, Nota
+ * Crédito/Débito/Anticipo/Contable, all through `contenidoRecibo`) print a
+ * short block by design (product decision, 2026-09-21); Factura and the
+ * reports keep the full block.
  *
  * `EncabezadoInforme` is this same letterhead's horizontal/landscape
  * counterpart (every "informe" — Cartera por Conceptos, Vencimientos,
@@ -99,8 +129,23 @@ export function EncabezadoDocumento(props: {
    *  (`DatosAdquiriente`'s `dd` style) — omitted (null/undefined) whenever
    *  the document has no unit to reference, or the unit has none set. */
   referenciaPago?: string | null;
+  /** Prints the WebSACO mark inside the gray banner, to the right of the
+   *  copropiedad's own name — see this component's own docblock for which
+   *  callers opt in. */
+  mostrarLogo?: boolean;
+  /** Drops Dirección/Celular/Email from the left-hand contact block,
+   *  leaving just NIT — see this component's own docblock for which
+   *  callers opt in. */
+  soloNit?: boolean;
 }): ReactElement {
-  const { copropiedad, titulo, subtitulo, referenciaPago } = props;
+  const {
+    copropiedad,
+    titulo,
+    subtitulo,
+    referenciaPago,
+    mostrarLogo,
+    soloNit,
+  } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
@@ -122,7 +167,17 @@ export function EncabezadoDocumento(props: {
     createElement(
       View,
       { style: styles.banner },
-      createElement(Text, { style: styles.nombre }, copropiedad.name),
+      createElement(
+        View,
+        { style: styles.filaBanner },
+        createElement(Text, { style: styles.nombre }, copropiedad.name),
+        mostrarLogo
+          ? createElement(Image, {
+              style: styles.logoBanner,
+              src: logoDataUriWebsaco(),
+            })
+          : null,
+      ),
     ),
     createElement(
       View,
@@ -131,9 +186,9 @@ export function EncabezadoDocumento(props: {
         View,
         { style: styles.datos },
         filaDato('NIT', nit),
-        filaDato('Dirección', direccion || '—'),
-        filaDato('Celular', copropiedad.phone ?? '—'),
-        filaDato('Email', copropiedad.email ?? '—'),
+        soloNit ? null : filaDato('Dirección', direccion || '—'),
+        soloNit ? null : filaDato('Celular', copropiedad.phone ?? '—'),
+        soloNit ? null : filaDato('Email', copropiedad.email ?? '—'),
       ),
       createElement(
         View,

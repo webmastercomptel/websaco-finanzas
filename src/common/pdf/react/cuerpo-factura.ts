@@ -33,6 +33,8 @@ const styles = StyleSheet.create({
   filaTotales: {
     flexDirection: 'row',
     paddingVertical: 2,
+  },
+  grupoTotales: {
     marginBottom: 8,
   },
   bandaPagar: {
@@ -176,64 +178,76 @@ export function CuerpoFactura(props: {
       createElement(View, { style: styles.reglaTotales }),
       createElement(
         View,
-        { style: styles.filaTotales, wrap: false },
+        { style: styles.grupoTotales },
         createElement(
-          Text,
-          { style: celdaStyle(0, styles.celdaTotales) },
-          'Totales',
+          View,
+          { style: styles.filaTotales, wrap: false },
+          createElement(
+            Text,
+            { style: celdaStyle(0, styles.celdaTotales) },
+            'Totales',
+          ),
+          createElement(
+            Text,
+            { style: celdaStyle(1, styles.celdaTotales) },
+            formatoPeso(totalSaldoAnterior),
+          ),
+          createElement(
+            Text,
+            { style: celdaStyle(2, styles.celdaTotales) },
+            formatoPeso(totalCargosDelMes),
+          ),
+          createElement(
+            Text,
+            { style: celdaStyle(3, styles.celdaTotales) },
+            formatoPeso(totalNuevoSaldo),
+          ),
         ),
-        createElement(
-          Text,
-          { style: celdaStyle(1, styles.celdaTotales) },
-          formatoPeso(totalSaldoAnterior),
-        ),
-        createElement(
-          Text,
-          { style: celdaStyle(2, styles.celdaTotales) },
-          formatoPeso(totalCargosDelMes),
-        ),
-        createElement(
-          Text,
-          { style: celdaStyle(3, styles.celdaTotales) },
-          formatoPeso(totalNuevoSaldo),
-        ),
+        totalIva > 0
+          ? createElement(
+              View,
+              { style: styles.filaTotales, wrap: false },
+              createElement(
+                Text,
+                { style: celdaStyle(0, styles.celdaTotales) },
+                etiquetaIva,
+              ),
+              createElement(Text, {
+                style: celdaStyle(1, styles.celdaTotales),
+              }),
+              createElement(Text, {
+                style: celdaStyle(2, styles.celdaTotales),
+              }),
+              createElement(
+                Text,
+                { style: celdaStyle(3, styles.celdaTotales) },
+                formatoPeso(totalIva),
+              ),
+            )
+          : null,
+        totalAnticipos > 0
+          ? createElement(
+              View,
+              { style: styles.filaTotales, wrap: false },
+              createElement(
+                Text,
+                { style: celdaStyle(0, styles.celdaTotales) },
+                'Saldo a Favor',
+              ),
+              createElement(Text, {
+                style: celdaStyle(1, styles.celdaTotales),
+              }),
+              createElement(Text, {
+                style: celdaStyle(2, styles.celdaTotales),
+              }),
+              createElement(
+                Text,
+                { style: celdaStyle(3, styles.celdaTotales) },
+                `-${formatoPeso(totalAnticipos)}`,
+              ),
+            )
+          : null,
       ),
-      totalIva > 0
-        ? createElement(
-            View,
-            { style: styles.filaTotales, wrap: false },
-            createElement(
-              Text,
-              { style: celdaStyle(0, styles.celdaTotales) },
-              etiquetaIva,
-            ),
-            createElement(Text, { style: celdaStyle(1, styles.celdaTotales) }),
-            createElement(Text, { style: celdaStyle(2, styles.celdaTotales) }),
-            createElement(
-              Text,
-              { style: celdaStyle(3, styles.celdaTotales) },
-              formatoPeso(totalIva),
-            ),
-          )
-        : null,
-      totalAnticipos > 0
-        ? createElement(
-            View,
-            { style: styles.filaTotales, wrap: false },
-            createElement(
-              Text,
-              { style: celdaStyle(0, styles.celdaTotales) },
-              'Saldo a Favor',
-            ),
-            createElement(Text, { style: celdaStyle(1, styles.celdaTotales) }),
-            createElement(Text, { style: celdaStyle(2, styles.celdaTotales) }),
-            createElement(
-              Text,
-              { style: celdaStyle(3, styles.celdaTotales) },
-              `- ${formatoPeso(totalAnticipos)}`,
-            ),
-          )
-        : null,
     ),
     createElement(
       View,

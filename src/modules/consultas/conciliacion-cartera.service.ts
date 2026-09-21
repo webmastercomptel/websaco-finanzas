@@ -394,6 +394,10 @@ export class ConciliacionCarteraService {
       coPropertyId,
       hasta,
     );
+    const totalAnticiposPendientes = anticiposPendientes.reduce(
+      (suma, a) => suma + a.valor,
+      0,
+    );
 
     return {
       periodStart: desde.toISOString(),
@@ -406,6 +410,7 @@ export class ConciliacionCarteraService {
       saldoCarteraReal,
       diferencia,
       anticiposPendientes,
+      totalAnticiposPendientes,
     };
   }
 

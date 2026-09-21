@@ -30,6 +30,13 @@ export interface InmuebleListadoItem {
 }
 
 const FONT_SIZE = 8;
+/** A touch smaller than every other column (product decision, 2026-09-20)
+ *  — Titular is the one column holding a person's full name, the most
+ *  likely to run long, so a slightly smaller font both reads a bit more
+ *  compact and leaves `truncarTexto` more characters to work with before
+ *  it has to cut a name off. */
+const FONT_SIZE_TITULAR = 7.25;
+const COLUMNA_TITULAR = 1;
 
 /** Every column used to split the content width evenly, which starved
  *  "Titular" (a person's full name, the one column someone actually needs
@@ -72,8 +79,16 @@ function anchosDeColumna(cantidadConceptos: number): number[] {
  *  `wrap` pagination — same reasoning as `vencimientos-cartera-pdf.ts`'s own
  *  `FILAS_POR_PAGINA`: a masthead repeated via `fixed` on every page doesn't
  *  reserve its own height against react-pdf's row-fitting estimate. Manual
- *  per-page `<Page>` elements sidestep the interaction entirely. */
-const FILAS_POR_PAGINA = 36;
+ *  per-page `<Page>` elements sidestep the interaction entirely.
+ *
+ *  36 was the original value and looked reasonable on paper, but a rendered
+ *  test with 60 rows (confirmed 2026-09-20) showed it actually overflows
+ *  the page: react-pdf silently wraps the excess onto an extra, blank
+ *  continuation page carrying neither the masthead nor the column header —
+ *  exactly the "header doesn't repeat" symptom this whole manual-pagination
+ *  approach exists to avoid. 30 was verified, on the same 60-row render, to
+ *  land exactly on the page boundary with visible headroom to spare. */
+const FILAS_POR_PAGINA = 30;
 
 const styles = StyleSheet.create({
   filaEncabezado: {
@@ -98,6 +113,10 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE,
     fontFamily: 'Helvetica',
   },
+  celdaTitular: {
+    fontSize: FONT_SIZE_TITULAR,
+    fontFamily: 'Helvetica',
+  },
 });
 
 function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
@@ -117,11 +136,14 @@ function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
  * Facturación this never caps or groups concept columns: every concepto in
  * the catalog gets its own, shrinking width instead.
  *
- * Every page repeats the same three-line header (nombre, NIT, título +
- * fecha de generación) — a roster long enough to paginate is exactly the
- * case where a reader needs it on every sheet, not just the first.
+ * Every page repeats the same header (nombre, NIT, título, and "Generado:"
+ * right under the title — see `EncabezadoInforme`'s own `fechaGeneracionEnTitulo`)
+ * plus the column-title bar — a roster long enough to paginate is exactly
+ * the case where a reader needs both on every sheet, not just the first.
  * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
- * toggle). Paginated by hand (see `FILAS_POR_PAGINA`'s docblock).
+ * toggle). Paginated by hand (see `FILAS_POR_PAGINA`'s docblock) — that
+ * repetition depends entirely on no page's content actually overflowing
+ * past what `FILAS_POR_PAGINA` assumes fits.
  */
 export async function generarPdfListadoInmuebles(
   copropiedad: CopropiedadDocument,
@@ -145,8 +167,14 @@ export async function generarPdfListadoInmuebles(
     i: number,
     variante: 'encabezado' | 'normal',
   ) => {
+    const esTitular = variante === 'normal' && i === COLUMNA_TITULAR;
     const base =
-      variante === 'encabezado' ? styles.celdaEncabezado : styles.celda;
+      variante === 'encabezado'
+        ? styles.celdaEncabezado
+        : esTitular
+          ? styles.celdaTitular
+          : styles.celda;
+    const fontSizeEfectivo = esTitular ? FONT_SIZE_TITULAR : FONT_SIZE;
     const dimensiones: {
       flexGrow: number;
       flexBasis: number;
@@ -156,10 +184,19 @@ export async function generarPdfListadoInmuebles(
       flexBasis: 0,
       textAlign: i >= primeraColumnaNumerica ? 'right' : 'left',
     };
+    // Titular is set in ALL CAPS (see `nombreListadoDe` in
+    // `inmuebles-reporte.service.ts`) — capitals and tildes render
+    // consistently wider than `truncarTexto`'s 0.52 lowercase-average
+    // heuristic assumes, so its default margin still let some full names
+    // overflow into a second line despite the smaller `FONT_SIZE_TITULAR`.
+    // A wider per-char estimate for this column only truncates a couple of
+    // characters sooner — cheap insurance against a wrap that misaligns
+    // the whole row against its single-line siblings.
+    const anchoPromedioChar = esTitular ? 0.62 : undefined;
     return createElement(
       Text,
       { key: i, style: [base, dimensiones] },
-      truncarTexto(texto, anchos[i] - 6, FONT_SIZE),
+      truncarTexto(texto, anchos[i] - 6, fontSizeEfectivo, anchoPromedioChar),
     );
   };
 
@@ -184,6 +221,7 @@ export async function generarPdfListadoInmuebles(
         copropiedad,
         titulo: 'LISTADO DE INMUEBLES',
         fechaGeneracion,
+        fechaGeneracionEnTitulo: true,
       }),
 
       createElement(

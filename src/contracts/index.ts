@@ -79,6 +79,16 @@ export interface Inmueble {
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
   estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
+  /**
+   * Whether this unit is billed going forward — `LotesFacturacionService`
+   * only ever queries `inactivo` units OUT of a new cycle's preview
+   * (product decision, 2026-09-21); a unit already billed keeps every past
+   * Factura untouched, same as every other retire-not-delete state in this
+   * domain. Not the same axis as `estadoCartera` (collections follow-up on
+   * an ACTIVE unit) or `SaldoInicial`/delete (this unit never existed in
+   * this system at all).
+   */
+  estado: 'activo' | 'inactivo';
   /** Free-text notes — see the note on `Inmueble.notes` in the schema. */
   observaciones: string | null;
   /** ISO 8601 — when this unit's record was last saved. */
@@ -1300,12 +1310,24 @@ export interface RespuestaEstadoCuenta {
   fechaEmision: string;
   saldoAnterior: number;
   cargosDelMes: number;
-  /** Pagos en efectivo (Recibo) y anticipos aplicados (Nota de Anticipo)
-   *  recibidos en el período — el nombre del campo se quedó corto una vez
-   *  Nota de Anticipo entró a sumar acá también; el label en pantalla/PDF
-   *  ya dice "Pagos y Anticipos Aplicados". */
-  pagosRecibidos: number;
+  /** Monto BRUTO (`Recibo.receivedAmount`, nunca el neto aplicado de una
+   *  aplicación individual) de cada Recibo ACTIVO cuya `receivedDate` cae
+   *  dentro del período — una sola vez por Recibo, sin importar contra
+   *  cuántas facturas se cruzó ni cuántas veces. Un Recibo recibido en el
+   *  período pero aún sin ningún cruce (parqueado como anticipo) también
+   *  cuenta acá. */
+  pagosDelMes: number;
+  /** Suma de la porción en efectivo (`amountApplied - discountApplied`) de
+   *  cada cruce de Nota de Anticipo dentro del período — el reaplicar más
+   *  tarde el saldo sobrante de un Recibo YA contado en un `pagosDelMes`
+   *  anterior, nunca una entrada de dinero nueva este período, por eso vive
+   *  separado de `pagosDelMes` en vez de sumado a él. */
+  anticiposAplicados: number;
   descuentosAjustes: number;
+  /** `saldoAnterior + cargosDelMes - pagosDelMes - anticiposAplicados -
+   *  descuentosAjustes`. Puede quedar negativo (saldo a favor del
+   *  propietario) — no se recorta acá; el PDF/pantalla lo rotulan
+   *  "(A Favor)" en vez de forzarlo a cero. */
   saldoActual: number;
   /** "Vencida" cuando al menos una Factura/Nota Débito de este inmueble
    *  (sin importar el período) sigue con saldo pendiente A LA FECHA DE
@@ -1396,6 +1418,9 @@ export interface RespuestaConciliacionCartera {
   saldoCarteraReal: number;
   diferencia: number;
   anticiposPendientes: AnticipoPendienteConciliacion[];
+  /** Sum of `anticiposPendientes[].valor` — how much of `saldoCarteraReal`
+   *  sits in unapplied advances as of `periodEnd`, at a glance. */
+  totalAnticiposPendientes: number;
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */
@@ -1462,6 +1487,10 @@ export interface Copropiedad {
   ciudad: string | null;
   telefono: string | null;
   email: string | null;
+  /** Whether the WebSACO mark prints on this coproperty's own financial
+   *  documents (Factura, Recibo, Nota Crédito/Débito/Contable/Anticipo).
+   *  Default true — an opt-out, not an opt-in. */
+  mostrarLogo: boolean;
   /** Null when the building has no managing company on file. */
   entidadAdministradora: { id: string; nombre: string } | null;
   /**
@@ -1838,4 +1867,90 @@ export interface CiudadDian {
   codigo: string;
   nombre: string;
   departamentoCodigo: string;
+}
+
+/* ── Inicio (Copropiedad): resumen de KPIs ─────────────────────── */
+
+/** One slice of a per-concepto pie breakdown (Facturado or Recibido). */
+export interface MontoPorConcepto {
+  conceptoId: string;
+  nombre: string;
+  monto: number;
+}
+
+/** Response shape for GET /consultas/inicio-resumen — the 3 landing-page KPI
+ *  cards for a coproperty ("Total Facturado" and "Total Ingresos Recibidos";
+ *  "Total de Cartera" is unchanged and sourced from `cartera-general`
+ *  instead, no new field here). Both totals/breakdowns are scoped to the
+ *  coproperty's own "último periodo facturado" — the `periodStart`/
+ *  `periodEnd` of its most recently issued (non-anulada) Factura. */
+export interface RespuestaInicioResumen {
+  /** `null` when the coproperty has no Factura yet — a legitimate empty
+   *  state for a brand-new coproperty, not an error. Both totals/charts
+   *  below come back as `0`/`[]` in that case. */
+  periodo: { periodStart: string; periodEnd: string } | null;
+  totalFacturado: number;
+  facturadoPorConcepto: MontoPorConcepto[];
+  totalIngresosRecibidos: number;
+  /** Includes a synthetic `conceptoId: 'anticipos'` entry (a sentinel that
+   *  can never collide with a real Mongo ObjectId string) for the portion of
+   *  received cash not yet applied to any charge — only when its `monto` is
+   *  `> 0`, same "only show a slice if positive" convention
+   *  `vencimientos-cartera` already uses for its rango slices. */
+  recibidoPorConcepto: MontoPorConcepto[];
+}
+
+/* ── Pista de Auditoría ──────────────────────────────────────────── */
+
+/** Fixed set of report labels — not a catalog, the 6 in-scope document
+ *  types spelled out exactly as the design spec names them. */
+export type TipoDocumentoPistaAuditoria =
+  | 'Factura'
+  | 'Recibo'
+  | 'Nota Débito'
+  | 'Nota Crédito'
+  | 'Nota Contable'
+  | 'Nota de Anticipo';
+
+/**
+ * One row per creation OR void EVENT — deliberately not one row per
+ * document. A voided document produces TWO independent
+ * `EventoAuditoria` rows: a `'crear'` row (`usuarioId` = the creator,
+ * `fecha` = the document's own `createdAt`) and an `'anular'` row
+ * (`usuarioId` = whoever voided it, `fecha` = `voidedAt`). Collapsing to
+ * one row per document would make filtering by `usuarioId` ambiguous —
+ * creator? voider? both? — see the design spec's "Event model" section.
+ */
+export interface EventoAuditoria {
+  /** Genuine instant (`createdAt` for `'crear'`, `voidedAt` for
+   *  `'anular'`) — format it in the viewer's own local timezone, never
+   *  force UTC (opposite rule from the calendar-only business dates
+   *  elsewhere in this contract, see the design spec's "Timestamp
+   *  handling" section). */
+  fecha: IsoDate;
+  usuarioId: string;
+  usuarioNombre: string;
+  accion: 'crear' | 'anular';
+  tipoDocumento: TipoDocumentoPistaAuditoria;
+  numeroCompleto: string;
+  inmuebleCodigo: string;
+  valor: Monto;
+  /** Link to the document's own detail page — same convention as
+   *  `ActividadRecienteCopropiedad` (e.g. `/facturas/{id}`). */
+  href: string;
+}
+
+/** Response shape for GET /consultas/pista-auditoria. */
+export interface RespuestaPistaAuditoria {
+  items: EventoAuditoria[];
+  total: number;
+  pagina: number;
+  porPagina: number;
+  /** Every distinct actor with activity in this coproperty — populates
+   *  the frontend's own Usuario filter dropdown directly, without
+   *  depending on `GET /usuarios` (`PlatformAdminGuard`-gated, unreachable
+   *  for a regular coproperty administrator). Independent of whatever
+   *  filters were applied to `items`, so the dropdown never shrinks as
+   *  the user filters. */
+  usuarios: { accountId: string; nombre: string }[];
 }

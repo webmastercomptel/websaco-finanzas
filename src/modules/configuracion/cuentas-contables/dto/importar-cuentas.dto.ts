@@ -17,6 +17,16 @@ import {
 /** One row of a bulk import: the same fields `CrearCuentaDto` accepts,
  *  named for a spreadsheet column instead of a form field. */
 export class FilaImportarCuentaDto {
+  /** The active coproperty's own `Copropiedad.code` — a row-level safety
+   *  check on top of the tenancy law (never what resolves the tenant), same
+   *  convention `FilaSaldoInicialDto` uses, so a file meant for a different
+   *  building fails loudly per row instead of silently loading its chart of
+   *  accounts into this one — see `CuentasContablesService.importar`. */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  codigoCopropiedad: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(40)

@@ -72,6 +72,7 @@ const crearServicio = (opts: {
 }) =>
   new ValoresRecurrentesService(
     modeloInmuebles(opts.inmuebleExiste ?? true) as never,
+    {} as never,
     modeloConceptos(opts.conceptos ?? [conceptoDoc()]) as never,
     modeloValoresRecurrentes(opts.valores ?? []) as never,
     tenantQueDevuelve(COP),
@@ -167,6 +168,7 @@ describe('ValoresRecurrentesService.guardar', () => {
     const valoresRecurrentes = modeloValoresRecurrentes([]);
     const service = new ValoresRecurrentesService(
       modeloInmuebles(true) as never,
+      {} as never,
       modeloConceptos([conceptoDoc()]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
@@ -188,6 +190,7 @@ describe('ValoresRecurrentesService.guardar', () => {
     ]);
     const service = new ValoresRecurrentesService(
       modeloInmuebles(true) as never,
+      {} as never,
       modeloConceptos([conceptoDoc()]) as never,
       valoresRecurrentes as never,
       tenantQueDevuelve(COP),
@@ -218,6 +221,7 @@ describe('ValoresRecurrentesService.guardar', () => {
     const valoresRecurrentes = modeloValoresRecurrentes([]);
     const service = new ValoresRecurrentesService(
       modeloInmuebles(true) as never,
+      {} as never,
       modeloConceptos([
         conceptoDoc(),
         conceptoDoc({
@@ -246,6 +250,7 @@ describe('ValoresRecurrentesService.guardar', () => {
     const valoresRecurrentes = modeloValoresRecurrentes([]);
     const service = new ValoresRecurrentesService(
       modeloInmuebles(true) as never,
+      {} as never,
       modeloConceptos([
         conceptoDoc(),
         conceptoDoc({
@@ -264,5 +269,75 @@ describe('ValoresRecurrentesService.guardar', () => {
     });
 
     expect(valoresRecurrentes.deleteOne).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ValoresRecurrentesService.importarMasivo', () => {
+  const modeloInmueblesPorCodigo = (codigosExistentes: string[]) => ({
+    findOne: jest.fn(({ code }: Filtro) => ({
+      exec: () =>
+        Promise.resolve(
+          codigosExistentes.includes(code as string)
+            ? { _id: { toString: () => INMUEBLE_ID } }
+            : null,
+        ),
+    })),
+    // `guardar` (called per matched row) resolves the unit a second time via
+    // `exigirInmueble`'s own `exists` check — always true here, since this
+    // suite only cares about the `codigoCopropiedad` row failing before
+    // `guardar` is ever reached.
+    exists: jest.fn(() => ({ exec: () => Promise.resolve({ _id: 'x' }) })),
+  });
+
+  const progresoModeloCon = () => ({
+    intervalo: jest.fn(() => 1),
+    iniciar: jest.fn().mockResolvedValue(undefined),
+    actualizar: jest.fn().mockResolvedValue(undefined),
+    finalizar: jest.fn().mockResolvedValue(undefined),
+  });
+
+  const copropiedadModeloCon = (code: string) => ({
+    findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
+  });
+
+  it('una fila con código de copropiedad que no coincide falla sola, el resto sigue', async () => {
+    // A diferencia de InmueblesService.importar (que borra el listado antes
+    // de escribir), este import nunca crea ni borra un inmueble — así que un
+    // código equivocado puede fallar fila por fila, sin necesidad de
+    // abortar el archivo entero primero.
+    const valoresRecurrentes = modeloValoresRecurrentes([]);
+    const service = new ValoresRecurrentesService(
+      modeloInmueblesPorCodigo(['301', '302']) as never,
+      copropiedadModeloCon('0001') as never,
+      modeloConceptos([conceptoDoc()]) as never,
+      valoresRecurrentes as never,
+      tenantQueDevuelve(COP),
+      progresoModeloCon() as never,
+    );
+
+    const resultado = await service.importarMasivo({
+      filas: [
+        {
+          codigo: '301',
+          codigoCopropiedad: '0001',
+          valores: [{ conceptoId: CONCEPTO_ADMIN.toString(), monto: 350000 }],
+        },
+        {
+          codigo: '302',
+          codigoCopropiedad: 'OTRA',
+          valores: [{ conceptoId: CONCEPTO_ADMIN.toString(), monto: 100000 }],
+        },
+      ],
+    });
+
+    expect(resultado.actualizados).toBe(1);
+    expect(resultado.errores).toEqual([
+      {
+        fila: 2,
+        codigo: '302',
+        mensaje:
+          'El código de copropiedad "OTRA" no coincide con el de la copropiedad activa (0001)',
+      },
+    ]);
   });
 });

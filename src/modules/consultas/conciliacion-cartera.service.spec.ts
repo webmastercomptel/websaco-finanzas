@@ -714,6 +714,38 @@ describe('ConciliacionCarteraService', () => {
 
         expect(result.anticiposPendientes).toEqual([]);
       });
+
+      it('totaliza los anticipos pendientes', async () => {
+        const inm1 = inmuebleDoc({ code: '301' });
+        const inm2 = inmuebleDoc({ code: '402' });
+        const r1 = reciboDoc({
+          inmuebleId: inm1._id,
+          receivedAmount: 90000,
+          receivedDate: new Date('2026-09-05'),
+        });
+        const r2 = reciboDoc({
+          inmuebleId: inm2._id,
+          receivedAmount: 35000,
+          receivedDate: new Date('2026-09-10'),
+        });
+
+        const svc = servicio({
+          recibos: [r1, r2],
+          inmuebles: [inm1, inm2],
+        });
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.totalAnticiposPendientes).toBe(125000);
+      });
+
+      it('totaliza 0 cuando no hay anticipos pendientes', async () => {
+        const svc = servicio({});
+
+        const result = await svc.findAll(PERIODO);
+
+        expect(result.totalAnticiposPendientes).toBe(0);
+      });
     });
 
     it('surfaces a non-zero diferencia when SaldoCartera has drifted from the documents', async () => {

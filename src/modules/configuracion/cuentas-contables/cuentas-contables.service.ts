@@ -124,16 +124,37 @@ export class CuentasContablesService {
    * Loads a chart-of-accounts file in one act: one row, one account. Reuses
    * `create` per row — same duplicate-code check, same field mapping — so
    * a bad row fails on its own without aborting the rest (mirrors
-   * `InmueblesService.importar`).
+   * `InmueblesService.importar`'s per-row independence, though nothing here
+   * is destructive the way that import's roster wipe is — see
+   * `ValoresRecurrentesService.importarMasivo`'s own note on why a
+   * `codigoCopropiedad` mismatch is checked per row instead of aborting the
+   * whole file).
    */
   async importar(
     dto: ImportarCuentasDto,
   ): Promise<ResultadoImportacionCuentas> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap (see
+    // backend/CLAUDE.md's own note on this exact mistake).
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
     const errores: ResultadoImportacionCuentas['errores'] = [];
     let creados = 0;
 
     for (const [indice, fila] of dto.filas.entries()) {
       try {
+        if (fila.codigoCopropiedad !== copropiedad.code) {
+          throw new Error(
+            `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+          );
+        }
+
         await this.create(fila);
         creados += 1;
       } catch (err) {

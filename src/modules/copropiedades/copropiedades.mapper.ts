@@ -43,6 +43,7 @@ export const toCopropiedad = (
   ciudad: doc.city,
   telefono: doc.phone,
   email: doc.email,
+  mostrarLogo: doc.showLogoOnDocuments,
   entidadAdministradora: entidadDe(doc.managingEntityId),
   nombreAdministrador: doc.administratorName,
   usuarioAdministrador,

@@ -174,6 +174,8 @@ export function contenidoRecibo(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: `${datos.tituloDocumento} ${datos.numeroCompleto}`,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
+      soloNit: true,
     }),
     createElement(BloqueRecibo, { datos }),
     createElement(Tabla, {

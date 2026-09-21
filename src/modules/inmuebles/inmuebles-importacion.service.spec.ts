@@ -3,12 +3,22 @@ import { InmueblesService } from './inmuebles.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 const COP = new Types.ObjectId();
+const CODIGO_COPROPIEDAD = '0001';
 
 type Filtro = Record<string, unknown>;
 
 const fila = (over: Record<string, unknown> = {}) => ({
   codigo: '301',
+  codigoCopropiedad: CODIGO_COPROPIEDAD,
   ...over,
+});
+
+/** `copropiedades.findById(coPropertyId).exec()` — the whole-file
+ *  `codigoCopropiedad` check reads `.code` from this before anything is
+ *  wiped. Defaults to matching every `fila()` above so existing tests are
+ *  unaffected; only the mismatch test overrides it. */
+const copropiedadModeloCon = (code: string = CODIGO_COPROPIEDAD) => ({
+  findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
 });
 
 /** Records every code checked and every unit written; codes in `existentes`
@@ -104,6 +114,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -133,6 +144,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -156,6 +168,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -187,6 +200,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       catalogos as never,
@@ -229,6 +243,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -258,6 +273,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -282,6 +298,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -317,6 +334,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -341,6 +359,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -360,6 +379,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -378,6 +398,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       catalogos as never,
@@ -406,6 +427,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       catalogos as never,
@@ -436,6 +458,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       catalogos as never,
@@ -464,6 +487,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       catalogos as never,
@@ -492,6 +516,7 @@ describe('InmueblesService.importar', () => {
     const eliminacion = eliminacionModeloCon();
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -513,6 +538,7 @@ describe('InmueblesService.importar', () => {
     });
     const service = new InmueblesService(
       inmuebles as never,
+      copropiedadModeloCon() as never,
       terceros as never,
       tenant,
       {} as never,
@@ -526,5 +552,49 @@ describe('InmueblesService.importar', () => {
 
     expect(resultado.eliminadosAntes).toBe(12);
     expect(resultado.bloqueadosPorFactura).toEqual(['101', '203']);
+  });
+
+  it('un código de copropiedad que no coincide aborta TODO el archivo, sin borrar nada', async () => {
+    // A diferencia de un código de inmueble repetido (falla solo esa fila),
+    // un archivo de otra copropiedad no puede tener la oportunidad de borrar
+    // el listado de esta — ver la nota del método sobre por qué este es el
+    // único chequeo que aborta el archivo completo en lugar de fallar fila
+    // por fila.
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const eliminacion = eliminacionModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      copropiedadModeloCon('0001') as never,
+      terceros as never,
+      tenant,
+      {} as never,
+      eliminacion as never,
+      progresoModeloCon() as never,
+    );
+
+    const resultado = await service.importar({
+      filas: [
+        fila({ codigo: '301', codigoCopropiedad: '0001' }),
+        fila({ codigo: '302', codigoCopropiedad: 'OTRA' }),
+      ],
+    });
+
+    expect(resultado).toEqual({
+      total: 2,
+      creados: 0,
+      errores: [
+        {
+          fila: 2,
+          codigo: '302',
+          mensaje:
+            'El código de copropiedad "OTRA" no coincide con el de la copropiedad activa (0001)',
+        },
+      ],
+      eliminadosAntes: 0,
+      bloqueadosPorFactura: [],
+    });
+    expect(eliminacion.eliminarTodosEliminables).not.toHaveBeenCalled();
+    expect(inmuebles.escrituras).toHaveLength(0);
   });
 });

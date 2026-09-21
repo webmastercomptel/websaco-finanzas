@@ -76,6 +76,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -97,6 +98,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -114,6 +116,7 @@ describe('InmueblesService.create', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -129,6 +132,7 @@ describe('InmueblesService.create', () => {
     const modelo = modeloCon();
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenantSinCopropiedad,
       {} as never,
@@ -150,6 +154,7 @@ describe('InmueblesService.update', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -168,6 +173,7 @@ describe('InmueblesService.update', () => {
     const service = new InmueblesService(
       modelo as never,
       {} as never,
+      {} as never,
       tenant,
       {} as never,
       {} as never,
@@ -179,10 +185,47 @@ describe('InmueblesService.update', () => {
     expect(modelo.escrituras[0]).toEqual({ zone: 'Norte' });
   });
 
+  it('traduce estado "inactivo"/"activo" a status "inactive"/"active"', async () => {
+    const modelo = modeloCon();
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      {} as never,
+      tenant,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.update('inm-1', { estado: 'inactivo' });
+    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
+
+    await service.update('inm-1', { estado: 'activo' });
+    expect(modelo.escrituras[1]).toEqual({ status: 'active' });
+  });
+
+  it('no toca status cuando el patch no trae estado', async () => {
+    const modelo = modeloCon();
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      {} as never,
+      tenant,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.update('inm-1', { zona: 'Norte' });
+
+    expect(modelo.escrituras[0]).not.toHaveProperty('status');
+  });
+
   it('no choca consigo mismo al guardar sin cambiar el código', async () => {
     const modelo = modeloCon();
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenant,
       {} as never,
@@ -206,6 +249,7 @@ describe('InmueblesService.update', () => {
     })) as never;
     const service = new InmueblesService(
       modelo as never,
+      {} as never,
       {} as never,
       tenant,
       {} as never,

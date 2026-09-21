@@ -339,6 +339,17 @@ export class CarteraPorConceptosService {
 
     const grupos: GrupoInmuebleCarteraPorConceptos[] = [];
     for (const [inmuebleId, documentosInternos] of docsPorInmueble) {
+      // Shared by all 3 tabs (unlike `conceptoId`/`estado` below, which are
+      // each one tab's own filter) — `Inmueble.status` is a soft retire,
+      // not `collectionStatus`, so a unit stops showing up here without
+      // ever touching cartera itself. Checked against the SAME map used
+      // for `código`/titular below, not a second query.
+      if (query.estadoInmueble) {
+        const statusEsperado =
+          query.estadoInmueble === 'inactivo' ? 'inactive' : 'active';
+        if (inmuebleById.get(inmuebleId)?.status !== statusEsperado) continue;
+      }
+
       // Fecha ascending first, then tipo, then número — matches the
       // on-screen/Excel/PDF column order (bug real reportado: antes
       // ordenaba solo por número crudo, mezclando FV y ND sin criterio

@@ -22,6 +22,16 @@ import {
  * separate collections; see the note on the Tercero schema for why.
  */
 export class FilaImportarInmuebleDto {
+  /** The active coproperty's own `Copropiedad.code` — a whole-file safety
+   *  check on top of the tenancy law (never what resolves the tenant), so a
+   *  file meant for a different building fails loudly, before anything is
+   *  wiped, instead of silently replacing this coproperty's roster with
+   *  another's — see `InmueblesService.importar`. */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  codigoCopropiedad: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(40)

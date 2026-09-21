@@ -217,17 +217,25 @@ describe('EstadoCuentaService', () => {
       });
     });
 
-    it('el descuento por pronto pago de un Recibo va a descuentosAjustes, NUNCA a pagosRecibidos', async () => {
+    it('el descuento por pronto pago de un Recibo va a descuentosAjustes, NUNCA a pagosDelMes', async () => {
       // Bug real reportado: un Recibo con descuento por pronto pago activo
       // (amountApplied 400000 = 360000 de efectivo real + 40000 de
       // descuento) sumaba el descuento completo a "Pagos Recibidos" — el
       // propietario nunca pagó esos 40000, así que deben verse como
-      // descuento, no como plata recibida.
+      // descuento, no como plata recibida. `pagosDelMes` ahora es el monto
+      // BRUTO del Recibo (400000, lo que realmente entró), nunca el neto
+      // aplicado — el descuento sigue viviendo aparte, en
+      // `descuentosAjustes`.
       const inmId = id();
       const fId = id();
       const rId = id();
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 400000 });
-      const r = reciboDoc({ _id: rId });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-01-20'),
+        receivedAmount: 400000,
+      });
       const app = appDoc(rId, 'RC', {
         amountApplied: 400000,
         discountApplied: 40000,
@@ -247,7 +255,7 @@ describe('EstadoCuentaService', () => {
         periodEnd: '2026-01-31T23:59:59.999Z',
       });
 
-      expect(result.pagosRecibidos).toBe(360000);
+      expect(result.pagosDelMes).toBe(400000);
       expect(result.descuentosAjustes).toBe(40000);
       const filaDescuento = result.movimientos.find((m) =>
         m.concepto.includes('Descuento Aplicado'),
@@ -258,12 +266,17 @@ describe('EstadoCuentaService', () => {
       });
     });
 
-    it('Recibo application produces categoria pago', async () => {
+    it('Recibo activo con receivedDate en el período produce una fila "Recibo" con su monto BRUTO, no el neto aplicado', async () => {
       const inmId = id();
       const fId = id();
       const rId = id();
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
-      const r = reciboDoc({ _id: rId });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-01-20'),
+        receivedAmount: 30000,
+      });
       const app = appDoc(rId, 'RC', {
         amountApplied: 30000,
         appliedAt: new Date('2026-01-20'),
@@ -285,7 +298,14 @@ describe('EstadoCuentaService', () => {
       const pagoRow = result.movimientos.find((m) => m.categoria === 'pago');
       expect(pagoRow).toBeDefined();
       expect(pagoRow!.abono).toBe(30000);
-      expect(result.pagosRecibidos).toBe(30000);
+      expect(pagoRow!.numeroCompleto).toBe(r.fullNumber);
+      expect(pagoRow!.concepto).toBe('Recibo');
+      // Exactamente UNA fila de tipo pago — el viejo estilo "una fila por
+      // cruce de AplicacionCartera" queda excluido de Detalle de Movimientos.
+      expect(
+        result.movimientos.filter((m) => m.categoria === 'pago'),
+      ).toHaveLength(1);
+      expect(result.pagosDelMes).toBe(30000);
       expect(result.descuentosAjustes).toBe(0);
     });
 
@@ -299,7 +319,12 @@ describe('EstadoCuentaService', () => {
       const fId = id();
       const rId = id();
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
-      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-10-01') });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-10-01'),
+        receivedAmount: 100000,
+      });
       const app = appDoc(rId, 'RC', {
         amountApplied: 100000,
         appliedAt: new Date('2026-09-09'),
@@ -321,7 +346,193 @@ describe('EstadoCuentaService', () => {
       const pagoRow = result.movimientos.find((m) => m.categoria === 'pago');
       expect(pagoRow).toBeDefined();
       expect(pagoRow!.fecha).toBe('2026-10-01T00:00:00.000Z');
-      expect(result.pagosRecibidos).toBe(100000);
+      expect(result.pagosDelMes).toBe(100000);
+    });
+
+    it('un Recibo aplicado a 2+ facturas en el mismo período produce UNA sola fila "Recibo" y pagosDelMes lo cuenta una sola vez', async () => {
+      const inmId = id();
+      const rId = id();
+      const f1 = facturaDoc({ inmuebleId: inmId, total: 60000 });
+      const f2 = facturaDoc({ inmuebleId: inmId, total: 40000 });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-01-20'),
+        receivedAmount: 100000,
+      });
+      // El mismo Recibo cruzado contra dos facturas distintas dentro del
+      // mismo período — cada cruce es su propia AplicacionCartera.
+      const app1 = appDoc(rId, 'RC', {
+        amountApplied: 60000,
+        appliedAt: new Date('2026-01-20'),
+      });
+      const app2 = appDoc(rId, 'RC', {
+        amountApplied: 40000,
+        appliedAt: new Date('2026-01-20'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f1, f2]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app1, app2]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      const filasRecibo = result.movimientos.filter(
+        (m) => m.categoria === 'pago' && m.concepto === 'Recibo',
+      );
+      expect(filasRecibo).toHaveLength(1);
+      expect(filasRecibo[0].abono).toBe(100000);
+      expect(result.pagosDelMes).toBe(100000);
+    });
+
+    it('varios Recibos distintos en el mismo período producen una fila por cada uno y pagosDelMes suma los tres', async () => {
+      const inmId = id();
+      const r1 = reciboDoc({
+        fullNumber: 'RC-0001',
+        status: 'activo',
+        receivedDate: new Date('2026-01-05'),
+        receivedAmount: 100000,
+      });
+      const r2 = reciboDoc({
+        fullNumber: 'RC-0002',
+        status: 'activo',
+        receivedDate: new Date('2026-01-12'),
+        receivedAmount: 200000,
+      });
+      const r3 = reciboDoc({
+        fullNumber: 'RC-0003',
+        status: 'activo',
+        receivedDate: new Date('2026-01-25'),
+        receivedAmount: 300000,
+      });
+
+      const svc = servicio({
+        recibos: mockFind([r1, r2, r3]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      const filasRecibo = result.movimientos.filter(
+        (m) => m.categoria === 'pago' && m.concepto === 'Recibo',
+      );
+      expect(filasRecibo).toHaveLength(3);
+      expect(result.pagosDelMes).toBe(600000);
+    });
+
+    it('un Recibo recibido en el período pero SIN ningún cruce todavía (parqueado como anticipo) igual aparece en Detalle de Movimientos', async () => {
+      const inmId = id();
+      const r = reciboDoc({
+        status: 'activo',
+        receivedDate: new Date('2026-01-08'),
+        receivedAmount: 500000,
+      });
+
+      const svc = servicio({
+        recibos: mockFind([r]),
+        // Sin AplicacionCartera alguna: el Recibo entero quedó como anticipo.
+        aplicaciones: mockFind([]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      const filaRecibo = result.movimientos.find(
+        (m) => m.categoria === 'pago' && m.concepto === 'Recibo',
+      );
+      expect(filaRecibo).toBeDefined();
+      expect(filaRecibo!.abono).toBe(500000);
+      expect(filaRecibo!.numeroCompleto).toBe(r.fullNumber);
+      expect(result.pagosDelMes).toBe(500000);
+    });
+
+    it('un Recibo ANULADO con receivedDate en el período NO produce fila ni cuenta en pagosDelMes', async () => {
+      const inmId = id();
+      const r = reciboDoc({
+        status: 'anulado',
+        receivedDate: new Date('2026-01-08'),
+        receivedAmount: 500000,
+      });
+
+      const svc = servicio({
+        recibos: mockFind([r]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(
+        result.movimientos.find(
+          (m) => m.categoria === 'pago' && m.concepto === 'Recibo',
+        ),
+      ).toBeUndefined();
+      expect(result.pagosDelMes).toBe(0);
+    });
+
+    it('caso de aceptación confirmado: Recibo de 1.000.000 salda una Factura de 962.000 (909.800 efectivo + 52.200 descuento), deja 90.200 de anticipo — saldoActual queda en -90.200', async () => {
+      const inmId = id();
+      const fId = id();
+      const rId = id();
+      const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 962000 });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-01-10'),
+        receivedAmount: 1000000,
+      });
+      const app = appDoc(rId, 'RC', {
+        amountApplied: 962000,
+        discountApplied: 52200,
+        appliedAt: new Date('2026-01-10'),
+      });
+
+      const svc = servicio({
+        facturas: mockFind([f]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind([app]),
+        saldoDocumentoOrigen: mockFind([
+          { documentoId: rId, saldoDisponible: 90200 },
+        ]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.cargosDelMes).toBe(962000);
+      expect(result.pagosDelMes).toBe(1000000);
+      expect(result.descuentosAjustes).toBe(52200);
+      expect(result.anticiposAplicados).toBe(0);
+      expect(result.saldoActual).toBe(-90200);
+      expect(result.anticipos).toEqual([
+        {
+          numeroCompleto: r.fullNumber,
+          fecha: '2026-01-10T00:00:00.000Z',
+          monto: 90200,
+        },
+      ]);
     });
 
     it('NC application produces categoria descuento', async () => {
@@ -354,7 +565,8 @@ describe('EstadoCuentaService', () => {
       expect(descRow).toBeDefined();
       expect(descRow!.abono).toBe(20000);
       expect(result.descuentosAjustes).toBe(20000);
-      expect(result.pagosRecibidos).toBe(0);
+      expect(result.pagosDelMes).toBe(0);
+      expect(result.anticiposAplicados).toBe(0);
     });
 
     it('una Factura anulada TODAVÍA cuenta en cargosDelMes — bug real reportado: se contaba su Nota Crédito de anulación en descuentosAjustes pero no el cargo original, subestimando saldoActual', async () => {
@@ -392,11 +604,14 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoActual).toBe(result.saldoAnterior);
     });
 
-    it('NA application produces categoria pago (bug real reportado: la Nota de Anticipo no aparecía en el estado de cuenta)', async () => {
+    it('NA application produces categoria pago y alimenta SOLO anticiposAplicados, nunca pagosDelMes (bug real reportado: la Nota de Anticipo no aparecía en el estado de cuenta)', async () => {
       // Bug real: `sourceIds` solo se armaba con recibos+notasCredito — una
       // AplicacionCartera con sourceType 'NA' nunca calzaba con ningún id de
       // esa lista, así que el crédito de la Nota de Anticipo desaparecía por
-      // completo del estado de cuenta, entendiendo pagosRecibidos.
+      // completo del estado de cuenta, entendiendo el total recibido. Una
+      // NA reaplica el saldo sobrante de un Recibo YA contado en un
+      // `pagosDelMes` anterior — nunca es plata nueva este período, así que
+      // vive en `anticiposAplicados`, aislado de `pagosDelMes`.
       const inmId = id();
       const fId = id();
       const naId = id();
@@ -428,7 +643,8 @@ describe('EstadoCuentaService', () => {
       expect(pagoRow!.abono).toBe(40000);
       expect(pagoRow!.concepto).toBe('Nota de Anticipo');
       expect(pagoRow!.numeroCompleto).toBe(na.fullNumber);
-      expect(result.pagosRecibidos).toBe(40000);
+      expect(result.anticiposAplicados).toBe(40000);
+      expect(result.pagosDelMes).toBe(0);
     });
 
     it('Nota Contable paired rows have categoria null and contribute to neither summary', async () => {
@@ -457,7 +673,8 @@ describe('EstadoCuentaService', () => {
         numeroCompleto: nt.fullNumber,
         concepto: 'Nota Contable',
       });
-      expect(result.pagosRecibidos).toBe(0);
+      expect(result.pagosDelMes).toBe(0);
+      expect(result.anticiposAplicados).toBe(0);
       expect(result.descuentosAjustes).toBe(0);
       // Direct assertion, not derived from the same formula saldoActual
       // uses — cargosDelMes must reflect ONLY the Factura (100k), never
@@ -469,7 +686,8 @@ describe('EstadoCuentaService', () => {
       expect(
         result.saldoAnterior +
           result.cargosDelMes -
-          result.pagosRecibidos -
+          result.pagosDelMes -
+          result.anticiposAplicados -
           result.descuentosAjustes,
       ).toBe(result.saldoActual);
     });
@@ -506,7 +724,12 @@ describe('EstadoCuentaService', () => {
       const fId = id();
       const rId = id();
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
-      const r = reciboDoc({ _id: rId });
+      const r = reciboDoc({
+        _id: rId,
+        status: 'activo',
+        receivedDate: new Date('2026-01-20'),
+        receivedAmount: 100000,
+      });
       const app = appDoc(rId, 'RC', {
         amountApplied: 100000,
         appliedAt: new Date('2026-01-20'),

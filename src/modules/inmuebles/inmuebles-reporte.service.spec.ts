@@ -84,6 +84,70 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
     void CONCEPTO_INTERESES; // referenced only to document why it's absent
   });
 
+  it('arma el titular como "Apellido1 Apellido2 Nombre1" para una persona natural, no el orden de Tercero.name', async () => {
+    const service = new InmueblesReporteService(
+      modeloInmuebles([
+        {
+          _id: INMUEBLE_1,
+          code: '301',
+          area: 72,
+          participationFactor: 1.8452,
+          holderId: {
+            name: 'Ana María Pérez Gómez',
+            personType: 'natural',
+            firstName: 'Ana',
+            middleName: 'María',
+            firstLastName: 'Pérez',
+            secondLastName: 'Gómez',
+            businessName: null,
+          },
+        },
+      ]) as never,
+      modeloConceptos([]) as never,
+      modeloValores([]) as never,
+      modeloCopropiedades({ name: 'Prueba' }) as never,
+      tenant,
+    );
+
+    await service.generarListadoPdf();
+
+    const [, items] = generarPdfListadoInmuebles.mock.calls[0];
+    // "Pérez Gómez Ana" — apellidos primero, y sin el segundo nombre
+    // ("María"), justo lo que lo acorta frente a `Tercero.name`.
+    expect((items as { titular: string }[])[0].titular).toBe('Pérez Gómez Ana');
+  });
+
+  it('usa la razón social tal cual para una persona jurídica', async () => {
+    const service = new InmueblesReporteService(
+      modeloInmuebles([
+        {
+          _id: INMUEBLE_1,
+          code: '301',
+          area: 72,
+          participationFactor: 1.8452,
+          holderId: {
+            name: 'Ferretería SAS',
+            personType: 'juridica',
+            firstName: null,
+            middleName: null,
+            firstLastName: null,
+            secondLastName: null,
+            businessName: 'Ferretería SAS',
+          },
+        },
+      ]) as never,
+      modeloConceptos([]) as never,
+      modeloValores([]) as never,
+      modeloCopropiedades({ name: 'Prueba' }) as never,
+      tenant,
+    );
+
+    await service.generarListadoPdf();
+
+    const [, items] = generarPdfListadoInmuebles.mock.calls[0];
+    expect((items as { titular: string }[])[0].titular).toBe('Ferretería SAS');
+  });
+
   it('arma un renglón por inmueble con su titular, área, coeficiente y valores por concepto', async () => {
     const service = new InmueblesReporteService(
       modeloInmuebles([

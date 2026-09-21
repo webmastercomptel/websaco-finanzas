@@ -22,9 +22,43 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { generarPdfListadoInmuebles } from '../../common/pdf/inmuebles-listado-pdf';
 import type { RespuestaListadoInmuebles } from '../../contracts';
 
-/** The shape `holderId` arrives in when the query populated it — same
- *  minimal pick `inmuebles.mapper.ts`'s own `titularDe` reads. */
-type TitularPoblado = { name: string };
+/** The shape `holderId` arrives in when the query populated it — wider than
+ *  `inmuebles.mapper.ts`'s own `titularDe` pick, since this roster needs the
+ *  raw name parts to build its own apellido-first display string (see
+ *  `nombreListadoDe`) instead of reusing `Tercero.name`'s stored order. */
+type TitularPoblado = {
+  name: string;
+  personType: 'natural' | 'juridica';
+  firstName: string | null;
+  firstLastName: string | null;
+  secondLastName: string | null;
+  businessName: string | null;
+};
+
+/**
+ * "Apellido1 Apellido2 Nombre1" for a natural person — deliberately
+ * SHORTER than `Tercero.name`'s own stored order (which also includes
+ * `middleName`/segundo nombre), and surname-first (product decision,
+ * 2026-09-20): a roster row is one printed/screen line, and the surname is
+ * what identifies someone at a glance in a list sorted by unit, not their
+ * full legal name — `Tercero.name` itself is untouched, still what
+ * Factura/Recibo/every DIAN-facing document prints. `businessName` for a
+ * legal entity has no "surname" to lead with, so it's used as-is. Falls
+ * back to `Tercero.name` only if every relevant part is somehow null (a
+ * titular saved before these fields existed, or with a blank name).
+ */
+function nombreListadoDe(holder: TitularPoblado | null): string | null {
+  if (!holder) return null;
+  if (holder.personType === 'juridica') {
+    return holder.businessName || holder.name;
+  }
+  const partes = [
+    holder.firstLastName,
+    holder.secondLastName,
+    holder.firstName,
+  ].filter((p): p is string => Boolean(p));
+  return partes.length > 0 ? partes.join(' ') : holder.name;
+}
 
 /** One active unit, already joined with its recurring cargo amounts —
  *  shared by the PDF and JSON/Excel roster, so the two never drift apart. */
@@ -73,7 +107,10 @@ export class InmueblesReporteService {
       this.inmuebles
         .find({ coPropertyId, status: 'active' })
         .sort({ code: 1 })
-        .populate('holderId', 'name')
+        .populate(
+          'holderId',
+          'name personType firstName firstLastName secondLastName businessName',
+        )
         .exec(),
       // `intereses` excluded — it is computed from overdue balances, never a
       // flat monthly amount, so it has no column here (same reasoning as
@@ -112,7 +149,7 @@ export class InmueblesReporteService {
       }
       return {
         codigo: inm.code,
-        titular: holder?.name ?? null,
+        titular: nombreListadoDe(holder),
         area: inm.area,
         coeficiente: inm.participationFactor,
         valores: valoresPorConcepto,

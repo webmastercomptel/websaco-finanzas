@@ -81,6 +81,13 @@ class CamposInmuebleDto {
   @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
   estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo';
 
+  /** Whether the unit is billed going forward — see the contract's own
+   *  note on `Inmueble.estado`. Defaults to `activo` (the schema's own
+   *  default), so omitting it on create is the common case. */
+  @IsOptional()
+  @IsIn(['activo', 'inactivo'])
+  estado?: 'activo' | 'inactivo';
+
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -104,9 +111,11 @@ export class CrearInmuebleDto extends CamposInmuebleDto {
  * Editing a unit. Every field optional — a patch that had to carry the whole
  * record would make two people editing different fields overwrite each other.
  *
- * No `estado` here: every unit in a coproperty is active by definition — see
- * `InmueblesEliminacionService` for the one way a unit stops existing (a
- * hard delete, only when it has never been billed).
+ * `estado` toggles whether the unit is billed going forward (product
+ * decision, 2026-09-21) — a soft retire, distinct from
+ * `InmueblesEliminacionService`'s hard delete (only for a unit that has
+ * never been billed at all). Marking `inactivo` never touches a single past
+ * Factura/Recibo/etc.
  */
 export class ActualizarInmuebleDto extends CamposInmuebleDto {
   @IsOptional()

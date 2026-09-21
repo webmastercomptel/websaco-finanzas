@@ -49,6 +49,12 @@ class CamposCopropiedadDto {
   @MaxLength(120)
   email?: string;
 
+  /** Whether the WebSACO mark prints on this coproperty's own financial
+   *  documents — see `Copropiedad.showLogoOnDocuments`'s own docblock. */
+  @IsOptional()
+  @IsBoolean()
+  mostrarLogo?: boolean;
+
   /**
    * The managing entity, when there is one. Mutually exclusive with
    * `nombreAdministrador` in practice — a building either has a company on

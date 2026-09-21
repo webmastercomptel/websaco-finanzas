@@ -61,6 +61,7 @@ export async function generarPdfConciliacionCartera(
       copropiedad,
       titulo: 'CONCILIACIÓN DE CARTERA',
       subtitulo: `Período ${formatoFecha(reporte.periodStart)} al ${formatoFecha(reporte.periodEnd)}`,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     }),
 
     createElement(FilaLabelValor, {
@@ -135,18 +136,26 @@ export async function generarPdfConciliacionCartera(
           { style: styles.sinDatos },
           'No hay anticipos pendientes a esa fecha.',
         )
-      : createElement(Tabla, {
-          columnas: ['Inmueble', 'Fecha', 'No. Recibo', 'Valor'],
-          filas: reporte.anticiposPendientes.map((a) => [
-            a.inmuebleCodigo,
-            formatoFecha(a.fecha),
-            a.numeroRecibo,
-            formatoPeso(a.valor),
-          ]),
-          columnasNumericas: 1,
-          striped: true,
-          fontSize: 8.5,
-        }),
+      : createElement(
+          View,
+          null,
+          createElement(Tabla, {
+            columnas: ['Inmueble', 'Fecha', 'No. Recibo', 'Valor'],
+            filas: reporte.anticiposPendientes.map((a) => [
+              a.inmuebleCodigo,
+              formatoFecha(a.fecha),
+              a.numeroRecibo,
+              formatoPeso(a.valor),
+            ]),
+            columnasNumericas: 1,
+            striped: true,
+            fontSize: 8.5,
+          }),
+          createElement(FilaLabelValor, {
+            label: 'Total Anticipos Pendientes:',
+            valor: formatoPeso(reporte.totalAnticiposPendientes),
+          }),
+        ),
   );
 
   return renderizarPdf(reporteDocumento(contenido));

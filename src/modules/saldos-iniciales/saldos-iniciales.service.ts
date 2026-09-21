@@ -151,6 +151,106 @@ export class SaldosInicialesService {
       .exec();
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
 
+    // One-shot guard — this import is meant to happen exactly once per
+    // coproperty. Voiding every existing active record (via `anular()`)
+    // clears this and allows a fresh attempt, without ever deleting
+    // anything.
+    const activos = await this.saldosIniciales
+      .countDocuments({ coPropertyId, status: 'activo' })
+      .exec();
+    if (activos > 0) {
+      throw new ConflictException(
+        'Esta copropiedad ya tiene saldos iniciales activos. Anulá los existentes antes de cargar un archivo nuevo.',
+      );
+    }
+
+    // Whole-file validation pass — no DB writes yet. Every problem found is
+    // collected, not just the first, and if anything fails NOTHING below
+    // this block runs: no lote, no rows, no progress tracking.
+    const codigos = [...new Set(dto.filas.map((f) => f.codigoInmueble))];
+    const inmueblesEncontrados = await this.inmuebles
+      .find({ coPropertyId, code: { $in: codigos } })
+      .exec();
+    const inmueblePorCodigo = new Map(
+      inmueblesEncontrados.map((i) => [i.code, i]),
+    );
+
+    const erroresValidacion: ResultadoImportacionSaldosIniciales['errores'] =
+      [];
+    const vistos = new Set<string>();
+    let sumaValores = 0;
+
+    dto.filas.forEach((fila, indice) => {
+      const numeroFila = indice + 1;
+      if (fila.codigoCopropiedad !== copropiedad.code) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+        });
+        return;
+      }
+      if (!inmueblePorCodigo.has(fila.codigoInmueble)) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `No existe un inmueble con el código ${fila.codigoInmueble} en esta copropiedad`,
+        });
+        return;
+      }
+      if (new Date(fila.fecha).getTime() > new Date(dto.fechaCorte).getTime()) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `La fecha ${fila.fecha} es posterior a la fecha de corte (${dto.fechaCorte})`,
+        });
+        return;
+      }
+      const clave = `${fila.codigoInmueble}|${fila.tipoDocumento}|${fila.numero}`;
+      if (vistos.has(clave)) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `El documento ${fila.tipoDocumento} ${fila.numero} del inmueble ${fila.codigoInmueble} está repetido en este archivo`,
+        });
+        return;
+      }
+      const conceptoFaltante = fila.cargos.find(
+        (cargo) => !conceptoPorId.get(cargo.conceptoId),
+      );
+      if (conceptoFaltante) {
+        erroresValidacion.push({
+          fila: numeroFila,
+          inmuebleCodigo: fila.codigoInmueble,
+          mensaje: `No existe el concepto de cobro ${conceptoFaltante.conceptoId}`,
+        });
+        return;
+      }
+      vistos.add(clave);
+      sumaValores += fila.cargos.reduce((sum, c) => sum + c.monto, 0);
+    });
+
+    if (sumaValores !== dto.valorTotal) {
+      erroresValidacion.push({
+        fila: 0,
+        inmuebleCodigo: null,
+        mensaje: `La suma de los valores del archivo (${sumaValores}) no coincide con el valor total esperado (${dto.valorTotal})`,
+      });
+    }
+
+    if (erroresValidacion.length > 0) {
+      return {
+        total: dto.filas.length,
+        importados: 0,
+        errores: erroresValidacion,
+      };
+    }
+
+    // Validation passed — every row below is now expected to succeed. The
+    // per-row try/catch in the loop below stays only as a defensive safety
+    // net for genuine runtime failures, not as the primary validation path
+    // anymore.
+
     // One batch header for the WHOLE file (traceability only — never a real
     // consecutivo, see `LoteSaldoInicial`'s own docblock), updated with the
     // final tallies once every row has been attempted.

@@ -133,6 +133,98 @@ describe('CarteraPorConceptosService', () => {
     ]);
   });
 
+  it('filtra por estadoInmueble — solo activos', async () => {
+    const inmActivoId = id();
+    const inmInactivoId = id();
+    const inmActivo = inmuebleDoc({
+      _id: inmActivoId,
+      code: '301',
+      status: 'active',
+    });
+    const inmInactivo = inmuebleDoc({
+      _id: inmInactivoId,
+      code: '402',
+      status: 'inactive',
+    });
+    const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
+    const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
+
+    const svc = servicio({
+      facturas: find([fActivo, fInactivo]),
+      inmuebles: find([inmActivo, inmInactivo]),
+      saldoTotalDocumento: find([
+        { documentoId: fActivo._id, saldoPendiente: 100000 },
+        { documentoId: fInactivo._id, saldoPendiente: 50000 },
+      ]),
+    });
+
+    const result = await svc.findAll({ estadoInmueble: 'activo' });
+
+    expect(result.grupos).toHaveLength(1);
+    expect(result.grupos[0].inmuebleCodigo).toBe('301');
+  });
+
+  it('filtra por estadoInmueble — solo inactivos', async () => {
+    const inmActivoId = id();
+    const inmInactivoId = id();
+    const inmActivo = inmuebleDoc({
+      _id: inmActivoId,
+      code: '301',
+      status: 'active',
+    });
+    const inmInactivo = inmuebleDoc({
+      _id: inmInactivoId,
+      code: '402',
+      status: 'inactive',
+    });
+    const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
+    const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
+
+    const svc = servicio({
+      facturas: find([fActivo, fInactivo]),
+      inmuebles: find([inmActivo, inmInactivo]),
+      saldoTotalDocumento: find([
+        { documentoId: fActivo._id, saldoPendiente: 100000 },
+        { documentoId: fInactivo._id, saldoPendiente: 50000 },
+      ]),
+    });
+
+    const result = await svc.findAll({ estadoInmueble: 'inactivo' });
+
+    expect(result.grupos).toHaveLength(1);
+    expect(result.grupos[0].inmuebleCodigo).toBe('402');
+  });
+
+  it('sin estadoInmueble, incluye activos e inactivos por igual', async () => {
+    const inmActivoId = id();
+    const inmInactivoId = id();
+    const inmActivo = inmuebleDoc({
+      _id: inmActivoId,
+      code: '301',
+      status: 'active',
+    });
+    const inmInactivo = inmuebleDoc({
+      _id: inmInactivoId,
+      code: '402',
+      status: 'inactive',
+    });
+    const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
+    const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
+
+    const svc = servicio({
+      facturas: find([fActivo, fInactivo]),
+      inmuebles: find([inmActivo, inmInactivo]),
+      saldoTotalDocumento: find([
+        { documentoId: fActivo._id, saldoPendiente: 100000 },
+        { documentoId: fInactivo._id, saldoPendiente: 50000 },
+      ]),
+    });
+
+    const result = await svc.findAll({});
+
+    expect(result.grupos).toHaveLength(2);
+  });
+
   it('ordena los documentos de un mismo inmueble por fecha ascendente, mezclando FV y ND', async () => {
     const inmId = id();
     const inm = inmuebleDoc({ _id: inmId, code: '301' });

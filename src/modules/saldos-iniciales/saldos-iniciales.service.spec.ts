@@ -1,12 +1,12 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { SaldosInicialesAnticipoService } from './saldos-iniciales-anticipo.service';
+import { SaldosInicialesService } from './saldos-iniciales.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ProgresoImportacionService } from '../inmuebles/progreso-importacion.service';
 
 const COP = new Types.ObjectId();
 const INMUEBLE = new Types.ObjectId();
-const HOLDER = new Types.ObjectId();
+const CONCEPTO = new Types.ObjectId();
 const CUENTA = new Types.ObjectId().toString();
 
 const sesionFalsa = () => ({
@@ -27,16 +27,19 @@ const progresoFalso = (): ProgresoImportacionService =>
   }) as unknown as ProgresoImportacionService;
 
 /**
- * Builds the service with in-memory backing state for
- * `saldos_iniciales_anticipo` and `saldos_documento_origen` — same
- * "shared-state, not one-shot stubs" discipline as `NotasAnticipoService`'s
- * own spec, since `listar`/`anular` both need to see what `importar` wrote.
+ * Same "shared-state, not one-shot stubs" discipline as
+ * `saldos-iniciales-anticipo.service.spec.ts` — `listar`/`anular` both need
+ * to see what `importar` wrote, and the three shared cartera ledgers must
+ * actually accumulate across rows for the ledger-side assertions to mean
+ * anything.
  */
 const construirServicio = () => {
   const documentos: Record<string, unknown>[] = [];
-  const saldosOrigen: Record<string, unknown>[] = [];
+  const saldosTotales: Record<string, unknown>[] = [];
+  const carteraPorDocumentoFilas: Record<string, unknown>[] = [];
+  const saldosCarteraFilas: Record<string, unknown>[] = [];
 
-  const saldosInicialesAnticipo = {
+  const saldosIniciales = {
     create: jest.fn((filas: Record<string, unknown>[]) => {
       const creados = filas.map((f) => ({ _id: new Types.ObjectId(), ...f }));
       documentos.push(...creados);
@@ -78,17 +81,17 @@ const construirServicio = () => {
     })),
   };
 
-  const saldoDocumentoOrigen = {
+  const saldoTotalDocumento = {
     create: jest.fn((filas: Record<string, unknown>[]) => {
       const creados = filas.map((f) => ({ ...f }));
-      saldosOrigen.push(...creados);
+      saldosTotales.push(...creados);
       return Promise.resolve(creados);
     }),
     find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
       exec: () => {
         const ids = (filtro.documentoId?.$in ?? []).map(String);
         return Promise.resolve(
-          saldosOrigen.filter((s) => ids.includes(String(s.documentoId))),
+          saldosTotales.filter((s) => ids.includes(String(s.documentoId))),
         );
       },
     })),
@@ -96,7 +99,7 @@ const construirServicio = () => {
       session: jest.fn().mockReturnThis(),
       exec: () =>
         Promise.resolve(
-          saldosOrigen.find(
+          saldosTotales.find(
             (s) => String(s.documentoId) === String(filtro.documentoId),
           ) ?? null,
         ),
@@ -108,11 +111,82 @@ const construirServicio = () => {
       ) => ({
         session: jest.fn().mockReturnThis(),
         exec: () => {
-          const fila = saldosOrigen.find(
+          const fila = saldosTotales.find(
             (s) => String(s.documentoId) === String(filtro.documentoId),
           );
           if (fila) Object.assign(fila, update.$set);
           return Promise.resolve(fila ?? null);
+        },
+      }),
+    ),
+  };
+
+  const carteraPorDocumento = {
+    create: jest.fn((filas: Record<string, unknown>[]) => {
+      const creados = filas.map((f) => ({ _id: new Types.ObjectId(), ...f }));
+      carteraPorDocumentoFilas.push(...creados);
+      return Promise.resolve(creados);
+    }),
+    find: jest.fn((filtro: { documentoId?: unknown }) => ({
+      session: jest.fn().mockReturnThis(),
+      exec: () =>
+        Promise.resolve(
+          carteraPorDocumentoFilas.filter(
+            (f) => String(f.documentoId) === String(filtro.documentoId),
+          ),
+        ),
+    })),
+    updateOne: jest.fn(
+      (
+        filtro: Record<string, unknown>,
+        update: { $set: Record<string, unknown> },
+      ) => ({
+        session: jest.fn().mockReturnThis(),
+        exec: () => {
+          const fila = carteraPorDocumentoFilas.find(
+            (f) => String(f._id) === String(filtro._id),
+          );
+          if (fila) Object.assign(fila, update.$set);
+          return Promise.resolve(fila ?? null);
+        },
+      }),
+    ),
+  };
+
+  const saldosCartera = {
+    findOne: jest.fn((filtro: Record<string, unknown>) => ({
+      session: jest.fn().mockReturnThis(),
+      exec: () =>
+        Promise.resolve(
+          saldosCarteraFilas.find(
+            (s) =>
+              String(s.inmuebleId) === String(filtro.inmuebleId) &&
+              String(s.conceptoId) === String(filtro.conceptoId),
+          ) ?? null,
+        ),
+    })),
+    findOneAndUpdate: jest.fn(
+      (
+        filtro: { inmuebleId: unknown; conceptoId: unknown },
+        update: { $inc: Record<string, number> },
+      ) => ({
+        session: jest.fn().mockReturnThis(),
+        exec: () => {
+          let fila = saldosCarteraFilas.find(
+            (s) =>
+              String(s.inmuebleId) === String(filtro.inmuebleId) &&
+              String(s.conceptoId) === String(filtro.conceptoId),
+          );
+          if (!fila) {
+            fila = {
+              inmuebleId: filtro.inmuebleId,
+              conceptoId: filtro.conceptoId,
+              balance: 0,
+            };
+            saldosCarteraFilas.push(fila);
+          }
+          fila.balance = (fila.balance as number) + (update.$inc.balance ?? 0);
+          return Promise.resolve(fila);
         },
       }),
     ),
@@ -142,43 +216,64 @@ const construirServicio = () => {
   };
 
   const inmuebles = {
-    findOne: jest.fn(() => ({
-      exec: () =>
-        Promise.resolve({
-          _id: INMUEBLE,
-          code: 'AP-101',
-          holderId: HOLDER,
-        }),
-    })),
     find: jest.fn(() => ({
+      exec: () => Promise.resolve([{ _id: INMUEBLE, code: 'AP-101' }]),
+    })),
+    findOne: jest.fn(() => ({
+      session: jest.fn().mockReturnThis(),
+      exec: () => Promise.resolve({ _id: INMUEBLE, code: 'AP-101' }),
+    })),
+  };
+
+  const conceptosCobro = {
+    find: jest.fn(() => ({
+      populate: jest.fn().mockReturnThis(),
       exec: () =>
-        Promise.resolve([{ _id: INMUEBLE, code: 'AP-101', holderId: HOLDER }]),
+        Promise.resolve([
+          {
+            _id: CONCEPTO,
+            name: 'Administración',
+            kind: 'administracion',
+            cuentaDebitoId: null,
+            cuentaCreditoId: null,
+          },
+        ]),
     })),
   };
 
   const session = sesionFalsa();
-  const service = new SaldosInicialesAnticipoService(
-    saldosInicialesAnticipo as never,
+  const service = new SaldosInicialesService(
+    saldosIniciales as never,
     lotes as never,
     consecutivos as never,
     copropiedades as never,
     inmuebles as never,
-    saldoDocumentoOrigen as never,
+    conceptosCobro as never,
+    saldosCartera as never,
+    carteraPorDocumento as never,
+    saldoTotalDocumento as never,
     { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
     progresoFalso(),
     conexionCon(session),
   );
 
-  return { service, documentos, saldosOrigen };
+  return {
+    service,
+    documentos,
+    saldosTotales,
+    carteraPorDocumentoFilas,
+    saldosCarteraFilas,
+  };
 };
 
 const filaValida = (over: Record<string, unknown> = {}) => ({
   codigoCopropiedad: '0001',
   codigoInmueble: 'AP-101',
-  tipoDocumento: 'RC',
-  numero: '4152',
+  tipoDocumento: 'FV',
+  numero: '1001',
   fecha: '2026-01-01',
-  valor: 300000,
+  fechaVencimiento: '2026-02-01',
+  cargos: [{ conceptoId: CONCEPTO.toString(), monto: 300000 }],
   ...over,
 });
 
@@ -188,53 +283,36 @@ const dtoValido = (
 ) => ({
   filas,
   fechaCorte: '2026-01-31',
-  valorTotal: filas.reduce((sum, f) => sum + f.valor, 0),
+  valorTotal: filas.reduce(
+    (sum, f) =>
+      sum + (f.cargos as { monto: number }[]).reduce((s, c) => s + c.monto, 0),
+    0,
+  ),
   ...over,
 });
 
-describe('SaldosInicialesAnticipoService.importar', () => {
-  it('crea el documento y su fila de SaldoDocumentoOrigen con saldoDisponible igual al valor importado', async () => {
-    const { service, documentos, saldosOrigen } = construirServicio();
+describe('SaldosInicialesService.importar', () => {
+  it('crea el documento y actualiza las tres tablas de cartera compartidas', async () => {
+    const {
+      service,
+      documentos,
+      saldosTotales,
+      carteraPorDocumentoFilas,
+      saldosCarteraFilas,
+    } = construirServicio();
 
     const resultado = await service.importar(CUENTA, dtoValido([filaValida()]));
 
     expect(resultado.importados).toBe(1);
     expect(resultado.errores).toHaveLength(0);
     expect(documentos).toHaveLength(1);
-    expect(documentos[0]).toMatchObject({
-      tipoDocumentoOriginal: 'RC',
-      numeroOriginal: '4152',
-      fullNumber: 'RC 4152',
-      montoOriginal: 300000,
-      terceroId: HOLDER,
+    expect(saldosTotales).toHaveLength(1);
+    expect(saldosTotales[0]).toMatchObject({
+      total: 300000,
+      saldoPendiente: 300000,
     });
-    expect(saldosOrigen).toHaveLength(1);
-    expect(saldosOrigen[0]).toMatchObject({
-      tipoDocumento: 'SI',
-      montoOriginal: 300000,
-      saldoDisponible: 300000,
-    });
-  });
-
-  it('rechaza el archivo completo sin persistir nada si el código de copropiedad de una fila no coincide', async () => {
-    const { service, documentos } = construirServicio();
-
-    // valorTotal set to only the VALID row's value on purpose — the bad row
-    // is excluded from the sum by design (an invalid row's amount never
-    // counts), so it must not also trip the total-mismatch check and mask
-    // which assertion below is actually exercising the código-de-
-    // copropiedad failure.
-    const resultado = await service.importar(
-      CUENTA,
-      dtoValido([filaValida({ codigoCopropiedad: 'OTRA' }), filaValida()], {
-        valorTotal: 300000,
-      }),
-    );
-
-    expect(resultado.importados).toBe(0);
-    expect(resultado.errores).toHaveLength(1);
-    expect(resultado.errores[0].fila).toBe(1);
-    expect(documentos).toHaveLength(0);
+    expect(carteraPorDocumentoFilas).toHaveLength(1);
+    expect(saldosCarteraFilas[0]).toMatchObject({ balance: 300000 });
   });
 
   it('rechaza el archivo completo sin persistir nada si un inmueble no existe', async () => {
@@ -244,11 +322,12 @@ describe('SaldosInicialesAnticipoService.importar', () => {
       CUENTA,
       dtoValido([
         filaValida(),
-        filaValida({ codigoInmueble: 'NO-EXISTE', numero: '4153' }),
+        filaValida({ codigoInmueble: 'NO-EXISTE', numero: '1002' }),
       ]),
     );
 
     expect(resultado.importados).toBe(0);
+    expect(resultado.errores.length).toBeGreaterThan(0);
     expect(documentos).toHaveLength(0);
   });
 
@@ -291,12 +370,12 @@ describe('SaldosInicialesAnticipoService.importar', () => {
     expect(documentos).toHaveLength(0);
   });
 
-  it('bloquea una segunda importación mientras existan saldos iniciales de anticipo activos', async () => {
+  it('bloquea una segunda importación mientras existan saldos iniciales activos', async () => {
     const { service } = construirServicio();
     await service.importar(CUENTA, dtoValido([filaValida()]));
 
     await expect(
-      service.importar(CUENTA, dtoValido([filaValida({ numero: '9999' })])),
+      service.importar(CUENTA, dtoValido([filaValida({ numero: '1002' })])),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -312,28 +391,28 @@ describe('SaldosInicialesAnticipoService.importar', () => {
 
     const resultado = await service.importar(
       CUENTA,
-      dtoValido([filaValida({ numero: '9999' })]),
+      dtoValido([filaValida({ numero: '1002' })]),
     );
 
     expect(resultado.importados).toBe(1);
   });
 });
 
-describe('SaldosInicialesAnticipoService.listar', () => {
-  it('resuelve saldoDisponible desde SaldoDocumentoOrigen, nunca desde el documento en sí', async () => {
+describe('SaldosInicialesService.listar', () => {
+  it('resuelve saldoPendiente desde SaldoTotalDocumento, nunca desde el documento en sí', async () => {
     const { service } = construirServicio();
     await service.importar(CUENTA, dtoValido([filaValida()]));
 
     const [item] = await service.listar();
 
-    expect(item.saldoDisponible).toBe(300000);
-    expect(item.monto).toBe(300000);
+    expect(item.saldoPendiente).toBe(300000);
+    expect(item.total).toBe(300000);
     expect(item.inmuebleCodigo).toBe('AP-101');
   });
 });
 
-describe('SaldosInicialesAnticipoService.anular', () => {
-  it('pone en cero el saldo disponible restante y marca el documento anulado', async () => {
+describe('SaldosInicialesService.anular', () => {
+  it('pone en cero el saldo pendiente restante y marca el documento anulado', async () => {
     const { service } = construirServicio();
     await service.importar(CUENTA, dtoValido([filaValida()]));
     const [{ id }] = await service.listar();
@@ -345,30 +424,7 @@ describe('SaldosInicialesAnticipoService.anular', () => {
     );
 
     expect(anulado.estado).toBe('anulado');
-    expect(anulado.saldoDisponible).toBe(0);
-  });
-
-  it('lanza ConflictException si ya está anulado', async () => {
-    const { service } = construirServicio();
-    await service.importar(CUENTA, dtoValido([filaValida()]));
-    const [{ id }] = await service.listar();
-
-    await service.anular(
-      id,
-      { motivo: 'otro', detalle: 'Detalle de prueba con longitud suficiente' },
-      CUENTA,
-    );
-
-    await expect(
-      service.anular(
-        id,
-        {
-          motivo: 'otro',
-          detalle: 'Detalle de prueba con longitud suficiente',
-        },
-        CUENTA,
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
+    expect(anulado.saldoPendiente).toBe(0);
   });
 
   it('lanza NotFoundException si el documento no existe', async () => {

@@ -75,4 +75,16 @@ export class ImportarSaldosInicialesDto {
   @ValidateNested({ each: true })
   @Type(() => FilaSaldoInicialDto)
   filas: FilaSaldoInicialDto[];
+
+  /** No row's `fecha` may be later than this — `fechaVencimiento` is
+   *  exempt, a charge can legitimately be due after the cutoff even if it
+   *  originated before it. */
+  @IsDateString()
+  fechaCorte: string;
+
+  /** Must equal the exact sum of every row's `cargos`. */
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  valorTotal: number;
 }

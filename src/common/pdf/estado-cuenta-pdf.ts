@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { View } from '@react-pdf/renderer';
-import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { formatoFecha, formatoPeso, formatoSaldoConFavor } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import { FilaInfo } from './react/fila-info';
@@ -65,6 +65,7 @@ export async function generarPdfEstadoCuenta(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: 'Estado de Cuenta',
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     }),
 
     createElement(FilaInfo, {
@@ -90,10 +91,15 @@ export async function generarPdfEstadoCuenta(
     createElement(TablaResumen, {
       filas: [
         { label: 'Saldo anterior', valor: formatoPeso(estado.saldoAnterior) },
-        { label: 'Cargos del mes', valor: formatoPeso(estado.cargosDelMes) },
+        { label: 'Cargos', valor: formatoPeso(estado.cargosDelMes) },
         {
-          label: 'Pagos y Anticipos Aplicados',
-          valor: `-${formatoPeso(estado.pagosRecibidos)}`,
+          label: 'Pagos',
+          valor: `-${formatoPeso(estado.pagosDelMes)}`,
+          color: VERDE_OK,
+        },
+        {
+          label: 'Anticipos Aplicados',
+          valor: `-${formatoPeso(estado.anticiposAplicados)}`,
           color: VERDE_OK,
         },
         {
@@ -103,7 +109,7 @@ export async function generarPdfEstadoCuenta(
         },
         {
           label: 'Saldo actual',
-          valor: formatoPeso(estado.saldoActual),
+          valor: formatoSaldoConFavor(estado.saldoActual),
           destacada: true,
         },
         {
