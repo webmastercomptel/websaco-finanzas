@@ -1338,6 +1338,37 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(actualizacion.$set.status).toBe('liquidado');
   });
 
+  it('solo trae inmuebles activos para el preview — un inmueble marcado inactivo no entra a un ciclo nuevo', async () => {
+    // `Inmueble.estado` (product decision, 2026-09-21): un inmueble inactivo
+    // nunca debe generar Factura en un ciclo nuevo — la consulta que arma
+    // el preview es la única elegibilidad real, así que basta con
+    // verificar que siempre filtra por `status: 'active'`.
+    const m = construirModelos({});
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+
+    await service.liquidar('lote-1');
+
+    const llamadas = (m.inmuebles.find as jest.Mock).mock.calls as unknown[][];
+    const filtro = llamadas[0]?.[0] as Record<string, unknown> | undefined;
+    expect(filtro?.status).toBe('active');
+  });
+
   it('congela accountingTaxAccount desde cuentaImpuestoId del concepto', async () => {
     const m = construirModelos({
       conceptos: [

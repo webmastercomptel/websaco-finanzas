@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
 import type { CopropiedadDocument } from '../../../database/schemas/copropiedades/copropiedad.schema';
-import { logoBytesWebsaco } from './logo-websaco';
+import { logoDataUriWebsaco } from './logo-websaco';
 
 const styles = StyleSheet.create({
   banner: {
@@ -104,11 +104,11 @@ const styles = StyleSheet.create({
  * `EncabezadoDocumento` caller) still defaults to none — no product
  * decision has opted it in, so don't assume that's an oversight.
  *
- * `mostrarNitDebajoTitulo` prints the copropiedad's own NIT (with
- * verification digit) directly under the title, on the same 5 documents
- * EXCEPT Factura — Factura already shows NIT in the left-hand contact
- * block just to its left, so repeating it under the title would be pure
- * duplication there.
+ * `soloNit` drops Dirección/Celular/Email from the left-hand contact block,
+ * leaving just NIT — the 5 documents this shape serves (Recibo, Nota
+ * Crédito/Débito/Anticipo/Contable, all through `contenidoRecibo`) print a
+ * short block by design (product decision, 2026-09-21); Factura and the
+ * reports keep the full block.
  *
  * `EncabezadoInforme` is this same letterhead's horizontal/landscape
  * counterpart (every "informe" — Cartera por Conceptos, Vencimientos,
@@ -133,10 +133,10 @@ export function EncabezadoDocumento(props: {
    *  copropiedad's own name — see this component's own docblock for which
    *  callers opt in. */
   mostrarLogo?: boolean;
-  /** Prints "NIT: <taxId>-<dígito>" directly under the title — see this
-   *  component's own docblock for which callers opt in (and why Factura
-   *  doesn't). */
-  mostrarNitDebajoTitulo?: boolean;
+  /** Drops Dirección/Celular/Email from the left-hand contact block,
+   *  leaving just NIT — see this component's own docblock for which
+   *  callers opt in. */
+  soloNit?: boolean;
 }): ReactElement {
   const {
     copropiedad,
@@ -144,7 +144,7 @@ export function EncabezadoDocumento(props: {
     subtitulo,
     referenciaPago,
     mostrarLogo,
-    mostrarNitDebajoTitulo,
+    soloNit,
   } = props;
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
@@ -174,7 +174,7 @@ export function EncabezadoDocumento(props: {
         mostrarLogo
           ? createElement(Image, {
               style: styles.logoBanner,
-              src: logoBytesWebsaco(),
+              src: logoDataUriWebsaco(),
             })
           : null,
       ),
@@ -186,17 +186,14 @@ export function EncabezadoDocumento(props: {
         View,
         { style: styles.datos },
         filaDato('NIT', nit),
-        filaDato('Dirección', direccion || '—'),
-        filaDato('Celular', copropiedad.phone ?? '—'),
-        filaDato('Email', copropiedad.email ?? '—'),
+        soloNit ? null : filaDato('Dirección', direccion || '—'),
+        soloNit ? null : filaDato('Celular', copropiedad.phone ?? '—'),
+        soloNit ? null : filaDato('Email', copropiedad.email ?? '—'),
       ),
       createElement(
         View,
         { style: styles.derecha },
         createElement(Text, { style: styles.titulo }, titulo),
-        mostrarNitDebajoTitulo
-          ? createElement(Text, { style: styles.subtitulo }, `NIT: ${nit}`)
-          : null,
         subtitulo
           ? createElement(Text, { style: styles.subtitulo }, subtitulo)
           : null,

@@ -79,6 +79,16 @@ export interface Inmueble {
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
   estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
+  /**
+   * Whether this unit is billed going forward — `LotesFacturacionService`
+   * only ever queries `inactivo` units OUT of a new cycle's preview
+   * (product decision, 2026-09-21); a unit already billed keeps every past
+   * Factura untouched, same as every other retire-not-delete state in this
+   * domain. Not the same axis as `estadoCartera` (collections follow-up on
+   * an ACTIVE unit) or `SaldoInicial`/delete (this unit never existed in
+   * this system at all).
+   */
+  estado: 'activo' | 'inactivo';
   /** Free-text notes — see the note on `Inmueble.notes` in the schema. */
   observaciones: string | null;
   /** ISO 8601 — when this unit's record was last saved. */
@@ -1408,6 +1418,9 @@ export interface RespuestaConciliacionCartera {
   saldoCarteraReal: number;
   diferencia: number;
   anticiposPendientes: AnticipoPendienteConciliacion[];
+  /** Sum of `anticiposPendientes[].valor` — how much of `saldoCarteraReal`
+   *  sits in unapplied advances as of `periodEnd`, at a glance. */
+  totalAnticiposPendientes: number;
 }
 
 /* ── Identidad ─────────────────────────────────────────────────── */

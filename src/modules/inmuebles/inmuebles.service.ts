@@ -68,12 +68,12 @@ export class InmueblesService {
     query: ListarInmueblesDto,
   ): Promise<Paginado<InmuebleContract>> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    // Every unit in a coproperty is active by definition — there is no
-    // `estado` filter to accept here anymore (see `ActualizarInmuebleDto`'s
-    // own note). `status` stays `active` on every document Mongo actually
-    // holds; this still names it explicitly rather than dropping the clause,
-    // matching `LotesFacturacionService`'s own billing-eligibility query.
-    const filtro: Record<string, unknown> = { coPropertyId, status: 'active' };
+    // Both `activo` and `inactivo` units show here (unlike
+    // `LotesFacturacionService`'s own billing-eligibility query, which
+    // filters to `status: 'active'` and only there — see `Inmueble.estado`'s
+    // own contract note): a unit marked `inactivo` still has to be findable
+    // and editable, if only to flip it back.
+    const filtro: Record<string, unknown> = { coPropertyId };
 
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
@@ -533,6 +533,9 @@ export class InmueblesService {
     set('holderKind', dto.tipoTitular);
     set('holderResides', dto.resideEnElInmueble);
     set('collectionStatus', dto.estadoCartera);
+    if (dto.estado !== undefined) {
+      doc.status = dto.estado === 'inactivo' ? 'inactive' : 'active';
+    }
     set('contactName', dto.contacto);
     set('notes', dto.observaciones);
 

@@ -50,9 +50,10 @@ import type {
  * arrears report is not thereby entitled to rewrite who owns a unit, and
  * granting both with one key is how that happens by accident.
  *
- * Every unit here is active by definition — there is no `estado` to toggle
- * (see `ActualizarInmuebleDto`'s own note). DELETE exists, unlike most of
- * this domain, but only for a unit that has never been billed — see
+ * `estado` (activo/inactivo — see `ActualizarInmuebleDto`'s own note) is a
+ * soft retire that only affects future billing eligibility; both states
+ * still list and edit here. DELETE exists on top of that, unlike most of
+ * this domain, but only for a unit that has never been billed at all — see
  * `InmueblesEliminacionService`, gated by `manage` (stricter than the
  * `update` editing needs), same reasoning as `ConceptosController`'s own
  * DELETE.

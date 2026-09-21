@@ -23,4 +23,12 @@ export class ConsultarCarteraPorConceptosPdfDto {
   @IsOptional()
   @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
   estado?: 'vigente' | 'juridico' | 'dificil_recaudo';
+
+  /** Filters which units feed the report by `Inmueble.estado` (soft
+   *  retire, not `collectionStatus` above) — omitted means every unit,
+   *  active and inactive alike. Shared across all 3 tabs, unlike
+   *  `conceptoId`/`estado`. */
+  @IsOptional()
+  @IsIn(['activo', 'inactivo'])
+  estadoInmueble?: 'activo' | 'inactivo';
 }

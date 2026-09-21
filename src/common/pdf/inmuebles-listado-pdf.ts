@@ -184,10 +184,19 @@ export async function generarPdfListadoInmuebles(
       flexBasis: 0,
       textAlign: i >= primeraColumnaNumerica ? 'right' : 'left',
     };
+    // Titular is set in ALL CAPS (see `nombreListadoDe` in
+    // `inmuebles-reporte.service.ts`) — capitals and tildes render
+    // consistently wider than `truncarTexto`'s 0.52 lowercase-average
+    // heuristic assumes, so its default margin still let some full names
+    // overflow into a second line despite the smaller `FONT_SIZE_TITULAR`.
+    // A wider per-char estimate for this column only truncates a couple of
+    // characters sooner — cheap insurance against a wrap that misaligns
+    // the whole row against its single-line siblings.
+    const anchoPromedioChar = esTitular ? 0.62 : undefined;
     return createElement(
       Text,
       { key: i, style: [base, dimensiones] },
-      truncarTexto(texto, anchos[i] - 6, fontSizeEfectivo),
+      truncarTexto(texto, anchos[i] - 6, fontSizeEfectivo, anchoPromedioChar),
     );
   };
 

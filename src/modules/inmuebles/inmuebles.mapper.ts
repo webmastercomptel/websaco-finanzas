@@ -50,6 +50,7 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   tipoTitular: doc.holderKind,
   resideEnElInmueble: doc.holderResides,
   estadoCartera: doc.collectionStatus,
+  estado: doc.status === 'active' ? 'activo' : 'inactivo',
   observaciones: doc.notes,
   fechaActualizacion: doc.updatedAt.toISOString(),
 });

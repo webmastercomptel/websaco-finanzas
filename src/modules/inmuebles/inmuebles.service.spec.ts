@@ -116,7 +116,11 @@ describe('InmueblesService.findAll', () => {
     expect(modelo.find).not.toHaveBeenCalled();
   });
 
-  it('siempre filtra por status activo: no hay estado que alternar', async () => {
+  it('lista tanto los inmuebles activos como los inactivos — el filtro de status queda solo en la elegibilidad de facturación', async () => {
+    // `Inmueble.estado` (product decision, 2026-09-21) es un retiro suave
+    // que solo afecta la elegibilidad de un futuro ciclo de facturación
+    // (ver `LotesFacturacionService`) — un inmueble inactivo sigue teniendo
+    // que aparecer acá, aunque solo sea para poder reactivarlo.
     const modelo = modeloCon([]);
     const service = new InmueblesService(
       modelo as never,
@@ -130,7 +134,7 @@ describe('InmueblesService.findAll', () => {
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].status).toBe('active');
+    expect(modelo.filtros[0]).not.toHaveProperty('status');
   });
 
   it('escapa la búsqueda para que no actúe como expresión regular', async () => {
@@ -239,7 +243,25 @@ describe('InmueblesService.findAll', () => {
       bloque: 'Torre A',
       coeficiente: 1.8452,
       titular: null,
+      estado: 'activo',
     });
+  });
+
+  it('mapea status "inactive" a estado "inactivo"', async () => {
+    const modelo = modeloCon([documento({ status: 'inactive' })]);
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      {} as never,
+      tenantQueDevuelve(COP),
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const { items } = await service.findAll({});
+
+    expect(items[0].estado).toBe('inactivo');
   });
 
   it('usa 50 por página por defecto', async () => {
