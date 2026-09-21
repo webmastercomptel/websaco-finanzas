@@ -664,6 +664,108 @@ describe('NotasDebitoService', () => {
       expect(resultado.estado).toBe('anulada');
     });
 
+    it('al anular, reversa la cuenta de INGRESO del concepto, no la cuenta compartida de la copropiedad (bug real reportado, 2026-09-21)', async () => {
+      // `debitNotesAccount` y `cuentaCreditoId.code` valen distinto a
+      // propósito — un test que usara el mismo valor para ambos (como el
+      // resto de este archivo) no puede distinguir cuál de las dos se usó
+      // de verdad, y así fue como este bug pasó sin verse.
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'administracion',
+                cuentaCreditoId: { code: '413501-CONCEPTO' },
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '413599-COPROPIEDAD',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string }> }[]],
+      ];
+      const cuentas = documentos[0].entries.map((e) => e.account);
+      expect(cuentas).toContain('413501-CONCEPTO');
+      expect(cuentas).not.toContain('413599-COPROPIEDAD');
+    });
+
+    it('al anular sin cuentaCreditoId configurada en el concepto, cae a SIN-CUENTA-ASIGNADA (no a la cuenta compartida de la copropiedad)', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                coPropertyId: COP,
+                kind: 'administracion',
+                cuentaCreditoId: null,
+              }),
+            ),
+          })),
+        },
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                receivablesAccount: '1305',
+                debitNotesAccount: '413599-COPROPIEDAD',
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ entries: Array<{ account: string }> }[]],
+      ];
+      const cuentas = documentos[0].entries.map((e) => e.account);
+      expect(cuentas).toContain('SIN-CUENTA-ASIGNADA');
+      expect(cuentas).not.toContain('413599-COPROPIEDAD');
+    });
+
     it('al anular, NO mueve cuentas de orden cuando el concepto de la nota no es intereses', async () => {
       const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
       const svc = servicio({
