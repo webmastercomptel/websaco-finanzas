@@ -162,7 +162,7 @@ export class TercerosService {
     const doc = this.aDocumento(dto);
 
     // `name` is recomputed only when a field it depends on is actually
-    // touched — an edit to, say, `email` costs no extra read. When one IS
+    // touched — an edit to, say, `emails` costs no extra read. When one IS
     // touched, the untouched parts still count: patching only `nom2` must
     // not blank out `nom1`/`ape1` from the resulting `name`, so the current
     // document is read and merged in before recomputing.
@@ -239,7 +239,7 @@ export class TercerosService {
     set('identificationType', dto.tipoIdentificacion);
     set('identificationNumber', dto.numeroIdentificacion);
     set('identificationVerificationDigit', dto.digitoVerificacion);
-    set('email', dto.email);
+    set('emails', dto.emails);
     set('phone', dto.telefono);
     set('address', dto.direccion);
     set('city', dto.ciudad);

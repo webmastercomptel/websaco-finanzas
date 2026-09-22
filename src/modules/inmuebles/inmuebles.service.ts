@@ -21,6 +21,7 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
+import { parseEmails } from '../../common/utils/email.utils';
 import { CatalogosService } from '../catalogos/catalogos.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
 import {
@@ -152,7 +153,7 @@ export class InmueblesService {
     const coPropertyId = this.tenant.resolveCoPropertyId();
 
     const yaExiste = await this.inmuebles
-      .exists({ coPropertyId, code: dto.codigo })
+      .exists(this.filtroCodigoDuplicado(coPropertyId, dto.codigo))
       .exec();
     if (yaExiste) {
       // Checked here as well as by the unique index, so the person gets a
@@ -190,7 +191,7 @@ export class InmueblesService {
       // excludes this one, so saving without changing the code is not a clash
       // with itself.
       const chocaConOtro = await this.inmuebles
-        .exists({ coPropertyId, code: dto.codigo, _id: { $ne: id } })
+        .exists(this.filtroCodigoDuplicado(coPropertyId, dto.codigo, id))
         .exec();
       if (chocaConOtro) {
         throw new ConflictException(
@@ -290,7 +291,7 @@ export class InmueblesService {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
           const yaExiste = await this.inmuebles
-            .exists({ coPropertyId, code: fila.codigo })
+            .exists(this.filtroCodigoDuplicado(coPropertyId, fila.codigo))
             .exec();
           if (yaExiste) {
             throw new Error(
@@ -455,7 +456,7 @@ export class InmueblesService {
       identificationType: fila.tipoIdentificacionTitular,
       identificationNumber: fila.numeroIdentificacionTitular,
       identificationVerificationDigit: fila.digitoVerificacionTitular,
-      email: fila.emailTitular,
+      emails: parseEmails(fila.emailTitular),
       phone: fila.telefonoTitular,
       address: fila.direccionTitular,
       city: ciudad,
@@ -498,7 +499,12 @@ export class InmueblesService {
     set('businessName', fila.razonSocialTitular);
     set('identificationType', fila.tipoIdentificacionTitular);
     set('identificationVerificationDigit', fila.digitoVerificacionTitular);
-    set('email', fila.emailTitular);
+    set(
+      'emails',
+      fila.emailTitular === undefined
+        ? undefined
+        : parseEmails(fila.emailTitular),
+    );
     set('phone', fila.telefonoTitular);
     set('address', fila.direccionTitular);
     set('city', ciudad);
@@ -507,6 +513,29 @@ export class InmueblesService {
 
     if (Object.keys(cambios).length === 0) return;
     await this.terceros.updateOne({ _id: id }, { $set: cambios }).exec();
+  }
+
+  /**
+   * The filter behind every "does this code already exist" check — `create`,
+   * `update` and `importar` all use it, manual entry and bulk file alike, so
+   * a unit can never be duplicated by one path when the other would have
+   * caught it.
+   *
+   * Case- and whitespace-insensitive on purpose: the unique index and the
+   * schema's own `trim: true` only protect an EXACT string, so "301",
+   * " 301" and "Torre A-301" vs "torre a-301" used to slip through as
+   * distinct units. Anchored so "301" cannot match "3010".
+   */
+  private filtroCodigoDuplicado(
+    coPropertyId: Types.ObjectId,
+    codigo: string,
+    excluirId?: string,
+  ): Record<string, unknown> {
+    return {
+      coPropertyId,
+      code: { $regex: `^${escapeRegex(codigo.trim())}$`, $options: 'i' },
+      ...(excluirId ? { _id: { $ne: excluirId } } : {}),
+    };
   }
 
   /**

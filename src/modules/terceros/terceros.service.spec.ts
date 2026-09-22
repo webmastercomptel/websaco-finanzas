@@ -18,7 +18,7 @@ const documento = (over: Record<string, unknown> = {}) => ({
   identificationType: 'CC',
   identificationNumber: '123456',
   identificationVerificationDigit: null,
-  email: null,
+  emails: [],
   phone: null,
   address: null,
   city: null,
@@ -339,9 +339,9 @@ describe('TercerosService.update', () => {
       tenantQueDevuelve(COP),
     );
 
-    await service.update('ter-1', { email: 'nuevo@ejemplo.com' });
+    await service.update('ter-1', { emails: ['nuevo@ejemplo.com'] });
 
-    expect(modelo.escrituras[0]).toEqual({ email: 'nuevo@ejemplo.com' });
+    expect(modelo.escrituras[0]).toEqual({ emails: ['nuevo@ejemplo.com'] });
   });
 
   it('no choca consigo mismo al guardar sin cambiar la identificación', async () => {
@@ -368,7 +368,7 @@ describe('TercerosService.update', () => {
     );
 
     await expect(
-      service.update('ter-ajeno', { email: 'x@x.com' }),
+      service.update('ter-ajeno', { emails: ['x@x.com'] }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 

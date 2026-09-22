@@ -20,7 +20,7 @@ export const toTercero = (doc: TerceroDocument): TerceroContract => ({
   tipoIdentificacion: doc.identificationType,
   numeroIdentificacion: doc.identificationNumber,
   digitoVerificacion: doc.identificationVerificationDigit,
-  email: doc.email,
+  emails: doc.emails,
   telefono: doc.phone,
   direccion: doc.address,
   ciudad: doc.city,

@@ -1,7 +1,9 @@
 // src/modules/terceros/dto/guardar-tercero.dto.ts
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsOptional,
   IsString,
@@ -72,10 +74,15 @@ class CamposTerceroDto {
   @MaxLength(2)
   digitoVerificacion?: string;
 
+  /** More than one inbox for the same party — see the note on
+   *  `Tercero.emails`. Each entry is validated as its own address; the
+   *  frontend splits a single comma-separated field into this list. */
   @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  email?: string;
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsEmail({}, { each: true })
+  @MaxLength(120, { each: true })
+  emails?: string[];
 
   @IsOptional()
   @IsString()

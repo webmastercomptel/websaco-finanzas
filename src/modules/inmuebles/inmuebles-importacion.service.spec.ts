@@ -28,10 +28,19 @@ const inmueblesModeloCon = (existentes: string[] = []) => {
   return {
     escrituras,
     exists: jest.fn(({ code }: Filtro) => ({
-      exec: () =>
-        Promise.resolve(
-          existentes.includes(code as string) ? { _id: 'x' } : null,
-        ),
+      exec: () => {
+        // The service now checks case/whitespace-insensitively — see
+        // `InmueblesService.filtroCodigoDuplicado` — so this fake model
+        // matches Mongo's own regex semantics instead of a plain string.
+        const { $regex, $options } = code as {
+          $regex: string;
+          $options?: string;
+        };
+        const patron = new RegExp($regex, $options);
+        return Promise.resolve(
+          existentes.some((c) => patron.test(c)) ? { _id: 'x' } : null,
+        );
+      },
     })),
     create: jest.fn((doc: Record<string, unknown>) => {
       escrituras.push(doc);
@@ -162,6 +171,29 @@ describe('InmueblesService.importar', () => {
     expect(resultado.errores[0].mensaje).toContain('301');
   });
 
+  it('un código que ya existe con otra capitalización o espacios también falla solo', async () => {
+    // Mismo criterio que el manual — ver `filtroCodigoDuplicado`.
+    const inmuebles = inmueblesModeloCon(['Torre A-301']);
+    const terceros = tercerosModeloCon();
+    const eliminacion = eliminacionModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      copropiedadModeloCon() as never,
+      terceros as never,
+      tenant,
+      {} as never,
+      eliminacion as never,
+      progresoModeloCon() as never,
+    );
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: ' torre a-301 ' })],
+    });
+
+    expect(resultado.creados).toBe(0);
+    expect(resultado.errores).toHaveLength(1);
+  });
+
   it('reutiliza un tercero existente por identificación, sin duplicarlo', async () => {
     const inmuebles = inmueblesModeloCon();
     const terceros = tercerosModeloCon({ '123456': 'ter-1' });
@@ -290,6 +322,65 @@ describe('InmueblesService.importar', () => {
       name: 'Ana Pérez',
     });
     expect(inmuebles.escrituras[0]).toMatchObject({ holderId: 'ter-nuevo' });
+  });
+
+  it('parte emailTitular en varias direcciones, separadas por coma o punto y coma', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const eliminacion = eliminacionModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      copropiedadModeloCon() as never,
+      terceros as never,
+      tenant,
+      {} as never,
+      eliminacion as never,
+      progresoModeloCon() as never,
+    );
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana Pérez',
+          emailTitular:
+            ' ana@ejemplo.com , gestor@ejemplo.com;otro@ejemplo.com ',
+        }),
+      ],
+    });
+
+    expect(terceros.creados[0]).toMatchObject({
+      emails: ['ana@ejemplo.com', 'gestor@ejemplo.com', 'otro@ejemplo.com'],
+    });
+  });
+
+  it('un email inválido en emailTitular falla solo esa fila', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const eliminacion = eliminacionModeloCon();
+    const service = new InmueblesService(
+      inmuebles as never,
+      copropiedadModeloCon() as never,
+      terceros as never,
+      tenant,
+      {} as never,
+      eliminacion as never,
+      progresoModeloCon() as never,
+    );
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana Pérez',
+          emailTitular: 'no-es-un-correo',
+        }),
+      ],
+    });
+
+    expect(resultado.creados).toBe(0);
+    expect(resultado.errores[0].mensaje).toContain('no-es-un-correo');
+    expect(terceros.create).not.toHaveBeenCalled();
   });
 
   it('concatena nom1Titular/ape1Titular en name para un titular persona natural', async () => {

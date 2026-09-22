@@ -125,7 +125,12 @@ describe('InmueblesService.create', () => {
 
     await service.create({ codigo: '301' });
 
-    expect(modelo.filtros[0]).toEqual({ coPropertyId: COP, code: '301' });
+    // Case/whitespace-insensitive on purpose — see
+    // `InmueblesService.filtroCodigoDuplicado`.
+    expect(modelo.filtros[0]).toEqual({
+      coPropertyId: COP,
+      code: { $regex: '^301$', $options: 'i' },
+    });
   });
 
   it('falla cerrado sin copropiedad activa, antes de escribir', async () => {
@@ -237,7 +242,32 @@ describe('InmueblesService.update', () => {
 
     expect(modelo.filtros[0]).toEqual({
       coPropertyId: COP,
-      code: '301',
+      code: { $regex: '^301$', $options: 'i' },
+      _id: { $ne: 'inm-1' },
+    });
+  });
+
+  it('rechaza un código que ya existe con otra capitalización o espacios', async () => {
+    // "301", " 301" y "Torre A-301"/"torre a-301" deben tratarse como el
+    // mismo código — ver `filtroCodigoDuplicado`.
+    const modelo = modeloCon({ duplicado: true });
+    const service = new InmueblesService(
+      modelo as never,
+      {} as never,
+      {} as never,
+      tenant,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.update('inm-1', { codigo: ' Torre A-301 ' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(modelo.filtros[0]).toEqual({
+      coPropertyId: COP,
+      code: { $regex: '^Torre A-301$', $options: 'i' },
       _id: { $ne: 'inm-1' },
     });
   });
