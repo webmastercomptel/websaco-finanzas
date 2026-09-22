@@ -99,6 +99,7 @@ import {
 } from '../facturacion/asiento.builder';
 import { toNotaAnticipo, toNotaAnticipoDetalle } from './notas-anticipo.mapper';
 import { construirDatosImpresionNotaAnticipo } from './nota-anticipo-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type {
   NotaAnticipo as NotaAnticipoContract,
   NotaAnticipoDetalle,
@@ -174,6 +175,8 @@ export class NotasAnticipoService {
     @InjectModel(Tercero.name)
     private readonly terceros?: Model<TerceroDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // Backs `datosImpresion`'s own `resolverGenerico('NA', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   private async transaccion<T>(
@@ -510,6 +513,10 @@ export class NotasAnticipoService {
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'NA',
+      coPropertyId,
+    );
     return construirDatosImpresionNotaAnticipo(
       nota,
       aplicacionesActivas,
@@ -523,6 +530,7 @@ export class NotasAnticipoService {
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,
       },
+      tituloDocumento,
     );
   }
 

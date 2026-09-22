@@ -87,6 +87,7 @@ import {
 } from '../facturacion/asiento.builder';
 import { toNotaDebito, toNotaDebitoDetalle } from './notas-debito.mapper';
 import { construirDatosImpresionNotaDebito } from './nota-debito-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type {
   NotaDebito as NotaDebitoContract,
   NotaDebitoDetalle,
@@ -154,6 +155,9 @@ export class NotasDebitoService {
     @InjectModel(Tercero.name)
     private readonly terceros?: Model<TerceroDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — same append discipline as every dependency
+    // above. Backs `datosImpresion`'s own `resolverGenerico('ND', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -407,13 +411,23 @@ export class NotasDebitoService {
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
-    return construirDatosImpresionNotaDebito(nota, copropiedad, coPropertyId, {
-      inmuebles: this.inmuebles,
-      terceros: this.terceros!,
-      conceptos: this.conceptos,
-      asientos: this.asientos,
-      cuentasContables: this.cuentasContables!,
-    });
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'ND',
+      coPropertyId,
+    );
+    return construirDatosImpresionNotaDebito(
+      nota,
+      copropiedad,
+      coPropertyId,
+      {
+        inmuebles: this.inmuebles,
+        terceros: this.terceros!,
+        conceptos: this.conceptos,
+        asientos: this.asientos,
+        cuentasContables: this.cuentasContables!,
+      },
+      tituloDocumento,
+    );
   }
 
   /**

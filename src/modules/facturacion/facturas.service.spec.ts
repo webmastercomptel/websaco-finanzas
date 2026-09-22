@@ -461,3 +461,297 @@ describe('FacturasService.datosVisualesPdf', () => {
     expect(recibos.find).not.toHaveBeenCalled();
   });
 });
+
+/** Minimal `Copropiedad` fixture — every field `emisorDe`/
+ *  `datosPlantillaPreliminar` reads. */
+const copropiedadBase = (over: Record<string, unknown> = {}) => ({
+  name: 'Conjunto Residencial Alcázares',
+  taxId: '900123456',
+  taxIdVerificationDigit: '7',
+  address: 'Calle 1 # 2-3',
+  city: 'Bogotá',
+  phone: '6011234567',
+  email: 'admin@alcazares.com',
+  showLogoOnDocuments: true,
+  billingNotes: null,
+  discountAppliesWithLateFee: false,
+  ...over,
+});
+
+/** A `FacturaLean`-shaped fixture — the plain fields `datosPlantilla` reads
+ *  off an already-issued invoice. */
+const facturaParaPlantilla = (over: Record<string, unknown> = {}) => ({
+  inmuebleId: new Types.ObjectId(),
+  coPropertyId: COP,
+  resolucionId: null,
+  prefix: 'CONJ-2026',
+  discountAmount: 0,
+  discountDeadline: null,
+  holder: {
+    name: 'Ana Pérez',
+    identificationType: 'CC',
+    identificationNumber: '123456',
+    identificationVerificationDigit: null,
+    address: null,
+    city: null,
+    email: null,
+  },
+  lines: [
+    {
+      conceptoId: { toString: () => 'con-1' },
+      conceptName: 'Administración',
+      conceptKind: 'administracion',
+      baseAmount: 520000,
+      taxRate: 0,
+      taxAmount: 0,
+      totalAmount: 520000,
+      balanceBefore: 0,
+      balanceAfter: 520000,
+    },
+  ],
+  ...over,
+});
+
+/** Builds a `FacturasService` wired with a mocked `TituloDocumentoService` —
+ *  the only extra dependency `datosPlantilla` needs beyond `construirServicio`
+ *  above. Every other model is an empty stub, same convention. */
+const construirServicioConTitulo = (
+  resolverFacturaResultado: {
+    titulo: string;
+    resolucion: unknown;
+  } = { titulo: 'Cobro Expensas Comunes', resolucion: null },
+) => {
+  const tituloDocumento = {
+    resolverGenerico: jest.fn(),
+    resolverFactura: jest.fn(() => Promise.resolve(resolverFacturaResultado)),
+  };
+  const service = new FacturasService(
+    modeloCon([]) as never,
+    modeloSaldoTotalDocumento([]) as never,
+    modeloCarteraPorDocumento([]) as never,
+    modeloVacio() as never,
+    modeloVacio() as never,
+    modeloVacio() as never,
+    tenantQueDevuelve(COP),
+    tituloDocumento as never,
+  );
+  return { service, tituloDocumento };
+};
+
+describe('FacturasService.datosPlantilla', () => {
+  it('llama a TituloDocumentoService.resolverFactura con el coPropertyId, el resolucionId y el prefix PROPIOS de la factura', async () => {
+    const { service, tituloDocumento } = construirServicioConTitulo();
+    const resolucionId = new Types.ObjectId();
+    const factura = facturaParaPlantilla({
+      resolucionId,
+      prefix: 'CONJ-2026-1041',
+    });
+
+    await service.datosPlantilla(factura as never, copropiedadBase() as never, {
+      referencia: null,
+      totalAnticipos: 0,
+    });
+
+    expect(tituloDocumento.resolverFactura).toHaveBeenCalledWith(
+      COP,
+      resolucionId,
+      'CONJ-2026-1041',
+    );
+  });
+
+  it('arma emisor directamente desde la copropiedad recibida, sin ninguna query adicional', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ name: 'Conjunto X', taxId: '900999999' }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.emisor).toEqual({
+      nombre: 'Conjunto X',
+      nit: '900999999',
+      digitoVerificacion: '7',
+      direccion: 'Calle 1 # 2-3',
+      ciudad: 'Bogotá',
+      telefono: '6011234567',
+      email: 'admin@alcazares.com',
+      mostrarLogo: true,
+    });
+  });
+
+  it('copia titular desde titularDe(factura.holder) — duplicado a propósito junto al Factura.titular general', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.titular).toMatchObject({
+      nombre: 'Ana Pérez',
+      numeroIdentificacion: '123456',
+    });
+  });
+
+  it('tieneDescuentoProntoPago es true exactamente cuando totalConDescuento no es null', async () => {
+    const { service } = construirServicioConTitulo();
+    const facturaConDescuento = facturaParaPlantilla({
+      discountAmount: 20000,
+      discountDeadline: new Date('2026-09-30'),
+    });
+
+    const datos = await service.datosPlantilla(
+      facturaConDescuento as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.tieneDescuentoProntoPago).toBe(true);
+    expect(datos.totalConDescuento).not.toBeNull();
+  });
+
+  it('tieneDescuentoProntoPago es false y totalConDescuento null cuando la factura no ofrece descuento', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.tieneDescuentoProntoPago).toBe(false);
+    expect(datos.totalConDescuento).toBeNull();
+  });
+
+  it('usa el título y la resolución exactos que devuelve TituloDocumentoService.resolverFactura', async () => {
+    const resolucionResuelta = {
+      numero: 'RES-2026-001',
+      nombreVisible: null,
+      prefijo: 'CONJ-2026',
+      rangoDesde: 1,
+      rangoHasta: 5000,
+      vigenteDesde: '2026-01-01T00:00:00.000Z',
+      vigenteHasta: null,
+    };
+    const { service } = construirServicioConTitulo({
+      titulo: 'Cobro Expensas Comunes',
+      resolucion: resolucionResuelta,
+    });
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.tituloDocumento).toBe('Cobro Expensas Comunes');
+    expect(datos.resolucion).toEqual(resolucionResuelta);
+  });
+});
+
+describe('FacturasService.datosPlantillaPreliminar', () => {
+  const loteBase = (over: Record<string, unknown> = {}) => ({
+    earlyPaymentDiscount: 0,
+    earlyPaymentDiscountFixedValue: 0,
+    discountDeadline: new Date('2026-09-30'),
+    ...over,
+  });
+
+  const preliminarBase = (over: Record<string, unknown> = {}) => ({
+    holder: {
+      name: 'Carlos Ruiz',
+      identificationType: 'CC',
+      identificationNumber: '987654',
+      identificationVerificationDigit: null,
+      address: null,
+      city: null,
+      email: null,
+    },
+    lines: [
+      {
+        conceptoId: { toString: () => 'con-1' },
+        conceptName: 'Administración',
+        conceptKind: 'administracion',
+        baseAmount: 500000,
+        taxRate: 0,
+        taxAmount: 0,
+        totalAmount: 500000,
+        balanceBefore: 0,
+        balanceAfter: 500000,
+      },
+    ],
+    ...over,
+  });
+
+  it('usa literalmente "Prefactura" como tituloDocumento, y NUNCA llama a TituloDocumentoService', () => {
+    const { service, tituloDocumento } = construirServicioConTitulo();
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminarBase() as never,
+      loteBase() as never,
+      copropiedadBase() as never,
+    );
+
+    expect(datos.tituloDocumento).toBe('Prefactura');
+    expect(tituloDocumento.resolverFactura).not.toHaveBeenCalled();
+    expect(tituloDocumento.resolverGenerico).not.toHaveBeenCalled();
+  });
+
+  it('resolucion siempre es null en una Prefactura — no hay nada frozen que mostrar todavía', () => {
+    const { service } = construirServicioConTitulo();
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminarBase() as never,
+      loteBase() as never,
+      copropiedadBase() as never,
+    );
+
+    expect(datos.resolucion).toBeNull();
+  });
+
+  it('arma emisor y titular igual que datosPlantilla', () => {
+    const { service } = construirServicioConTitulo();
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminarBase() as never,
+      loteBase() as never,
+      copropiedadBase({ name: 'Conjunto Y' }) as never,
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Y');
+    expect(datos.titular).toMatchObject({
+      nombre: 'Carlos Ruiz',
+      numeroIdentificacion: '987654',
+    });
+  });
+});
+
+describe('FacturasService.guardarPrintSnapshot', () => {
+  it('hace un $set de printSnapshot sobre la factura indicada, con exactamente el datos recibido', async () => {
+    const facturaId = new Types.ObjectId();
+    const updateOne = jest.fn(() => ({ exec: () => Promise.resolve({}) }));
+    const service = new FacturasService(
+      { updateOne } as never,
+      modeloSaldoTotalDocumento([]) as never,
+      modeloCarteraPorDocumento([]) as never,
+      modeloVacio() as never,
+      modeloVacio() as never,
+      modeloVacio() as never,
+      tenantQueDevuelve(COP),
+    );
+
+    const datos = { tituloDocumento: 'Cobro Expensas Comunes' };
+    await service.guardarPrintSnapshot(facturaId, datos as never);
+
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: facturaId },
+      { $set: { printSnapshot: datos } },
+    );
+  });
+});

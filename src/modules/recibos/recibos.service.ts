@@ -90,6 +90,7 @@ import {
 } from '../facturacion/asiento.builder';
 import { toRecibo, toReciboDetalle } from './recibos.mapper';
 import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 import type {
   Recibo as ReciboContract,
@@ -266,6 +267,9 @@ export class RecibosService {
     // requests always get it from Nest's own DI.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // APPENDED LAST, optional — same append discipline as every dependency
+    // above. Backs `datosImpresion`'s own `resolverGenerico('RC', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /**
@@ -1308,6 +1312,10 @@ export class RecibosService {
     // other trailing-optional dependency on this class (see the canonical
     // constructor docblock) — left optional only for the many existing
     // positional-mock tests that never exercise this path.
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'RC',
+      coPropertyId,
+    );
     return construirDatosImpresionRecibo(
       recibo,
       aplicacionesActivas,
@@ -1320,6 +1328,7 @@ export class RecibosService {
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,
       },
+      tituloDocumento,
     );
   }
 

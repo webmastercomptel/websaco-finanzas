@@ -96,6 +96,7 @@ import {
   construirDatosImpresionNotaCredito,
   type ModelosDatosImpresionNotaCredito,
 } from './nota-credito-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import {
   toNotaCredito,
   toNotaCreditoDetalle,
@@ -217,6 +218,8 @@ export class NotasCreditoService {
     // APPENDED LAST, optional — see `RecibosService`'s own identical append.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // Backs `datosImpresion`'s own `resolverGenerico('NC', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape.
@@ -915,11 +918,10 @@ export class NotasCreditoService {
     const facturaFinal = await this.facturas
       .findOne({ _id: facturaId, coPropertyId })
       .exec();
-    // `presentacion` not resolved here (mechanical `null` to match
-    // `toFactura`'s signature) — same as `saldoPendiente: 0` above, this
-    // return value is just the just-voided Factura's own updated status
-    // fields, not a place that reads its generated PDF pointer.
-    return toFactura(facturaFinal!, 0, new Map(), null);
+    // `saldoPendiente: 0` and an empty `saldoPorConcepto` map: this return
+    // value is just the just-voided Factura's own updated status fields, not
+    // a place that reads its live cartera balance.
+    return toFactura(facturaFinal!, 0, new Map());
   }
 
   /**
@@ -1080,6 +1082,10 @@ export class NotasCreditoService {
       terceros: this.terceros!,
       cuentasContables: this.cuentasContables!,
     };
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'NC',
+      coPropertyId,
+    );
     return construirDatosImpresionNotaCredito(
       nota,
       montoSinAplicar,
@@ -1087,6 +1093,7 @@ export class NotasCreditoService {
       copropiedad,
       coPropertyId,
       datosImpresion,
+      tituloDocumento,
     );
   }
 

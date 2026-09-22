@@ -26,6 +26,7 @@ import { PeriodoService } from './contabilidad/periodo.service';
 import { PresentacionDocumentoService } from './documentos/presentacion-documento.service';
 import { PlantillaDocumentoService } from './documentos/plantilla-documento.service';
 import { GeneracionDocumentoService } from './documentos/generacion-documento.service';
+import { TituloDocumentoService } from './documentos/titulo-documento.service';
 import { gcsBucketProvider } from './storage/gcs-bucket.provider';
 import { GCS_BUCKET } from './storage/storage.constants';
 import { DocumentoStorageService } from './storage/documento-storage.service';
@@ -56,6 +57,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     PresentacionDocumentoService,
     PlantillaDocumentoService,
     GeneracionDocumentoService,
+    TituloDocumentoService,
     gcsBucketProvider,
     DocumentoStorageService,
   ],
@@ -74,6 +76,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     PresentacionDocumentoService,
     PlantillaDocumentoService,
     GeneracionDocumentoService,
+    TituloDocumentoService,
     GCS_BUCKET,
     DocumentoStorageService,
   ],

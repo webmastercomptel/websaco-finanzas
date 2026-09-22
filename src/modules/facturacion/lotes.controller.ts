@@ -344,6 +344,20 @@ export class LotesController {
    * `GeneracionDocumentoService.confirmar` every other document type already
    * uses. There is nothing "best-effort per row" about confirming one file
    * any more — see `SolicitudGeneracionFacturaLote`.
+   *
+   * Right after confirming, freezes each invoice's own `datos` onto its
+   * `printSnapshot` (see that field's own docblock,
+   * `factura.schema.ts`) — the actual fix for `datosPlantilla`'s live-read
+   * immutability gap. Recomputed here rather than stashed from
+   * `solicitarGeneracionFacturas`: confirm only ever runs once, right after
+   * a successful upload, so recomputing `datos` fresh costs nothing extra
+   * and needs no intermediate state threaded between the two calls (a
+   * request/response pair that can be minutes apart, with nothing durable in
+   * between to stash into). A failure resolving the copropiedad or building
+   * a snapshot never rolls back the confirmation itself — the PDF is already
+   * safely uploaded and confirmed either way; only the immutability
+   * safeguard would be missing for this run; the next generation still
+   * writes it.
    */
   @Post(':id/facturas/confirmar-generacion')
   @CheckAbility({ action: 'create', subject: 'Factura' })
@@ -351,8 +365,33 @@ export class LotesController {
     @Param('id') id: string,
     @Body() dto: ConfirmarGeneracionDocumentoDto,
   ): Promise<{ objectPath: string }> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
-    return this.generacion.confirmar('FV', lote, dto.objectPath);
+    const resultado = await this.generacion.confirmar(
+      'FV',
+      lote,
+      dto.objectPath,
+    );
+
+    const facturasLean = await this.facturas.findAllRawPorLote(id);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (facturasLean.length > 0 && copropiedad) {
+      const datosVisualesPorInmueble = await this.facturas.datosVisualesPdf(
+        facturasLean.map((f) => f.inmuebleId),
+      );
+      await Promise.all(
+        facturasLean.map(async (factura) => {
+          const datos = await this.facturas.datosPlantilla(
+            factura,
+            copropiedad,
+            datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
+          );
+          await this.facturas.guardarPrintSnapshot(factura._id, datos);
+        }),
+      );
+    }
+
+    return resultado;
   }
 
   /**

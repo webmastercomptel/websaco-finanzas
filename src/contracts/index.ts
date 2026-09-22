@@ -269,6 +269,39 @@ export interface CargoPlantillaFactura {
   nuevoSaldo: Monto;
 }
 
+/** The issuing coproperty's own header data, as a Factura/Prefactura's
+ *  pdfmake template prints it — built directly from the `Copropiedad` the
+ *  caller already has in hand, no extra query. Genuinely live/mutable (a
+ *  coproperty can rename itself, change its NIT, or toggle its logo at any
+ *  time) — exactly why `Factura.printSnapshot` exists: without it, viewing
+ *  an old invoice today would show today's emisor data, not what was true
+ *  when it was actually issued. */
+export interface EmisorPlantillaFactura {
+  nombre: string;
+  nit: string | null;
+  digitoVerificacion: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  telefono: string | null;
+  email: string | null;
+  mostrarLogo: boolean;
+}
+
+/** A Factura's own frozen DIAN resolution, resolved for printing — `null`
+ *  when the invoice was numbered through a plain consecutivo instead (see
+ *  `Factura.resolucionId`). `prefijo` here is always the INVOICE's own
+ *  frozen prefix, never the resolución's own (possibly since-edited) one —
+ *  see `TituloDocumentoService.resolverFactura`'s own docblock. */
+export interface ResolucionPlantillaFactura {
+  numero: string;
+  nombreVisible: string | null;
+  prefijo: string;
+  rangoDesde: number;
+  rangoHasta: number;
+  vigenteDesde: IsoDate;
+  vigenteHasta: IsoDate | null;
+}
+
 /**
  * Computed totals a Factura/Prefactura's pdfmake template needs beyond its
  * own frozen/previewed fields — relocated from the old react-pdf
@@ -277,6 +310,14 @@ export interface CargoPlantillaFactura {
  * response as `solicitar-generacion` — never re-derived on every `findOne`.
  * For a Prefactura (no issuance moment to freeze at) it is computed fresh on
  * every read, same as the rest of `DocumentoPrefactura`.
+ *
+ * `tituloDocumento`/`emisor`/`resolucion`/`titular` close a real
+ * immutability gap: a live `datosPlantilla` recomputation would otherwise
+ * show TODAY's coproperty data, TODAY's "Tabla de Documentos" title and
+ * whichever resolución is active TODAY, even for an invoice issued months
+ * ago under different values. `Factura.printSnapshot` freezes exactly this
+ * shape at PDF-confirmation time so a re-read of an old invoice never drifts
+ * — see `FacturasController.obtenerDocumento`.
  */
 export interface DatosPlantillaFactura {
   cargos: CargoPlantillaFactura[];
@@ -292,6 +333,23 @@ export interface DatosPlantillaFactura {
   referenciaPago: string | null;
   totalAnticipos: Monto;
   notas: string | null;
+  /** "Factura de Venta" (from "Tabla de Documentos"), or literally
+   *  "Prefactura" for a not-yet-issued preview — see
+   *  `TituloDocumentoService`. */
+  tituloDocumento: string;
+  emisor: EmisorPlantillaFactura;
+  /** `null` on a Prefactura (no issuance moment, nothing frozen yet to
+   *  show) or when the invoice was numbered through a plain consecutivo. */
+  resolucion: ResolucionPlantillaFactura | null;
+  /** Equivalent to `totalConDescuento !== null` — a convenience flag so the
+   *  template doesn't have to test the other field for `null` itself. */
+  tieneDescuentoProntoPago: boolean;
+  /** Convenience copy of the Factura's own `titular` (see `Factura.titular`)
+   *  — duplicated here ON PURPOSE so the frontend can build a print page
+   *  from `datos` alone, without also fetching the parent `Factura`. The
+   *  general contract's own `titular` is unaffected and stays the
+   *  authoritative one everywhere else. */
+  titular: TitularFactura | null;
 }
 
 /** A sales invoice ("FV"), only ever created already numbered. */

@@ -85,6 +85,7 @@ describe('construirDatosImpresionNotaContable', () => {
       copropiedadBase(),
       COP,
       modelos() as never,
+      'Nota Contable',
     );
 
     expect(datos.tituloDocumento).toBe('Nota Contable');
@@ -99,6 +100,7 @@ describe('construirDatosImpresionNotaContable', () => {
       copropiedadBase(),
       COP,
       modelos() as never,
+      'Nota Contable',
     );
 
     expect(datos.inmuebleCodigo).toBe('301');
@@ -112,6 +114,7 @@ describe('construirDatosImpresionNotaContable', () => {
       copropiedadBase(),
       COP,
       m as never,
+      'Nota Contable',
     );
 
     expect(datos.titularNombre).toBe('—');
@@ -124,6 +127,7 @@ describe('construirDatosImpresionNotaContable', () => {
       copropiedadBase(),
       COP,
       modelos({ origenCuenta: '413501', destinoCuenta: '413502' }) as never,
+      'Nota Contable',
     );
 
     expect(datos.lineas).toEqual([
@@ -150,6 +154,7 @@ describe('construirDatosImpresionNotaContable', () => {
         destinoCuenta: '413502',
         cuentas: [{ code: '413501', name: 'Ingresos TV' }],
       }) as never,
+      'Nota Contable',
     );
 
     expect(datos.lineas[0].cuentaNombre).toBe('Ingresos TV');
@@ -162,6 +167,7 @@ describe('construirDatosImpresionNotaContable', () => {
       copropiedadBase(),
       COP,
       modelos({ origenCuenta: null, destinoCuenta: '413502' }) as never,
+      'Nota Contable',
     );
 
     expect(datos.lineas[0].cuentaCodigo).toBe('SIN-CUENTA-ASIGNADA');

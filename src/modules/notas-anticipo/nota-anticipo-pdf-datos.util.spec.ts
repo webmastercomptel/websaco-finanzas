@@ -71,6 +71,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Anticipo',
     );
 
     expect(datos.tituloDocumento).toBe('Nota de Anticipo');
@@ -88,6 +89,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Anticipo',
     );
 
     expect(datos.concepto).toBe('Aplicación de anticipo — recibo RC-0009');
@@ -100,6 +102,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Anticipo',
     );
 
     const filasDebito = datos.lineas.filter((l) => l.debito > 0);
@@ -166,6 +169,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Nota de Anticipo',
     );
 
     expect(datos.lineas).toEqual([
@@ -222,6 +226,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Nota de Anticipo',
     );
 
     const filaCredito = datos.lineas.find((l) => l.tipoDocumento === 'ND');
@@ -243,6 +248,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Anticipo',
     );
 
     const filaAplicacion = datos.lineas.find((l) => l.tipoDocumento === 'FV');
@@ -260,6 +266,7 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Nota de Anticipo',
     );
 
     expect(modelos.terceros.findOne).not.toHaveBeenCalled();

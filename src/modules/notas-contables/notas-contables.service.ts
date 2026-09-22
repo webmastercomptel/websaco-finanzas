@@ -57,6 +57,7 @@ import {
 } from '../facturacion/asiento.builder';
 import { toNotaContable, fechaNotaContable } from './notas-contables.mapper';
 import { construirDatosImpresionNotaContable } from './nota-contable-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type {
   NotaContable as NotaContableContract,
   Paginado,
@@ -107,6 +108,9 @@ export class NotasContablesService {
     @InjectModel(Tercero.name)
     private readonly terceros?: Model<TerceroDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — same append discipline as every dependency
+    // above. Backs `datosImpresion`'s own `resolverGenerico('NT', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
@@ -346,6 +350,10 @@ export class NotasContablesService {
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'NT',
+      coPropertyId,
+    );
     return construirDatosImpresionNotaContable(
       nota,
       copropiedad,
@@ -356,6 +364,7 @@ export class NotasContablesService {
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,
       },
+      tituloDocumento,
     );
   }
 

@@ -26,13 +26,17 @@ import {
   SaldoDocumentoOrigenDocument,
 } from '../../database/schemas/recibos/saldo-documento-origen.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type {
   Factura as FacturaContract,
   DatosPlantillaFactura,
+  EmisorPlantillaFactura,
+  ResolucionPlantillaFactura,
+  TitularFactura,
   Paginado,
 } from '../../contracts';
-import { toFactura } from './facturas.mapper';
+import { toFactura, titularDe } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -60,6 +64,13 @@ export class FacturasService {
     @InjectModel(SaldoDocumentoOrigen.name)
     private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     private readonly tenant: TenantContextService,
+    // APPENDED LAST, optional — same convention every sibling document
+    // service already uses for a dependency only some methods need (see
+    // e.g. `RecibosService`'s own `terceros?`/`presentacionDocumento?`): so
+    // the many existing hand-rolled-mock tests that stop their positional
+    // argument list before this one keep compiling. Backs `datosPlantilla`'s
+    // own `resolverFactura` call; real requests always get it from Nest's DI.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** Batch-resolves each document's own live per-concepto breakdown from
@@ -291,6 +302,10 @@ export class FacturasService {
     totalAnticipos: number,
     referenciaPago: string | null,
     notas: string | null,
+    tituloDocumento: string,
+    emisor: EmisorPlantillaFactura,
+    resolucion: ResolucionPlantillaFactura | null,
+    titular: TitularFactura | null,
   ): DatosPlantillaFactura {
     const totalSaldoAnterior = lines.reduce(
       (acc, l) => acc + l.balanceBefore,
@@ -331,6 +346,29 @@ export class FacturasService {
       referenciaPago,
       totalAnticipos,
       notas,
+      tituloDocumento,
+      emisor,
+      resolucion,
+      tieneDescuentoProntoPago: totalConDescuento !== null,
+      titular,
+    };
+  }
+
+  /** The issuing coproperty's own header data, exactly as the Factura/
+   *  Prefactura pdfmake template needs it — see
+   *  `EmisorPlantillaFactura`'s own docblock (contracts/index.ts) for why
+   *  this is genuinely live and must be frozen via `printSnapshot`, not
+   *  re-derived from `coPropertyId` on every read. */
+  private emisorDe(copropiedad: CopropiedadDocument): EmisorPlantillaFactura {
+    return {
+      nombre: copropiedad.name,
+      nit: copropiedad.taxId,
+      digitoVerificacion: copropiedad.taxIdVerificationDigit,
+      direccion: copropiedad.address,
+      ciudad: copropiedad.city,
+      telefono: copropiedad.phone,
+      email: copropiedad.email,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
     };
   }
 
@@ -362,13 +400,40 @@ export class FacturasService {
       factura.discountAmount > 0 && factura.discountDeadline
         ? { monto: factura.discountAmount }
         : null;
+    // Non-null: always injected in the real app, same trailing-optional
+    // convention as every sibling document service (see the constructor's
+    // own comment) — left optional only for existing positional-mock tests
+    // that never exercise this path.
+    const { titulo, resolucion } = await this.tituloDocumento!.resolverFactura(
+      factura.coPropertyId,
+      factura.resolucionId,
+      factura.prefix,
+    );
     return this.construirDatosPlantilla(
       factura.lines,
       descuento,
       visuales?.totalAnticipos ?? 0,
       visuales?.referencia ?? null,
       copropiedad.billingNotes?.trim() || null,
+      titulo,
+      this.emisorDe(copropiedad),
+      resolucion,
+      titularDe(factura.holder),
     );
+  }
+
+  /** Freezes `datos` onto this invoice's own `printSnapshot` — called once,
+   *  right after its lote's combined PDF is confirmed uploaded (see
+   *  `LotesController.confirmarGeneracionFacturas`). See
+   *  `Factura.printSnapshot`'s own docblock for the immutability gap this
+   *  closes. */
+  async guardarPrintSnapshot(
+    facturaId: Types.ObjectId,
+    datos: DatosPlantillaFactura,
+  ): Promise<void> {
+    await this.facturas
+      .updateOne({ _id: facturaId }, { $set: { printSnapshot: datos } })
+      .exec();
   }
 
   /**
@@ -399,6 +464,15 @@ export class FacturasService {
       datosVisuales?.totalAnticipos ?? 0,
       datosVisuales?.referencia ?? null,
       copropiedad.billingNotes?.trim() || null,
+      // Never resolved via TituloDocumentoService: a Prefactura is a
+      // preview, not a real document type — it has no row of its own under
+      // "Tabla de Documentos", literally "Prefactura" always.
+      'Prefactura',
+      this.emisorDe(copropiedad),
+      // No frozen resolución to show yet — a Prefactura is unnumbered, so
+      // there is nothing to resolve (see this method's own docblock).
+      null,
+      titularDe(preliminar.holder),
     );
   }
 }
