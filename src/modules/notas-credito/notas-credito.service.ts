@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -120,6 +119,7 @@ import type { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import type { AnularFacturaDto } from './dto/anular-factura.dto';
 import type { AplicacionSolicitadaDto } from '../recibos/dto/aplicacion-solicitada.dto';
 import type { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 
 /** One credit-side line `aplicarManual`/`aplicarFifo` produce, per concepto
  *  of the Factura they just settled — `cuenta: null` means the line's
@@ -173,8 +173,6 @@ type LineaAncla = {
  */
 @Injectable()
 export class NotasCreditoService {
-  private readonly logger = new Logger(NotasCreditoService.name);
-
   constructor(
     @InjectModel(NotaCredito.name)
     private readonly notasCredito: Model<NotaCreditoDocument>,
@@ -210,9 +208,9 @@ export class NotasCreditoService {
     // `cuentasContables`/`inmuebles` above — so `notas-credito.service.spec.ts`,
     // which constructs this service positionally without these two, keeps
     // compiling. `terceros` backs `construirDatosImpresionNotaCredito`'s own
-    // `modelos.terceros` (the printed titular's name); `presentacionDocumento`
-    // is where `aplicar()` freezes the printable tree — see
-    // `congelarPresentacion`'s own docblock.
+    // `modelos.terceros` (the printed titular's name, via `datosImpresion`);
+    // `presentacionDocumento` backs `findOne`'s `objectPath`/`generatedAt`
+    // lookup.
     @InjectModel(Tercero.name)
     private readonly terceros?: Model<TerceroDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
@@ -394,10 +392,6 @@ export class NotasCreditoService {
     // RecibosService.crear()'s own periodo/lotes checks.
     await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
 
-    // Captured inside the transaction below, read after it commits — see
-    // the `congelarPresentacion` call at the end of this method.
-    let notaCreadaId!: Types.ObjectId;
-
     const etiquetaAncla =
       dto.tipoDocumento === 'FV'
         ? 'La factura'
@@ -572,7 +566,6 @@ export class NotasCreditoService {
         ],
         { session },
       );
-      notaCreadaId = creada._id;
 
       await this.saldoDocumentoOrigen.create(
         [
@@ -801,17 +794,11 @@ export class NotasCreditoService {
       );
     });
 
-    // AFTER the transaction has committed — never inside it (see
-    // `congelarPresentacion`'s own docblock). `crear()` always applies
-    // immediately against its anchor (design §5, this method's own
-    // docblock) — there is no separate `aplicar()` call in the normal
-    // creation flow (`useCrearNotaCredito` on the frontend never follows up
-    // with one), so THIS is the freeze point most Notas Crédito ever get.
-    // `aplicar()` re-freezes later only for the deferred-cruce case (a
-    // leftover `unappliedAmount` applied afterward) — its own call remains,
-    // freezing is idempotent (`PresentacionDocumentoService.guardar` upserts).
-    await this.congelarPresentacion(coPropertyId, notaCreadaId);
-
+    // Presentation generation is no longer triggered here — under the
+    // pdfmake + frontend-render model, `solicitar-generacion`/
+    // `confirmar-generacion` are separate, explicit actions the frontend
+    // calls later (`NotasCreditoController`), never something `crear()`
+    // does internally.
     return resultado;
   }
 
@@ -928,12 +915,10 @@ export class NotasCreditoService {
     const facturaFinal = await this.facturas
       .findOne({ _id: facturaId, coPropertyId })
       .exec();
-    // `documentDefinition` not resolved here (mechanical `null` to match
-    // `toFactura`'s signature after Factura's frozen presentation record
-    // moved to the shared `presentacion_documento` table) — same as
-    // `saldoPendiente: 0` above, this return value is just the just-voided
-    // Factura's own updated status fields, not a place that reads its
-    // printout.
+    // `presentacion` not resolved here (mechanical `null` to match
+    // `toFactura`'s signature) — same as `saldoPendiente: 0` above, this
+    // return value is just the just-voided Factura's own updated status
+    // fields, not a place that reads its generated PDF pointer.
     return toFactura(facturaFinal!, 0, new Map(), null);
   }
 
@@ -1055,134 +1040,54 @@ export class NotasCreditoService {
       };
     });
 
-    // AFTER the transaction has committed — never inside it (see
-    // `congelarPresentacion`'s own docblock). Re-freezes what `crear()`
-    // already froze (idempotent upsert) — needed here too because THIS
-    // deferred-cruce path changes `montoSinAplicar`/the applied breakdown
-    // after that first freeze, which is exactly what the document must show
-    // live.
-    await this.congelarPresentacion(coPropertyId, new Types.ObjectId(id));
-
+    // Presentation generation is no longer re-triggered here either — under
+    // the pdfmake + frontend-render model, nothing re-renders after
+    // issuance (see the plan's own note on why Nota Crédito becomes
+    // symmetric with the other five document types here).
     return resultadoAplicacion;
   }
 
   /**
-   * Freezes this Nota Crédito's printable presentation tree into the shared
-   * `presentacion_documento` table (`tipoDocumento: 'NC'`). Called from
-   * `crear()` (every Nota Crédito applies immediately against its anchor at
-   * creation, design §5 — see `crear()`'s own docblock — so that first
-   * freeze is what makes the document viewable at all) AND from `aplicar()`
-   * (the deferred-cruce case: a leftover `unappliedAmount` applied later
-   * changes `montoSinAplicar`/the applied breakdown, which must re-freeze to
-   * stay accurate). Because a Nota Crédito can be applied more than once
-   * over its life, this method re-freezes — overwrites, via
-   * `PresentacionDocumentoService.guardar`'s own upsert — unconditionally on
-   * every call, never just the first.
-   *
-   * A previous version of this method ran ONLY from `aplicar()`, on the
-   * assumption that the business flow always calls `aplicar()` right after
-   * `crear()` — false: `crear()` applies inline and is never followed by a
-   * separate `aplicar()` call in the normal flow (confirmed against
-   * `useCrearNotaCredito` on the frontend, which never triggers one). That
-   * left `documentDefinition` permanently `null` for every Nota Crédito
-   * that never later went through a deferred-cruce `aplicar()` — including
-   * every one created via `anularFactura()`, which calls `crear()` and
-   * nothing else.
-   *
-   * Runs strictly AFTER the caller's own transaction has already committed,
-   * and is best-effort: any failure here is logged and swallowed, never
-   * rethrown — a presentation-cache failure must never make the caller
-   * believe the real cruce (already committed) failed. Skips silently when
-   * any optional collaborator it needs (`presentacionDocumento`/`terceros`/
-   * `cuentasContables`/`inmuebles`) is absent — relevant only to a unit test
-   * that builds this service without every optional dependency, same
-   * defensive style `conAuxiliares` already uses for `cuentasContables`.
+   * The pure printable data for this Nota Crédito — what
+   * `NotasCreditoController`'s `solicitar-generacion` route sends the
+   * frontend alongside the template, computed fresh every call (never
+   * persisted, unlike the old per-`aplicar()` re-freeze this replaces).
+   * Reuses `construirDatosImpresionNotaCredito` UNCHANGED.
    */
-  private async congelarPresentacion(
-    coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.terceros ||
-      !this.cuentasContables ||
-      !this.inmuebles
-    ) {
-      return;
-    }
-    try {
-      const [nota, copropiedad] = await Promise.all([
-        this.notasCredito.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!nota || !copropiedad) return;
-
-      // Live balance, not a cached field — see `NotaCredito.unappliedAmount`
-      // (gone from the schema) and `aplicar()`'s own identical read above.
-      const saldoOrigen = await this.saldoDocumentoOrigen
-        .findOne({ documentoId: nota._id })
-        .exec();
-      const montoSinAplicar = saldoOrigen?.saldoDisponible ?? 0;
-
-      // Every application this note has EVER made — same query
-      // `NotasCreditoController`'s retired `generarPdf` route used to run
-      // via `RecibosService.findAplicacionesForSource('NC', nota._id)`, run
-      // directly here instead (this service already owns `this.aplicaciones`,
-      // no need to reach into `RecibosService` for it).
-      const aplicaciones = await this.aplicaciones
+  async datosImpresion(id: string): Promise<DatosReciboImpresion> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.findOneRaw(id);
+    const [saldoOrigen, copropiedad, aplicaciones] = await Promise.all([
+      this.saldoDocumentoOrigen.findOne({ documentoId: nota._id }).exec(),
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.aplicaciones
         .find({ coPropertyId, sourceType: 'NC', sourceId: nota._id })
         .sort({ appliedAt: 1 })
-        .exec();
-
-      const datosImpresion: ModelosDatosImpresionNotaCredito = {
-        facturas: this.facturas,
-        notasDebito: this.notasDebito,
-        conceptosCobro: this.conceptosCobro,
-        inmuebles: this.inmuebles,
-        terceros: this.terceros,
-        cuentasContables: this.cuentasContables,
-      };
-      const datos = await construirDatosImpresionNotaCredito(
-        nota,
-        montoSinAplicar,
-        aplicaciones,
-        copropiedad,
-        coPropertyId,
-        datosImpresion,
-      );
-
-      // `contenidoRecibo` returns page content only (no `<Document>`/`<Page>`
-      // wrapper) — same split `paginaFactura` uses for Factura, the frontend
-      // wraps it in its own `<Page>` at hydration time. No `opciones` passed:
-      // a frozen tree has no room for a per-request `duplicado` watermark
-      // anymore (see this note's own docblock on `?duplicado=true`).
-      //
-      // Dynamic import, not a top-level one: `recibo-pdf.ts`/`serializar-arbol.ts`
-      // pull in `@react-pdf/renderer` (ESM), which Jest's CJS environment
-      // can't load. A static import here made that load happen just from
-      // importing `NotasCreditoService` for DI — breaking both this
-      // service's own spec and its controller's spec transitively. Same fix
-      // as `LotesFacturacionService.consolidar()` (`lotes.service.ts`).
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'NC',
-        nota._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota crédito ${notaId.toString()} — la aplicación ya quedó registrada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
+        .exec(),
+    ]);
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
+    const montoSinAplicar = saldoOrigen?.saldoDisponible ?? 0;
+
+    const datosImpresion: ModelosDatosImpresionNotaCredito = {
+      facturas: this.facturas,
+      notasDebito: this.notasDebito,
+      conceptosCobro: this.conceptosCobro,
+      inmuebles: this.inmuebles!,
+      terceros: this.terceros!,
+      cuentasContables: this.cuentasContables!,
+    };
+    return construirDatosImpresionNotaCredito(
+      nota,
+      montoSinAplicar,
+      aplicaciones,
+      copropiedad,
+      coPropertyId,
+      datosImpresion,
+    );
   }
 
   /** Mirrors `RecibosService.aplicarManual` exactly — `sourceType: 'NC'` in
@@ -2044,6 +1949,12 @@ export class NotasCreditoService {
       ]),
     ]);
 
+    // `objectPath`/`generatedAt` — resolved from `presentacion_documento` the
+    // same way `RecibosService.findOne` resolves its own.
+    const presentacion = this.presentacionDocumento
+      ? await this.presentacionDocumento.buscar('NC', nota._id)
+      : null;
+
     return toNotaCreditoDetalle(
       nota,
       montoAplicado,
@@ -2051,6 +1962,7 @@ export class NotasCreditoService {
       aplicaciones,
       await this.resolverInmuebleCodigo(nota.inmuebleId),
       numerosPorDocumento,
+      presentacion,
     );
   }
 

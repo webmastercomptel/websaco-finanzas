@@ -15,6 +15,12 @@ import { NotasAnticipoService } from './notas-anticipo.service';
 import { CrearNotaAnticipoDto } from './dto/crear-nota-anticipo.dto';
 import { AnularNotaAnticipoDto } from './dto/anular-nota-anticipo.dto';
 import { ListarNotaAnticipoDto } from './dto/listar-nota-anticipo.dto';
+import {
+  GeneracionDocumentoService,
+  type SolicitudGeneracionDocumento,
+} from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 import type {
   NotaAnticipo,
   NotaAnticipoDetalle,
@@ -33,7 +39,10 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 @Controller('notas-anticipo')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class NotasAnticipoController {
-  constructor(private readonly notasAnticipo: NotasAnticipoService) {}
+  constructor(
+    private readonly notasAnticipo: NotasAnticipoService,
+    private readonly generacion: GeneracionDocumentoService,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'NotaAnticipo' })
@@ -44,12 +53,9 @@ export class NotasAnticipoController {
   }
 
   /**
-   * Also the frontend's source for rendering a Nota de Anticipo's PDF
-   * client-side — `NotaAnticipo.documentDefinition` (frozen once, at
-   * `crear()` time — see
-   * `NotasAnticipoService.congelarPresentacionNotaAnticipo`; no
-   * `?duplicado=true` variant baked in) is just another field on the same
-   * mapped contract, so there's no separate `:id/pdf` route anymore.
+   * `NotaAnticipo.objectPath`/`generatedAt` (set/confirmed via
+   * `solicitar-generacion`/`confirmar-generacion` below) are just fields on
+   * the same mapped contract — no PDF is built or streamed by this backend.
    */
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'NotaAnticipo' })
@@ -74,5 +80,52 @@ export class NotasAnticipoController {
     @Body() dto: AnularNotaAnticipoDto,
   ): Promise<NotaAnticipo> {
     return this.notasAnticipo.anular(id, dto, user.accountId!);
+  }
+
+  /**
+   * Requests generation of this Nota de Anticipo's PDF — the template for
+   * `NA` plus this note's own computed `datos`
+   * (`NotasAnticipoService.datosImpresion`, reusing
+   * `construirDatosImpresionNotaAnticipo` unchanged) and an upload target.
+   * Same `create` action as `crear()` above.
+   */
+  @Post(':id/solicitar-generacion')
+  @CheckAbility({ action: 'create', subject: 'NotaAnticipo' })
+  async solicitarGeneracion(
+    @Param('id') id: string,
+  ): Promise<SolicitudGeneracionDocumento<DatosReciboImpresion>> {
+    const [nota, datos] = await Promise.all([
+      this.notasAnticipo.findOneRaw(id),
+      this.notasAnticipo.datosImpresion(id),
+    ]);
+    return this.generacion.solicitar('NA', nota, datos);
+  }
+
+  /**
+   * Confirms the frontend finished uploading the PDF `solicitar-generacion`
+   * handed it a signed URL for. Same `create` action as `crear()`/
+   * `solicitar-generacion` above.
+   */
+  @Post(':id/confirmar-generacion')
+  @CheckAbility({ action: 'create', subject: 'NotaAnticipo' })
+  async confirmarGeneracion(
+    @Param('id') id: string,
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const nota = await this.notasAnticipo.findOneRaw(id);
+    return this.generacion.confirmar('NA', nota, dto.objectPath);
+  }
+
+  /**
+   * A short-lived signed URL to read back this Nota de Anticipo's
+   * already-generated PDF. Same `read` action as `findOne` above.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'NotaAnticipo' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const nota = await this.notasAnticipo.findOne(id);
+    return this.generacion.urlLectura('La nota de anticipo', id, nota);
   }
 }

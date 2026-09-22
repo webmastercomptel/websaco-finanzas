@@ -1,5 +1,4 @@
 import type {
-  NodoDocumentoFactura,
   NotaDebito as NotaDebitoContract,
   NotaDebitoDetalle,
 } from '../../contracts';
@@ -12,10 +11,11 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toNotaCredito`.
  *
- * `documentDefinition` is resolved by the caller from the shared, permanent
- * `presentacion_documento` table — same pattern `toRecibo` uses for its own
- * field of the same name. Defaults to `null` so `crear()`'s own immediate
- * return, `anular()`, and the listing don't need to pass it explicitly.
+ * `objectPath`/`generatedAt` are resolved by the caller from the shared,
+ * permanent `presentacion_documento` table — same pattern `toRecibo` uses
+ * for its own fields of the same name. Defaults to `null` so `crear()`'s own
+ * immediate return, `anular()`, and the listing don't need to pass it
+ * explicitly.
  */
 export const toNotaDebito = (
   doc: NotaDebitoDocument,
@@ -23,7 +23,7 @@ export const toNotaDebito = (
   // Live-resolved by the caller from `inmuebleId` — no frozen field for it
   // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
   inmuebleCodigo: string,
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaDebitoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -43,9 +43,8 @@ export const toNotaDebito = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
-  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
-  // its own field of the same name.
-  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
+  objectPath: presentacion?.objectPath ?? null,
+  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
 
 /**
@@ -67,9 +66,9 @@ export const toNotaDebitoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
   inmuebleCodigo: string,
   fechasPorSourceId: Map<string, Date> = new Map(),
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaDebitoDetalle => ({
-  ...toNotaDebito(doc, saldoPendiente, inmuebleCodigo, documentDefinition),
+  ...toNotaDebito(doc, saldoPendiente, inmuebleCodigo, presentacion),
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,

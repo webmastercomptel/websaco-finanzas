@@ -28,10 +28,20 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
-import type { Factura as FacturaContract, Paginado } from '../../contracts';
+import type {
+  Factura as FacturaContract,
+  DatosPlantillaFactura,
+  Paginado,
+} from '../../contracts';
 import { toFactura } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
-import type { DatosVisualesFactura } from '../../common/pdf/factura-pdf';
+import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
+import type {
+  FacturaPreliminar,
+  LoteFacturacionDocument,
+} from '../../database/schemas/facturacion/lote-facturacion.schema';
+import type { FacturaLinea } from '../../database/schemas/facturacion/factura-linea.schema';
 
 export type { FacturaDocument };
 
@@ -55,8 +65,8 @@ export class FacturasService {
     // optional deps (`cuentasContables`/`resoluciones`): in the real app
     // this is always injected; left `undefined` only by the many existing
     // tests that construct this service positionally without it, in which
-    // case `findOne` simply resolves `documentDefinition` as `null` instead
-    // of throwing.
+    // case `findOne` simply resolves `objectPath`/`generatedAt` as `null`
+    // instead of throwing.
     private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
@@ -136,12 +146,11 @@ export class FacturasService {
     );
 
     return {
-      // `documentDefinition` passed as `null` here on purpose — a listing
-      // page (default 50/página) has no use for each row's full frozen
-      // presentation tree, and shipping it here would multiply the payload
-      // for no reason. Not even worth querying `presentacion_documento` for
-      // the list case, since the result is nulled either way — `findOne`
-      // below is the only place that needs the real lookup.
+      // `presentacion` passed as `null` here on purpose — a listing page
+      // (default 50/página) has no use for each row's own upload pointer,
+      // and querying `presentacion_documento` for the whole page would be
+      // wasted work for no reason. `findOne` below is the only place that
+      // needs the real lookup.
       items: documentos.map((doc) =>
         toFactura(
           doc,
@@ -164,7 +173,7 @@ export class FacturasService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    const [saldoTotal, carteraPorDoc, documentDefinition] = await Promise.all([
+    const [saldoTotal, carteraPorDoc, presentacion] = await Promise.all([
       this.saldoTotalDocumento.findOne({ documentoId: documento._id }).exec(),
       this.carteraPorConceptoDe([documento._id]),
       this.presentacionDocumento
@@ -175,23 +184,23 @@ export class FacturasService {
       documento,
       saldoTotal?.saldoPendiente ?? 0,
       carteraPorDoc.get(documento._id.toString()) ?? new Map<string, number>(),
-      documentDefinition,
+      presentacion,
     );
   }
 
   /**
    * Every Factura one lote's consolidación produced, raw — used by
-   * `LotesController.obtenerDocumentosFacturas` to hand the browser each
-   * invoice's own frozen `documentDefinition` (the mapped contract skips
-   * that field's raw shape; this reads it as `.lean()` gave it to us).
+   * `LotesController.obtenerDocumentosFacturas`/`solicitarGeneracionFacturas`
+   * to work the whole batch without hydrating every invoice (the mapped
+   * contract is built separately, from the real documents, by `findOne`).
    * Ordered by unit code, the same order the roster and the Liquidación
    * table already use, so a batch reads in a predictable sequence.
    *
    * `.lean()` on purpose: a lote can carry hundreds of Facturas, and this
-   * only ever needs plain fields (see `FacturaLean` below, also used by
-   * `paginaFactura` when `consolidar()` first builds each `documentDefinition`)
-   * — hydrating full Mongoose documents here is pure overhead this batch
-   * endpoint can't afford under Cloud Run's memory ceiling.
+   * only ever needs plain fields (see `FacturaLean` below, also what
+   * `datosPlantilla` accepts) — hydrating full Mongoose documents here is
+   * pure overhead this batch endpoint can't afford under Cloud Run's memory
+   * ceiling.
    */
   async findAllRawPorLote(loteId: string) {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -263,6 +272,133 @@ export class FacturasService {
     }
     return resultado;
   }
+
+  /**
+   * The "Cargos del Mes / Saldo Anterior / Nuevo Saldo" table and its totals
+   * — relocated verbatim from the old react-pdf
+   * `contenidoDocumentoFacturacion` (`common/pdf/factura-pdf.ts:94-137`) now
+   * that rendering moved to the frontend (pdfmake). Shared by `datosPlantilla`
+   * (an issued Factura) and `datosPlantillaPreliminar` (a not-yet-issued
+   * Prefactura), same split as the old `paginaFactura`/`paginaPrefactura`
+   * both building a `DatosDocumentoFacturacion` before handing it to this
+   * shared body.
+   */
+  private construirDatosPlantilla(
+    lines: FacturaLinea[],
+    descuento: { monto: number } | null,
+    totalAnticipos: number,
+    referenciaPago: string | null,
+    notas: string | null,
+  ): DatosPlantillaFactura {
+    const totalSaldoAnterior = lines.reduce(
+      (acc, l) => acc + l.balanceBefore,
+      0,
+    );
+    const totalCargosDelMes = lines.reduce((acc, l) => acc + l.baseAmount, 0);
+    const totalNuevoSaldo = totalSaldoAnterior + totalCargosDelMes;
+    const totalIva = lines.reduce((acc, l) => acc + l.taxAmount, 0);
+    const totalAPagar = lines.reduce((acc, l) => acc + l.balanceAfter, 0);
+
+    const cargos = lines.map((l) => ({
+      nombre:
+        l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
+      saldoAnterior: l.balanceBefore,
+      cargosDelMes: l.baseAmount,
+      nuevoSaldo: l.balanceBefore + l.baseAmount,
+    }));
+
+    const tasasIva = new Set(
+      lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
+    );
+    const etiquetaIva =
+      tasasIva.size === 1 ? `IVA ${[...tasasIva][0]}%` : 'IVA';
+
+    const totalConDescuento = descuento
+      ? totalAPagar - descuento.monto - totalAnticipos
+      : null;
+
+    return {
+      cargos,
+      totalSaldoAnterior,
+      totalCargosDelMes,
+      totalNuevoSaldo,
+      totalIva,
+      etiquetaIva,
+      totalAPagar,
+      totalConDescuento,
+      referenciaPago,
+      totalAnticipos,
+      notas,
+    };
+  }
+
+  /**
+   * `DatosPlantillaFactura` for one already-issued Factura — what
+   * `LotesController`'s batch `solicitar-generacion` route sends alongside
+   * each invoice's upload target. `datosVisuales` is optional: the batch
+   * caller resolves it once for the whole lote (`datosVisualesPdf`) and
+   * passes each invoice's own entry in to avoid one extra round trip per
+   * invoice; omitted, this resolves it itself for standalone callers.
+   *
+   * Accepts `FacturaLean` (not `FacturaDocument`) for the same reason
+   * `paginaFactura` did — a real hydrated document is structurally
+   * assignable to the plain-fields lean shape, so the batch route (which
+   * only ever has `.lean()`-fetched invoices, see `findAllRawPorLote`) can
+   * pass either without a cast.
+   */
+  async datosPlantilla(
+    factura: FacturaLean,
+    copropiedad: CopropiedadDocument,
+    datosVisuales?: DatosVisualesFactura,
+  ): Promise<DatosPlantillaFactura> {
+    const visuales =
+      datosVisuales ??
+      (await this.datosVisualesPdf([factura.inmuebleId])).get(
+        factura.inmuebleId.toString(),
+      );
+    const descuento =
+      factura.discountAmount > 0 && factura.discountDeadline
+        ? { monto: factura.discountAmount }
+        : null;
+    return this.construirDatosPlantilla(
+      factura.lines,
+      descuento,
+      visuales?.totalAnticipos ?? 0,
+      visuales?.referencia ?? null,
+      copropiedad.billingNotes?.trim() || null,
+    );
+  }
+
+  /**
+   * `DatosPlantillaFactura` for a not-yet-issued Prefactura — computed fresh
+   * on every call, same as the rest of a Prefactura's response, since it has
+   * no issuance moment to freeze at. The discount is recomputed from the
+   * lote's own parameters (`calcularDescuentoProntoPago`), unlike an issued
+   * Factura's already-frozen `discountAmount`/`discountDeadline`.
+   */
+  datosPlantillaPreliminar(
+    preliminar: FacturaPreliminar,
+    lote: LoteFacturacionDocument,
+    copropiedad: CopropiedadDocument,
+    datosVisuales?: DatosVisualesFactura,
+  ): DatosPlantillaFactura {
+    const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
+      preliminar.lines,
+      lote.earlyPaymentDiscount,
+      lote.earlyPaymentDiscountFixedValue,
+      lote.discountDeadline,
+      copropiedad.discountAppliesWithLateFee,
+    );
+    const descuento =
+      discountAmount > 0 && discountDeadline ? { monto: discountAmount } : null;
+    return this.construirDatosPlantilla(
+      preliminar.lines,
+      descuento,
+      datosVisuales?.totalAnticipos ?? 0,
+      datosVisuales?.referencia ?? null,
+      copropiedad.billingNotes?.trim() || null,
+    );
+  }
 }
 
 /**
@@ -275,3 +411,14 @@ export class FacturasService {
 export type FacturaLean = Awaited<
   ReturnType<FacturasService['findAllRawPorLote']>
 >[number];
+
+/** Cosmetic, live-read data the PDF prints alongside a Factura/Prefactura's
+ *  own frozen fields — see `FacturasService.datosVisualesPdf`, the only
+ *  place that computes it. Relocated from the now-deleted
+ *  `common/pdf/factura-pdf.ts` react-pdf renderer (pdfmake + frontend-render
+ *  migration); kept local to this file since `FacturasService` is its only
+ *  consumer, unlike `DatosReciboImpresion`'s cross-module sharing. */
+export interface DatosVisualesFactura {
+  referencia: string | null;
+  totalAnticipos: number;
+}

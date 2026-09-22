@@ -1,5 +1,4 @@
 import type {
-  NodoDocumentoFactura,
   NotaAnticipo as NotaAnticipoContract,
   NotaAnticipoDetalle,
 } from '../../contracts';
@@ -12,18 +11,18 @@ import { toAplicacionCartera } from '../recibos/recibos.mapper';
  * is English, the API is Spanish — see "the contract law" in CLAUDE.md, same
  * pattern as `toNotaDebito`.
  *
- * `documentDefinition` is resolved by the caller from the shared, permanent
- * `presentacion_documento` table — same pattern `toRecibo`/`toNotaDebito`
- * use for their own field of the same name. Defaults to `null` so
- * `crear()`'s own immediate return, `anular()`, and the listing don't need
- * to pass it explicitly.
+ * `objectPath`/`generatedAt` are resolved by the caller from the shared,
+ * permanent `presentacion_documento` table — same pattern `toRecibo`/
+ * `toNotaDebito` use for their own fields of the same name. Defaults to
+ * `null` so `crear()`'s own immediate return, `anular()`, and the listing
+ * don't need to pass it explicitly.
  */
 export const toNotaAnticipo = (
   doc: NotaAnticipoDocument,
   // Live-resolved by the caller from `inmuebleId` — no frozen field for it
   // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
   inmuebleCodigo: string,
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaAnticipoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -40,9 +39,8 @@ export const toNotaAnticipo = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
-  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
-  // its own field of the same name.
-  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
+  objectPath: presentacion?.objectPath ?? null,
+  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
 
 /**
@@ -56,9 +54,9 @@ export const toNotaAnticipoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
   inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaAnticipoDetalle => ({
-  ...toNotaAnticipo(doc, inmuebleCodigo, documentDefinition),
+  ...toNotaAnticipo(doc, inmuebleCodigo, presentacion),
   // Self-sourced: every `aplicacion` here was made BY this Nota de
   // Anticipo, so its own `issueDate` — never `appliedAt` — is what a person
   // means by "the date of this movement".

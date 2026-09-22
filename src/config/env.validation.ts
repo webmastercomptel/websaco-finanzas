@@ -70,6 +70,12 @@ export const envValidationSchema = Joi.object({
   // Account/Role collections and resolves identity against them.
   ROOT_ADMIN_EMAIL: Joi.string().email().required(),
 
+  // Cloud Storage bucket that holds generated documents (see
+  // common/storage/). No default: a wrong-but-present bucket name fails at
+  // upload time with an opaque 404, which is much harder to trace back to a
+  // typo than a boot-time Joi error naming the exact variable.
+  FIREBASE_STORAGE_BUCKET: Joi.string().required(),
+
   // Comma-separated list of web origins allowed to call this API, e.g.
   // "https://finanzas.ejemplo.com". Scheme and host, no path, no trailing slash.
   //

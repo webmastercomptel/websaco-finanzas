@@ -11,7 +11,7 @@ import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 
 export interface ModelosDatosImpresionRecibo {
   facturas: Model<FacturaDocument>;

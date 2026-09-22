@@ -9,7 +9,7 @@ import type { CuentaContableDocument } from '../../database/schemas/contabilidad
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 
 export interface ModelosDatosImpresionNotaDebito {
   inmuebles: Model<InmuebleDocument>;

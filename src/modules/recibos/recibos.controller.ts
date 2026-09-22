@@ -15,6 +15,12 @@ import { RecibosService } from './recibos.service';
 import { CrearReciboDto } from './dto/crear-recibo.dto';
 import { AnularReciboDto } from './dto/anular-recibo.dto';
 import { ListarRecibosDto } from './dto/listar-recibos.dto';
+import {
+  GeneracionDocumentoService,
+  type SolicitudGeneracionDocumento,
+} from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 import type { Paginado, Recibo, ReciboDetalle } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
@@ -29,7 +35,10 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 @Controller('recibos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class RecibosController {
-  constructor(private readonly recibos: RecibosService) {}
+  constructor(
+    private readonly recibos: RecibosService,
+    private readonly generacion: GeneracionDocumentoService,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Recibo' })
@@ -38,14 +47,11 @@ export class RecibosController {
   }
 
   /**
-   * Also the frontend's source for rendering a Recibo's PDF client-side —
-   * `Recibo.documentDefinition` (frozen once, at `crear()` time — see
-   * `RecibosService.congelarPresentacionRecibo`; no `?duplicado=true`
-   * variant baked in, reprinting a duplicate copy is a client-side concern
-   * now, not something this route does server-side) is just another field
-   * on the same mapped contract, so there's no separate `:id/pdf` route
-   * anymore — same conversion Factura's own controller already went
-   * through.
+   * `Recibo.objectPath`/`generatedAt` (set/confirmed via
+   * `solicitar-generacion`/`confirmar-generacion` below) are just fields on
+   * the same mapped contract — no PDF is built or streamed by this backend,
+   * the browser renders it client-side from `plantilla_documento` +
+   * `RecibosService.datosImpresion`.
    */
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'Recibo' })
@@ -76,5 +82,51 @@ export class RecibosController {
     // PoliciesGuard already required a Recibo/annul permission, which only an
     // account with an active assignment can hold.
     return this.recibos.anular(id, dto, user.accountId!);
+  }
+
+  /**
+   * Requests generation of this Recibo's PDF — the template for `RC` plus
+   * this receipt's own computed `datos` (`RecibosService.datosImpresion`,
+   * reusing `construirDatosImpresionRecibo` unchanged) and an upload target.
+   * Same `create` action as `crear()` above — same capability.
+   */
+  @Post(':id/solicitar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Recibo' })
+  async solicitarGeneracion(
+    @Param('id') id: string,
+  ): Promise<SolicitudGeneracionDocumento<DatosReciboImpresion>> {
+    const [recibo, datos] = await Promise.all([
+      this.recibos.findOneRaw(id),
+      this.recibos.datosImpresion(id),
+    ]);
+    return this.generacion.solicitar('RC', recibo, datos);
+  }
+
+  /**
+   * Confirms the frontend finished uploading the PDF `solicitar-generacion`
+   * handed it a signed URL for. Same `create` action as `crear()`/
+   * `solicitar-generacion` above.
+   */
+  @Post(':id/confirmar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Recibo' })
+  async confirmarGeneracion(
+    @Param('id') id: string,
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const recibo = await this.recibos.findOneRaw(id);
+    return this.generacion.confirmar('RC', recibo, dto.objectPath);
+  }
+
+  /**
+   * A short-lived signed URL to read back this Recibo's already-generated
+   * PDF. Same `read` action as `findOne` above.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'Recibo' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const recibo = await this.recibos.findOne(id);
+    return this.generacion.urlLectura('El recibo', id, recibo);
   }
 }

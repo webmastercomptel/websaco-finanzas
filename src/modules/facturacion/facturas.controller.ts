@@ -4,6 +4,7 @@ import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { FacturasService } from './facturas.service';
+import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
 import { ListarFacturasDto } from './dto/listar-facturas.dto';
 import type { Factura, Paginado } from '../../contracts';
 
@@ -20,7 +21,10 @@ import type { Factura, Paginado } from '../../contracts';
 @Controller('facturas')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 export class FacturasController {
-  constructor(private readonly facturas: FacturasService) {}
+  constructor(
+    private readonly facturas: FacturasService,
+    private readonly generacion: GeneracionDocumentoService,
+  ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Factura' })
@@ -29,16 +33,30 @@ export class FacturasController {
   }
 
   /**
-   * Also the frontend's source for rendering a Factura's PDF client-side —
-   * `Factura.documentDefinition` (frozen once, at `consolidar()` time, no
-   * "DUPLICADO" variant baked in — reprinting a duplicate copy is a
-   * client-side concern now, not something this route does server-side) is
-   * just another field on the same mapped contract, so there's no separate
-   * `:id/pdf` route anymore.
+   * `Factura.objectPath`/`generatedAt` (frozen once, per invoice, via the
+   * batch `solicitar-generacion`/`confirmar-generacion` pair on
+   * `LotesController`) are just fields on the same mapped contract — no PDF
+   * is built or streamed by this backend, the browser renders it
+   * client-side from `plantilla_documento` + `FacturasService.datosPlantilla`.
    */
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'Factura' })
   findOne(@Param('id') id: string): Promise<Factura> {
     return this.facturas.findOne(id);
+  }
+
+  /**
+   * A short-lived signed URL to read back this Factura's already-generated
+   * PDF. Gated by the same `read` action as `findOne` above — nothing about
+   * downloading an already-emitted document needs a stricter permission
+   * than viewing it.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const factura = await this.facturas.findOne(id);
+    return this.generacion.urlLectura('La factura', id, factura);
   }
 }

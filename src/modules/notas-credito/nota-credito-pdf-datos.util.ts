@@ -14,7 +14,7 @@ import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 import {
   fechaNotaCredito,
   tipoAnclaDe,

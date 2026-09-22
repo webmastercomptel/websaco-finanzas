@@ -16,64 +16,58 @@ export type TipoDocumentoPresentacion =
   (typeof TIPOS_DOCUMENTO_PRESENTACION)[number];
 
 /**
- * The frozen react-pdf presentation tree for ONE emitted document, of any of
- * the six types this system prints (`FV` Factura, `RC` Recibo, `NC` Nota
- * Crédito, `ND` Nota Débito, `NA` Nota Anticipo, `NT` Nota Contable) — a
- * serialized element tree (see `serializarArbol`,
- * `common/pdf/react/serializar-arbol.ts`), built once at each document's own
- * moment of emission and rendered client-side from then on, instead of the
- * server re-drawing a PDF on every download.
+ * The write-once pointer to ONE emitted document's frozen PDF, of any of the
+ * six types this system prints (`FV` Factura, `RC` Recibo, `NC` Nota
+ * Crédito, `ND` Nota Débito, `NA` Nota Anticipo, `NT` Nota Contable).
  *
- * NOT a cache in the regenerable sense — there is no live computation this
- * row is a faster stand-in for. It is a PERMANENT, IMMUTABLE record of what
- * that document looked like the moment it was issued: if the coproperty's
- * phone number changes tomorrow, recomputing the tree from today's data would
- * NOT reproduce what was actually printed and handed to the recipient back
- * then — same reasoning this codebase already applies to `TitularCongelado`
- * and `Factura.discountAmount` (frozen once, at emission, never recalculated
- * later even though the inputs that produced them can still change). This
- * table exists precisely so that frozen snapshot survives independently of
- * whatever the source document/copropiedad/etc. currently say.
+ * SECOND generation of this table. The first rendered PDFs server-side
+ * (`@react-pdf/renderer`) and froze a serialized element tree here
+ * (`documentDefinition`) at the moment of emission. Rendering moved to the
+ * frontend (pdfmake), so there is no tree to freeze any more — what this
+ * table freezes now is `objectPath`, a pointer into Cloud Storage
+ * (`common/storage/`) at the ALREADY-rendered, already-uploaded PDF file
+ * itself. The concept this table exists for is unchanged: "one row per
+ * emitted document, immutable forever, opaque to business logic" — only
+ * WHAT gets frozen changed, from a tree to a file.
  *
- * A NEW enum, deliberately NOT `SOURCE_TYPES`/`DOCUMENT_TYPES`
- * (`recibos/aplicacion-cartera.schema.ts`): those enumerate a cruce's SOURCE
- * (what paid) and TARGET (what got paid down), which is a different axis
- * from "what kind of document is this row a frozen printout for" — `NT`
- * (Nota Contable) in particular never appears as either a `sourceType` or a
- * `documentType` over there (it reclassifies a charge between conceptos, it
- * never applies money), and `NotaContable`'s OWN `tipoDocumento` field
- * (`notas-contables/nota-contable.schema.ts`) already means something else
- * entirely (which Factura/NotaDebito it reclassifies, not itself). Reusing
- * either existing enum here would silently overload one of those meanings.
+ * A FROZEN FILE, not a frozen tree, is what makes a two-phase write
+ * necessary where the old single `guardar()` upsert was enough: rendering a
+ * tree was one atomic, in-process step, but uploading a file is a separate
+ * round trip the frontend makes AFTER this backend hands out a signed URL —
+ * a step that can fail, retry, or never happen at all. So this table now
+ * models that as an explicit state machine instead of a single write:
  *
- * Polymorphic auxiliary table, same convention as `CarteraPorDocumento`/
- * `SaldoTotalDocumento`/`AplicacionCartera`: `tipoDocumento` names which
- * collection `documentoId` points into, so this table can serve all six
- * document kinds without six near-identical schemas or six near-identical
- * services. `documentoId` is a plain `ObjectId` on purpose — no Mongoose
- * `ref` — since which collection it targets is only known at read time, via
- * `tipoDocumento`.
+ *  1. `solicitarGeneracion` computes `objectPath` and sets it, WITHOUT
+ *     setting `generatedAt` — "a generation was requested", not "a document
+ *     exists". Safe to repeat while unconfirmed (an upload that failed can
+ *     be retried against a fresh signed URL for the same path).
+ *  2. `confirmarGeneracion` verifies the object actually landed in the
+ *     bucket (never trusting the frontend's bare claim that it did) and
+ *     ONLY THEN sets `generatedAt` — the real immutability boundary. Once
+ *     set, this row is frozen: `confirmarGeneracion` REJECTS being called
+ *     again for the same key, `solicitarGeneracion` REJECTS restarting a
+ *     confirmed row. Nothing this table can be asked to do overwrites a
+ *     confirmed document's pointer, unlike the old single-upsert `guardar`,
+ *     which happily replaced the previous frozen tree on every rerun (a Nota
+ *     Crédito's `aplicar()` re-running, most notably) — a frozen FILE has no
+ *     equivalent "re-render and replace" story, because nothing consumes it
+ *     ever needs a fresher render: the file that was actually handed to the
+ *     recipient is the one that must keep resolving forever.
  *
- * Separate from a `documentDefinition` field on each document's own schema
- * (Factura's first iteration, before this table existed, kept it that way —
- * see the migration in this table's own introducing change) precisely so
- * every document type shares ONE mechanism instead of Factura being the
- * lone exception with its own field: a Recibo, a Nota Crédito, etc. all
- * write/read here the same way. It is also why this lives in its own
- * collection rather than embedded: this is opaque PRESENTATION data, never
- * business/financial fact — it never gates whether a financial transaction
- * succeeds (every write here happens strictly AFTER the document's own
- * transaction commits, best-effort, never rolled back together with it),
- * and keeping it out of the document's own schema keeps that document
- * strictly business data, matching "the contract law"'s Spanish-mapped API
- * contract on one side and this opaque Mixed blob, passed through
- * unchanged, on the other.
+ * `buscar`/`buscarVarios` read `generatedAt`, never `objectPath` alone, to
+ * decide whether "something is generated" — a row that only has `objectPath`
+ * (requested, never confirmed) must read identically to "nothing generated
+ * yet", the same way an abandoned upload attempt should not make a
+ * `GET .../url-lectura` try to serve a file that was never actually
+ * finished.
  *
- * One row per document — every write is an upsert (`guardar`/`guardarVarios`
- * on `PresentacionDocumentoService`), never a plain insert, since a Nota
- * Crédito's `aplicar()` may re-run against the same document and must
- * overwrite its previous printout with a freshly frozen one, not accumulate
- * a second row.
+ * Same polymorphic-table conventions as before (kept unchanged from the
+ * first generation): `tipoDocumento` names which collection `documentoId`
+ * points into (`CarteraPorDocumento`/`SaldoTotalDocumento`/
+ * `AplicacionCartera` share this convention), `documentoId` is a plain
+ * `ObjectId` with no Mongoose `ref` since the target collection is only
+ * known at read time, and this stays a shared table across all six document
+ * kinds rather than six near-identical schemas.
  */
 @Schema({ collection: 'presentacion_documento', timestamps: false })
 export class PresentacionDocumento {
@@ -86,19 +80,30 @@ export class PresentacionDocumento {
   @Prop({ type: SchemaTypes.ObjectId, required: true })
   documentoId: Types.ObjectId;
 
-  @Prop({ type: SchemaTypes.Mixed, required: true })
-  documentDefinition: Record<string, unknown>;
+  /** Set by `solicitarGeneracion`, computed server-side from
+   *  `(coPropertyId, tipoDocumento, documentoId)` — never accepted from a
+   *  caller, same tenancy-law reasoning as `TenantContextService`: a
+   *  client-supplied storage path for something that becomes a permanent
+   *  record must never be trusted. `null` only ever appears transiently on
+   *  a row nothing has requested generation for yet, which in practice means
+   *  the row itself does not exist (there is no write path that creates a
+   *  row without also setting this). */
+  @Prop({ type: String, default: null })
+  objectPath: string | null;
 
-  @Prop({ type: Date, required: true, default: Date.now })
-  generatedAt: Date;
+  /** `null` until `confirmarGeneracion` verifies the upload actually landed
+   *  in the bucket. THIS is the immutability boundary, not row existence —
+   *  see the class docblock. */
+  @Prop({ type: Date, default: null })
+  generatedAt: Date | null;
 }
 
 export const PresentacionDocumentoSchema = SchemaFactory.createForClass(
   PresentacionDocumento,
 );
 
-// One frozen record per document — every write is an upsert against this
-// exact key, never an insert-only path that could duplicate it.
+// One row per document — every write is an upsert against this exact key,
+// never an insert-only path that could duplicate it.
 PresentacionDocumentoSchema.index(
   { tipoDocumento: 1, documentoId: 1 },
   { unique: true },

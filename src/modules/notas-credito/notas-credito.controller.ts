@@ -12,13 +12,17 @@ import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasCreditoService } from './notas-credito.service';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import {
+  GeneracionDocumentoService,
+  type SolicitudGeneracionDocumento,
+} from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
 import { CrearNotaCreditoDto } from './dto/crear-nota-credito.dto';
 import { AplicarNotaCreditoDto } from './dto/aplicar-nota-credito.dto';
 import { AnularNotaCreditoDto } from './dto/anular-nota-credito.dto';
 import { ListarNotasCreditoDto } from './dto/listar-notas-credito.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 import type {
-  DocumentoNotaCredito,
   NotaCredito,
   NotaCreditoDetalle,
   Paginado,
@@ -38,7 +42,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 export class NotasCreditoController {
   constructor(
     private readonly notasCredito: NotasCreditoService,
-    private readonly presentacionDocumento: PresentacionDocumentoService,
+    private readonly generacion: GeneracionDocumentoService,
   ) {}
 
   @Get()
@@ -88,40 +92,51 @@ export class NotasCreditoController {
   }
 
   /**
-   * This note's own frozen react-pdf presentation tree, for the browser to
-   * render — same idea as `Factura.documentDefinition`. Frozen first by
-   * `crear()` (every Nota Crédito applies immediately against its anchor,
-   * design §5), then refrozen by `aplicar()` whenever a later deferred
-   * cruce changes `montoSinAplicar`/the applied breakdown (see
-   * `NotasCreditoService.congelarPresentacion`'s own docblock).
-   *
-   * A `null` `documentDefinition` should not normally happen in practice —
-   * `crear()` always freezes one — but this stays defensive rather than
-   * throwing, same as `Factura`'s equivalent route: the frontend already
-   * treats `documentDefinition: null` as "not available".
-   *
-   * Route renamed from `.../pdf` — no PDF is built here anymore, the
-   * browser renders this client-side. Lost in the move: `?duplicado=true`
-   * used to stamp a "DUPLICADO" watermark dynamically on every request; a
-   * frozen `documentDefinition` has no room for that anymore (the exact
-   * same loss already accepted for Factura) — reprinting a duplicate copy
-   * is now a client-side concern, not something this route does
-   * server-side.
+   * Requests generation of this Nota Crédito's PDF — the template for `NC`
+   * plus this note's own computed `datos`
+   * (`NotasCreditoService.datosImpresion`, reusing
+   * `construirDatosImpresionNotaCredito` unchanged) and an upload target.
+   * Same `create` action as `crear()` above — under the new model nothing
+   * re-renders after issuance (no re-freeze on `aplicar()` any more), so
+   * this is the only place a Nota Crédito's document is ever generated.
    */
-  @Get(':id/documento')
-  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
-  async obtenerDocumento(
+  @Post(':id/solicitar-generacion')
+  @CheckAbility({ action: 'create', subject: 'NotaCredito' })
+  async solicitarGeneracion(
     @Param('id') id: string,
-  ): Promise<DocumentoNotaCredito> {
-    const nota = await this.notasCredito.findOneRaw(id);
-    const [documentDefinition, inmuebleCodigo] = await Promise.all([
-      this.presentacionDocumento.buscar('NC', nota._id),
-      this.notasCredito.resolverInmuebleCodigo(nota.inmuebleId),
+  ): Promise<SolicitudGeneracionDocumento<DatosReciboImpresion>> {
+    const [nota, datos] = await Promise.all([
+      this.notasCredito.findOneRaw(id),
+      this.notasCredito.datosImpresion(id),
     ]);
-    return {
-      inmuebleCodigo,
-      documentDefinition:
-        documentDefinition as DocumentoNotaCredito['documentDefinition'],
-    };
+    return this.generacion.solicitar('NC', nota, datos);
+  }
+
+  /**
+   * Confirms the frontend finished uploading the PDF `solicitar-generacion`
+   * handed it a signed URL for. Same `create` action as `crear()`/
+   * `solicitar-generacion` above.
+   */
+  @Post(':id/confirmar-generacion')
+  @CheckAbility({ action: 'create', subject: 'NotaCredito' })
+  async confirmarGeneracion(
+    @Param('id') id: string,
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const nota = await this.notasCredito.findOneRaw(id);
+    return this.generacion.confirmar('NC', nota, dto.objectPath);
+  }
+
+  /**
+   * A short-lived signed URL to read back this Nota Crédito's
+   * already-generated PDF. Same `read` action as `findOne` above.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const nota = await this.notasCredito.findOne(id);
+    return this.generacion.urlLectura('La nota crédito', id, nota);
   }
 }

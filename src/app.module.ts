@@ -16,6 +16,7 @@ import { InmueblesModule } from './modules/inmuebles/inmuebles.module';
 import { TercerosModule } from './modules/terceros/terceros.module';
 import { FacturacionModule } from './modules/facturacion/facturacion.module';
 import { EntidadesModule } from './modules/entidades/entidades.module';
+import { PlantillasDocumentoModule } from './modules/plantillas-documento/plantillas-documento.module';
 import { CopropiedadesModule } from './modules/copropiedades/copropiedades.module';
 import { RecibosModule } from './modules/recibos/recibos.module';
 import { NotasCreditoModule } from './modules/notas-credito/notas-credito.module';
@@ -71,6 +72,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
     NotasAnticipoModule,
     SaldosInicialesModule,
     EntidadesModule,
+    PlantillasDocumentoModule,
     CopropiedadesModule,
     ConceptosModule,
     UsuariosModule,

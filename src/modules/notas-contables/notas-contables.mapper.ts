@@ -1,7 +1,4 @@
-import type {
-  NodoDocumentoFactura,
-  NotaContable as NotaContableContract,
-} from '../../contracts';
+import type { NotaContable as NotaContableContract } from '../../contracts';
 import type { NotaContableDocument } from '../../database/schemas/notas-contables/nota-contable.schema';
 
 /**
@@ -21,18 +18,18 @@ export const fechaNotaContable = (doc: {
  * English, the API is Spanish, and this is the only place the two meet — see
  * "the contract law" in CLAUDE.md, same pattern as `toNotaCredito`.
  *
- * `documentDefinition` is resolved by the caller from the shared, permanent
- * `presentacion_documento` table — same pattern `toRecibo`/`toNotaDebito`
- * use for their own field of the same name. Defaults to `null` so
- * `crear()`'s own immediate return, `anular()`, and the listing don't need
- * to pass it explicitly.
+ * `objectPath`/`generatedAt` are resolved by the caller from the shared,
+ * permanent `presentacion_documento` table — same pattern `toRecibo`/
+ * `toNotaDebito` use for their own fields of the same name. Defaults to
+ * `null` so `crear()`'s own immediate return, `anular()`, and the listing
+ * don't need to pass it explicitly.
  */
 export const toNotaContable = (
   doc: NotaContableDocument,
   // Live-resolved by the caller from `inmuebleId` — no frozen field for it
   // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
   inmuebleCodigo: string,
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaContableContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -58,7 +55,6 @@ export const toNotaContable = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
-  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
-  // its own field of the same name.
-  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
+  objectPath: presentacion?.objectPath ?? null,
+  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });

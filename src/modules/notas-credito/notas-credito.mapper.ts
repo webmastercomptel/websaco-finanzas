@@ -57,6 +57,13 @@ export const fechaNotaCredito = (doc: {
  * gone precisely so a Nota Crédito never changes after issuance (see
  * `SaldoDocumentoOrigen`'s own docblock). The caller resolves them and
  * passes them in here, same pattern `toRecibo` already uses.
+ *
+ * `objectPath`/`generatedAt` are resolved by the caller from the shared,
+ * permanent `presentacion_documento` table — folded directly into THIS
+ * contract (unlike the other five document types, this one used to expose
+ * them through a separate `GET /notas-credito/:id/documento` route/contract,
+ * now removed — a Nota Crédito no longer re-freezes on every `aplicar()`
+ * under the pdfmake model, so it no longer needs its own asymmetric shape).
  */
 export const toNotaCredito = (
   doc: NotaCreditoDocument,
@@ -71,6 +78,7 @@ export const toNotaCredito = (
   // has no reason to pay for this lookup on every row, only `findOne`'s
   // detail view (via `toNotaCreditoDetalle`) resolves and passes it.
   numeroDocumentoAncla: string | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaCreditoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -96,6 +104,8 @@ export const toNotaCredito = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  objectPath: presentacion?.objectPath ?? null,
+  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
 
 /**
@@ -123,6 +133,7 @@ export const toNotaCreditoDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
   inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): NotaCreditoDetalle => ({
   ...toNotaCredito(
     doc,
@@ -130,6 +141,7 @@ export const toNotaCreditoDetalle = (
     montoSinAplicar,
     inmuebleCodigo,
     numerosPorDocumento.get(idAnclaDe(doc).toString()) ?? null,
+    presentacion,
   ),
   // Self-sourced: every `aplicacion` here was made BY this Nota Crédito, so
   // its own date — never `appliedAt`, the real cruce instant — is what a

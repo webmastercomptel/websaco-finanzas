@@ -1,7 +1,6 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -96,6 +95,7 @@ import type {
 import type { CrearNotaDebitoDto } from './dto/crear-nota-debito.dto';
 import type { AnularNotaDebitoDto } from './dto/anular-nota-debito.dto';
 import type { ListarNotaDebitoDto } from './dto/listar-nota-debito.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 
 /**
  * Service for Nota Débito: manual additional charges against a property's
@@ -103,18 +103,19 @@ import type { ListarNotaDebitoDto } from './dto/listar-nota-debito.dto';
  * source (like Recibo/NotaCredito).
  *
  * `terceros` and `presentacionDocumento` were APPENDED, trailing and
- * optional (same reasoning as `cuentasContables` right above), when
- * `crear()` took over freezing this Nota Débito's own `documentDefinition`
- * into the shared `presentacion_documento` table — see
- * `congelarPresentacionNotaDebito`. `terceros` is needed only for that step
- * (`construirDatosImpresionNotaDebito`'s own `modelos.terceros`); every
- * existing positional test keeps compiling with both left `undefined`, in
- * which case `congelarPresentacionNotaDebito` simply no-ops.
+ * optional (same reasoning as `cuentasContables` right above). Originally
+ * added so `crear()` could freeze this Nota Débito's own
+ * `documentDefinition` right after creating it — that step is GONE under
+ * the pdfmake + frontend-render model (`solicitar-generacion`/
+ * `confirmar-generacion` are separate, explicit actions triggered later,
+ * from `NotasDebitoController`). `terceros` now backs `datosImpresion`
+ * (`construirDatosImpresionNotaDebito`'s own `modelos.terceros`) and
+ * `presentacionDocumento` backs `findOne`'s `objectPath`/`generatedAt`
+ * lookup; every existing positional test keeps compiling with both left
+ * `undefined`.
  */
 @Injectable()
 export class NotasDebitoService {
-  private readonly logger = new Logger(NotasDebitoService.name);
-
   constructor(
     @InjectModel(NotaDebito.name)
     private readonly notasDebito: Model<NotaDebitoDocument>,
@@ -383,83 +384,36 @@ export class NotasDebitoService {
       return toNotaDebito(final!, dto.total, inmueble.code);
     });
 
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: this Nota Débito's own
-    // financial correctness never depends on this succeeding. Same
-    // frozen-at-emission principle `LotesFacturacionService.consolidar()`
-    // already applies to Factura, extended to this document (see
-    // `congelarPresentacionNotaDebito`).
-    await this.congelarPresentacionNotaDebito(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
+    // Presentation generation is no longer triggered here — under the
+    // pdfmake + frontend-render model, `solicitar-generacion`/
+    // `confirmar-generacion` are separate, explicit actions the frontend
+    // calls later (`NotasDebitoController`), never something `crear()`
+    // does internally.
     return resultado;
   }
 
   /**
-   * Freezes this Nota Débito's react-pdf presentation tree into the shared,
-   * permanent `presentacion_documento` table — called AFTER `crear()`'s own
-   * transaction has already committed (never from inside it). No-ops when
-   * any optional dependency it needs is missing (test-only construction —
-   * see this class's own docblock). Wrapped in try/catch, log-and-continue,
-   * never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
+   * The pure printable data for this Nota Débito — what
+   * `NotasDebitoController`'s `solicitar-generacion` route sends the
+   * frontend alongside the template, computed fresh every call. Reuses
+   * `construirDatosImpresionNotaDebito` UNCHANGED.
    */
-  private async congelarPresentacionNotaDebito(
-    coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
-    }
-    try {
-      const [notaRaw, copropiedad] = await Promise.all([
-        this.notasDebito.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!notaRaw || !copropiedad) return;
-
-      const datos = await construirDatosImpresionNotaDebito(
-        notaRaw,
-        copropiedad,
-        coPropertyId,
-        {
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          conceptos: this.conceptos,
-          asientos: this.asientos,
-          cuentasContables: this.cuentasContables,
-        },
-      );
-
-      // Deferred import — see `RecibosService.congelarPresentacionRecibo`'s
-      // own identical comment: `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load statically.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'ND',
-        notaRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota débito ${notaId.toString()} — la nota ya quedó creada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
+  async datosImpresion(id: string): Promise<DatosReciboImpresion> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.findOneRaw(id);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
+    return construirDatosImpresionNotaDebito(nota, copropiedad, coPropertyId, {
+      inmuebles: this.inmuebles,
+      terceros: this.terceros!,
+      conceptos: this.conceptos,
+      asientos: this.asientos,
+      cuentasContables: this.cuentasContables!,
+    });
   }
 
   /**
@@ -602,11 +556,9 @@ export class NotasDebitoService {
       ]),
     ]);
 
-    // Also the frontend's source for rendering this Nota Débito's PDF
-    // client-side — frozen once by `congelarPresentacionNotaDebito`, read
-    // back the same way `RecibosService.findOne` reads its own
-    // `documentDefinition`.
-    const documentDefinition = this.presentacionDocumento
+    // `objectPath`/`generatedAt` — resolved from `presentacion_documento` the
+    // same way `RecibosService.findOne` resolves its own.
+    const presentacion = this.presentacionDocumento
       ? await this.presentacionDocumento.buscar('ND', nota._id)
       : null;
 
@@ -616,7 +568,7 @@ export class NotasDebitoService {
       aplicaciones,
       await this.resolverInmuebleCodigo(nota.inmuebleId),
       fechasPorSourceId,
-      documentDefinition,
+      presentacion,
     );
   }
 
