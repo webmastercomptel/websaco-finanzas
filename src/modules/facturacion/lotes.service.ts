@@ -1105,7 +1105,9 @@ export class LotesFacturacionService {
                 tercero.identificationVerificationDigit,
               address: tercero.address,
               city: tercero.city,
-              email: tercero.email,
+              // The PDF prints one address, not a list — see the product
+              // decision on `TitularCongelado.email`, 2026-09-22.
+              email: tercero.emails[0] ?? null,
             }
           : null,
         lines,

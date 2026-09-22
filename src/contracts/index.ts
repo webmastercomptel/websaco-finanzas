@@ -171,7 +171,9 @@ export interface Tercero {
   tipoIdentificacion: string | null;
   numeroIdentificacion: string | null;
   digitoVerificacion: string | null;
-  email: string | null;
+  /** See the note on `Tercero.emails` (schema) — more than one inbox for
+   *  the same party, never null, empty when none is on file. */
+  emails: string[];
   telefono: string | null;
   direccion: string | null;
   ciudad: string | null;

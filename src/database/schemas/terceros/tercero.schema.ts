@@ -99,8 +99,15 @@ export class Tercero {
   @Prop({ type: String, default: null, trim: true })
   identificationVerificationDigit: string | null;
 
-  @Prop({ type: String, default: null, trim: true })
-  email: string | null;
+  /**
+   * A party often answers to more than one inbox — an owner and their
+   * property manager, or two co-owners. Stored as a list for the same
+   * reason `fiscalResponsibilities` is: squeezing several values into one
+   * string is how the second one gets lost. Empty, never null, so callers
+   * never have to branch on absence before mapping over it.
+   */
+  @Prop({ type: [String], default: [] })
+  emails: string[];
 
   @Prop({ type: String, default: null, trim: true })
   phone: string | null;

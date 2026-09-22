@@ -1203,7 +1203,7 @@ describe('LotesFacturacionService.liquidar', () => {
     identificationVerificationDigit: null,
     address: null,
     city: null,
-    email: null,
+    emails: [],
     ...over,
   });
   const concepto = (over: Record<string, unknown> = {}) => ({
@@ -1739,6 +1739,35 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(
       lineas.some((l) => (l as { source: string }).source === 'interes'),
     ).toBe(false);
+  });
+
+  it('congela solo el primer email cuando el titular tiene varios', async () => {
+    const m = construirModelos({
+      terceros: tercero({ emails: ['ana@ejemplo.com', 'gestor@ejemplo.com'] }),
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const preliminar = actualizacion.$set.preview[0];
+    expect(preliminar.holder?.email).toBe('ana@ejemplo.com');
   });
 
   it('deja holder y terceroId en null si el titular no se encuentra', async () => {
