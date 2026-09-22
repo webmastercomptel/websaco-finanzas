@@ -324,24 +324,16 @@ export interface Factura {
   motivoAnulacion: MotivoAnulacionFactura | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` (see `PresentacionDocumento` for the two-phase
-   *  write). `objectPath` alone (no `generatedAt`) reads identically to
-   *  "nothing generated yet". */
-  objectPath: string | null;
-  /** ISO 8601 — set only once the upload to `objectPath` is confirmed. */
-  generatedAt: IsoDate | null;
 }
 
-/** One entry of `GET /lotes/:id/facturas/documentos` — a lote's invoices,
- *  each with its own presentation pointer, for the browser to know which
- *  ones already have a generated PDF to read and which still need
- *  `solicitar-generacion`. See `Factura.objectPath`/`generatedAt`. */
+/** One entry of `GET /lotes/:id/facturas/documentos` — a plain listing of a
+ *  lote's invoices (id + unit code). There is no per-invoice presentation
+ *  pointer any more: a lote's invoice run produces ONE combined PDF (one
+ *  page per invoice, anchored on the Lote's own id), read via
+ *  `GET /lotes/:id/url-lectura` — see `SolicitudGeneracionFacturaLote`. */
 export interface DocumentoFacturaLote {
   id: string;
   inmuebleCodigo: string;
-  objectPath: string | null;
-  generatedAt: IsoDate | null;
 }
 
 /** Response of `GET /lotes/:id/inmuebles/:inmuebleId/prefactura/documento`
@@ -355,6 +347,21 @@ export interface DocumentoPrefactura {
   datos: DatosPlantillaFactura;
 }
 
+/** Response of `GET /facturas/:id/documento` — a live-computed view of one
+ *  already-issued Factura's PDF content: the current template
+ *  (`plantilla_documento` row for `FV`) plus this invoice's own computed
+ *  totals (`FacturasService.datosPlantilla`), recomputed on every call —
+ *  never read from a stored file. The lote's invoice run produces ONE
+ *  combined PDF for the whole batch (see `SolicitudGeneracionFacturaLote`/
+ *  `LotesController`'s `:id/url-lectura`); reading that file to show a
+ *  single invoice would leak every other unit's invoice to whoever is only
+ *  entitled to see their own, so this route computes it live instead, same
+ *  as `DocumentoPrefactura` above (same shape, on purpose). */
+export interface DocumentoFactura {
+  plantilla: PlantillaDocumento;
+  datos: DatosPlantillaFactura;
+}
+
 /** One entry of `GET /lotes/:id/prefacturas/documentos` — same idea as
  *  `DocumentoFacturaLote`, but always computed live: a Prefactura reflects
  *  the lote's current previsualización, edits included, never cached. */
@@ -364,34 +371,23 @@ export interface DocumentoPrefacturaLote {
   datos: DatosPlantillaFactura;
 }
 
-/** Response of the batch `POST /lotes/:id/facturas/solicitar-generacion` —
- *  the lote's template (`plantilla_documento` row for `FV`), fetched ONCE,
- *  plus one entry per Factura the lote produced, each with its own upload
- *  target and computed data. See `FacturasService.datosPlantilla`. */
+/** Response of `POST /lotes/:id/facturas/solicitar-generacion` — a lote's
+ *  invoice run produces ONE combined PDF (one page per invoice), so this is
+ *  anchored on the LOTE's own id, not any one Factura's: `objectPath`/
+ *  `uploadUrl`/`expiresAt` are the single upload target the frontend renders
+ *  that combined file to (hoisted to the top level, unlike the old
+ *  per-invoice shape this replaced). `facturas` is just each invoice's own
+ *  computed `datos` — one page's worth, in the order the combined PDF must
+ *  render them. See `FacturasService.datosPlantilla`. */
 export interface SolicitudGeneracionFacturaLote {
   plantilla: PlantillaDocumento;
+  objectPath: string;
+  uploadUrl: string;
+  expiresAt: IsoDate;
   facturas: {
     facturaId: string;
-    objectPath: string;
-    uploadUrl: string;
-    expiresAt: IsoDate;
     datos: DatosPlantillaFactura;
   }[];
-}
-
-/** One Factura this batch call confirmed the upload for, or the reason it
- *  could not — same best-effort, per-row reporting shape as
- *  `ErrorConsolidacion`, since one invoice's upload failing must never block
- *  confirming the rest of the batch. */
-export interface ErrorConfirmacionGeneracionFactura {
-  facturaId: string;
-  mensaje: string;
-}
-
-/** Response of the batch `POST /lotes/:id/facturas/confirmar-generacion`. */
-export interface ResultadoConfirmacionGeneracionFacturaLote {
-  confirmadas: string[];
-  errores: ErrorConfirmacionGeneracionFactura[];
 }
 
 /** Why a Factura was voided — same catalog as a Nota Crédito's void (no
@@ -632,8 +628,10 @@ export interface Recibo {
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
   /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` — see `Factura.objectPath`/`generatedAt` for the
-   *  shared two-phase write this mirrors. */
+   *  `confirmarGeneracion` — see `PresentacionDocumento`'s own docblock for
+   *  the two-phase write this mirrors. Unlike Factura (batch-only, one
+   *  combined PDF per lote — see `SolicitudGeneracionFacturaLote`), a Recibo
+   *  is issued and stored one-to-one, so it keeps its own pointer here. */
   objectPath: string | null;
   generatedAt: IsoDate | null;
 }
@@ -686,7 +684,9 @@ export interface ReciboDetalle extends Recibo {
 
 /** One entry of `GET /lotes-recibos/:id/documentos` — a batch's receipts,
  *  each with its own presentation pointer. See `Recibo.objectPath`/
- *  `generatedAt`; mirrors `DocumentoFacturaLote`. */
+ *  `generatedAt`. Unlike `DocumentoFacturaLote` (Factura moved to one
+ *  combined PDF per lote), a Recibo is still stored one-to-one, so this
+ *  keeps the per-row pointer. */
 export interface DocumentoReciboLote {
   id: string;
   inmuebleCodigo: string;
@@ -840,10 +840,11 @@ export interface NotaCredito {
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
   /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` — see `Factura.objectPath`/`generatedAt`. Unlike
-   *  the old `documentDefinition` (which `aplicar()` re-froze every time it
-   *  ran), this is never re-requested once confirmed: nothing re-renders
-   *  after issuance under the new model. */
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt` for the
+   *  shared two-phase write this mirrors. Unlike the old `documentDefinition`
+   *  (which `aplicar()` re-froze every time it ran), this is never
+   *  re-requested once confirmed: nothing re-renders after issuance under
+   *  the new model. */
   objectPath: string | null;
   generatedAt: IsoDate | null;
 }
@@ -888,7 +889,7 @@ export interface NotaDebito {
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
   /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` — see `Factura.objectPath`/`generatedAt`. */
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
   objectPath: string | null;
   generatedAt: IsoDate | null;
 }
@@ -935,7 +936,7 @@ export interface NotaAnticipo {
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
   /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` — see `Factura.objectPath`/`generatedAt`. */
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
   objectPath: string | null;
   generatedAt: IsoDate | null;
 }
@@ -1078,7 +1079,7 @@ export interface NotaContable {
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
   /** Set by `solicitarGeneracion` (pending upload) and confirmed by
-   *  `confirmarGeneracion` — see `Factura.objectPath`/`generatedAt`. */
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
   objectPath: string | null;
   generatedAt: IsoDate | null;
 }

@@ -1,12 +1,27 @@
 // src/modules/facturacion/facturas.controller.ts
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { FacturasService } from './facturas.service';
-import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
+import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
+import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
 import { ListarFacturasDto } from './dto/listar-facturas.dto';
-import type { Factura, Paginado } from '../../contracts';
+import type { DocumentoFactura, Factura, Paginado } from '../../contracts';
 
 /**
  * Read-only: invoices are only ever created via a Lote's consolidación
@@ -23,7 +38,10 @@ import type { Factura, Paginado } from '../../contracts';
 export class FacturasController {
   constructor(
     private readonly facturas: FacturasService,
-    private readonly generacion: GeneracionDocumentoService,
+    private readonly tenant: TenantContextService,
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades: Model<CopropiedadDocument>,
+    private readonly plantillas: PlantillaDocumentoService,
   ) {}
 
   @Get()
@@ -32,13 +50,6 @@ export class FacturasController {
     return this.facturas.findAll(query);
   }
 
-  /**
-   * `Factura.objectPath`/`generatedAt` (frozen once, per invoice, via the
-   * batch `solicitar-generacion`/`confirmar-generacion` pair on
-   * `LotesController`) are just fields on the same mapped contract — no PDF
-   * is built or streamed by this backend, the browser renders it
-   * client-side from `plantilla_documento` + `FacturasService.datosPlantilla`.
-   */
   @Get(':id')
   @CheckAbility({ action: 'read', subject: 'Factura' })
   findOne(@Param('id') id: string): Promise<Factura> {
@@ -46,17 +57,37 @@ export class FacturasController {
   }
 
   /**
-   * A short-lived signed URL to read back this Factura's already-generated
-   * PDF. Gated by the same `read` action as `findOne` above — nothing about
-   * downloading an already-emitted document needs a stricter permission
-   * than viewing it.
+   * A live-computed view of one Factura's PDF content — the current `FV`
+   * template plus this invoice's own already-frozen `datos`
+   * (`FacturasService.datosPlantilla`), recomputed on every call, no stored
+   * file involved. A Factura is batch-only: its lote's invoice run produces
+   * ONE combined PDF (one page per invoice, anchored on the Lote's own id —
+   * see `LotesController.solicitarGeneracionFacturas`/`:id/url-lectura`).
+   * Reading that combined file to show a single invoice would leak every
+   * other unit's invoice to whoever is only entitled to see their own, so
+   * this route never touches it — same reasoning, and the same live
+   * computation, as `LotesController`'s Prefactura routes. Same `read`
+   * action as `findOne` above.
    */
-  @Get(':id/url-lectura')
+  @Get(':id/documento')
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  async urlLectura(
-    @Param('id') id: string,
-  ): Promise<{ url: string; expiresAt: string }> {
-    const factura = await this.facturas.findOne(id);
-    return this.generacion.urlLectura('La factura', id, factura);
+  async obtenerDocumento(@Param('id') id: string): Promise<DocumentoFactura> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const factura = await this.facturas.findOneRaw(id);
+
+    const [copropiedad, plantilla] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.plantillas.findOne('FV'),
+    ]);
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    return {
+      plantilla: toPlantilla(plantilla),
+      datos: await this.facturas.datosPlantilla(factura, copropiedad),
+    };
   }
 }

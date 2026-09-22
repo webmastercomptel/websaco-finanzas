@@ -14,7 +14,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -40,14 +40,14 @@ import type {
   DocumentoPrefactura,
   DocumentoPrefacturaLote,
   SolicitudGeneracionFacturaLote,
-  ResultadoConfirmacionGeneracionFacturaLote,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
 import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
-import { ConfirmarGeneracionFacturaLoteDto } from './dto/confirmar-generacion-factura-lote.dto';
+import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
 import {
   Copropiedad,
   CopropiedadDocument,
@@ -72,6 +72,7 @@ export class LotesController {
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly presentacionDocumento: PresentacionDocumentoService,
     private readonly plantillas: PlantillaDocumentoService,
+    private readonly generacion: GeneracionDocumentoService,
   ) {}
 
   @Get()
@@ -254,13 +255,12 @@ export class LotesController {
   }
 
   /**
-   * Every Factura this lote's consolidación produced, with its own
-   * presentation pointer — one entry per invoice, in the exact layout
-   * `GET /facturas/:id` already shows for one at a time (both read the same
-   * `presentacion_documento` row). `.lean()` (`findAllRawPorLote`) keeps the
-   * Factura fetch cheap for a lote with hundreds of invoices, and
-   * `buscarVarios` batches the presentation lookup into one query instead of
-   * one per invoice.
+   * A plain listing of every Factura this lote's consolidación produced —
+   * id and unit code only. There is no per-invoice presentation pointer any
+   * more: a lote's invoice run produces ONE combined PDF, anchored on the
+   * Lote's own id (see `:id/url-lectura` below), not on any one Factura's.
+   * `.lean()` (`findAllRawPorLote`) keeps the Factura fetch cheap for a lote
+   * with hundreds of invoices.
    */
   @Get(':id/facturas/documentos')
   @CheckAbility({ action: 'read', subject: 'Factura' })
@@ -278,29 +278,22 @@ export class LotesController {
       );
     }
 
-    const presentaciones = await this.presentacionDocumento.buscarVarios(
-      'FV',
-      facturas.map((factura) => factura._id),
-    );
-
-    return facturas.map((factura) => {
-      const presentacion = presentaciones.get(factura._id.toString());
-      return {
-        id: factura._id.toString(),
-        inmuebleCodigo: factura.unitCode,
-        objectPath: presentacion?.objectPath ?? null,
-        generatedAt: presentacion?.generatedAt.toISOString() ?? null,
-      };
-    });
+    return facturas.map((factura) => ({
+      id: factura._id.toString(),
+      inmuebleCodigo: factura.unitCode,
+    }));
   }
 
   /**
-   * Batch `solicitar-generacion` for every Factura this lote produced — the
-   * template for `FV` is fetched ONCE (never once per invoice), and each
-   * invoice gets its own upload target (`objectPath`/`uploadUrl`) plus its
-   * own computed `datos` (`FacturasService.datosPlantilla`). Same guard as
-   * `:id/consolidar` — provisioning invoices in bulk is the same capability
-   * as issuing one.
+   * `solicitar-generacion` for the lote's invoice run — ONE combined PDF
+   * (one page per invoice), anchored on the LOTE's own id via the shared
+   * `GeneracionDocumentoService.solicitar` (same helper every other document
+   * type already uses), not on any one Factura's. The template for `FV` is
+   * fetched ONCE, and each invoice's own computed `datos`
+   * (`FacturasService.datosPlantilla`) travels as the array the frontend
+   * renders one page per entry from — no per-invoice upload target any
+   * more. Same guard as `:id/consolidar` — provisioning invoices in bulk is
+   * the same capability as issuing one.
    */
   @Post(':id/facturas/solicitar-generacion')
   @CheckAbility({ action: 'create', subject: 'Factura' })
@@ -308,7 +301,7 @@ export class LotesController {
     @Param('id') id: string,
   ): Promise<SolicitudGeneracionFacturaLote> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
-    await this.lotes.findOneRaw(id);
+    const lote = await this.lotes.findOneRaw(id);
 
     const facturasLean = await this.facturas.findAllRawPorLote(id);
     if (facturasLean.length === 0) {
@@ -317,12 +310,10 @@ export class LotesController {
       );
     }
 
-    const [copropiedad, plantilla, datosVisualesPorInmueble] =
-      await Promise.all([
-        this.copropiedades.findById(coPropertyId).exec(),
-        this.plantillas.findOne('FV'),
-        this.facturas.datosVisualesPdf(facturasLean.map((f) => f.inmuebleId)),
-      ]);
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf(facturasLean.map((f) => f.inmuebleId)),
+    ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -330,66 +321,63 @@ export class LotesController {
     }
 
     const facturas = await Promise.all(
-      facturasLean.map(async (factura) => {
-        const { objectPath, uploadUrl, expiresAt } =
-          await this.presentacionDocumento.solicitarGeneracion(
-            'FV',
-            factura._id,
-            coPropertyId,
-          );
-        const datos = await this.facturas.datosPlantilla(
+      facturasLean.map(async (factura) => ({
+        facturaId: factura._id.toString(),
+        datos: await this.facturas.datosPlantilla(
           factura,
           copropiedad,
           datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
-        );
-        return {
-          facturaId: factura._id.toString(),
-          objectPath,
-          uploadUrl,
-          expiresAt: expiresAt.toISOString(),
-          datos,
-        };
-      }),
+        ),
+      })),
     );
 
-    return { plantilla: toPlantilla(plantilla), facturas };
+    const { plantilla, objectPath, uploadUrl, expiresAt } =
+      await this.generacion.solicitar('FV', lote, facturas);
+
+    return { plantilla, objectPath, uploadUrl, expiresAt, facturas };
   }
 
   /**
-   * Batch `confirmar-generacion` — one confirmation per Factura the
-   * frontend already uploaded a rendered PDF for. Best-effort per row, same
-   * "one bad row never blocks the rest" shape as `consolidar()`'s own
-   * `errores` array: one invoice's upload failing to verify must never
-   * block confirming the others.
+   * Confirms the frontend finished uploading the lote's combined PDF
+   * `solicitar-generacion` handed it a signed URL for — a single
+   * confirmation, the same shared `ConfirmarGeneracionDocumentoDto`/
+   * `GeneracionDocumentoService.confirmar` every other document type already
+   * uses. There is nothing "best-effort per row" about confirming one file
+   * any more — see `SolicitudGeneracionFacturaLote`.
    */
   @Post(':id/facturas/confirmar-generacion')
   @CheckAbility({ action: 'create', subject: 'Factura' })
   async confirmarGeneracionFacturas(
     @Param('id') id: string,
-    @Body() dto: ConfirmarGeneracionFacturaLoteDto,
-  ): Promise<ResultadoConfirmacionGeneracionFacturaLote> {
-    await this.lotes.findOneRaw(id);
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const lote = await this.lotes.findOneRaw(id);
+    return this.generacion.confirmar('FV', lote, dto.objectPath);
+  }
 
-    const confirmadas: string[] = [];
-    const errores: ResultadoConfirmacionGeneracionFacturaLote['errores'] = [];
-
-    for (const item of dto.facturas) {
-      try {
-        await this.presentacionDocumento.confirmarGeneracion(
-          'FV',
-          new Types.ObjectId(item.facturaId),
-          item.objectPath,
-        );
-        confirmadas.push(item.facturaId);
-      } catch (err) {
-        errores.push({
-          facturaId: item.facturaId,
-          mensaje: err instanceof Error ? err.message : 'Error desconocido',
-        });
-      }
-    }
-
-    return { confirmadas, errores };
+  /**
+   * A short-lived signed URL to read back this lote's combined invoice-run
+   * PDF (one file, one page per invoice) — never a single Factura's own
+   * document, since a Factura no longer has one of its own (see
+   * `FacturasController`'s `:id/documento`, computed live instead
+   * precisely to avoid leaking every other unit's invoice). Same `read`
+   * action as `findOne` above.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const lote = await this.lotes.findOneRaw(id);
+    const presentacion = await this.presentacionDocumento.buscar(
+      'FV',
+      lote._id,
+    );
+    return this.generacion.urlLectura(
+      'El lote de facturación',
+      id,
+      presentacion ?? { objectPath: null, generatedAt: null },
+    );
   }
 
   /**

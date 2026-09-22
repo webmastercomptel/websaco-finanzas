@@ -26,7 +26,6 @@ import {
   SaldoDocumentoOrigenDocument,
 } from '../../database/schemas/recibos/saldo-documento-origen.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import type {
   Factura as FacturaContract,
@@ -61,13 +60,6 @@ export class FacturasService {
     @InjectModel(SaldoDocumentoOrigen.name)
     private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     private readonly tenant: TenantContextService,
-    // Optional — same convention as `LotesFacturacionService`'s own trailing
-    // optional deps (`cuentasContables`/`resoluciones`): in the real app
-    // this is always injected; left `undefined` only by the many existing
-    // tests that construct this service positionally without it, in which
-    // case `findOne` simply resolves `objectPath`/`generatedAt` as `null`
-    // instead of throwing.
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
   ) {}
 
   /** Batch-resolves each document's own live per-concepto breakdown from
@@ -146,17 +138,11 @@ export class FacturasService {
     );
 
     return {
-      // `presentacion` passed as `null` here on purpose — a listing page
-      // (default 50/página) has no use for each row's own upload pointer,
-      // and querying `presentacion_documento` for the whole page would be
-      // wasted work for no reason. `findOne` below is the only place that
-      // needs the real lookup.
       items: documentos.map((doc) =>
         toFactura(
           doc,
           saldoPorDocumento.get(doc._id.toString()) ?? 0,
           carteraPorDoc.get(doc._id.toString()) ?? new Map<string, number>(),
-          null,
         ),
       ),
       total,
@@ -173,19 +159,35 @@ export class FacturasService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    const [saldoTotal, carteraPorDoc, presentacion] = await Promise.all([
+    const [saldoTotal, carteraPorDoc] = await Promise.all([
       this.saldoTotalDocumento.findOne({ documentoId: documento._id }).exec(),
       this.carteraPorConceptoDe([documento._id]),
-      this.presentacionDocumento
-        ? this.presentacionDocumento.buscar('FV', documento._id)
-        : Promise.resolve(null),
     ]);
     return toFactura(
       documento,
       saldoTotal?.saldoPendiente ?? 0,
       carteraPorDoc.get(documento._id.toString()) ?? new Map<string, number>(),
-      presentacion,
     );
+  }
+
+  /**
+   * One Factura, raw and lean, scoped to the active tenant — used by
+   * `FacturasController.obtenerDocumento` to compute a live
+   * `DatosPlantillaFactura` for a single invoice without hydrating a full
+   * Mongoose document, same reasoning as `findAllRawPorLote` (this method's
+   * batch counterpart). Structurally the same shape `datosPlantilla` already
+   * accepts (`FacturaLean`).
+   */
+  async findOneRaw(id: string): Promise<FacturaLean> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documento = await this.facturas
+      .findOne({ _id: id, coPropertyId })
+      .lean()
+      .exec();
+    if (!documento) {
+      throw new NotFoundException(`No se encontró la factura ${id}`);
+    }
+    return documento;
   }
 
   /**

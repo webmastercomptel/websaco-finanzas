@@ -57,18 +57,18 @@ export const lineaDe = (
  * batch-reads them from those two live ledgers — and passed in here, same
  * pattern `toNotaDebito` already uses for its own `saldoPendiente`.
  *
- * `objectPath`/`generatedAt` are likewise not fields on `Factura` itself —
- * they live in the shared, permanent `presentacion_documento` table (see
- * that schema's own docblock: a frozen record, not a regenerable cache).
- * `FacturasService` resolves them from `PresentacionDocumentoService` and
- * passes them in here, same shape as `saldoPendiente`/`saldoPorConcepto`
- * above.
+ * There is no `objectPath`/`generatedAt` on this contract, unlike every
+ * other financial document: a Factura is batch-only, and its lote's invoice
+ * run produces ONE combined PDF (anchored on the Lote's own id — see
+ * `SolicitudGeneracionFacturaLote`), never a per-invoice file. Viewing one
+ * invoice on demand is computed live instead (`GET /facturas/:id/documento`
+ * — see `DocumentoFactura`), precisely so it never reads from that combined
+ * file (which would leak every other unit's invoice).
  */
 export const toFactura = (
   doc: FacturaDocument,
   saldoPendiente: number,
   saldoPorConcepto: Map<string, number>,
-  presentacion: { objectPath: string; generatedAt: Date } | null,
 ): FacturaContract => ({
   id: doc._id.toString(),
   loteId: doc.loteId.toString(),
@@ -98,8 +98,4 @@ export const toFactura = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
-  // Resolved by the caller from `presentacion_documento`, see this
-  // function's own docblock.
-  objectPath: presentacion?.objectPath ?? null,
-  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
