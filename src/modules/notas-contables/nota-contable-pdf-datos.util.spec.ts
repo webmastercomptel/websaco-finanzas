@@ -22,8 +22,16 @@ const notaBase = (over: Record<string, unknown> = {}): NotaContableDocument =>
     ...over,
   }) as unknown as NotaContableDocument;
 
-const copropiedadBase = (): CopropiedadDocument =>
-  ({}) as unknown as CopropiedadDocument;
+const copropiedadBase = (
+  over: Record<string, unknown> = {},
+): CopropiedadDocument =>
+  ({
+    name: 'Conjunto Residencial Los Alamos',
+    taxId: '900123456',
+    taxIdVerificationDigit: '7',
+    showLogoOnDocuments: true,
+    ...over,
+  }) as unknown as CopropiedadDocument;
 
 const modelos = (
   over: {
@@ -92,6 +100,22 @@ describe('construirDatosImpresionNotaContable', () => {
     expect(datos.numeroCompleto).toBe('NT-0003');
     expect(datos.concepto).toBe('Reclasificación de TV a Pintura');
     expect(datos.monto).toBe(100000);
+  });
+
+  it('arma emisor/logoFilas desde la copropiedad y suma débito/crédito de las líneas', async () => {
+    const datos = await construirDatosImpresionNotaContable(
+      notaBase(),
+      copropiedadBase(),
+      COP,
+      modelos() as never,
+      'Nota Contable',
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Residencial Los Alamos');
+    expect(datos.emisor.nitCompleto).toBe('900123456-7');
+    expect(datos.logoFilas).toEqual([{}]);
+    expect(datos.totalDebito).toBe(100000);
+    expect(datos.totalCredito).toBe(100000);
   });
 
   it('resuelve inmuebleCodigo y titularNombre vía Inmueble.holderId -> Tercero.name', async () => {

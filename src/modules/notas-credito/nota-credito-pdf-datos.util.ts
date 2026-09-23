@@ -11,6 +11,7 @@ import type { TerceroDocument } from '../../database/schemas/terceros/tercero.sc
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
+import { emisorDe } from '../../common/documentos/emisor.util';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
@@ -348,5 +349,9 @@ export async function construirDatosImpresionNotaCredito(
     concepto: nota.notes ?? MOTIVOS_LABELS[nota.reason] ?? nota.reason,
     monto: nota.totalAmount,
     lineas,
+    totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
+    totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
+    emisor: emisorDe(copropiedad),
+    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
   };
 }

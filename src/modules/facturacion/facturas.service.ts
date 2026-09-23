@@ -46,6 +46,7 @@ import type {
 import { toFactura, titularDe } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import { emisorDe } from '../../common/documentos/emisor.util';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type {
   FacturaPreliminar,
@@ -400,34 +401,6 @@ export class FacturasService {
     };
   }
 
-  /** The issuing coproperty's own header data, exactly as the Factura/
-   *  Prefactura pdfmake template needs it — see
-   *  `EmisorPlantillaFactura`'s own docblock (contracts/index.ts) for why
-   *  this is genuinely live and must be frozen via `printSnapshot`, not
-   *  re-derived from `coPropertyId` on every read. */
-  private emisorDe(copropiedad: CopropiedadDocument): EmisorPlantillaFactura {
-    const nitCompleto = copropiedad.taxId
-      ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
-      : '—';
-    const direccionCompleta =
-      [copropiedad.address, copropiedad.city].filter(Boolean).join(' - ') ||
-      '—';
-    return {
-      nombre: copropiedad.name,
-      nit: copropiedad.taxId,
-      digitoVerificacion: copropiedad.taxIdVerificationDigit,
-      direccion: copropiedad.address,
-      ciudad: copropiedad.city,
-      telefono: copropiedad.phone,
-      email: copropiedad.email,
-      mostrarLogo: copropiedad.showLogoOnDocuments,
-      nitCompleto,
-      direccionCompleta,
-      telefonoMostrado: copropiedad.phone ?? '—',
-      emailMostrado: copropiedad.email ?? '—',
-    };
-  }
-
   /** The whole DIAN-resolution footer sentence, pre-composed — see
    *  `ResolucionFilaFactura`'s own docblock for why this can't be built
    *  inside the template itself (the " vigente hasta …" tail is
@@ -493,7 +466,7 @@ export class FacturasService {
       visuales?.referencia ?? null,
       copropiedad.billingNotes?.trim() || null,
       titulo,
-      this.emisorDe(copropiedad),
+      emisorDe(copropiedad),
       resolucion,
       titularDe(factura.holder),
     );
@@ -547,7 +520,7 @@ export class FacturasService {
       // preview, not a real document type — it has no row of its own under
       // "Tabla de Documentos", literally "Prefactura" always.
       'Prefactura',
-      this.emisorDe(copropiedad),
+      emisorDe(copropiedad),
       // No frozen resolución to show yet — a Prefactura is unnumbered, so
       // there is nothing to resolve (see this method's own docblock).
       null,

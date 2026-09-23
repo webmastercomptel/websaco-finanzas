@@ -26,6 +26,10 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
+    name: 'Conjunto Residencial Los Alamos',
+    taxId: '900123456',
+    taxIdVerificationDigit: '7',
+    showLogoOnDocuments: true,
     receivablesAccount: '130500',
     advancesAccount: '210505',
     ...over,
@@ -80,6 +84,27 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     expect(datos.titularNombre).toBe('MARIA GOMEZ');
     expect(datos.fecha).toEqual(new Date('2026-07-12'));
     expect(datos.monto).toBe(200000);
+  });
+
+  it('arma emisor/logoFilas desde la copropiedad y suma débito/crédito de las líneas', async () => {
+    const datos = await construirDatosImpresionNotaAnticipo(
+      notaBase(),
+      [],
+      copropiedadBase(),
+      COP,
+      modelosVacios() as never,
+      'Nota de Anticipo',
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Residencial Los Alamos');
+    expect(datos.emisor.nitCompleto).toBe('900123456-7');
+    expect(datos.logoFilas).toEqual([{}]);
+    expect(datos.totalDebito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.debito, 0),
+    );
+    expect(datos.totalCredito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.credito, 0),
+    );
   });
 
   it('el concepto nombra el recibo de origen', async () => {

@@ -1434,7 +1434,8 @@ export class LotesFacturacionService {
       }));
 
     if (filasPendientes.length > numerosReservados.length) {
-      const primeraSinNumero = filasPendientesConIndice[numerosReservados.length];
+      const primeraSinNumero =
+        filasPendientesConIndice[numerosReservados.length];
       errores.push({
         fila: primeraSinNumero.indiceEnPreview + 1,
         inmuebleCodigo: primeraSinNumero.preliminar.unitCode,
