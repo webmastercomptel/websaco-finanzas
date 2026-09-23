@@ -578,7 +578,249 @@ describe('FacturasService.datosPlantilla', () => {
       telefono: '6011234567',
       email: 'admin@alcazares.com',
       mostrarLogo: true,
+      nitCompleto: '900999999-7',
+      direccionCompleta: 'Calle 1 # 2-3 - Bogotá',
+      telefonoMostrado: '6011234567',
+      emailMostrado: 'admin@alcazares.com',
     });
+  });
+
+  it('emisor.nitCompleto y direccionCompleta caen a "—" cuando la copropiedad no tiene esos datos', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({
+        taxId: null,
+        taxIdVerificationDigit: null,
+        address: null,
+        city: null,
+      }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.emisor.nitCompleto).toBe('—');
+    expect(datos.emisor.direccionCompleta).toBe('—');
+  });
+
+  it('emisor.telefonoMostrado y emailMostrado caen a "—" cuando la copropiedad no tiene esos datos', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ phone: null, email: null }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.emisor.telefonoMostrado).toBe('—');
+    expect(datos.emisor.emailMostrado).toBe('—');
+  });
+
+  it('logoFilas refleja emisor.mostrarLogo — [{}] cuando está encendido, [] cuando no', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const conLogo = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ showLogoOnDocuments: true }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+    const sinLogo = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ showLogoOnDocuments: false }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(conLogo.logoFilas).toEqual([{}]);
+    expect(sinLogo.logoFilas).toEqual([]);
+  });
+
+  it('referenciaPagoFilas trae la referencia solo cuando datosVisuales.referencia no es null', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const conReferencia = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: 'REF-301', totalAnticipos: 0 },
+    );
+    const sinReferencia = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(conReferencia.referenciaPagoFilas).toEqual([
+      { referenciaPago: 'REF-301' },
+    ]);
+    expect(sinReferencia.referenciaPagoFilas).toEqual([]);
+  });
+
+  it('ivaFilas y anticiposFilas solo aparecen cuando el total respectivo es mayor a 0', async () => {
+    const { service } = construirServicioConTitulo();
+    const facturaConIva = facturaParaPlantilla({
+      lines: [
+        {
+          conceptoId: { toString: () => 'con-1' },
+          conceptName: 'Administración',
+          conceptKind: 'administracion',
+          baseAmount: 500000,
+          taxRate: 19,
+          taxAmount: 95000,
+          totalAmount: 595000,
+          balanceBefore: 0,
+          balanceAfter: 595000,
+        },
+      ],
+    });
+
+    const conIvaYAnticipos = await service.datosPlantilla(
+      facturaConIva as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 30000 },
+    );
+    const sinIvaNiAnticipos = await service.datosPlantilla(
+      facturaParaPlantilla() as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(conIvaYAnticipos.ivaFilas).toEqual([
+      { etiquetaIva: 'IVA 19%', totalIva: 95000 },
+    ]);
+    expect(conIvaYAnticipos.anticiposFilas).toEqual([
+      { totalAnticipos: 30000 },
+    ]);
+    expect(sinIvaNiAnticipos.ivaFilas).toEqual([]);
+    expect(sinIvaNiAnticipos.anticiposFilas).toEqual([]);
+  });
+
+  it('notasFilas trae las notas solo cuando la copropiedad tiene billingNotes', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const conNotas = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ billingNotes: 'Consignar en cuenta 123' }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+    const sinNotas = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase({ billingNotes: null }) as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(conNotas.notasFilas).toEqual([{ notas: 'Consignar en cuenta 123' }]);
+    expect(sinNotas.notasFilas).toEqual([]);
+  });
+
+  it('descuentoFilas trae fechaLimiteDescuento y totalConDescuento solo cuando hay descuento', async () => {
+    const { service } = construirServicioConTitulo();
+    const conDescuento = facturaParaPlantilla({
+      discountAmount: 20000,
+      discountDeadline: new Date('2026-09-30'),
+    });
+
+    const datos = await service.datosPlantilla(
+      conDescuento as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+    const sinDescuento = await service.datosPlantilla(
+      facturaParaPlantilla() as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.descuentoFilas).toEqual([
+      {
+        fechaLimiteDescuento: new Date('2026-09-30').toISOString(),
+        totalConDescuento: datos.totalConDescuento,
+      },
+    ]);
+    expect(sinDescuento.descuentoFilas).toEqual([]);
+  });
+
+  it('resolucionFilas compone la frase completa, incluyendo "vigente hasta" solo cuando aplica', async () => {
+    const { service } = construirServicioConTitulo({
+      titulo: 'Cobro Expensas Comunes',
+      resolucion: {
+        numero: 'RES-2026-001',
+        nombreVisible: null,
+        prefijo: 'CONJ-2026',
+        rangoDesde: 1,
+        rangoHasta: 5000,
+        vigenteDesde: '2026-01-01T00:00:00.000Z',
+        vigenteHasta: '2030-01-01T00:00:00.000Z',
+      },
+    });
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.resolucionFilas).toEqual([
+      {
+        textoResolucion:
+          'Resolución de Facturación DIAN No. RES-2026-001 del 2026-01-01T00:00:00.000Z. ' +
+          'Numeración autorizada de CONJ-20261 a CONJ-20265000 vigente hasta 2030-01-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('resolucionFilas queda vacío cuando no hay resolución frozen', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.resolucionFilas).toEqual([]);
+  });
+
+  it('titularEmailMostrado y titularIdentificacionMostrada caen a "—" cuando faltan', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla({
+      holder: {
+        name: 'Ana Pérez',
+        identificationType: null,
+        identificationNumber: null,
+        identificationVerificationDigit: null,
+        address: null,
+        city: null,
+        email: null,
+      },
+    });
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0 },
+    );
+
+    expect(datos.titularEmailMostrado).toBe('—');
+    expect(datos.titularIdentificacionMostrada).toBe('—');
+  });
+
+  it('totalAPagarFinal es totalAPagar menos totalAnticipos', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 20000 },
+    );
+
+    expect(datos.totalAPagarFinal).toBe(datos.totalAPagar - 20000);
   });
 
   it('copia titular desde titularDe(factura.holder) — duplicado a propósito junto al Factura.titular general', async () => {

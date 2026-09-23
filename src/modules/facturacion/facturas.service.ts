@@ -35,6 +35,13 @@ import type {
   ResolucionPlantillaFactura,
   TitularFactura,
   Paginado,
+  FilaMarcadorFactura,
+  ReferenciaPagoFilaFactura,
+  IvaFilaFactura,
+  AnticiposFilaFactura,
+  NotasFilaFactura,
+  DescuentoFilaFactura,
+  ResolucionFilaFactura,
 } from '../../contracts';
 import { toFactura, titularDe } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
@@ -298,7 +305,7 @@ export class FacturasService {
    */
   private construirDatosPlantilla(
     lines: FacturaLinea[],
-    descuento: { monto: number } | null,
+    descuento: { monto: number; fechaLimite: Date } | null,
     totalAnticipos: number,
     referenciaPago: string | null,
     notas: string | null,
@@ -334,6 +341,35 @@ export class FacturasService {
       ? totalAPagar - descuento.monto - totalAnticipos
       : null;
 
+    const logoFilas: FilaMarcadorFactura[] = emisor.mostrarLogo ? [{}] : [];
+    const referenciaPagoFilas: ReferenciaPagoFilaFactura[] = referenciaPago
+      ? [{ referenciaPago }]
+      : [];
+    const ivaFilas: IvaFilaFactura[] =
+      totalIva > 0 ? [{ etiquetaIva, totalIva }] : [];
+    const anticiposFilas: AnticiposFilaFactura[] =
+      totalAnticipos > 0 ? [{ totalAnticipos }] : [];
+    const notasFilas: NotasFilaFactura[] = notas ? [{ notas }] : [];
+    const descuentoFilas: DescuentoFilaFactura[] =
+      totalConDescuento !== null && descuento
+        ? [
+            {
+              fechaLimiteDescuento: descuento.fechaLimite.toISOString(),
+              totalConDescuento,
+            },
+          ]
+        : [];
+    const resolucionFilas: ResolucionFilaFactura[] = resolucion
+      ? [{ textoResolucion: this.textoResolucion(resolucion) }]
+      : [];
+
+    const titularEmailMostrado = titular?.email ?? '—';
+    const titularIdentificacionMostrada = titular
+      ? [titular.tipoIdentificacion, titular.numeroIdentificacion]
+          .filter(Boolean)
+          .join(' ') || '—'
+      : '—';
+
     return {
       cargos,
       totalSaldoAnterior,
@@ -351,6 +387,16 @@ export class FacturasService {
       resolucion,
       tieneDescuentoProntoPago: totalConDescuento !== null,
       titular,
+      titularEmailMostrado,
+      titularIdentificacionMostrada,
+      totalAPagarFinal: totalAPagar - totalAnticipos,
+      logoFilas,
+      referenciaPagoFilas,
+      ivaFilas,
+      anticiposFilas,
+      notasFilas,
+      descuentoFilas,
+      resolucionFilas,
     };
   }
 
@@ -360,6 +406,12 @@ export class FacturasService {
    *  this is genuinely live and must be frozen via `printSnapshot`, not
    *  re-derived from `coPropertyId` on every read. */
   private emisorDe(copropiedad: CopropiedadDocument): EmisorPlantillaFactura {
+    const nitCompleto = copropiedad.taxId
+      ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
+      : '—';
+    const direccionCompleta =
+      [copropiedad.address, copropiedad.city].filter(Boolean).join(' - ') ||
+      '—';
     return {
       nombre: copropiedad.name,
       nit: copropiedad.taxId,
@@ -369,7 +421,29 @@ export class FacturasService {
       telefono: copropiedad.phone,
       email: copropiedad.email,
       mostrarLogo: copropiedad.showLogoOnDocuments,
+      nitCompleto,
+      direccionCompleta,
+      telefonoMostrado: copropiedad.phone ?? '—',
+      emailMostrado: copropiedad.email ?? '—',
     };
+  }
+
+  /** The whole DIAN-resolution footer sentence, pre-composed — see
+   *  `ResolucionFilaFactura`'s own docblock for why this can't be built
+   *  inside the template itself (the " vigente hasta …" tail is
+   *  conditional, and the pdfmake template has no conditional primitive).
+   *  Relocated verbatim from the old react-pdf `paginaFactura`'s own
+   *  `pie` text. */
+  private textoResolucion(resolucion: ResolucionPlantillaFactura): string {
+    const vigenteHasta = resolucion.vigenteHasta
+      ? ` vigente hasta ${resolucion.vigenteHasta}`
+      : '';
+    return (
+      `Resolución de Facturación DIAN No. ${resolucion.numero} ` +
+      `del ${resolucion.vigenteDesde}. ` +
+      `Numeración autorizada de ${resolucion.prefijo}${resolucion.rangoDesde} ` +
+      `a ${resolucion.prefijo}${resolucion.rangoHasta}${vigenteHasta}`
+    );
   }
 
   /**
@@ -398,7 +472,10 @@ export class FacturasService {
       );
     const descuento =
       factura.discountAmount > 0 && factura.discountDeadline
-        ? { monto: factura.discountAmount }
+        ? {
+            monto: factura.discountAmount,
+            fechaLimite: factura.discountDeadline,
+          }
         : null;
     // Non-null: always injected in the real app, same trailing-optional
     // convention as every sibling document service (see the constructor's
@@ -457,7 +534,9 @@ export class FacturasService {
       copropiedad.discountAppliesWithLateFee,
     );
     const descuento =
-      discountAmount > 0 && discountDeadline ? { monto: discountAmount } : null;
+      discountAmount > 0 && discountDeadline
+        ? { monto: discountAmount, fechaLimite: discountDeadline }
+        : null;
     return this.construirDatosPlantilla(
       preliminar.lines,
       descuento,

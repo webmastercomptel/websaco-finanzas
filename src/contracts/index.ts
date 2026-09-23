@@ -285,6 +285,21 @@ export interface EmisorPlantillaFactura {
   telefono: string | null;
   email: string | null;
   mostrarLogo: boolean;
+  /**
+   * Pre-composed, print-ready copies of `nit`/`digitoVerificacion` and
+   * `direccion`/`ciudad` — additive, the raw fields above stay untouched
+   * since other callers (`EncabezadoDocumento`) already rely on them.
+   * Mirrors the exact composition the old react-pdf `EncabezadoDocumento`
+   * did in-component (`nit-digitoVerificacion`, `direccion - ciudad`),
+   * `'—'` when nothing is set — needed now that the pdfmake template can
+   * only do plain `{{}}` substitution, no in-template fallback/join logic.
+   */
+  nitCompleto: string;
+  direccionCompleta: string;
+  /** `telefono`/`email` pre-composed to `'—'` when absent — same
+   *  reasoning as `nitCompleto`/`direccionCompleta` above. */
+  telefonoMostrado: string;
+  emailMostrado: string;
 }
 
 /** A Factura's own frozen DIAN resolution, resolved for printing — `null`
@@ -300,6 +315,59 @@ export interface ResolucionPlantillaFactura {
   rangoHasta: number;
   vigenteDesde: IsoDate;
   vigenteHasta: IsoDate | null;
+}
+
+/**
+ * A conditional block's own gate, pdfmake-template style: the template can
+ * only test "is this array empty or not" (via `$repeat` over a table row),
+ * never a real `if`, so every optional block in the Factura/Prefactura
+ * template is modeled as an array field that is `[]` when the condition is
+ * false and `[<oneObject>]` when it's true — see `DatosPlantillaFactura`'s
+ * own docblock. `FilaMarcadorFactura` is the shape for a block whose only
+ * job is to exist or not (nothing inside it varies) — the WebSACO logo row.
+ */
+export type FilaMarcadorFactura = Record<string, never>;
+
+/** One row of `DatosPlantillaFactura.referenciaPagoFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface ReferenciaPagoFilaFactura {
+  referenciaPago: string;
+}
+
+/** One row of `DatosPlantillaFactura.ivaFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface IvaFilaFactura {
+  etiquetaIva: string;
+  totalIva: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.anticiposFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface AnticiposFilaFactura {
+  totalAnticipos: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.notasFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface NotasFilaFactura {
+  notas: string;
+}
+
+/** One row of `DatosPlantillaFactura.descuentoFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface DescuentoFilaFactura {
+  fechaLimiteDescuento: IsoDate;
+  totalConDescuento: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.resolucionFilas` — `textoResolucion` is
+ *  the WHOLE footer sentence, pre-composed server-side (including the
+ *  conditional " vigente hasta …" tail): the template has no way to append
+ *  text conditionally inside a single placeholder, so that branching has to
+ *  happen before the data ever reaches it. See `FilaMarcadorFactura`'s own
+ *  docblock and `FacturasService`'s own composing helper. */
+export interface ResolucionFilaFactura {
+  textoResolucion: string;
 }
 
 /**
@@ -350,6 +418,40 @@ export interface DatosPlantillaFactura {
    *  general contract's own `titular` is unaffected and stays the
    *  authoritative one everywhere else. */
   titular: TitularFactura | null;
+  /** `titular?.email`, pre-composed to `'—'` when absent — same reasoning
+   *  as `EmisorPlantillaFactura.nitCompleto`: the pdfmake template can't do
+   *  a `value ?? '—'` fallback itself. */
+  titularEmailMostrado: string;
+  /** `titular.tipoIdentificacion` + `titular.numeroIdentificacion`, joined
+   *  and pre-composed to `'—'` when neither is set — same reasoning as
+   *  `titularEmailMostrado`. */
+  titularIdentificacionMostrada: string;
+  /** `totalAPagar` menos `totalAnticipos` — what the template's "Total a
+   *  Pagar" band actually prints, computed once here so the template never
+   *  has to subtract two placeholders itself. */
+  totalAPagarFinal: Monto;
+  /** Gates the WebSACO logo inside the letterhead banner — `[{}]` exactly
+   *  when `emisor.mostrarLogo` is true, `[]` otherwise. See
+   *  `FilaMarcadorFactura`'s own docblock for why this is an array. */
+  logoFilas: FilaMarcadorFactura[];
+  /** Gates the "Referencia de Pago" line under the title — `[]` when
+   *  `referenciaPago` is null. */
+  referenciaPagoFilas: ReferenciaPagoFilaFactura[];
+  /** Gates the bold IVA row in the totals table — `[]` when `totalIva` is
+   *  0. */
+  ivaFilas: IvaFilaFactura[];
+  /** Gates the bold "Saldo a Favor" row in the totals table — `[]` when
+   *  `totalAnticipos` is 0. */
+  anticiposFilas: AnticiposFilaFactura[];
+  /** Gates the copropiedad's billing-notes box — `[]` when `notas` is
+   *  null. */
+  notasFilas: NotasFilaFactura[];
+  /** Gates the amber "Descuento Pronto Pago" box — `[]` when
+   *  `tieneDescuentoProntoPago` is false. */
+  descuentoFilas: DescuentoFilaFactura[];
+  /** Gates the DIAN resolution footer line — `[]` when `resolucion` is
+   *  null. */
+  resolucionFilas: ResolucionFilaFactura[];
 }
 
 /** A sales invoice ("FV"), only ever created already numbered. */
