@@ -9,6 +9,7 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Job, Queue, QueueEvents } from 'bullmq';
 import { Connection, Model, Types } from 'mongoose';
+import type { AnyBulkWriteOperation } from 'mongoose';
 import {
   LoteFacturacion,
   LoteFacturacionDocument,
@@ -155,7 +156,7 @@ type FilaPreparada = {
   facturaId: Types.ObjectId;
   facturaDoc: Record<string, unknown>;
   saldoTotalDoc: Record<string, unknown>;
-  saldosOps: Record<string, unknown>[];
+  saldosOps: AnyBulkWriteOperation<SaldoCartera>[];
   carteraDocs: Record<string, unknown>[];
   asientoDoc: Record<string, unknown>;
   total: number;
@@ -1435,7 +1436,8 @@ export class LotesFacturacionService {
       }));
 
     if (filasPendientes.length > numerosReservados.length) {
-      const primeraSinNumero = filasPendientesConIndice[numerosReservados.length];
+      const primeraSinNumero =
+        filasPendientesConIndice[numerosReservados.length];
       errores.push({
         fila: primeraSinNumero.indiceEnPreview + 1,
         inmuebleCodigo: primeraSinNumero.preliminar.unitCode,
