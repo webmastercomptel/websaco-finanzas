@@ -1,5 +1,6 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
@@ -43,7 +44,9 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
  * models on it and is @Global, so a feature module injects any model without
  * importing anything.
  *
- * Feature modules and BullMQ are added as they land.
+ * `BullModule.forRootAsync` opens the one shared Redis connection every
+ * queue in the app reuses — feature modules only `registerQueue` their own
+ * queue name on top of it (see `FacturacionModule`, the first consumer).
  */
 @Module({
   imports: [
@@ -56,6 +59,12 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('app.mongodbUri'),
+      }),
+    }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: { url: config.get<string>('app.redisUrl') },
       }),
     }),
     DatabaseModule,
