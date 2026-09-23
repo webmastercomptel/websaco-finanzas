@@ -41,6 +41,7 @@ import {
   FacturaDocument,
 } from '../../../database/schemas/facturacion/factura.schema';
 import type { DocumentoAdmin, ResolucionAdmin } from '../../../contracts';
+import type { LeanFindModel } from '../../../common/interfaces/mongoose-narrow-model.interface';
 import { TenantContextService } from '../../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../../common/utils/query.utils';
 import { toDocumentoAdmin, toResolucionAdmin } from './documentos.mapper';
@@ -338,7 +339,7 @@ export class DocumentosService {
   ): Promise<number> {
     const modelMap: Record<
       CategoriaDocumento,
-      Model<{ fullNumber: string }>
+      LeanFindModel<{ fullNumber: string }>
     > = {
       FV: this.facturas,
       IN: this.recibos,
@@ -346,10 +347,13 @@ export class DocumentosService {
       ND: this.notasDebito,
       NT: this.notasContables,
     };
-    const model =
-      code === 'NA'
-        ? (this.notasAnticipo as unknown as Model<{ fullNumber: string }>)
-        : modelMap[categoria];
+    // Annotated as `LeanFindModel`, not inferred: without it, the ternary's
+    // type is the union of `this.notasAnticipo`'s own full `Model<...>` type
+    // and `LeanFindModel`, and `.find()` below would have to satisfy BOTH
+    // — including every one of `Model`'s own overloads this call never
+    // uses.
+    const model: LeanFindModel<{ fullNumber: string }> =
+      code === 'NA' ? this.notasAnticipo : modelMap[categoria];
 
     const matchPrefix = prefix ? `${prefix}-` : '';
     const docs = await model

@@ -14,6 +14,7 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
 import type { ErrorAplicacion } from '../../contracts';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
+import type { SessionFindOneModel } from '../../common/interfaces/mongoose-narrow-model.interface';
 
 /**
  * Raised when a Factura cannot accept the requested application — it does
@@ -269,7 +270,7 @@ type ConSaldoDisponible<T> = T & {
 export async function decrementarSaldoDocumentoOrigen<
   T extends { _id: Types.ObjectId },
 >(
-  documentos: Model<T>,
+  documentos: SessionFindOneModel<T>,
   saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
   session: ClientSession,
   coPropertyId: Types.ObjectId,
@@ -972,7 +973,7 @@ export interface ContextoAplicacion<
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>;
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>;
   saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>;
-  recibos: Model<TOrigen>;
+  recibos: SessionFindOneModel<TOrigen>;
   session: ClientSession;
   coPropertyId: Types.ObjectId;
   recibo: TOrigen;

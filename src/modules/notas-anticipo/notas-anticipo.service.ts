@@ -109,6 +109,7 @@ import type { CrearNotaAnticipoDto } from './dto/crear-nota-anticipo.dto';
 import type { AnularNotaAnticipoDto } from './dto/anular-nota-anticipo.dto';
 import type { ListarNotaAnticipoDto } from './dto/listar-nota-anticipo.dto';
 import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
+import type { SessionFindOneModel } from '../../common/interfaces/mongoose-narrow-model.interface';
 
 /**
  * Applies a Recibo's leftover `unappliedAmount` against open cartera LATER,
@@ -350,7 +351,7 @@ export class NotasAnticipoService {
     dto: CrearNotaAnticipoDto,
     fechaEmision: Date,
     origenTipo: 'RC' | 'SI',
-    origenModel: Model<TOrigen>,
+    origenModel: SessionFindOneModel<TOrigen>,
     origenDoc: TOrigen,
   ): Promise<NotaAnticipoContract> {
     // `unappliedAmount` is no longer a live field on the (now immutable)

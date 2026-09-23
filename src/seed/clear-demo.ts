@@ -7,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
 import type { Model } from 'mongoose';
 import { AppModule } from '../app.module';
+import type { DeleteManyModel } from '../common/interfaces/mongoose-narrow-model.interface';
 
 // — Financial documents —
 import {
@@ -114,7 +115,7 @@ async function clearDemo(): Promise<void> {
     // ---------- helper ----------
     const cleared: Array<{ label: string; count: number }> = [];
 
-    async function wipe<T>(label: string, model: Model<T>): Promise<void> {
+    async function wipe(label: string, model: DeleteManyModel): Promise<void> {
       const { deletedCount } = await model.deleteMany({});
       cleared.push({ label, count: deletedCount });
     }
