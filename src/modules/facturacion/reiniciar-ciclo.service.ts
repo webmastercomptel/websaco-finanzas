@@ -120,10 +120,10 @@ import type { ResultadoReinicioCiclo } from '../../contracts';
  * class docblock's three-guard reasoning). These are demo/sandbox buildings
  * used to show prospective clients the billing cycle end to end; none of
  * them is ever where real customer data lives. Confirmed with the product
- * owner (2026-09-19) that 0002-0004 are sandbox buildings exactly like 0001
- * before this list was widened from a single code.
+ * owner (2026-09-22) that only 0001-0003 are sandbox buildings — 0004 is a
+ * real client and must never be accepted here.
  */
-const CODIGOS_COPROPIEDAD_PRUEBA = ['0001', '0002', '0003', '0004'];
+const CODIGOS_COPROPIEDAD_PRUEBA = ['0001', '0002', '0003'];
 
 /**
  * Wipes EVERY financial document of the one hardcoded test coproperty —
