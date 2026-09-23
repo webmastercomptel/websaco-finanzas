@@ -30,6 +30,9 @@ export class TitularCongelado {
 
   @Prop({ type: String, default: null, trim: true })
   email: string | null;
+
+  @Prop({ type: String, default: null, trim: true })
+  phone: string | null;
 }
 
 export const TitularCongeladoSchema =

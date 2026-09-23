@@ -19,6 +19,7 @@ export const titularDe = (
         direccion: titular.address,
         ciudad: titular.city,
         email: titular.email,
+        telefono: titular.phone,
       }
     : null;
 

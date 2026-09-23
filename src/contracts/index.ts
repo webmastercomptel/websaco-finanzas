@@ -227,6 +227,7 @@ export interface TitularFactura {
   direccion: string | null;
   ciudad: string | null;
   email: string | null;
+  telefono: string | null;
 }
 
 /** One invoice line, everything about its concept frozen at emission. */
@@ -394,6 +395,12 @@ export interface DatosPlantillaFactura {
   totalNuevoSaldo: Monto;
   totalIva: Monto;
   etiquetaIva: string;
+  /** The inmueble's own "uso" (residencial/comercial/…), read LIVE off
+   *  `Inmueble.usage` on every call — unlike `titular`/`emisor`, this is
+   *  never frozen into `printSnapshot`: a unit's declared use isn't part of
+   *  what a Factura legally certifies at issuance, same category as
+   *  `referenciaPago` (`DatosVisualesFactura`), not `titular`/`emisor`. */
+  uso: string | null;
   totalAPagar: Monto;
   /** `totalAPagar` menos el descuento por pronto pago y el anticipo
    *  disponible — `null` cuando el documento no ofrece descuento. */
@@ -422,6 +429,9 @@ export interface DatosPlantillaFactura {
    *  as `EmisorPlantillaFactura.nitCompleto`: the pdfmake template can't do
    *  a `value ?? '—'` fallback itself. */
   titularEmailMostrado: string;
+  /** `titular?.telefono`, pre-composed to `'—'` when absent — same
+   *  reasoning as `titularEmailMostrado`. */
+  titularTelefonoMostrado: string;
   /** `titular.tipoIdentificacion` + `titular.numeroIdentificacion`, joined
    *  and pre-composed to `'—'` when neither is set — same reasoning as
    *  `titularEmailMostrado`. */

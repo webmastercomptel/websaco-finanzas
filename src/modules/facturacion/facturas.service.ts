@@ -288,6 +288,7 @@ export class FacturasService {
       resultado.set(key, {
         referencia: inmueble.reference,
         totalAnticipos: anticipoPorInmueble.get(key) ?? 0,
+        usage: inmueble.usage,
       });
     }
     return resultado;
@@ -313,6 +314,7 @@ export class FacturasService {
     emisor: EmisorPlantillaFactura,
     resolucion: ResolucionPlantillaFactura | null,
     titular: TitularFactura | null,
+    uso: string | null,
   ): DatosPlantillaFactura {
     const totalSaldoAnterior = lines.reduce(
       (acc, l) => acc + l.balanceBefore,
@@ -364,6 +366,7 @@ export class FacturasService {
       : [];
 
     const titularEmailMostrado = titular?.email ?? '—';
+    const titularTelefonoMostrado = titular?.telefono ?? '—';
     const titularIdentificacionMostrada = titular
       ? [titular.tipoIdentificacion, titular.numeroIdentificacion]
           .filter(Boolean)
@@ -377,6 +380,7 @@ export class FacturasService {
       totalNuevoSaldo,
       totalIva,
       etiquetaIva,
+      uso,
       totalAPagar,
       totalConDescuento,
       referenciaPago,
@@ -388,6 +392,7 @@ export class FacturasService {
       tieneDescuentoProntoPago: totalConDescuento !== null,
       titular,
       titularEmailMostrado,
+      titularTelefonoMostrado,
       titularIdentificacionMostrada,
       totalAPagarFinal: totalAPagar - totalAnticipos,
       logoFilas,
@@ -496,6 +501,7 @@ export class FacturasService {
       this.emisorDe(copropiedad),
       resolucion,
       titularDe(factura.holder),
+      visuales?.usage ?? null,
     );
   }
 
@@ -552,6 +558,7 @@ export class FacturasService {
       // there is nothing to resolve (see this method's own docblock).
       null,
       titularDe(preliminar.holder),
+      datosVisuales?.usage ?? null,
     );
   }
 }
@@ -576,4 +583,5 @@ export type FacturaLean = Awaited<
 export interface DatosVisualesFactura {
   referencia: string | null;
   totalAnticipos: number;
+  usage: string | null;
 }

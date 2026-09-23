@@ -1204,6 +1204,7 @@ describe('LotesFacturacionService.liquidar', () => {
     address: null,
     city: null,
     emails: [],
+    phone: null,
     ...over,
   });
   const concepto = (over: Record<string, unknown> = {}) => ({
@@ -1768,6 +1769,35 @@ describe('LotesFacturacionService.liquidar', () => {
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
     const preliminar = actualizacion.$set.preview[0];
     expect(preliminar.holder?.email).toBe('ana@ejemplo.com');
+  });
+
+  it('congela el teléfono del titular en holder.phone', async () => {
+    const m = construirModelos({
+      terceros: tercero({ phone: '3108458405' }),
+    });
+    const service = new LotesFacturacionService(
+      m.lotes as never,
+      {} as never, // facturas
+      m.saldos as never,
+      m.carteraPorDocumento as never,
+      m.saldoTotalDocumento as never,
+      {} as never, // asientos
+      m.conceptos as never,
+      m.valoresRecurrentes as never,
+      m.inmuebles as never,
+      m.terceros as never,
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+
+    await service.liquidar('lote-1');
+
+    const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const preliminar = actualizacion.$set.preview[0];
+    expect(preliminar.holder?.phone).toBe('3108458405');
   });
 
   it('deja holder y terceroId en null si el titular no se encuentra', async () => {

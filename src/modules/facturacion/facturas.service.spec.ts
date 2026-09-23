@@ -550,6 +550,7 @@ describe('FacturasService.datosPlantilla', () => {
     await service.datosPlantilla(factura as never, copropiedadBase() as never, {
       referencia: null,
       totalAnticipos: 0,
+      usage: null,
     });
 
     expect(tituloDocumento.resolverFactura).toHaveBeenCalledWith(
@@ -566,7 +567,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ name: 'Conjunto X', taxId: '900999999' }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.emisor).toEqual({
@@ -597,7 +598,7 @@ describe('FacturasService.datosPlantilla', () => {
         address: null,
         city: null,
       }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.emisor.nitCompleto).toBe('—');
@@ -611,7 +612,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ phone: null, email: null }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.emisor.telefonoMostrado).toBe('—');
@@ -625,12 +626,12 @@ describe('FacturasService.datosPlantilla', () => {
     const conLogo = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ showLogoOnDocuments: true }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
     const sinLogo = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ showLogoOnDocuments: false }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(conLogo.logoFilas).toEqual([{}]);
@@ -644,12 +645,12 @@ describe('FacturasService.datosPlantilla', () => {
     const conReferencia = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: 'REF-301', totalAnticipos: 0 },
+      { referencia: 'REF-301', totalAnticipos: 0, usage: null },
     );
     const sinReferencia = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(conReferencia.referenciaPagoFilas).toEqual([
@@ -679,12 +680,12 @@ describe('FacturasService.datosPlantilla', () => {
     const conIvaYAnticipos = await service.datosPlantilla(
       facturaConIva as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 30000 },
+      { referencia: null, totalAnticipos: 30000, usage: null },
     );
     const sinIvaNiAnticipos = await service.datosPlantilla(
       facturaParaPlantilla() as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(conIvaYAnticipos.ivaFilas).toEqual([
@@ -704,12 +705,12 @@ describe('FacturasService.datosPlantilla', () => {
     const conNotas = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ billingNotes: 'Consignar en cuenta 123' }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
     const sinNotas = await service.datosPlantilla(
       factura as never,
       copropiedadBase({ billingNotes: null }) as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(conNotas.notasFilas).toEqual([{ notas: 'Consignar en cuenta 123' }]);
@@ -726,12 +727,12 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       conDescuento as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
     const sinDescuento = await service.datosPlantilla(
       facturaParaPlantilla() as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.descuentoFilas).toEqual([
@@ -761,7 +762,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.resolucionFilas).toEqual([
@@ -780,13 +781,13 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.resolucionFilas).toEqual([]);
   });
 
-  it('titularEmailMostrado y titularIdentificacionMostrada caen a "—" cuando faltan', async () => {
+  it('titularEmailMostrado, titularTelefonoMostrado y titularIdentificacionMostrada caen a "—" cuando faltan', async () => {
     const { service } = construirServicioConTitulo();
     const factura = facturaParaPlantilla({
       holder: {
@@ -797,17 +798,56 @@ describe('FacturasService.datosPlantilla', () => {
         address: null,
         city: null,
         email: null,
+        phone: null,
       },
     });
 
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.titularEmailMostrado).toBe('—');
+    expect(datos.titularTelefonoMostrado).toBe('—');
     expect(datos.titularIdentificacionMostrada).toBe('—');
+  });
+
+  it('titularTelefonoMostrado copia el teléfono del titular cuando existe', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla({
+      holder: {
+        name: 'Ana Pérez',
+        identificationType: null,
+        identificationNumber: null,
+        identificationVerificationDigit: null,
+        address: null,
+        city: null,
+        email: null,
+        phone: '3108458405',
+      },
+    });
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0, usage: null },
+    );
+
+    expect(datos.titularTelefonoMostrado).toBe('3108458405');
+  });
+
+  it('uso viaja desde datosVisuales.usage', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla();
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0, usage: 'Residencial' },
+    );
+
+    expect(datos.uso).toBe('Residencial');
   });
 
   it('totalAPagarFinal es totalAPagar menos totalAnticipos', async () => {
@@ -817,7 +857,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 20000 },
+      { referencia: null, totalAnticipos: 20000, usage: null },
     );
 
     expect(datos.totalAPagarFinal).toBe(datos.totalAPagar - 20000);
@@ -830,7 +870,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.titular).toMatchObject({
@@ -849,7 +889,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       facturaConDescuento as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.tieneDescuentoProntoPago).toBe(true);
@@ -863,7 +903,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.tieneDescuentoProntoPago).toBe(false);
@@ -889,7 +929,7 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase() as never,
-      { referencia: null, totalAnticipos: 0 },
+      { referencia: null, totalAnticipos: 0, usage: null },
     );
 
     expect(datos.tituloDocumento).toBe('Cobro Expensas Comunes');
@@ -929,6 +969,31 @@ describe('FacturasService.datosPlantillaPreliminar', () => {
       },
     ],
     ...over,
+  });
+
+  it('uso viaja desde datosVisuales.usage', () => {
+    const { service } = construirServicioConTitulo();
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminarBase() as never,
+      loteBase() as never,
+      copropiedadBase() as never,
+      { referencia: null, totalAnticipos: 0, usage: 'Comercial' },
+    );
+
+    expect(datos.uso).toBe('Comercial');
+  });
+
+  it('uso es null cuando no se pasa datosVisuales', () => {
+    const { service } = construirServicioConTitulo();
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminarBase() as never,
+      loteBase() as never,
+      copropiedadBase() as never,
+    );
+
+    expect(datos.uso).toBeNull();
   });
 
   it('usa literalmente "Prefactura" como tituloDocumento, y NUNCA llama a TituloDocumentoService', () => {
