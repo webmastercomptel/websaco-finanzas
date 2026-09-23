@@ -1954,6 +1954,14 @@ describe('LotesFacturacionService.consolidar', () => {
           { ...doc, _id: { toString: () => `fac-${facturasCreadas.length}` } },
         ]);
       }),
+      // Batched via `insertMany` (one call per tanda) instead of one
+      // `create` per row — every Factura doc already carries its own
+      // pre-assigned real `_id`, set by `prepararFilaParaConsolidar`, so
+      // the mock only needs to record what it was given.
+      insertMany: jest.fn((docs: Record<string, unknown>[]) => {
+        facturasCreadas.push(...docs);
+        return Promise.resolve(docs);
+      }),
     };
     const saldos = {
       // consolidar() reads the current balance per concept, fresh, right
@@ -1985,6 +1993,12 @@ describe('LotesFacturacionService.consolidar', () => {
         saldoTotalDocumentoCreados.push(...docs);
         return Promise.resolve(docs);
       }),
+      // Batched via `insertMany` (one call per tanda) instead of one
+      // `create` per row — see `facturas.insertMany`'s own comment above.
+      insertMany: jest.fn((docs: Record<string, unknown>[]) => {
+        saldoTotalDocumentoCreados.push(...docs);
+        return Promise.resolve(docs);
+      }),
     };
     const asientos = {
       // Resume support: which of the (possibly pre-existing) Facturas for
@@ -1997,6 +2011,12 @@ describe('LotesFacturacionService.consolidar', () => {
         const doc = docs[0];
         asientosCreados.push(doc);
         return Promise.resolve([doc]);
+      }),
+      // Batched via `insertMany` (one call per tanda) instead of one
+      // `create` per row — see `facturas.insertMany`'s own comment above.
+      insertMany: jest.fn((docs: Record<string, unknown>[]) => {
+        asientosCreados.push(...docs);
+        return Promise.resolve(docs);
       }),
     };
     const copropiedades = {
@@ -2464,8 +2484,8 @@ describe('LotesFacturacionService.consolidar', () => {
     );
 
     await expect(service.consolidar('lote-1')).resolves.toBeDefined();
-    expect(m.facturas.create).toHaveBeenCalled();
-    expect(m.asientos.create).toHaveBeenCalled();
+    expect(m.facturas.insertMany).toHaveBeenCalled();
+    expect(m.asientos.insertMany).toHaveBeenCalled();
   });
 
   it('en un reintento, no vuelve a facturar una unidad que ya tiene Factura en este lote', async () => {
@@ -2528,10 +2548,16 @@ describe('LotesFacturacionService.consolidar', () => {
     // the block size (unidadesYaFacturadas already excluded it).
     expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
     expect(reservarBloqueFacturas).toHaveBeenCalledWith(COP.toString(), 1);
-    // The pre-existing invoice is carried forward, not dropped.
+    // The pre-existing invoice is carried forward, not dropped. The new
+    // invoice's id is whatever `prepararFilaParaConsolidar` pre-assigned
+    // (a real ObjectId, not a mock-synthesized string) — read back off the
+    // mock's own record of what was inserted, rather than hardcoding it.
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
+    const idNuevaFactura = (
+      m.facturasCreadas[0]._id as Types.ObjectId
+    ).toString();
     expect(actualizacion.$set.invoiceIds).toEqual(
-      expect.arrayContaining(['fac-previo', 'fac-1']),
+      expect.arrayContaining(['fac-previo', idNuevaFactura]),
     );
     expect(actualizacion.$set.status).toBe('consolidado');
     expect(actualizacion.$set.summary).toMatchObject({
@@ -2542,21 +2568,25 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(resultado.errores).toEqual([]);
   });
 
-  it('registra un error por fila (y sigue con las demás) si falla la escritura después de numerar', async () => {
-    // Row 1's AsientoContable write fails after its Factura was already
-    // created; row 2 is unrelated and must still complete normally — this
-    // is a per-row data problem, not the global resolution-exhaustion
-    // blocker, so the loop must continue, not break.
+  it('un error de escritura tras numerar registra un error por CADA fila de la tanda que lo contenía', async () => {
+    // Both rows land in the SAME tanda (default size 20, far above 2 rows),
+    // so their Factura/SaldoTotalDocumento/Asiento writes all run inside
+    // ONE Mongo transaction — a single `asientos.insertMany` covers both,
+    // not one call per row any more. Its rejection rolls back the WHOLE
+    // tanda: both rows are recorded as errors, not just the one whose write
+    // actually failed — the accepted tradeoff documented on
+    // `procesarTanda()` for batching several rows per transaction.
     const m = construirModelos({
       preview: [
         preliminar(),
         preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
       ],
     });
-    m.asientos.create = jest
+    m.asientos.insertMany = jest
       .fn()
-      .mockRejectedValueOnce(new Error('Mongo se cayó'))
-      .mockResolvedValueOnce({}) as typeof m.asientos.create;
+      .mockRejectedValueOnce(
+        new Error('Mongo se cayó'),
+      ) as typeof m.asientos.insertMany;
     // Kept as a separate reference and asserted on directly below — see the
     // same @typescript-eslint/unbound-method note above.
     const reservarBloqueFacturas = numeracionQueOtorgaTodo({
@@ -2588,14 +2618,22 @@ describe('LotesFacturacionService.consolidar', () => {
 
     const resultado = await service.consolidar('lote-1');
 
-    // Both rows got a real number (reserved together, in one call), both
-    // Facturas were created — the failure happened only on row 1's journal
-    // posting.
+    // Both rows got a real number (reserved together, in one call) — the
+    // failure happened once, on the tanda's own journal-posting step.
     expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
     expect(reservarBloqueFacturas).toHaveBeenCalledWith(COP.toString(), 2);
-    expect(m.facturasCreadas).toHaveLength(2);
+    expect(m.asientos.insertMany).toHaveBeenCalledTimes(1);
     expect(resultado.errores).toEqual([
-      expect.objectContaining({ fila: 1, inmuebleCodigo: '301' }),
+      expect.objectContaining({
+        fila: 1,
+        inmuebleCodigo: '301',
+        mensaje: expect.stringContaining('Mongo se cayó') as string,
+      }),
+      expect.objectContaining({
+        fila: 2,
+        inmuebleCodigo: '302',
+        mensaje: expect.stringContaining('Mongo se cayó') as string,
+      }),
     ]);
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
     expect(actualizacion.$set.status).toBe('liquidado');
@@ -2667,9 +2705,13 @@ describe('LotesFacturacionService.consolidar', () => {
     expect(actualizacion.$set.status).toBe('liquidado');
     expect(actualizacion.$set.summary).toBeNull();
     // The orphaned invoice is still referenced — it exists, it just isn't
-    // counted toward a completed summary.
+    // counted toward a completed summary. Same "read the real generated id
+    // back off the mock" reasoning as the test above.
+    const idNuevaFactura = (
+      m.facturasCreadas[0]._id as Types.ObjectId
+    ).toString();
     expect(actualizacion.$set.invoiceIds).toEqual(
-      expect.arrayContaining(['fac-huerfana', 'fac-1']),
+      expect.arrayContaining(['fac-huerfana', idNuevaFactura]),
     );
   });
 

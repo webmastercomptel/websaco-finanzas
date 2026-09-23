@@ -1,10 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Job, Queue, QueueEvents } from 'bullmq';
 import { Connection, Model, Types } from 'mongoose';
 import {
   LoteFacturacion,
@@ -83,8 +86,82 @@ import {
   enriquecerMovimientosConAuxiliares,
   CUENTA_SIN_ASIGNAR,
   type MarcasCuentaContable,
+  type CuentasOrden,
+  type ContextoAuxiliares,
 } from './asiento.builder';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import {
+  NOMBRE_COLA_CONSOLIDACION,
+  NOMBRE_TRABAJO_CONSOLIDACION,
+  EVENTOS_COLA_CONSOLIDACION,
+  type DatosTrabajoConsolidacion,
+  type ResultadoConsolidacion,
+} from './colas/consolidacion.constants';
+
+/** Rows per Mongo transaction and concurrent transactions in flight during
+ *  `consolidar()`'s write step — see `ejecutarConsolidacion()`'s own
+ *  docblock. Conservative defaults for a shared/free-tier Atlas cluster;
+ *  safe to raise once the cluster has dedicated resources. */
+const TAMANO_TANDA_CONSOLIDACION = 20;
+const CONCURRENCIA_TANDAS_CONSOLIDACION = 4;
+
+/** One row of `LoteFacturacionDocument['preview']` — the exact type
+ *  `lote.preview.entries()` always yielded, kept as an alias rather than
+ *  re-importing `FacturaPreliminar` so it stays byte-identical to the
+ *  Mongoose subdocument type every call site already relied on. */
+type FilaPreliminar = LoteFacturacionDocument['preview'][number];
+
+/** `indiceEnPreview` is the row's real position in `lote.preview` — kept
+ *  explicit rather than re-derived later via `findIndex(inmuebleId match)`,
+ *  which silently mis-reports `fila` whenever two preview rows happen to
+ *  share an `inmuebleId` (a Factura Individual test fixture, say); the
+ *  original per-row loop never had this problem because `fila` came
+ *  straight from the loop's own index. */
+type FilaNumerada = {
+  preliminar: FilaPreliminar;
+  numero: NumeroAsignado;
+  indiceEnPreview: number;
+};
+
+/** Everything a tanda's rows share and need to write against — assembled
+ *  once per `ejecutarConsolidacion()` call, read (never mutated except via
+ *  `sumarMonto`/`registrarNumero`/`errores`/`facturaIds`) by every tanda,
+ *  safe under `conLimiteDeConcurrencia`'s concurrency since none of those
+ *  mutations ever interleave mid-statement (Node's single-threaded event
+ *  loop, not true parallelism). */
+type ContextoTanda = {
+  loteId: string;
+  lote: LoteFacturacionDocument;
+  coPropertyId: Types.ObjectId;
+  cuentaCartera: string;
+  cuentasOrden: CuentasOrden | null;
+  marcasPorCuenta: Map<string, MarcasCuentaContable> | undefined;
+  contextoAuxiliares: Pick<
+    ContextoAuxiliares,
+    'centroCosto' | 'flujoCajaCodigo'
+  >;
+  saldoPorClave: Map<string, number>;
+  copropiedad: CopropiedadDocument | null;
+  errores: ErrorConsolidacion[];
+  registrarNumero: (numero: number, completo: string) => void;
+  facturaIds: string[];
+  sumarMonto: (monto: number) => void;
+};
+
+/** One row's fully-prepared write payload — everything
+ *  `prepararFilaParaConsolidar` computes in memory, ready for
+ *  `procesarTanda` to insert alongside every other row in its tanda. */
+type FilaPreparada = {
+  facturaId: Types.ObjectId;
+  facturaDoc: Record<string, unknown>;
+  saldoTotalDoc: Record<string, unknown>;
+  saldosOps: Record<string, unknown>[];
+  carteraDocs: Record<string, unknown>[];
+  asientoDoc: Record<string, unknown>;
+  total: number;
+  numero: number;
+  fullNumber: string;
+};
 
 /**
  * CANONICAL CONSTRUCTOR — pinned here and never changed by a later task in
@@ -118,6 +195,16 @@ import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-
  * constructor params with no runtime purpose — removed outright, along with
  * updating the handful of test constructions that never actually passed
  * them (all stop at `cuentasContables`, the last argument any test needs).
+ *
+ * `cola`/`eventosCola` were APPENDED, both optional, when `consolidar()`'s
+ * actual work moved onto a BullMQ job instead of running inline on the HTTP
+ * request thread — see `ejecutarConsolidacion()`'s own docblock. Optional
+ * for the exact same reason `cuentasContables` is: the ~50 hand-rolled
+ * constructions in this class's own spec never pass either one, and don't
+ * need to — `consolidar()` falls back to calling `ejecutarConsolidacion()`
+ * directly, in-process, whenever `cola`/`eventosCola` is undefined, which
+ * is exactly the path every existing test already exercises. In the real
+ * app, Nest DI always injects both.
  */
 @Injectable()
 export class LotesFacturacionService {
@@ -150,6 +237,13 @@ export class LotesFacturacionService {
     @InjectConnection() private readonly connection: Connection,
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables?: Model<CuentaContableDocument>,
+    @InjectQueue(NOMBRE_COLA_CONSOLIDACION)
+    private readonly cola?: Queue<
+      DatosTrabajoConsolidacion,
+      ResultadoConsolidacion
+    >,
+    @Inject(EVENTOS_COLA_CONSOLIDACION)
+    private readonly eventosCola?: QueueEvents,
   ) {}
 
   /**
@@ -1088,35 +1182,82 @@ export class LotesFacturacionService {
   }
 
   /**
-   * Commits a liquidado Lote: reserves a real number per row, creates the
-   * Factura, updates SaldoCartera, and posts the AsientoContable — all for
-   * one row, before moving to the next.
+   * The external entry point — unchanged contract. `consolidar()` used to
+   * DO the work; now it enqueues one BullMQ job that carries it out
+   * (`ejecutarConsolidacion()`, below) and awaits that job's result via
+   * `Job.waitUntilFinished`, so `POST :id/consolidar` still returns the
+   * exact same `{ lote, errores }` shape it always did — only WHERE the
+   * heavy lifting executes moved, off this HTTP request's own thread and
+   * onto a worker, reusing the Redis this app already had wired ahead of
+   * BullMQ.
    *
-   * The period is checked ONCE, up front: every row shares the same
-   * `fechaFacturacion`, so one check covers the whole batch. Rows fail
-   * independently EXCEPT resolution exhaustion or absence, which is a
-   * global blocker — every remaining row would fail identically, so the
-   * loop stops there instead of repeating the same failure for each one.
-   *
-   * The number is reserved OUTSIDE any transaction (per the numbering law,
-   * "a document that fails to save leaves a gap, and a gap is the honest
-   * outcome") — but Factura + SaldoCartera + AsientoContable for that same
-   * row run inside one Mongo transaction, scoped to the row alone. If any
-   * of the three fails, all three roll back together: no orphaned Factura,
-   * no half-applied balance, no Asiento missing its Factura. The row
-   * leaves no trace, so it is automatically retried, cleanly, with a fresh
-   * number, the next time this method is called — no standing error, no
-   * manual reconciliation, unless the same underlying problem recurs (in
-   * which case it is reported again, every time, never silently retried
-   * without surfacing it).
-   * The Lote reaches `consolidado` only when every previewed row has both
-   * a number AND a fully posted Factura/SaldoCartera/AsientoContable —
-   * never while any row, past or present, is still incomplete.
+   * Falls back to calling `ejecutarConsolidacion()` directly, in-process,
+   * whenever `cola`/`eventosCola` is undefined — see the constructor's own
+   * docblock: that's the ~50 hand-rolled test constructions in this
+   * class's own spec, never real production traffic.
    */
   async consolidar(
     loteId: string,
   ): Promise<{ lote: LoteContract; errores: ErrorConsolidacion[] }> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    if (!this.cola || !this.eventosCola) {
+      return this.ejecutarConsolidacion(loteId, coPropertyId);
+    }
+
+    const trabajo = await this.cola.add(NOMBRE_TRABAJO_CONSOLIDACION, {
+      loteId,
+      coPropertyId: coPropertyId.toString(),
+    });
+    return trabajo.waitUntilFinished(this.eventosCola);
+  }
+
+  /**
+   * Commits a liquidado Lote: reserves a real number per row, creates the
+   * Factura, updates SaldoCartera, and posts the AsientoContable.
+   *
+   * The period is checked ONCE, up front: every row shares the same
+   * `fechaFacturacion`, so one check covers the whole batch. Rows fail
+   * independently EXCEPT resolution exhaustion or absence, which is a
+   * global blocker — every remaining row would fail identically, so
+   * numbering stops there instead of repeating the same failure for each
+   * one.
+   *
+   * The number is reserved OUTSIDE any transaction (per the numbering law,
+   * "a document that fails to save leaves a gap, and a gap is the honest
+   * outcome") — but Factura + SaldoCartera + AsientoContable run inside one
+   * Mongo transaction PER TANDA (a fixed-size chunk of rows,
+   * `TAMANO_TANDA_CONSOLIDACION`), not per row: this used to be one
+   * transaction per invoice, sequential, which meant a lote of a few
+   * hundred units paid the FULL network round-trip cost of 5 collection
+   * writes plus a majority-write-concern commit, ONE ROW AT A TIME — the
+   * dominant cost of a slow `consolidar()` call. Batching amortizes those 6
+   * round-trips over `TAMANO_TANDA_CONSOLIDACION` rows at once
+   * (`procesarTanda`), and independent tandas run with bounded concurrency
+   * (`conLimiteDeConcurrencia`, `CONCURRENCIA_TANDAS_CONSOLIDACION` at a
+   * time) since no two tandas ever touch the same document — each row's
+   * `inmuebleId` is unique within the lote, and every Factura `_id` is
+   * pre-assigned in JS before any write reaches Mongo.
+   *
+   * The tradeoff a bigger transaction unit accepts: failure isolation moves
+   * from per-row to per-tanda. If any write in a tanda's transaction fails,
+   * the WHOLE tanda rolls back — no orphaned Factura, no half-applied
+   * balance, no Asiento missing its Factura, same guarantee as before, just
+   * scoped to `TAMANO_TANDA_CONSOLIDACION` rows instead of one. Every row in
+   * a rolled-back tanda leaves no trace, so all of them are automatically
+   * retried, cleanly, with fresh numbers, the next time this runs — same
+   * "no standing error unless the problem recurs" behavior as before, just
+   * coarser-grained.
+   *
+   * The Lote reaches `consolidado` only when every previewed row has both
+   * a number AND a fully posted Factura/SaldoCartera/AsientoContable —
+   * never while any row, past or present, is still incomplete.
+   */
+  async ejecutarConsolidacion(
+    loteId: string,
+    coPropertyId: Types.ObjectId,
+    job?: Job<DatosTrabajoConsolidacion, ResultadoConsolidacion>,
+  ): Promise<ResultadoConsolidacion> {
     const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
@@ -1154,11 +1295,11 @@ export class LotesFacturacionService {
     //
     // A Factura existing without a matching AsientoContable should no
     // longer occur going forward (Factura + SaldoCartera + AsientoContable
-    // now commit or roll back together, in one transaction, per row) — but
-    // this guard stays for any orphan left behind by an attempt from before
-    // that transaction existed: it is surfaced as a standing error on every
-    // retry instead of being silently re-invoiced (a second real DIAN
-    // number) or silently left incomplete.
+    // now commit or roll back together, in one transaction, per tanda) —
+    // but this guard stays for any orphan left behind by an attempt from
+    // before that transaction existed: it is surfaced as a standing error
+    // on every retry instead of being silently re-invoiced (a second real
+    // DIAN number) or silently left incomplete.
     const facturasExistentes = await this.facturas
       .find({ coPropertyId, loteId, status: 'emitida' })
       .exec();
@@ -1232,9 +1373,18 @@ export class LotesFacturacionService {
     // EXTERNAL write — e.g. a payment posting mid-consolidation — which
     // widens from "immediately before this row" to "the top of this call",
     // not a new category of risk.
-    const filasPendientes = lote.preview.filter(
-      (p) => !unidadesYaFacturadas.has(p.inmuebleId.toString()),
-    );
+    // Paired with each row's REAL position in `lote.preview` up front —
+    // `filaIndiceDe` below reads it back for error reporting instead of
+    // re-deriving it later via `findIndex(inmuebleId match)`, which
+    // silently mis-reports `fila` whenever two preview rows share an
+    // `inmuebleId` (see `FilaNumerada`'s own docblock).
+    const filasPendientesConIndice = lote.preview
+      .map((preliminar, indiceEnPreview) => ({ preliminar, indiceEnPreview }))
+      .filter(
+        ({ preliminar }) =>
+          !unidadesYaFacturadas.has(preliminar.inmuebleId.toString()),
+      );
+    const filasPendientes = filasPendientesConIndice.map((f) => f.preliminar);
     const conceptoIdsPendientes = Array.from(
       new Map(
         filasPendientes.flatMap((p) =>
@@ -1263,311 +1413,113 @@ export class LotesFacturacionService {
     // instead of one round-trip per row — `filasPendientes.length` is
     // already exactly the count of rows that will reach the numbering step
     // below (unidadesYaFacturadas-skipped rows never did). May grant fewer
-    // than requested if the active resolution runs out partway through;
-    // `indiceReservado` below tracks position into whatever was granted.
+    // than requested if the active resolution runs out partway through.
     const { numeros: numerosReservados } =
       await this.numeracion.reservarBloqueFacturas(
         coPropertyId.toString(),
         filasPendientes.length,
       );
-    let indiceReservado = 0;
+
+    // Pairs each pending row with the number it will use, in the SAME
+    // order `filasPendientes` already carries. A row past the end of
+    // `numerosReservados` never gets processed this call — the active
+    // resolution ran out, and every remaining row would fail identically,
+    // same "global blocker" `consolidar()` always had.
+    const filasNumeradas = filasPendientesConIndice
+      .slice(0, numerosReservados.length)
+      .map(({ preliminar, indiceEnPreview }, indice) => ({
+        preliminar,
+        indiceEnPreview,
+        numero: numerosReservados[indice],
+      }));
+
+    if (filasPendientes.length > numerosReservados.length) {
+      const primeraSinNumero = filasPendientesConIndice[numerosReservados.length];
+      errores.push({
+        fila: primeraSinNumero.indiceEnPreview + 1,
+        inmuebleCodigo: primeraSinNumero.preliminar.unitCode,
+        mensaje:
+          `Se agotó el rango de numeración disponible para este lote ` +
+          `(se pudieron numerar ${numerosReservados.length} de ` +
+          `${filasPendientes.length} facturas). Hay que cargar una ` +
+          `resolución nueva.`,
+      });
+    }
 
     // Coarse progress signal, purely for the frontend to poll and show
     // "fila X de Y" instead of a frozen button — a real consolidación can
-    // run tens of seconds. Throttled to ~20 writes total regardless of how
-    // many rows there are, so this doesn't reintroduce a per-row round-trip
-    // cost right after removing one above; never read for anything
-    // financial.
-    const totalPendientes = filasPendientes.length;
+    // run tens of seconds. Reported both into `lote.progress` (Mongo, the
+    // field the API contract has always exposed) and into the job's own
+    // BullMQ progress (Redis, cheap, available for a future push-based
+    // UI). Throttled to ~20 writes total regardless of how many tandas run.
+    const totalPendientes = filasNumeradas.length;
     const intervaloProgreso = Math.max(1, Math.ceil(totalPendientes / 20));
     let filasCompletadas = 0;
-    if (totalPendientes > 0) {
+    const informarProgreso = async (): Promise<void> => {
+      await job?.updateProgress({
+        current: filasCompletadas,
+        total: totalPendientes,
+      });
       await this.lotes
         .updateOne(
           { _id: loteId, coPropertyId },
-          { $set: { progress: { current: 0, total: totalPendientes } } },
+          {
+            $set: {
+              progress: { current: filasCompletadas, total: totalPendientes },
+            },
+          },
         )
         .exec();
+    };
+    if (totalPendientes > 0) {
+      await informarProgreso();
     }
 
-    for (const [indice, preliminar] of lote.preview.entries()) {
-      if (unidadesYaFacturadas.has(preliminar.inmuebleId.toString())) {
-        continue;
-      }
-
-      // Spec §6, "Unbalanced AsientoContable": refused before it would be
-      // saved — and before a real DIAN number or any document is created
-      // for this row. Since construirMovimientos posts one debit and one
-      // credit per line, both for that same line's totalAmount, the two
-      // sums are equal by construction for any real preliminar — this check
-      // is defense-in-depth against a future bug in that builder, not a
-      // reachable data problem a re-run fixes, so it is thrown
-      // (uncaught, propagates out of consolidar entirely), not recorded as a
-      // row error.
-      let entries = construirMovimientos(
-        preliminar,
-        cuentaCartera,
-        cuentasOrden,
-      );
-      if (marcasPorCuenta) {
-        entries = enriquecerMovimientosConAuxiliares(entries, marcasPorCuenta, {
-          ...contextoAuxiliares,
-          terceroCode: preliminar.unitCode,
-        });
-      }
-      const sumaDebitos = entries
-        .filter((m) => m.type === 'debito')
-        .reduce((acc, m) => acc + m.amount, 0);
-      const sumaCreditos = entries
-        .filter((m) => m.type === 'credito')
-        .reduce((acc, m) => acc + m.amount, 0);
-      if (sumaDebitos !== sumaCreditos) {
-        throw new Error(
-          `Asiento contable desbalanceado para la unidad ${preliminar.unitCode}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
-        );
-      }
-
-      if (indiceReservado >= numerosReservados.length) {
-        // Global blocker: the reserved block ran out — every remaining row
-        // would fail identically, same as siguienteFactura's own
-        // ConflictException used to trigger before this batching fix.
-        errores.push({
-          fila: indice + 1,
-          inmuebleCodigo: preliminar.unitCode,
-          mensaje:
-            `Se agotó el rango de numeración disponible para este lote ` +
-            `(se pudieron numerar ${numerosReservados.length} de ` +
-            `${filasPendientes.length} facturas). Hay que cargar una ` +
-            `resolución nueva.`,
-        });
-        break;
-      }
-      const numero: NumeroAsignado = numerosReservados[indiceReservado];
-      indiceReservado += 1;
-
-      // A real number is already consumed at this point — per the
-      // numbering law ("a document that fails to save leaves a gap, and a
-      // gap is the honest outcome"), any failure from here on is THIS
-      // row's own data problem, not a global blocker: record it and move
-      // to the next row instead of aborting the whole batch.
-      try {
-        // `preliminar.lines[].balanceBefore/After` were computed back at
-        // liquidar() time — stale the moment a payment posts in between.
-        // The number that actually gets printed on the issued Factura must
-        // reflect SaldoCartera as it stood when this consolidar() call
-        // started (see `saldoPorClave` above) — so it's recomputed fresh
-        // here, per concept, with the same running-map trick as aLinea()
-        // for a unit whose lines repeat a concept (e.g. recurrente +
-        // novedad on the same concepto).
-        const saldoCorrientePorConcepto = new Map<string, number>();
-        for (const linea of preliminar.lines) {
-          const key = linea.conceptoId.toString();
-          let balanceBefore = saldoCorrientePorConcepto.get(key);
-          if (balanceBefore === undefined) {
-            balanceBefore =
-              saldoPorClave.get(`${preliminar.inmuebleId.toString()}:${key}`) ??
-              0;
-          }
-          const balanceAfter = balanceBefore + linea.totalAmount;
-          linea.balanceBefore = balanceBefore;
-          linea.balanceAfter = balanceAfter;
-          saldoCorrientePorConcepto.set(key, balanceAfter);
-        }
-
-        const { discountAmount, discountDeadline } =
-          calcularDescuentoProntoPago(
-            preliminar.lines,
-            lote.earlyPaymentDiscount,
-            lote.earlyPaymentDiscountFixedValue,
-            lote.discountDeadline,
-            copropiedad?.discountAppliesWithLateFee ?? false,
-          );
-
-        // Factura + saldos + asiento run in one Mongo transaction, scoped to
-        // THIS row only (never the whole batch — a long-running multi-row
-        // transaction risks the driver's default transaction lifetime limit
-        // and holds locks far longer than it needs to). Same pattern already
-        // used and audited in RecibosService.transaccion(): if anything in
-        // here throws, all three writes roll back together — no orphaned
-        // Factura, no half-applied SaldoCartera increment, no Asiento
-        // missing its Factura. The number already reserved by
-        // reservarBloqueFacturas() above is NOT part of this transaction and
-        // stays spent either way — that real gap is the same accepted
-        // outcome the numbering law already documents ("a gap is the honest
-        // outcome"), unchanged by this fix. What changes is that a row whose
-        // write phase fails no longer leaves a stuck, permanently-incomplete
-        // Factura behind: it leaves nothing, so the next consolidar() call
-        // reprocesses it cleanly with a fresh number instead of surfacing a
-        // standing "requires manual reconciliation" error forever.
-        const session = await this.connection.startSession();
-        let facturaCreada!: FacturaDocument;
-        try {
-          await session.withTransaction(async () => {
-            const [factura] = await this.facturas.create(
-              [
-                {
-                  coPropertyId,
-                  loteId,
-                  inmuebleId: preliminar.inmuebleId,
-                  unitCode: preliminar.unitCode,
-                  terceroId: preliminar.terceroId,
-                  holder: preliminar.holder,
-                  // Null when siguienteFactura fell back to the plain FV
-                  // consecutivo because this coproperty has no active DIAN
-                  // resolution.
-                  resolucionId: numero.resolucionId ?? null,
-                  prefix: numero.prefijo,
-                  number: numero.numero,
-                  fullNumber: numero.completo,
-                  issueDate: lote.billingDate,
-                  dueDate: lote.dueDate,
-                  periodStart: lote.periodStart,
-                  periodEnd: lote.periodEnd,
-                  lines: preliminar.lines,
-                  subtotal: preliminar.subtotal,
-                  totalTax: preliminar.totalTax,
-                  total: preliminar.total,
-                  outstandingBalance: preliminar.total,
-                  discountAmount,
-                  discountDeadline,
-                  status: 'emitida',
-                },
-              ],
-              { session },
-            );
-            facturaCreada = factura;
-
-            // Seeds this Factura's own atomically-guarded total-balance row
-            // — see `SaldoTotalDocumento`'s own docblock for why this can't
-            // just be `sum(CarteraPorDocumento.saldoPendiente)` computed on
-            // demand.
-            await this.saldoTotalDocumento.create(
-              [
-                {
-                  coPropertyId,
-                  tipoDocumento: 'FV' as const,
-                  documentoId: factura._id,
-                  total: preliminar.total,
-                  saldoPendiente: preliminar.total,
-                },
-              ],
-              { session },
-            );
-
-            // One bulkWrite instead of one findOneAndUpdate per line — same
-            // atomic, commutative $inc per document as before, just as one
-            // round trip instead of N. Safe inside a transaction (unlike
-            // Promise.all, which the driver refuses on a single session).
-            if (preliminar.lines.length) {
-              await this.saldos.bulkWrite(
-                preliminar.lines.map((linea) => ({
-                  updateOne: {
-                    filter: {
-                      coPropertyId,
-                      inmuebleId: preliminar.inmuebleId,
-                      conceptoId: linea.conceptoId,
-                    },
-                    update: {
-                      $inc: { balance: linea.totalAmount },
-                      $setOnInsert: {
-                        coPropertyId,
-                        inmuebleId: preliminar.inmuebleId,
-                        conceptoId: linea.conceptoId,
-                      },
-                    },
-                    upsert: true,
-                  },
-                })),
-                { session },
-              );
-            }
-
-            // Seeds this Factura's own row in the new per-document cartera
-            // ledger — one per line, alongside `SaldoCartera` above (kept as
-            // an independent, redundantly-maintained audit control; see
-            // `CarteraPorDocumento`'s own docblock). `balanceBefore`/
-            // `balanceAfter` were just computed fresh, above.
-            if (preliminar.lines.length) {
-              await this.carteraPorDocumento.insertMany(
-                preliminar.lines.map((linea) => ({
-                  coPropertyId,
-                  inmuebleId: preliminar.inmuebleId,
-                  tipoDocumento: 'FV' as const,
-                  documentoId: factura._id,
-                  conceptoId: linea.conceptoId,
-                  montoOriginal: linea.totalAmount,
-                  saldoPendiente: linea.totalAmount,
-                  saldoAnterior: linea.balanceBefore,
-                  saldoNuevo: linea.balanceAfter,
-                })),
-                { session },
-              );
-            }
-
-            // Documento cruce self-reference (FV, this SAME factura's own
-            // número) — a second enrichment pass because the earlier one
-            // (right after `construirMovimientos`, used for the
-            // debits-equal-credits check above) runs BEFORE `numero` is
-            // reserved. Re-running tercero/centroCosto/flujoCaja here too is
-            // harmless — same inputs, same idempotent result — the only
-            // thing this pass actually changes is documentoCruce.
-            const entriesFinal = marcasPorCuenta
-              ? enriquecerMovimientosConAuxiliares(entries, marcasPorCuenta, {
-                  ...contextoAuxiliares,
-                  terceroCode: preliminar.unitCode,
-                  documentoCruce: { tipo: 'FV', numero: numero.numero },
-                })
-              : entries;
-
-            await this.asientos.create(
-              [
-                {
-                  coPropertyId,
-                  loteId,
-                  facturaId: factura._id.toString(),
-                  date: lote.billingDate,
-                  entries: entriesFinal,
-                },
-              ],
-              { session },
-            );
-          });
-        } finally {
-          await session.endSession();
-        }
-        // Deliberately outside the withTransaction callback: the driver may
-        // retry that callback internally on a transient error, and these are
-        // plain in-memory mutations with no transactional undo — living
-        // inside the callback would double them on a retry even though only
-        // one attempt's writes actually commit.
-        facturaIds.push(facturaCreada._id.toString());
-        montoTotal += preliminar.total;
-        registrarNumero(facturaCreada.number, facturaCreada.fullNumber);
-      } catch (err) {
-        errores.push({
-          fila: indice + 1,
-          inmuebleCodigo: preliminar.unitCode,
-          mensaje: err instanceof Error ? err.message : 'Error desconocido',
-        });
-      }
-
-      filasCompletadas += 1;
-      if (
-        filasCompletadas % intervaloProgreso === 0 ||
-        filasCompletadas === totalPendientes
-      ) {
-        await this.lotes
-          .updateOne(
-            { _id: loteId, coPropertyId },
-            {
-              $set: {
-                progress: { current: filasCompletadas, total: totalPendientes },
-              },
-            },
-          )
-          .exec();
-      }
+    // Splits the numbered rows into fixed-size tandas — one Mongo
+    // transaction per tanda instead of one per row — run with bounded
+    // concurrency. See this method's own docblock for the round-trip
+    // math and the failure-isolation tradeoff this accepts.
+    const tandas: (typeof filasNumeradas)[] = [];
+    for (
+      let i = 0;
+      i < filasNumeradas.length;
+      i += TAMANO_TANDA_CONSOLIDACION
+    ) {
+      tandas.push(filasNumeradas.slice(i, i + TAMANO_TANDA_CONSOLIDACION));
     }
+
+    const contextoTanda: ContextoTanda = {
+      loteId,
+      lote,
+      coPropertyId,
+      cuentaCartera,
+      cuentasOrden,
+      marcasPorCuenta,
+      contextoAuxiliares,
+      saldoPorClave,
+      copropiedad,
+      errores,
+      registrarNumero,
+      facturaIds,
+      sumarMonto: (monto: number): void => {
+        montoTotal += monto;
+      },
+    };
+
+    await this.conLimiteDeConcurrencia(
+      tandas,
+      CONCURRENCIA_TANDAS_CONSOLIDACION,
+      async (tanda) => {
+        await this.procesarTanda(tanda, contextoTanda);
+        filasCompletadas += tanda.length;
+        if (
+          filasCompletadas % intervaloProgreso === 0 ||
+          filasCompletadas === totalPendientes
+        ) {
+          await informarProgreso();
+        }
+      },
+    );
 
     // Presentation generation is no longer triggered here — under the
     // pdfmake + frontend-render model, `solicitar-generacion`/
@@ -1609,6 +1561,293 @@ export class LotesFacturacionService {
     return {
       lote: consolidadoDelTodo ? toLote(actualizado!) : toLote(lote),
       errores,
+    };
+  }
+
+  /**
+   * Runs `tarea` over every item in `items`, at most `concurrencia`
+   * promises in flight at once — a manual worker-pool since this codebase
+   * carries no bounded-concurrency dependency for something this small.
+   */
+  private async conLimiteDeConcurrencia<T>(
+    items: T[],
+    concurrencia: number,
+    tarea: (item: T) => Promise<void>,
+  ): Promise<void> {
+    let siguiente = 0;
+    const trabajador = async (): Promise<void> => {
+      while (siguiente < items.length) {
+        const indice = siguiente;
+        siguiente += 1;
+        await tarea(items[indice]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(concurrencia, items.length) }, () =>
+        trabajador(),
+      ),
+    );
+  }
+
+  /**
+   * Processes ONE tanda of already-numbered rows inside a single Mongo
+   * transaction — the same 5-collection write `consolidar()` always did
+   * per row, just batched across every row in this tanda. Every new
+   * document's `_id` is assigned in JS before the transaction starts
+   * (never left for Mongo to generate) specifically so
+   * SaldoTotalDocumento/CarteraPorDocumento/AsientoContable can reference
+   * a Factura's real id from inside the SAME insertMany/bulkWrite calls
+   * that create it — no round-trip spent reading anything back mid-way.
+   *
+   * A thrown "asiento desbalanceado" (defense-in-depth — see
+   * `prepararFilaParaConsolidar`) is NOT caught here: it propagates out of
+   * the whole tanda, and from there out of `consolidar()` entirely, same
+   * as it always did.
+   *
+   * Any OTHER failure — the transaction can't commit, a duplicate key,
+   * whatever — rolls back this tanda's transaction as a whole and records
+   * EVERY row in it as its own `ErrorConsolidacion` (same message,
+   * different `fila`/`inmuebleCodigo`): the tradeoff a bigger transaction
+   * unit accepts versus the old one-row-per-transaction isolation — a
+   * retry simply reprocesses the whole tanda with fresh numbers, nothing
+   * is left half-done.
+   */
+  private async procesarTanda(
+    tanda: FilaNumerada[],
+    ctx: ContextoTanda,
+  ): Promise<void> {
+    const preparados = tanda.map(({ preliminar, numero }) =>
+      this.prepararFilaParaConsolidar(preliminar, numero, ctx),
+    );
+
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await this.facturas.insertMany(
+          preparados.map((p) => p.facturaDoc),
+          { session },
+        );
+        await this.saldoTotalDocumento.insertMany(
+          preparados.map((p) => p.saldoTotalDoc),
+          { session },
+        );
+        const opsSaldos = preparados.flatMap((p) => p.saldosOps);
+        if (opsSaldos.length) {
+          await this.saldos.bulkWrite(opsSaldos, { session });
+        }
+        const docsCartera = preparados.flatMap((p) => p.carteraDocs);
+        if (docsCartera.length) {
+          await this.carteraPorDocumento.insertMany(docsCartera, { session });
+        }
+        await this.asientos.insertMany(
+          preparados.map((p) => p.asientoDoc),
+          { session },
+        );
+      });
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : 'Error desconocido';
+      for (const { preliminar, indiceEnPreview } of tanda) {
+        ctx.errores.push({
+          fila: indiceEnPreview + 1,
+          inmuebleCodigo: preliminar.unitCode,
+          mensaje,
+        });
+      }
+      return;
+    } finally {
+      await session.endSession();
+    }
+
+    for (const p of preparados) {
+      ctx.facturaIds.push(p.facturaId.toString());
+      ctx.sumarMonto(p.total);
+      ctx.registrarNumero(p.numero, p.fullNumber);
+    }
+  }
+
+  /**
+   * All the in-memory prep `consolidar()` always did per row — movements,
+   * the debits-equal-credits check, balance recompute, the pronto-pago
+   * discount, and the actual document shapes — WITHOUT touching the
+   * database. `procesarTanda` batches the actual writes across every row
+   * this returns for its tanda.
+   *
+   * The unbalanced-asiento check stays a plain, uncaught `throw` — see
+   * `procesarTanda`'s own docblock for why that's deliberate.
+   */
+  private prepararFilaParaConsolidar(
+    preliminar: FilaPreliminar,
+    numero: NumeroAsignado,
+    ctx: ContextoTanda,
+  ): FilaPreparada {
+    let entries = construirMovimientos(
+      preliminar,
+      ctx.cuentaCartera,
+      ctx.cuentasOrden,
+    );
+    if (ctx.marcasPorCuenta) {
+      entries = enriquecerMovimientosConAuxiliares(
+        entries,
+        ctx.marcasPorCuenta,
+        {
+          ...ctx.contextoAuxiliares,
+          terceroCode: preliminar.unitCode,
+        },
+      );
+    }
+    const sumaDebitos = entries
+      .filter((m) => m.type === 'debito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    const sumaCreditos = entries
+      .filter((m) => m.type === 'credito')
+      .reduce((acc, m) => acc + m.amount, 0);
+    if (sumaDebitos !== sumaCreditos) {
+      throw new Error(
+        `Asiento contable desbalanceado para la unidad ${preliminar.unitCode}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
+      );
+    }
+
+    // `preliminar.lines[].balanceBefore/After` were computed back at
+    // liquidar() time — stale the moment a payment posts in between. The
+    // number that actually gets printed on the issued Factura must reflect
+    // SaldoCartera as it stood when this consolidar() call started (see
+    // `saldoPorClave`) — so it's recomputed fresh here, per concept, with
+    // the same running-map trick as aLinea() for a unit whose lines repeat
+    // a concept (e.g. recurrente + novedad on the same concepto).
+    const saldoCorrientePorConcepto = new Map<string, number>();
+    for (const linea of preliminar.lines) {
+      const key = linea.conceptoId.toString();
+      let balanceBefore = saldoCorrientePorConcepto.get(key);
+      if (balanceBefore === undefined) {
+        balanceBefore =
+          ctx.saldoPorClave.get(`${preliminar.inmuebleId.toString()}:${key}`) ??
+          0;
+      }
+      const balanceAfter = balanceBefore + linea.totalAmount;
+      linea.balanceBefore = balanceBefore;
+      linea.balanceAfter = balanceAfter;
+      saldoCorrientePorConcepto.set(key, balanceAfter);
+    }
+
+    const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
+      preliminar.lines,
+      ctx.lote.earlyPaymentDiscount,
+      ctx.lote.earlyPaymentDiscountFixedValue,
+      ctx.lote.discountDeadline,
+      ctx.copropiedad?.discountAppliesWithLateFee ?? false,
+    );
+
+    const facturaId = new Types.ObjectId();
+
+    const facturaDoc = {
+      _id: facturaId,
+      coPropertyId: ctx.coPropertyId,
+      loteId: ctx.loteId,
+      inmuebleId: preliminar.inmuebleId,
+      unitCode: preliminar.unitCode,
+      terceroId: preliminar.terceroId,
+      holder: preliminar.holder,
+      // Null when siguienteFactura fell back to the plain FV consecutivo
+      // because this coproperty has no active DIAN resolution.
+      resolucionId: numero.resolucionId ?? null,
+      prefix: numero.prefijo,
+      number: numero.numero,
+      fullNumber: numero.completo,
+      issueDate: ctx.lote.billingDate,
+      dueDate: ctx.lote.dueDate,
+      periodStart: ctx.lote.periodStart,
+      periodEnd: ctx.lote.periodEnd,
+      lines: preliminar.lines,
+      subtotal: preliminar.subtotal,
+      totalTax: preliminar.totalTax,
+      total: preliminar.total,
+      outstandingBalance: preliminar.total,
+      discountAmount,
+      discountDeadline,
+      status: 'emitida' as const,
+    };
+
+    // Seeds this Factura's own atomically-guarded total-balance row — see
+    // `SaldoTotalDocumento`'s own docblock for why this can't just be
+    // `sum(CarteraPorDocumento.saldoPendiente)` computed on demand.
+    const saldoTotalDoc = {
+      coPropertyId: ctx.coPropertyId,
+      tipoDocumento: 'FV' as const,
+      documentoId: facturaId,
+      total: preliminar.total,
+      saldoPendiente: preliminar.total,
+    };
+
+    // Same atomic, commutative $inc per document as before — just batched
+    // into ONE bulkWrite per tanda instead of one per row.
+    const saldosOps = preliminar.lines.map((linea) => ({
+      updateOne: {
+        filter: {
+          coPropertyId: ctx.coPropertyId,
+          inmuebleId: preliminar.inmuebleId,
+          conceptoId: linea.conceptoId,
+        },
+        update: {
+          $inc: { balance: linea.totalAmount },
+          $setOnInsert: {
+            coPropertyId: ctx.coPropertyId,
+            inmuebleId: preliminar.inmuebleId,
+            conceptoId: linea.conceptoId,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    // Seeds this Factura's own row in the per-document cartera ledger —
+    // one per line, alongside `SaldoCartera` above (kept as an
+    // independent, redundantly-maintained audit control; see
+    // `CarteraPorDocumento`'s own docblock).
+    const carteraDocs = preliminar.lines.map((linea) => ({
+      coPropertyId: ctx.coPropertyId,
+      inmuebleId: preliminar.inmuebleId,
+      tipoDocumento: 'FV' as const,
+      documentoId: facturaId,
+      conceptoId: linea.conceptoId,
+      montoOriginal: linea.totalAmount,
+      saldoPendiente: linea.totalAmount,
+      saldoAnterior: linea.balanceBefore,
+      saldoNuevo: linea.balanceAfter,
+    }));
+
+    // Documento cruce self-reference (FV, this SAME factura's own número)
+    // — a second enrichment pass because the earlier one (right after
+    // `construirMovimientos`, used for the debits-equal-credits check
+    // above) runs before `numero` exists on the very first call site of
+    // this method. Re-running tercero/centroCosto/flujoCaja here too is
+    // harmless — same inputs, same idempotent result — the only thing this
+    // pass actually changes is documentoCruce.
+    const entriesFinal = ctx.marcasPorCuenta
+      ? enriquecerMovimientosConAuxiliares(entries, ctx.marcasPorCuenta, {
+          ...ctx.contextoAuxiliares,
+          terceroCode: preliminar.unitCode,
+          documentoCruce: { tipo: 'FV', numero: numero.numero },
+        })
+      : entries;
+
+    const asientoDoc = {
+      coPropertyId: ctx.coPropertyId,
+      loteId: ctx.loteId,
+      facturaId: facturaId.toString(),
+      date: ctx.lote.billingDate,
+      entries: entriesFinal,
+    };
+
+    return {
+      facturaId,
+      facturaDoc,
+      saldoTotalDoc,
+      saldosOps,
+      carteraDocs,
+      asientoDoc,
+      total: preliminar.total,
+      numero: numero.numero,
+      fullNumber: numero.completo,
     };
   }
 
