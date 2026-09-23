@@ -158,6 +158,28 @@ export class Factura {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Account', default: null })
   voidedBy: Types.ObjectId | null;
+
+  /**
+   * Frozen `DatosPlantillaFactura` (contracts/index.ts) exactly as it stood
+   * the moment this invoice's lote's combined PDF was confirmed uploaded —
+   * set once, by `LotesController.confirmarGeneracionFacturas`, and never
+   * touched again afterward. `GET /facturas/:id/documento` returns this
+   * VERBATIM instead of recomputing live data once it is set, closing a real
+   * immutability gap a live `datosPlantilla` recomputation otherwise has:
+   * `referenciaPago`/`totalAnticipos`/`notas`/`emisor`/`resolucion` are all
+   * genuinely mutable over time, so re-reading an old invoice today could
+   * otherwise show values that were never true when it was actually issued.
+   *
+   * `null` for an invoice whose lote hasn't had its PDF generated yet, or one
+   * issued before this field existed — `obtenerDocumento` falls back to a
+   * live `FacturasService.datosPlantilla` computation in either case.
+   *
+   * `Mixed`, not a strict sub-schema — same pragmatic choice as
+   * `PlantillaDocumento.docDefinition`: this is an internal snapshot, never
+   * queried or indexed into, only ever read back whole.
+   */
+  @Prop({ type: SchemaTypes.Mixed, default: null })
+  printSnapshot: Record<string, unknown> | null;
 }
 
 export const FacturaSchema = SchemaFactory.createForClass(Factura);

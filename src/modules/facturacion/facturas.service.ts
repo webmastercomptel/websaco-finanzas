@@ -26,12 +26,32 @@ import {
   SaldoDocumentoOrigenDocument,
 } from '../../database/schemas/recibos/saldo-documento-origen.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import { escapeRegex } from '../../common/utils/query.utils';
-import type { Factura as FacturaContract, Paginado } from '../../contracts';
-import { toFactura } from './facturas.mapper';
+import type {
+  Factura as FacturaContract,
+  DatosPlantillaFactura,
+  EmisorPlantillaFactura,
+  ResolucionPlantillaFactura,
+  TitularFactura,
+  Paginado,
+  FilaMarcadorFactura,
+  ReferenciaPagoFilaFactura,
+  IvaFilaFactura,
+  AnticiposFilaFactura,
+  NotasFilaFactura,
+  DescuentoFilaFactura,
+  ResolucionFilaFactura,
+} from '../../contracts';
+import { toFactura, titularDe } from './facturas.mapper';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
-import type { DatosVisualesFactura } from '../../common/pdf/factura-pdf';
+import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
+import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
+import type {
+  FacturaPreliminar,
+  LoteFacturacionDocument,
+} from '../../database/schemas/facturacion/lote-facturacion.schema';
+import type { FacturaLinea } from '../../database/schemas/facturacion/factura-linea.schema';
 
 export type { FacturaDocument };
 
@@ -51,13 +71,13 @@ export class FacturasService {
     @InjectModel(SaldoDocumentoOrigen.name)
     private readonly saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
     private readonly tenant: TenantContextService,
-    // Optional — same convention as `LotesFacturacionService`'s own trailing
-    // optional deps (`cuentasContables`/`resoluciones`): in the real app
-    // this is always injected; left `undefined` only by the many existing
-    // tests that construct this service positionally without it, in which
-    // case `findOne` simply resolves `documentDefinition` as `null` instead
-    // of throwing.
-    private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — same convention every sibling document
+    // service already uses for a dependency only some methods need (see
+    // e.g. `RecibosService`'s own `terceros?`/`presentacionDocumento?`): so
+    // the many existing hand-rolled-mock tests that stop their positional
+    // argument list before this one keep compiling. Backs `datosPlantilla`'s
+    // own `resolverFactura` call; real requests always get it from Nest's DI.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** Batch-resolves each document's own live per-concepto breakdown from
@@ -136,18 +156,11 @@ export class FacturasService {
     );
 
     return {
-      // `documentDefinition` passed as `null` here on purpose — a listing
-      // page (default 50/página) has no use for each row's full frozen
-      // presentation tree, and shipping it here would multiply the payload
-      // for no reason. Not even worth querying `presentacion_documento` for
-      // the list case, since the result is nulled either way — `findOne`
-      // below is the only place that needs the real lookup.
       items: documentos.map((doc) =>
         toFactura(
           doc,
           saldoPorDocumento.get(doc._id.toString()) ?? 0,
           carteraPorDoc.get(doc._id.toString()) ?? new Map<string, number>(),
-          null,
         ),
       ),
       total,
@@ -164,34 +177,50 @@ export class FacturasService {
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    const [saldoTotal, carteraPorDoc, documentDefinition] = await Promise.all([
+    const [saldoTotal, carteraPorDoc] = await Promise.all([
       this.saldoTotalDocumento.findOne({ documentoId: documento._id }).exec(),
       this.carteraPorConceptoDe([documento._id]),
-      this.presentacionDocumento
-        ? this.presentacionDocumento.buscar('FV', documento._id)
-        : Promise.resolve(null),
     ]);
     return toFactura(
       documento,
       saldoTotal?.saldoPendiente ?? 0,
       carteraPorDoc.get(documento._id.toString()) ?? new Map<string, number>(),
-      documentDefinition,
     );
   }
 
   /**
+   * One Factura, raw and lean, scoped to the active tenant — used by
+   * `FacturasController.obtenerDocumento` to compute a live
+   * `DatosPlantillaFactura` for a single invoice without hydrating a full
+   * Mongoose document, same reasoning as `findAllRawPorLote` (this method's
+   * batch counterpart). Structurally the same shape `datosPlantilla` already
+   * accepts (`FacturaLean`).
+   */
+  async findOneRaw(id: string): Promise<FacturaLean> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const documento = await this.facturas
+      .findOne({ _id: id, coPropertyId })
+      .lean()
+      .exec();
+    if (!documento) {
+      throw new NotFoundException(`No se encontró la factura ${id}`);
+    }
+    return documento;
+  }
+
+  /**
    * Every Factura one lote's consolidación produced, raw — used by
-   * `LotesController.obtenerDocumentosFacturas` to hand the browser each
-   * invoice's own frozen `documentDefinition` (the mapped contract skips
-   * that field's raw shape; this reads it as `.lean()` gave it to us).
+   * `LotesController.obtenerDocumentosFacturas`/`solicitarGeneracionFacturas`
+   * to work the whole batch without hydrating every invoice (the mapped
+   * contract is built separately, from the real documents, by `findOne`).
    * Ordered by unit code, the same order the roster and the Liquidación
    * table already use, so a batch reads in a predictable sequence.
    *
    * `.lean()` on purpose: a lote can carry hundreds of Facturas, and this
-   * only ever needs plain fields (see `FacturaLean` below, also used by
-   * `paginaFactura` when `consolidar()` first builds each `documentDefinition`)
-   * — hydrating full Mongoose documents here is pure overhead this batch
-   * endpoint can't afford under Cloud Run's memory ceiling.
+   * only ever needs plain fields (see `FacturaLean` below, also what
+   * `datosPlantilla` accepts) — hydrating full Mongoose documents here is
+   * pure overhead this batch endpoint can't afford under Cloud Run's memory
+   * ceiling.
    */
   async findAllRawPorLote(loteId: string) {
     const coPropertyId = this.tenant.resolveCoPropertyId();
@@ -263,6 +292,268 @@ export class FacturasService {
     }
     return resultado;
   }
+
+  /**
+   * The "Cargos del Mes / Saldo Anterior / Nuevo Saldo" table and its totals
+   * — relocated verbatim from the old react-pdf
+   * `contenidoDocumentoFacturacion` (`common/pdf/factura-pdf.ts:94-137`) now
+   * that rendering moved to the frontend (pdfmake). Shared by `datosPlantilla`
+   * (an issued Factura) and `datosPlantillaPreliminar` (a not-yet-issued
+   * Prefactura), same split as the old `paginaFactura`/`paginaPrefactura`
+   * both building a `DatosDocumentoFacturacion` before handing it to this
+   * shared body.
+   */
+  private construirDatosPlantilla(
+    lines: FacturaLinea[],
+    descuento: { monto: number; fechaLimite: Date } | null,
+    totalAnticipos: number,
+    referenciaPago: string | null,
+    notas: string | null,
+    tituloDocumento: string,
+    emisor: EmisorPlantillaFactura,
+    resolucion: ResolucionPlantillaFactura | null,
+    titular: TitularFactura | null,
+  ): DatosPlantillaFactura {
+    const totalSaldoAnterior = lines.reduce(
+      (acc, l) => acc + l.balanceBefore,
+      0,
+    );
+    const totalCargosDelMes = lines.reduce((acc, l) => acc + l.baseAmount, 0);
+    const totalNuevoSaldo = totalSaldoAnterior + totalCargosDelMes;
+    const totalIva = lines.reduce((acc, l) => acc + l.taxAmount, 0);
+    const totalAPagar = lines.reduce((acc, l) => acc + l.balanceAfter, 0);
+
+    const cargos = lines.map((l) => ({
+      nombre:
+        l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
+      saldoAnterior: l.balanceBefore,
+      cargosDelMes: l.baseAmount,
+      nuevoSaldo: l.balanceBefore + l.baseAmount,
+    }));
+
+    const tasasIva = new Set(
+      lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
+    );
+    const etiquetaIva =
+      tasasIva.size === 1 ? `IVA ${[...tasasIva][0]}%` : 'IVA';
+
+    const totalConDescuento = descuento
+      ? totalAPagar - descuento.monto - totalAnticipos
+      : null;
+
+    const logoFilas: FilaMarcadorFactura[] = emisor.mostrarLogo ? [{}] : [];
+    const referenciaPagoFilas: ReferenciaPagoFilaFactura[] = referenciaPago
+      ? [{ referenciaPago }]
+      : [];
+    const ivaFilas: IvaFilaFactura[] =
+      totalIva > 0 ? [{ etiquetaIva, totalIva }] : [];
+    const anticiposFilas: AnticiposFilaFactura[] =
+      totalAnticipos > 0 ? [{ totalAnticipos }] : [];
+    const notasFilas: NotasFilaFactura[] = notas ? [{ notas }] : [];
+    const descuentoFilas: DescuentoFilaFactura[] =
+      totalConDescuento !== null && descuento
+        ? [
+            {
+              fechaLimiteDescuento: descuento.fechaLimite.toISOString(),
+              totalConDescuento,
+            },
+          ]
+        : [];
+    const resolucionFilas: ResolucionFilaFactura[] = resolucion
+      ? [{ textoResolucion: this.textoResolucion(resolucion) }]
+      : [];
+
+    const titularEmailMostrado = titular?.email ?? '—';
+    const titularIdentificacionMostrada = titular
+      ? [titular.tipoIdentificacion, titular.numeroIdentificacion]
+          .filter(Boolean)
+          .join(' ') || '—'
+      : '—';
+
+    return {
+      cargos,
+      totalSaldoAnterior,
+      totalCargosDelMes,
+      totalNuevoSaldo,
+      totalIva,
+      etiquetaIva,
+      totalAPagar,
+      totalConDescuento,
+      referenciaPago,
+      totalAnticipos,
+      notas,
+      tituloDocumento,
+      emisor,
+      resolucion,
+      tieneDescuentoProntoPago: totalConDescuento !== null,
+      titular,
+      titularEmailMostrado,
+      titularIdentificacionMostrada,
+      totalAPagarFinal: totalAPagar - totalAnticipos,
+      logoFilas,
+      referenciaPagoFilas,
+      ivaFilas,
+      anticiposFilas,
+      notasFilas,
+      descuentoFilas,
+      resolucionFilas,
+    };
+  }
+
+  /** The issuing coproperty's own header data, exactly as the Factura/
+   *  Prefactura pdfmake template needs it — see
+   *  `EmisorPlantillaFactura`'s own docblock (contracts/index.ts) for why
+   *  this is genuinely live and must be frozen via `printSnapshot`, not
+   *  re-derived from `coPropertyId` on every read. */
+  private emisorDe(copropiedad: CopropiedadDocument): EmisorPlantillaFactura {
+    const nitCompleto = copropiedad.taxId
+      ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
+      : '—';
+    const direccionCompleta =
+      [copropiedad.address, copropiedad.city].filter(Boolean).join(' - ') ||
+      '—';
+    return {
+      nombre: copropiedad.name,
+      nit: copropiedad.taxId,
+      digitoVerificacion: copropiedad.taxIdVerificationDigit,
+      direccion: copropiedad.address,
+      ciudad: copropiedad.city,
+      telefono: copropiedad.phone,
+      email: copropiedad.email,
+      mostrarLogo: copropiedad.showLogoOnDocuments,
+      nitCompleto,
+      direccionCompleta,
+      telefonoMostrado: copropiedad.phone ?? '—',
+      emailMostrado: copropiedad.email ?? '—',
+    };
+  }
+
+  /** The whole DIAN-resolution footer sentence, pre-composed — see
+   *  `ResolucionFilaFactura`'s own docblock for why this can't be built
+   *  inside the template itself (the " vigente hasta …" tail is
+   *  conditional, and the pdfmake template has no conditional primitive).
+   *  Relocated verbatim from the old react-pdf `paginaFactura`'s own
+   *  `pie` text. */
+  private textoResolucion(resolucion: ResolucionPlantillaFactura): string {
+    const vigenteHasta = resolucion.vigenteHasta
+      ? ` vigente hasta ${resolucion.vigenteHasta}`
+      : '';
+    return (
+      `Resolución de Facturación DIAN No. ${resolucion.numero} ` +
+      `del ${resolucion.vigenteDesde}. ` +
+      `Numeración autorizada de ${resolucion.prefijo}${resolucion.rangoDesde} ` +
+      `a ${resolucion.prefijo}${resolucion.rangoHasta}${vigenteHasta}`
+    );
+  }
+
+  /**
+   * `DatosPlantillaFactura` for one already-issued Factura — what
+   * `LotesController`'s batch `solicitar-generacion` route sends alongside
+   * each invoice's upload target. `datosVisuales` is optional: the batch
+   * caller resolves it once for the whole lote (`datosVisualesPdf`) and
+   * passes each invoice's own entry in to avoid one extra round trip per
+   * invoice; omitted, this resolves it itself for standalone callers.
+   *
+   * Accepts `FacturaLean` (not `FacturaDocument`) for the same reason
+   * `paginaFactura` did — a real hydrated document is structurally
+   * assignable to the plain-fields lean shape, so the batch route (which
+   * only ever has `.lean()`-fetched invoices, see `findAllRawPorLote`) can
+   * pass either without a cast.
+   */
+  async datosPlantilla(
+    factura: FacturaLean,
+    copropiedad: CopropiedadDocument,
+    datosVisuales?: DatosVisualesFactura,
+  ): Promise<DatosPlantillaFactura> {
+    const visuales =
+      datosVisuales ??
+      (await this.datosVisualesPdf([factura.inmuebleId])).get(
+        factura.inmuebleId.toString(),
+      );
+    const descuento =
+      factura.discountAmount > 0 && factura.discountDeadline
+        ? {
+            monto: factura.discountAmount,
+            fechaLimite: factura.discountDeadline,
+          }
+        : null;
+    // Non-null: always injected in the real app, same trailing-optional
+    // convention as every sibling document service (see the constructor's
+    // own comment) — left optional only for existing positional-mock tests
+    // that never exercise this path.
+    const { titulo, resolucion } = await this.tituloDocumento!.resolverFactura(
+      factura.coPropertyId,
+      factura.resolucionId,
+      factura.prefix,
+    );
+    return this.construirDatosPlantilla(
+      factura.lines,
+      descuento,
+      visuales?.totalAnticipos ?? 0,
+      visuales?.referencia ?? null,
+      copropiedad.billingNotes?.trim() || null,
+      titulo,
+      this.emisorDe(copropiedad),
+      resolucion,
+      titularDe(factura.holder),
+    );
+  }
+
+  /** Freezes `datos` onto this invoice's own `printSnapshot` — called once,
+   *  right after its lote's combined PDF is confirmed uploaded (see
+   *  `LotesController.confirmarGeneracionFacturas`). See
+   *  `Factura.printSnapshot`'s own docblock for the immutability gap this
+   *  closes. */
+  async guardarPrintSnapshot(
+    facturaId: Types.ObjectId,
+    datos: DatosPlantillaFactura,
+  ): Promise<void> {
+    await this.facturas
+      .updateOne({ _id: facturaId }, { $set: { printSnapshot: datos } })
+      .exec();
+  }
+
+  /**
+   * `DatosPlantillaFactura` for a not-yet-issued Prefactura — computed fresh
+   * on every call, same as the rest of a Prefactura's response, since it has
+   * no issuance moment to freeze at. The discount is recomputed from the
+   * lote's own parameters (`calcularDescuentoProntoPago`), unlike an issued
+   * Factura's already-frozen `discountAmount`/`discountDeadline`.
+   */
+  datosPlantillaPreliminar(
+    preliminar: FacturaPreliminar,
+    lote: LoteFacturacionDocument,
+    copropiedad: CopropiedadDocument,
+    datosVisuales?: DatosVisualesFactura,
+  ): DatosPlantillaFactura {
+    const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
+      preliminar.lines,
+      lote.earlyPaymentDiscount,
+      lote.earlyPaymentDiscountFixedValue,
+      lote.discountDeadline,
+      copropiedad.discountAppliesWithLateFee,
+    );
+    const descuento =
+      discountAmount > 0 && discountDeadline
+        ? { monto: discountAmount, fechaLimite: discountDeadline }
+        : null;
+    return this.construirDatosPlantilla(
+      preliminar.lines,
+      descuento,
+      datosVisuales?.totalAnticipos ?? 0,
+      datosVisuales?.referencia ?? null,
+      copropiedad.billingNotes?.trim() || null,
+      // Never resolved via TituloDocumentoService: a Prefactura is a
+      // preview, not a real document type — it has no row of its own under
+      // "Tabla de Documentos", literally "Prefactura" always.
+      'Prefactura',
+      this.emisorDe(copropiedad),
+      // No frozen resolución to show yet — a Prefactura is unnumbered, so
+      // there is nothing to resolve (see this method's own docblock).
+      null,
+      titularDe(preliminar.holder),
+    );
+  }
 }
 
 /**
@@ -275,3 +566,14 @@ export class FacturasService {
 export type FacturaLean = Awaited<
   ReturnType<FacturasService['findAllRawPorLote']>
 >[number];
+
+/** Cosmetic, live-read data the PDF prints alongside a Factura/Prefactura's
+ *  own frozen fields — see `FacturasService.datosVisualesPdf`, the only
+ *  place that computes it. Relocated from the now-deleted
+ *  `common/pdf/factura-pdf.ts` react-pdf renderer (pdfmake + frontend-render
+ *  migration); kept local to this file since `FacturasService` is its only
+ *  consumer, unlike `DatosReciboImpresion`'s cross-module sharing. */
+export interface DatosVisualesFactura {
+  referencia: string | null;
+  totalAnticipos: number;
+}

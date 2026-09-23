@@ -10,7 +10,7 @@ import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 import { fechaNotaContable } from './notas-contables.mapper';
 
 export interface ModelosDatosImpresionNotaContable {
@@ -46,6 +46,10 @@ export async function construirDatosImpresionNotaContable(
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaContable,
+  // Resolved by the caller (`NotasContablesService.datosImpresion`, via
+  // `TituloDocumentoService.resolverGenerico('NT', ...)`) — see
+  // `construirDatosImpresionRecibo`'s identical parameter.
+  tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const [conceptoOrigen, conceptoDestino, inmueble] = await Promise.all([
     modelos.conceptos
@@ -97,7 +101,7 @@ export async function construirDatosImpresionNotaContable(
   ];
 
   return {
-    tituloDocumento: 'Nota Contable',
+    tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: fechaNotaContable(nota),
     inmuebleCodigo: inmueble?.code ?? '—',

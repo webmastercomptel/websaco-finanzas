@@ -1,6 +1,5 @@
 import type {
   AplicacionCartera as AplicacionCarteraContract,
-  NodoDocumentoFactura,
   Recibo as ReciboContract,
   ReciboDetalle,
 } from '../../contracts';
@@ -24,11 +23,11 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
  * `montoOtrosIngresos`, unlike those two, IS read straight off the document
  * — it's frozen at creation (`Recibo.otherIncomeAmount`), never recomputed.
  *
- * `documentDefinition` is resolved by the caller from the shared, permanent
- * `presentacion_documento` table (see that schema's own docblock: a frozen
- * record, not a regenerable cache) — same pattern `toFactura` uses for its
- * own field of the same name. Defaults to `null` so every call site that
- * has nothing to freeze/resolve yet (`crear()`'s own immediate return,
+ * `objectPath`/`generatedAt` are resolved by the caller from the shared,
+ * permanent `presentacion_documento` table (see that schema's own docblock:
+ * a frozen record, not a regenerable cache) — same pattern `toFactura` uses
+ * for its own fields of the same name. Defaults to `null` so every call site
+ * that has nothing to resolve yet (`crear()`'s own immediate return,
  * `anular()`, listing) doesn't need to pass it explicitly.
  */
 export const toRecibo = (
@@ -38,7 +37,7 @@ export const toRecibo = (
   // Live-resolved by the caller from `inmuebleId` — no frozen field for it
   // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
   inmuebleCodigo: string,
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): ReciboContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -60,9 +59,8 @@ export const toRecibo = (
   motivoAnulacion: doc.voidedReason,
   detalleAnulacion: doc.voidedDetail,
   fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
-  // Opaque blob, passed through unchanged — same cast `toFactura` uses for
-  // its own field of the same name.
-  documentDefinition: documentDefinition as NodoDocumentoFactura | null,
+  objectPath: presentacion?.objectPath ?? null,
+  generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
 
 /**
@@ -116,8 +114,8 @@ export const toAplicacionCartera = (
  * `documentId.toString() -> fullNumber` lookup (a Factura or Nota Débito) —
  * this module has no Factura/NotaDebito model of its own to resolve it here.
  *
- * `documentDefinition` forwards straight to `toRecibo` — see that
- * function's own docblock.
+ * `presentacion` forwards straight to `toRecibo` — see that function's own
+ * docblock.
  */
 export const toReciboDetalle = (
   doc: ReciboDocument,
@@ -126,14 +124,14 @@ export const toReciboDetalle = (
   aplicaciones: AplicacionCarteraDocument[],
   inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
-  documentDefinition: Record<string, unknown> | null = null,
+  presentacion: { objectPath: string; generatedAt: Date } | null = null,
 ): ReciboDetalle => ({
   ...toRecibo(
     doc,
     montoAplicado,
     montoSinAplicar,
     inmuebleCodigo,
-    documentDefinition,
+    presentacion,
   ),
   // Self-sourced: every `aplicacion` here was made BY this Recibo, so its
   // own `receivedDate` — never `appliedAt` — is what a person means by "the

@@ -15,6 +15,7 @@ export default registerAs('app', () => ({
   mongodbUri: process.env.MONGODB_URI!,
   redisUrl: process.env.REDIS_URL!,
   firebaseServiceAccountBase64: process.env.FIREBASE_SERVICE_ACCOUNT_BASE64!,
+  firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET!,
   rootAdminEmail: process.env.ROOT_ADMIN_EMAIL!,
   // Genuinely optional outside production (see env.validation.ts), not a
   // silently defaulted value.

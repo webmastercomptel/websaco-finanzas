@@ -83,18 +83,12 @@ export class LoteRecibosController {
   }
 
   /**
-   * Every Recibo this batch's `aplicar()` produced, as its own frozen
-   * `documentDefinition` — one entry per row with a real Recibo, in the
+   * Every Recibo this batch's `aplicar()` produced, with its own
+   * presentation pointer — one entry per row with a real Recibo, in the
    * exact layout `GET /recibos/:id` already shows for one at a time (both
-   * read the same `presentacion_documento` row, frozen once by
-   * `RecibosService.congelarPresentacionRecibo`, called from inside
-   * `crear()` — see that method's own docblock). No PDF is built here
-   * anymore — the browser renders each entry client-side — so there's
-   * nothing left to stream.
-   *
-   * Route renamed from `:id/pdf` — same conversion as
-   * `LotesController.obtenerDocumentosFacturas`'s own `:id/facturas.pdf` ->
-   * `:id/facturas/documentos` rename.
+   * read the same `presentacion_documento` row). See
+   * `LotesController.obtenerDocumentosFacturas`'s identical pattern for
+   * Factura.
    */
   @Get(':id/recibos/documentos')
   @CheckAbility({ action: 'read', subject: 'Recibo' })
@@ -112,7 +106,7 @@ export class LoteRecibosController {
       );
     }
 
-    const documentDefinitions = await this.presentacionDocumento.buscarVarios(
+    const presentaciones = await this.presentacionDocumento.buscarVarios(
       'RC',
       reciboIds.map((rid) => new Types.ObjectId(rid)),
     );
@@ -131,13 +125,14 @@ export class LoteRecibosController {
         .map((f) => [f.reciboId, f.inmuebleCodigo]),
     );
 
-    return reciboIds.map((rid) => ({
-      id: rid,
-      inmuebleCodigo: codigoPorRecibo.get(rid) ?? '',
-      // Opaque blob, passed through unchanged — same cast
-      // `LotesController.obtenerDocumentosFacturas` uses for the same field.
-      documentDefinition: (documentDefinitions.get(rid) ??
-        null) as DocumentoReciboLote['documentDefinition'],
-    }));
+    return reciboIds.map((rid) => {
+      const presentacion = presentaciones.get(rid);
+      return {
+        id: rid,
+        inmuebleCodigo: codigoPorRecibo.get(rid) ?? '',
+        objectPath: presentacion?.objectPath ?? null,
+        generatedAt: presentacion?.generatedAt.toISOString() ?? null,
+      };
+    });
   }
 }

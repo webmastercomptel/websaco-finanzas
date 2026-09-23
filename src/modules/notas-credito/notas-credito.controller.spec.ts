@@ -4,14 +4,32 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 
 function makeController(
   notasCredito: Record<string, unknown>,
-  presentacionDocumento: Record<string, unknown> = {
-    buscar: jest.fn(() => Promise.resolve(null)),
+  generacion: Record<string, unknown> = {
+    solicitar: jest.fn(() =>
+      Promise.resolve({
+        plantilla: {
+          tipoDocumento: 'NC',
+          docDefinition: {},
+          fechaActualizacion: '',
+        },
+        datos: {},
+        objectPath: 'documentos-generados/x/NC/1.pdf',
+        uploadUrl: 'https://upload',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ),
+    confirmar: jest.fn(() =>
+      Promise.resolve({ objectPath: 'documentos-generados/x/NC/1.pdf' }),
+    ),
+    urlLectura: jest.fn(() =>
+      Promise.resolve({
+        url: 'https://x',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ),
   },
 ) {
-  return new NotasCreditoController(
-    notasCredito as never,
-    presentacionDocumento as never,
-  );
+  return new NotasCreditoController(notasCredito as never, generacion as never);
 }
 
 describe('NotasCreditoController.crear', () => {
@@ -125,49 +143,98 @@ describe('NotasCreditoController.findAll / findOne', () => {
   });
 });
 
-describe('NotasCreditoController.obtenerDocumento', () => {
+describe('NotasCreditoController.solicitarGeneracion', () => {
   const notaFixture = () => ({
     _id: new Types.ObjectId(),
+    coPropertyId: new Types.ObjectId(),
     fullNumber: 'NC-001-0001',
   });
 
-  it('devuelve el documentDefinition congelado, leído por (tipoDocumento, documentoId)', async () => {
+  it('junta la nota y sus datos de impresión, y delega en GeneracionDocumentoService', async () => {
     const nota = notaFixture();
+    const datos = { tituloDocumento: 'Nota Crédito' };
     const notasCredito = {
       findOneRaw: jest.fn(() => Promise.resolve(nota)),
-      resolverInmuebleCodigo: jest.fn(() => Promise.resolve('A-101')),
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
     };
-    const presentacionDocumento = {
-      buscar: jest.fn(() =>
-        Promise.resolve({ type: 'VIEW', props: {} } as Record<string, unknown>),
+    const generacion = {
+      solicitar: jest.fn(() =>
+        Promise.resolve({
+          plantilla: {
+            tipoDocumento: 'NC',
+            docDefinition: {},
+            fechaActualizacion: '',
+          },
+          datos,
+          objectPath: 'documentos-generados/x/NC/1.pdf',
+          uploadUrl: 'https://upload',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
       ),
     };
-    const controller = makeController(notasCredito, presentacionDocumento);
+    const controller = makeController(notasCredito, generacion);
 
-    const respuesta = await controller.obtenerDocumento('nc-1');
+    const respuesta = await controller.solicitarGeneracion('nc-1');
 
-    expect(presentacionDocumento.buscar).toHaveBeenCalledWith('NC', nota._id);
+    expect(generacion.solicitar).toHaveBeenCalledWith('NC', nota, datos);
+    expect(respuesta.objectPath).toBe('documentos-generados/x/NC/1.pdf');
+    expect(respuesta.uploadUrl).toBe('https://upload');
+    expect(respuesta.datos).toEqual({ tituloDocumento: 'Nota Crédito' });
+  });
+});
+
+describe('NotasCreditoController.confirmarGeneracion', () => {
+  it('resuelve la nota por id y delega la confirmación en GeneracionDocumentoService', async () => {
+    const nota = { _id: new Types.ObjectId() };
+    const notasCredito = { findOneRaw: jest.fn(() => Promise.resolve(nota)) };
+    const generacion = {
+      confirmar: jest.fn(() =>
+        Promise.resolve({ objectPath: 'documentos-generados/x/NC/1.pdf' }),
+      ),
+    };
+    const controller = makeController(notasCredito, generacion);
+
+    const respuesta = await controller.confirmarGeneracion('nc-1', {
+      objectPath: 'documentos-generados/x/NC/1.pdf',
+    });
+
+    expect(generacion.confirmar).toHaveBeenCalledWith(
+      'NC',
+      nota,
+      'documentos-generados/x/NC/1.pdf',
+    );
     expect(respuesta).toEqual({
-      inmuebleCodigo: 'A-101',
-      documentDefinition: { type: 'VIEW', props: {} },
+      objectPath: 'documentos-generados/x/NC/1.pdf',
     });
   });
+});
 
-  it('devuelve documentDefinition: null cuando nada fue congelado todavía, sin lanzar', async () => {
+describe('NotasCreditoController.urlLectura', () => {
+  it('resuelve la nota por id y delega en GeneracionDocumentoService con la etiqueta correcta', async () => {
+    const nota = {
+      objectPath: 'documentos-generados/x/NC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+    };
     const notasCredito = {
-      findOneRaw: jest.fn(() => Promise.resolve(notaFixture())),
-      resolverInmuebleCodigo: jest.fn(() => Promise.resolve('A-101')),
+      findOne: jest.fn(() => Promise.resolve(nota)),
     };
-    const presentacionDocumento = {
-      buscar: jest.fn(() => Promise.resolve(null)),
+    const generacion = {
+      urlLectura: jest.fn(() =>
+        Promise.resolve({
+          url: 'https://read',
+          expiresAt: '2026-01-01T00:10:00.000Z',
+        }),
+      ),
     };
-    const controller = makeController(notasCredito, presentacionDocumento);
+    const controller = makeController(notasCredito, generacion);
 
-    const respuesta = await controller.obtenerDocumento('nc-1');
+    const respuesta = await controller.urlLectura('nc-1');
 
-    expect(respuesta).toEqual({
-      inmuebleCodigo: 'A-101',
-      documentDefinition: null,
-    });
+    expect(generacion.urlLectura).toHaveBeenCalledWith(
+      'La nota crédito',
+      'nc-1',
+      nota,
+    );
+    expect(respuesta.url).toBe('https://read');
   });
 });

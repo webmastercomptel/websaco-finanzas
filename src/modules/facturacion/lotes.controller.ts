@@ -39,12 +39,15 @@ import type {
   DocumentoFacturaLote,
   DocumentoPrefactura,
   DocumentoPrefacturaLote,
+  SolicitudGeneracionFacturaLote,
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { paginaPrefactura } from '../../common/pdf/prefactura-pdf';
-import { serializarArbol } from '../../common/pdf/react/serializar-arbol';
 import { generarPdfConsultaFacturacion } from '../../common/pdf/consulta-facturacion-pdf';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
+import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
+import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
 import {
   Copropiedad,
   CopropiedadDocument,
@@ -68,6 +71,8 @@ export class LotesController {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly presentacionDocumento: PresentacionDocumentoService,
+    private readonly plantillas: PlantillaDocumentoService,
+    private readonly generacion: GeneracionDocumentoService,
   ) {}
 
   @Get()
@@ -160,12 +165,12 @@ export class LotesController {
   }
 
   /**
-   * One unit's prefactura, as a react-pdf presentation tree the browser
-   * renders — same idea as `Factura.documentDefinition`, but with no moment
-   * to freeze it at: a Prefactura previews a not-yet-issued invoice, so this
-   * is computed FRESH on every call from the lote's current `preview`,
-   * never cached. Route renamed from `.../prefactura.pdf` — no PDF is built
-   * here anymore, the browser renders this client-side.
+   * One unit's prefactura — the current template for `FV` plus this unit's
+   * computed totals, both computed/read FRESH on every call from the lote's
+   * current `preview`, never cached: a Prefactura previews a not-yet-issued
+   * invoice, so it has no moment to freeze at and no `presentacion_documento`
+   * row of its own. The browser renders it client-side (pdfmake) from these
+   * two pieces.
    */
   @Get(':id/inmuebles/:inmuebleId/prefactura/documento')
   @CheckAbility({ action: 'read', subject: 'Factura' })
@@ -183,10 +188,12 @@ export class LotesController {
         `El lote ${id} no tiene una previsualización para el inmueble ${inmuebleId}`,
       );
     }
-    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
-      this.copropiedades.findById(coPropertyId).exec(),
-      this.facturas.datosVisualesPdf([preliminar.inmuebleId]),
-    ]);
+    const [copropiedad, datosVisualesPorInmueble, plantilla] =
+      await Promise.all([
+        this.copropiedades.findById(coPropertyId).exec(),
+        this.facturas.datosVisualesPdf([preliminar.inmuebleId]),
+        this.plantillas.findOne('FV'),
+      ]);
     if (!copropiedad) {
       throw new NotFoundException(
         `No se encontró la copropiedad ${coPropertyId.toString()}`,
@@ -194,31 +201,24 @@ export class LotesController {
     }
 
     return {
-      // `paginaPrefactura` always returns a single element (never the array
-      // branch `serializarArbol` also allows for) — same cast pattern
-      // `consolidar()` uses when it freezes each Factura's own tree
-      // (`lotes.service.ts`, `presentacionDocumento.guardarVarios`).
-      documentDefinition: serializarArbol(
-        paginaPrefactura(
-          preliminar,
-          lote,
-          copropiedad,
-          datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
-        ),
-      ) as DocumentoPrefactura['documentDefinition'],
+      plantilla: toPlantilla(plantilla),
+      datos: this.facturas.datosPlantillaPreliminar(
+        preliminar,
+        lote,
+        copropiedad,
+        datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
+      ),
     };
   }
 
   /**
-   * Every unit's prefactura from the lote's CURRENT previsualización, each
-   * as its own presentation tree for the browser to render — the
+   * Every unit's prefactura from the lote's CURRENT previsualización — the
    * Liquidación screen's full-batch preview, reachable before consolidación
    * even exists (unlike `:id/facturas/documentos`, which needs real
-   * Facturas). Computed FRESH on every call, one entry per unit — there is
-   * no frozen field to read back, unlike `Factura.documentDefinition`: a
-   * Prefactura always reflects whatever `preview` holds right now, edits
-   * included. Route renamed from `.../prefacturas.pdf` — no PDF is built
-   * here anymore.
+   * Facturas). The template is fetched ONCE for the whole batch, not once
+   * per unit — same reasoning as the Factura batch `solicitar-generacion`
+   * route below. Computed FRESH on every call: a Prefactura always reflects
+   * whatever `preview` holds right now, edits included, never cached.
    */
   @Get(':id/prefacturas/documentos')
   @CheckAbility({ action: 'read', subject: 'Factura' })
@@ -245,32 +245,22 @@ export class LotesController {
     return lote.preview.map((preliminar) => ({
       inmuebleId: preliminar.inmuebleId.toString(),
       inmuebleCodigo: preliminar.unitCode,
-      // Same "always a single element" cast as the single-unit route above.
-      documentDefinition: serializarArbol(
-        paginaPrefactura(
-          preliminar,
-          lote,
-          copropiedad,
-          datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
-        ),
-      ) as DocumentoPrefacturaLote['documentDefinition'],
+      datos: this.facturas.datosPlantillaPreliminar(
+        preliminar,
+        lote,
+        copropiedad,
+        datosVisualesPorInmueble.get(preliminar.inmuebleId.toString()),
+      ),
     }));
   }
 
   /**
-   * Every Factura this lote's consolidación produced, as its own frozen
-   * `documentDefinition` — one entry per invoice, in the exact layout
-   * `GET /facturas/:id` already shows for one at a time (both read the same
-   * `presentacion_documento` row, frozen once by
-   * `LotesFacturacionService.consolidar()`; see `serializarArbol`). No PDF is
-   * built here anymore — the browser renders each entry client-side — so
-   * there's nothing left to stream: `.lean()` (`findAllRawPorLote`) already
-   * keeps the Factura fetch cheap for a lote with hundreds of invoices, and
-   * `buscarVarios` batches the presentation lookup into one query instead of
-   * one per invoice.
-   *
-   * Route renamed from `:id/facturas.pdf` — the old `.pdf` suffix would be
-   * actively misleading on a JSON response.
+   * A plain listing of every Factura this lote's consolidación produced —
+   * id and unit code only. There is no per-invoice presentation pointer any
+   * more: a lote's invoice run produces ONE combined PDF, anchored on the
+   * Lote's own id (see `:id/url-lectura` below), not on any one Factura's.
+   * `.lean()` (`findAllRawPorLote`) keeps the Factura fetch cheap for a lote
+   * with hundreds of invoices.
    */
   @Get(':id/facturas/documentos')
   @CheckAbility({ action: 'read', subject: 'Factura' })
@@ -288,19 +278,145 @@ export class LotesController {
       );
     }
 
-    const documentDefinitions = await this.presentacionDocumento.buscarVarios(
-      'FV',
-      facturas.map((factura) => factura._id),
-    );
-
     return facturas.map((factura) => ({
       id: factura._id.toString(),
       inmuebleCodigo: factura.unitCode,
-      // Opaque blob, passed through unchanged — same cast `toFactura`
-      // (`facturas.mapper.ts`) uses for the same field.
-      documentDefinition: (documentDefinitions.get(factura._id.toString()) ??
-        null) as DocumentoFacturaLote['documentDefinition'],
     }));
+  }
+
+  /**
+   * `solicitar-generacion` for the lote's invoice run — ONE combined PDF
+   * (one page per invoice), anchored on the LOTE's own id via the shared
+   * `GeneracionDocumentoService.solicitar` (same helper every other document
+   * type already uses), not on any one Factura's. The template for `FV` is
+   * fetched ONCE, and each invoice's own computed `datos`
+   * (`FacturasService.datosPlantilla`) travels as the array the frontend
+   * renders one page per entry from — no per-invoice upload target any
+   * more. Same guard as `:id/consolidar` — provisioning invoices in bulk is
+   * the same capability as issuing one.
+   */
+  @Post(':id/facturas/solicitar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Factura' })
+  async solicitarGeneracionFacturas(
+    @Param('id') id: string,
+  ): Promise<SolicitudGeneracionFacturaLote> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOneRaw(id);
+
+    const facturasLean = await this.facturas.findAllRawPorLote(id);
+    if (facturasLean.length === 0) {
+      throw new NotFoundException(
+        `El lote ${id} todavía no tiene facturas emitidas`,
+      );
+    }
+
+    const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.facturas.datosVisualesPdf(facturasLean.map((f) => f.inmuebleId)),
+    ]);
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+
+    const facturas = await Promise.all(
+      facturasLean.map(async (factura) => ({
+        facturaId: factura._id.toString(),
+        datos: await this.facturas.datosPlantilla(
+          factura,
+          copropiedad,
+          datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
+        ),
+      })),
+    );
+
+    const { plantilla, objectPath, uploadUrl, expiresAt } =
+      await this.generacion.solicitar('FV', lote, facturas);
+
+    return { plantilla, objectPath, uploadUrl, expiresAt, facturas };
+  }
+
+  /**
+   * Confirms the frontend finished uploading the lote's combined PDF
+   * `solicitar-generacion` handed it a signed URL for — a single
+   * confirmation, the same shared `ConfirmarGeneracionDocumentoDto`/
+   * `GeneracionDocumentoService.confirmar` every other document type already
+   * uses. There is nothing "best-effort per row" about confirming one file
+   * any more — see `SolicitudGeneracionFacturaLote`.
+   *
+   * Right after confirming, freezes each invoice's own `datos` onto its
+   * `printSnapshot` (see that field's own docblock,
+   * `factura.schema.ts`) — the actual fix for `datosPlantilla`'s live-read
+   * immutability gap. Recomputed here rather than stashed from
+   * `solicitarGeneracionFacturas`: confirm only ever runs once, right after
+   * a successful upload, so recomputing `datos` fresh costs nothing extra
+   * and needs no intermediate state threaded between the two calls (a
+   * request/response pair that can be minutes apart, with nothing durable in
+   * between to stash into). A failure resolving the copropiedad or building
+   * a snapshot never rolls back the confirmation itself — the PDF is already
+   * safely uploaded and confirmed either way; only the immutability
+   * safeguard would be missing for this run; the next generation still
+   * writes it.
+   */
+  @Post(':id/facturas/confirmar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Factura' })
+  async confirmarGeneracionFacturas(
+    @Param('id') id: string,
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOneRaw(id);
+    const resultado = await this.generacion.confirmar(
+      'FV',
+      lote,
+      dto.objectPath,
+    );
+
+    const facturasLean = await this.facturas.findAllRawPorLote(id);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (facturasLean.length > 0 && copropiedad) {
+      const datosVisualesPorInmueble = await this.facturas.datosVisualesPdf(
+        facturasLean.map((f) => f.inmuebleId),
+      );
+      await Promise.all(
+        facturasLean.map(async (factura) => {
+          const datos = await this.facturas.datosPlantilla(
+            factura,
+            copropiedad,
+            datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
+          );
+          await this.facturas.guardarPrintSnapshot(factura._id, datos);
+        }),
+      );
+    }
+
+    return resultado;
+  }
+
+  /**
+   * A short-lived signed URL to read back this lote's combined invoice-run
+   * PDF (one file, one page per invoice) — never a single Factura's own
+   * document, since a Factura no longer has one of its own (see
+   * `FacturasController`'s `:id/documento`, computed live instead
+   * precisely to avoid leaking every other unit's invoice). Same `read`
+   * action as `findOne` above.
+   */
+  @Get(':id/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async urlLectura(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const lote = await this.lotes.findOneRaw(id);
+    const presentacion = await this.presentacionDocumento.buscar(
+      'FV',
+      lote._id,
+    );
+    return this.generacion.urlLectura(
+      'El lote de facturación',
+      id,
+      presentacion ?? { objectPath: null, generatedAt: null },
+    );
   }
 
   /**

@@ -63,6 +63,8 @@ describe('toNotaCredito', () => {
       motivoAnulacion: null,
       detalleAnulacion: null,
       fechaAnulacion: null,
+      objectPath: null,
+      generatedAt: null,
     });
   });
 

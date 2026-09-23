@@ -149,6 +149,10 @@ import {
   PresentacionDocumento,
   PresentacionDocumentoSchema,
 } from './schemas/documentos/presentacion-documento.schema';
+import {
+  PlantillaDocumento,
+  PlantillaDocumentoSchema,
+} from './schemas/documentos/plantilla-documento.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -206,6 +210,7 @@ const models = [
   },
   { name: ProgresoImportacion.name, schema: ProgresoImportacionSchema },
   { name: PresentacionDocumento.name, schema: PresentacionDocumentoSchema },
+  { name: PlantillaDocumento.name, schema: PlantillaDocumentoSchema },
 ];
 
 /**

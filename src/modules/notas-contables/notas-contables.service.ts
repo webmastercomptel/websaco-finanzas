@@ -1,7 +1,6 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -58,6 +57,7 @@ import {
 } from '../facturacion/asiento.builder';
 import { toNotaContable, fechaNotaContable } from './notas-contables.mapper';
 import { construirDatosImpresionNotaContable } from './nota-contable-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type {
   NotaContable as NotaContableContract,
   Paginado,
@@ -65,23 +65,25 @@ import type {
 import type { CrearNotaContableDto } from './dto/crear-nota-contable.dto';
 import type { AnularNotaContableDto } from './dto/anular-nota-contable.dto';
 import type { ListarNotaContableDto } from './dto/listar-nota-contable.dto';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 
 /**
  * Service for Notas Contables: reclassifying an amount between two
  * ConceptoCobro balances within one inmueble's cartera.
  *
  * `terceros` and `presentacionDocumento` were APPENDED, trailing and
- * optional (same reasoning as `cuentasContables`/`inmuebles` right above),
- * when `crear()` took over freezing this Nota Contable's own
- * `documentDefinition` into the shared `presentacion_documento` table —
- * see `congelarPresentacionNotaContable`. Every existing positional test
- * keeps compiling with both left `undefined`, in which case that step
- * simply no-ops.
+ * optional (same reasoning as `cuentasContables`/`inmuebles` right above).
+ * Originally added so `crear()` could freeze this Nota Contable's own
+ * `documentDefinition` right after creating it — that step is GONE under
+ * the pdfmake + frontend-render model (`solicitar-generacion`/
+ * `confirmar-generacion` are separate, explicit actions triggered later,
+ * from `NotasContablesController`). `terceros` now backs `datosImpresion`
+ * and `presentacionDocumento` backs `findOne`'s `objectPath`/`generatedAt`
+ * lookup; every existing positional test keeps compiling with both left
+ * `undefined`.
  */
 @Injectable()
 export class NotasContablesService {
-  private readonly logger = new Logger(NotasContablesService.name);
-
   constructor(
     @InjectModel(NotaContable.name)
     private readonly notasContables: Model<NotaContableDocument>,
@@ -106,6 +108,9 @@ export class NotasContablesService {
     @InjectModel(Tercero.name)
     private readonly terceros?: Model<TerceroDocument>,
     private readonly presentacionDocumento?: PresentacionDocumentoService,
+    // APPENDED LAST, optional — same append discipline as every dependency
+    // above. Backs `datosImpresion`'s own `resolverGenerico('NT', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
@@ -322,91 +327,45 @@ export class NotasContablesService {
       );
     });
 
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: this Nota Contable's own
-    // financial correctness never depends on this succeeding. Same
-    // frozen-at-emission principle `LotesFacturacionService.consolidar()`
-    // already applies to Factura, extended to this document (see
-    // `congelarPresentacionNotaContable`).
-    await this.congelarPresentacionNotaContable(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
+    // Presentation generation is no longer triggered here — under the
+    // pdfmake + frontend-render model, `solicitar-generacion`/
+    // `confirmar-generacion` are separate, explicit actions the frontend
+    // calls later (`NotasContablesController`), never something `crear()`
+    // does internally.
     return resultado;
   }
 
   /**
-   * Freezes this Nota Contable's react-pdf presentation tree into the
-   * shared, permanent `presentacion_documento` table — called AFTER
-   * `crear()`'s own transaction has already committed (never from inside
-   * it). No-ops when any optional dependency it needs is missing (test-only
-   * construction — see this class's own docblock). Wrapped in try/catch,
-   * log-and-continue, never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
-   *
-   * Incidentally fixes a pre-existing drift, not something to special-case:
-   * the live print (`construirDatosImpresionNotaContable`) re-resolves each
-   * concepto's `cuentaCreditoId` fresh on every request, so if a concepto's
-   * account changed after this note was issued, the OLD `:id/pdf` route
-   * would silently print the NEW account instead of what was actually
-   * posted — freezing at creation makes the printed document match the
-   * ledger entry `postearAsiento` actually recorded.
+   * The pure printable data for this Nota Contable — what
+   * `NotasContablesController`'s `solicitar-generacion` route sends the
+   * frontend alongside the template, computed fresh every call. Reuses
+   * `construirDatosImpresionNotaContable` UNCHANGED.
    */
-  private async congelarPresentacionNotaContable(
-    coPropertyId: Types.ObjectId,
-    notaId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.inmuebles ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
-    }
-    try {
-      const [notaRaw, copropiedad] = await Promise.all([
-        this.notasContables.findOne({ _id: notaId, coPropertyId }).exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!notaRaw || !copropiedad) return;
-
-      const datos = await construirDatosImpresionNotaContable(
-        notaRaw,
-        copropiedad,
-        coPropertyId,
-        {
-          conceptos: this.conceptos,
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          cuentasContables: this.cuentasContables,
-        },
-      );
-
-      // Deferred import — see `RecibosService.congelarPresentacionRecibo`'s
-      // own identical comment: `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load statically.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'NT',
-        notaRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para la nota contable ${notaId.toString()} — la nota ya quedó creada, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
+  async datosImpresion(id: string): Promise<DatosReciboImpresion> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const nota = await this.findOneRaw(id);
+    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
       );
     }
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'NT',
+      coPropertyId,
+    );
+    return construirDatosImpresionNotaContable(
+      nota,
+      copropiedad,
+      coPropertyId,
+      {
+        conceptos: this.conceptos,
+        inmuebles: this.inmuebles!,
+        terceros: this.terceros!,
+        cuentasContables: this.cuentasContables!,
+      },
+      tituloDocumento,
+    );
   }
 
   /**
@@ -490,17 +449,15 @@ export class NotasContablesService {
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota contable ${id}`);
     }
-    // Also the frontend's source for rendering this Nota Contable's PDF
-    // client-side — frozen once by `congelarPresentacionNotaContable`, read
-    // back the same way `RecibosService.findOne` reads its own
-    // `documentDefinition`.
-    const documentDefinition = this.presentacionDocumento
+    // `objectPath`/`generatedAt` — resolved from `presentacion_documento` the
+    // same way `RecibosService.findOne` resolves its own.
+    const presentacion = this.presentacionDocumento
       ? await this.presentacionDocumento.buscar('NT', nota._id)
       : null;
     return toNotaContable(
       nota,
       await this.resolverInmuebleCodigo(nota.inmuebleId),
-      documentDefinition,
+      presentacion,
     );
   }
 

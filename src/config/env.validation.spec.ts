@@ -6,6 +6,7 @@ const baseEnv = {
     'mongodb+srv://usuario:clave@cluster0.abcde.mongodb.net/finanzas',
   REDIS_URL: 'rediss://default:clave@algo.redis-cloud.com:6379',
   FIREBASE_SERVICE_ACCOUNT_BASE64: 'eyJmYWtlIjoidmFsb3IifQ==',
+  FIREBASE_STORAGE_BUCKET: 'finanzas-demo.appspot.com',
   ROOT_ADMIN_EMAIL: 'santiago@comptel.com',
 };
 

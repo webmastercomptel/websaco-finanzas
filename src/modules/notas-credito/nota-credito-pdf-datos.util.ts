@@ -14,7 +14,7 @@ import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 import {
   fechaNotaCredito,
   tipoAnclaDe,
@@ -101,6 +101,10 @@ export async function construirDatosImpresionNotaCredito(
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaCredito,
+  // Resolved by the caller (`NotasCreditoService.datosImpresion`, via
+  // `TituloDocumentoService.resolverGenerico('NC', ...)`) — see
+  // `construirDatosImpresionRecibo`'s identical parameter.
+  tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -336,7 +340,7 @@ export async function construirDatosImpresionNotaCredito(
   }
 
   return {
-    tituloDocumento: 'Nota de Crédito',
+    tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: fechaNotaCredito(nota),
     inmuebleCodigo: inmueble?.code ?? '—',

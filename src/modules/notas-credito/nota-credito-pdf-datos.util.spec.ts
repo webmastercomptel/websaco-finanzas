@@ -71,6 +71,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     expect(datos.tituloDocumento).toBe('Nota de Crédito');
@@ -89,6 +90,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     expect(datos.concepto).toBe('Rebaja o descuento parcial o total');
@@ -102,6 +104,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     expect(datos.concepto).toBe('Cancela factura 685');
@@ -150,6 +153,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Nota de Crédito',
     );
 
     expect(datos.lineas).toEqual([
@@ -184,6 +188,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     const filaAplicacion = datos.lineas.find((l) => l.tipoDocumento === 'FV');
@@ -202,6 +207,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     const filaAnticipo = datos.lineas.find((l) => l.cuentaCodigo === '210505');
@@ -217,6 +223,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     expect(datos.lineas.some((l) => l.cuentaCodigo === '210505')).toBe(false);
@@ -230,6 +237,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase({ creditNotesAccount: '413595' }),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     const filaDebito = datos.lineas.find((l) => l.debito > 0);
@@ -270,6 +278,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Nota de Crédito',
     );
 
     const filasDebito = datos.lineas.filter((l) => l.debito > 0);
@@ -290,6 +299,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Nota de Crédito',
     );
 
     expect(datos.fecha).toEqual(new Date('2026-05-01'));

@@ -2,8 +2,34 @@ import { Types } from 'mongoose';
 import { RecibosController } from './recibos.controller';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(recibos: Record<string, unknown>) {
-  return new RecibosController(recibos as never);
+function makeController(
+  recibos: Record<string, unknown>,
+  generacion: Record<string, unknown> = {
+    solicitar: jest.fn(() =>
+      Promise.resolve({
+        plantilla: {
+          tipoDocumento: 'RC',
+          docDefinition: {},
+          fechaActualizacion: '',
+        },
+        datos: {},
+        objectPath: 'documentos-generados/x/RC/1.pdf',
+        uploadUrl: 'https://upload',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ),
+    confirmar: jest.fn(() =>
+      Promise.resolve({ objectPath: 'documentos-generados/x/RC/1.pdf' }),
+    ),
+    urlLectura: jest.fn(() =>
+      Promise.resolve({
+        url: 'https://x',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ),
+  },
+) {
+  return new RecibosController(recibos as never, generacion as never);
 }
 
 describe('RecibosController.crear', () => {
@@ -54,9 +80,6 @@ describe('RecibosController.anular', () => {
 
     await controller.anular(user, 'rec-1', dto);
 
-    // Anular es la operación más sensible del módulo (motivo obligatorio +
-    // justificación de 20 caracteres, y cascada sobre cada aplicación): el
-    // actor sale del caller autenticado, nunca del body.
     expect(recibos.anular).toHaveBeenCalledWith('rec-1', dto, user.accountId);
   });
 });
@@ -75,10 +98,10 @@ describe('RecibosController.findAll / findOne', () => {
     expect(recibos.findAll).toHaveBeenCalledWith({ estado: 'activo' });
   });
 
-  it('findOne delega el id en el servicio — incluye documentDefinition, no hay ruta :id/pdf separada', async () => {
+  it('findOne delega el id en el servicio — incluye objectPath/generatedAt, no hay ruta :id/pdf separada', async () => {
     const recibos = {
       findOne: jest.fn(() =>
-        Promise.resolve({ id: 'rec-1', documentDefinition: null }),
+        Promise.resolve({ id: 'rec-1', objectPath: null, generatedAt: null }),
       ),
     };
     const controller = makeController(recibos);
@@ -86,5 +109,95 @@ describe('RecibosController.findAll / findOne', () => {
     await controller.findOne('rec-1');
 
     expect(recibos.findOne).toHaveBeenCalledWith('rec-1');
+  });
+});
+
+describe('RecibosController.solicitarGeneracion', () => {
+  it('junta el recibo y sus datos de impresión, y delega en GeneracionDocumentoService', async () => {
+    const recibo = {
+      _id: new Types.ObjectId(),
+      coPropertyId: new Types.ObjectId(),
+    };
+    const datos = { tituloDocumento: 'Recibo de Caja' };
+    const recibos = {
+      findOneRaw: jest.fn(() => Promise.resolve(recibo)),
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
+    };
+    const generacion = {
+      solicitar: jest.fn(() =>
+        Promise.resolve({
+          plantilla: {
+            tipoDocumento: 'RC',
+            docDefinition: {},
+            fechaActualizacion: '',
+          },
+          datos,
+          objectPath: 'documentos-generados/x/RC/1.pdf',
+          uploadUrl: 'https://upload',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+      ),
+    };
+    const controller = makeController(recibos, generacion);
+
+    const respuesta = await controller.solicitarGeneracion('rec-1');
+
+    expect(generacion.solicitar).toHaveBeenCalledWith('RC', recibo, datos);
+    expect(respuesta.objectPath).toBe('documentos-generados/x/RC/1.pdf');
+  });
+});
+
+describe('RecibosController.confirmarGeneracion', () => {
+  it('resuelve el recibo por id y delega la confirmación en GeneracionDocumentoService', async () => {
+    const recibo = { _id: new Types.ObjectId() };
+    const recibos = { findOneRaw: jest.fn(() => Promise.resolve(recibo)) };
+    const generacion = {
+      confirmar: jest.fn(() =>
+        Promise.resolve({ objectPath: 'documentos-generados/x/RC/1.pdf' }),
+      ),
+    };
+    const controller = makeController(recibos, generacion);
+
+    const respuesta = await controller.confirmarGeneracion('rec-1', {
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+    });
+
+    expect(generacion.confirmar).toHaveBeenCalledWith(
+      'RC',
+      recibo,
+      'documentos-generados/x/RC/1.pdf',
+    );
+    expect(respuesta).toEqual({
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+    });
+  });
+});
+
+describe('RecibosController.urlLectura', () => {
+  it('resuelve el recibo por id y delega en GeneracionDocumentoService con la etiqueta correcta', async () => {
+    const recibo = {
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+    };
+    const recibos = {
+      findOne: jest.fn(() => Promise.resolve(recibo)),
+    };
+    const generacion = {
+      urlLectura: jest.fn(() =>
+        Promise.resolve({
+          url: 'https://x',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        }),
+      ),
+    };
+    const controller = makeController(recibos, generacion);
+
+    await controller.urlLectura('rec-1');
+
+    expect(generacion.urlLectura).toHaveBeenCalledWith(
+      'El recibo',
+      'rec-1',
+      recibo,
+    );
   });
 });

@@ -10,8 +10,11 @@ import type Redis from 'ioredis';
 import { ClsModule } from 'nestjs-cls';
 import { redisProvider } from './redis/redis.provider';
 import { REDIS_CLIENT } from './redis/redis.constants';
-import { firebaseAuthProvider } from './firebase/firebase.provider';
-import { FIREBASE_AUTH } from './firebase/firebase.constants';
+import {
+  firebaseAppProvider,
+  firebaseAuthProvider,
+} from './firebase/firebase.provider';
+import { FIREBASE_APP, FIREBASE_AUTH } from './firebase/firebase.constants';
 import { FirebaseUsuariosService } from './firebase/firebase-usuarios.service';
 import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
@@ -21,6 +24,12 @@ import { CuentaService } from './cuentas/cuenta.service';
 import { NumeracionService } from './numeracion/numeracion.service';
 import { PeriodoService } from './contabilidad/periodo.service';
 import { PresentacionDocumentoService } from './documentos/presentacion-documento.service';
+import { PlantillaDocumentoService } from './documentos/plantilla-documento.service';
+import { GeneracionDocumentoService } from './documentos/generacion-documento.service';
+import { TituloDocumentoService } from './documentos/titulo-documento.service';
+import { gcsBucketProvider } from './storage/gcs-bucket.provider';
+import { GCS_BUCKET } from './storage/storage.constants';
+import { DocumentoStorageService } from './storage/documento-storage.service';
 
 /**
  * Global module for cross-cutting providers: the shared Redis client, the
@@ -35,6 +44,7 @@ import { PresentacionDocumentoService } from './documentos/presentacion-document
   imports: [ClsModule.forRoot({ global: true, middleware: { mount: true } })],
   providers: [
     redisProvider,
+    firebaseAppProvider,
     firebaseAuthProvider,
     FirebaseAuthGuard,
     PlatformAdminGuard,
@@ -45,9 +55,15 @@ import { PresentacionDocumentoService } from './documentos/presentacion-document
     NumeracionService,
     PeriodoService,
     PresentacionDocumentoService,
+    PlantillaDocumentoService,
+    GeneracionDocumentoService,
+    TituloDocumentoService,
+    gcsBucketProvider,
+    DocumentoStorageService,
   ],
   exports: [
     REDIS_CLIENT,
+    FIREBASE_APP,
     FIREBASE_AUTH,
     FirebaseAuthGuard,
     PlatformAdminGuard,
@@ -58,6 +74,11 @@ import { PresentacionDocumentoService } from './documentos/presentacion-document
     NumeracionService,
     PeriodoService,
     PresentacionDocumentoService,
+    PlantillaDocumentoService,
+    GeneracionDocumentoService,
+    TituloDocumentoService,
+    GCS_BUCKET,
+    DocumentoStorageService,
   ],
 })
 export class CommonModule implements OnApplicationShutdown {

@@ -65,13 +65,28 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
+    expect(datos.tituloDocumento).toBe('Recibo de Caja');
     expect(datos.numeroCompleto).toBe('RC-0005');
     expect(datos.inmuebleCodigo).toBe('1201');
     expect(datos.titularNombre).toBe('ACOSTA BONILLA JOSE ERNESTO');
     expect(datos.concepto).toBe('Cancela factura 685');
     expect(datos.monto).toBe(905040);
+  });
+
+  it('usa el tituloDocumento que le pasa el caller (resuelto vía TituloDocumentoService), no un literal propio', async () => {
+    const datos = await construirDatosImpresionRecibo(
+      reciboBase(),
+      [],
+      copropiedadBase(),
+      COP,
+      modelosVacios() as never,
+      'Comprobante de Ingreso',
+    );
+
+    expect(datos.tituloDocumento).toBe('Comprobante de Ingreso');
   });
 
   it('usa "Pago recibido" cuando el recibo no tiene notes', async () => {
@@ -81,6 +96,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     expect(datos.concepto).toBe('Pago recibido');
@@ -142,6 +158,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Recibo de Caja',
     );
 
     expect(datos.lineas).toEqual([
@@ -180,6 +197,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     const filaAnticipo = datos.lineas.find((l) => l.cuentaCodigo === '210505');
@@ -201,6 +219,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     const filaAnticipo = datos.lineas.find((l) => l.cuentaCodigo === '210505');
@@ -223,6 +242,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase({ discountsDebitAccount: '530525' }),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     const filaAnticipo = datos.lineas.find((l) => l.cuentaCodigo === '210505');
@@ -249,6 +269,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase({ otherIncomeCreditAccount: '429505' }),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     expect(datos.lineas.some((l) => l.cuentaCodigo === '210505')).toBe(false);
@@ -269,6 +290,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     expect(datos.lineas.some((l) => l.cuentaCodigo === '210505')).toBe(false);
@@ -300,6 +322,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelos as never,
+      'Recibo de Caja',
     );
 
     expect(datos.lineas[0]).toMatchObject({
@@ -321,6 +344,7 @@ describe('construirDatosImpresionRecibo', () => {
       copropiedadBase(),
       COP,
       modelosVacios() as never,
+      'Recibo de Caja',
     );
 
     const filaAplicacion = datos.lineas.find((l) => l.tipoDocumento === 'FV');

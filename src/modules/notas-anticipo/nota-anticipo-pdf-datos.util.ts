@@ -13,7 +13,7 @@ import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 
 export interface ModelosDatosImpresionNotaAnticipo {
   facturas: Model<FacturaDocument>;
@@ -62,6 +62,10 @@ export async function construirDatosImpresionNotaAnticipo(
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaAnticipo,
+  // Resolved by the caller (`NotasAnticipoService.datosImpresion`, via
+  // `TituloDocumentoService.resolverGenerico('NA', ...)`) — see
+  // `construirDatosImpresionRecibo`'s identical parameter.
+  tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -177,7 +181,7 @@ export async function construirDatosImpresionNotaAnticipo(
   }
 
   return {
-    tituloDocumento: 'Nota de Anticipo',
+    tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: nota.issueDate,
     inmuebleCodigo: inmueble?.code ?? '—',

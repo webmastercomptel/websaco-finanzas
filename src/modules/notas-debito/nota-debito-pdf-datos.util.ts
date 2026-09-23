@@ -9,7 +9,7 @@ import type { CuentaContableDocument } from '../../database/schemas/contabilidad
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 
 export interface ModelosDatosImpresionNotaDebito {
   inmuebles: Model<InmuebleDocument>;
@@ -43,6 +43,10 @@ export async function construirDatosImpresionNotaDebito(
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaDebito,
+  // Resolved by the caller (`NotasDebitoService.datosImpresion`, via
+  // `TituloDocumentoService.resolverGenerico('ND', ...)`) — see
+  // `construirDatosImpresionRecibo`'s identical parameter.
+  tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const [inmueble, tercero, concepto, asiento] = await Promise.all([
     modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
@@ -73,7 +77,7 @@ export async function construirDatosImpresionNotaDebito(
   }));
 
   return {
-    tituloDocumento: 'Nota de Débito',
+    tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: nota.issueDate,
     inmuebleCodigo: inmueble?.code ?? '—',

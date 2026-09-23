@@ -5,10 +5,11 @@ import {
   cert,
   getApps,
   initializeApp,
+  type App,
   type ServiceAccount,
 } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
-import { FIREBASE_AUTH } from './firebase.constants';
+import { FIREBASE_APP, FIREBASE_AUTH } from './firebase.constants';
 
 /**
  * The credential as Google actually writes it: snake_case keys. The SDK's
@@ -68,19 +69,20 @@ const parseServiceAccount = (base64: string): ServiceAccount => {
 };
 
 /**
- * The shared Firebase Auth instance.
+ * The shared Firebase `App`, initialized once.
  *
- * Only ever used to VERIFY tokens. This project does not create, list, update
- * or delete users: accounts are provisioned by hand in the Firebase console.
- * That is a deliberate limit, not a missing feature — see CLAUDE.md.
- *
- * `getApps()` is checked first because Jest can load this module more than once
- * in a single process, and initializing twice throws.
+ * `getApps()` is checked first because Jest can load this module more than
+ * once in a single process, and initializing twice throws — and because,
+ * from here on, more than one provider needs this same app (Auth below,
+ * Storage in `common/storage/gcs-bucket.provider.ts`): initializing it
+ * per-consumer would silently create a second, disconnected `App` the
+ * moment a second provider called `initializeApp` instead of reusing this
+ * one.
  */
-export const firebaseAuthProvider: Provider = {
-  provide: FIREBASE_AUTH,
+export const firebaseAppProvider: Provider = {
+  provide: FIREBASE_APP,
   inject: [ConfigService],
-  useFactory: (config: ConfigService): Auth => {
+  useFactory: (config: ConfigService): App => {
     const logger = new Logger('Firebase');
     const base64 = config.get<string>('app.firebaseServiceAccountBase64');
 
@@ -105,6 +107,19 @@ export const firebaseAuthProvider: Provider = {
     logger.log(
       `Firebase Admin inicializado (proyecto ${app.options.projectId ?? 'desconocido'})`,
     );
-    return getAuth(app);
+    return app;
   },
+};
+
+/**
+ * The shared Firebase Auth instance, built from the one shared `App` above.
+ *
+ * Only ever used to VERIFY tokens. This project does not create, list, update
+ * or delete users: accounts are provisioned by hand in the Firebase console.
+ * That is a deliberate limit, not a missing feature — see CLAUDE.md.
+ */
+export const firebaseAuthProvider: Provider = {
+  provide: FIREBASE_AUTH,
+  inject: [FIREBASE_APP],
+  useFactory: (app: App): Auth => getAuth(app),
 };

@@ -48,6 +48,22 @@ export interface Paginado<T> {
   porPagina: number;
 }
 
+/* ── Plantillas de Documento ───────────────────────────────────── */
+
+/**
+ * One platform-wide pdfmake template — the `docDefinition` JSON (with
+ * `{{nombre}}`-style placeholders) the frontend fills in and renders for a
+ * given document type. `docDefinition` is intentionally `Record<string,
+ * unknown>` here rather than a typed pdfmake shape: this backend never reads
+ * or validates its internals, only stores and returns it opaquely — see
+ * `PlantillaDocumento` (schema) for the full reasoning.
+ */
+export interface PlantillaDocumento {
+  tipoDocumento: 'FV' | 'RC' | 'NC' | 'ND' | 'NA' | 'NT';
+  docDefinition: Record<string, unknown>;
+  fechaActualizacion: IsoDate;
+}
+
 /* ── Inmuebles ─────────────────────────────────────────────────── */
 
 /** The party responsible for a unit, as a unit listing needs to show them. */
@@ -242,15 +258,201 @@ export interface FacturaLinea {
   saldoPendiente: Monto;
 }
 
+/** One row of the "Cargos del Mes" table inside `DatosPlantillaFactura` —
+ *  one concept's saldo anterior / cargos del mes / nuevo saldo, mirroring
+ *  the old react-pdf `CuerpoFactura`'s own row shape now that rendering
+ *  moved to the frontend (pdfmake). */
+export interface CargoPlantillaFactura {
+  nombre: string;
+  saldoAnterior: Monto;
+  cargosDelMes: Monto;
+  nuevoSaldo: Monto;
+}
+
+/** The issuing coproperty's own header data, as a Factura/Prefactura's
+ *  pdfmake template prints it — built directly from the `Copropiedad` the
+ *  caller already has in hand, no extra query. Genuinely live/mutable (a
+ *  coproperty can rename itself, change its NIT, or toggle its logo at any
+ *  time) — exactly why `Factura.printSnapshot` exists: without it, viewing
+ *  an old invoice today would show today's emisor data, not what was true
+ *  when it was actually issued. */
+export interface EmisorPlantillaFactura {
+  nombre: string;
+  nit: string | null;
+  digitoVerificacion: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+  telefono: string | null;
+  email: string | null;
+  mostrarLogo: boolean;
+  /**
+   * Pre-composed, print-ready copies of `nit`/`digitoVerificacion` and
+   * `direccion`/`ciudad` — additive, the raw fields above stay untouched
+   * since other callers (`EncabezadoDocumento`) already rely on them.
+   * Mirrors the exact composition the old react-pdf `EncabezadoDocumento`
+   * did in-component (`nit-digitoVerificacion`, `direccion - ciudad`),
+   * `'—'` when nothing is set — needed now that the pdfmake template can
+   * only do plain `{{}}` substitution, no in-template fallback/join logic.
+   */
+  nitCompleto: string;
+  direccionCompleta: string;
+  /** `telefono`/`email` pre-composed to `'—'` when absent — same
+   *  reasoning as `nitCompleto`/`direccionCompleta` above. */
+  telefonoMostrado: string;
+  emailMostrado: string;
+}
+
+/** A Factura's own frozen DIAN resolution, resolved for printing — `null`
+ *  when the invoice was numbered through a plain consecutivo instead (see
+ *  `Factura.resolucionId`). `prefijo` here is always the INVOICE's own
+ *  frozen prefix, never the resolución's own (possibly since-edited) one —
+ *  see `TituloDocumentoService.resolverFactura`'s own docblock. */
+export interface ResolucionPlantillaFactura {
+  numero: string;
+  nombreVisible: string | null;
+  prefijo: string;
+  rangoDesde: number;
+  rangoHasta: number;
+  vigenteDesde: IsoDate;
+  vigenteHasta: IsoDate | null;
+}
+
 /**
- * One node of a frozen react-pdf presentation tree — see
- * `Factura.documentDefinition` below. Kept as a local, minimal type instead
- * of importing `NodoSerializado` from `common/pdf/react/serializar-arbol`:
- * this file is the Spanish API surface, not a place that reaches into
- * `common/pdf`'s internals.
+ * A conditional block's own gate, pdfmake-template style: the template can
+ * only test "is this array empty or not" (via `$repeat` over a table row),
+ * never a real `if`, so every optional block in the Factura/Prefactura
+ * template is modeled as an array field that is `[]` when the condition is
+ * false and `[<oneObject>]` when it's true — see `DatosPlantillaFactura`'s
+ * own docblock. `FilaMarcadorFactura` is the shape for a block whose only
+ * job is to exist or not (nothing inside it varies) — the WebSACO logo row.
  */
-export type NodoDocumentoFactura =
-  string | number | null | { type: string; props: Record<string, unknown> };
+export type FilaMarcadorFactura = Record<string, never>;
+
+/** One row of `DatosPlantillaFactura.referenciaPagoFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface ReferenciaPagoFilaFactura {
+  referenciaPago: string;
+}
+
+/** One row of `DatosPlantillaFactura.ivaFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface IvaFilaFactura {
+  etiquetaIva: string;
+  totalIva: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.anticiposFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface AnticiposFilaFactura {
+  totalAnticipos: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.notasFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface NotasFilaFactura {
+  notas: string;
+}
+
+/** One row of `DatosPlantillaFactura.descuentoFilas` — see
+ *  `FilaMarcadorFactura`'s own docblock. */
+export interface DescuentoFilaFactura {
+  fechaLimiteDescuento: IsoDate;
+  totalConDescuento: Monto;
+}
+
+/** One row of `DatosPlantillaFactura.resolucionFilas` — `textoResolucion` is
+ *  the WHOLE footer sentence, pre-composed server-side (including the
+ *  conditional " vigente hasta …" tail): the template has no way to append
+ *  text conditionally inside a single placeholder, so that branching has to
+ *  happen before the data ever reaches it. See `FilaMarcadorFactura`'s own
+ *  docblock and `FacturasService`'s own composing helper. */
+export interface ResolucionFilaFactura {
+  textoResolucion: string;
+}
+
+/**
+ * Computed totals a Factura/Prefactura's pdfmake template needs beyond its
+ * own frozen/previewed fields — relocated from the old react-pdf
+ * `contenidoDocumentoFacturacion` (see `FacturasService.datosPlantilla`/
+ * `datosPlantillaPreliminar`). For a Factura this travels once, in the same
+ * response as `solicitar-generacion` — never re-derived on every `findOne`.
+ * For a Prefactura (no issuance moment to freeze at) it is computed fresh on
+ * every read, same as the rest of `DocumentoPrefactura`.
+ *
+ * `tituloDocumento`/`emisor`/`resolucion`/`titular` close a real
+ * immutability gap: a live `datosPlantilla` recomputation would otherwise
+ * show TODAY's coproperty data, TODAY's "Tabla de Documentos" title and
+ * whichever resolución is active TODAY, even for an invoice issued months
+ * ago under different values. `Factura.printSnapshot` freezes exactly this
+ * shape at PDF-confirmation time so a re-read of an old invoice never drifts
+ * — see `FacturasController.obtenerDocumento`.
+ */
+export interface DatosPlantillaFactura {
+  cargos: CargoPlantillaFactura[];
+  totalSaldoAnterior: Monto;
+  totalCargosDelMes: Monto;
+  totalNuevoSaldo: Monto;
+  totalIva: Monto;
+  etiquetaIva: string;
+  totalAPagar: Monto;
+  /** `totalAPagar` menos el descuento por pronto pago y el anticipo
+   *  disponible — `null` cuando el documento no ofrece descuento. */
+  totalConDescuento: Monto | null;
+  referenciaPago: string | null;
+  totalAnticipos: Monto;
+  notas: string | null;
+  /** "Factura de Venta" (from "Tabla de Documentos"), or literally
+   *  "Prefactura" for a not-yet-issued preview — see
+   *  `TituloDocumentoService`. */
+  tituloDocumento: string;
+  emisor: EmisorPlantillaFactura;
+  /** `null` on a Prefactura (no issuance moment, nothing frozen yet to
+   *  show) or when the invoice was numbered through a plain consecutivo. */
+  resolucion: ResolucionPlantillaFactura | null;
+  /** Equivalent to `totalConDescuento !== null` — a convenience flag so the
+   *  template doesn't have to test the other field for `null` itself. */
+  tieneDescuentoProntoPago: boolean;
+  /** Convenience copy of the Factura's own `titular` (see `Factura.titular`)
+   *  — duplicated here ON PURPOSE so the frontend can build a print page
+   *  from `datos` alone, without also fetching the parent `Factura`. The
+   *  general contract's own `titular` is unaffected and stays the
+   *  authoritative one everywhere else. */
+  titular: TitularFactura | null;
+  /** `titular?.email`, pre-composed to `'—'` when absent — same reasoning
+   *  as `EmisorPlantillaFactura.nitCompleto`: the pdfmake template can't do
+   *  a `value ?? '—'` fallback itself. */
+  titularEmailMostrado: string;
+  /** `titular.tipoIdentificacion` + `titular.numeroIdentificacion`, joined
+   *  and pre-composed to `'—'` when neither is set — same reasoning as
+   *  `titularEmailMostrado`. */
+  titularIdentificacionMostrada: string;
+  /** `totalAPagar` menos `totalAnticipos` — what the template's "Total a
+   *  Pagar" band actually prints, computed once here so the template never
+   *  has to subtract two placeholders itself. */
+  totalAPagarFinal: Monto;
+  /** Gates the WebSACO logo inside the letterhead banner — `[{}]` exactly
+   *  when `emisor.mostrarLogo` is true, `[]` otherwise. See
+   *  `FilaMarcadorFactura`'s own docblock for why this is an array. */
+  logoFilas: FilaMarcadorFactura[];
+  /** Gates the "Referencia de Pago" line under the title — `[]` when
+   *  `referenciaPago` is null. */
+  referenciaPagoFilas: ReferenciaPagoFilaFactura[];
+  /** Gates the bold IVA row in the totals table — `[]` when `totalIva` is
+   *  0. */
+  ivaFilas: IvaFilaFactura[];
+  /** Gates the bold "Saldo a Favor" row in the totals table — `[]` when
+   *  `totalAnticipos` is 0. */
+  anticiposFilas: AnticiposFilaFactura[];
+  /** Gates the copropiedad's billing-notes box — `[]` when `notas` is
+   *  null. */
+  notasFilas: NotasFilaFactura[];
+  /** Gates the amber "Descuento Pronto Pago" box — `[]` when
+   *  `tieneDescuentoProntoPago` is false. */
+  descuentoFilas: DescuentoFilaFactura[];
+  /** Gates the DIAN resolution footer line — `[]` when `resolucion` is
+   *  null. */
+  resolucionFilas: ResolucionFilaFactura[];
+}
 
 /** A sales invoice ("FV"), only ever created already numbered. */
 export interface Factura {
@@ -282,28 +484,42 @@ export interface Factura {
   motivoAnulacion: MotivoAnulacionFactura | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `consolidar()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  an invoice whose consolidación ran before this field existed, or
-   *  whose presentation-cache step failed — the invoice itself is still
-   *  valid either way, this is presentation, not business data. */
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
-/** One entry of `GET /lotes/:id/facturas/documentos` — a lote's invoices,
- *  each as its own frozen presentation tree, for the browser to render.
- *  See `Factura.documentDefinition`. */
+/** One entry of `GET /lotes/:id/facturas/documentos` — a plain listing of a
+ *  lote's invoices (id + unit code). There is no per-invoice presentation
+ *  pointer any more: a lote's invoice run produces ONE combined PDF (one
+ *  page per invoice, anchored on the Lote's own id), read via
+ *  `GET /lotes/:id/url-lectura` — see `SolicitudGeneracionFacturaLote`. */
 export interface DocumentoFacturaLote {
   id: string;
   inmuebleCodigo: string;
-  documentDefinition: NodoDocumentoFactura | null;
 }
 
 /** Response of `GET /lotes/:id/inmuebles/:inmuebleId/prefactura/documento`
  *  — a Prefactura has no issuance moment to freeze at, so this is computed
- *  fresh on every request instead of read from a stored field. */
+ *  fresh on every request instead of read from a stored field: the current
+ *  template (`plantilla_documento` row for `FV`) plus this unit's computed
+ *  totals. No `objectPath`/`generatedAt` — a Prefactura never gets a
+ *  `presentacion_documento` row, since it is never issued. */
 export interface DocumentoPrefactura {
-  documentDefinition: NodoDocumentoFactura | null;
+  plantilla: PlantillaDocumento;
+  datos: DatosPlantillaFactura;
+}
+
+/** Response of `GET /facturas/:id/documento` — a live-computed view of one
+ *  already-issued Factura's PDF content: the current template
+ *  (`plantilla_documento` row for `FV`) plus this invoice's own computed
+ *  totals (`FacturasService.datosPlantilla`), recomputed on every call —
+ *  never read from a stored file. The lote's invoice run produces ONE
+ *  combined PDF for the whole batch (see `SolicitudGeneracionFacturaLote`/
+ *  `LotesController`'s `:id/url-lectura`); reading that file to show a
+ *  single invoice would leak every other unit's invoice to whoever is only
+ *  entitled to see their own, so this route computes it live instead, same
+ *  as `DocumentoPrefactura` above (same shape, on purpose). */
+export interface DocumentoFactura {
+  plantilla: PlantillaDocumento;
+  datos: DatosPlantillaFactura;
 }
 
 /** One entry of `GET /lotes/:id/prefacturas/documentos` — same idea as
@@ -312,7 +528,26 @@ export interface DocumentoPrefactura {
 export interface DocumentoPrefacturaLote {
   inmuebleId: string;
   inmuebleCodigo: string;
-  documentDefinition: NodoDocumentoFactura | null;
+  datos: DatosPlantillaFactura;
+}
+
+/** Response of `POST /lotes/:id/facturas/solicitar-generacion` — a lote's
+ *  invoice run produces ONE combined PDF (one page per invoice), so this is
+ *  anchored on the LOTE's own id, not any one Factura's: `objectPath`/
+ *  `uploadUrl`/`expiresAt` are the single upload target the frontend renders
+ *  that combined file to (hoisted to the top level, unlike the old
+ *  per-invoice shape this replaced). `facturas` is just each invoice's own
+ *  computed `datos` — one page's worth, in the order the combined PDF must
+ *  render them. See `FacturasService.datosPlantilla`. */
+export interface SolicitudGeneracionFacturaLote {
+  plantilla: PlantillaDocumento;
+  objectPath: string;
+  uploadUrl: string;
+  expiresAt: IsoDate;
+  facturas: {
+    facturaId: string;
+    datos: DatosPlantillaFactura;
+  }[];
 }
 
 /** Why a Factura was voided — same catalog as a Nota Crédito's void (no
@@ -552,12 +787,13 @@ export interface Recibo {
   motivoAnulacion: MotivoAnulacionRecibo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a receipt whose creation ran before this field existed, or whose
-   *  presentation-cache step failed — the receipt itself is still valid
-   *  either way, this is presentation, not business data. */
-  documentDefinition: NodoDocumentoFactura | null;
+  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
+   *  `confirmarGeneracion` — see `PresentacionDocumento`'s own docblock for
+   *  the two-phase write this mirrors. Unlike Factura (batch-only, one
+   *  combined PDF per lote — see `SolicitudGeneracionFacturaLote`), a Recibo
+   *  is issued and stored one-to-one, so it keeps its own pointer here. */
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /**
@@ -607,12 +843,15 @@ export interface ReciboDetalle extends Recibo {
 }
 
 /** One entry of `GET /lotes-recibos/:id/documentos` — a batch's receipts,
- *  each as its own frozen presentation tree, for the browser to render. See
- *  `Recibo.documentDefinition`; mirrors `DocumentoFacturaLote`. */
+ *  each with its own presentation pointer. See `Recibo.objectPath`/
+ *  `generatedAt`. Unlike `DocumentoFacturaLote` (Factura moved to one
+ *  combined PDF per lote), a Recibo is still stored one-to-one, so this
+ *  keeps the per-row pointer. */
 export interface DocumentoReciboLote {
   id: string;
   inmuebleCodigo: string;
-  documentDefinition: NodoDocumentoFactura | null;
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /** One row of a Recibos-por-lote upload. */
@@ -760,23 +999,14 @@ export interface NotaCredito {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-}
-
-/**
- * Response of `GET /notas-credito/:id/documento` — this note's own frozen
- * react-pdf presentation tree, for the browser to render. Unlike
- * `Factura.documentDefinition` (frozen once, at `consolidar()` time), this
- * is refrozen every time `aplicar()` runs (see
- * `NotasCreditoService.congelarPresentacion`) — `crear()` never freezes it,
- * since the business flow always calls `aplicar()` right after `crear()`, so
- * a note is never viewed before its first freeze. `null` should therefore
- * not normally happen in practice; handled defensively anyway (the frontend
- * already treats `documentDefinition: null` as "not available"), same as
- * `Factura`'s equivalent field.
- */
-export interface DocumentoNotaCredito {
-  inmuebleCodigo: string;
-  documentDefinition: NodoDocumentoFactura | null;
+  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt` for the
+   *  shared two-phase write this mirrors. Unlike the old `documentDefinition`
+   *  (which `aplicar()` re-froze every time it ran), this is never
+   *  re-requested once confirmed: nothing re-renders after issuance under
+   *  the new model. */
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /**
@@ -818,11 +1048,10 @@ export interface NotaDebito {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
+  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /**
@@ -866,11 +1095,10 @@ export interface NotaAnticipo {
   motivoAnulacion: MotivoAnulacionNotaAnticipo | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
+  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /**
@@ -1010,11 +1238,10 @@ export interface NotaContable {
   motivoAnulacion: MotivoAnulacionNotaCredito | null;
   detalleAnulacion: string | null;
   fechaAnulacion: IsoDate | null;
-  /** Frozen at `crear()` time, rendered client-side — see
-   *  `Factura.documentDefinition` (schema) and `serializarArbol`. Null for
-   *  a note whose creation ran before this field existed, or whose
-   *  presentation-cache step failed. */
-  documentDefinition: NodoDocumentoFactura | null;
+  /** Set by `solicitarGeneracion` (pending upload) and confirmed by
+   *  `confirmarGeneracion` — see `Recibo.objectPath`/`generatedAt`. */
+  objectPath: string | null;
+  generatedAt: IsoDate | null;
 }
 
 /* ── Auxiliar de Cartera (kardex) ────────────────────────────── */

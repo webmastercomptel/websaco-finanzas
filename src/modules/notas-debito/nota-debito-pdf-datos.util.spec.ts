@@ -75,6 +75,7 @@ describe('construirDatosImpresionNotaDebito', () => {
       copropiedadBase(),
       COP,
       modelosCon() as never,
+      'Nota de Débito',
     );
 
     expect(datos.tituloDocumento).toBe('Nota de Débito');
@@ -91,6 +92,7 @@ describe('construirDatosImpresionNotaDebito', () => {
       copropiedadBase(),
       COP,
       modelosCon() as never,
+      'Nota de Débito',
     );
 
     expect(datos.concepto).toBe('Multa por mascota sin correa');
@@ -102,6 +104,7 @@ describe('construirDatosImpresionNotaDebito', () => {
       copropiedadBase(),
       COP,
       modelosCon() as never,
+      'Nota de Débito',
     );
 
     expect(datos.concepto).toBe('Multas');
@@ -113,6 +116,7 @@ describe('construirDatosImpresionNotaDebito', () => {
       copropiedadBase(),
       COP,
       modelosCon() as never,
+      'Nota de Débito',
     );
 
     expect(datos.lineas).toEqual([
@@ -145,6 +149,7 @@ describe('construirDatosImpresionNotaDebito', () => {
           findOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
         },
       }) as never,
+      'Nota de Débito',
     );
 
     expect(datos.lineas).toEqual([]);

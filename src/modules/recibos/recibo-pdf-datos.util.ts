@@ -11,7 +11,7 @@ import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
-} from '../../common/pdf/recibo-pdf';
+} from '../../common/documentos/datos-impresion.types';
 
 export interface ModelosDatosImpresionRecibo {
   facturas: Model<FacturaDocument>;
@@ -58,6 +58,11 @@ export async function construirDatosImpresionRecibo(
   copropiedad: CopropiedadDocument,
   coPropertyId: Types.ObjectId,
   modelos: ModelosDatosImpresionRecibo,
+  // Resolved by the caller (`RecibosService.datosImpresion`, via
+  // `TituloDocumentoService.resolverGenerico('RC', ...)`) — the "Tabla de
+  // Documentos" configured title, falling back to this exact literal when
+  // nothing was configured. No longer hardcoded here.
+  tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -210,7 +215,7 @@ export async function construirDatosImpresionRecibo(
   }
 
   return {
-    tituloDocumento: 'Recibo de Caja',
+    tituloDocumento,
     numeroCompleto: recibo.fullNumber,
     fecha: recibo.receivedDate,
     inmuebleCodigo: inmueble?.code ?? '—',

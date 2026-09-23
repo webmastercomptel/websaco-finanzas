@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
@@ -91,6 +90,8 @@ import {
 } from '../facturacion/asiento.builder';
 import { toRecibo, toReciboDetalle } from './recibos.mapper';
 import { construirDatosImpresionRecibo } from './recibo-pdf-datos.util';
+import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
+import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
@@ -211,18 +212,19 @@ const redactarObservaciones = (
  * and write that balance (see that schema's own docblock).
  *
  * `terceros` and `presentacionDocumento` were APPENDED, trailing and
- * optional (same reasoning as `cuentasContables`/`inmuebles` right above),
- * when `crear()` took over freezing this Recibo's own `documentDefinition`
- * into the shared `presentacion_documento` table — see
- * `congelarPresentacionRecibo`. `terceros` is needed only for that step
- * (`construirDatosImpresionRecibo`'s own `modelos.terceros`); every existing
- * positional test keeps compiling with both left `undefined`, in which case
- * `congelarPresentacionRecibo` simply no-ops.
+ * optional (same reasoning as `cuentasContables`/`inmuebles` right above).
+ * Originally added so `crear()` could freeze this Recibo's own
+ * `documentDefinition` right after creating it — that step is GONE under
+ * the pdfmake + frontend-render model (`solicitar-generacion`/
+ * `confirmar-generacion` are separate, explicit actions the frontend
+ * triggers later, from `RecibosController`). `terceros` now backs
+ * `datosImpresion` (`construirDatosImpresionRecibo`'s own
+ * `modelos.terceros`) and `presentacionDocumento` backs `findOne`'s
+ * `objectPath`/`generatedAt` lookup; every existing positional test keeps
+ * compiling with both left `undefined`.
  */
 @Injectable()
 export class RecibosService {
-  private readonly logger = new Logger(RecibosService.name);
-
   constructor(
     @InjectModel(Recibo.name)
     private readonly recibos: Model<ReciboDocument>,
@@ -265,6 +267,9 @@ export class RecibosService {
     // requests always get it from Nest's own DI.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // APPENDED LAST, optional — same append discipline as every dependency
+    // above. Backs `datosImpresion`'s own `resolverGenerico('RC', ...)` call.
+    private readonly tituloDocumento?: TituloDocumentoService,
   ) {}
 
   /**
@@ -607,99 +612,12 @@ export class RecibosService {
       );
     });
 
-    // Frozen presentation record — built once here, outside the transaction
-    // above and AFTER it has already committed: a Recibo's own financial
-    // correctness never depends on this succeeding. Same frozen-at-emission
-    // principle `LotesFacturacionService.consolidar()` already applies to
-    // Factura, extended to this document (see `congelarPresentacionRecibo`
-    // and `PresentacionDocumento`'s own schema docblock).
-    await this.congelarPresentacionRecibo(
-      coPropertyId,
-      new Types.ObjectId(resultado.id),
-    );
-
+    // Presentation generation is no longer triggered here — under the
+    // pdfmake + frontend-render model, `solicitar-generacion`/
+    // `confirmar-generacion` are separate, explicit actions the frontend
+    // calls later (`RecibosController`), never something `crear()` does
+    // internally.
     return resultado;
-  }
-
-  /**
-   * Freezes this Recibo's react-pdf presentation tree into the shared,
-   * permanent `presentacion_documento` table — called AFTER `crear()`'s own
-   * transaction has already committed (never from inside it: a failure here
-   * must never roll back a real financial document). No-ops when any
-   * optional dependency it needs is missing (test-only construction — see
-   * this class's own canonical-constructor docblock). Wrapped in try/catch,
-   * log-and-continue, never rethrown — same placement/reasoning as
-   * `LotesFacturacionService.consolidar()`'s identical step for Factura.
-   */
-  private async congelarPresentacionRecibo(
-    coPropertyId: Types.ObjectId,
-    reciboId: Types.ObjectId,
-  ): Promise<void> {
-    if (
-      !this.presentacionDocumento ||
-      !this.inmuebles ||
-      !this.terceros ||
-      !this.cuentasContables
-    ) {
-      return;
-    }
-    try {
-      const [reciboRaw, aplicacionesActivas, copropiedad] = await Promise.all([
-        this.recibos.findOne({ _id: reciboId, coPropertyId }).exec(),
-        this.aplicaciones
-          .find({
-            coPropertyId,
-            sourceType: 'RC',
-            sourceId: reciboId,
-            status: 'activa',
-          })
-          .sort({ appliedAt: 1 })
-          .exec(),
-        this.copropiedades.findById(coPropertyId).exec(),
-      ]);
-      if (!reciboRaw || !copropiedad) return;
-
-      const datos = await construirDatosImpresionRecibo(
-        reciboRaw,
-        aplicacionesActivas,
-        copropiedad,
-        coPropertyId,
-        {
-          facturas: this.facturas,
-          notasDebito: this.notasDebito,
-          inmuebles: this.inmuebles,
-          terceros: this.terceros,
-          cuentasContables: this.cuentasContables,
-        },
-      );
-
-      // Deferred import — `recibo-pdf.ts` pulls in `@react-pdf/renderer`
-      // (ESM), which Jest's CJS environment can't load. A static import at
-      // the top of this file would make that load happen just from
-      // importing `RecibosService` for DI, breaking every spec that
-      // references this service even though none of them touch PDFs — same
-      // reasoning `LotesFacturacionService.consolidar()` documents for its
-      // own identical dynamic import.
-      const {
-        contenidoRecibo,
-      }: typeof import('../../common/pdf/recibo-pdf.js') =
-        await import('../../common/pdf/recibo-pdf.js');
-      const {
-        serializarArbol,
-      }: typeof import('../../common/pdf/react/serializar-arbol.js') =
-        await import('../../common/pdf/react/serializar-arbol.js');
-
-      await this.presentacionDocumento.guardar(
-        'RC',
-        reciboRaw._id,
-        serializarArbol(contenidoRecibo(datos, copropiedad)),
-      );
-    } catch (error) {
-      this.logger.error(
-        `No se pudo congelar documentDefinition para el recibo ${reciboId.toString()} — el recibo ya quedó creado, se puede reintentar aparte.`,
-        error instanceof Error ? error.stack : error,
-      );
-    }
   }
 
   /**
@@ -1332,12 +1250,10 @@ export class RecibosService {
       numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
     }
 
-    // Also the frontend's source for rendering this Recibo's PDF
-    // client-side — frozen once by `congelarPresentacionRecibo`, read back
-    // here the same way `FacturasService.findOne` reads its own
-    // `documentDefinition`. `null` for a receipt whose creation ran before
-    // this field existed, or whose presentation-cache step failed.
-    const documentDefinition = this.presentacionDocumento
+    // `objectPath`/`generatedAt` — resolved from `presentacion_documento` the
+    // same way `FacturasService.findOne` resolves its own; `null` for a
+    // receipt that never had `solicitar-generacion` called for it yet.
+    const presentacion = this.presentacionDocumento
       ? await this.presentacionDocumento.buscar('RC', recibo._id)
       : null;
 
@@ -1348,7 +1264,7 @@ export class RecibosService {
       aplicaciones,
       await this.resolverInmuebleCodigo(recibo.inmuebleId),
       numerosPorDocumento,
-      documentDefinition,
+      presentacion,
     );
   }
 
@@ -1362,6 +1278,58 @@ export class RecibosService {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
     return recibo;
+  }
+
+  /**
+   * The pure printable data for this Recibo's own receipt — what
+   * `RecibosController`'s `solicitar-generacion` route sends the frontend
+   * alongside the template, computed fresh every call (never persisted).
+   * Reuses `construirDatosImpresionRecibo` UNCHANGED — it already returned
+   * pure data, decoupled from any renderer, so only who consumes the result
+   * changed (JSON now, instead of feeding a react-pdf tree).
+   */
+  async datosImpresion(id: string): Promise<DatosReciboImpresion> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const recibo = await this.findOneRaw(id);
+    const [aplicacionesActivas, copropiedad] = await Promise.all([
+      this.aplicaciones
+        .find({
+          coPropertyId,
+          sourceType: 'RC',
+          sourceId: recibo._id,
+          status: 'activa',
+        })
+        .sort({ appliedAt: 1 })
+        .exec(),
+      this.copropiedades.findById(coPropertyId).exec(),
+    ]);
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+      );
+    }
+    // Non-null: always injected in the real app, same convention as every
+    // other trailing-optional dependency on this class (see the canonical
+    // constructor docblock) — left optional only for the many existing
+    // positional-mock tests that never exercise this path.
+    const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
+      'RC',
+      coPropertyId,
+    );
+    return construirDatosImpresionRecibo(
+      recibo,
+      aplicacionesActivas,
+      copropiedad,
+      coPropertyId,
+      {
+        facturas: this.facturas,
+        notasDebito: this.notasDebito,
+        inmuebles: this.inmuebles!,
+        terceros: this.terceros!,
+        cuentasContables: this.cuentasContables!,
+      },
+      tituloDocumento,
+    );
   }
 
   /**
