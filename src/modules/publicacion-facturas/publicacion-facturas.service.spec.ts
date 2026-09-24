@@ -5,7 +5,11 @@ import {
   type Desenlace,
   type FilaReclamada,
 } from './publicacion-facturas.service';
-import { LOTE_MAXIMO_POR_CICLO } from './publicacion-facturas.politica';
+import {
+  CLAIM_TTL_MS,
+  LOTE_MAXIMO_POR_CICLO,
+  URL_LECTURA_TTL_MS,
+} from './publicacion-facturas.politica';
 import type { LoteFacturasPdfConfirmadoEvent } from '../../common/eventos/lote-facturas-pdf-confirmado.event';
 
 // `procesar` is intentionally private on the service — accessed here via a
@@ -233,6 +237,166 @@ describe('PublicacionFacturasService.reclamar', () => {
   });
 });
 
+// W4.1 / W4.2: `reclamar` es un único `findOneAndUpdate` atómico, así que la
+// exclusividad real (una segunda llamada sobre la misma fila ya reclamada no
+// la vuelve a tomar) y el límite exacto de la ventana de reclamo vencido no
+// se pueden probar sólo espiando el filtro/update pasado al mock, como hace
+// el describe anterior — hay que simular, sobre un documento en memoria, el
+// MISMO predicado que ese filtro le pide a MongoDB, y verificar que el
+// resultado cambia según el estado. Sigue la convención de mocks a mano de
+// `backend/CLAUDE.md`; no se levanta un MongoDB real para esto.
+describe('PublicacionFacturasService.reclamar — exclusividad y ventana de reclamo vencido', () => {
+  /** Replica el predicado exacto de `reclamar` (service.ts) contra UNA fila
+   *  en memoria: `attempts < max` Y (pendiente/fallido retryable due, O
+   *  enviando con claimedAt <= vencido). */
+  function coincideFiltroDeReclamo(
+    fila: FilaReclamada,
+    max: number,
+    ahora: Date,
+    vencido: Date,
+  ): boolean {
+    if (!(fila.attempts < max)) return false;
+    const ramaDisponible =
+      (fila.status === 'pendiente' || fila.status === 'fallido') &&
+      fila.retryable === true &&
+      fila.nextAttemptAt !== null &&
+      fila.nextAttemptAt.getTime() <= ahora.getTime();
+    const ramaEnviandoVencido =
+      fila.status === 'enviando' &&
+      fila.claimedAt !== null &&
+      fila.claimedAt.getTime() <= vencido.getTime();
+    return ramaDisponible || ramaEnviandoVencido;
+  }
+
+  /** Un `filas` falso cuyo `findOneAndUpdate` aplica ese mismo predicado
+   *  sobre un único documento mutable — cada llamada ve el estado que dejó
+   *  la anterior, igual que un `findOneAndUpdate` real sobre la misma fila. */
+  function mockFilasSimuladas(inicial: FilaReclamada) {
+    let estado: FilaReclamada = { ...inicial };
+    let intentoToken = 0;
+    return {
+      estadoActual: () => estado,
+      findOneAndUpdate: jest.fn((filtro: { attempts: { $lt: number } }) => ({
+        lean: () => ({
+          exec: () => {
+            const ahora = new Date();
+            const vencido = new Date(ahora.getTime() - CLAIM_TTL_MS);
+            const max = filtro.attempts.$lt;
+            if (!coincideFiltroDeReclamo(estado, max, ahora, vencido)) {
+              return Promise.resolve(null);
+            }
+            intentoToken += 1;
+            estado = {
+              ...estado,
+              status: 'enviando',
+              claimedAt: ahora,
+              claimToken: `token-${intentoToken}`,
+              attempts: estado.attempts + 1,
+            };
+            return Promise.resolve({ ...estado });
+          },
+        }),
+      })),
+    };
+  }
+
+  it('una segunda llamada sobre la misma fila ya reclamada (enviando, no vencida) devuelve null', async () => {
+    const filaDisponible: FilaReclamada = {
+      ...FILA_BASE,
+      status: 'pendiente',
+      retryable: true,
+      attempts: 0,
+      nextAttemptAt: new Date(Date.now() - 1_000),
+      claimedAt: null,
+      claimToken: null,
+    };
+    const filas = mockFilasSimuladas(filaDisponible);
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    const primeraReclamada = await service.reclamar(6);
+    const segundaReclamada = await service.reclamar(6);
+
+    expect(primeraReclamada).not.toBeNull();
+    expect(primeraReclamada?.status).toBe('enviando');
+    expect(segundaReclamada).toBeNull();
+  });
+
+  it('una fila reclamada hace más tiempo que CLAIM_TTL_MS es reclamable de nuevo', async () => {
+    jest.useFakeTimers();
+    const ahoraFija = new Date('2026-01-01T00:10:00.000Z');
+    jest.setSystemTime(ahoraFija);
+    const vencidoLimite = new Date(ahoraFija.getTime() - CLAIM_TTL_MS);
+
+    const filaVieja: FilaReclamada = {
+      ...FILA_BASE,
+      status: 'enviando',
+      claimedAt: new Date(vencidoLimite.getTime() - 1), // 1ms más viejo: vencido
+      claimToken: 'reclamo-viejo',
+      attempts: 1,
+    };
+    const filas = mockFilasSimuladas(filaVieja);
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    const reclamada = await service.reclamar(6);
+
+    expect(reclamada).not.toBeNull();
+    expect(reclamada?.status).toBe('enviando');
+
+    jest.useRealTimers();
+  });
+
+  it('el borde exacto del TTL (claimedAt == vencido) es reclamable; 1ms más nuevo no lo es', async () => {
+    jest.useFakeTimers();
+    const ahoraFija = new Date('2026-01-01T00:10:00.000Z');
+    jest.setSystemTime(ahoraFija);
+    const vencidoLimite = new Date(ahoraFija.getTime() - CLAIM_TTL_MS);
+
+    const filaJustoEnElLimite: FilaReclamada = {
+      ...FILA_BASE,
+      status: 'enviando',
+      claimedAt: vencidoLimite, // == vencido → $lte lo incluye
+      claimToken: 'limite-exacto',
+      attempts: 1,
+    };
+    const filasEnLimite = mockFilasSimuladas(filaJustoEnElLimite);
+    const serviceEnLimite = new PublicacionFacturasService(
+      filasEnLimite as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+    await expect(serviceEnLimite.reclamar(6)).resolves.not.toBeNull();
+
+    const filaMasReciente: FilaReclamada = {
+      ...FILA_BASE,
+      status: 'enviando',
+      claimedAt: new Date(vencidoLimite.getTime() + 1), // 1ms más nuevo: no vencido
+      claimToken: 'mas-reciente',
+      attempts: 1,
+    };
+    const filasReciente = mockFilasSimuladas(filaMasReciente);
+    const serviceReciente = new PublicacionFacturasService(
+      filasReciente as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+    await expect(serviceReciente.reclamar(6)).resolves.toBeNull();
+
+    jest.useRealTimers();
+  });
+});
+
 describe('PublicacionFacturasService.procesar', () => {
   const originalFetch = global.fetch;
 
@@ -387,7 +551,7 @@ describe('PublicacionFacturasService.procesar', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it('urlSigned nunca llega al logger, ni en éxito ni en fallo', async () => {
+  it('urlSigned nunca llega al logger en el camino de fallo reintentable (HTTP 422)', async () => {
     const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     global.fetch = jest.fn().mockResolvedValue({ status: 422 });
@@ -411,6 +575,280 @@ describe('PublicacionFacturasService.procesar', () => {
     for (const llamada of todasLasLlamadas) {
       expect(String(llamada)).not.toContain(url);
     }
+  });
+
+  // W4.5: el test de arriba sólo ejercitaba el camino 422, a pesar de que su
+  // título original prometía cubrir "éxito y fallo". Estos tres casos
+  // hermanos cubren, por separado, el camino de éxito y los dos caminos que
+  // fallan ANTES de tener un status HTTP (timeout y error de red) — la
+  // matriz completa de puntos donde `procesar` loguea algo.
+  it('urlSigned nunca llega al logger en el camino de éxito (HTTP 201)', async () => {
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const url =
+      'https://storage.googleapis.com/bucket/secreto-no-loguear-exito.pdf';
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      mockStorage({ url, expiresAt: new Date() }) as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
+
+    const todasLasLlamadas = [
+      ...logSpy.mock.calls,
+      ...warnSpy.mock.calls,
+    ].flat();
+    for (const llamada of todasLasLlamadas) {
+      expect(String(llamada)).not.toContain(url);
+    }
+  });
+
+  it('urlSigned nunca llega al logger en el camino de timeout', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const abortError = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+    });
+    global.fetch = jest.fn().mockRejectedValue(abortError);
+    const url =
+      'https://storage.googleapis.com/bucket/secreto-no-loguear-timeout.pdf';
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      mockStorage({ url, expiresAt: new Date() }) as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(
+      { ...FILA_BASE, attempts: 1 },
+      6,
+    );
+
+    for (const llamada of warnSpy.mock.calls.flat()) {
+      expect(String(llamada)).not.toContain(url);
+    }
+  });
+
+  it('urlSigned nunca llega al logger en el camino de error de red', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn().mockRejectedValue(new Error('ECONNRESET'));
+    const url =
+      'https://storage.googleapis.com/bucket/secreto-no-loguear-red.pdf';
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      mockStorage({ url, expiresAt: new Date() }) as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(
+      { ...FILA_BASE, attempts: 1 },
+      6,
+    );
+
+    for (const llamada of warnSpy.mock.calls.flat()) {
+      expect(String(llamada)).not.toContain(url);
+    }
+  });
+
+  // W4.3: `procesar` no debe cachear ni reutilizar la URL firmada entre
+  // intentos — cada llamada (cada intento) debe pedir una fresca. Esto es lo
+  // que hace que un retry se auto-sane ante una URL vencida (design.md,
+  // decisión #3 y el escenario "Expired signed URL triggers a fresh one on
+  // retry" de invoice-batch-publication/spec.md).
+  it('pide una URL de lectura nueva en cada intento, nunca reutiliza la anterior', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const storage = mockStorage();
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      storage as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
+    await (service as unknown as ServicioConPrivados).procesar(
+      { ...FILA_BASE, attempts: 2 },
+      6,
+    );
+
+    expect(storage.generarUrlLectura).toHaveBeenCalledTimes(2);
+    expect(storage.generarUrlLectura).toHaveBeenNthCalledWith(
+      1,
+      FILA_BASE.objectPath,
+      URL_LECTURA_TTL_MS,
+    );
+    expect(storage.generarUrlLectura).toHaveBeenNthCalledWith(
+      2,
+      FILA_BASE.objectPath,
+      URL_LECTURA_TTL_MS,
+    );
+  });
+
+  // S2: un 3xx nunca debe seguirse — bajaría el POST a GET y perdería el
+  // body firmado.
+  it('el fetch de salida no sigue redirecciones (redirect: "error")', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ redirect: 'error' }),
+    );
+  });
+
+  // S1: un body de respuesta sin leer puede retener la conexión en undici —
+  // `procesar` nunca lee el body (decide todo por el status code), así que
+  // debe cancelarlo explícitamente.
+  it('cancela el cuerpo de la respuesta cuando existe, para no retener la conexión', async () => {
+    const cancelar = jest.fn().mockResolvedValue(undefined);
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ status: 201, body: { cancel: cancelar } });
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
+
+    expect(cancelar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// W4.4: `barrerAgotados` dispara DOS `updateMany` distintos (design.md,
+// sección "Sweep"). Un mock que sólo resuelve `{}` no prueba nada sobre
+// CUÁLES filas se tocan — esto simula, sobre un array de documentos en
+// memoria, el mismo predicado que cada `updateMany` le pide a MongoDB, y
+// comprueba que una fila que agotó `max` se cierra en `fallido` terminal
+// mientras que una que sigue dentro del presupuesto de intentos queda
+// intacta.
+describe('PublicacionFacturasService.barrerAgotados', () => {
+  function mockFilasConDocumentos(documentos: Record<string, unknown>[]) {
+    const estado = documentos.map((d) => ({ ...d }));
+    return {
+      estado,
+      updateMany: jest.fn(
+        (
+          filtro: Record<string, unknown>,
+          update: { $set: Record<string, unknown> },
+        ) => ({
+          exec: () => {
+            const ahora = new Date();
+            const vencido = new Date(ahora.getTime() - CLAIM_TTL_MS);
+            const max = (filtro.attempts as { $gte: number }).$gte;
+            const esLaRamaDeEnviandoVencido = filtro.status === 'enviando';
+            let modificados = 0;
+            for (const doc of estado) {
+              const coincide = esLaRamaDeEnviandoVencido
+                ? doc.status === 'enviando' &&
+                  doc.claimedAt !== null &&
+                  (doc.claimedAt as Date).getTime() <= vencido.getTime() &&
+                  (doc.attempts as number) >= max
+                : (doc.status === 'pendiente' || doc.status === 'fallido') &&
+                  doc.retryable === true &&
+                  (doc.attempts as number) >= max;
+              if (coincide) {
+                Object.assign(doc, update.$set);
+                modificados += 1;
+              }
+            }
+            return Promise.resolve({ modifiedCount: modificados });
+          },
+        }),
+      ),
+    };
+  }
+
+  it('cierra en fallido terminal las filas "enviando" con reclamo vencido que ya agotaron max, sin tocar las que están dentro del presupuesto', async () => {
+    jest.useFakeTimers();
+    const ahoraFija = new Date('2026-01-01T00:10:00.000Z');
+    jest.setSystemTime(ahoraFija);
+    const vencidoLimite = new Date(ahoraFija.getTime() - CLAIM_TTL_MS);
+
+    const filaAgotada = {
+      ...FILA_BASE,
+      status: 'enviando',
+      claimedAt: new Date(vencidoLimite.getTime() - 1_000),
+      attempts: 6, // >= max: debe cerrarse
+      retryable: true,
+    };
+    const filaDentroDelPresupuesto = {
+      ...FILA_BASE,
+      status: 'enviando',
+      claimedAt: new Date(vencidoLimite.getTime() - 1_000),
+      attempts: 3, // < max: NO debe tocarse
+      retryable: true,
+    };
+    const filas = mockFilasConDocumentos([
+      filaAgotada,
+      filaDentroDelPresupuesto,
+    ]);
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await service.barrerAgotados(6);
+
+    expect(filas.estado[0]).toMatchObject({
+      status: 'fallido',
+      retryable: false,
+      lastError: 'reclamo-expirado',
+    });
+    expect(filas.estado[1]).toMatchObject({ status: 'enviando', attempts: 3 });
+
+    jest.useRealTimers();
+  });
+
+  it('cierra en fallido terminal las pendientes/fallidas reintentables que agotaron max (bajado por env), sin tocar las que están dentro del presupuesto', async () => {
+    const filaFallidaAgotada = {
+      ...FILA_BASE,
+      status: 'fallido',
+      retryable: true,
+      attempts: 6, // >= max: debe cerrarse
+    };
+    const filaPendienteDentroDelPresupuesto = {
+      ...FILA_BASE,
+      status: 'pendiente',
+      retryable: true,
+      attempts: 2, // < max: NO debe tocarse
+    };
+    const filas = mockFilasConDocumentos([
+      filaFallidaAgotada,
+      filaPendienteDentroDelPresupuesto,
+    ]);
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await service.barrerAgotados(6);
+
+    expect(filas.estado[0]).toMatchObject({
+      status: 'fallido',
+      retryable: false,
+    });
+    expect(filas.estado[1]).toMatchObject({
+      status: 'pendiente',
+      attempts: 2,
+      retryable: true,
+    });
   });
 });
 
@@ -559,5 +997,62 @@ describe('PublicacionFacturasService.procesarPendientes — presupuesto de ciclo
     expect(llamadasReclamar).toBeGreaterThan(0);
     expect(llamadasReclamar).toBeLessThan(LOTE_MAXIMO_POR_CICLO);
     expect(resumen.reclamadas).toBe(llamadasReclamar);
+  });
+});
+
+// W4.7: `resumen.enviadas`/`reintentar`/`terminales` (service.ts:398-400) no
+// tenían ninguna aserción — sólo `reclamadas` estaba cubierto arriba. Este
+// caso mezcla los tres desenlaces posibles en un mismo ciclo y comprueba que
+// cada contador cuenta exactamente lo suyo, no sólo el total.
+describe('PublicacionFacturasService.procesarPendientes — contadores del resumen', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('cuenta enviadas, reintentar y terminales por separado cuando el ciclo mezcla los tres desenlaces', async () => {
+    const filasParaReclamar = [
+      { ...FILA_BASE, claimToken: 'tok-enviado', attempts: 1 },
+      { ...FILA_BASE, claimToken: 'tok-reintentar', attempts: 1 },
+      { ...FILA_BASE, claimToken: 'tok-terminal', attempts: 1 },
+    ];
+    let indiceReclamo = 0;
+    const filas = mockFilas({
+      findOneAndUpdate: jest.fn(() => ({
+        lean: () => ({
+          exec: () => {
+            const fila = filasParaReclamar[indiceReclamo];
+            indiceReclamo += 1;
+            return Promise.resolve(fila ?? null);
+          },
+        }),
+      })),
+    });
+
+    // 201 → enviado; 502 (attempts 1 < max 6) → fallido reintentable;
+    // 401 → fallido terminal, sin importar attempts.
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ status: 201 })
+      .mockResolvedValueOnce({ status: 502 })
+      .mockResolvedValueOnce({ status: 401 });
+
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    const resumen = await service.procesarPendientes();
+
+    expect(resumen).toEqual({
+      omitido: false,
+      reclamadas: 3,
+      enviadas: 1,
+      reintentar: 1,
+      terminales: 1,
+    });
   });
 });

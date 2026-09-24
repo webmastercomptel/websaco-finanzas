@@ -707,12 +707,18 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('actualizar sin tocar el flag: acepta — la validación no corre', async () => {
+  it('actualizar sin tocar el flag: acepta — la validación no corre (ni con el NIT incompleto)', async () => {
+    // Fixture deliberada con NIT incompleto (ambos campos null) mientras el
+    // flag ya está en true — un estado legacy real. Si
+    // validarActivacionGestionEdificios corriera por error, esta fila la
+    // rechazaría. Que el update pase demuestra que la validación
+    // efectivamente NO se ejecuta cuando el request no toca ninguna de sus
+    // tres claves — no sólo que pasaría de todos modos con un NIT completo.
     const { modelo, service } = construirService([
       documento({
         usesBuildingManagement: true,
-        taxId: '900123456',
-        taxIdVerificationDigit: '7',
+        taxId: null,
+        taxIdVerificationDigit: null,
       }),
     ]);
 

@@ -217,6 +217,12 @@ export class PublicacionFacturasService {
         },
         body: rawBody,
         signal: controller.signal,
+        // WebSaco3's receiver is a JSON API endpoint; it has no business
+        // redirecting a POST. Treat a 3xx as a hard failure (same bucket as
+        // a network error, retried under the normal backoff/max policy)
+        // instead of letting undici silently follow it — a followed
+        // 301/302/303 downgrades POST to GET and drops the signed body.
+        redirect: 'error',
       });
     } catch (err) {
       const motivo = (err as Error).name === 'AbortError' ? 'timeout' : 'red';
@@ -227,6 +233,11 @@ export class PublicacionFacturasService {
     } finally {
       clearTimeout(timeoutId);
     }
+
+    // Every outcome below is derived from the status code alone — the body
+    // is never read. Cancel it so undici can release the underlying
+    // connection instead of holding it open until GC.
+    void respuesta.body?.cancel().catch(() => {});
 
     const clasificacion = clasificarRespuesta(respuesta.status);
 

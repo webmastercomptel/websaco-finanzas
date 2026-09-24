@@ -246,14 +246,78 @@ Independent of Phases 3–7 except for the event type (2.1) and `EventEmitterMod
 >   normal file access must add the 4 lines by hand before 10.1 can be
 >   considered fully satisfied.
 
-### 10.1 Full gate
-- Run `npm run typecheck && npm run lint && npm test` (delegate per the routing rule in `~/.claude/CLAUDE.md` — do not run directly via Bash).
-- Confirms proposal's "Success Criteria" checklist end-to-end: duplicate-event idempotency, per-response-code behavior, deterministic HMAC, and NIT-gated activation all pass under the full suite together (not just in isolation per task).
+### 10.1 [x] Full gate
+- Run `npm run typecheck && npm run lint && npm test` (delegated per the routing rule — ran via a haiku sub-agent, not directly via Bash).
+- Result: `typecheck` PASS, `lint` PASS, `test` — 1342 individual tests passed, 104/105 suites; the 1 failing suite (`consultas.controller.spec.ts`, missing `@react-pdf/hyphenate/en-us`) is the same pre-existing, unrelated environment issue already noted at the top of this phase — not caused by this change.
+- Confirms proposal's "Success Criteria" checklist end-to-end: duplicate-event idempotency, per-response-code behavior, deterministic HMAC, and NIT-gated activation all pass under the full suite together.
 - Depends on: every task above.
 
-### 10.2 Manual rollback-path sanity check (no code change)
-- Verify (by reading, not executing) that removing `PublicacionFacturasModule` from `app.module.ts` leaves `facturacion` and `copropiedades` compiling and tests passing, per the proposal's Rollback Plan and design's opening paragraph ("delete `modules/publicacion-facturas/`... everything still compiles").
+### 10.2 [x] Manual rollback-path sanity check (no code change)
+- Verified by reading `app.module.ts`: `PublicacionFacturasModule` is a single, isolated import (last line of the `imports` array, no other module references it). `EventEmitterModule.forRoot()` is registered separately and is explicitly commented to stay even if the publication module is rolled back, since `LotesController` itself injects `EventEmitter2` to emit the domain event regardless of whether anything listens.
+- Removing just the `PublicacionFacturasModule` line cleanly disables the whole outbound-publish path with no other code depending on it — matches the proposal's Rollback Plan and design's stated invariant.
 - Depends on: 10.1.
+
+**Phase 10 complete — all 10 phases (22/22 sub-tasks) done.** Note: a separate,
+unrelated concurrent session was actively modifying ~13 files under
+`src/common/documentos/` and `src/modules/facturacion/` during this work
+(a `paginaEnLote`/page-count integrity fix, unrelated to this change). This
+change's own commit (`7b35930`) was made cleanly before that concurrent diff
+existed on top of it — nothing from this change is mixed into that working-tree
+state. `.env.example` still needs the 4 new vars added by hand (sandboxed
+agents cannot write `.env*` files) — see the block earlier in this file.
+
+---
+
+## Phase 11 — Close verify-report W4 (test-gap closure) + S1/S2 fixes
+
+> Ran after Phase 10, as a follow-up `sdd-apply` batch requested by the user
+> once `sdd-verify` reported PASS WITH WARNINGS. Scope: only the 6 partial
+> scenarios listed under W4 in `verify-report.md`, plus suggestions S1/S2
+> (cheap, safe production fixes). S3/S4 were left out on purpose — optional,
+> and out of this batch's scope to avoid creep.
+
+### 11.1 [x] `reclamar` exclusivity + stale-window boundary tests
+- Added `describe('PublicacionFacturasService.reclamar — exclusividad y ventana de reclamo vencido', ...)` in `publicacion-facturas.service.spec.ts`: a hand-rolled in-memory `filas` fake replays the SAME predicate `reclamar`'s `findOneAndUpdate` filter encodes (per design.md's "Claim" block), against one mutable document, instead of only asserting the filter shape.
+- Tests: `'una segunda llamada sobre la misma fila ya reclamada (enviando, no vencida) devuelve null'`, `'una fila reclamada hace más tiempo que CLAIM_TTL_MS es reclamable de nuevo'`, `'el borde exacto del TTL (claimedAt == vencido) es reclamable; 1ms más nuevo no lo es'`.
+- Satisfies: W4 items 1 (second concurrent claim → `null`) and 2 (stale-reclaim boundary, both sides).
+
+### 11.2 [x] Fresh signed URL per attempt test
+- Added `'pide una URL de lectura nueva en cada intento, nunca reutiliza la anterior'` in the `procesar` describe block: calls `procesar` twice for the same row and asserts `DocumentoStorageService.generarUrlLectura` was called twice (never cached/reused across attempts).
+- Satisfies: W4 item 3.
+
+### 11.3 [x] `barrerAgotados` exact-filter behavioral tests
+- Added `describe('PublicacionFacturasService.barrerAgotados', ...)`: a hand-rolled in-memory `filas` fake applies both `updateMany` predicates (expired-`enviando`-over-max, and pendiente/fallido-retryable-over-max) against a small array of rows.
+- Tests: `'cierra en fallido terminal las filas "enviando" con reclamo vencido que ya agotaron max, sin tocar las que están dentro del presupuesto'`, `'cierra en fallido terminal las pendientes/fallidas reintentables que agotaron max (bajado por env), sin tocar las que están dentro del presupuesto'`.
+- Satisfies: W4 item 4.
+
+### 11.4 [x] Signed URL never logged — success and timeout/network sibling cases
+- The pre-existing test `'urlSigned nunca llega al logger, ni en éxito ni en fallo'` only ever exercised the 422 path despite its title. Renamed to `'urlSigned nunca llega al logger en el camino de fallo reintentable (HTTP 422)'` and added three siblings: `'... en el camino de éxito (HTTP 201)'`, `'... en el camino de timeout'`, `'... en el camino de error de red'`.
+- Satisfies: W4 item 5.
+
+### 11.5 [x] `copropiedades` "doesn't touch the flag" fixture fix
+- `copropiedades.service.spec.ts` → `'actualizar sin tocar el flag: acepta — la validación no corre'` used a fixture with a COMPLETE NIT, so it would have passed even with a bug that always ran the validation. Renamed to `'... (ni con el NIT incompleto)'` and swapped the fixture to `taxId: null, taxIdVerificationDigit: null` with the flag already `true` (the exact legacy state `encolar()` itself warns about) — the update still succeeds, proving the guard clause genuinely short-circuits before checking NIT completeness.
+- Satisfies: W4 item 6.
+
+### 11.6 [x] `ResumenCiclo` counters coverage (service.ts:398-400)
+- Added `describe('PublicacionFacturasService.procesarPendientes — contadores del resumen', ...)`: one cycle claims three rows that resolve to `enviado`/reintentable-`fallido`/terminal-`fallido` respectively (201, 502, 401), asserting `enviadas: 1, reintentar: 1, terminales: 1` — each counter exercised and asserted independently, not just the total.
+- Satisfies: W4 item 7.
+
+### 11.7 [x] S1 — cancel the unread response body
+- `publicacion-facturas.service.ts`: after a successful `fetch`, `void respuesta.body?.cancel().catch(() => {})` — every outcome branch decides purely from `respuesta.status`, so the body is never read; cancelling it lets undici release the socket instead of waiting for GC.
+- Test: `'cancela el cuerpo de la respuesta cuando existe, para no retener la conexión'`.
+- **Production code changed** (not just tests) — flagged per this batch's instructions.
+
+### 11.8 [x] S2 — reject followed redirects on the outbound POST
+- `publicacion-facturas.service.ts`: added `redirect: 'error'` to the `fetch` call options. Chosen over `'manual'` so a 3xx is treated exactly like a network failure — retried under the existing backoff/max policy via the same `catch` branch already in place — instead of introducing a new HTTP-status-0 case into `clasificarRespuesta`.
+- Test: `'el fetch de salida no sigue redirecciones (redirect: "error")'`.
+- **Production code changed** (not just tests) — flagged per this batch's instructions.
+
+### 11.9 [x] Full gate re-run
+- `npm run typecheck && npm run lint && npm test`, run directly (this batch is the execution agent, not the orchestrator — the always-delegate rule doesn't apply here).
+- Result: typecheck PASS (0 errors); lint PASS (0 warnings/errors, `--fix` touched only pre-existing unrelated concurrent-session files, none of this batch's files); tests — 1354/1354 passed, 104/105 suites (the 1 failing suite is the same pre-existing, unrelated `consultas.controller.spec.ts` / `@react-pdf/hyphenate` environment issue noted in Phase 10, unaffected by this batch).
+- `publicacion-facturas` + `copropiedades` scoped suites: 100/100 tests passed (was 88 before this batch — 12 new tests added, 0 removed, 2 renamed for accuracy).
+
+**Phase 11 complete — verify-report.md's W4 finding is resolved (see its own updated entry). S1 and S2 applied. S3/S4 intentionally left open (optional, out of this batch's scope).**
 
 ---
 
