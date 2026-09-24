@@ -20,4 +20,15 @@ export default registerAs('app', () => ({
   // Genuinely optional outside production (see env.validation.ts), not a
   // silently defaulted value.
   corsOrigins: process.env.CORS_ORIGINS,
+  // Outbound publishing to WebSaco3 — all optional, travel together (see the
+  // `.and(...)` chain in env.validation.ts). `websaco3PublicacionMaxIntentos`
+  // always has a Joi default, so it alone is safe to `!`.
+  websaco3FacturasEndpointUrl: process.env.WEBSACO3_FACTURAS_ENDPOINT_URL,
+  websaco3HmacSecret: process.env.WEBSACO3_HMAC_SECRET,
+  websaco3PublicacionTriggerSecret:
+    process.env.WEBSACO3_PUBLICACION_TRIGGER_SECRET,
+  websaco3PublicacionMaxIntentos: parseInt(
+    process.env.WEBSACO3_PUBLICACION_MAX_INTENTOS!,
+    10,
+  ),
 }));

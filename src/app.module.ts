@@ -1,6 +1,7 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
@@ -34,6 +35,7 @@ import { ConfiguracionModule } from './modules/configuracion/configuracion.modul
 import { HealthModule } from './modules/health/health.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicion-contabilidad.module';
+import { PublicacionFacturasModule } from './modules/publicacion-facturas/publicacion-facturas.module';
 
 /**
  * Bootstrap module: config, the database connection and its schemas, the
@@ -67,6 +69,9 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
         connection: { url: config.get<string>('app.redisUrl') },
       }),
     }),
+    // Stays even if PublicacionFacturasModule is ever rolled back —
+    // LotesController itself injects EventEmitter2 to emit the domain fact.
+    EventEmitterModule.forRoot(),
     DatabaseModule,
     CommonModule,
     CaslModule,
@@ -92,6 +97,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
     HealthModule,
     CatalogosModule,
     AdicionContabilidadModule,
+    PublicacionFacturasModule,
   ],
 })
 export class AppModule {}

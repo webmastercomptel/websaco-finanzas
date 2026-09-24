@@ -4,12 +4,16 @@ import type { Bucket } from '@google-cloud/storage';
 import { GCS_BUCKET } from './storage.constants';
 
 /**
- * Thin wrapper around one GCS bucket for the two things this backend ever
- * does with a generated document: hand out a short-lived signed URL to
- * upload it, and later hand out another to read it back. It never reads or
- * writes bytes itself — pdfmake in the browser produces the PDF, the
- * browser's own PUT against the signed URL moves the bytes, and this
- * service's job stops at issuing/checking the URL.
+ * Thin wrapper around one GCS bucket for what this backend does with a
+ * generated document: hand out a short-lived signed URL to upload it, hand
+ * out another to read it back, and — the one case that needs actual
+ * bytes — download an already-confirmed file to extract from it
+ * server-side (`descargarBytes`, used by `FacturasController
+ * .obtenerDocumentoPdf` to pull one invoice's page out of its lote's
+ * combined PDF). Every other path still never reads or writes bytes:
+ * pdfmake in the browser produces the PDF, the browser's own PUT against
+ * the signed URL moves the bytes, and this service's job stops at
+ * issuing/checking the URL.
  *
  * Kept generic over `objectPath` on purpose: it has no notion of
  * `tipoDocumento`/`documentoId`, that structure lives one layer up in
@@ -70,5 +74,20 @@ export class DocumentoStorageService {
       expires: expiresAt,
     });
     return { url, expiresAt };
+  }
+
+  /**
+   * The actual bytes of an already-confirmed document — deliberately the
+   * only method on this service that touches content instead of just a URL.
+   * Exists for one caller: extracting a single invoice's page out of its
+   * lote's combined PDF (`FacturasController.obtenerDocumentoPdf`) needs the
+   * whole file server-side to slice from, not a browser-facing signed URL —
+   * handing that URL to the client instead would leak every other unit's
+   * invoice in the same lote, exactly what individual-invoice viewing was
+   * built to avoid in the first place.
+   */
+  async descargarBytes(objectPath: string): Promise<Buffer> {
+    const [bytes] = await this.bucket.file(objectPath).download();
+    return bytes;
   }
 }

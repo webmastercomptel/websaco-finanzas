@@ -128,6 +128,19 @@ export class NotasCreditoController {
   }
 
   /**
+   * This Nota Crédito's already-computed print data, always fresh — unlike
+   * `solicitar-generacion`, this never orchestrates an upload and never
+   * 409s when a PDF already exists. Exists for the platform's own
+   * template-preview tool (`/plantilla-preview`, frontend). Same `read`
+   * action as `findOne` above.
+   */
+  @Get(':id/datos-impresion')
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  datosImpresion(@Param('id') id: string): Promise<DatosReciboImpresion> {
+    return this.notasCredito.datosImpresion(id);
+  }
+
+  /**
    * A short-lived signed URL to read back this Nota Crédito's
    * already-generated PDF. Same `read` action as `findOne` above.
    */

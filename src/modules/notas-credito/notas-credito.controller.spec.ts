@@ -238,3 +238,18 @@ describe('NotasCreditoController.urlLectura', () => {
     expect(respuesta.url).toBe('https://read');
   });
 });
+
+describe('NotasCreditoController.datosImpresion', () => {
+  it('delega en NotasCreditoService.datosImpresion, sin pasar por GeneracionDocumentoService', async () => {
+    const datos = { tituloDocumento: 'Nota de Crédito' };
+    const notasCredito = {
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
+    };
+    const controller = makeController(notasCredito);
+
+    const resultado = await controller.datosImpresion('nc-1');
+
+    expect(notasCredito.datosImpresion).toHaveBeenCalledWith('nc-1');
+    expect(resultado).toBe(datos);
+  });
+});

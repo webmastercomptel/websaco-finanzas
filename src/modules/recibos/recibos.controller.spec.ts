@@ -201,3 +201,16 @@ describe('RecibosController.urlLectura', () => {
     );
   });
 });
+
+describe('RecibosController.datosImpresion', () => {
+  it('delega en RecibosService.datosImpresion, sin pasar por GeneracionDocumentoService', async () => {
+    const datos = { tituloDocumento: 'Recibo de Caja' };
+    const recibos = { datosImpresion: jest.fn(() => Promise.resolve(datos)) };
+    const controller = makeController(recibos);
+
+    const resultado = await controller.datosImpresion('rec-1');
+
+    expect(recibos.datosImpresion).toHaveBeenCalledWith('rec-1');
+    expect(resultado).toBe(datos);
+  });
+});

@@ -207,3 +207,18 @@ describe('NotasAnticipoController.urlLectura', () => {
     );
   });
 });
+
+describe('NotasAnticipoController.datosImpresion', () => {
+  it('delega en NotasAnticipoService.datosImpresion, sin pasar por GeneracionDocumentoService', async () => {
+    const datos = { tituloDocumento: 'Nota de Anticipo' };
+    const notasAnticipo = {
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
+    };
+    const controller = makeController(notasAnticipo);
+
+    const resultado = await controller.datosImpresion('na-1');
+
+    expect(notasAnticipo.datosImpresion).toHaveBeenCalledWith('na-1');
+    expect(resultado).toBe(datos);
+  });
+});

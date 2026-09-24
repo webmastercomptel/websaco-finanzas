@@ -1,5 +1,6 @@
 // src/modules/copropiedades/copropiedades.service.ts
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -283,9 +284,12 @@ export class CopropiedadesService {
     dto: CrearCopropiedadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
+    const cambios = this.aDocumento(dto);
+    this.validarActivacionGestionEdificios(cambios, null);
+
     const code = await this.siguienteCodigo();
     const creada = await this.copropiedades.create({
-      ...this.aDocumento(dto),
+      ...cambios,
       code,
     });
 
@@ -406,12 +410,19 @@ export class CopropiedadesService {
     dto: ActualizarCopropiedadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
+    const cambios = this.aDocumento(dto);
+    const actual = await this.copropiedades
+      .findById(id)
+      .select('usesBuildingManagement taxId taxIdVerificationDigit')
+      .lean()
+      .exec();
+    if (!actual) {
+      throw new NotFoundException(`No se encontró la copropiedad ${id}`);
+    }
+    this.validarActivacionGestionEdificios(cambios, actual);
+
     const actualizada = await this.copropiedades
-      .findByIdAndUpdate(
-        id,
-        { $set: this.aDocumento(dto) },
-        { returnDocument: 'after' },
-      )
+      .findByIdAndUpdate(id, { $set: cambios }, { returnDocument: 'after' })
       .exec();
 
     if (!actualizada) {
@@ -634,6 +645,48 @@ export class CopropiedadesService {
     });
 
     return this.findOne(destinoId);
+  }
+
+  /**
+   * Gates `usesBuildingManagement: true` behind a complete NIT — see spec
+   * `building-management-activation`. Evaluated against the RESULTING
+   * document (incoming `cambios` merged onto `actual`), not the DTO alone,
+   * so activating the flag while relying on a NIT already on file is
+   * accepted, and clearing the NIT while the flag stays on is rejected.
+   *
+   * A no-op whenever the request doesn't touch any of the three keys —
+   * this validation must never block an unrelated edit.
+   */
+  private validarActivacionGestionEdificios(
+    cambios: Record<string, unknown>,
+    actual: Pick<
+      Copropiedad,
+      'usesBuildingManagement' | 'taxId' | 'taxIdVerificationDigit'
+    > | null,
+  ): void {
+    const claves = [
+      'usesBuildingManagement',
+      'taxId',
+      'taxIdVerificationDigit',
+    ] as const;
+    if (!claves.some((clave) => clave in cambios)) return;
+
+    const efectivo = (clave: (typeof claves)[number]): unknown =>
+      clave in cambios ? cambios[clave] : (actual?.[clave] ?? null);
+
+    if (efectivo('usesBuildingManagement') !== true) return;
+
+    const completo = (valor: unknown): boolean =>
+      typeof valor === 'string' && valor.trim() !== '';
+
+    if (
+      !completo(efectivo('taxId')) ||
+      !completo(efectivo('taxIdVerificationDigit'))
+    ) {
+      throw new BadRequestException(
+        'Para activar la gestión de edificios la copropiedad debe tener NIT y dígito de verificación.',
+      );
+    }
   }
 
   /**

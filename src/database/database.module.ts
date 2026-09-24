@@ -153,6 +153,10 @@ import {
   PlantillaDocumento,
   PlantillaDocumentoSchema,
 } from './schemas/documentos/plantilla-documento.schema';
+import {
+  PublicacionLote,
+  PublicacionLoteSchema,
+} from './schemas/publicaciones/publicacion-lote.schema';
 
 const models = [
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
@@ -211,6 +215,7 @@ const models = [
   { name: ProgresoImportacion.name, schema: ProgresoImportacionSchema },
   { name: PresentacionDocumento.name, schema: PresentacionDocumentoSchema },
   { name: PlantillaDocumento.name, schema: PlantillaDocumentoSchema },
+  { name: PublicacionLote.name, schema: PublicacionLoteSchema },
 ];
 
 /**

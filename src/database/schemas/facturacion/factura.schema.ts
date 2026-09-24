@@ -180,6 +180,29 @@ export class Factura {
    */
   @Prop({ type: SchemaTypes.Mixed, default: null })
   printSnapshot: Record<string, unknown> | null;
+
+  /**
+   * The 1-based page this invoice occupies inside its lote's combined PDF
+   * (`presentacion_documento`'s `('FV', loteId)` row) — set together with
+   * `printSnapshot`, from the same `facturasLean` array index
+   * `LotesController.confirmarGeneracionFacturas` already iterates in.
+   * That array is `FacturasService.findAllRawPorLote(loteId)`, sorted by
+   * `unitCode` — the EXACT same query, same sort, `solicitarGeneracionFacturas`
+   * used moments earlier to build the frontend's `contextos` array that
+   * `construirDocumento` turned into pages, one page break per item, in
+   * that same order. Two separate queries against the same criteria, but
+   * nothing writes to a lote's own Facturas between solicitar and confirmar,
+   * so the order is stable across both calls.
+   *
+   * `null` for the same two cases `printSnapshot` is: no lote PDF confirmed
+   * yet, or an invoice issued before this field existed. `FacturasController
+   * .obtenerDocumentoPdf` falls back to the live `{plantilla, datos}` render
+   * (`obtenerDocumento`) whenever either is `null` — extracting a page needs
+   * both a page number AND a printSnapshot to know the response is otherwise
+   * immutable.
+   */
+  @Prop({ type: Number, default: null })
+  paginaEnLote: number | null;
 }
 
 export const FacturaSchema = SchemaFactory.createForClass(Factura);

@@ -1054,11 +1054,11 @@ describe('FacturasService.guardarPrintSnapshot', () => {
     );
 
     const datos = { tituloDocumento: 'Cobro Expensas Comunes' };
-    await service.guardarPrintSnapshot(facturaId, datos as never);
+    await service.guardarPrintSnapshot(facturaId, datos as never, 3);
 
     expect(updateOne).toHaveBeenCalledWith(
       { _id: facturaId },
-      { $set: { printSnapshot: datos } },
+      { $set: { printSnapshot: datos, paginaEnLote: 3 } },
     );
   });
 });

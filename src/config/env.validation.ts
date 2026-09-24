@@ -89,4 +89,33 @@ export const envValidationSchema = Joi.object({
     then: Joi.string().required(),
     otherwise: Joi.string().optional().allow(''),
   }),
-});
+
+  // Outbound publishing to WebSaco3 (see modules/publicacion-facturas/). All
+  // three are optional and travel TOGETHER: the listener always enqueues an
+  // outbox row regardless of config (the flag is the domain truth), but
+  // nothing ever drains without a URL+secret to send with AND a trigger
+  // secret to authorize the sweep — a partial set would silently leave rows
+  // stuck in `pendiente` forever with no boot-time signal. `.and(...)` fails
+  // loudly instead.
+  WEBSACO3_FACTURAS_ENDPOINT_URL: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().uri({ scheme: ['https'] }),
+      otherwise: Joi.string().uri({ scheme: ['http', 'https'] }),
+    })
+    .optional(),
+  WEBSACO3_HMAC_SECRET: Joi.string().min(32).optional(),
+  // Shared with the Cloud Scheduler job's `X-Scheduler-Secret` header, not
+  // with WebSaco3 — a distinct party from WEBSACO3_HMAC_SECRET, so one can
+  // rotate or leak without the other.
+  WEBSACO3_PUBLICACION_TRIGGER_SECRET: Joi.string().min(32).optional(),
+  WEBSACO3_PUBLICACION_MAX_INTENTOS: Joi.number()
+    .integer()
+    .min(1)
+    .max(20)
+    .default(6),
+}).and(
+  'WEBSACO3_FACTURAS_ENDPOINT_URL',
+  'WEBSACO3_HMAC_SECRET',
+  'WEBSACO3_PUBLICACION_TRIGGER_SECRET',
+);

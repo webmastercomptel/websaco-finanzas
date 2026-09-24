@@ -15,6 +15,7 @@ import {
 import type { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -53,6 +54,10 @@ import {
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  LOTE_FACTURAS_PDF_CONFIRMADO,
+  type LoteFacturasPdfConfirmadoEvent,
+} from '../../common/eventos/lote-facturas-pdf-confirmado.event';
 
 /**
  * The monthly billing cycle: define a run, upload novedades, liquidar
@@ -73,6 +78,7 @@ export class LotesController {
     private readonly presentacionDocumento: PresentacionDocumentoService,
     private readonly plantillas: PlantillaDocumentoService,
     private readonly generacion: GeneracionDocumentoService,
+    private readonly eventos: EventEmitter2,
   ) {}
 
   @Get()
@@ -374,19 +380,41 @@ export class LotesController {
     );
 
     const facturasLean = await this.facturas.findAllRawPorLote(id);
+
+    // Emitted here, before the snapshot block below, so a snapshot failure
+    // can never suppress it — see LOTE_FACTURAS_PDF_CONFIRMADO's own
+    // docblock. Awaited: the outbox row must exist before this request
+    // returns 200, with no crash window in between. The listener swallows
+    // every error itself, so publishing can never fail this confirmation.
+    await this.eventos.emitAsync(LOTE_FACTURAS_PDF_CONFIRMADO, {
+      coPropertyId: coPropertyId.toString(),
+      loteId: lote._id.toString(),
+      objectPath: resultado.objectPath,
+      numerosFactura: facturasLean.map((f) => f.fullNumber),
+    } satisfies LoteFacturasPdfConfirmadoEvent);
+
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     if (facturasLean.length > 0 && copropiedad) {
       const datosVisualesPorInmueble = await this.facturas.datosVisualesPdf(
         facturasLean.map((f) => f.inmuebleId),
       );
       await Promise.all(
-        facturasLean.map(async (factura) => {
+        facturasLean.map(async (factura, indice) => {
           const datos = await this.facturas.datosPlantilla(
             factura,
             copropiedad,
             datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
           );
-          await this.facturas.guardarPrintSnapshot(factura._id, datos);
+          // `indice + 1` is this invoice's 1-based page in the combined
+          // PDF — `facturasLean` (findAllRawPorLote, sorted by unitCode) is
+          // the exact same array `solicitarGeneracionFacturas` fetched to
+          // build the frontend's per-item pages in this same order. See
+          // `Factura.paginaEnLote`'s own docblock.
+          await this.facturas.guardarPrintSnapshot(
+            factura._id,
+            datos,
+            indice + 1,
+          );
         }),
       );
     }

@@ -206,3 +206,18 @@ describe('NotasDebitoController.urlLectura', () => {
     );
   });
 });
+
+describe('NotasDebitoController.datosImpresion', () => {
+  it('delega en NotasDebitoService.datosImpresion, sin pasar por GeneracionDocumentoService', async () => {
+    const datos = { tituloDocumento: 'Nota de Débito' };
+    const notasDebito = {
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
+    };
+    const controller = makeController(notasDebito);
+
+    const resultado = await controller.datosImpresion('nd-1');
+
+    expect(notasDebito.datosImpresion).toHaveBeenCalledWith('nd-1');
+    expect(resultado).toBe(datos);
+  });
+});

@@ -5,8 +5,10 @@ import {
   NotFoundException,
   Param,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
@@ -15,6 +17,9 @@ import { CheckAbility } from '../casl/check-ability.decorator';
 import { FacturasService } from './facturas.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
+import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
+import { extraerPaginaPdf } from '../../common/documentos/extraer-pagina-pdf.util';
 import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
 import {
   Copropiedad,
@@ -47,6 +52,8 @@ export class FacturasController {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly plantillas: PlantillaDocumentoService,
+    private readonly presentacionDocumento: PresentacionDocumentoService,
+    private readonly storage: DocumentoStorageService,
   ) {}
 
   @Get()
@@ -105,5 +112,71 @@ export class FacturasController {
       plantilla: toPlantilla(plantilla),
       datos: await this.facturas.datosPlantilla(factura, copropiedad),
     };
+  }
+
+  /**
+   * This invoice's own frozen PDF page, extracted server-side from its
+   * lote's already-uploaded combined file — the actual fix for the
+   * immutability gap `obtenerDocumento` above still has even once
+   * `printSnapshot` is frozen: `datos` stops drifting, but the TEMPLATE
+   * used to render it was always the live one, so editing `plantilla_
+   * documento` today silently changed how every already-issued invoice
+   * looked on reopen. Extracting a page out of the combined file sidesteps
+   * that entirely — it is literally a slice of the same bytes the lote's
+   * own download already serves, so there is nothing left to re-render or
+   * drift.
+   *
+   * 404s (never falls back silently) whenever the page isn't available yet
+   * — `printSnapshot`/`paginaEnLote` still `null` (lote not confirmed), or
+   * the lote's own `presentacion_documento` row missing/unconfirmed (should
+   * be impossible once `paginaEnLote` is set, checked anyway rather than
+   * trusted). The frontend (`verDocumentoFactura`) tries this route FIRST
+   * and falls back to the live `{ plantilla, datos }` render
+   * (`obtenerDocumento`) only on that 404 — same "try the frozen path,
+   * fall back to live" shape `generarYSubir`'s 409 handling already uses
+   * for the other five document types.
+   *
+   * Extracted fresh on every call, nothing persisted — viewing one invoice
+   * on its own (support cases: a resident's email bounced, a full inbox…)
+   * is rare enough that trading a few extra bytes copied per request for
+   * zero added Storage is the right side of that trade. Same `read` action
+   * as `findOne`/`obtenerDocumento` above.
+   */
+  @Get(':id/documento-pdf')
+  @CheckAbility({ action: 'read', subject: 'Factura' })
+  async obtenerDocumentoPdf(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const factura = await this.facturas.findOneRaw(id);
+    if (!factura.printSnapshot || factura.paginaEnLote === null) {
+      throw new NotFoundException(
+        `La factura ${id} todavía no tiene una página individual disponible`,
+      );
+    }
+
+    const presentacionLote = await this.presentacionDocumento.buscar(
+      'FV',
+      factura.loteId,
+    );
+    if (!presentacionLote) {
+      throw new NotFoundException(
+        `La factura ${id} todavía no tiene una página individual disponible`,
+      );
+    }
+
+    const bytesCombinado = await this.storage.descargarBytes(
+      presentacionLote.objectPath,
+    );
+    const bytesPagina = await extraerPaginaPdf(
+      bytesCombinado,
+      factura.paginaEnLote,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${id}.pdf"`,
+    });
+    res.send(Buffer.from(bytesPagina));
   }
 }

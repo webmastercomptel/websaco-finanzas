@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CopropiedadesService } from './copropiedades.service';
 
 type Filtro = Record<string, unknown>;
@@ -92,6 +92,10 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
     }),
     findById: jest.fn(() => ({
       populate: () => ({ exec: () => Promise.resolve(filas[0] ?? null) }),
+      exec: () => Promise.resolve(filas[0] ?? null),
+      select: () => ({
+        lean: () => ({ exec: () => Promise.resolve(filas[0] ?? null) }),
+      }),
     })),
     countDocuments: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
@@ -597,6 +601,143 @@ describe('CopropiedadesService.update', () => {
 
     expect(modelo.escrituras[0]).toEqual({
       creditNotesAccount: '413595',
+    });
+  });
+});
+
+// spec `building-management-activation` → "NIT completeness on activation":
+// las 7 escenas exactas descriptas en
+// openspec/changes/publicar-facturas-websaco/specs/building-management-activation/spec.md
+describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
+  const construirService = (documentos: unknown[]) => {
+    const modelo = modeloCon(documentos);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockContador() as never,
+      mockAsignaciones() as never,
+      mockAccounts() as never,
+      mockAuditoria() as never,
+      mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
+    );
+    return { modelo, service };
+  };
+
+  it('crear con el flag en true y sin NIT: rechaza', async () => {
+    const { service } = construirService([documento({ name: 'X' })]);
+
+    await expect(
+      service.create({ nombre: 'X', usaGestionEdificios: true }, ACTOR),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('crear con el flag en true y NIT completo: acepta', async () => {
+    const { modelo, service } = construirService([documento({ name: 'X' })]);
+
+    await service.create(
+      {
+        nombre: 'X',
+        usaGestionEdificios: true,
+        nit: '900123456',
+        digitoVerificacion: '7',
+      },
+      ACTOR,
+    );
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      usesBuildingManagement: true,
+      taxId: '900123456',
+      taxIdVerificationDigit: '7',
+    });
+  });
+
+  it('actualizar activa el flag y provee el NIT en el mismo request: acepta', async () => {
+    const { modelo, service } = construirService([
+      documento({
+        usesBuildingManagement: false,
+        taxId: null,
+        taxIdVerificationDigit: null,
+      }),
+    ]);
+
+    await service.update(
+      'cop-1',
+      {
+        usaGestionEdificios: true,
+        nit: '900123456',
+        digitoVerificacion: '7',
+      },
+      ACTOR,
+    );
+
+    expect(modelo.escrituras[0]).toEqual({
+      usesBuildingManagement: true,
+      taxId: '900123456',
+      taxIdVerificationDigit: '7',
+    });
+  });
+
+  it('actualizar activa el flag pero el NIT ya está en el archivo: acepta, usa el NIT existente', async () => {
+    const { modelo, service } = construirService([
+      documento({
+        usesBuildingManagement: false,
+        taxId: '900123456',
+        taxIdVerificationDigit: '7',
+      }),
+    ]);
+
+    await service.update('cop-1', { usaGestionEdificios: true }, ACTOR);
+
+    expect(modelo.escrituras[0]).toEqual({ usesBuildingManagement: true });
+  });
+
+  it('actualizar activa el flag sin NIT en ningún lado: rechaza', async () => {
+    const { service } = construirService([
+      documento({
+        usesBuildingManagement: false,
+        taxId: null,
+        taxIdVerificationDigit: null,
+      }),
+    ]);
+
+    await expect(
+      service.update('cop-1', { usaGestionEdificios: true }, ACTOR),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('actualizar sin tocar el flag: acepta — la validación no corre', async () => {
+    const { modelo, service } = construirService([
+      documento({
+        usesBuildingManagement: true,
+        taxId: '900123456',
+        taxIdVerificationDigit: '7',
+      }),
+    ]);
+
+    await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
+
+    expect(modelo.escrituras[0]).toEqual({ city: 'Cali' });
+  });
+
+  it('dígito de verificación "0" cuenta como presente, no como faltante', async () => {
+    const { modelo, service } = construirService([
+      documento({
+        usesBuildingManagement: false,
+        taxId: null,
+        taxIdVerificationDigit: null,
+      }),
+    ]);
+
+    await service.update(
+      'cop-1',
+      { usaGestionEdificios: true, nit: '900123456', digitoVerificacion: '0' },
+      ACTOR,
+    );
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      taxIdVerificationDigit: '0',
     });
   });
 });

@@ -478,17 +478,21 @@ export class FacturasService {
     );
   }
 
-  /** Freezes `datos` onto this invoice's own `printSnapshot` — called once,
+  /** Freezes `datos` and `paginaEnLote` onto this invoice — called once,
    *  right after its lote's combined PDF is confirmed uploaded (see
    *  `LotesController.confirmarGeneracionFacturas`). See
-   *  `Factura.printSnapshot`'s own docblock for the immutability gap this
-   *  closes. */
+   *  `Factura.printSnapshot`/`Factura.paginaEnLote`'s own docblocks for the
+   *  immutability gap this closes. */
   async guardarPrintSnapshot(
     facturaId: Types.ObjectId,
     datos: DatosPlantillaFactura,
+    paginaEnLote: number,
   ): Promise<void> {
     await this.facturas
-      .updateOne({ _id: facturaId }, { $set: { printSnapshot: datos } })
+      .updateOne(
+        { _id: facturaId },
+        { $set: { printSnapshot: datos, paginaEnLote } },
+      )
       .exec();
   }
 

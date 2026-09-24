@@ -118,6 +118,23 @@ export class RecibosController {
   }
 
   /**
+   * This Recibo's already-computed print data, always fresh — unlike
+   * `solicitar-generacion`, this never orchestrates an upload and never
+   * 409s when a PDF already exists (that check lives inside
+   * `GeneracionDocumentoService.solicitar`, never reached here). Exists for
+   * the platform's own template-preview tool (`/plantilla-preview`,
+   * frontend), which needs `datos` for an ALREADY-generated Recibo too —
+   * `solicitar-generacion` alone can't give that, since a generated
+   * document only has a signed URL to read back, not its own print data.
+   * Same `read` action as `findOne` above.
+   */
+  @Get(':id/datos-impresion')
+  @CheckAbility({ action: 'read', subject: 'Recibo' })
+  datosImpresion(@Param('id') id: string): Promise<DatosReciboImpresion> {
+    return this.recibos.datosImpresion(id);
+  }
+
+  /**
    * A short-lived signed URL to read back this Recibo's already-generated
    * PDF. Same `read` action as `findOne` above.
    */

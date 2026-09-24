@@ -212,3 +212,18 @@ describe('NotasContablesController.urlLectura', () => {
     );
   });
 });
+
+describe('NotasContablesController.datosImpresion', () => {
+  it('delega en NotasContablesService.datosImpresion, sin pasar por GeneracionDocumentoService', async () => {
+    const datos = { tituloDocumento: 'Nota Contable' };
+    const notasContables = {
+      datosImpresion: jest.fn(() => Promise.resolve(datos)),
+    };
+    const controller = makeController(notasContables);
+
+    const resultado = await controller.datosImpresion('nt-1');
+
+    expect(notasContables.datosImpresion).toHaveBeenCalledWith('nt-1');
+    expect(resultado).toBe(datos);
+  });
+});
