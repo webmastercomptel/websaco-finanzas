@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { PDFDocument } from 'pdf-lib';
 
 // `LotesController` statically imports `generarPdfConsultaFacturacion`,
 // which pulls in `@react-pdf/renderer`'s full render tree
@@ -46,7 +47,21 @@ const mockEventos = () => ({
   emitAsync: jest.fn().mockResolvedValue([]),
 });
 
-const construirController = (
+/** A real, minimal PDF with exactly `paginas` pages — so the controller's
+ *  own page-count verification (`páginas del combinado == cantidad de
+ *  facturas`) passes cleanly for these tests instead of tripping the
+ *  "desconfiar de paginaEnLote" branch. */
+const pdfDePaginas = async (paginas: number): Promise<Buffer> => {
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < paginas; i++) doc.addPage([200, 200]);
+  return Buffer.from(await doc.save());
+};
+
+const mockStorage = (bytes: Buffer) => ({
+  descargarBytes: jest.fn().mockResolvedValue(bytes),
+});
+
+const construirController = async (
   facturasLean: Record<string, unknown>[],
   objectPath = 'coproprietats/cop-1/lotes/lote-1.pdf',
 ) => {
@@ -54,6 +69,7 @@ const construirController = (
   const facturas = mockFacturas(facturasLean);
   const generacion = mockGeneracion(objectPath);
   const eventos = mockEventos();
+  const storage = mockStorage(await pdfDePaginas(facturasLean.length));
   const controller = new LotesController(
     lote as never,
     facturas as never,
@@ -64,8 +80,9 @@ const construirController = (
     {} as never, // PlantillaDocumentoService — no ejercitado en este test
     generacion as never,
     eventos as never,
+    storage as never,
   );
-  return { controller, eventos, generacion, objectPath };
+  return { controller, eventos, generacion, storage, objectPath };
 };
 
 describe('LotesController.confirmarGeneracionFacturas', () => {
@@ -82,7 +99,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
       facturaLean({ fullNumber: 'FV-3', unitCode: 'A-103' }),
     ];
     const { controller, eventos, objectPath } =
-      construirController(facturasLean);
+      await construirController(facturasLean);
 
     await controller.confirmarGeneracionFacturas(LOTE_ID.toString(), {
       objectPath,
@@ -100,7 +117,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
   });
 
   it('el emit se dispara aunque no haya facturas (array vacío)', async () => {
-    const { controller, eventos, objectPath } = construirController([]);
+    const { controller, eventos, objectPath } = await construirController([]);
 
     await controller.confirmarGeneracionFacturas(LOTE_ID.toString(), {
       objectPath,
@@ -117,7 +134,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
       facturaLean({ fullNumber: 'FV-1', unitCode: 'A-101' }),
     ];
     const { controller, eventos, objectPath } =
-      construirController(facturasLean);
+      await construirController(facturasLean);
     let resueltoAntesDeEmitir = false;
     eventos.emitAsync.mockImplementation(async () => {
       await Promise.resolve();

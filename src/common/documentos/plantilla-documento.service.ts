@@ -5,7 +5,10 @@ import {
   PlantillaDocumento,
   PlantillaDocumentoDocument,
 } from '../../database/schemas/documentos/plantilla-documento.schema';
-import type { TipoDocumentoPresentacion } from '../../database/schemas/documentos/presentacion-documento.schema';
+import {
+  TIPOS_DOCUMENTO_PRESENTACION,
+  type TipoDocumentoPresentacion,
+} from '../../database/schemas/documentos/presentacion-documento.schema';
 
 /**
  * Reads/writes `plantilla_documento` — the platform-wide pdfmake template
@@ -16,8 +19,7 @@ import type { TipoDocumentoPresentacion } from '../../database/schemas/documento
  * `solicitar-generacion`, the same reason `PresentacionDocumentoService`
  * lives here instead of inside a single feature module.
  *
- * Deliberately thin: no versioning, no per-coproperty variant — see the
- * schema's own docblock for why editing in place is safe here.
+ * Append-only, versioned — see the schema's own docblock for why.
  */
 @Injectable()
 export class PlantillaDocumentoService {
@@ -26,20 +28,38 @@ export class PlantillaDocumentoService {
     private readonly model: Model<PlantillaDocumentoDocument>,
   ) {}
 
-  /** Every template currently on file — the six-row (at most) listing for
-   *  the administration screen. */
+  /** The CURRENT (highest-version) template for every type currently on
+   *  file — the six-row (at most) listing for the administration screen.
+   *  Six targeted queries rather than an aggregation pipeline: the set is
+   *  fixed and tiny, and this stays as simple to read as `findOne` below. */
   async findAll(): Promise<PlantillaDocumentoDocument[]> {
-    return this.model.find().sort({ tipoDocumento: 1 }).exec();
+    const resultados = await Promise.all(
+      TIPOS_DOCUMENTO_PRESENTACION.map((tipo) =>
+        this.model
+          .findOne({ tipoDocumento: tipo })
+          .sort({ version: -1 })
+          .exec(),
+      ),
+    );
+    const encontrados: PlantillaDocumentoDocument[] = [];
+    for (const doc of resultados) {
+      if (doc) encontrados.push(doc);
+    }
+    return encontrados;
   }
 
-  /** One type's template, or throws — a document module reading this to
-   *  serve `solicitar-generacion` has nothing useful to fall back to when
-   *  it is missing; see the plan's own "coordination point" note that all
-   *  six templates must be authored before generation works at all. */
+  /** One type's CURRENT (highest-version) template, or throws — a document
+   *  module reading this to serve `solicitar-generacion` has nothing useful
+   *  to fall back to when it is missing; see the plan's own "coordination
+   *  point" note that all six templates must be authored before generation
+   *  works at all. */
   async findOne(
     tipoDocumento: TipoDocumentoPresentacion,
   ): Promise<PlantillaDocumentoDocument> {
-    const plantilla = await this.model.findOne({ tipoDocumento }).exec();
+    const plantilla = await this.model
+      .findOne({ tipoDocumento })
+      .sort({ version: -1 })
+      .exec();
     if (!plantilla) {
       throw new NotFoundException(
         `No hay plantilla configurada para el tipo de documento ${tipoDocumento}`,
@@ -48,19 +68,43 @@ export class PlantillaDocumentoService {
     return plantilla;
   }
 
-  /** Idempotent upsert — the only write path. A `PUT`, not a `POST`, because
-   *  the six-row set is fixed by the enum: there is never a "new" template
-   *  to create, only an existing slot to overwrite. */
+  /** One SPECIFIC, historical version of a type's template — what a live
+   *  Factura re-render pins to (`PresentacionDocumento.plantillaVersion`),
+   *  so it reproduces the exact layout that was live when it was actually
+   *  generated, not whatever's current. Throws rather than silently
+   *  falling back to `findOne` — a caller asking for a specific version has
+   *  a reason to need THAT one, not an approximation. */
+  async findVersion(
+    tipoDocumento: TipoDocumentoPresentacion,
+    version: number,
+  ): Promise<PlantillaDocumentoDocument> {
+    const plantilla = await this.model
+      .findOne({ tipoDocumento, version })
+      .exec();
+    if (!plantilla) {
+      throw new NotFoundException(
+        `No existe la versión ${version} de la plantilla ${tipoDocumento}`,
+      );
+    }
+    return plantilla;
+  }
+
+  /** The only write path. A `PUT`, not a `POST` — the six-row SET is fixed
+   *  by the enum, there is never a "new" template kind to create — but
+   *  unlike the old single-row-per-type design, this always INSERTS a new
+   *  version rather than overwriting the current one in place. */
   async upsert(
     tipoDocumento: TipoDocumentoPresentacion,
     docDefinition: Record<string, unknown>,
   ): Promise<PlantillaDocumentoDocument> {
-    return this.model
-      .findOneAndUpdate(
-        { tipoDocumento },
-        { $set: { docDefinition } },
-        { upsert: true, new: true },
-      )
+    const ultima = await this.model
+      .findOne({ tipoDocumento })
+      .sort({ version: -1 })
       .exec();
+    return this.model.create({
+      tipoDocumento,
+      version: (ultima?.version ?? 0) + 1,
+      docDefinition,
+    });
   }
 }

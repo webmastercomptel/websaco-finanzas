@@ -194,12 +194,15 @@ export class Factura {
    * nothing writes to a lote's own Facturas between solicitar and confirmar,
    * so the order is stable across both calls.
    *
-   * `null` for the same two cases `printSnapshot` is: no lote PDF confirmed
-   * yet, or an invoice issued before this field existed. `FacturasController
-   * .obtenerDocumentoPdf` falls back to the live `{plantilla, datos}` render
-   * (`obtenerDocumento`) whenever either is `null` — extracting a page needs
-   * both a page number AND a printSnapshot to know the response is otherwise
-   * immutable.
+   * `null` whenever page extraction isn't safe to trust: no lote PDF
+   * confirmed yet, an invoice issued before this field existed, OR — the
+   * one `confirmarGeneracionFacturas` actually checks for — the combined
+   * PDF's real page count didn't match the invoice count (pdfmake overflows
+   * a unit with an unusually long charge table onto a second page, which
+   * would silently shift every later invoice's real page off by however
+   * many extra pages got inserted before it). `FacturasController
+   * .obtenerDocumentoPdf` falls back to the live, `plantillaVersion`-pinned
+   * render (`obtenerDocumento`) whenever this or `printSnapshot` is `null`.
    */
   @Prop({ type: Number, default: null })
   paginaEnLote: number | null;

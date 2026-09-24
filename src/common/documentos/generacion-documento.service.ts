@@ -46,14 +46,13 @@ export class GeneracionDocumentoService {
     doc: { _id: Types.ObjectId; coPropertyId: Types.ObjectId },
     datos: TDatos,
   ): Promise<SolicitudGeneracionDocumento<TDatos>> {
-    const [plantilla, solicitud] = await Promise.all([
-      this.plantillas.findOne(tipoDocumento),
-      this.presentacionDocumento.solicitarGeneracion(
-        tipoDocumento,
-        doc._id,
-        doc.coPropertyId,
-      ),
-    ]);
+    const plantilla = await this.plantillas.findOne(tipoDocumento);
+    const solicitud = await this.presentacionDocumento.solicitarGeneracion(
+      tipoDocumento,
+      doc._id,
+      doc.coPropertyId,
+      plantilla.version,
+    );
     return {
       plantilla: toPlantilla(plantilla),
       datos,

@@ -20,12 +20,16 @@ export type PlantillaDocumentoDocument =
 /**
  * One pdfmake template per document type (`FV`/`RC`/`NC`/`ND`/`NA`/`NT`) —
  * the JSON `docDefinition`, with `{{nombre}}`-style placeholders, that the
- * frontend fills in and renders client-side. There is no version history: a
- * template is edited in place, and that is safe precisely because it never
- * governs how an ALREADY-emitted document looks — that immutability comes
- * from the frozen file in Storage (`PresentacionDocumento.objectPath`), not
- * from this row. Editing a template today only changes what the NEXT
- * document of that type renders as.
+ * frontend fills in and renders client-side.
+ *
+ * Append-only, versioned (see `version`'s own docblock): five of the six
+ * types freeze their look forever the moment their PDF is uploaded to
+ * Storage (`PresentacionDocumento.objectPath`), so editing this row never
+ * touches an already-issued document for them. Factura is the exception — a
+ * lone invoice is usually re-rendered live from its own frozen `datos`
+ * rather than read back from a file (see `FacturasController
+ * .obtenerDocumento`), and a live render needs to know WHICH template
+ * version to use, not just which `datos` — this versioning exists for that.
  *
  * PLATFORM-wide, not per coproperty — there is deliberately no
  * `coPropertyId` here, same axis as `EntidadAdministradora`: every
@@ -46,9 +50,18 @@ export class PlantillaDocumento {
     type: String,
     required: true,
     enum: TIPOS_DOCUMENTO_PRESENTACION,
-    unique: true,
   })
   tipoDocumento: TipoDocumentoPresentacion;
+
+  /** Autoincremented per `tipoDocumento`, starting at 1 — append-only:
+   *  `upsert()` always INSERTS a new row with `version = latest + 1`
+   *  instead of overwriting in place, so an already-issued Factura can pin
+   *  the exact version its own printout used (`PresentacionDocumento
+   *  .plantillaVersion`) and reproduce it forever, even after the template
+   *  is edited again. `findOne` resolves the highest version (current),
+   *  `findVersion` a specific pinned one. */
+  @Prop({ type: Number, required: true })
+  version: number;
 
   /**
    * Opaque to this backend on purpose — a pdfmake `docDefinition` tree with
@@ -65,3 +78,8 @@ export class PlantillaDocumento {
 
 export const PlantillaDocumentoSchema =
   SchemaFactory.createForClass(PlantillaDocumento);
+
+PlantillaDocumentoSchema.index(
+  { tipoDocumento: 1, version: 1 },
+  { unique: true },
+);

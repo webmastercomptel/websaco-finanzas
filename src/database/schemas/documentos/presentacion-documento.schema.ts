@@ -96,6 +96,15 @@ export class PresentacionDocumento {
    *  see the class docblock. */
   @Prop({ type: Date, default: null })
   generatedAt: Date | null;
+
+  /** The `PlantillaDocumento` version that was CURRENT at `solicitarGeneracion`
+   *  time — set once, alongside `objectPath`, never touched again. For a
+   *  Factura specifically, this is what lets a later live re-render
+   *  (`FacturasController.obtenerDocumento`) reproduce the exact layout
+   *  that was actually used, instead of whatever the template looks like
+   *  today. `null` only for a row written before this field existed. */
+  @Prop({ type: Number, default: null })
+  plantillaVersion: number | null;
 }
 
 export const PresentacionDocumentoSchema = SchemaFactory.createForClass(

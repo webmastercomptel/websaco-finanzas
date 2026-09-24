@@ -48,6 +48,8 @@ import { PresentacionDocumentoService } from '../../common/documentos/presentaci
 import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
 import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
 import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
+import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
+import { PDFDocument } from 'pdf-lib';
 import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
 import {
   Copropiedad,
@@ -79,6 +81,7 @@ export class LotesController {
     private readonly plantillas: PlantillaDocumentoService,
     private readonly generacion: GeneracionDocumentoService,
     private readonly eventos: EventEmitter2,
+    private readonly storage: DocumentoStorageService,
   ) {}
 
   @Get()
@@ -398,6 +401,27 @@ export class LotesController {
       const datosVisualesPorInmueble = await this.facturas.datosVisualesPdf(
         facturasLean.map((f) => f.inmuebleId),
       );
+      // `indice + 1` is only a SAFE page number when every invoice actually
+      // rendered to exactly one page — pdfmake auto-flows content, so a
+      // unit with an unusually long charge table can overflow onto a
+      // second page, which would silently shift every LATER invoice's real
+      // page off by however many extra pages got inserted before it (wrong
+      // content extracted, not even an error). Verified here, once, rather
+      // than trusted: download the just-uploaded combined PDF and check its
+      // real page count against the invoice count. Only when they match is
+      // `paginaEnLote` trustworthy for every invoice in this lote — `null`
+      // for all of them otherwise, which routes every one of them through
+      // the safe live-render fallback (`FacturasController.obtenerDocumento`,
+      // now itself pinned to this lote's own `plantillaVersion` — see that
+      // route's own docblock) instead of ever risking the fast path.
+      const bytesCombinado = await this.storage.descargarBytes(
+        resultado.objectPath,
+      );
+      const paginasReales = (
+        await PDFDocument.load(bytesCombinado)
+      ).getPageCount();
+      const paginacionConfiable = paginasReales === facturasLean.length;
+
       await Promise.all(
         facturasLean.map(async (factura, indice) => {
           const datos = await this.facturas.datosPlantilla(
@@ -405,15 +429,10 @@ export class LotesController {
             copropiedad,
             datosVisualesPorInmueble.get(factura.inmuebleId.toString()),
           );
-          // `indice + 1` is this invoice's 1-based page in the combined
-          // PDF — `facturasLean` (findAllRawPorLote, sorted by unitCode) is
-          // the exact same array `solicitarGeneracionFacturas` fetched to
-          // build the frontend's per-item pages in this same order. See
-          // `Factura.paginaEnLote`'s own docblock.
           await this.facturas.guardarPrintSnapshot(
             factura._id,
             datos,
-            indice + 1,
+            paginacionConfiable ? indice + 1 : null,
           );
         }),
       );

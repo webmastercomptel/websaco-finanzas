@@ -11,6 +11,7 @@ export const toPlantilla = (
   doc: PlantillaDocumentoDocument,
 ): PlantillaContract => ({
   tipoDocumento: doc.tipoDocumento,
+  version: doc.version,
   docDefinition: doc.docDefinition,
   fechaActualizacion: doc.updatedAt.toISOString(),
 });

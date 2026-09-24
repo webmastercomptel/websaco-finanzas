@@ -60,6 +60,7 @@ export interface Paginado<T> {
  */
 export interface PlantillaDocumento {
   tipoDocumento: 'FV' | 'RC' | 'NC' | 'ND' | 'NA' | 'NT';
+  version: number;
   docDefinition: Record<string, unknown>;
   fechaActualizacion: IsoDate;
 }

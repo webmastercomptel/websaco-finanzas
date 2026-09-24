@@ -91,15 +91,32 @@ export class FacturasController {
   @CheckAbility({ action: 'read', subject: 'Factura' })
   async obtenerDocumento(@Param('id') id: string): Promise<DocumentoFactura> {
     const factura = await this.facturas.findOneRaw(id);
-    const plantilla = await this.plantillas.findOne('FV');
 
     if (factura.printSnapshot) {
+      // Pinned to the version that was actually live when this invoice's
+      // lote was generated (`presentacion_documento`'s own
+      // `plantillaVersion`, set once at `solicitarGeneracion` time) — never
+      // "whatever the template looks like today". Falls back to the
+      // CURRENT template only for a row written before this field existed
+      // (`plantillaVersion` still `null`), same graceful-degradation the
+      // rest of this codebase already uses for pre-feature data.
+      const presentacionLote = await this.presentacionDocumento.buscar(
+        'FV',
+        factura.loteId,
+      );
+      const plantilla = presentacionLote?.plantillaVersion
+        ? await this.plantillas.findVersion(
+            'FV',
+            presentacionLote.plantillaVersion,
+          )
+        : await this.plantillas.findOne('FV');
       return {
         plantilla: toPlantilla(plantilla),
         datos: factura.printSnapshot as unknown as DatosPlantillaFactura,
       };
     }
 
+    const plantilla = await this.plantillas.findOne('FV');
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
     if (!copropiedad) {

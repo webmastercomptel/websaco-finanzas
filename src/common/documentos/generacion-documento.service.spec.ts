@@ -14,7 +14,7 @@ function makeService(
 }
 
 describe('GeneracionDocumentoService.solicitar', () => {
-  it('pide la plantilla del tipo y la solicitud de generación en paralelo, y arma la respuesta con los datos ya calculados del caller', async () => {
+  it('pide la plantilla del tipo, pasa su versión a la solicitud de generación, y arma la respuesta con los datos ya calculados del caller', async () => {
     const doc = {
       _id: new Types.ObjectId(),
       coPropertyId: new Types.ObjectId(),
@@ -24,6 +24,7 @@ describe('GeneracionDocumentoService.solicitar', () => {
       findOne: jest.fn(() =>
         Promise.resolve({
           tipoDocumento: 'RC',
+          version: 3,
           docDefinition: { content: [] },
           updatedAt: new Date('2026-01-01T00:00:00.000Z'),
         }),
@@ -47,10 +48,12 @@ describe('GeneracionDocumentoService.solicitar', () => {
       'RC',
       doc._id,
       doc.coPropertyId,
+      3,
     );
     expect(respuesta).toEqual({
       plantilla: {
         tipoDocumento: 'RC',
+        version: 3,
         docDefinition: { content: [] },
         fechaActualizacion: '2026-01-01T00:00:00.000Z',
       },

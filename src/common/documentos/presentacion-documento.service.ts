@@ -48,6 +48,7 @@ export class PresentacionDocumentoService {
     tipoDocumento: TipoDocumentoPresentacion,
     documentoId: Types.ObjectId,
     coPropertyId: Types.ObjectId,
+    plantillaVersion: number,
   ): Promise<{ objectPath: string; uploadUrl: string; expiresAt: Date }> {
     const existente = await this.model
       .findOne({ tipoDocumento, documentoId })
@@ -64,7 +65,7 @@ export class PresentacionDocumentoService {
     await this.model
       .findOneAndUpdate(
         { tipoDocumento, documentoId },
-        { $set: { objectPath } },
+        { $set: { objectPath, plantillaVersion } },
         { upsert: true },
       )
       .exec();
@@ -134,12 +135,20 @@ export class PresentacionDocumentoService {
   async buscar(
     tipoDocumento: TipoDocumentoPresentacion,
     documentoId: Types.ObjectId,
-  ): Promise<{ objectPath: string; generatedAt: Date } | null> {
+  ): Promise<{
+    objectPath: string;
+    generatedAt: Date;
+    plantillaVersion: number | null;
+  } | null> {
     const fila = await this.model
       .findOne({ tipoDocumento, documentoId })
       .exec();
     if (!fila?.generatedAt || !fila.objectPath) return null;
-    return { objectPath: fila.objectPath, generatedAt: fila.generatedAt };
+    return {
+      objectPath: fila.objectPath,
+      generatedAt: fila.generatedAt,
+      plantillaVersion: fila.plantillaVersion,
+    };
   }
 
   /** Batch form of `buscar` — one query (`$in`) for every document a listing

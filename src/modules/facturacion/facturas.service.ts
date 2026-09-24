@@ -486,7 +486,7 @@ export class FacturasService {
   async guardarPrintSnapshot(
     facturaId: Types.ObjectId,
     datos: DatosPlantillaFactura,
-    paginaEnLote: number,
+    paginaEnLote: number | null,
   ): Promise<void> {
     await this.facturas
       .updateOne(
