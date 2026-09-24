@@ -6,6 +6,7 @@ import type { TerceroDocument } from '../../database/schemas/terceros/tercero.sc
 import type { ConceptoCobroDocument } from '../../database/schemas/conceptos/concepto-cobro.schema';
 import type { AsientoContableDocument } from '../../database/schemas/facturacion/asiento-contable.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import { emisorDe } from '../../common/documentos/emisor.util';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
@@ -85,5 +86,9 @@ export async function construirDatosImpresionNotaDebito(
     concepto: nota.description ?? concepto?.name ?? 'Cargo manual',
     monto: nota.total,
     lineas,
+    totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
+    totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
+    emisor: emisorDe(copropiedad),
+    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
   };
 }

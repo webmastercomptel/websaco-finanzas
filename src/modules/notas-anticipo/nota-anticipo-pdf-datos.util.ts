@@ -10,6 +10,7 @@ import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmu
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
+import { emisorDe } from '../../common/documentos/emisor.util';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
@@ -193,5 +194,9 @@ export async function construirDatosImpresionNotaAnticipo(
         : 'Aplicación de anticipo',
     monto: nota.appliedAmount,
     lineas,
+    totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
+    totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
+    emisor: emisorDe(copropiedad),
+    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
   };
 }

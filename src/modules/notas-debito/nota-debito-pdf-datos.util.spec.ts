@@ -22,7 +22,13 @@ const notaBase = (over: Record<string, unknown> = {}): NotaDebitoDocument =>
   }) as unknown as NotaDebitoDocument;
 
 const copropiedadBase = (): CopropiedadDocument =>
-  ({ receivablesAccount: '130500' }) as unknown as CopropiedadDocument;
+  ({
+    name: 'Conjunto Residencial Los Alamos',
+    taxId: '900123456',
+    taxIdVerificationDigit: '7',
+    showLogoOnDocuments: true,
+    receivablesAccount: '130500',
+  }) as unknown as CopropiedadDocument;
 
 const modelosCon = (
   over: {
@@ -84,6 +90,26 @@ describe('construirDatosImpresionNotaDebito', () => {
     expect(datos.titularNombre).toBe('JUAN PEREZ');
     expect(datos.fecha).toEqual(new Date('2026-08-12'));
     expect(datos.monto).toBe(50000);
+  });
+
+  it('arma emisor/logoFilas desde la copropiedad y suma débito/crédito de las líneas', async () => {
+    const datos = await construirDatosImpresionNotaDebito(
+      notaBase(),
+      copropiedadBase(),
+      COP,
+      modelosCon() as never,
+      'Nota de Débito',
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Residencial Los Alamos');
+    expect(datos.emisor.nitCompleto).toBe('900123456-7');
+    expect(datos.logoFilas).toEqual([{}]);
+    expect(datos.totalDebito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.debito, 0),
+    );
+    expect(datos.totalCredito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.credito, 0),
+    );
   });
 
   it('usa description cuando la nota la tiene', async () => {

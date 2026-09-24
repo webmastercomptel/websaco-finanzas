@@ -25,6 +25,10 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
+    name: 'Conjunto Residencial Los Alamos',
+    taxId: '900123456',
+    taxIdVerificationDigit: '7',
+    showLogoOnDocuments: true,
     receivablesAccount: '130500',
     advancesAccount: '210505',
     ...over,
@@ -74,6 +78,40 @@ describe('construirDatosImpresionRecibo', () => {
     expect(datos.titularNombre).toBe('ACOSTA BONILLA JOSE ERNESTO');
     expect(datos.concepto).toBe('Cancela factura 685');
     expect(datos.monto).toBe(905040);
+  });
+
+  it('arma emisor/logoFilas desde la copropiedad y suma débito/crédito de las líneas', async () => {
+    const datos = await construirDatosImpresionRecibo(
+      reciboBase(),
+      [],
+      copropiedadBase(),
+      COP,
+      modelosVacios() as never,
+      'Recibo de Caja',
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Residencial Los Alamos');
+    expect(datos.emisor.nitCompleto).toBe('900123456-7');
+    expect(datos.logoFilas).toEqual([{}]);
+    expect(datos.totalDebito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.debito, 0),
+    );
+    expect(datos.totalCredito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.credito, 0),
+    );
+  });
+
+  it('logoFilas queda vacío cuando la copropiedad no muestra el logo', async () => {
+    const datos = await construirDatosImpresionRecibo(
+      reciboBase(),
+      [],
+      copropiedadBase({ showLogoOnDocuments: false }),
+      COP,
+      modelosVacios() as never,
+      'Recibo de Caja',
+    );
+
+    expect(datos.logoFilas).toEqual([]);
   });
 
   it('usa el tituloDocumento que le pasa el caller (resuelto vía TituloDocumentoService), no un literal propio', async () => {

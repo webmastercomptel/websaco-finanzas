@@ -30,6 +30,10 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
+    name: 'Conjunto Residencial Los Alamos',
+    taxId: '900123456',
+    taxIdVerificationDigit: '7',
+    showLogoOnDocuments: true,
     receivablesAccount: '130500',
     advancesAccount: '210505',
     creditNotesAccount: '413595',
@@ -80,6 +84,28 @@ describe('construirDatosImpresionNotaCredito', () => {
     expect(datos.titularNombre).toBe('JUAN PEREZ');
     expect(datos.fecha).toEqual(new Date('2026-06-10'));
     expect(datos.monto).toBe(100000);
+  });
+
+  it('arma emisor/logoFilas desde la copropiedad y suma débito/crédito de las líneas', async () => {
+    const datos = await construirDatosImpresionNotaCredito(
+      notaBase(),
+      0,
+      [],
+      copropiedadBase(),
+      COP,
+      modelosVacios() as never,
+      'Nota de Crédito',
+    );
+
+    expect(datos.emisor.nombre).toBe('Conjunto Residencial Los Alamos');
+    expect(datos.emisor.nitCompleto).toBe('900123456-7');
+    expect(datos.logoFilas).toEqual([{}]);
+    expect(datos.totalDebito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.debito, 0),
+    );
+    expect(datos.totalCredito).toBe(
+      datos.lineas.reduce((acc, l) => acc + l.credito, 0),
+    );
   });
 
   it('usa la etiqueta del motivo cuando la nota no tiene notes', async () => {
