@@ -6,6 +6,7 @@ import { DocumentoStorageService } from '../storage/documento-storage.service';
 import { toPlantilla } from '../../modules/plantillas-documento/plantillas-documento.mapper';
 import type { TipoDocumentoPresentacion } from '../../database/schemas/documentos/presentacion-documento.schema';
 import type { PlantillaDocumento } from '../../contracts';
+import { esAnulado, estamparAnulado } from './estampar-anulado.util';
 
 export interface SolicitudGeneracionDocumento<TDatos> {
   plantilla: PlantillaDocumento;
@@ -94,5 +95,34 @@ export class GeneracionDocumentoService {
       doc.objectPath,
     );
     return { url, expiresAt: expiresAt.toISOString() };
+  }
+
+  /**
+   * This already-confirmed document's actual bytes, proxied through the
+   * backend instead of a signed URL — the only way to react to the
+   * document's CURRENT `estado` before serving it. When `estado` is voided
+   * (`esAnulado`), the bytes are a derived, watermarked copy
+   * (`estamparAnulado`); the frozen file in Storage is never touched either
+   * way, same guard shape as `urlLectura` above.
+   */
+  async documentoPdf(
+    etiquetaEntidad: string,
+    id: string,
+    doc: {
+      objectPath: string | null;
+      generatedAt: Date | string | null;
+      estado: string;
+    },
+  ): Promise<Buffer> {
+    if (!doc.objectPath || !doc.generatedAt) {
+      throw new NotFoundException(
+        `${etiquetaEntidad} ${id} todavía no tiene un documento generado`,
+      );
+    }
+    const bytes = await this.storage.descargarBytes(doc.objectPath);
+    if (esAnulado(doc.estado)) {
+      return Buffer.from(await estamparAnulado(bytes, doc.estado));
+    }
+    return bytes;
   }
 }

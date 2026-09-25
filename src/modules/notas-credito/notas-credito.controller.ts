@@ -5,8 +5,10 @@ import {
   Param,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -151,5 +153,33 @@ export class NotasCreditoController {
   ): Promise<{ url: string; expiresAt: string }> {
     const nota = await this.notasCredito.findOne(id);
     return this.generacion.urlLectura('La nota crédito', id, nota);
+  }
+
+  /**
+   * This Nota Crédito's actual bytes, proxied through the backend rather
+   * than a signed URL — the only way to react to `estado` and stamp an
+   * anulado document before serving it (see `GeneracionDocumentoService
+   * .documentoPdf`). `url-lectura` above stays as-is for any existing
+   * caller — this is additive, not a replacement. Same `read` action as
+   * `findOne`/`urlLectura`.
+   */
+  @Get(':id/documento-pdf')
+  @CheckAbility({ action: 'read', subject: 'NotaCredito' })
+  async documentoPdf(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const nota = await this.notasCredito.findOne(id);
+    const bytes = await this.generacion.documentoPdf(
+      'La nota crédito',
+      id,
+      nota,
+    );
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${id}.pdf"`,
+    });
+    res.send(bytes);
   }
 }

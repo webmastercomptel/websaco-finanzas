@@ -27,6 +27,7 @@ function makeController(
         expiresAt: '2026-01-01T00:00:00.000Z',
       }),
     ),
+    documentoPdf: jest.fn(() => Promise.resolve(Buffer.from('%PDF-1.4'))),
   },
 ) {
   return new NotasCreditoController(notasCredito as never, generacion as never);
@@ -236,6 +237,39 @@ describe('NotasCreditoController.urlLectura', () => {
       nota,
     );
     expect(respuesta.url).toBe('https://read');
+  });
+});
+
+describe('NotasCreditoController.documentoPdf', () => {
+  it('resuelve la nota por id, delega en GeneracionDocumentoService.documentoPdf y envía los bytes como application/pdf', async () => {
+    const nota = {
+      objectPath: 'documentos-generados/x/NC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'anulado',
+    };
+    const bytesEstampados = Buffer.from('%PDF-1.4 estampado');
+    const notasCredito = {
+      findOne: jest.fn(() => Promise.resolve(nota)),
+    };
+    const generacion = {
+      documentoPdf: jest.fn(() => Promise.resolve(bytesEstampados)),
+    };
+    const controller = makeController(notasCredito, generacion);
+    const res = { set: jest.fn(), send: jest.fn() };
+
+    await controller.documentoPdf('nc-1', res as never);
+
+    expect(notasCredito.findOne).toHaveBeenCalledWith('nc-1');
+    expect(generacion.documentoPdf).toHaveBeenCalledWith(
+      'La nota crédito',
+      'nc-1',
+      nota,
+    );
+    expect(res.set).toHaveBeenCalledWith({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="nc-1.pdf"',
+    });
+    expect(res.send).toHaveBeenCalledWith(bytesEstampados);
   });
 });
 

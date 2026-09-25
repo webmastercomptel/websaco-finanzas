@@ -79,12 +79,13 @@ export class DocumentoStorageService {
   /**
    * The actual bytes of an already-confirmed document — deliberately the
    * only method on this service that touches content instead of just a URL.
-   * Exists for one caller: extracting a single invoice's page out of its
-   * lote's combined PDF (`FacturasController.obtenerDocumentoPdf`) needs the
-   * whole file server-side to slice from, not a browser-facing signed URL —
-   * handing that URL to the client instead would leak every other unit's
-   * invoice in the same lote, exactly what individual-invoice viewing was
-   * built to avoid in the first place.
+   * Two callers, both needing the whole file server-side rather than a
+   * browser-facing signed URL: `FacturasController.obtenerDocumentoPdf`
+   * extracts a single invoice's page out of its lote's combined PDF (handing
+   * the signed URL to the client instead would leak every other unit's
+   * invoice in the same lote); `GeneracionDocumentoService.documentoPdf`
+   * needs the bytes in-process to stamp an "anulada"/"anulado" watermark
+   * before serving them, which a direct-to-bucket signed URL can't do.
    */
   async descargarBytes(objectPath: string): Promise<Buffer> {
     const [bytes] = await this.bucket.file(objectPath).download();

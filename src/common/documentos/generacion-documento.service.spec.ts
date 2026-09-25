@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { PDFDocument } from 'pdf-lib';
 import { GeneracionDocumentoService } from './generacion-documento.service';
 
 function makeService(
@@ -136,5 +137,58 @@ describe('GeneracionDocumentoService.urlLectura', () => {
       url: 'https://read',
       expiresAt: '2026-01-01T00:10:00.000Z',
     });
+  });
+});
+
+describe('GeneracionDocumentoService.documentoPdf', () => {
+  it('rechaza con 404 cuando el documento todavía no tiene objectPath/generatedAt', async () => {
+    const service = makeService();
+
+    await expect(
+      service.documentoPdf('El recibo', 'rec-1', {
+        objectPath: null,
+        generatedAt: null,
+        estado: 'activo',
+      }),
+    ).rejects.toThrow('El recibo rec-1 todavía no tiene un documento generado');
+  });
+
+  it('devuelve los bytes sin modificar cuando el documento no está anulado', async () => {
+    const original = Buffer.from(await (await PDFDocument.create()).save());
+    const storage = {
+      descargarBytes: jest.fn(() => Promise.resolve(original)),
+    };
+    const service = makeService({}, {}, storage);
+
+    const bytes = await service.documentoPdf('El recibo', 'rec-1', {
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'activo',
+    });
+
+    expect(storage.descargarBytes).toHaveBeenCalledWith(
+      'documentos-generados/x/RC/1.pdf',
+    );
+    expect(Buffer.compare(bytes, original)).toBe(0);
+  });
+
+  it('devuelve una copia estampada cuando el documento está anulado', async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([400, 600]);
+    const original = Buffer.from(await doc.save());
+    const storage = {
+      descargarBytes: jest.fn(() => Promise.resolve(original)),
+    };
+    const service = makeService({}, {}, storage);
+
+    const bytes = await service.documentoPdf('El recibo', 'rec-1', {
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'anulado',
+    });
+
+    expect(Buffer.compare(bytes, original)).not.toBe(0);
+    const resultado = await PDFDocument.load(bytes);
+    expect(resultado.getPageCount()).toBe(1);
   });
 });

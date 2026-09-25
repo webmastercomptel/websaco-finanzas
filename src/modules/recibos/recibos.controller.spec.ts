@@ -27,6 +27,7 @@ function makeController(
         expiresAt: '2026-01-01T00:00:00.000Z',
       }),
     ),
+    documentoPdf: jest.fn(() => Promise.resolve(Buffer.from('%PDF-1.4'))),
   },
 ) {
   return new RecibosController(recibos as never, generacion as never);
@@ -199,6 +200,39 @@ describe('RecibosController.urlLectura', () => {
       'rec-1',
       recibo,
     );
+  });
+});
+
+describe('RecibosController.documentoPdf', () => {
+  it('resuelve el recibo por id, delega en GeneracionDocumentoService.documentoPdf y envía los bytes como application/pdf', async () => {
+    const recibo = {
+      objectPath: 'documentos-generados/x/RC/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'anulado',
+    };
+    const bytesEstampados = Buffer.from('%PDF-1.4 estampado');
+    const recibos = {
+      findOne: jest.fn(() => Promise.resolve(recibo)),
+    };
+    const generacion = {
+      documentoPdf: jest.fn(() => Promise.resolve(bytesEstampados)),
+    };
+    const controller = makeController(recibos, generacion);
+    const res = { set: jest.fn(), send: jest.fn() };
+
+    await controller.documentoPdf('rec-1', res as never);
+
+    expect(recibos.findOne).toHaveBeenCalledWith('rec-1');
+    expect(generacion.documentoPdf).toHaveBeenCalledWith(
+      'El recibo',
+      'rec-1',
+      recibo,
+    );
+    expect(res.set).toHaveBeenCalledWith({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="rec-1.pdf"',
+    });
+    expect(res.send).toHaveBeenCalledWith(bytesEstampados);
   });
 });
 

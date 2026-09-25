@@ -27,6 +27,7 @@ function makeController(
         expiresAt: '2026-01-01T00:00:00.000Z',
       }),
     ),
+    documentoPdf: jest.fn(() => Promise.resolve(Buffer.from('%PDF-1.4'))),
   },
 ) {
   return new NotasContablesController(
@@ -210,6 +211,39 @@ describe('NotasContablesController.urlLectura', () => {
       'nt-1',
       nota,
     );
+  });
+});
+
+describe('NotasContablesController.documentoPdf', () => {
+  it('resuelve la nota por id, delega en GeneracionDocumentoService.documentoPdf y envía los bytes como application/pdf', async () => {
+    const nota = {
+      objectPath: 'documentos-generados/x/NT/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'anulado',
+    };
+    const bytesEstampados = Buffer.from('%PDF-1.4 estampado');
+    const notasContables = {
+      findOne: jest.fn(() => Promise.resolve(nota)),
+    };
+    const generacion = {
+      documentoPdf: jest.fn(() => Promise.resolve(bytesEstampados)),
+    };
+    const controller = makeController(notasContables, generacion);
+    const res = { set: jest.fn(), send: jest.fn() };
+
+    await controller.documentoPdf('nt-1', res as never);
+
+    expect(notasContables.findOne).toHaveBeenCalledWith('nt-1');
+    expect(generacion.documentoPdf).toHaveBeenCalledWith(
+      'La nota contable',
+      'nt-1',
+      nota,
+    );
+    expect(res.set).toHaveBeenCalledWith({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="nt-1.pdf"',
+    });
+    expect(res.send).toHaveBeenCalledWith(bytesEstampados);
   });
 });
 

@@ -27,6 +27,7 @@ function makeController(
         expiresAt: '2026-01-01T00:00:00.000Z',
       }),
     ),
+    documentoPdf: jest.fn(() => Promise.resolve(Buffer.from('%PDF-1.4'))),
   },
 ) {
   return new NotasAnticipoController(
@@ -205,6 +206,39 @@ describe('NotasAnticipoController.urlLectura', () => {
       'na-1',
       nota,
     );
+  });
+});
+
+describe('NotasAnticipoController.documentoPdf', () => {
+  it('resuelve la nota por id, delega en GeneracionDocumentoService.documentoPdf y envía los bytes como application/pdf', async () => {
+    const nota = {
+      objectPath: 'documentos-generados/x/NA/1.pdf',
+      generatedAt: new Date('2026-01-01'),
+      estado: 'anulado',
+    };
+    const bytesEstampados = Buffer.from('%PDF-1.4 estampado');
+    const notasAnticipo = {
+      findOne: jest.fn(() => Promise.resolve(nota)),
+    };
+    const generacion = {
+      documentoPdf: jest.fn(() => Promise.resolve(bytesEstampados)),
+    };
+    const controller = makeController(notasAnticipo, generacion);
+    const res = { set: jest.fn(), send: jest.fn() };
+
+    await controller.documentoPdf('na-1', res as never);
+
+    expect(notasAnticipo.findOne).toHaveBeenCalledWith('na-1');
+    expect(generacion.documentoPdf).toHaveBeenCalledWith(
+      'La nota de anticipo',
+      'na-1',
+      nota,
+    );
+    expect(res.set).toHaveBeenCalledWith({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline; filename="na-1.pdf"',
+    });
+    expect(res.send).toHaveBeenCalledWith(bytesEstampados);
   });
 });
 

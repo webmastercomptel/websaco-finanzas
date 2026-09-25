@@ -20,6 +20,10 @@ import { PlantillaDocumentoService } from '../../common/documentos/plantilla-doc
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
 import { extraerPaginaPdf } from '../../common/documentos/extraer-pagina-pdf.util';
+import {
+  esAnulado,
+  estamparAnulado,
+} from '../../common/documentos/estampar-anulado.util';
 import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
 import {
   Copropiedad,
@@ -189,11 +193,19 @@ export class FacturasController {
       bytesCombinado,
       factura.paginaEnLote,
     );
+    // Extracted fresh per request (see this method's own docblock) — this is
+    // also where `estado` gets checked, since a Factura can be voided AFTER
+    // its lote's PDF was already frozen. Same read-time-only stamping as
+    // `GeneracionDocumentoService.documentoPdf` uses for the other five
+    // document types; the frozen combined file in Storage is never touched.
+    const bytesRespuesta = esAnulado(factura.status)
+      ? await estamparAnulado(Buffer.from(bytesPagina), factura.status)
+      : bytesPagina;
 
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="${id}.pdf"`,
     });
-    res.send(Buffer.from(bytesPagina));
+    res.send(Buffer.from(bytesRespuesta));
   }
 }
