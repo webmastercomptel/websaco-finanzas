@@ -4,6 +4,7 @@ import type { Style } from '@react-pdf/types';
 import { formatoFecha, formatoPeso } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
+import { BloqueInmueblePeriodo } from './react/bloque-inmueble-periodo';
 import { CreditoWebsaco } from './react/credito-websaco';
 import { FONDO_ZEBRA } from './react/paleta';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
@@ -27,38 +28,6 @@ const COLUMNAS = [
 const PRIMERA_NUMERICA = 5;
 
 const styles = StyleSheet.create({
-  bloque: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  bloqueIzquierda: {
-    width: 300,
-  },
-  filaSimple: {
-    flexDirection: 'row',
-    marginBottom: 2,
-  },
-  filaSimpleLabel: {
-    width: 55,
-    fontSize: 8.5,
-    fontFamily: 'Helvetica',
-  },
-  filaSimpleValor: {
-    fontSize: 8.5,
-    fontFamily: 'Helvetica',
-  },
-  periodo: {
-    flexDirection: 'row',
-  },
-  periodoLabel: {
-    fontSize: 8.5,
-    fontFamily: 'Helvetica',
-  },
-  periodoValor: {
-    fontSize: 8.5,
-    fontFamily: 'Helvetica',
-  },
   filaEncabezado: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
@@ -122,19 +91,6 @@ const filaBarra = (valores: string[], key: string) =>
     ),
   );
 
-/** Label in a fixed-width box + value right after with a small gap — same
- *  column-aligned convention `DatosAdquiriente` uses, not `FilaInfo`'s
- *  space-between (which needs a full-width row to look right; this sits in
- *  a narrower half-width column alongside Periodo and looked disjointed
- *  spread edge to edge). */
-const filaSimple = (label: string, valor: string, key: string) =>
-  createElement(
-    View,
-    { key, style: styles.filaSimple },
-    createElement(Text, { style: styles.filaSimpleLabel }, label),
-    createElement(Text, { style: styles.filaSimpleValor }, valor),
-  );
-
 /**
  * Generates a real PDF for the Auxiliar de Cartera ledger: one inmueble's
  * movements across all five document types for a date range, opening on
@@ -161,28 +117,15 @@ export async function generarPdfAuxiliarCartera(
       copropiedad,
       titulo: 'Auxiliar de Cartera',
       mostrarLogo: copropiedad.showLogoOnDocuments,
+      soloNit: true,
     }),
 
-    createElement(
-      View,
-      { style: styles.bloque },
-      createElement(
-        View,
-        { style: styles.bloqueIzquierda },
-        filaSimple('Inmueble:', reporte.inmuebleCodigo, 'inmueble'),
-        filaSimple('Nombre:', reporte.propietario ?? '—', 'nombre'),
-      ),
-      createElement(
-        View,
-        { style: styles.periodo },
-        createElement(Text, { style: styles.periodoLabel }, 'Periodo: '),
-        createElement(
-          Text,
-          { style: styles.periodoValor },
-          `${formatoFecha(reporte.desde)} al ${formatoFecha(reporte.hasta)}`,
-        ),
-      ),
-    ),
+    createElement(BloqueInmueblePeriodo, {
+      inmuebleCodigo: reporte.inmuebleCodigo,
+      propietario: reporte.propietario,
+      desde: formatoFecha(reporte.desde),
+      hasta: formatoFecha(reporte.hasta),
+    }),
 
     createElement(
       View,

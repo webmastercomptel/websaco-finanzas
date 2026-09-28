@@ -33,7 +33,7 @@ const styles = StyleSheet.create({
 });
 
 /**
- * "Generado por [logo]" on the left, "Página i/N" on the right — same
+ * "Generado con [logo]" on the left, "Página i/N" on the right — same
  * faint gray, same size, read as one unit instead of two unrelated footer
  * concerns. Placed in-flow, once per `<Page>` element it's put on — for a
  * single-page document (Factura, Estado de Cuenta) that's naturally once
@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
  * mention most SaaS invoicing tools use.
  *
  * `idInmueble`, when passed, prints "ID: <code>" immediately before
- * "Generado por" — the unit-code field a Factura/Prefactura used to show
+ * "Generado con" — the unit-code field a Factura/Prefactura used to show
  * elsewhere and was later dropped; restored here rather than in the body,
  * per product decision. Every other caller omits it and sees no change.
  *
@@ -86,7 +86,9 @@ export function CreditoWebsaco(props: {
             `ID: ${idInmueble}`,
           )
         : null,
-      createElement(Text, { style: styles.textoConMargen }, 'Generado por'),
+      // "con", not "por" — the software is the tool, not the author of the
+      // building's own document (product request, 2026-09-28).
+      createElement(Text, { style: styles.textoConMargen }, 'Generado con'),
       createElement(Image, { style: styles.logo, src: logoBytesWebsaco() }),
       creditoComptel
         ? createElement(

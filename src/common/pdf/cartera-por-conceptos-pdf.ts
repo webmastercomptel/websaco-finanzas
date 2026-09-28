@@ -1,6 +1,6 @@
 import { createElement, type ReactElement } from 'react';
 import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import { formatoFecha, formatoPeso } from './pdf-helpers';
+import { formatoFecha, formatoPesoSinSimbolo } from './pdf-helpers';
 import {
   reporteDocumento,
   reporteDocumentoMultiPagina,
@@ -9,6 +9,12 @@ import {
 import { EncabezadoInforme } from './react/encabezado-informe';
 import { Tabla } from './react/tabla';
 import { CreditoWebsaco } from './react/credito-websaco';
+import {
+  construirPdfTablaAgrupada,
+  numeroSinTipo,
+  type ColumnaTablaAgrupada,
+  type LineaTablaAgrupada,
+} from './react/tabla-agrupada';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaCarteraPorConceptos } from '../../contracts';
 
@@ -38,10 +44,6 @@ const MAX_CARGOS_INDIVIDUALES = 8;
  *  second line at these column widths, since there's no way to render and
  *  visually verify the actual output from here. */
 const FILAS_POR_PAGINA_RESUMIDO = 24;
-/** Same budget, `fontSize: 8` table (see the "detallado" `Tabla` calls) —
- *  a shorter header (~15.6pt) and shorter rows (~12pt) fit a few more,
- *  kept at 28 for the same headroom reasoning as the resumido constant. */
-const FILAS_POR_PAGINA_DETALLADO = 28;
 
 const ESTADO_LABELS: Record<
   'vigente' | 'juridico' | 'dificil_recaudo',
@@ -58,6 +60,57 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica',
   },
 });
+
+/** "Inmueble <código> — <propietario> — Celular: <celular>", the group
+ *  header line of the "detallado" layout. */
+function tituloGrupo(g: {
+  inmuebleCodigo: string;
+  titular: string | null;
+  celular: string | null;
+}): string {
+  return `Inmueble ${g.inmuebleCodigo} — ${g.titular ?? 'Sin propietario'} — Celular: ${g.celular ?? '—'}`;
+}
+
+/** Sums every document's `cargosPorConcepto` into one per-concept map. */
+function sumarCargos(
+  documentos: { cargosPorConcepto: Record<string, number> }[],
+): Record<string, number> {
+  const total: Record<string, number> = {};
+  for (const d of documentos) {
+    for (const [conceptoId, monto] of Object.entries(d.cargosPorConcepto)) {
+      total[conceptoId] = (total[conceptoId] ?? 0) + monto;
+    }
+  }
+  return total;
+}
+
+/** Tipo / Número / Fecha / Vence / Saldo — the fixed leading columns both
+ *  "detallado" layouts share, ahead of their own cargo columns. */
+const COLUMNAS_FIJAS_DETALLADO: ColumnaTablaAgrupada[] = [
+  { titulo: 'Tipo', peso: 0.5, numerica: false },
+  { titulo: 'Número', peso: 0.9, numerica: false },
+  { titulo: 'Fecha', peso: 0.8, numerica: false },
+  { titulo: 'Vence', peso: 0.8, numerica: false },
+  { titulo: 'Saldo', peso: 1, numerica: true },
+];
+
+/** The fixed leading cells of one document row, matching
+ *  `COLUMNAS_FIJAS_DETALLADO`. */
+function celdasFijasDetallado(d: {
+  tipo: string;
+  numeroCompleto: string;
+  fecha: string;
+  vence: string | null;
+  saldo: number;
+}): string[] {
+  return [
+    d.tipo,
+    numeroSinTipo(d.numeroCompleto),
+    formatoFecha(d.fecha),
+    d.vence ? formatoFecha(d.vence) : '—',
+    formatoPesoSinSimbolo(d.saldo),
+  ];
+}
 
 /** cargo/saldo * 100, or "—" when there is nothing to divide by (never
  *  happens for a real row — a document with saldo <= 0 is excluded
@@ -122,7 +175,9 @@ function construirPdfPaginado(
  *
  * - Every concept at once (`conceptoId` omitted): the "Por Inmueble" tab's
  *   own layout — one column per concept (capped, see `MAX_CARGOS_INDIVIDUALES`),
- *   "resumido" (one row per inmueble) or "detallado" (one row per document).
+ *   "resumido" (one row per inmueble) or "detallado" (one row per document,
+ *   grouped under an inmueble header with per-group subtotals — see
+ *   `construirPdfTablaAgrupada`).
  * - One single concept (`conceptoId` given): the "Por Concepto" tab's own
  *   layout — filtered to documents carrying that one charge, with a single
  *   named cargo column plus a "% Participación" column (cargo/saldo), same
@@ -220,10 +275,14 @@ async function generarPorInmueble(
   ];
   const cargosDe = (cargosPorConcepto: Record<string, number>): string[] => [
     ...conceptosIndividuales.map((c) =>
-      formatoPeso(cargosPorConcepto[c.conceptoId] ?? 0),
+      formatoPesoSinSimbolo(cargosPorConcepto[c.conceptoId] ?? 0),
     ),
     ...(hayOtros
-      ? [formatoPeso(sumaCargos(cargosPorConcepto, conceptosAgrupados))]
+      ? [
+          formatoPesoSinSimbolo(
+            sumaCargos(cargosPorConcepto, conceptosAgrupados),
+          ),
+        ]
       : []),
   ];
 
@@ -255,7 +314,7 @@ async function generarPorInmueble(
       return [
         g.inmuebleCodigo,
         g.celular ?? '—',
-        formatoPeso(g.saldoTotal),
+        formatoPesoSinSimbolo(g.saldoTotal),
         ...cargosDe(cargosGrupo),
       ];
     });
@@ -271,58 +330,45 @@ async function generarPorInmueble(
         filaTotales: [
           'GRAN TOTAL',
           '',
-          formatoPeso(granTotalSaldo),
+          formatoPesoSinSimbolo(granTotalSaldo),
           ...cargosDe(granTotalCargos),
         ],
       },
     );
   }
 
-  const columnas = [
-    'Inmueble',
-    'Número',
-    'Fecha',
-    'Vence',
-    'Saldo',
-    ...columnasCargos,
-  ];
-  const anchosRelativos = [
-    0.7,
-    1,
-    0.8,
-    0.8,
-    1,
-    ...columnasCargos.map(() => 1.1),
-  ];
-
-  const filas = reporte.grupos.flatMap((g) =>
-    g.documentos.map((d) => [
-      g.inmuebleCodigo,
-      d.numeroCompleto,
-      formatoFecha(d.fecha),
-      d.vence ? formatoFecha(d.vence) : '—',
-      formatoPeso(d.saldo),
-      ...cargosDe(d.cargosPorConcepto),
-    ]),
-  );
-
-  return construirPdfPaginado(
-    crearEncabezado,
-    filas,
-    FILAS_POR_PAGINA_DETALLADO,
+  const lineasPorGrupo: LineaTablaAgrupada[][] = reporte.grupos.map((g) => [
+    { clase: 'grupo' as const, texto: tituloGrupo(g) },
+    ...g.documentos.map((d, i) => ({
+      clase: 'documento' as const,
+      par: i % 2 === 1,
+      celdas: [...celdasFijasDetallado(d), ...cargosDe(d.cargosPorConcepto)],
+    })),
     {
-      columnas,
-      anchosRelativos,
-      columnasNumericas: 1 + columnasCargos.length,
-      // Detallado carries two more fixed columns than resumido on top of
-      // the same concept columns — smaller text keeps every cell readable
-      // instead of overflowing or wrapping into its neighbor.
-      fontSize: 8,
-      filaTotales: [
-        'GRAN TOTAL',
-        '',
-        '',
-        formatoPeso(granTotalSaldo),
+      clase: 'subtotal' as const,
+      etiqueta: `Total inmueble ${g.inmuebleCodigo}`,
+      valores: [
+        formatoPesoSinSimbolo(g.saldoTotal),
+        ...cargosDe(sumarCargos(g.documentos)),
+      ],
+    },
+  ]);
+
+  return construirPdfTablaAgrupada(
+    crearEncabezado,
+    [
+      ...COLUMNAS_FIJAS_DETALLADO,
+      ...columnasCargos.map((titulo) => ({
+        titulo,
+        peso: 1.1,
+        numerica: true,
+      })),
+    ],
+    lineasPorGrupo,
+    {
+      etiqueta: 'TOTALES',
+      valores: [
+        formatoPesoSinSimbolo(granTotalSaldo),
         ...cargosDe(granTotalCargos),
       ],
     },
@@ -405,8 +451,8 @@ async function generarPorConcepto(
       return [
         g.inmuebleCodigo,
         g.celular ?? '—',
-        formatoPeso(saldo),
-        formatoPeso(cargo),
+        formatoPesoSinSimbolo(saldo),
+        formatoPesoSinSimbolo(cargo),
         formatoPorcentaje(cargo, saldo),
       ];
     });
@@ -422,56 +468,56 @@ async function generarPorConcepto(
         filaTotales: [
           'GRAN TOTAL',
           '',
-          formatoPeso(granTotalSaldo),
-          formatoPeso(granTotalCargo),
+          formatoPesoSinSimbolo(granTotalSaldo),
+          formatoPesoSinSimbolo(granTotalCargo),
           formatoPorcentaje(granTotalCargo, granTotalSaldo),
         ],
       },
     );
   }
 
-  const columnas = [
-    'Inmueble',
-    'Número',
-    'Fecha',
-    'Vence',
-    'Saldo',
-    nombreCargo,
-    '% Participación',
-  ];
-  const filas = grupos.flatMap((g) =>
-    g.documentos.map((d) => {
-      const cargo = d.cargosPorConcepto[conceptoId] ?? 0;
-      return [
-        g.inmuebleCodigo,
-        d.numeroCompleto,
-        formatoFecha(d.fecha),
-        d.vence ? formatoFecha(d.vence) : '—',
-        formatoPeso(d.saldo),
-        formatoPeso(cargo),
-        formatoPorcentaje(cargo, d.saldo),
-      ];
-    }),
-  );
+  const lineasPorGrupo: LineaTablaAgrupada[][] = grupos.map((g) => {
+    const saldoGrupo = saldoDe(g.documentos);
+    const cargoGrupo = cargoDe(g.documentos);
+    return [
+      { clase: 'grupo' as const, texto: tituloGrupo(g) },
+      ...g.documentos.map((d, i) => {
+        const cargo = d.cargosPorConcepto[conceptoId] ?? 0;
+        return {
+          clase: 'documento' as const,
+          par: i % 2 === 1,
+          celdas: [
+            ...celdasFijasDetallado(d),
+            formatoPesoSinSimbolo(cargo),
+            formatoPorcentaje(cargo, d.saldo),
+          ],
+        };
+      }),
+      {
+        clase: 'subtotal' as const,
+        etiqueta: `Total inmueble ${g.inmuebleCodigo}`,
+        valores: [
+          formatoPesoSinSimbolo(saldoGrupo),
+          formatoPesoSinSimbolo(cargoGrupo),
+          formatoPorcentaje(cargoGrupo, saldoGrupo),
+        ],
+      },
+    ];
+  });
 
-  return construirPdfPaginado(
+  return construirPdfTablaAgrupada(
     crearEncabezado,
-    filas,
-    FILAS_POR_PAGINA_DETALLADO,
+    [
+      ...COLUMNAS_FIJAS_DETALLADO,
+      { titulo: nombreCargo, peso: 1.1, numerica: true },
+      { titulo: '% Participación', peso: 1.1, numerica: true },
+    ],
+    lineasPorGrupo,
     {
-      columnas,
-      anchosRelativos: [0.7, 1, 0.8, 0.8, 1, 1.1, 1.1],
-      columnasNumericas: 3,
-      // Same reasoning as the "Por Inmueble" layout's own detallado
-      // branch — two extra fixed columns need the smaller size to stay
-      // readable without overflowing.
-      fontSize: 8,
-      filaTotales: [
-        'GRAN TOTAL',
-        '',
-        '',
-        formatoPeso(granTotalSaldo),
-        formatoPeso(granTotalCargo),
+      etiqueta: 'TOTALES',
+      valores: [
+        formatoPesoSinSimbolo(granTotalSaldo),
+        formatoPesoSinSimbolo(granTotalCargo),
         formatoPorcentaje(granTotalCargo, granTotalSaldo),
       ],
     },

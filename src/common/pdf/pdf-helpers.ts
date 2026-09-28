@@ -6,6 +6,13 @@ export function formatoPeso(valor: number): string {
   return `$ ${valor.toLocaleString('es-CO', { maximumFractionDigits: 0 })}`;
 }
 
+/** `formatoPeso` minus the "$ " prefix — for dense listings where the
+ *  symbol on every cell costs more width than it's worth and the column
+ *  headers already say the values are money. */
+export function formatoPesoSinSimbolo(valor: number): string {
+  return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
+}
+
 /** Appends "(A Favor)" to an already-`formatoPeso`-formatted value when the
  *  raw number behind it is negative — Estado de Cuenta's own "Saldo actual"
  *  row is the only caller: a negative `saldoActual` there is a real credit

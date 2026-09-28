@@ -18,7 +18,7 @@ const styles = StyleSheet.create({
 
 /**
  * Contact info (left) + "Página i/N" (right), repeated on every page —
- * react-pdf equivalent of `escribirPiePagina`. The WebSACO "Generado por"
+ * react-pdf equivalent of `escribirPiePagina`. The WebSACO "Generado con"
  * credit used to live here too, but it doesn't need page-repetition
  * semantics the way a page number does — it moved to `CreditoWebsaco`,
  * placed once in the document's own content flow instead (see that

@@ -148,6 +148,9 @@ export class ConsultasController {
     const bytes = await generarPdfVencimientosCartera(reporte, copropiedad, {
       inmuebleId: query.inmuebleId,
       rango: query.rango,
+      estadoInmueble: query.estadoInmueble,
+      estadoCartera: query.estadoCartera,
+      tipo: query.tipo,
     });
 
     res.set({

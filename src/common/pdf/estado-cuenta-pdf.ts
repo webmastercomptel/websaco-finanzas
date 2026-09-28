@@ -3,7 +3,7 @@ import { View } from '@react-pdf/renderer';
 import { formatoFecha, formatoPeso, formatoSaldoConFavor } from './pdf-helpers';
 import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
-import { FilaInfo } from './react/fila-info';
+import { BloqueInmueblePeriodo } from './react/bloque-inmueble-periodo';
 import { TablaResumen } from './react/tabla-resumen';
 import { TituloSeccion } from './react/titulo-seccion';
 import { Tabla } from './react/tabla';
@@ -30,18 +30,18 @@ const ANCHOS_MOVIMIENTOS = [0.9, 1.1, 2.2, 1, 1];
  * takes the computed contract directly — the service already resolved all
  * the data the JSON endpoint returns.
  *
- * Reuses `EncabezadoDocumento` — its own docblock already names Estado de
- * Cuenta as a second consumer alongside Factura. Closes with `CreditoWebsaco`
- * ("Generado por" + "Página i/N" in one row) instead of a separate footer —
- * that footer's own contact-info half would be redundant: `EncabezadoDocumento`'s
- * info block already shows Celular and Email up top.
+ * Reuses `EncabezadoDocumento` with `soloNit` (only NIT under the name) and
+ * the WebSACO mark per `showLogoOnDocuments`, then the same Inmueble/Nombre +
+ * Periodo block as Auxiliar de Cartera (`BloqueInmueblePeriodo`) — product
+ * request 2026-09-28, which also dropped the "Generado:" timestamp row the
+ * Auxiliar never had. Closes with `CreditoWebsaco` ("Generado con" +
+ * "Página i/N" in one row), the same footer every other document carries.
  */
 export async function generarPdfEstadoCuenta(
   estado: RespuestaEstadoCuenta,
   copropiedad: CopropiedadDocument,
   opciones?: { duplicado?: boolean },
 ): Promise<Buffer> {
-  const ahora = new Date();
   const estadoTexto =
     estado.diasMoraMaximo != null
       ? `${ESTADO_LABELS[estado.estado] ?? estado.estado} — ${estado.diasMoraMaximo} días de mora`
@@ -66,25 +66,14 @@ export async function generarPdfEstadoCuenta(
       copropiedad,
       titulo: 'Estado de Cuenta',
       mostrarLogo: copropiedad.showLogoOnDocuments,
+      soloNit: true,
     }),
 
-    createElement(FilaInfo, {
-      label: 'Generado:',
-      valor: `${ahora.toLocaleDateString('es-CO')} ${ahora.toLocaleTimeString('es-CO')}`,
-    }),
-    createElement(FilaInfo, {
-      label: 'Inmueble:',
-      valor: estado.inmuebleCodigo,
-    }),
-    estado.propietario
-      ? createElement(FilaInfo, {
-          label: 'Propietario:',
-          valor: estado.propietario,
-        })
-      : null,
-    createElement(FilaInfo, {
-      label: 'Periodo:',
-      valor: `${formatoFecha(estado.periodStart)} al ${formatoFecha(estado.periodEnd)}`,
+    createElement(BloqueInmueblePeriodo, {
+      inmuebleCodigo: estado.inmuebleCodigo,
+      propietario: estado.propietario,
+      desde: formatoFecha(estado.periodStart),
+      hasta: formatoFecha(estado.periodEnd),
     }),
 
     createElement(TituloSeccion, { texto: 'Resumen de Saldos' }),
