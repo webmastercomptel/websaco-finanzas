@@ -7,7 +7,7 @@ import { BadRequestException } from '@nestjs/common';
  * offset (Colombia, UTC-5 — this backend's own users) would otherwise roll
  * day 1 of the month back into the previous day.
  */
-const formatoFecha = (fecha: Date): string => {
+export const formatoFecha = (fecha: Date): string => {
   const dd = String(fecha.getUTCDate()).padStart(2, '0');
   const mm = String(fecha.getUTCMonth() + 1).padStart(2, '0');
   return `${dd}/${mm}/${fecha.getUTCFullYear()}`;
