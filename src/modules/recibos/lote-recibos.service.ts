@@ -8,7 +8,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Job, Queue, QueueEvents } from 'bullmq';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
   LoteRecibos,
   LoteRecibosDocument,
@@ -29,6 +29,8 @@ import {
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import type { NumeroAsignado } from '../../common/numeracion/numeracion.service';
 import { RecibosService } from './recibos.service';
 import { toLoteRecibos } from './lote-recibos.mapper';
 import type {
@@ -86,6 +88,7 @@ export class LoteRecibosService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
     private readonly recibosService: RecibosService,
+    private readonly numeracion: NumeracionService,
     @InjectConnection() private readonly connection: Connection,
     @InjectQueue(NOMBRE_COLA_APLICACION_LOTE_RECIBOS)
     private readonly cola?: Queue<
@@ -312,7 +315,10 @@ export class LoteRecibosService {
     id: string,
     coPropertyId: Types.ObjectId,
     accountId: string,
-    job?: Job<DatosTrabajoAplicacionLoteRecibos, ResultadoAplicacionLoteRecibos>,
+    job?: Job<
+      DatosTrabajoAplicacionLoteRecibos,
+      ResultadoAplicacionLoteRecibos
+    >,
   ): Promise<ResultadoAplicacionLoteRecibos> {
     void job; // reserved for future progress reporting — see plan's Review Focus
     const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
@@ -351,8 +357,24 @@ export class LoteRecibosService {
       .map((fila, indice) => ({ fila, indice }))
       .filter(({ fila }) => fila.reciboId === null && fila.inmuebleId !== null);
 
+    // Reserved ONCE, up front, OUTSIDE every tanda's transaction — see
+    // `NumeracionService.reservarBloqueDocumentos`'s own docblock for why:
+    // every row in this lote shares the SAME `(coPropertyId, lote.codigo)`
+    // counter, so letting each tanda's transaction `$inc` it individually
+    // would write-conflict concurrent tandas against each other.
+    const { numeros: numerosReservados } =
+      await this.numeracion.reservarBloqueDocumentos(
+        coPropertyId.toString(),
+        lote.codigo,
+        pendientes.length,
+      );
+    const pendientesConNumero = pendientes.map((p, i) => ({
+      ...p,
+      numero: numerosReservados[i],
+    }));
+
     const tandas = this.dividirEnTandas(
-      pendientes,
+      pendientesConNumero,
       TAMANO_TANDA_APLICACION_LOTE_RECIBOS,
     );
 
@@ -404,19 +426,40 @@ export class LoteRecibosService {
    * ANY row's failure, the whole tanda's transaction aborts and EVERY row
    * in it is recorded as errored — mirrors
    * `LotesFacturacionService.procesarTanda()`'s own catch-all exactly.
-   * `prepararCreacion` runs per row BEFORE this transaction opens (pure
-   * validation/reads, same as `RecibosService.crear()`'s own pre-transaction
-   * placement) — a validation failure there also aborts the row's place in
-   * the tanda the same way a `crearEnSesion` failure would, since both are
-   * awaited inside the same try block below.
+   * `prepararCreacion` runs per row INSIDE this transaction's callback (its
+   * own reads carry no `session`, same as `RecibosService.crear()`'s own
+   * pre-transaction placement — it just can't run any earlier here, since
+   * the whole point is one shared transaction per tanda, not one per row) —
+   * a validation failure there aborts the row's place in the tanda the same
+   * way a `crearEnSesion` failure would, since both are awaited inside the
+   * same try block below. A transient-transaction retry re-runs the whole
+   * callback, so a row whose `prepararCreacion` did a `copropiedades
+   * .findById` (no `cuentaDestino` on the dto) pays that read again on
+   * retry — harmless, just not free.
    *
-   * `tanda`'s element type is the same `{ fila, indice }` shape
-   * `ejecutarAplicacion`'s own `pendientes` array already builds inline,
-   * where `fila` is a `LoteRecibosFila` subdocument (the schema's own row
-   * type, `database/schemas/recibos/lote-recibos.schema.ts:20`).
+   * Two things a naive version of this got wrong, both fixed here:
+   *  - A row's `fila.reciboId` is set in-memory the instant its
+   *    `crearEnSesion` call resolves, BEFORE the tanda's transaction
+   *    actually commits. If a LATER row in the same tanda then fails, Mongo
+   *    rolls back every write the earlier row made — but that in-memory
+   *    `reciboId` would otherwise survive into `lote.save()`, pointing at a
+   *    Recibo that was never actually persisted. The catch below resets
+   *    `fila.reciboId = null` for every row in the tanda, not just the one
+   *    that threw.
+   *  - `this.connection.startSession()` itself can reject (e.g. the pool is
+   *    exhausted) — this now happens INSIDE the try, so `procesarTanda`
+   *    never rejects and `Promise.all` in `conLimiteDeConcurrencia` never
+   *    aborts the whole run because of one tanda's connection hiccup.
+   *
+   * `tanda`'s element type is the same `{ fila, indice, numero }` shape
+   * `ejecutarAplicacion`'s own `pendientesConNumero` array already builds
+   * inline, where `fila` is a `LoteRecibosFila` subdocument (the schema's
+   * own row type, `database/schemas/recibos/lote-recibos.schema.ts:20`) and
+   * `numero` is this row's pre-reserved `NumeroAsignado` (reserved as a
+   * whole block before any tanda opens — see `ejecutarAplicacion`).
    */
   private async procesarTanda(
-    tanda: { fila: LoteRecibosFila; indice: number }[],
+    tanda: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
     ctx: {
       lote: LoteRecibosDocument;
       coPropertyId: Types.ObjectId;
@@ -424,55 +467,71 @@ export class LoteRecibosService {
       errores: ErrorAplicacionLoteRecibos[];
     },
   ): Promise<void> {
-    const session = await this.connection.startSession();
+    let sesion: ClientSession | undefined;
+    let indiceCulpable: number | null = null;
     try {
+      sesion = await this.connection.startSession();
+      const session = sesion;
       await session.withTransaction(async () => {
-        for (const { fila, indice } of tanda) {
+        for (const { fila, indice, numero } of tanda) {
           fila.error = null; // limpia cualquier error de un intento anterior
-          const inmueble = await this.inmuebles
-            .findOne({ _id: fila.inmuebleId, coPropertyId: ctx.coPropertyId })
-            .session(session)
-            .exec();
-          if (!inmueble || !inmueble.holderId) {
-            throw new BadRequestException(
-              `El inmueble ${fila.inmuebleCodigo} ya no tiene titular asignado`,
+          try {
+            const inmueble = await this.inmuebles
+              .findOne({ _id: fila.inmuebleId, coPropertyId: ctx.coPropertyId })
+              .session(session)
+              .exec();
+            if (!inmueble || !inmueble.holderId) {
+              throw new BadRequestException(
+                `El inmueble ${fila.inmuebleCodigo} ya no tiene titular asignado`,
+              );
+            }
+
+            const dto = {
+              codigo: ctx.lote.codigo,
+              inmuebleId: inmueble._id.toString(),
+              terceroId: inmueble.holderId.toString(),
+              montoRecibido: fila.valorRecibido,
+              fechaRecibo: fila.fechaPago.toISOString(),
+              medioPago: ctx.lote.medioPago,
+              cuentaDestino: ctx.lote.cuentaDestino ?? undefined,
+              aplicacionAutomatica: true as const,
+            };
+
+            const contexto = await this.recibosService.prepararCreacion(dto);
+            const recibo = await this.recibosService.crearEnSesion(
+              session,
+              ctx.accountId,
+              dto,
+              contexto,
+              numero,
             );
+            fila.reciboId = new Types.ObjectId(recibo.id);
+          } catch (err) {
+            indiceCulpable = indice;
+            throw err;
           }
-
-          const dto = {
-            codigo: ctx.lote.codigo,
-            inmuebleId: inmueble._id.toString(),
-            terceroId: inmueble.holderId.toString(),
-            montoRecibido: fila.valorRecibido,
-            fechaRecibo: fila.fechaPago.toISOString(),
-            medioPago: ctx.lote.medioPago,
-            cuentaDestino: ctx.lote.cuentaDestino ?? undefined,
-            aplicacionAutomatica: true as const,
-          };
-
-          const contexto = await this.recibosService.prepararCreacion(dto);
-          const recibo = await this.recibosService.crearEnSesion(
-            session,
-            ctx.accountId,
-            dto,
-            contexto,
-          );
-          fila.reciboId = new Types.ObjectId(recibo.id);
-          void indice;
         }
       });
     } catch (err) {
       const mensaje = err instanceof Error ? err.message : 'Error desconocido';
       for (const { fila, indice } of tanda) {
-        fila.error = mensaje;
+        // La transacción entera de la tanda se revirtió — ninguna fila de
+        // esta tanda quedó realmente persistida, sin importar qué reciboId
+        // haya quedado asignado en memoria antes de que la fila culpable
+        // fallara.
+        fila.reciboId = null;
+        fila.error =
+          indice === indiceCulpable
+            ? mensaje
+            : `Revertida junto con la fila ${(indiceCulpable ?? indice) + 1}, que falló: ${mensaje}`;
         ctx.errores.push({
           fila: indice + 1,
           inmuebleCodigo: fila.inmuebleCodigo,
-          mensaje,
+          mensaje: fila.error,
         });
       }
     } finally {
-      await session.endSession();
+      await sesion?.endSession();
     }
   }
 

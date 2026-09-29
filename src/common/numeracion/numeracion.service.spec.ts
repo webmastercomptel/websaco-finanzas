@@ -576,3 +576,91 @@ describe('NumeracionService.siguienteDocumento — dentro de una transacción', 
     });
   });
 });
+
+describe('NumeracionService.reservarBloqueDocumentos', () => {
+  /** Unlike `consecutivosCon` (fixed +1, used by `siguienteDocumento`'s own
+   *  tests), this respects the actual `$inc.nextNumber` amount the update
+   *  document carries — the whole point of this method is incrementing by
+   *  `cantidad` in one atomic step, not by 1 repeatedly. */
+  const consecutivosBloqueCon = (fila: Record<string, unknown> | null) => {
+    const estado = fila ? { ...fila } : null;
+    return {
+      findOneAndUpdate: jest.fn(
+        (
+          _filtro: unknown,
+          update: { $inc: { nextNumber: number } },
+          _opciones?: unknown,
+        ) => ({
+          exec: () => {
+            if (!estado) return Promise.resolve(null);
+            const previo = { ...estado };
+            estado.nextNumber =
+              (estado.nextNumber as number) + update.$inc.nextNumber;
+            return Promise.resolve(previo);
+          },
+        }),
+      ),
+    };
+  };
+
+  it('rechaza un código sin fila configurada', async () => {
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivosBloqueCon(null) as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    await expect(
+      service.reservarBloqueDocumentos(COP, 'RC', 5),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('reserva `cantidad` números consecutivos en UNA sola operación, arrancando después del contador existente', async () => {
+    const consecutivos = consecutivosBloqueCon({
+      prefix: 'RC',
+      nextNumber: 10,
+    });
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const { numeros } = await service.reservarBloqueDocumentos(COP, 'RC', 3);
+
+    expect(numeros.map((n) => n.numero)).toEqual([11, 12, 13]);
+    expect(consecutivos.findOneAndUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('cantidad 0 no toca la base y devuelve un array vacío', async () => {
+    const consecutivos = consecutivosBloqueCon({
+      prefix: 'RC',
+      nextNumber: 10,
+    });
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const { numeros } = await service.reservarBloqueDocumentos(COP, 'RC', 0);
+
+    expect(numeros).toEqual([]);
+    expect(consecutivos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('llamadas consecutivas nunca repiten un número', async () => {
+    const consecutivos = consecutivosBloqueCon({ prefix: 'RC', nextNumber: 0 });
+    const service = new NumeracionService(
+      resolucionesCon(null) as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const primero = await service.reservarBloqueDocumentos(COP, 'RC', 2);
+    const segundo = await service.reservarBloqueDocumentos(COP, 'RC', 2);
+
+    expect(primero.numeros.map((n) => n.numero)).toEqual([1, 2]);
+    expect(segundo.numeros.map((n) => n.numero)).toEqual([3, 4]);
+  });
+});

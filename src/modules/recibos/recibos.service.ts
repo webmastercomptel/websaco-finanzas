@@ -64,6 +64,7 @@ import {
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { NumeracionService } from '../../common/numeracion/numeracion.service';
+import type { NumeroAsignado } from '../../common/numeracion/numeracion.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { exigirPeriodoFacturacionActual } from '../../common/contabilidad/periodo-calendario.util';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
@@ -424,21 +425,33 @@ export class RecibosService {
    * once per row, inside ONE shared `session.withTransaction(...)` per
    * tanda — this file's own class docblock is unaffected, only this
    * method's call sites multiply.
+   *
+   * `numeroReservado`, when supplied, skips the internal
+   * `numeracion.siguienteDocumento(...)` call and uses it as-is instead —
+   * the batch path pre-reserves a whole block of numbers OUTSIDE any
+   * transaction (`LoteRecibosService.ejecutarAplicacion`, via
+   * `NumeracionService.reservarBloqueDocumentos`) specifically so
+   * concurrent tandas never all `$inc` the SAME counter document from
+   * inside their own open transactions, which would write-conflict each
+   * other. `crear()`'s own single-row call below never passes this — it
+   * keeps calling `siguienteDocumento` exactly as before.
    */
   async crearEnSesion(
     session: ClientSession,
     accountId: string,
     dto: CrearReciboDto,
     contexto: ContextoCreacionRecibo,
+    numeroReservado?: NumeroAsignado,
   ): Promise<ReciboContract> {
-    const { coPropertyId, destinationAccount, diferenciaConfirmada } =
-      contexto;
+    const { coPropertyId, destinationAccount, diferenciaConfirmada } = contexto;
 
-    const numero = await this.numeracion.siguienteDocumento(
-      coPropertyId.toString(),
-      dto.codigo,
-      session,
-    );
+    const numero =
+      numeroReservado ??
+      (await this.numeracion.siguienteDocumento(
+        coPropertyId.toString(),
+        dto.codigo,
+        session,
+      ));
 
     const [creado] = await this.recibos.create(
       [

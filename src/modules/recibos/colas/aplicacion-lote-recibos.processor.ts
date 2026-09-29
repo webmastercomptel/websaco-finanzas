@@ -15,10 +15,7 @@ export class AplicacionLoteRecibosProcessor extends WorkerHost {
   }
 
   async process(
-    job: Job<
-      DatosTrabajoAplicacionLoteRecibos,
-      ResultadoAplicacionLoteRecibos
-    >,
+    job: Job<DatosTrabajoAplicacionLoteRecibos, ResultadoAplicacionLoteRecibos>,
   ): Promise<ResultadoAplicacionLoteRecibos> {
     return this.loteRecibos.ejecutarAplicacion(
       job.data.loteId,

@@ -297,6 +297,56 @@ export class NumeracionService {
   }
 
   /**
+   * Reserves `cantidad` sequential numbers in ONE atomic operation — the
+   * `ConsecutivoDocumento` counterpart to `reservarBloqueFacturas` (RC/NC/
+   * ND/NT categories have no DIAN resolution/range to clamp against, so
+   * this is the plain `$inc`-by-`cantidad` shape `reservarBloqueFacturas`
+   * itself falls back to when a coproperty has no active resolución).
+   *
+   * Exists so a batch caller (`LoteRecibosService.ejecutarAplicacion`) can
+   * reserve every number its whole run will need BEFORE opening any Mongo
+   * transaction, instead of every row calling `siguienteDocumento` from
+   * inside its own transaction — concurrent transactions all incrementing
+   * the SAME `(coPropertyId, code)` counter document would otherwise
+   * write-conflict against each other and force the MongoDB driver to
+   * retry each one's entire transaction callback from scratch.
+   *
+   * `siguienteDocumento` itself is untouched by this — purely additive,
+   * same reasoning `reservarBloqueFacturas`'s own docblock gives for
+   * leaving `siguienteFactura` alone.
+   */
+  async reservarBloqueDocumentos(
+    coPropertyId: string,
+    code: string,
+    cantidad: number,
+  ): Promise<{ numeros: NumeroAsignado[] }> {
+    if (cantidad <= 0) return { numeros: [] };
+
+    const previo = await this.consecutivos
+      .findOneAndUpdate(
+        { coPropertyId: new Types.ObjectId(coPropertyId), code },
+        { $inc: { nextNumber: cantidad } },
+        // The pre-increment document: its nextNumber is the last number
+        // already handed out, so the reserved range starts right after it.
+        { returnDocument: 'before' },
+      )
+      .exec();
+
+    if (!previo) {
+      throw new NotFoundException(
+        `Esta copropiedad no tiene configurado el tipo de documento "${code}". ` +
+          'Cargalo en Documentos antes de emitir uno.',
+      );
+    }
+
+    return {
+      numeros: Array.from({ length: cantidad }, (_, i) =>
+        componer(previo.prefix, previo.nextNumber + i + 1),
+      ),
+    };
+  }
+
+  /**
    * Reserves the next batch number for a coproperty's billing cycle.
    *
    * Same atomicity as siguienteDocumento, simpler shape: a Lote carries no
