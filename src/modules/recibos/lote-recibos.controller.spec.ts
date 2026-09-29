@@ -37,12 +37,10 @@ const construirController = (
       expiresAt: '2026-09-29T00:00:00.000Z',
     }),
     confirmar: jest.fn().mockResolvedValue({ objectPath: 'x' }),
-    urlLectura: jest
-      .fn()
-      .mockResolvedValue({
-        url: 'https://read-url',
-        expiresAt: '2026-09-29T00:00:00.000Z',
-      }),
+    urlLectura: jest.fn().mockResolvedValue({
+      url: 'https://read-url',
+      expiresAt: '2026-09-29T00:00:00.000Z',
+    }),
     ...overrides.generacion,
   };
 
