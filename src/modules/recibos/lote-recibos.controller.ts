@@ -22,6 +22,10 @@ import type {
 } from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
+import { RecibosService } from './recibos.service';
+import { GeneracionDocumentoService } from '../../common/documentos/generacion-documento.service';
+import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
+import type { SolicitudGeneracionReciboLote } from '../../contracts';
 
 /** `subject: 'Recibo'` throughout — a Recibos-por-lote batch never touches
  *  cartera on its own, every row becomes a real Recibo through
@@ -33,6 +37,8 @@ export class LoteRecibosController {
   constructor(
     private readonly loteRecibos: LoteRecibosService,
     private readonly presentacionDocumento: PresentacionDocumentoService,
+    private readonly recibosService: RecibosService,
+    private readonly generacion: GeneracionDocumentoService,
   ) {}
 
   @Get()
@@ -134,5 +140,88 @@ export class LoteRecibosController {
         generatedAt: presentacion?.generatedAt.toISOString() ?? null,
       };
     });
+  }
+
+  /**
+   * `solicitar-generacion` for the lote's combined receipt PDF — ONE file
+   * (one page per Recibo), anchored on the LOTE's own `_id` as
+   * `documentoId`, under the SAME `'RC'` code every individual Recibo
+   * already uses (every `presentacion_documento` query is scoped by the
+   * exact `documentoId` in hand, never a bare tipoDocumento scan, so no
+   * collision is possible). Uses the same shared
+   * `GeneracionDocumentoService.solicitar` helper Factura's own lote route
+   * uses (`LotesController.solicitarGeneracionFacturas`), which means this
+   * combined PDF renders through the exact same already-authored `'RC'`
+   * template every individual Recibo already prints from — no new template
+   * to author. Each row's `datos` is
+   * `RecibosService.datosImpresion(reciboId)`, called once per Recibo in
+   * the lote.
+   */
+  @Post(':id/recibos/solicitar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Recibo' })
+  async solicitarGeneracionRecibos(
+    @Param('id') id: string,
+  ): Promise<SolicitudGeneracionReciboLote> {
+    const lote = await this.loteRecibos.findOneRaw(id);
+
+    const reciboIds = lote.filas
+      .map((f) => f.reciboId)
+      .filter((rid): rid is Types.ObjectId => rid !== null);
+    if (reciboIds.length === 0) {
+      throw new NotFoundException(
+        `El lote de recibos ${id} todavía no tiene recibos generados`,
+      );
+    }
+
+    const recibos = await Promise.all(
+      reciboIds.map(async (reciboId) => ({
+        reciboId: reciboId.toString(),
+        datos: await this.recibosService.datosImpresion(reciboId.toString()),
+      })),
+    );
+
+    const { plantilla, objectPath, uploadUrl, expiresAt } =
+      await this.generacion.solicitar('RC', lote, recibos);
+
+    return { plantilla, objectPath, uploadUrl, expiresAt, recibos };
+  }
+
+  /**
+   * Confirms the frontend finished uploading the lote's combined receipt
+   * PDF. Unlike Factura's equivalent, there is no per-item snapshot to
+   * freeze afterward — each Recibo already keeps its own independent `'RC'`
+   * presentation pointer (keyed by ITS OWN `_id`), untouched by this
+   * combined file (keyed by the LOTE's `_id`) existing alongside it.
+   */
+  @Post(':id/recibos/confirmar-generacion')
+  @CheckAbility({ action: 'create', subject: 'Recibo' })
+  async confirmarGeneracionRecibos(
+    @Param('id') id: string,
+    @Body() dto: ConfirmarGeneracionDocumentoDto,
+  ): Promise<{ objectPath: string }> {
+    const lote = await this.loteRecibos.findOneRaw(id);
+    return this.generacion.confirmar('RC', lote, dto.objectPath);
+  }
+
+  /**
+   * A short-lived signed URL to read back this lote's combined receipt PDF
+   * — never a single Recibo's own document (that stays `GET
+   * /recibos/:id/documento-pdf`, unaffected by this feature).
+   */
+  @Get(':id/recibos-generados/url-lectura')
+  @CheckAbility({ action: 'read', subject: 'Recibo' })
+  async urlLecturaRecibos(
+    @Param('id') id: string,
+  ): Promise<{ url: string; expiresAt: string }> {
+    const lote = await this.loteRecibos.findOneRaw(id);
+    const presentacion = await this.presentacionDocumento.buscar(
+      'RC',
+      lote._id,
+    );
+    return this.generacion.urlLectura(
+      'El lote de recibos',
+      id,
+      presentacion ?? { objectPath: null, generatedAt: null },
+    );
   }
 }
