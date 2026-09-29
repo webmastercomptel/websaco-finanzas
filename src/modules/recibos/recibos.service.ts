@@ -308,8 +308,25 @@ export class RecibosService {
    * (`LoteRecibosService.ejecutarAplicacion`) can run it once per row
    * BEFORE it opens its own shared per-tanda transaction, exactly mirroring
    * where `crear()` itself runs this today (outside any transaction).
+   *
+   * `coPropertyId` is the CALLER's job to resolve, never this method's —
+   * `crear()` below resolves it from CLS right before calling, exactly as
+   * it always has; `LoteRecibosService.ejecutarAplicacion` resolves it
+   * once on the HTTP request thread (before it ever enqueues anything) and
+   * threads it through the whole batch job instead. Neither this method
+   * nor `resolverInmuebleCodigo` ever call `TenantContextService`
+   * themselves anymore — they used to, which broke the moment the batch
+   * path started running for real inside a BullMQ job
+   * (`AplicacionLoteRecibosProcessor`): CLS is only ever populated by HTTP
+   * middleware (`ClsModule.forRoot({ middleware: { mount: true } })`),
+   * never inside a queued job, so `resolveCoPropertyId()` threw "No hay
+   * una copropiedad activa" unconditionally in there — a real bug, found
+   * live in production on `POST /lotes-recibos/:id/aplicar`.
    */
-  async prepararCreacion(dto: CrearReciboDto): Promise<ContextoCreacionRecibo> {
+  async prepararCreacion(
+    dto: CrearReciboDto,
+    coPropertyId: Types.ObjectId,
+  ): Promise<ContextoCreacionRecibo> {
     if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
       throw new BadRequestException(
         'No se puede pedir aplicación manual y automática a la vez',
@@ -364,8 +381,6 @@ export class RecibosService {
           `o a Otros Ingresos.`,
       );
     }
-
-    const coPropertyId = this.tenant.resolveCoPropertyId();
 
     // Every document that carries a date passes through here before being
     // saved (see `PeriodoService.exigirAbierto`'s docblock) — otherwise a
@@ -652,7 +667,7 @@ export class RecibosService {
       final!,
       totalAplicadoAhora,
       enviarAOtrosIngresos ? 0 : sobranteReal,
-      await this.resolverInmuebleCodigo(final!.inmuebleId),
+      await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
     );
   }
 
@@ -672,7 +687,8 @@ export class RecibosService {
    * internally.
    */
   async crear(accountId: string, dto: CrearReciboDto): Promise<ReciboContract> {
-    const contexto = await this.prepararCreacion(dto);
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const contexto = await this.prepararCreacion(dto, coPropertyId);
     return this.transaccion((session) =>
       this.crearEnSesion(session, accountId, dto, contexto),
     );
@@ -1118,7 +1134,7 @@ export class RecibosService {
         final!,
         0,
         0,
-        await this.resolverInmuebleCodigo(final!.inmuebleId),
+        await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
       );
     });
   }
@@ -1320,7 +1336,7 @@ export class RecibosService {
       appliedAmount,
       unappliedAmount,
       aplicaciones,
-      await this.resolverInmuebleCodigo(recibo.inmuebleId),
+      await this.resolverInmuebleCodigo(recibo.inmuebleId, coPropertyId),
       numerosPorDocumento,
       presentacion,
     );
@@ -1395,9 +1411,16 @@ export class RecibosService {
    * field for it exists on `Recibo` itself (unlike `Factura.unitCode`), so
    * every reader looks it up here. Same fallback (`?? ''`) as
    * `CarteraPorConceptosService`'s identical live-resolve.
+   *
+   * `coPropertyId` is the caller's to resolve, same reasoning as
+   * `prepararCreacion` above — every call site already has it in scope
+   * from its own earlier `resolveCoPropertyId()` (or, from
+   * `crearEnSesion`, from the batch job's own threaded-through value).
    */
-  async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+  async resolverInmuebleCodigo(
+    inmuebleId: Types.ObjectId,
+    coPropertyId: Types.ObjectId,
+  ): Promise<string> {
     const inmueble = await this.inmuebles
       ?.findOne({ _id: inmuebleId, coPropertyId })
       .exec();

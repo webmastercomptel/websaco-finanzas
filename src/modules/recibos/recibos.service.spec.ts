@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Types } from 'mongoose';
@@ -343,6 +344,11 @@ const construirServicio = (opts: {
    *  facturación. Los tests de "candado de periodo de facturación" pasan
    *  su propio lote consolidado. */
   ultimoLoteConsolidado?: unknown;
+  /** Default: `tenantQueDevuelve(COP)`. Los tests del job en cola (sin CLS)
+   *  pasan un tenant que explota, para probar que `prepararCreacion`/
+   *  `resolverInmuebleCodigo` nunca lo llaman cuando reciben un
+   *  `coPropertyId` explícito. */
+  tenant?: TenantContextService;
 }) => {
   const session = sesionFalsa();
   const recibos = modeloRecibos(opts.reciboCreado);
@@ -389,7 +395,7 @@ const construirServicio = (opts: {
     saldoTotalDocumento as never,
     asientos as never,
     copropiedades as never,
-    tenantQueDevuelve(COP),
+    opts.tenant ?? tenantQueDevuelve(COP),
     numeracionQueEntrega('RC-1'),
     conexionCon(session),
     periodo,
@@ -4161,5 +4167,64 @@ describe('RecibosService — ciclo de vida completo', () => {
         .reduce((acc, m) => acc + m.amount, 0);
       expect(debitos).toBe(creditos);
     }
+  });
+});
+
+describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
+  // Regresión: `LoteRecibosService.ejecutarAplicacion` corre dentro de un job
+  // de BullMQ (`AplicacionLoteRecibosProcessor`), fuera de cualquier request
+  // HTTP — `TenantContextService.resolveCoPropertyId()` lee CLS, que
+  // `ClsModule.forRoot({ middleware: { mount: true } })` solo puebla vía
+  // middleware HTTP, nunca dentro de un worker de cola. Un tenant que
+  // explota reproduce exactamente ese entorno: si cualquiera de estos
+  // métodos igual llama a `resolveCoPropertyId()` en vez de usar el
+  // `coPropertyId` explícito que se le pasó, el mock revienta y prueba el
+  // bug real reportado en producción ("No hay una copropiedad activa para
+  // esta petición" al hacer clic en "Actualizar Cartera").
+  const tenantQueExplota = (): TenantContextService =>
+    ({
+      resolveCoPropertyId: () => {
+        throw new ForbiddenException(
+          'No hay una copropiedad activa para esta petición',
+        );
+      },
+    }) as unknown as TenantContextService;
+
+  it('prepararCreacion no llama a resolveCoPropertyId cuando recibe un coPropertyId explícito', async () => {
+    const { service } = construirServicio({
+      reciboCreado: { _id: new Types.ObjectId() },
+      tenant: tenantQueExplota(),
+      cuentasContables: [],
+      inmueble: { code: '301' },
+    });
+
+    await expect(
+      service.prepararCreacion(
+        {
+          codigo: 'RC',
+          inmuebleId: INMUEBLE.toString(),
+          terceroId: TERCERO.toString(),
+          montoRecibido: 100000,
+          fechaRecibo: new Date().toISOString(),
+          medioPago: 'transferencia',
+          cuentaDestino: '111005',
+          aplicacionAutomatica: true,
+        },
+        COP,
+      ),
+    ).resolves.toMatchObject({ coPropertyId: COP });
+  });
+
+  it('resolverInmuebleCodigo no llama a resolveCoPropertyId cuando recibe un coPropertyId explícito', async () => {
+    const { service } = construirServicio({
+      reciboCreado: { _id: new Types.ObjectId() },
+      tenant: tenantQueExplota(),
+      cuentasContables: [],
+      inmueble: { code: '301' },
+    });
+
+    await expect(service.resolverInmuebleCodigo(INMUEBLE, COP)).resolves.toBe(
+      '301',
+    );
   });
 });

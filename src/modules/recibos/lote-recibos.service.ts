@@ -497,7 +497,10 @@ export class LoteRecibosService {
               aplicacionAutomatica: true as const,
             };
 
-            const contexto = await this.recibosService.prepararCreacion(dto);
+            const contexto = await this.recibosService.prepararCreacion(
+              dto,
+              ctx.coPropertyId,
+            );
             const recibo = await this.recibosService.crearEnSesion(
               session,
               ctx.accountId,
