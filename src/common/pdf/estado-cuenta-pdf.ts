@@ -160,6 +160,55 @@ export async function generarPdfEstadoCuenta(
         )
       : null,
 
+    // The documents behind "Saldo anterior", closing with a Total line that
+    // matches it exactly (product request, 2026-09-28). The service
+    // returns any unexplained remainder separately — printed as its own
+    // line only when it isn't zero, so the total always ties out.
+    estado.documentosSaldoAnterior.length > 0 ||
+      estado.ajusteSaldoAnterior !== 0
+      ? createElement(
+          View,
+          null,
+          createElement(TituloSeccion, {
+            texto: 'Documentos que conforman el Saldo Anterior',
+          }),
+          createElement(Tabla, {
+            columnas: ['Tipo', 'Número', 'Fecha', 'Vence', 'Saldo'],
+            filas: [
+              ...estado.documentosSaldoAnterior.map((d) => [
+                d.tipo,
+                d.numeroCompleto,
+                formatoFecha(d.fecha),
+                d.vence ? formatoFecha(d.vence) : '',
+                formatoPeso(d.saldo),
+              ]),
+              ...(estado.ajusteSaldoAnterior !== 0
+                ? [
+                    [
+                      '',
+                      'Otros abonos y ajustes',
+                      '',
+                      '',
+                      formatoPeso(estado.ajusteSaldoAnterior),
+                    ],
+                  ]
+                : []),
+            ],
+            columnasNumericas: 1,
+            anchosRelativos: [0.6, 1.4, 1, 1, 1.2],
+            striped: true,
+            fontSize: 8.5,
+            filaTotales: [
+              'Total',
+              '',
+              '',
+              '',
+              formatoPeso(estado.saldoAnterior),
+            ],
+          }),
+        )
+      : null,
+
     createElement(CreditoWebsaco, {}),
   );
 

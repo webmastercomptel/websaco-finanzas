@@ -440,6 +440,73 @@ export class EstadoCuentaService {
       .filter((r) => r.fecha < desde)
       .reduce((sum, r) => sum + (r.cargo ?? 0) - (r.abono ?? 0), 0);
 
+    // Step 6b: the documents that make up `saldoAnterior`, by the SAME rule
+    // — each cargo dated before `desde`, minus every active application
+    // against it whose source document is also dated before `desde` (the
+    // same `origen.fecha ?? appliedAt` Step 4 dates its credit rows by).
+    // Nota Contable rows net to zero, so they never contribute. Whatever
+    // `saldoAnterior` holds that no listed document explains (a pre-period
+    // credit applied to a document issued later) is returned separately as
+    // `ajusteSaldoAnterior`, so the printed list always adds up.
+    const abonadoAntesPorDocumento = new Map<string, number>();
+    for (const app of aplicaciones) {
+      const origen =
+        app.sourceType === 'RC'
+          ? reciboMap.get(app.sourceId.toString())
+          : app.sourceType === 'NA'
+            ? naMap.get(app.sourceId.toString())
+            : ncMap.get(app.sourceId.toString());
+      if ((origen?.fecha ?? app.appliedAt) >= desde) continue;
+      const key = app.documentId.toString();
+      abonadoAntesPorDocumento.set(
+        key,
+        (abonadoAntesPorDocumento.get(key) ?? 0) + app.amountApplied,
+      );
+    }
+    const cargosAnteriores = [
+      ...facturas.map((f) => ({
+        id: f._id,
+        tipo: 'FV',
+        numeroCompleto: f.fullNumber,
+        fecha: f.issueDate,
+        vence: f.dueDate,
+        total: f.total,
+      })),
+      ...notasDebito.map((nd) => ({
+        id: nd._id,
+        tipo: 'ND',
+        numeroCompleto: nd.fullNumber,
+        fecha: nd.issueDate,
+        vence: nd.issueDate,
+        total: nd.total,
+      })),
+      ...saldosIniciales.map((si) => ({
+        id: si._id,
+        tipo: si.tipoDocumentoOriginal,
+        numeroCompleto: si.numeroOriginal,
+        fecha: si.fecha,
+        vence: si.fechaVencimiento,
+        total: si.total,
+      })),
+    ].filter((d) => d.fecha < desde);
+    const documentosSaldoAnterior = cargosAnteriores
+      .map((d) => ({
+        ...d,
+        saldo: d.total - (abonadoAntesPorDocumento.get(d.id.toString()) ?? 0),
+      }))
+      .filter((d) => d.saldo > 0)
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime())
+      .map((d) => ({
+        tipo: d.tipo,
+        numeroCompleto: d.numeroCompleto,
+        fecha: d.fecha.toISOString(),
+        vence: d.vence ? d.vence.toISOString() : null,
+        saldo: d.saldo,
+      }));
+    const ajusteSaldoAnterior =
+      saldoAnterior -
+      documentosSaldoAnterior.reduce((sum, d) => sum + d.saldo, 0);
+
     // Step 7: movements within [periodStart, periodEnd].
     //
     // Recibo ("RC") "pago" rows built off `AplicacionCartera` cruces (Step
@@ -612,6 +679,8 @@ export class EstadoCuentaService {
       diasMoraMaximo,
       movimientos,
       anticipos,
+      documentosSaldoAnterior,
+      ajusteSaldoAnterior,
     };
   }
 }
