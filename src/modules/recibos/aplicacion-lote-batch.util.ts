@@ -5,6 +5,14 @@ import type { SaldoInicialDocument } from '../../database/schemas/saldos-inicial
 import { claveMesDe } from '../../common/contabilidad/periodo.service';
 import { formatoFecha } from '../../common/contabilidad/periodo-calendario.util';
 import type { MarcasCuentaContable } from '../facturacion/asiento.builder';
+import {
+  calcularPartesDistribucion,
+  calcularPartesWaterfall,
+  cuentaCarteraDeLinea,
+  evaluarAplicacionConDescuento,
+  type DesgloseCarteraAplicacion,
+  type ResumenAplicacion,
+} from './cruce.util';
 
 /** The inmueble fields this whole module ever reads — deliberately narrow
  *  (never the full `InmuebleDocument`) so the pure functions below stay
@@ -133,4 +141,286 @@ export function validarFilaAplicacionLote(
   }
 
   return { valido: true };
+}
+
+/** One document this call actually applied money against — plain data, no
+ *  Mongo import, no write: `procesarFilasTandaAplicacionLote` (Task 6)
+ *  turns this into the real insert/update payloads (Task 5/7). */
+export interface AplicacionEnMemoria {
+  tipo: 'FV' | 'ND' | 'SI';
+  documentId: Types.ObjectId;
+  numeroDocumento: number;
+  montoAplicado: number;
+  discountApplied: number;
+  detalleConceptos: {
+    conceptoId: Types.ObjectId;
+    conceptName: string;
+    monto: number;
+  }[];
+  /** Always negative (a consumption) — the total to `$inc` onto this
+   *  document's `SaldoTotalDocumento` row. */
+  saldoTotalDocumentoDelta: number;
+  /** Always negative per entry — one per concepto this application touched. */
+  saldoCarteraDeltas: {
+    inmuebleId: Types.ObjectId;
+    conceptoId: Types.ObjectId;
+    delta: number;
+  }[];
+  carteraPorDocumentoDeltas: {
+    documentoId: Types.ObjectId;
+    conceptoId: Types.ObjectId;
+    inmuebleId: Types.ObjectId;
+    tipoDocumento: 'FV' | 'ND' | 'SI';
+    delta: number;
+  }[];
+}
+
+export interface ResultadoFifoEnMemoria {
+  aplicaciones: AplicacionEnMemoria[];
+  desglose: DesgloseCarteraAplicacion[];
+  montoAplicadoMora: number;
+  montoDescuentoTotal: number;
+  resumen: ResumenAplicacion[];
+  montoSinAplicar: number;
+}
+
+/**
+ * Reproduces `ejecutarAplicacionFifo`'s exact walk (`cruce.util.ts`) against
+ * `datosInmueble.candidatosOrdenados` — same priority order, same
+ * discount/mora rules, same waterfall/distribución split (via
+ * `calcularPartesWaterfall`/`calcularPartesDistribucion`, Task 1) — but
+ * reading/writing `datosInmueble.saldoPorDocumento` in place instead of
+ * `SaldoTotalDocumento` in Mongo. No `AplicacionInvalidaError`/`errores[]`:
+ * the only reason that DB version can find a candidate already exhausted
+ * is a genuinely concurrent writer, which cannot happen against this
+ * in-memory map within one tanda — a candidate at `saldoPendiente <= 0` is
+ * simply skipped (an earlier row in this same tanda already finished it
+ * off), never an error.
+ */
+export function aplicarFifoEnMemoria(
+  datosInmueble: DatosInmuebleParaAplicacionLote,
+  montoDisponible: number,
+  fechaRecibo: Date,
+  usesMemorandumAccounts: boolean,
+): ResultadoFifoEnMemoria {
+  const aplicaciones: AplicacionEnMemoria[] = [];
+  const desglose: DesgloseCarteraAplicacion[] = [];
+  let restante = montoDisponible;
+  let montoAplicadoMora = 0;
+  let montoDescuentoTotal = 0;
+  const resumen: ResumenAplicacion[] = [];
+
+  for (const candidato of datosInmueble.candidatosOrdenados) {
+    if (restante <= 0) break;
+    const documentoId = candidato.doc._id;
+    const clave = documentoId.toString();
+    const saldoPendiente = datosInmueble.saldoPorDocumento.get(clave) ?? 0;
+    if (saldoPendiente <= 0) continue;
+
+    if (candidato.tipo === 'ND') {
+      const nota = candidato.doc;
+      const monto = Math.min(restante, saldoPendiente);
+      const saldoPendienteDespues = saldoPendiente - monto;
+      datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
+
+      const partes = calcularPartesDistribucion(
+        [{ conceptoId: nota.conceptoId, monto: nota.total }],
+        monto,
+      );
+      desglose.push({
+        cuenta: null,
+        monto,
+        tipoDocumento: 'ND',
+        numeroDocumento: nota.number,
+      });
+      aplicaciones.push({
+        tipo: 'ND',
+        documentId: documentoId,
+        numeroDocumento: nota.number,
+        montoAplicado: monto,
+        discountApplied: 0,
+        detalleConceptos: [
+          {
+            conceptoId: nota.conceptoId,
+            conceptName: nota.description ?? 'Nota Débito',
+            monto,
+          },
+        ],
+        saldoTotalDocumentoDelta: -monto,
+        saldoCarteraDeltas: partes.map((p) => ({
+          inmuebleId: nota.inmuebleId,
+          conceptoId: p.conceptoId,
+          delta: -p.parte,
+        })),
+        carteraPorDocumentoDeltas: partes.map((p) => ({
+          documentoId,
+          conceptoId: p.conceptoId,
+          inmuebleId: nota.inmuebleId,
+          tipoDocumento: 'ND',
+          delta: -p.parte,
+        })),
+      });
+      resumen.push({
+        tipo: 'ND',
+        numero: nota.number,
+        completa: saldoPendienteDespues === 0,
+      });
+      restante -= monto;
+      continue;
+    }
+
+    if (candidato.tipo === 'FV') {
+      const factura = candidato.doc;
+      const { montoAFactura: montoSinCapar, montoDescuento } =
+        evaluarAplicacionConDescuento(
+          {
+            outstandingBalance: saldoPendiente,
+            discountAmount: factura.discountAmount,
+            discountDeadline: factura.discountDeadline,
+          },
+          fechaRecibo,
+          restante,
+        );
+      const monto = Math.min(montoSinCapar, saldoPendiente);
+      const cashUsado = monto - montoDescuento;
+      const saldoPendienteDespues = saldoPendiente - monto;
+      datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
+
+      const lines = factura.lines.map((l) => ({
+        conceptoId: l.conceptoId,
+        totalAmount: l.totalAmount,
+      }));
+      const partes = calcularPartesWaterfall(
+        { total: factura.total, outstandingBalance: saldoPendienteDespues, lines },
+        monto,
+        -1,
+      );
+      const detalleConceptos = partes.map((p) => {
+        const linea = factura.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+        return {
+          conceptoId: p.conceptoId,
+          conceptName: linea?.conceptName ?? 'Concepto',
+          monto: p.parte,
+        };
+      });
+      for (const p of partes) {
+        const linea = factura.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+        if (p.parte !== 0) {
+          desglose.push({
+            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+            monto: p.parte,
+            tipoDocumento: 'FV',
+            numeroDocumento: factura.number,
+          });
+        }
+        if (linea?.conceptKind === 'intereses') {
+          montoAplicadoMora += p.parte;
+        }
+      }
+      aplicaciones.push({
+        tipo: 'FV',
+        documentId: documentoId,
+        numeroDocumento: factura.number,
+        montoAplicado: monto,
+        discountApplied: montoDescuento,
+        detalleConceptos,
+        saldoTotalDocumentoDelta: -monto,
+        saldoCarteraDeltas: partes.map((p) => ({
+          inmuebleId: factura.inmuebleId,
+          conceptoId: p.conceptoId,
+          delta: -p.parte,
+        })),
+        carteraPorDocumentoDeltas: partes.map((p) => ({
+          documentoId,
+          conceptoId: p.conceptoId,
+          inmuebleId: factura.inmuebleId,
+          tipoDocumento: 'FV',
+          delta: -p.parte,
+        })),
+      });
+      resumen.push({
+        tipo: 'FV',
+        numero: factura.number,
+        completa: saldoPendienteDespues === 0,
+      });
+      montoDescuentoTotal += montoDescuento;
+      restante -= cashUsado;
+      continue;
+    }
+
+    // 'SI' — Saldo Inicial: same waterfall as FV, never a discount (a
+    // Saldo Inicial never carries `discountAmount`/`discountDeadline`).
+    const saldoInicial = candidato.doc;
+    const monto = Math.min(restante, saldoPendiente);
+    const saldoPendienteDespues = saldoPendiente - monto;
+    datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
+
+    const lines = saldoInicial.lines.map((l) => ({
+      conceptoId: l.conceptoId,
+      totalAmount: l.montoOriginal,
+    }));
+    const partes = calcularPartesWaterfall(
+      { total: saldoInicial.total, outstandingBalance: saldoPendienteDespues, lines },
+      monto,
+      -1,
+    );
+    const detalleConceptos = partes.map((p) => {
+      const linea = saldoInicial.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+      return {
+        conceptoId: p.conceptoId,
+        conceptName: linea?.conceptName ?? 'Concepto',
+        monto: p.parte,
+      };
+    });
+    for (const p of partes) {
+      const linea = saldoInicial.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+      if (p.parte !== 0) {
+        desglose.push({
+          cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+          monto: p.parte,
+          tipoDocumento: 'SI',
+          numeroDocumento: saldoInicial.number,
+        });
+      }
+      if (linea?.conceptKind === 'intereses') {
+        montoAplicadoMora += p.parte;
+      }
+    }
+    aplicaciones.push({
+      tipo: 'SI',
+      documentId: documentoId,
+      numeroDocumento: saldoInicial.number,
+      montoAplicado: monto,
+      discountApplied: 0,
+      detalleConceptos,
+      saldoTotalDocumentoDelta: -monto,
+      saldoCarteraDeltas: partes.map((p) => ({
+        inmuebleId: saldoInicial.inmuebleId,
+        conceptoId: p.conceptoId,
+        delta: -p.parte,
+      })),
+      carteraPorDocumentoDeltas: partes.map((p) => ({
+        documentoId,
+        conceptoId: p.conceptoId,
+        inmuebleId: saldoInicial.inmuebleId,
+        tipoDocumento: 'SI',
+        delta: -p.parte,
+      })),
+    });
+    resumen.push({
+      tipo: 'SI',
+      numero: saldoInicial.number,
+      completa: saldoPendienteDespues === 0,
+    });
+    restante -= monto;
+  }
+
+  return {
+    aplicaciones,
+    desglose,
+    montoAplicadoMora,
+    montoDescuentoTotal,
+    resumen,
+    montoSinAplicar: restante,
+  };
 }
