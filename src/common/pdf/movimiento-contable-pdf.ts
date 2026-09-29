@@ -73,7 +73,7 @@ const FUENTE_DATOS = 6.5;
 
 /** Same reasoning as `vencimientos-cartera-pdf.ts`'s own constant — manual
  *  per-page pagination instead of react-pdf's automatic `wrap`. */
-const FILAS_POR_PAGINA = 38;
+const FILAS_POR_PAGINA = 41;
 
 function formatoPesoCompacto(valor: number): string {
   return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
@@ -298,11 +298,13 @@ export async function generarPdfMovimientoContable(
         : texto,
     );
 
+  // Stamped in the footer next to "Generado con", not in the masthead —
+  // computed once so every page shows the same instant.
+  const fechaGeneracion = new Date();
   const masthead = createElement(EncabezadoInforme, {
     copropiedad,
     titulo: 'MOVIMIENTO CONTABLE',
     subtitulo,
-    fechaGeneracion: new Date(),
   });
   const filaEncabezadoTabla = createElement(
     View,
@@ -324,7 +326,7 @@ export async function generarPdfMovimientoContable(
               { style: styles.sinDatos },
               'No hay transacciones contables en el período seleccionado',
             ),
-            createElement(CreditoWebsaco, {}),
+            createElement(CreditoWebsaco, { fechaGeneracion }),
           ),
         ],
         { orientacion: 'horizontal' },
@@ -393,7 +395,7 @@ export async function generarPdfMovimientoContable(
           )
         : null,
 
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     );
   });
 

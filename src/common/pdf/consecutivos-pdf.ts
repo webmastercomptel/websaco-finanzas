@@ -145,11 +145,13 @@ export async function generarPdfConsecutivos(
         : texto,
     );
 
+  // Stamped in the footer next to "Generado con", not in the masthead —
+  // computed once so every page shows the same instant.
+  const fechaGeneracion = new Date();
   const masthead = createElement(EncabezadoInforme, {
     copropiedad,
     titulo: 'CONSECUTIVOS',
     subtitulo,
-    fechaGeneracion: new Date(),
   });
   const filaEncabezadoTabla = createElement(
     View,
@@ -171,7 +173,7 @@ export async function generarPdfConsecutivos(
               { style: styles.sinDatos },
               'No hay documentos de este tipo en el período seleccionado',
             ),
-            createElement(CreditoWebsaco, {}),
+            createElement(CreditoWebsaco, { fechaGeneracion }),
           ),
         ],
         { orientacion: 'horizontal' },
@@ -252,7 +254,7 @@ export async function generarPdfConsecutivos(
           )
         : null,
 
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     );
   });
 

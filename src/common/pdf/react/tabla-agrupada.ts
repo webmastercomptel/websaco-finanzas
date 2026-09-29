@@ -10,13 +10,28 @@ import { CreditoWebsaco } from './credito-websaco';
 import { FONDO_ZEBRA } from './paleta';
 import { truncarTexto } from './text-measure';
 
-/** Lines per page, counting every group header, data row and group
- *  subtotal as one line each — same 7pt data / 8pt header font and the
- *  same 30-line budget as `consulta-facturacion-pdf.ts` (product request,
- *  2026-09-28: "fuente del mismo tamaño del listado de facturación"). */
-const LINEAS_POR_PAGINA = 30;
+/** Same 7pt data / 8pt header font as `consulta-facturacion-pdf.ts`
+ *  (product request, 2026-09-28: "fuente del mismo tamaño del listado de
+ *  facturación"). */
 const FONT_TITULO = 8;
 const FONT_DATOS = 7;
+
+/** Rendered height (pt) of each line kind, measured off a real render: a
+ *  data row is 7pt text + 2×2pt padding; a subtotal adds its 0.5pt rule; a
+ *  group header adds its 4pt top margin. Pagination budgets by height, not
+ *  by line count — counting every line as equal left pages a third empty
+ *  whenever groups were short (reported 2026-09-29). */
+const ALTO_LINEA: Record<LineaTablaAgrupada['clase'], number> = {
+  documento: 11.5,
+  subtotal: 12,
+  grupo: 15.5,
+};
+
+/** Height (pt) available for lines on one landscape page: 564pt inside the
+ *  margins, minus the masthead with up to two subtitle lines and the column
+ *  header (~132pt), the TOTALES row (~20pt), the footer (~24pt) and a few
+ *  points of slack against line-height rounding. */
+const ALTO_DISPONIBLE = 395;
 
 /** Horizontal padding every cell carries. A merged cell spanning `n`
  *  columns carries the padding of all `n` (the extra on its right), or
@@ -94,28 +109,38 @@ export function numeroSinTipo(numeroCompleto: string): string {
   );
 }
 
-/** Splits groups of lines into pages of at most `LINEAS_POR_PAGINA`. A
+const altoDe = (lineas: LineaTablaAgrupada[]): number =>
+  lineas.reduce((sum, l) => sum + ALTO_LINEA[l.clase], 0);
+
+/** Splits groups of lines into pages of at most `ALTO_DISPONIBLE` points. A
  *  group that doesn't fit in what's left of the current page but fits on a
  *  fresh one starts a new page, so a group's header, rows and subtotal stay
- *  together; only a group longer than a whole page is split line by line. */
+ *  together; only a group taller than a whole page is split line by line. */
 function paginarGrupos(grupos: LineaTablaAgrupada[][]): LineaTablaAgrupada[][] {
   const paginas: LineaTablaAgrupada[][] = [];
   let actual: LineaTablaAgrupada[] = [];
+  let alto = 0;
   const cerrarPagina = (): void => {
     paginas.push(actual);
     actual = [];
+    alto = 0;
   };
   for (const grupo of grupos) {
+    const altoGrupo = altoDe(grupo);
     if (
       actual.length > 0 &&
-      actual.length + grupo.length > LINEAS_POR_PAGINA &&
-      grupo.length <= LINEAS_POR_PAGINA
+      alto + altoGrupo > ALTO_DISPONIBLE &&
+      altoGrupo <= ALTO_DISPONIBLE
     ) {
       cerrarPagina();
     }
     for (const linea of grupo) {
-      if (actual.length >= LINEAS_POR_PAGINA) cerrarPagina();
+      const altoLinea = ALTO_LINEA[linea.clase];
+      if (actual.length > 0 && alto + altoLinea > ALTO_DISPONIBLE) {
+        cerrarPagina();
+      }
       actual.push(linea);
+      alto += altoLinea;
     }
   }
   paginas.push(actual);
@@ -137,6 +162,8 @@ export function construirPdfTablaAgrupada(
   columnas: ColumnaTablaAgrupada[],
   grupos: LineaTablaAgrupada[][],
   totales: { etiqueta: string; valores: string[] },
+  /** Printed in the footer next to "Generado con" — see `CreditoWebsaco`. */
+  fechaGeneracion?: Date,
 ): Promise<Buffer> {
   const pesos = columnas.map((c) => c.peso);
   const pesoTotal = pesos.reduce((a, b) => a + b, 0);
@@ -284,7 +311,7 @@ export function construirPdfTablaAgrupada(
             'totales',
           )
         : null,
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     ),
   );
   return renderizarPdf(

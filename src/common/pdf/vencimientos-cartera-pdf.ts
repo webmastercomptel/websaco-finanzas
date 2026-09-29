@@ -131,21 +131,26 @@ export async function generarPdfVencimientosCartera(
   const partesSubtitulo = [
     tipo === 'resumido' ? 'Resumido' : 'Detallado',
     `Corte al ${formatoFecha(reporte.fechaCorte)}`,
-    filtro.estadoInmueble
-      ? `Inmuebles: ${ESTADO_INMUEBLE_LABELS[filtro.estadoInmueble]}`
-      : null,
     filtro.estadoCartera
       ? `Estado Cartera: ${ESTADO_CARTERA_LABELS[filtro.estadoCartera]}`
       : null,
   ].filter((p): p is string => p !== null);
-  // Computed once, outside any page — every page shows the same instant.
+  // The unit-status filter gets its own line under the title (product
+  // request, 2026-09-29), same as Cartera por Conceptos.
+  const lineaInmuebles = filtro.estadoInmueble
+    ? `Inmuebles: ${ESTADO_INMUEBLE_LABELS[filtro.estadoInmueble]}`
+    : null;
+  // Computed once, outside any page — every page's footer shows the same
+  // instant (stamped next to "Generado con", not in the masthead).
   const fechaGeneracion = new Date();
   const crearEncabezado = (): ReactElement =>
     createElement(EncabezadoInforme, {
       copropiedad,
       titulo: 'VENCIMIENTOS DE CARTERA',
-      subtitulo: partesSubtitulo.join(' — '),
-      fechaGeneracion,
+      subtitulo: [
+        partesSubtitulo.join(' — '),
+        ...(lineaInmuebles ? [lineaInmuebles] : []),
+      ],
     });
 
   const grupos = agruparPorInmueble(reporte.filas);
@@ -189,6 +194,7 @@ export async function generarPdfVencimientosCartera(
       ],
       lineas,
       totales,
+      fechaGeneracion,
     );
   }
 
@@ -238,5 +244,6 @@ export async function generarPdfVencimientosCartera(
     ],
     lineas,
     { ...totales, valores: ['', ...totales.valores] },
+    fechaGeneracion,
   );
 }

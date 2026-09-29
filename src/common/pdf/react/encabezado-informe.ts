@@ -86,12 +86,20 @@ const styles = StyleSheet.create({
  * 2026-09-20; `inmuebles-listado-pdf.ts` is the first caller to opt in) —
  * every other report keeps the original left-column placement, so this
  * defaults to `false` rather than moving it for everyone.
+ *
+ * `fechaGeneracion` omitted prints no "Generado" line at all — the cartera
+ * listings and Vencimientos (product request, 2026-09-28) stamp it in the
+ * footer instead, next to "Generado con" (`CreditoWebsaco`'s own
+ * `fechaGeneracion`).
  */
 export function EncabezadoInforme(props: {
   copropiedad: CopropiedadDocument;
   titulo: string;
-  subtitulo?: string;
-  fechaGeneracion: Date;
+  /** One line, or several stacked under the title (e.g. the unit-status
+   *  filter — "Inmuebles: Activos" — on its own line, product request
+   *  2026-09-29). */
+  subtitulo?: string | string[];
+  fechaGeneracion?: Date;
   fechaGeneracionEnTitulo?: boolean;
 }): ReactElement {
   const {
@@ -104,7 +112,9 @@ export function EncabezadoInforme(props: {
   const nit = copropiedad.taxId
     ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
     : '—';
-  const textoGenerado = `Generado: ${formatoFechaHora(fechaGeneracion)}`;
+  const textoGenerado = fechaGeneracion
+    ? `Generado: ${formatoFechaHora(fechaGeneracion)}`
+    : null;
 
   return createElement(
     View,
@@ -126,7 +136,7 @@ export function EncabezadoInforme(props: {
           createElement(Text, { style: styles.etiqueta }, 'NIT:'),
           createElement(Text, { style: styles.valor }, nit),
         ),
-        fechaGeneracionEnTitulo
+        fechaGeneracionEnTitulo || !fechaGeneracion
           ? null
           : createElement(
               View,
@@ -143,12 +153,17 @@ export function EncabezadoInforme(props: {
         View,
         { style: styles.derecha },
         createElement(Text, { style: styles.titulo }, titulo),
-        fechaGeneracionEnTitulo
+        fechaGeneracionEnTitulo && textoGenerado
           ? createElement(Text, { style: styles.subtitulo }, textoGenerado)
           : null,
-        subtitulo
-          ? createElement(Text, { style: styles.subtitulo }, subtitulo)
-          : null,
+        ...(Array.isArray(subtitulo)
+          ? subtitulo
+          : subtitulo
+            ? [subtitulo]
+            : []
+        ).map((linea, i) =>
+          createElement(Text, { key: i, style: styles.subtitulo }, linea),
+        ),
       ),
     ),
     createElement(View, { style: styles.separador }),

@@ -34,16 +34,14 @@ const MAX_CARGOS_INDIVIDUALES = 8;
  *  guarantee the masthead, table header AND `CreditoWebsaco` footer all
  *  repeat correctly once a report runs past one page.
  *
- *  612pt (landscape height) − 48pt (24pt top+bottom margin, see
- *  `document.ts`) ≈ 564pt usable. Budget: ~80pt masthead
- *  (`EncabezadoInforme`'s banner + info row + rule) + ~18pt table header
- *  (10pt text × ~1.2 line-height + 3pt padding + 3pt margin) + ~24pt
- *  footer (`CreditoWebsaco`, in-flow) ≈ 442pt left for rows, ÷ ~14pt/row
- *  (10pt text + 2pt vertical padding) ≈ 31 — kept well under that (24) for
- *  headroom against line-height estimate error and any cell wrapping to a
- *  second line at these column widths, since there's no way to render and
- *  visually verify the actual output from here. */
-const FILAS_POR_PAGINA_RESUMIDO = 24;
+ *  Measured off real renders (2026-09-29), not estimated: a 10pt row is
+ *  ~12.5pt tall, and 32 rows plus the GRAN TOTAL row, a two-line subtitle
+ *  and the footer are the most one landscape page holds — 33 already spills
+ *  the total onto a second page. The previous 24 left a third of every page
+ *  empty (reported). */
+const FILAS_POR_PAGINA_RESUMIDO = 32;
+
+const ESTADO_INMUEBLE_LABELS = { activo: 'Activos', inactivo: 'Inactivos' };
 
 const ESTADO_LABELS: Record<
   'vigente' | 'juridico' | 'dificil_recaudo',
@@ -146,6 +144,7 @@ function construirPdfPaginado(
     fontSize?: number;
     filaTotales: string[];
   },
+  fechaGeneracion: Date,
 ): Promise<Buffer> {
   const bloques = agruparEnPaginas(filas, filasPorPagina);
   const paginas = bloques.map((bloque, i) =>
@@ -162,7 +161,7 @@ function construirPdfPaginado(
         fontSize: tabla.fontSize,
         filaTotales: i === bloques.length - 1 ? tabla.filaTotales : undefined,
       }),
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     ),
   );
   return renderizarPdf(
@@ -196,7 +195,13 @@ export async function generarPdfCarteraPorConceptos(
   tipo: 'resumido' | 'detallado',
   conceptoId?: string,
   estado?: 'vigente' | 'juridico' | 'dificil_recaudo',
+  /** Already applied by the service (`ConsultarCarteraPorConceptosDto`) —
+   *  only named here, as its own "Inmuebles: …" line under the title. */
+  estadoInmueble?: 'activo' | 'inactivo',
 ): Promise<Buffer> {
+  const lineaInmuebles = estadoInmueble
+    ? `Inmuebles: ${ESTADO_INMUEBLE_LABELS[estadoInmueble]}`
+    : null;
   if (estado) {
     const filtrado: RespuestaCarteraPorConceptos = {
       ...reporte,
@@ -207,12 +212,26 @@ export async function generarPdfCarteraPorConceptos(
       copropiedad,
       fechaCorte,
       tipo,
+      lineaInmuebles,
       ESTADO_LABELS[estado],
     );
   }
   return conceptoId
-    ? generarPorConcepto(reporte, copropiedad, fechaCorte, tipo, conceptoId)
-    : generarPorInmueble(reporte, copropiedad, fechaCorte, tipo);
+    ? generarPorConcepto(
+        reporte,
+        copropiedad,
+        fechaCorte,
+        tipo,
+        conceptoId,
+        lineaInmuebles,
+      )
+    : generarPorInmueble(
+        reporte,
+        copropiedad,
+        fechaCorte,
+        tipo,
+        lineaInmuebles,
+      );
 }
 
 async function generarPorInmueble(
@@ -220,6 +239,7 @@ async function generarPorInmueble(
   copropiedad: CopropiedadDocument,
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
+  lineaInmuebles: string | null,
   estadoLabel?: string,
 ): Promise<Buffer> {
   // Computed once, outside any page — `EncabezadoInforme`'s own docblock:
@@ -230,8 +250,10 @@ async function generarPorInmueble(
     createElement(EncabezadoInforme, {
       copropiedad,
       titulo: 'CARTERA POR CONCEPTOS',
-      subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
-      fechaGeneracion,
+      subtitulo: [
+        `${tipo === 'resumido' ? 'Resumido' : 'Detallado'}${estadoLabel ? '' : ' Inmueble'} — Corte al ${formatoFecha(fechaCorte)}${estadoLabel ? ` — Estado: ${estadoLabel}` : ''}`,
+        ...(lineaInmuebles ? [lineaInmuebles] : []),
+      ],
     });
 
   if (reporte.grupos.length === 0) {
@@ -246,7 +268,7 @@ async function generarPorInmueble(
             { style: styles.sinDatos },
             'No hay cartera pendiente en esta copropiedad.',
           ),
-          createElement(CreditoWebsaco, {}),
+          createElement(CreditoWebsaco, { fechaGeneracion }),
         ),
         { orientacion: 'horizontal' },
       ),
@@ -334,6 +356,7 @@ async function generarPorInmueble(
           ...cargosDe(granTotalCargos),
         ],
       },
+      fechaGeneracion,
     );
   }
 
@@ -372,6 +395,7 @@ async function generarPorInmueble(
         ...cargosDe(granTotalCargos),
       ],
     },
+    fechaGeneracion,
   );
 }
 
@@ -381,6 +405,7 @@ async function generarPorConcepto(
   fechaCorte: string,
   tipo: 'resumido' | 'detallado',
   conceptoId: string,
+  lineaInmuebles: string | null,
 ): Promise<Buffer> {
   const nombreCargo =
     reporte.conceptos.find((c) => c.conceptoId === conceptoId)?.nombre ??
@@ -392,8 +417,10 @@ async function generarPorConcepto(
     createElement(EncabezadoInforme, {
       copropiedad,
       titulo: 'CARTERA POR CONCEPTOS',
-      subtitulo: `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
-      fechaGeneracion,
+      subtitulo: [
+        `${tipo === 'resumido' ? 'Resumido' : 'Detallado'} — ${nombreCargo} — Corte al ${formatoFecha(fechaCorte)}`,
+        ...(lineaInmuebles ? [lineaInmuebles] : []),
+      ],
     });
 
   const grupos = reporte.grupos
@@ -417,7 +444,7 @@ async function generarPorConcepto(
             { style: styles.sinDatos },
             'No hay cartera pendiente para este cargo en esta copropiedad.',
           ),
-          createElement(CreditoWebsaco, {}),
+          createElement(CreditoWebsaco, { fechaGeneracion }),
         ),
         { orientacion: 'horizontal' },
       ),
@@ -473,6 +500,7 @@ async function generarPorConcepto(
           formatoPorcentaje(granTotalCargo, granTotalSaldo),
         ],
       },
+      fechaGeneracion,
     );
   }
 
@@ -521,5 +549,6 @@ async function generarPorConcepto(
         formatoPorcentaje(granTotalCargo, granTotalSaldo),
       ],
     },
+    fechaGeneracion,
   );
 }

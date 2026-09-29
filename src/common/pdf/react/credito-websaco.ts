@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
 import { logoBytesWebsaco } from './logo-websaco';
+import { formatoFechaHora } from '../pdf-helpers';
 
 const styles = StyleSheet.create({
   contenedor: {
@@ -67,12 +68,19 @@ const styles = StyleSheet.create({
  * reseller of record and its NIT is required on the invoice itself, per
  * product decision. Only `factura-pdf.ts` passes it; every other caller
  * omits it and sees no change.
+ *
+ * `fechaGeneracion`, when passed, prints "· dd/mm/aaaa hh:mm:ss" right after
+ * the WebSACO mark — the cartera listings and Vencimientos moved their
+ * "Generado" timestamp here from the masthead (product request,
+ * 2026-09-28). Callers compute it once per report, so every page shows the
+ * same instant.
  */
 export function CreditoWebsaco(props: {
   idInmueble?: string | null;
   creditoComptel?: boolean;
+  fechaGeneracion?: Date;
 }): ReactElement {
-  const { idInmueble, creditoComptel } = props;
+  const { idInmueble, creditoComptel, fechaGeneracion } = props;
   return createElement(
     View,
     { style: styles.contenedor },
@@ -95,6 +103,13 @@ export function CreditoWebsaco(props: {
             Text,
             { style: styles.textoConMargenIzquierdo },
             '· Comptel-System Ltda, NIT 800.010.333-2',
+          )
+        : null,
+      fechaGeneracion
+        ? createElement(
+            Text,
+            { style: styles.textoConMargenIzquierdo },
+            `· ${formatoFechaHora(fechaGeneracion)}`,
           )
         : null,
     ),

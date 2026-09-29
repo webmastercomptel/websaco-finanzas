@@ -260,6 +260,7 @@ export class ConsultasController {
       query.tipo,
       query.conceptoId,
       query.estado,
+      query.estadoInmueble,
     );
 
     const sufijo = query.conceptoId
