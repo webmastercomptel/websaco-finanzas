@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -156,6 +157,15 @@ export class LoteRecibosController {
    * to author. Each row's `datos` is
    * `RecibosService.datosImpresion(reciboId)`, called once per Recibo in
    * the lote.
+   *
+   * Requires `lote.status === 'aplicado'` — `aplicar()` is best-effort
+   * (see `LoteRecibosService`'s own docblock), so a `cargado` lote can have
+   * SOME rows with a `reciboId` and others still pending retry. Confirming
+   * the combined PDF against that partial state would freeze it there
+   * forever: `PresentacionDocumentoService.confirmarGeneracion` refuses a
+   * second confirm for the same `(tipoDocumento, documentoId)`, so once the
+   * remaining rows are later applied, there would be no way to regenerate
+   * the file to include them.
    */
   @Post(':id/recibos/solicitar-generacion')
   @CheckAbility({ action: 'create', subject: 'Recibo' })
@@ -163,6 +173,12 @@ export class LoteRecibosController {
     @Param('id') id: string,
   ): Promise<SolicitudGeneracionReciboLote> {
     const lote = await this.loteRecibos.findOneRaw(id);
+
+    if (lote.status !== 'aplicado') {
+      throw new BadRequestException(
+        `El lote de recibos ${id} todavía no está aplicado — generá el combinado recién cuando todas las filas se hayan aplicado con éxito`,
+      );
+    }
 
     const reciboIds = lote.filas
       .map((f) => f.reciboId)

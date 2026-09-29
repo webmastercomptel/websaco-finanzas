@@ -12,9 +12,15 @@ const construirController = (
     generacion: Record<string, jest.Mock>;
     presentacionDocumento: Record<string, jest.Mock>;
     recibosService: Record<string, jest.Mock>;
+    estado: string;
   }> = {},
 ) => {
-  const loteDoc = { _id: LOTE_ID, coPropertyId: COPROPERTY_ID, filas };
+  const loteDoc = {
+    _id: LOTE_ID,
+    coPropertyId: COPROPERTY_ID,
+    status: overrides.estado ?? 'aplicado',
+    filas,
+  };
   const loteRecibos = {
     findOneRaw: jest.fn().mockResolvedValue(loteDoc),
   };
@@ -88,6 +94,18 @@ describe('LoteRecibosController.solicitarGeneracionRecibos', () => {
     await expect(
       controller.solicitarGeneracionRecibos(LOTE_ID.toString()),
     ).rejects.toThrow('todavía no tiene recibos generados');
+  });
+
+  it('rechaza generar el combinado mientras el lote está solo parcialmente aplicado — el combinado quedaría incompleto para siempre una vez confirmado', async () => {
+    const { controller, generacion } = construirController(
+      [{ reciboId: RECIBO_ID_1 }, { reciboId: null }],
+      { estado: 'cargado' },
+    );
+
+    await expect(
+      controller.solicitarGeneracionRecibos(LOTE_ID.toString()),
+    ).rejects.toThrow(/todavía no está aplicado/);
+    expect(generacion.solicitar).not.toHaveBeenCalled();
   });
 });
 
