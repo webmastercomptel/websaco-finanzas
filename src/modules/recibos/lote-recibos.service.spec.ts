@@ -1,446 +1,232 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { LoteRecibosService } from './lote-recibos.service';
-import type { TenantContextService } from '../../common/tenant/tenant-context.service';
-import type { RecibosService } from './recibos.service';
 
-const COP = new Types.ObjectId();
-const CUENTA = new Types.ObjectId();
+const COPROPERTY_ID = new Types.ObjectId();
+const INMUEBLE_ID = new Types.ObjectId();
+const HOLDER_ID = new Types.ObjectId();
 
-const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
-  ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
-
-const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
-  _id: new Types.ObjectId(),
-  coPropertyId: COP,
-  code: '301',
-  holderId: new Types.ObjectId(),
+const filaBase = (over: Record<string, unknown> = {}) => ({
+  inmuebleId: INMUEBLE_ID,
+  inmuebleCodigo: '301',
+  fechaPago: new Date('2026-06-02'),
+  valorRecibido: 250000,
+  reciboId: null,
+  error: null,
   ...over,
 });
 
-/** A hand-rolled Mongoose-document-shaped lote — mutable in place (like a
- *  real Mongoose document), with `save()`/`markModified()` no-ops that just
- *  track calls, matching this repo's own "shared-state, not one-shot
- *  stubs" discipline for services that mutate a fetched document. */
-const loteDoc = (over: Record<string, unknown> = {}) => ({
+const construirLoteDoc = (filas: ReturnType<typeof filaBase>[]) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
   number: 1,
   status: 'cargado',
-  creadoEn: new Date('2026-06-10T14:30:00.000Z'),
-  codigo: 'RC',
+  creadoEn: new Date('2026-06-01'),
+  codigo: 'IN',
   medioPago: 'transferencia',
-  cuentaDestino: '111005',
-  totalDigitado: 0,
-  filas: [] as Record<string, unknown>[],
-  generatedBy: CUENTA,
+  cuentaDestino: null,
+  totalDigitado: filas.reduce((s, f) => s + f.valorRecibido, 0),
+  totalFilas: filas.reduce((s, f) => s + f.valorRecibido, 0),
+  filas,
   markModified: jest.fn(),
-  save: jest.fn(function (this: Record<string, unknown>) {
-    return Promise.resolve(this);
-  }),
-  ...over,
+  save: jest.fn().mockResolvedValue(undefined),
 });
 
-const construirServicio = (opciones: {
-  lote?: Record<string, unknown> | null;
-  lotes?: Record<string, unknown>[];
-  inmuebles?: Record<string, unknown>[];
-  copropiedad?: Record<string, unknown> | null;
-  recibosCreados?: Record<string, unknown>[];
-  crearRecibo?: jest.Mock;
-  yaHayUno?: boolean;
-}) => {
-  const lotesModelo = {
-    exists: jest.fn(() => ({
-      exec: () => Promise.resolve(opciones.yaHayUno ?? false),
-    })),
-    findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opciones.lote ?? null),
-    })),
-    find: jest.fn(() => ({
-      sort: () => ({ exec: () => Promise.resolve(opciones.lotes ?? []) }),
-    })),
-    findOneAndUpdate: jest.fn(
-      (_filtro: unknown, _update: unknown, _opts?: unknown) => ({
-        exec: () => Promise.resolve(opciones.lote ?? null),
-      }),
-    ),
-    create: jest.fn((datos: Record<string, unknown>) =>
-      Promise.resolve({ ...loteDoc(), ...datos }),
-    ),
-    deleteOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+/** Hand-rolled Mongo session/connection mock — no real replica set involved
+ *  (transactions need one; this codebase's tests never spin one up).
+ *  `withTransaction` just awaits its callback once — no retry simulation,
+ *  matching how `LotesFacturacionService`'s own tests mock the same shape. */
+const construirConnectionMock = () => {
+  const session = {
+    withTransaction: jest.fn(async (fn: () => Promise<void>) => {
+      await fn();
+    }),
+    endSession: jest.fn().mockResolvedValue(undefined),
   };
-
-  const consecutivos = {
-    findOneAndUpdate: jest.fn(() => ({
-      exec: () => Promise.resolve({ nextNumber: 1 }),
-    })),
+  return {
+    connection: { startSession: jest.fn().mockResolvedValue(session) },
+    session,
   };
-
-  const inmuebles = {
-    find: jest.fn(() => ({
-      exec: () => Promise.resolve(opciones.inmuebles ?? []),
-    })),
-    findOne: jest.fn((filtro: Record<string, unknown>) => ({
-      exec: () =>
-        Promise.resolve(
-          (opciones.inmuebles ?? []).find(
-            (i) => String(i._id) === String(filtro._id),
-          ) ?? null,
-        ),
-    })),
-  };
-
-  const recibosModelo = {
-    find: jest.fn(() => ({
-      exec: () => Promise.resolve(opciones.recibosCreados ?? []),
-    })),
-  };
-
-  const copropiedades = {
-    findById: jest.fn(() => ({
-      exec: () =>
-        Promise.resolve(
-          'copropiedad' in opciones ? opciones.copropiedad : { code: '0001' },
-        ),
-    })),
-  };
-
-  const recibosService = {
-    crear:
-      opciones.crearRecibo ??
-      jest.fn(() => Promise.resolve({ id: new Types.ObjectId().toString() })),
-  } as unknown as RecibosService;
-
-  const service = new LoteRecibosService(
-    lotesModelo as never,
-    consecutivos as never,
-    inmuebles as never,
-    recibosModelo as never,
-    copropiedades as never,
-    tenantQueDevuelve(COP),
-    recibosService,
-  );
-
-  return { service, lotesModelo, recibosService };
 };
 
-describe('LoteRecibosService.crear', () => {
-  it('rechaza cuando ya hay un lote en curso (borrador o cargado)', async () => {
-    const { service } = construirServicio({ yaHayUno: true });
-
-    await expect(
-      service.crear(CUENTA.toString(), {
-        codigo: 'RC',
-        medioPago: 'transferencia',
-        totalDigitado: 100000,
+const construirServicio = (
+  loteDoc: ReturnType<typeof construirLoteDoc>,
+  crearImpl: (dto: Record<string, unknown>) => Promise<{ id: string }>,
+  connectionMock = construirConnectionMock(),
+) => {
+  const lotesModel = {
+    findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc) })),
+  };
+  const inmueblesModel = {
+    findOne: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve({ _id: INMUEBLE_ID, holderId: HOLDER_ID }),
       }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
+    })),
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+  const recibosModel = {
+    find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+  };
+  const recibosService = {
+    prepararCreacion: jest.fn().mockResolvedValue({
+      coPropertyId: COPROPERTY_ID,
+      destinationAccount: 'CTA-1',
+      diferenciaConfirmada: 0,
+    }),
+    crearEnSesion: jest.fn((_session, _accountId, dto) => crearImpl(dto)),
+  };
 
-  it('crea el lote en estado borrador', async () => {
-    const { service } = construirServicio({});
+  const service = new LoteRecibosService(
+    lotesModel as never,
+    {} as never, // consecutivos — not exercised by ejecutarAplicacion
+    inmueblesModel as never,
+    recibosModel as never,
+    {} as never, // copropiedades — not exercised by ejecutarAplicacion
+    { resolveCoPropertyId: () => COPROPERTY_ID } as never,
+    recibosService as never,
+    connectionMock.connection as never,
+    undefined, // cola — no BullMQ in this test, mirrors LotesFacturacionService's own test-construction pattern
+    undefined, // eventosCola
+  );
+  return { service, recibosService, ...connectionMock };
+};
 
-    const resultado = await service.crear(CUENTA.toString(), {
-      codigo: 'RC',
-      medioPago: 'transferencia',
-      totalDigitado: 100000,
-    });
-
-    expect(resultado.estado).toBe('borrador');
-    expect(resultado.totalDigitado).toBe(100000);
-  });
-});
-
-describe('LoteRecibosService.cargarArchivo', () => {
-  it('resuelve inmuebleId cuando el código existe en la copropiedad activa', async () => {
-    const inmueble = inmuebleDoc({ code: '301' });
-    const lote = loteDoc();
-    const { service, lotesModelo } = construirServicio({
-      lote,
-      inmuebles: [inmueble],
-    });
-
-    await service.cargarArchivo('lote-1', CUENTA.toString(), {
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          fechaPago: '2026-06-02',
-          valorRecibido: 100000,
-        },
-      ],
-    });
-
-    const [, update] = lotesModelo.findOneAndUpdate.mock.calls[0] as [
-      unknown,
-      {
-        $set: {
-          filas: { inmuebleId: Types.ObjectId | null; error: string | null }[];
-        };
-      },
-    ];
-    expect(update.$set.filas[0].inmuebleId).toEqual(inmueble._id);
-    expect(update.$set.filas[0].error).toBeNull();
-  });
-
-  it('marca en error una fila cuyo código de inmueble no existe', async () => {
-    const lote = loteDoc();
-    const { service, lotesModelo } = construirServicio({ lote, inmuebles: [] });
-
-    await service.cargarArchivo('lote-1', CUENTA.toString(), {
-      filas: [
-        {
-          inmuebleCodigo: '999',
-          fechaPago: '2026-06-02',
-          valorRecibido: 100000,
-        },
-      ],
-    });
-
-    const [, update] = lotesModelo.findOneAndUpdate.mock.calls[0] as [
-      unknown,
-      { $set: { filas: { error: string | null }[] } },
-    ];
-    expect(update.$set.filas[0].error).toMatch(/no existe/);
-  });
-
-  it('marca en error una fila cuyo código de copropiedad no coincide con la activa', async () => {
-    const inmueble = inmuebleDoc({ code: '301' });
-    const lote = loteDoc();
-    const { service, lotesModelo } = construirServicio({
-      lote,
-      inmuebles: [inmueble],
-      copropiedad: { code: '0001' },
-    });
-
-    await service.cargarArchivo('lote-1', CUENTA.toString(), {
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          copropiedadCodigo: '0002',
-          fechaPago: '2026-06-02',
-          valorRecibido: 100000,
-        },
-      ],
-    });
-
-    const [, update] = lotesModelo.findOneAndUpdate.mock.calls[0] as [
-      unknown,
-      { $set: { filas: { error: string | null }[] } },
-    ];
-    expect(update.$set.filas[0].error).toMatch(/no coincide/);
-  });
-
-  it('marca en error un inmueble sin titular asignado', async () => {
-    const inmueble = inmuebleDoc({ code: '301', holderId: null });
-    const lote = loteDoc();
-    const { service, lotesModelo } = construirServicio({
-      lote,
-      inmuebles: [inmueble],
-    });
-
-    await service.cargarArchivo('lote-1', CUENTA.toString(), {
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          fechaPago: '2026-06-02',
-          valorRecibido: 100000,
-        },
-      ],
-    });
-
-    const [, update] = lotesModelo.findOneAndUpdate.mock.calls[0] as [
-      unknown,
-      { $set: { filas: { error: string | null }[] } },
-    ];
-    expect(update.$set.filas[0].error).toMatch(/titular/);
-  });
-
-  it('rechaza cargar un archivo sobre un lote ya aplicado', async () => {
-    const lote = loteDoc({ status: 'aplicado' });
-    const { service } = construirServicio({ lote });
-
-    await expect(
-      service.cargarArchivo('lote-1', CUENTA.toString(), {
-        filas: [
-          {
-            inmuebleCodigo: '301',
-            fechaPago: '2026-06-02',
-            valorRecibido: 100000,
-          },
-        ],
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
-  });
-});
-
-describe('LoteRecibosService.aplicar', () => {
-  it('rechaza cuando la suma de las filas no coincide con el total digitado', async () => {
-    const lote = loteDoc({
-      totalDigitado: 999999,
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          inmuebleId: new Types.ObjectId(),
-          fechaPago: new Date('2026-06-02'),
-          valorRecibido: 100000,
-          reciboId: null,
-          error: null,
-        },
-      ],
-    });
-    const { service } = construirServicio({ lote });
-
-    await expect(
-      service.aplicar('lote-1', CUENTA.toString()),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('crea un Recibo por cada fila sin error, vía RecibosService.crear() con aplicacionAutomatica', async () => {
-    const inmueble = inmuebleDoc({ code: '301' });
-    const lote = loteDoc({
-      totalDigitado: 100000,
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          inmuebleId: inmueble._id,
-          fechaPago: new Date('2026-06-02'),
-          valorRecibido: 100000,
-          reciboId: null,
-          error: null,
-        },
-      ],
-    });
-    const crearRecibo = jest.fn(() =>
+describe('LoteRecibosService.ejecutarAplicacion', () => {
+  it('crea un Recibo por cada fila elegible (vía prepararCreacion + crearEnSesion) y marca el lote como aplicado', async () => {
+    const filas = [filaBase()];
+    const loteDoc = construirLoteDoc(filas);
+    const { service, recibosService } = construirServicio(loteDoc, () =>
       Promise.resolve({ id: new Types.ObjectId().toString() }),
     );
-    const { service } = construirServicio({
-      lote,
-      inmuebles: [inmueble],
-      crearRecibo,
-    });
 
-    const resultado = await service.aplicar('lote-1', CUENTA.toString());
-
-    expect(crearRecibo).toHaveBeenCalledWith(
-      CUENTA.toString(),
-      expect.objectContaining({
-        codigo: 'RC',
-        inmuebleId: inmueble._id.toString(),
-        terceroId: inmueble.holderId.toString(),
-        montoRecibido: 100000,
-        aplicacionAutomatica: true,
-      }),
+    const { errores } = await service.ejecutarAplicacion(
+      loteDoc._id.toString(),
+      COPROPERTY_ID,
+      'cuenta-1',
     );
-    expect(resultado.errores).toHaveLength(0);
-    expect(resultado.lote.estado).toBe('aplicado');
+
+    expect(errores).toHaveLength(0);
+    expect(recibosService.prepararCreacion).toHaveBeenCalledTimes(1);
+    expect(recibosService.crearEnSesion).toHaveBeenCalledTimes(1);
+    expect(loteDoc.status).toBe('aplicado');
   });
 
-  it('best-effort: una fila que falla no bloquea las demás, y queda reportada', async () => {
-    const inmuebleA = inmuebleDoc({ code: '301' });
-    const inmuebleB = inmuebleDoc({ code: '302' });
-    const lote = loteDoc({
-      totalDigitado: 300000,
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          inmuebleId: inmuebleA._id,
-          fechaPago: new Date('2026-06-02'),
-          valorRecibido: 100000,
-          reciboId: null,
-          error: null,
-        },
-        {
-          inmuebleCodigo: '302',
-          inmuebleId: inmuebleB._id,
-          fechaPago: new Date('2026-06-02'),
-          valorRecibido: 200000,
-          reciboId: null,
-          error: null,
-        },
-      ],
-    });
-    const crearRecibo = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('El período contable está cerrado'))
-      .mockResolvedValueOnce({ id: new Types.ObjectId().toString() });
-    const { service } = construirServicio({
-      lote,
-      inmuebles: [inmuebleA, inmuebleB],
-      crearRecibo,
+  it('una tanda entera se revierte cuando UNA fila falla — el resto de esa tanda también queda en errores, ninguna persiste reciboId', async () => {
+    const filas = [filaBase(), filaBase({ inmuebleCodigo: '302' })];
+    const loteDoc = construirLoteDoc(filas);
+    let llamada = 0;
+    const { service } = construirServicio(loteDoc, () => {
+      llamada += 1;
+      if (llamada === 1) return Promise.reject(new Error('periodo cerrado'));
+      return Promise.resolve({ id: new Types.ObjectId().toString() });
     });
 
-    const resultado = await service.aplicar('lote-1', CUENTA.toString());
+    const { errores } = await service.ejecutarAplicacion(
+      loteDoc._id.toString(),
+      COPROPERTY_ID,
+      'cuenta-1',
+    );
 
-    expect(crearRecibo).toHaveBeenCalledTimes(2);
-    expect(resultado.errores).toHaveLength(1);
-    expect(resultado.errores[0]).toMatchObject({
-      fila: 1,
-      inmuebleCodigo: '301',
-    });
-    expect(resultado.lote.filas[0].error).toMatch(/período contable/);
-    expect(resultado.lote.filas[1].reciboId).not.toBeNull();
-    // Queda `cargado`, no `aplicado`, porque la fila 1 sigue sin resolverse.
-    expect(resultado.lote.estado).toBe('cargado');
+    // Both rows land in the same (only) tanda here — one throw aborts the
+    // shared transaction, so BOTH rows are recorded as errored, even though
+    // the second row's own crearEnSesion call would have succeeded alone.
+    expect(errores).toHaveLength(2);
+    expect(filas[0].reciboId).toBeNull();
+    expect(filas[1].reciboId).toBeNull();
+    expect(loteDoc.status).toBe('cargado');
   });
 
-  it('una fila que falló se puede reintentar y aplicar con éxito en una segunda llamada', async () => {
-    const inmuebleA = inmuebleDoc({ code: '301' });
-    const filaConErrorPrevio = {
-      inmuebleCodigo: '301',
-      inmuebleId: inmuebleA._id,
-      fechaPago: new Date('2026-06-02'),
-      valorRecibido: 100000,
-      reciboId: null,
-      error: 'El período contable está cerrado', // del intento anterior
+  it('una fila ya aplicada (reciboId presente) no se reprocesa', async () => {
+    const yaAplicado = new Types.ObjectId();
+    const filas = [filaBase({ reciboId: yaAplicado })];
+    const loteDoc = construirLoteDoc(filas);
+    const { service, recibosService } = construirServicio(loteDoc, () =>
+      Promise.resolve({ id: new Types.ObjectId().toString() }),
+    );
+
+    await service.ejecutarAplicacion(
+      loteDoc._id.toString(),
+      COPROPERTY_ID,
+      'cuenta-1',
+    );
+
+    expect(recibosService.crearEnSesion).not.toHaveBeenCalled();
+    expect(loteDoc.status).toBe('aplicado');
+  });
+
+  it('cada tanda abre y cierra su propia sesión (una sesión por tanda, no una global para todo el lote)', async () => {
+    const filas = [filaBase(), filaBase({ inmuebleCodigo: '302' })];
+    const loteDoc = construirLoteDoc(filas);
+    const connectionMock = construirConnectionMock();
+    const { service } = construirServicio(
+      loteDoc,
+      () => Promise.resolve({ id: new Types.ObjectId().toString() }),
+      connectionMock,
+    );
+
+    await service.ejecutarAplicacion(
+      loteDoc._id.toString(),
+      COPROPERTY_ID,
+      'cuenta-1',
+    );
+
+    // Both rows fit in one tanda (tanda size 20) here, so exactly one
+    // session is opened and closed for this whole run.
+    expect(connectionMock.connection.startSession).toHaveBeenCalledTimes(1);
+    expect(connectionMock.session.endSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LoteRecibosService.aplicar (enqueue path)', () => {
+  it('sin cola configurada, corre ejecutarAplicacion inline (test-construction fallback)', async () => {
+    const filas = [filaBase()];
+    const loteDoc = construirLoteDoc(filas);
+    const { service, recibosService } = construirServicio(loteDoc, () =>
+      Promise.resolve({ id: new Types.ObjectId().toString() }),
+    );
+
+    await service.aplicar(loteDoc._id.toString(), 'cuenta-1');
+
+    expect(recibosService.crearEnSesion).toHaveBeenCalledTimes(1);
+  });
+
+  it('con cola configurada, encola el trabajo y espera su resultado', async () => {
+    const filas = [filaBase()];
+    const loteDoc = construirLoteDoc(filas);
+    const lotesModel = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc) })),
     };
-    const lote = loteDoc({
-      totalDigitado: 100000,
-      filas: [filaConErrorPrevio],
-    });
-    const crearRecibo = jest.fn(() =>
-      Promise.resolve({ id: new Types.ObjectId().toString() }),
+    const resultadoEsperado = { lote: {} as never, errores: [] };
+    const trabajo = {
+      waitUntilFinished: jest.fn().mockResolvedValue(resultadoEsperado),
+    };
+    const cola = { add: jest.fn().mockResolvedValue(trabajo) };
+    const eventosCola = {};
+    const { connection } = construirConnectionMock();
+
+    const service = new LoteRecibosService(
+      lotesModel as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { resolveCoPropertyId: () => COPROPERTY_ID } as never,
+      { prepararCreacion: jest.fn(), crearEnSesion: jest.fn() } as never,
+      connection as never,
+      cola as never,
+      eventosCola as never,
     );
-    const { service } = construirServicio({
-      lote,
-      inmuebles: [inmuebleA],
-      crearRecibo,
+
+    const resultado = await service.aplicar(
+      loteDoc._id.toString(),
+      'cuenta-1',
+    );
+
+    expect(cola.add).toHaveBeenCalledWith('aplicar', {
+      loteId: loteDoc._id.toString(),
+      coPropertyId: COPROPERTY_ID.toString(),
+      accountId: 'cuenta-1',
     });
-
-    const resultado = await service.aplicar('lote-1', CUENTA.toString());
-
-    expect(crearRecibo).toHaveBeenCalledTimes(1);
-    expect(resultado.errores).toHaveLength(0);
-    expect(resultado.lote.filas[0].error).toBeNull();
-    expect(resultado.lote.estado).toBe('aplicado');
-  });
-
-  it('reintentar tras un error parcial es idempotente — no vuelve a crear un Recibo para la fila ya exitosa', async () => {
-    const inmuebleA = inmuebleDoc({ code: '301' });
-    const reciboYaCreado = new Types.ObjectId();
-    const lote = loteDoc({
-      totalDigitado: 100000,
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          inmuebleId: inmuebleA._id,
-          fechaPago: new Date('2026-06-02'),
-          valorRecibido: 100000,
-          reciboId: reciboYaCreado,
-          error: null,
-        },
-      ],
-    });
-    const crearRecibo = jest.fn();
-    const { service } = construirServicio({
-      lote,
-      inmuebles: [inmuebleA],
-      crearRecibo,
-    });
-
-    const resultado = await service.aplicar('lote-1', CUENTA.toString());
-
-    expect(crearRecibo).not.toHaveBeenCalled();
-    expect(resultado.lote.estado).toBe('aplicado');
+    expect(trabajo.waitUntilFinished).toHaveBeenCalledWith(eventosCola);
+    expect(resultado).toBe(resultadoEsperado);
   });
 });

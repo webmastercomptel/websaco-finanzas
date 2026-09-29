@@ -1,14 +1,18 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Job, Queue, QueueEvents } from 'bullmq';
+import { Connection, Model, Types } from 'mongoose';
 import {
   LoteRecibos,
   LoteRecibosDocument,
+  LoteRecibosFila,
 } from '../../database/schemas/recibos/lote-recibos.schema';
 import { ConsecutivoLoteRecibos } from '../../database/schemas/recibos/consecutivo-lote-recibos.schema';
 import type { ConsecutivoLoteRecibosDocument } from '../../database/schemas/recibos/consecutivo-lote-recibos.schema';
@@ -33,6 +37,24 @@ import type {
 } from '../../contracts';
 import type { CrearLoteRecibosDto } from './dto/crear-lote-recibos.dto';
 import type { CargarFilasLoteRecibosDto } from './dto/cargar-filas-lote-recibos.dto';
+import {
+  NOMBRE_COLA_APLICACION_LOTE_RECIBOS,
+  NOMBRE_TRABAJO_APLICACION_LOTE_RECIBOS,
+  EVENTOS_COLA_APLICACION_LOTE_RECIBOS,
+  type DatosTrabajoAplicacionLoteRecibos,
+  type ResultadoAplicacionLoteRecibos,
+} from './colas/aplicacion-lote-recibos.constants';
+
+/** Rows per shared transaction — matches
+ *  `TAMANO_TANDA_CONSOLIDACION` (facturación) exactly; same conservative
+ *  default for the same shared/free-tier Atlas cluster. */
+const TAMANO_TANDA_APLICACION_LOTE_RECIBOS = 20;
+/** Tandas in flight at once — matches
+ *  `CONCURRENCIA_TANDAS_CONSOLIDACION`. Concurrency is only ever ACROSS
+ *  tandas; a tanda's own rows run sequentially inside its one shared
+ *  session (a session's operations cannot run concurrently against
+ *  themselves). */
+const CONCURRENCIA_TANDAS_APLICACION_LOTE_RECIBOS = 4;
 
 /**
  * Bulk Recibo de Caja intake: a coproperty's bank hands over a flat file of
@@ -64,6 +86,14 @@ export class LoteRecibosService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
     private readonly recibosService: RecibosService,
+    @InjectConnection() private readonly connection: Connection,
+    @InjectQueue(NOMBRE_COLA_APLICACION_LOTE_RECIBOS)
+    private readonly cola?: Queue<
+      DatosTrabajoAplicacionLoteRecibos,
+      ResultadoAplicacionLoteRecibos
+    >,
+    @Inject(EVENTOS_COLA_APLICACION_LOTE_RECIBOS)
+    private readonly eventosCola?: QueueEvents,
   ) {}
 
   private async siguienteNumero(coPropertyId: Types.ObjectId): Promise<number> {
@@ -238,22 +268,53 @@ export class LoteRecibosService {
   }
 
   /**
-   * Creates one real Recibo per row without an error, via
-   * `RecibosService.crear()` completely unchanged — same FIFO application,
-   * same asiento, same period guards a single automatic-mode Recibo already
-   * enforces. Best-effort (mirrors `LotesFacturacionService.consolidar()`):
-   * a row that fails does not block the rest, its own `error` is recorded,
-   * and retrying `aplicar()` afterward is safe — a row that already has a
-   * `reciboId` is never re-processed.
+   * Resolves the tenant on the request thread (CLS context is only valid
+   * here, not inside a queued job — same reasoning as
+   * `LotesFacturacionService.consolidar()`), then either enqueues the real
+   * work or, when no queue is wired (hand-constructed unit tests), runs it
+   * inline — mirrors that same method's own `if (!this.cola ...)` fallback.
    */
   async aplicar(
     id: string,
     accountId: string,
-  ): Promise<{
-    lote: LoteRecibosContract;
-    errores: ErrorAplicacionLoteRecibos[];
-  }> {
+  ): Promise<ResultadoAplicacionLoteRecibos> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
+
+    if (!this.cola || !this.eventosCola) {
+      return this.ejecutarAplicacion(id, coPropertyId, accountId);
+    }
+
+    const trabajo = await this.cola.add(
+      NOMBRE_TRABAJO_APLICACION_LOTE_RECIBOS,
+      { loteId: id, coPropertyId: coPropertyId.toString(), accountId },
+    );
+    return trabajo.waitUntilFinished(this.eventosCola);
+  }
+
+  /**
+   * Creates one real Recibo per row without an error, via
+   * `RecibosService.prepararCreacion`/`crearEnSesion` — same FIFO
+   * application, same asiento, same period guards a single automatic-mode
+   * Recibo already enforces, now run inside a transaction THIS method opens
+   * and shares across a whole tanda of rows, instead of one transaction per
+   * row. Best-effort per row within what a tanda's rollback allows (mirrors
+   * `LotesFacturacionService.ejecutarConsolidacion()`): a row that fails
+   * takes its WHOLE tanda down with it — every row in that tanda is
+   * recorded as errored, none of them persist a `reciboId` — and retrying
+   * `aplicar()` afterward is safe, since a row that already has a
+   * `reciboId` is never re-processed.
+   *
+   * Tandas run with bounded concurrency
+   * (`CONCURRENCIA_TANDAS_APLICACION_LOTE_RECIBOS`); each tanda's own rows
+   * run strictly sequentially inside that tanda's one shared session.
+   */
+  async ejecutarAplicacion(
+    id: string,
+    coPropertyId: Types.ObjectId,
+    accountId: string,
+    job?: Job<DatosTrabajoAplicacionLoteRecibos, ResultadoAplicacionLoteRecibos>,
+  ): Promise<ResultadoAplicacionLoteRecibos> {
+    void job; // reserved for future progress reporting — see plan's Review Focus
     const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
@@ -286,46 +347,21 @@ export class LoteRecibosService {
     }
 
     const errores: ErrorAplicacionLoteRecibos[] = [];
+    const pendientes = lote.filas
+      .map((fila, indice) => ({ fila, indice }))
+      .filter(({ fila }) => fila.reciboId === null && fila.inmuebleId !== null);
 
-    for (const [indice, fila] of lote.filas.entries()) {
-      if (fila.reciboId !== null) continue; // ya se aplicó, no se repite
-      if (!fila.inmuebleId) continue; // problema permanente, no reintentable
+    const tandas = this.dividirEnTandas(
+      pendientes,
+      TAMANO_TANDA_APLICACION_LOTE_RECIBOS,
+    );
 
-      fila.error = null; // limpia cualquier error de un intento anterior
-
-      try {
-        const inmueble = await this.inmuebles
-          .findOne({ _id: fila.inmuebleId, coPropertyId })
-          .exec();
-        if (!inmueble || !inmueble.holderId) {
-          throw new BadRequestException(
-            `El inmueble ${fila.inmuebleCodigo} ya no tiene titular asignado`,
-          );
-        }
-
-        const recibo = await this.recibosService.crear(accountId, {
-          codigo: lote.codigo,
-          inmuebleId: inmueble._id.toString(),
-          terceroId: inmueble.holderId.toString(),
-          montoRecibido: fila.valorRecibido,
-          fechaRecibo: fila.fechaPago.toISOString(),
-          medioPago: lote.medioPago,
-          cuentaDestino: lote.cuentaDestino ?? undefined,
-          aplicacionAutomatica: true,
-        });
-
-        fila.reciboId = new Types.ObjectId(recibo.id);
-      } catch (err) {
-        const mensaje =
-          err instanceof Error ? err.message : 'Error desconocido';
-        fila.error = mensaje;
-        errores.push({
-          fila: indice + 1,
-          inmuebleCodigo: fila.inmuebleCodigo,
-          mensaje,
-        });
-      }
-    }
+    await this.conLimiteDeConcurrencia(
+      tandas,
+      CONCURRENCIA_TANDAS_APLICACION_LOTE_RECIBOS,
+      (tanda) =>
+        this.procesarTanda(tanda, { lote, coPropertyId, accountId, errores }),
+    );
 
     // `filasElegibles` holds the SAME subdocument references the loop above
     // just mutated in place — checking `reciboId` now reflects exactly
@@ -344,5 +380,125 @@ export class LoteRecibosService {
 
     const numeros = await this.numerosPorRecibo(lote, coPropertyId);
     return { lote: toLoteRecibos(lote, numeros), errores };
+  }
+
+  /** Splits `items` into fixed-size groups, in order — pure, no I/O. Two
+   *  rows for the same `inmuebleId` land in different tandas whenever
+   *  they're more than `tamano` positions apart in `pendientes`; this
+   *  function has no notion of `inmuebleId` at all, by design (grouping by
+   *  inmueble would need cross-tanda FIFO ordering guarantees this plan
+   *  deliberately does not build — see the plan's Review Focus). */
+  private dividirEnTandas<T>(items: T[], tamano: number): T[][] {
+    const tandas: T[][] = [];
+    for (let i = 0; i < items.length; i += tamano) {
+      tandas.push(items.slice(i, i + tamano));
+    }
+    return tandas;
+  }
+
+  /**
+   * One shared Mongo transaction for every row in `tanda` — opens its own
+   * session (never reused across tandas, so tandas running concurrently
+   * via `conLimiteDeConcurrencia` never share one), calls
+   * `RecibosService.crearEnSesion` sequentially per row inside it, and on
+   * ANY row's failure, the whole tanda's transaction aborts and EVERY row
+   * in it is recorded as errored — mirrors
+   * `LotesFacturacionService.procesarTanda()`'s own catch-all exactly.
+   * `prepararCreacion` runs per row BEFORE this transaction opens (pure
+   * validation/reads, same as `RecibosService.crear()`'s own pre-transaction
+   * placement) — a validation failure there also aborts the row's place in
+   * the tanda the same way a `crearEnSesion` failure would, since both are
+   * awaited inside the same try block below.
+   *
+   * `tanda`'s element type is the same `{ fila, indice }` shape
+   * `ejecutarAplicacion`'s own `pendientes` array already builds inline,
+   * where `fila` is a `LoteRecibosFila` subdocument (the schema's own row
+   * type, `database/schemas/recibos/lote-recibos.schema.ts:20`).
+   */
+  private async procesarTanda(
+    tanda: { fila: LoteRecibosFila; indice: number }[],
+    ctx: {
+      lote: LoteRecibosDocument;
+      coPropertyId: Types.ObjectId;
+      accountId: string;
+      errores: ErrorAplicacionLoteRecibos[];
+    },
+  ): Promise<void> {
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        for (const { fila, indice } of tanda) {
+          fila.error = null; // limpia cualquier error de un intento anterior
+          const inmueble = await this.inmuebles
+            .findOne({ _id: fila.inmuebleId, coPropertyId: ctx.coPropertyId })
+            .session(session)
+            .exec();
+          if (!inmueble || !inmueble.holderId) {
+            throw new BadRequestException(
+              `El inmueble ${fila.inmuebleCodigo} ya no tiene titular asignado`,
+            );
+          }
+
+          const dto = {
+            codigo: ctx.lote.codigo,
+            inmuebleId: inmueble._id.toString(),
+            terceroId: inmueble.holderId.toString(),
+            montoRecibido: fila.valorRecibido,
+            fechaRecibo: fila.fechaPago.toISOString(),
+            medioPago: ctx.lote.medioPago,
+            cuentaDestino: ctx.lote.cuentaDestino ?? undefined,
+            aplicacionAutomatica: true as const,
+          };
+
+          const contexto = await this.recibosService.prepararCreacion(dto);
+          const recibo = await this.recibosService.crearEnSesion(
+            session,
+            ctx.accountId,
+            dto,
+            contexto,
+          );
+          fila.reciboId = new Types.ObjectId(recibo.id);
+          void indice;
+        }
+      });
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : 'Error desconocido';
+      for (const { fila, indice } of tanda) {
+        fila.error = mensaje;
+        ctx.errores.push({
+          fila: indice + 1,
+          inmuebleCodigo: fila.inmuebleCodigo,
+          mensaje,
+        });
+      }
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /** Bounded-concurrency worker pool — same shape as
+   *  `LotesFacturacionService`'s own private helper of the same name.
+   *  Duplicated rather than extracted to a shared util: these two callers
+   *  belong to independently-evolving modules and the helper is ~15 lines;
+   *  sharing it would couple them for no current benefit. Now runs over
+   *  TANDAS, not individual rows. */
+  private async conLimiteDeConcurrencia<T>(
+    items: T[],
+    concurrencia: number,
+    tarea: (item: T) => Promise<void>,
+  ): Promise<void> {
+    let siguiente = 0;
+    const trabajador = async (): Promise<void> => {
+      while (siguiente < items.length) {
+        const indice = siguiente;
+        siguiente += 1;
+        await tarea(items[indice]);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(concurrencia, items.length) }, () =>
+        trabajador(),
+      ),
+    );
   }
 }
