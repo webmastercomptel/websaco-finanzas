@@ -7,6 +7,12 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
+  claveMesDe,
+  type CandidatoAplicacionLote,
+  type DatosBatchAplicacionLote,
+  type DatosInmuebleParaAplicacionLote,
+} from './aplicacion-lote-batch.util';
+import {
   Recibo,
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
@@ -428,6 +434,216 @@ export class RecibosService {
     }
 
     return { coPropertyId, destinationAccount, diferenciaConfirmada };
+  }
+
+  /** `claveMesDe("2026-06")` back to a real `Date` inside that month — any
+   *  day works, `PeriodoService.estaAbierto` only reads year/month off it
+   *  (`periodoDe`, same local-time reasoning that produced the key). */
+  private fechaDeClaveMes(clave: string): Date {
+    const [year, month] = clave.split('-').map(Number);
+    return new Date(year, month - 1, 1);
+  }
+
+  /**
+   * Everything `ejecutarAplicacion()`'s batch-lote path needs, read ONCE
+   * for the WHOLE lote instead of once per row — design §4. Mirrors, but
+   * never calls, `prepararCreacion`'s own reads: `lotes.exigirSinLoteAbierto`
+   * (still throws and aborts before any tanda starts — a refusal costs no
+   * session, same placement `prepararCreacion` already uses),
+   * `lotes.obtenerUltimoConsolidado`, and `periodo.estaAbierto` (this
+   * method's non-throwing twin of `prepararCreacion`'s
+   * `periodo.exigirAbierto`, resolved per DISTINCT month instead of per
+   * row). Candidate documents (Facturas/Notas Débito/Saldos Iniciales) are
+   * fetched via `$in` across EVERY inmueble in the lote, then
+   * cross-referenced against `SaldoTotalDocumento` for a positive balance
+   * — same two-step `ejecutarAplicacionFifo` already does per inmueble,
+   * just widened to the whole batch.
+   */
+  async leerDatosBatchAplicacionLote(
+    coPropertyId: Types.ObjectId,
+    inmuebleIds: Types.ObjectId[],
+    fechasPago: Date[],
+  ): Promise<DatosBatchAplicacionLote> {
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+
+    const mesesDistintos = [...new Set(fechasPago.map((f) => claveMesDe(f)))];
+
+    const [
+      inmuebles,
+      facturas,
+      notasDebito,
+      saldosIniciales,
+      copropiedad,
+      cuentasContables,
+      ultimoLoteFacturacion,
+      periodosAbiertos,
+    ] = await Promise.all([
+      this.inmuebles!.find({ coPropertyId, _id: { $in: inmuebleIds } }).exec(),
+      this.facturas
+        .find({
+          coPropertyId,
+          inmuebleId: { $in: inmuebleIds },
+          status: 'emitida',
+        })
+        .exec(),
+      this.notasDebito
+        .find({
+          coPropertyId,
+          inmuebleId: { $in: inmuebleIds },
+          status: 'emitida',
+        })
+        .exec(),
+      this.saldosIniciales
+        ? this.saldosIniciales
+            .find({
+              coPropertyId,
+              inmuebleId: { $in: inmuebleIds },
+              status: 'activo',
+            })
+            .exec()
+        : Promise.resolve([]),
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.cuentasContables!.find({ coPropertyId }).exec(),
+      this.lotes.obtenerUltimoConsolidado(coPropertyId.toString()),
+      Promise.all(
+        mesesDistintos.map((clave) =>
+          this.periodo.estaAbierto(
+            coPropertyId.toString(),
+            this.fechaDeClaveMes(clave),
+          ),
+        ),
+      ),
+    ]);
+
+    const idsDocumentos = [
+      ...facturas.map((f) => f._id),
+      ...notasDebito.map((n) => n._id),
+      ...saldosIniciales.map((s) => s._id),
+    ];
+    const saldosTotales = idsDocumentos.length
+      ? await this.saldoTotalDocumento
+          .find({
+            documentoId: { $in: idsDocumentos },
+            saldoPendiente: { $gt: 0 },
+          })
+          .exec()
+      : [];
+    const saldoPorDocumentoGlobal = new Map(
+      saldosTotales.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
+    const cuentasContablesPorCodigo = new Map(
+      cuentasContables.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
+        },
+      ]),
+    );
+    const periodoAbiertoPorMes = new Map(
+      mesesDistintos.map((clave, i) => [clave, periodosAbiertos[i]]),
+    );
+
+    const indicePorInmueble = new Map<string, DatosInmuebleParaAplicacionLote>();
+    for (const inmueble of inmuebles) {
+      const facturasAbiertas = facturas
+        .filter(
+          (f) =>
+            f.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(f._id.toString()),
+        )
+        .sort(
+          (a, b) =>
+            (a.dueDate ?? a.issueDate).getTime() -
+            (b.dueDate ?? b.issueDate).getTime(),
+        );
+      const notasDebitoAbiertas = notasDebito
+        .filter(
+          (n) =>
+            n.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(n._id.toString()),
+        )
+        .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
+      const saldosInicialesAbiertos = saldosIniciales
+        .filter(
+          (s) =>
+            s.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(s._id.toString()),
+        )
+        .sort(
+          (a, b) => a.fechaVencimiento.getTime() - b.fechaVencimiento.getTime(),
+        );
+
+      const prioridadDe = (c: CandidatoAplicacionLote): Date =>
+        c.tipo === 'FV'
+          ? (c.doc.dueDate ?? c.doc.issueDate)
+          : c.tipo === 'ND'
+            ? c.doc.issueDate
+            : c.doc.fechaVencimiento;
+
+      const candidatosOrdenados: CandidatoAplicacionLote[] = [
+        ...facturasAbiertas.map(
+          (doc): CandidatoAplicacionLote => ({ tipo: 'FV', doc }),
+        ),
+        ...notasDebitoAbiertas.map(
+          (doc): CandidatoAplicacionLote => ({ tipo: 'ND', doc }),
+        ),
+        ...saldosInicialesAbiertos.map(
+          (doc): CandidatoAplicacionLote => ({ tipo: 'SI', doc }),
+        ),
+      ].sort((a, b) => {
+        const porFecha = prioridadDe(a).getTime() - prioridadDe(b).getTime();
+        if (porFecha !== 0) return porFecha;
+        return a.doc._id.toString().localeCompare(b.doc._id.toString());
+      });
+
+      const saldoPorDocumento = new Map<string, number>();
+      for (const { doc } of candidatosOrdenados) {
+        saldoPorDocumento.set(
+          doc._id.toString(),
+          saldoPorDocumentoGlobal.get(doc._id.toString())!,
+        );
+      }
+
+      indicePorInmueble.set(inmueble._id.toString(), {
+        inmueble: {
+          _id: inmueble._id,
+          holderId: inmueble.holderId,
+          code: inmueble.code,
+        },
+        candidatosOrdenados,
+        saldoPorDocumento,
+      });
+    }
+
+    return {
+      indicePorInmueble,
+      copropiedad: copropiedad
+        ? {
+            receivablesAccount: copropiedad.receivablesAccount,
+            advancesAccount: copropiedad.advancesAccount,
+            discountsDebitAccount: copropiedad.discountsDebitAccount,
+            usesMemorandumAccounts: copropiedad.usesMemorandumAccounts,
+            memorandumDebitAccount: copropiedad.memorandumDebitAccount,
+            memorandumCreditAccount: copropiedad.memorandumCreditAccount,
+            defaultCostCentre: copropiedad.defaultCostCentre,
+            cashFlowCode: copropiedad.cashFlowCode,
+            defaultBankAccountCode: copropiedad.defaultBankAccountCode,
+          }
+        : null,
+      cuentasContablesPorCodigo,
+      periodoAbiertoPorMes,
+      ultimoLoteFacturacion: ultimoLoteFacturacion
+        ? {
+            periodStart: ultimoLoteFacturacion.periodStart,
+            periodEnd: ultimoLoteFacturacion.periodEnd,
+          }
+        : null,
+    };
   }
 
   /**

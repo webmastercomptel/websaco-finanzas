@@ -4228,3 +4228,164 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
     );
   });
 });
+
+// `RecibosService`, `Types` and `ConflictException` are already imported at
+// the top of this file — only this new type import is needed.
+import type { DatosBatchAplicacionLote } from './aplicacion-lote-batch.util';
+
+describe('RecibosService.leerDatosBatchAplicacionLote', () => {
+  const COP = new Types.ObjectId();
+  const INMUEBLE_ID = new Types.ObjectId();
+  const FACTURA_ABIERTA_ID = new Types.ObjectId();
+  const FACTURA_CERRADA_ID = new Types.ObjectId();
+
+  const construirServicio = (opciones: {
+    facturas?: Record<string, unknown>[];
+    saldosTotales?: Record<string, unknown>[];
+    copropiedad?: Record<string, unknown> | null;
+    cuentasContables?: Record<string, unknown>[];
+    ultimoLoteFacturacion?: Record<string, unknown> | null;
+    periodoAbierto?: boolean;
+  }) => {
+    const exigirSinLoteAbierto = jest.fn().mockResolvedValue(undefined);
+    const lotesFacturacion = {
+      exigirSinLoteAbierto,
+      obtenerUltimoConsolidado: jest
+        .fn()
+        .mockResolvedValue(opciones.ultimoLoteFacturacion ?? null),
+    };
+    const inmueblesModel = {
+      find: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve([
+            { _id: INMUEBLE_ID, holderId: new Types.ObjectId(), code: '301' },
+          ]),
+      })),
+    };
+    const facturasModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.facturas ?? []),
+      })),
+    };
+    const vacioModel = { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) };
+    const saldoTotalDocumentoModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.saldosTotales ?? []),
+      })),
+    };
+    const copropiedadesModel = {
+      findById: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.copropiedad ?? null),
+      })),
+    };
+    const cuentasContablesModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.cuentasContables ?? []),
+      })),
+    };
+    const periodo = {
+      estaAbierto: jest.fn().mockResolvedValue(opciones.periodoAbierto ?? true),
+    };
+
+    const service = new RecibosService(
+      {} as never, // recibos
+      {} as never, // aplicaciones
+      facturasModel as never,
+      {} as never, // saldos (SaldoCartera)
+      {} as never, // carteraPorDocumento
+      saldoTotalDocumentoModel as never,
+      {} as never, // asientos
+      copropiedadesModel as never,
+      {} as never, // tenant
+      {} as never, // numeracion
+      {} as never, // connection
+      periodo as never,
+      vacioModel as never, // notasDebito
+      lotesFacturacion as never,
+      {} as never, // saldoDocumentoOrigen
+      cuentasContablesModel as never,
+      inmueblesModel as never,
+      undefined, // terceros
+      undefined, // presentacionDocumento
+      vacioModel as never, // saldosIniciales
+      undefined, // tituloDocumento
+    );
+
+    return { service, exigirSinLoteAbierto, periodo };
+  };
+
+  const facturaDoc = (over: Record<string, unknown> = {}) => ({
+    _id: FACTURA_ABIERTA_ID,
+    inmuebleId: INMUEBLE_ID,
+    issueDate: new Date('2026-05-01'),
+    dueDate: new Date('2026-05-10'),
+    ...over,
+  });
+
+  it('abre el índice con la factura abierta y deja afuera la que ya no tiene saldo', async () => {
+    const { service } = construirServicio({
+      facturas: [
+        facturaDoc(),
+        facturaDoc({ _id: FACTURA_CERRADA_ID, dueDate: new Date('2026-05-15') }),
+      ],
+      saldosTotales: [
+        { documentoId: FACTURA_ABIERTA_ID, saldoPendiente: 100000 },
+        // FACTURA_CERRADA_ID no aparece — su saldo ya llegó a 0.
+      ],
+    });
+
+    const datos = await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      [new Date('2026-06-02')],
+    );
+
+    const datosInmueble = datos.indicePorInmueble.get(INMUEBLE_ID.toString())!;
+    expect(datosInmueble.candidatosOrdenados).toHaveLength(1);
+    expect(datosInmueble.candidatosOrdenados[0]).toMatchObject({ tipo: 'FV' });
+    expect(datosInmueble.saldoPorDocumento.get(FACTURA_ABIERTA_ID.toString())).toBe(
+      100000,
+    );
+  });
+
+  it('llama exigirSinLoteAbierto (una sola vez para todo el lote) y propaga su rechazo', async () => {
+    const { service, exigirSinLoteAbierto } = construirServicio({});
+    exigirSinLoteAbierto.mockRejectedValueOnce(new ConflictException('lote abierto'));
+
+    await expect(
+      service.leerDatosBatchAplicacionLote(COP, [INMUEBLE_ID], [new Date('2026-06-02')]),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(exigirSinLoteAbierto).toHaveBeenCalledTimes(1);
+  });
+
+  it('resuelve el estado abierto/cerrado por cada mes DISTINTO entre las fechas de pago, no por fila', async () => {
+    const { service, periodo } = construirServicio({});
+
+    await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      // Local-time constructors, not ISO strings — `new Date('2026-07-01')`
+      // parses as UTC midnight, which this repo (America/Bogota, UTC-5)
+      // reads back as June 30 local, silently collapsing to the SAME month
+      // as the other two dates and breaking this test's "two distinct
+      // months" premise. See Task 2's own ledgered ruling.
+      [new Date(2026, 5, 2), new Date(2026, 5, 20), new Date(2026, 6, 1)],
+    );
+
+    // Dos meses distintos (junio, julio) entre tres fechas — una sola
+    // llamada por mes, no una por fila.
+    expect(periodo.estaAbierto).toHaveBeenCalledTimes(2);
+  });
+
+  it('deja copropiedad null cuando no existe, sin lanzar', async () => {
+    const { service } = construirServicio({ copropiedad: null });
+
+    const datos = await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      [new Date('2026-06-02')],
+    );
+
+    expect(datos.copropiedad).toBeNull();
+  });
+});
