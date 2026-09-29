@@ -1,6 +1,7 @@
 import { createElement, type ReactElement } from 'react';
 import { Image, StyleSheet, Text, View } from '@react-pdf/renderer';
 import { logoBytesWebsaco } from './logo-websaco';
+import { formatoFechaHora } from '../pdf-helpers';
 
 const styles = StyleSheet.create({
   contenedor: {
@@ -33,7 +34,7 @@ const styles = StyleSheet.create({
 });
 
 /**
- * "Generado por [logo]" on the left, "Página i/N" on the right — same
+ * "Generado con [logo]" on the left, "Página i/N" on the right — same
  * faint gray, same size, read as one unit instead of two unrelated footer
  * concerns. Placed in-flow, once per `<Page>` element it's put on — for a
  * single-page document (Factura, Estado de Cuenta) that's naturally once
@@ -58,7 +59,7 @@ const styles = StyleSheet.create({
  * mention most SaaS invoicing tools use.
  *
  * `idInmueble`, when passed, prints "ID: <code>" immediately before
- * "Generado por" — the unit-code field a Factura/Prefactura used to show
+ * "Generado con" — the unit-code field a Factura/Prefactura used to show
  * elsewhere and was later dropped; restored here rather than in the body,
  * per product decision. Every other caller omits it and sees no change.
  *
@@ -67,12 +68,19 @@ const styles = StyleSheet.create({
  * reseller of record and its NIT is required on the invoice itself, per
  * product decision. Only `factura-pdf.ts` passes it; every other caller
  * omits it and sees no change.
+ *
+ * `fechaGeneracion`, when passed, prints "· dd/mm/aaaa hh:mm:ss" right after
+ * the WebSACO mark — the cartera listings and Vencimientos moved their
+ * "Generado" timestamp here from the masthead (product request,
+ * 2026-09-28). Callers compute it once per report, so every page shows the
+ * same instant.
  */
 export function CreditoWebsaco(props: {
   idInmueble?: string | null;
   creditoComptel?: boolean;
+  fechaGeneracion?: Date;
 }): ReactElement {
-  const { idInmueble, creditoComptel } = props;
+  const { idInmueble, creditoComptel, fechaGeneracion } = props;
   return createElement(
     View,
     { style: styles.contenedor },
@@ -86,13 +94,22 @@ export function CreditoWebsaco(props: {
             `ID: ${idInmueble}`,
           )
         : null,
-      createElement(Text, { style: styles.textoConMargen }, 'Generado por'),
+      // "con", not "por" — the software is the tool, not the author of the
+      // building's own document (product request, 2026-09-28).
+      createElement(Text, { style: styles.textoConMargen }, 'Generado con'),
       createElement(Image, { style: styles.logo, src: logoBytesWebsaco() }),
       creditoComptel
         ? createElement(
             Text,
             { style: styles.textoConMargenIzquierdo },
             '· Comptel-System Ltda, NIT 800.010.333-2',
+          )
+        : null,
+      fechaGeneracion
+        ? createElement(
+            Text,
+            { style: styles.textoConMargenIzquierdo },
+            `· ${formatoFechaHora(fechaGeneracion)}`,
           )
         : null,
     ),

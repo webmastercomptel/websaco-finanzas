@@ -48,8 +48,14 @@ const calcularDiasMora = (fechaReferencia: Date, corte: Date): number => {
   return Math.max(0, Math.floor(diff / 86_400_000));
 };
 
-/** Fixed aging buckets, in display order — never a per-coproperty catalog. */
-const RANGOS: { key: RangoVencimiento; etiqueta: string; max: number }[] = [
+/** Fixed aging buckets, in display order — never a per-coproperty catalog.
+ *  Exported so Cartera General's "Análisis de Vencimientos" buckets exactly
+ *  the same way instead of keeping a second copy that could drift. */
+export const RANGOS: {
+  key: RangoVencimiento;
+  etiqueta: string;
+  max: number;
+}[] = [
   { key: 'dias_1_30', etiqueta: 'Vencida de 1-30', max: 30 },
   { key: 'dias_31_60', etiqueta: 'Vencida de 31-60', max: 60 },
   { key: 'dias_61_90', etiqueta: 'Vencida de 61-90', max: 90 },
@@ -61,7 +67,7 @@ const RANGOS: { key: RangoVencimiento; etiqueta: string; max: number }[] = [
 ];
 
 /** Classifies an already-overdue document (diasVencido >= 0) into a bucket. */
-const clasificarVencido = (diasVencido: number): RangoVencimiento => {
+export const clasificarVencido = (diasVencido: number): RangoVencimiento => {
   for (const r of RANGOS) {
     if (diasVencido <= r.max) return r.key;
   }
@@ -215,8 +221,30 @@ export class VencimientosCarteraService {
       filasRaw.map((r) => r.inmuebleId),
     );
 
+    // Unit status first, then collection status, both before bucketing — so
+    // the aging totals, `totalCartera` and every later on-screen/PDF filter
+    // (inmueble, rango) only ever see the units that survived them. A unit
+    // with no `collectionStatus` reads as `vigente`, the schema's default.
+    const statusEsperado = query.estadoInmueble
+      ? query.estadoInmueble === 'inactivo'
+        ? 'inactive'
+        : 'active'
+      : null;
+    const filasDelEstado = filasRaw.filter((r) => {
+      const inmueble = inmuebleData.get(r.inmuebleId.toString());
+      if (statusEsperado && inmueble?.status !== statusEsperado) return false;
+      if (
+        query.estadoCartera &&
+        (inmueble?.estadoCartera ?? 'vigente') !== query.estadoCartera
+      ) {
+        return false;
+      }
+      return true;
+    });
+    if (filasDelEstado.length === 0) return empty(fecha);
+
     const rangoTotales = new Map<RangoVencimiento, number>();
-    const filas: FilaVencimientoCartera[] = filasRaw.map((r) => {
+    const filas: FilaVencimientoCartera[] = filasDelEstado.map((r) => {
       const noVencidoAun = r.vence > fecha;
       const diasMora = calcularDiasMora(r.vence, fecha);
       const rango: RangoVencimiento = noVencidoAun
@@ -229,6 +257,7 @@ export class VencimientosCarteraService {
         inmuebleId: r.inmuebleId.toString(),
         inmuebleCodigo: data?.codigo ?? '',
         propietario: data?.propietario ?? null,
+        celular: data?.celular ?? null,
         tipo: r.tipo,
         numeroCompleto: r.numeroCompleto,
         fecha: r.fecha.toISOString(),
@@ -270,11 +299,12 @@ export class VencimientosCarteraService {
     };
   }
 
-  /** Batch-fetch inmueble codes and tercero names for the units involved. */
+  /** Batch-fetch inmueble codes, both statuses and the owner's name/phone
+   *  for the units involved. */
   private async resolveInmuebles(
     coPropertyId: Types.ObjectId,
     inmuebleIds: Types.ObjectId[],
-  ): Promise<Map<string, { codigo: string; propietario: string | null }>> {
+  ): Promise<Map<string, InmuebleResuelto>> {
     const uniqueIds = [...new Set(inmuebleIds.map((id) => id.toString()))].map(
       (id) => new Types.ObjectId(id),
     );
@@ -286,7 +316,10 @@ export class VencimientosCarteraService {
       .map((i) => i.holderId)
       .filter((id): id is Types.ObjectId => id !== null);
 
-    const nombreMap = new Map<string, string>();
+    const terceroMap = new Map<
+      string,
+      { name: string; phone?: string | null }
+    >();
     if (holderIds.length > 0) {
       const uniqueHolderIds = [
         ...new Set(holderIds.map((id) => id.toString())),
@@ -298,24 +331,34 @@ export class VencimientosCarteraService {
         })
         .exec();
       for (const t of terceros) {
-        nombreMap.set(t._id.toString(), t.name);
+        terceroMap.set(t._id.toString(), { name: t.name, phone: t.phone });
       }
     }
 
-    const result = new Map<
-      string,
-      { codigo: string; propietario: string | null }
-    >();
+    const result = new Map<string, InmuebleResuelto>();
     for (const i of inmuebles) {
+      const titular = i.holderId
+        ? terceroMap.get(i.holderId.toString())
+        : undefined;
       result.set(i._id.toString(), {
         codigo: i.code,
-        propietario: i.holderId
-          ? (nombreMap.get(i.holderId.toString()) ?? null)
-          : null,
+        status: i.status,
+        estadoCartera: i.collectionStatus,
+        propietario: titular?.name ?? null,
+        celular: titular?.phone || null,
       });
     }
     return result;
   }
+}
+
+/** What `resolveInmuebles` knows about one unit. */
+interface InmuebleResuelto {
+  codigo: string;
+  propietario: string | null;
+  celular: string | null;
+  status: string;
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo' | undefined;
 }
 
 function empty(fecha: Date): RespuestaVencimientosCartera {

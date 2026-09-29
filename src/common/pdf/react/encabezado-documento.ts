@@ -46,6 +46,12 @@ const styles = StyleSheet.create({
     fontSize: 8.5,
     fontFamily: 'Helvetica',
   },
+  /** `soloNit`: a single row has nothing to line up with, so the label
+   *  hugs its value ("NIT: 900…") instead of padding to a column. */
+  etiquetaSola: {
+    fontSize: 8.5,
+    fontFamily: 'Helvetica',
+  },
   valor: {
     marginLeft: 5,
     fontSize: 8.5,
@@ -86,7 +92,7 @@ const styles = StyleSheet.create({
  * No WebSACO logo in this banner by default — support's own past feedback
  * was that clients are protective of a document that represents THEIR
  * building, not the software that produced it; a vendor mark on their own
- * letterhead reads as an intrusion. `PieDocumento`'s subtle "Generado por"
+ * letterhead reads as an intrusion. `PieDocumento`'s subtle "Generado con"
  * footer credit still carries that same understated branding for every
  * caller. `mostrarLogo` is the one deliberate exception (product decision,
  * 2026-09-19, repositioned 2026-09-20): the 6 financial documents (Factura,
@@ -100,15 +106,17 @@ const styles = StyleSheet.create({
  * straight through rather than a literal `true` — a coproperty can opt
  * back OUT per its own "Copropiedades" record (default on), since the
  * earlier product feedback that removed the logo in the first place came
- * from specific clients, not every one of them. Cartera General (the other
- * `EncabezadoDocumento` caller) still defaults to none — no product
- * decision has opted it in, so don't assume that's an oversight.
+ * from specific clients, not every one of them.
  *
  * `soloNit` drops Dirección/Celular/Email from the left-hand contact block,
  * leaving just NIT — the 5 documents this shape serves (Recibo, Nota
  * Crédito/Débito/Anticipo/Contable, all through `contenidoRecibo`) print a
- * short block by design (product decision, 2026-09-21); Factura and the
- * reports keep the full block.
+ * short block by design (product decision, 2026-09-21), and so do Cartera
+ * General, Auxiliar de Cartera, Estado de Cuenta and Conciliación de
+ * Cartera (product decision, 2026-09-28); Factura keeps the full block.
+ *
+ * Cartera General likewise now passes `copropiedad.showLogoOnDocuments` to
+ * `mostrarLogo` (product decision, 2026-09-28), same rule as the others.
  *
  * `EncabezadoInforme` is this same letterhead's horizontal/landscape
  * counterpart (every "informe" — Cartera por Conceptos, Vencimientos,
@@ -157,7 +165,11 @@ export function EncabezadoDocumento(props: {
     createElement(
       View,
       { style: styles.dato },
-      createElement(Text, { style: styles.etiqueta }, `${etiqueta}:`),
+      createElement(
+        Text,
+        { style: soloNit ? styles.etiquetaSola : styles.etiqueta },
+        `${etiqueta}:`,
+      ),
       createElement(Text, { style: styles.valor }, valor),
     );
 

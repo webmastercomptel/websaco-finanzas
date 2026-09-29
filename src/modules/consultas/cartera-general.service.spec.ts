@@ -8,6 +8,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
   const find = (data: unknown[] = []) => ({
     find: jest.fn().mockReturnThis(),
     sort: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
     exec: jest.fn().mockResolvedValue(data),
   });
   const defaults: Record<string, unknown> = {
@@ -18,6 +19,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     conceptosCobro: find(),
     tenant: { resolveCoPropertyId: () => COP },
     saldosIniciales: find(),
+    inmuebles: find(),
   };
   const m = { ...defaults, ...overrides };
   return new CarteraGeneralService(
@@ -28,6 +30,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.conceptosCobro as never,
     m.tenant as never,
     m.saldosIniciales as never,
+    m.inmuebles as never,
   );
 };
 
@@ -90,6 +93,83 @@ describe('CarteraGeneralService', () => {
       expect(result.totalVencido).toBe(300000);
       expect(result.totalPendiente).toBe(100000);
       expect(result.porcentajeVencido).toBeCloseTo(75);
+    });
+  });
+
+  describe('analisisVencimientos y carteraPorEstado', () => {
+    const factura = (
+      inmuebleId: Types.ObjectId,
+      dueDate: string,
+      monto: number,
+    ) => ({
+      _id: id(),
+      coPropertyId: COP,
+      inmuebleId,
+      issueDate: new Date('2025-01-01'),
+      dueDate: new Date(dueDate),
+      total: monto,
+      outstandingBalance: monto,
+      status: 'emitida',
+    });
+
+    it('reparte la cartera por rango de mora y por estado del inmueble, con su porcentaje', async () => {
+      const inmVigente = id();
+      const inmJuridico = id();
+      const inmDificil = id();
+
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([
+            // Corte 2026-07-01: 10 días de mora → 1-30
+            factura(inmVigente, '2026-06-21', 100000),
+            // 45 días → 31-60
+            factura(inmJuridico, '2026-05-17', 200000),
+            // > 720 días → +720
+            factura(inmDificil, '2024-01-01', 300000),
+            // sin vencer
+            factura(inmVigente, '2026-08-01', 400000),
+          ]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([
+            { _id: inmVigente, collectionStatus: 'vigente' },
+            { _id: inmJuridico, collectionStatus: 'juridico' },
+            { _id: inmDificil, collectionStatus: 'dificil_recaudo' },
+          ]),
+        },
+      });
+
+      const result = await svc.findAll({ fecha: '2026-07-01' });
+
+      expect(result.porcentajePendiente).toBeCloseTo(40);
+      const porEtiqueta = Object.fromEntries(
+        result.analisisVencimientos.map((l) => [l.etiqueta, l]),
+      );
+      expect(result.analisisVencimientos).toHaveLength(9);
+      expect(porEtiqueta['Sin vencer'].monto).toBe(400000);
+      expect(porEtiqueta['Vencida de 1-30'].monto).toBe(100000);
+      expect(porEtiqueta['Vencida de 1-30'].porcentaje).toBeCloseTo(10);
+      expect(porEtiqueta['Vencida de 31-60'].monto).toBe(200000);
+      expect(porEtiqueta['Vencida +720'].monto).toBe(300000);
+      expect(porEtiqueta['Vencida de 61-90'].monto).toBe(0);
+
+      expect(result.carteraPorEstado).toEqual([
+        { etiqueta: 'Cartera Vigente', monto: 500000, porcentaje: 50 },
+        { etiqueta: 'Cartera en Prejurídico', monto: 200000, porcentaje: 20 },
+        { etiqueta: 'Cartera de Difícil Cobro', monto: 300000, porcentaje: 30 },
+      ]);
+    });
+
+    it('sin cartera devuelve todas las líneas en cero', async () => {
+      const result = await servicio().findAll({});
+
+      expect(result.analisisVencimientos.every((l) => l.monto === 0)).toBe(
+        true,
+      );
+      expect(result.carteraPorEstado.map((l) => l.monto)).toEqual([0, 0, 0]);
     });
   });
 

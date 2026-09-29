@@ -64,6 +64,93 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
 };
 
 describe('VencimientosCarteraService', () => {
+  describe('estadoInmueble', () => {
+    const conDosInmuebles = () => {
+      const activoId = id();
+      const inactivoId = id();
+      return servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest
+            .fn()
+            .mockResolvedValue([
+              facturaDoc({ inmuebleId: activoId, total: 100000 }),
+              facturaDoc({ inmuebleId: inactivoId, total: 40000 }),
+            ]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest
+            .fn()
+            .mockResolvedValue([
+              inmuebleDoc({ _id: activoId, code: '101', status: 'active' }),
+              inmuebleDoc({ _id: inactivoId, code: '102', status: 'inactive' }),
+            ]),
+        },
+      });
+    };
+
+    it('sin filtro incluye inmuebles activos e inactivos', async () => {
+      const result = await conDosInmuebles().findAll({ fecha: '2026-09-06' });
+
+      expect(result.filas.map((f) => f.inmuebleCodigo)).toEqual(['101', '102']);
+      expect(result.totalCartera).toBe(140000);
+    });
+
+    it('filtra por estado del inmueble antes de calcular rangos y total', async () => {
+      const result = await conDosInmuebles().findAll({
+        fecha: '2026-09-06',
+        estadoInmueble: 'inactivo',
+      });
+
+      expect(result.filas.map((f) => f.inmuebleCodigo)).toEqual(['102']);
+      expect(result.totalCartera).toBe(40000);
+      expect(result.rangos.reduce((sum, r) => sum + r.valor, 0)).toBe(40000);
+    });
+  });
+
+  describe('estadoCartera', () => {
+    it('filtra por el estado de cartera del inmueble (sin estado cuenta como vigente)', async () => {
+      const vigenteId = id();
+      const juridicoId = id();
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest
+            .fn()
+            .mockResolvedValue([
+              facturaDoc({ inmuebleId: vigenteId, total: 100000 }),
+              facturaDoc({ inmuebleId: juridicoId, total: 40000 }),
+            ]),
+        },
+        inmuebles: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([
+            inmuebleDoc({ _id: vigenteId, code: '101' }),
+            inmuebleDoc({
+              _id: juridicoId,
+              code: '102',
+              collectionStatus: 'juridico',
+            }),
+          ]),
+        },
+      });
+
+      const juridico = await svc.findAll({
+        fecha: '2026-09-06',
+        estadoCartera: 'juridico',
+      });
+      expect(juridico.filas.map((f) => f.inmuebleCodigo)).toEqual(['102']);
+      expect(juridico.totalCartera).toBe(40000);
+
+      const vigente = await svc.findAll({
+        fecha: '2026-09-06',
+        estadoCartera: 'vigente',
+      });
+      expect(vigente.filas.map((f) => f.inmuebleCodigo)).toEqual(['101']);
+    });
+  });
+
   it('una Factura vencida produce una fila con su propio rango y saldo', async () => {
     const inmId = id();
     const f = facturaDoc({
