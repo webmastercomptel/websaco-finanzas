@@ -103,6 +103,12 @@ import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
 
+export interface ContextoCreacionRecibo {
+  coPropertyId: Types.ObjectId;
+  destinationAccount: string;
+  diferenciaConfirmada: number;
+}
+
 /**
  * Redacts "Cancela facturas 6, 173, 340 y genera anticipo" / "Abona a
  * factura 341" from the applications a `crear()` call actually made — the
@@ -294,12 +300,15 @@ export class RecibosService {
   }
 
   /**
-   * Creates a Recibo. With `aplicaciones` present, applies them manually in
-   * the same transaction (all-or-nothing, design §6); with
-   * `aplicacionAutomatica`, Task 7 wires FIFO in here instead. Neither
-   * present: the whole `montoRecibido` becomes anticipo.
+   * Everything `crear()` must validate/resolve BEFORE opening a transaction
+   * — mutual-exclusivity of aplicación manual/automática, the period and
+   * billing-period locks, and `destinationAccount` resolution. Pure reads
+   * and validation, no writes; extracted so the batch path
+   * (`LoteRecibosService.ejecutarAplicacion`) can run it once per row
+   * BEFORE it opens its own shared per-tanda transaction, exactly mirroring
+   * where `crear()` itself runs this today (outside any transaction).
    */
-  async crear(accountId: string, dto: CrearReciboDto): Promise<ReciboContract> {
+  async prepararCreacion(dto: CrearReciboDto): Promise<ContextoCreacionRecibo> {
     if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
       throw new BadRequestException(
         'No se puede pedir aplicación manual y automática a la vez',
@@ -402,222 +411,258 @@ export class RecibosService {
       );
     }
 
-    const resultado = await this.transaccion(async (session) => {
-      const numero = await this.numeracion.siguienteDocumento(
-        coPropertyId.toString(),
-        dto.codigo,
-        session,
-      );
+    return { coPropertyId, destinationAccount, diferenciaConfirmada };
+  }
 
-      const [creado] = await this.recibos.create(
-        [
-          {
-            coPropertyId,
-            inmuebleId: new Types.ObjectId(dto.inmuebleId),
-            terceroId: new Types.ObjectId(dto.terceroId),
-            prefix: numero.prefijo,
-            number: numero.numero,
-            fullNumber: numero.completo,
-            receivedAmount: dto.montoRecibido,
-            receivedDate: new Date(dto.fechaRecibo),
-            paymentMethod: dto.medioPago,
-            destinationAccount,
-            reference: dto.referencia ?? null,
-            notes: dto.observaciones ?? null,
-            // Frozen from here on — the document is immutable once issued.
-            // `SaldoDocumentoOrigen` (seeded right below) is the live source
-            // every application/reversal actually moves from now on.
-            appliedAmount: 0,
-            unappliedAmount: dto.montoRecibido,
-            status: 'activo',
-            generatedBy: accountId,
-          },
-        ],
-        { session },
-      );
+  /**
+   * Everything `crear()`'s transaction callback used to do, unchanged
+   * internally — numbering, Recibo/`SaldoDocumentoOrigen` creation, the
+   * manual/automática application branch, asiento posting — now taking an
+   * EXTERNALLY-SUPPLIED `session` instead of opening its own. `crear()`
+   * below calls this via `this.transaccion(...)` for a single row;
+   * `LoteRecibosService.ejecutarAplicacion` calls it directly, sequentially,
+   * once per row, inside ONE shared `session.withTransaction(...)` per
+   * tanda — this file's own class docblock is unaffected, only this
+   * method's call sites multiply.
+   */
+  async crearEnSesion(
+    session: ClientSession,
+    accountId: string,
+    dto: CrearReciboDto,
+    contexto: ContextoCreacionRecibo,
+  ): Promise<ReciboContract> {
+    const { coPropertyId, destinationAccount, diferenciaConfirmada } =
+      contexto;
 
-      await this.saldoDocumentoOrigen.create(
-        [
-          {
-            coPropertyId,
-            tipoDocumento: 'RC',
-            documentoId: creado._id,
-            montoOriginal: dto.montoRecibido,
-            saldoDisponible: dto.montoRecibido,
-          },
-        ],
-        { session },
-      );
+    const numero = await this.numeracion.siguienteDocumento(
+      coPropertyId.toString(),
+      dto.codigo,
+      session,
+    );
 
-      let totalAplicadoAhora = 0;
-      let desglose: DesgloseCarteraAplicacion[] = [];
-      let montoAplicadoMora = 0;
-      let montoDescuentoAhora = 0;
-      let resumenAplicaciones: ResumenAplicacion[] = [];
-      if (dto.aplicaciones?.length) {
-        const resultado = await this.aplicarManual(
-          session,
+    const [creado] = await this.recibos.create(
+      [
+        {
           coPropertyId,
-          creado,
-          dto.aplicaciones,
-          accountId,
-          diferenciaConfirmada,
-        );
-        totalAplicadoAhora = resultado.creadas.reduce(
-          (acc, a) => acc + a.amountApplied,
-          0,
-        );
-        desglose = resultado.desglose;
-        montoAplicadoMora = resultado.montoAplicadoMora;
-        resumenAplicaciones = resultado.resumen;
-        // Already includes `diferenciaConfirmada` — `ejecutarAplicacionManual`
-        // folds it in (see that function's own `descuentoConfirmadoExtra`).
-        montoDescuentoAhora = resultado.montoDescuentoTotal;
-      } else if (dto.aplicacionAutomatica) {
-        const resultado = await this.aplicarFifo(
-          session,
+          inmuebleId: new Types.ObjectId(dto.inmuebleId),
+          terceroId: new Types.ObjectId(dto.terceroId),
+          prefix: numero.prefijo,
+          number: numero.numero,
+          fullNumber: numero.completo,
+          receivedAmount: dto.montoRecibido,
+          receivedDate: new Date(dto.fechaRecibo),
+          paymentMethod: dto.medioPago,
+          destinationAccount,
+          reference: dto.referencia ?? null,
+          notes: dto.observaciones ?? null,
+          // Frozen from here on — the document is immutable once issued.
+          // `SaldoDocumentoOrigen` (seeded right below) is the live source
+          // every application/reversal actually moves from now on.
+          appliedAmount: 0,
+          unappliedAmount: dto.montoRecibido,
+          status: 'activo',
+          generatedBy: accountId,
+        },
+      ],
+      { session },
+    );
+
+    await this.saldoDocumentoOrigen.create(
+      [
+        {
           coPropertyId,
-          creado,
-          dto.montoRecibido,
-          accountId,
-        );
-        totalAplicadoAhora = resultado.aplicadas.reduce(
-          (acc, a) => acc + a.amountApplied,
-          0,
-        );
-        desglose = resultado.desglose;
-        montoAplicadoMora = resultado.montoAplicadoMora;
-        resumenAplicaciones = resultado.resumen;
-        montoDescuentoAhora = resultado.montoDescuentoTotal;
-      }
-      // Don't claim "pronto pago" when (part of) the discount is really a
-      // manually confirmed shortfall — see `postearAsientoRecibo`'s own
-      // note on `descripcionDescuento`.
-      const descripcionDescuento =
-        diferenciaConfirmada > 0 ? 'Descuento — recibo de caja' : undefined;
+          tipoDocumento: 'RC',
+          documentoId: creado._id,
+          montoOriginal: dto.montoRecibido,
+          saldoDisponible: dto.montoRecibido,
+        },
+      ],
+      { session },
+    );
 
-      // `totalAplicadoAhora` already includes any early-payment discount
-      // summed in (see `evaluarAplicacionConDescuento`, cruce.util.ts) — the
-      // real cash this call drew from `montoRecibido` is the difference.
-      // Every downstream use of "how much of the received money is left
-      // over as anticipo" (Observaciones, `postearAsientoRecibo`'s
-      // `montoSinAplicar`) must use this, never `totalAplicadoAhora` itself.
-      const cashAplicadoAhora = totalAplicadoAhora - montoDescuentoAhora;
-      // 0 in the shortfall case (folded away above) — only positive for a
-      // genuine surplus, which only a Manual submission can leave (see the
-      // `sobranteSolicitado` guard).
-      const sobranteReal = dto.montoRecibido - cashAplicadoAhora;
-      const enviarAOtrosIngresos =
-        dto.destinoSobrante === 'otros_ingresos' && sobranteReal > 0;
-
-      // Observaciones is redacted from the ACTUAL applications, never
-      // whatever the frontend guessed beforehand — Automática mode only
-      // learns which documents FIFO touched once `aplicarFifo` above has
-      // already run, so this is the earliest point the real text can be
-      // known. A caller-supplied `dto.observaciones` always wins verbatim
-      // (a Manual submission already sent its own client-composed text; see
-      // `recibo-nuevo.tsx`'s `observacionesSugeridas`).
-      const camposFrozen: Record<string, unknown> = {};
-      if (!dto.observaciones) {
-        let generado = redactarObservaciones(
-          resumenAplicaciones,
-          !enviarAOtrosIngresos && sobranteReal > 0,
-        );
-        if (diferenciaConfirmada > 0) {
-          const nota = `Diferencia de ${diferenciaConfirmada} enviada a Descuentos`;
-          generado = generado ? `${generado} — ${nota}` : nota;
-        }
-        if (enviarAOtrosIngresos) {
-          const nota = `Sobrante de ${sobranteReal} enviado a Otros Ingresos`;
-          generado = generado ? `${generado} — ${nota}` : nota;
-        }
-        if (generado) {
-          camposFrozen.notes = generado;
-        }
-      }
-      // Frozen alongside `notes` — see `Recibo.otherIncomeAmount`'s own
-      // docblock on why this can't be derived later the way a discount can.
-      if (enviarAOtrosIngresos) {
-        camposFrozen.otherIncomeAmount = sobranteReal;
-      }
-      if (Object.keys(camposFrozen).length > 0) {
-        await this.recibos
-          .findOneAndUpdate(
-            { _id: creado._id, coPropertyId },
-            { $set: camposFrozen },
-            { session },
-          )
-          .exec();
-      }
-
-      // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
-      // hit `destinationAccount` for the FULL `montoRecibido` the instant
-      // this Recibo was created, whether or not any of it was applied in
-      // this same call (design decision, Task 2: a pure anticipo still has
-      // an accounting effect — it must reconcile against the bank).
-      const reciboActual = await this.recibos
-        .findOne({ _id: creado._id, coPropertyId })
-        .session(session)
-        .exec();
-      await this.postearAsientoRecibo(
+    let totalAplicadoAhora = 0;
+    let desglose: DesgloseCarteraAplicacion[] = [];
+    let montoAplicadoMora = 0;
+    let montoDescuentoAhora = 0;
+    let resumenAplicaciones: ResumenAplicacion[] = [];
+    if (dto.aplicaciones?.length) {
+      const resultado = await this.aplicarManual(
         session,
         coPropertyId,
-        reciboActual!,
-        totalAplicadoAhora,
-        sobranteReal,
-        desglose,
-        montoAplicadoMora,
-        montoDescuentoAhora,
-        descripcionDescuento,
-        dto.destinoSobrante,
+        creado,
+        dto.aplicaciones,
+        accountId,
+        diferenciaConfirmada,
       );
+      totalAplicadoAhora = resultado.creadas.reduce(
+        (acc, a) => acc + a.amountApplied,
+        0,
+      );
+      desglose = resultado.desglose;
+      montoAplicadoMora = resultado.montoAplicadoMora;
+      resumenAplicaciones = resultado.resumen;
+      // Already includes `diferenciaConfirmada` — `ejecutarAplicacionManual`
+      // folds it in (see that function's own `descuentoConfirmadoExtra`).
+      montoDescuentoAhora = resultado.montoDescuentoTotal;
+    } else if (dto.aplicacionAutomatica) {
+      const resultado = await this.aplicarFifo(
+        session,
+        coPropertyId,
+        creado,
+        dto.montoRecibido,
+        accountId,
+      );
+      totalAplicadoAhora = resultado.aplicadas.reduce(
+        (acc, a) => acc + a.amountApplied,
+        0,
+      );
+      desglose = resultado.desglose;
+      montoAplicadoMora = resultado.montoAplicadoMora;
+      resumenAplicaciones = resultado.resumen;
+      montoDescuentoAhora = resultado.montoDescuentoTotal;
+    }
+    // Don't claim "pronto pago" when (part of) the discount is really a
+    // manually confirmed shortfall — see `postearAsientoRecibo`'s own
+    // note on `descripcionDescuento`.
+    const descripcionDescuento =
+      diferenciaConfirmada > 0 ? 'Descuento — recibo de caja' : undefined;
 
-      if (enviarAOtrosIngresos) {
-        // Same reasoning as the shortfall's fold into `montoDescuentoAhora`
-        // above, mirrored: money booked as Otros Ingresos in the asiento
-        // above must stop being re-appliable as if it were a client
-        // anticipo — otherwise it would be counted twice (once as revenue
-        // today, once again if someone later applies a Nota de Anticipo
-        // against this same recibo).
-        await decrementarSaldoDocumentoOrigen(
-          this.recibos,
-          this.saldoDocumentoOrigen,
-          session,
-          coPropertyId,
-          creado._id,
-          sobranteReal,
-          'activo',
-        );
+    // `totalAplicadoAhora` already includes any early-payment discount
+    // summed in (see `evaluarAplicacionConDescuento`, cruce.util.ts) — the
+    // real cash this call drew from `montoRecibido` is the difference.
+    // Every downstream use of "how much of the received money is left
+    // over as anticipo" (Observaciones, `postearAsientoRecibo`'s
+    // `montoSinAplicar`) must use this, never `totalAplicadoAhora` itself.
+    const cashAplicadoAhora = totalAplicadoAhora - montoDescuentoAhora;
+    // 0 in the shortfall case (folded away above) — only positive for a
+    // genuine surplus, which only a Manual submission can leave (see the
+    // `sobranteSolicitado` guard).
+    const sobranteReal = dto.montoRecibido - cashAplicadoAhora;
+    const enviarAOtrosIngresos =
+      dto.destinoSobrante === 'otros_ingresos' && sobranteReal > 0;
+
+    // Observaciones is redacted from the ACTUAL applications, never
+    // whatever the frontend guessed beforehand — Automática mode only
+    // learns which documents FIFO touched once `aplicarFifo` above has
+    // already run, so this is the earliest point the real text can be
+    // known. A caller-supplied `dto.observaciones` always wins verbatim
+    // (a Manual submission already sent its own client-composed text; see
+    // `recibo-nuevo.tsx`'s `observacionesSugeridas`).
+    const camposFrozen: Record<string, unknown> = {};
+    if (!dto.observaciones) {
+      let generado = redactarObservaciones(
+        resumenAplicaciones,
+        !enviarAOtrosIngresos && sobranteReal > 0,
+      );
+      if (diferenciaConfirmada > 0) {
+        const nota = `Diferencia de ${diferenciaConfirmada} enviada a Descuentos`;
+        generado = generado ? `${generado} — ${nota}` : nota;
       }
-
-      const final = await this.recibos
-        .findOne({ _id: creado._id, coPropertyId })
-        .session(session)
+      if (enviarAOtrosIngresos) {
+        const nota = `Sobrante de ${sobranteReal} enviado a Otros Ingresos`;
+        generado = generado ? `${generado} — ${nota}` : nota;
+      }
+      if (generado) {
+        camposFrozen.notes = generado;
+      }
+    }
+    // Frozen alongside `notes` — see `Recibo.otherIncomeAmount`'s own
+    // docblock on why this can't be derived later the way a discount can.
+    if (enviarAOtrosIngresos) {
+      camposFrozen.otherIncomeAmount = sobranteReal;
+    }
+    if (Object.keys(camposFrozen).length > 0) {
+      await this.recibos
+        .findOneAndUpdate(
+          { _id: creado._id, coPropertyId },
+          { $set: camposFrozen },
+          { session },
+        )
         .exec();
-      // "Aplicado" is the full amount CREDITED TO CARTERA — cartera-cash
-      // plus whatever discount absorbed the rest (see `anular()`'s own
-      // `montoAplicadoCarteraTotal`, the established convention this
-      // mirrors: `recibo.appliedAmount` alone is cash-only, same trap).
-      // `totalAplicadoAhora` already includes any discount, confirmed or
-      // automatic — see its own comment above. Otros Ingresos is deliberately
-      // NEVER folded in here — it never touched cartera at all, so it's its
-      // own field (`montoOtrosIngresos`, read by `toRecibo` straight off
-      // `final.otherIncomeAmount`, just persisted above) instead of being
-      // added to "Aplicado", which previously made the two indistinguishable.
-      return toRecibo(
-        final!,
-        totalAplicadoAhora,
-        enviarAOtrosIngresos ? 0 : sobranteReal,
-        await this.resolverInmuebleCodigo(final!.inmuebleId),
-      );
-    });
+    }
 
-    // Presentation generation is no longer triggered here — under the
-    // pdfmake + frontend-render model, `solicitar-generacion`/
-    // `confirmar-generacion` are separate, explicit actions the frontend
-    // calls later (`RecibosController`), never something `crear()` does
-    // internally.
-    return resultado;
+    // ALWAYS posted, never gated on `totalAplicadoAhora > 0` — the cash
+    // hit `destinationAccount` for the FULL `montoRecibido` the instant
+    // this Recibo was created, whether or not any of it was applied in
+    // this same call (design decision, Task 2: a pure anticipo still has
+    // an accounting effect — it must reconcile against the bank).
+    const reciboActual = await this.recibos
+      .findOne({ _id: creado._id, coPropertyId })
+      .session(session)
+      .exec();
+    await this.postearAsientoRecibo(
+      session,
+      coPropertyId,
+      reciboActual!,
+      totalAplicadoAhora,
+      sobranteReal,
+      desglose,
+      montoAplicadoMora,
+      montoDescuentoAhora,
+      descripcionDescuento,
+      dto.destinoSobrante,
+    );
+
+    if (enviarAOtrosIngresos) {
+      // Same reasoning as the shortfall's fold into `montoDescuentoAhora`
+      // above, mirrored: money booked as Otros Ingresos in the asiento
+      // above must stop being re-appliable as if it were a client
+      // anticipo — otherwise it would be counted twice (once as revenue
+      // today, once again if someone later applies a Nota de Anticipo
+      // against this same recibo).
+      await decrementarSaldoDocumentoOrigen(
+        this.recibos,
+        this.saldoDocumentoOrigen,
+        session,
+        coPropertyId,
+        creado._id,
+        sobranteReal,
+        'activo',
+      );
+    }
+
+    const final = await this.recibos
+      .findOne({ _id: creado._id, coPropertyId })
+      .session(session)
+      .exec();
+    // "Aplicado" is the full amount CREDITED TO CARTERA — cartera-cash
+    // plus whatever discount absorbed the rest (see `anular()`'s own
+    // `montoAplicadoCarteraTotal`, the established convention this
+    // mirrors: `recibo.appliedAmount` alone is cash-only, same trap).
+    // `totalAplicadoAhora` already includes any discount, confirmed or
+    // automatic — see its own comment above. Otros Ingresos is deliberately
+    // NEVER folded in here — it never touched cartera at all, so it's its
+    // own field (`montoOtrosIngresos`, read by `toRecibo` straight off
+    // `final.otherIncomeAmount`, just persisted above) instead of being
+    // added to "Aplicado", which previously made the two indistinguishable.
+    return toRecibo(
+      final!,
+      totalAplicadoAhora,
+      enviarAOtrosIngresos ? 0 : sobranteReal,
+      await this.resolverInmuebleCodigo(final!.inmuebleId),
+    );
+  }
+
+  /**
+   * Creates a Recibo. With `aplicaciones` present, applies them manually in
+   * the same transaction (all-or-nothing, design §6); with
+   * `aplicacionAutomatica`, FIFO applies instead. Neither present: the
+   * whole `montoRecibido` becomes anticipo. Now a thin wrapper around
+   * `prepararCreacion`/`crearEnSesion` — see those methods for the actual
+   * logic, extracted so `LoteRecibosService.ejecutarAplicacion` can reuse
+   * both across a tanda of rows sharing one transaction.
+   *
+   * Presentation generation is no longer triggered here — under the
+   * pdfmake + frontend-render model, `solicitar-generacion`/
+   * `confirmar-generacion` are separate, explicit actions the frontend
+   * calls later (`RecibosController`), never something `crear()` does
+   * internally.
+   */
+  async crear(accountId: string, dto: CrearReciboDto): Promise<ReciboContract> {
+    const contexto = await this.prepararCreacion(dto);
+    return this.transaccion((session) =>
+      this.crearEnSesion(session, accountId, dto, contexto),
+    );
   }
 
   /**
