@@ -171,6 +171,20 @@ export class LoteRecibosService {
     return toLoteRecibos(lote, numeros);
   }
 
+  /** The raw hydrated document — `_id`/`coPropertyId` as `ObjectId`, not the
+   *  mapped Spanish contract `findOne()` returns — for callers that need to
+   *  hand this lote to `GeneracionDocumentoService`'s generic
+   *  `{_id, coPropertyId}` doc parameter, same role `LotesFacturacionService
+   *  .findOneRaw` plays for Factura's own combined-PDF routes. */
+  async findOneRaw(id: string): Promise<LoteRecibosDocument> {
+    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    if (!lote) {
+      throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
+    }
+    return lote;
+  }
+
   /** Most recent first — same ordering `useLotes()` already expects from
    *  Facturación's own listing. */
   async findAll(): Promise<LoteRecibosContract[]> {
