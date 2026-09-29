@@ -1,3 +1,5 @@
+import type { DatosReciboImpresion } from '../common/documentos/datos-impresion.types';
+
 /**
  * API CONTRACT — the Spanish-shaped payloads this backend serves.
  *
@@ -558,6 +560,25 @@ export interface SolicitudGeneracionFacturaLote {
   facturas: {
     facturaId: string;
     datos: DatosPlantillaFactura;
+  }[];
+}
+
+/** Response of `POST /lotes-recibos/:id/recibos/solicitar-generacion` — a
+ *  lote de recibos' combined PDF (one page per Recibo), same shape and same
+ *  reasoning as `SolicitudGeneracionFacturaLote` above: anchored on the
+ *  LOTE's own id as `documentoId`, under the SAME `'RC'` code every
+ *  individual Recibo already uses — the lote's `_id` never collides with
+ *  any Recibo's own `_id`, so no separate type code is needed. `recibos` is
+ *  each row's already-computed `RecibosService.datosImpresion` — one page's
+ *  worth, in the order the combined PDF renders them. */
+export interface SolicitudGeneracionReciboLote {
+  plantilla: PlantillaDocumento;
+  objectPath: string;
+  uploadUrl: string;
+  expiresAt: IsoDate;
+  recibos: {
+    reciboId: string;
+    datos: DatosReciboImpresion;
   }[];
 }
 
