@@ -450,6 +450,42 @@ async function ajustarCarteraPorDocumento(
  * journal entry per concepto instead of recomputing the split independently
  * (which would risk the two drifting apart).
  */
+export function calcularPartesWaterfall(
+  factura: {
+    total: number;
+    outstandingBalance: number;
+    lines: { conceptoId: Types.ObjectId; totalAmount: number }[];
+  },
+  montoTotal: number,
+  signo: 1 | -1,
+): { conceptoId: Types.ObjectId; parte: number }[] {
+  if (factura.lines.length === 0 || factura.total === 0 || montoTotal === 0) {
+    return [];
+  }
+
+  const aplicadoDespues = factura.total - factura.outstandingBalance;
+  const aplicadoAntes = aplicadoDespues + signo * montoTotal;
+  const lo = Math.min(aplicadoAntes, aplicadoDespues);
+  const hi = Math.max(aplicadoAntes, aplicadoDespues);
+
+  const ordenAplicacion = [...factura.lines].reverse();
+  const partes: { conceptoId: Types.ObjectId; parte: number }[] = [];
+  let cursor = 0;
+  for (const linea of ordenAplicacion) {
+    const inicioLinea = cursor;
+    const finLinea = cursor + linea.totalAmount;
+    cursor = finLinea;
+
+    const parte = Math.max(
+      0,
+      Math.min(finLinea, hi) - Math.max(inicioLinea, lo),
+    );
+    if (parte === 0) continue;
+    partes.push({ conceptoId: linea.conceptoId, parte });
+  }
+  return partes;
+}
+
 export async function ajustarSaldosCartera(
   saldos: Model<SaldoCarteraDocument>,
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
@@ -471,48 +507,17 @@ export async function ajustarSaldosCartera(
   // function.
   tipoDocumento: DocumentType = 'FV',
 ): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
-  if (factura.lines.length === 0 || factura.total === 0 || montoTotal === 0) {
-    return [];
-  }
-
-  // How much of the invoice is applied AFTER this call vs. BEFORE it — see
-  // docblock. `aplicadoDespues` uses `factura.outstandingBalance`, which the
-  // caller has ALREADY updated for this call's effect.
-  const aplicadoDespues = factura.total - factura.outstandingBalance;
-  const aplicadoAntes = aplicadoDespues + signo * montoTotal;
-  const lo = Math.min(aplicadoAntes, aplicadoDespues);
-  const hi = Math.max(aplicadoAntes, aplicadoDespues);
-
-  const ordenAplicacion = [...factura.lines].reverse();
-  const partes: { conceptoId: Types.ObjectId; parte: number }[] = [];
-  let cursor = 0;
-  for (const linea of ordenAplicacion) {
-    const inicioLinea = cursor;
-    const finLinea = cursor + linea.totalAmount;
-    cursor = finLinea;
-
-    const parte = Math.max(
-      0,
-      Math.min(finLinea, hi) - Math.max(inicioLinea, lo),
-    );
-    if (parte === 0) continue;
-    partes.push({ conceptoId: linea.conceptoId, parte });
-
+  const partes = calcularPartesWaterfall(factura, montoTotal, signo);
+  for (const { conceptoId, parte } of partes) {
     await saldos
       .findOneAndUpdate(
-        {
-          coPropertyId,
-          inmuebleId: factura.inmuebleId,
-          conceptoId: linea.conceptoId,
-        },
+        { coPropertyId, inmuebleId: factura.inmuebleId, conceptoId },
         [
           {
             $set: {
               coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
-              inmuebleId: {
-                $ifNull: ['$inmuebleId', factura.inmuebleId],
-              },
-              conceptoId: { $ifNull: ['$conceptoId', linea.conceptoId] },
+              inmuebleId: { $ifNull: ['$inmuebleId', factura.inmuebleId] },
+              conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
               balance: {
                 $max: [
                   0,
@@ -537,7 +542,7 @@ export async function ajustarSaldosCartera(
       factura.inmuebleId,
       tipoDocumento,
       factura._id,
-      linea.conceptoId,
+      conceptoId,
       parte,
       signo,
     );
@@ -696,23 +701,10 @@ export async function actualizarRemanentesLinea(
  * `ajustarSaldosCartera`'s own return: the caller codes the journal entry
  * per concepto from this, instead of re-deriving the rounding independently.
  */
-export async function ajustarSaldosCarteraPorDistribucion(
-  saldos: Model<SaldoCarteraDocument>,
-  carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
-  session: ClientSession,
-  coPropertyId: Types.ObjectId,
-  inmuebleId: Types.ObjectId,
+export function calcularPartesDistribucion(
   distribucion: { conceptoId: Types.ObjectId; monto: number }[],
   montoAplicado: number,
-  signo: 1 | -1,
-  // The document this distribution actually belongs to — omitted only by
-  // `NotasContablesService`, whose reclassification is scoped to a whole
-  // inmueble+concepto, not one document (see `CarteraPorDocumento`'s own
-  // docblock; which specific document(s) a reclasificación should land on
-  // is still an open design question, tracked separately). Every OTHER
-  // caller has a concrete anchor document and must pass this.
-  documento?: { tipoDocumento: DocumentType; documentoId: Types.ObjectId },
-): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
+): { conceptoId: Types.ObjectId; parte: number }[] {
   if (distribucion.length === 0 || montoAplicado === 0) {
     return [];
   }
@@ -735,20 +727,42 @@ export async function ajustarSaldosCarteraPorDistribucion(
     repartido += parte;
     if (parte === 0) continue;
     partes.push({ conceptoId: linea.conceptoId, parte });
+  }
+  return partes;
+}
 
+export async function ajustarSaldosCarteraPorDistribucion(
+  saldos: Model<SaldoCarteraDocument>,
+  carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
+  session: ClientSession,
+  coPropertyId: Types.ObjectId,
+  inmuebleId: Types.ObjectId,
+  distribucion: { conceptoId: Types.ObjectId; monto: number }[],
+  montoAplicado: number,
+  signo: 1 | -1,
+  // The document this distribution actually belongs to — omitted only by
+  // `NotasContablesService`, whose reclassification is scoped to a whole
+  // inmueble+concepto, not one document (see `CarteraPorDocumento`'s own
+  // docblock; which specific document(s) a reclasificación should land on
+  // is still an open design question, tracked separately). Every OTHER
+  // caller has a concrete anchor document and must pass this.
+  documento?: { tipoDocumento: DocumentType; documentoId: Types.ObjectId },
+): Promise<{ conceptoId: Types.ObjectId; parte: number }[]> {
+  const partes = calcularPartesDistribucion(distribucion, montoAplicado);
+  for (const { conceptoId, parte } of partes) {
     await saldos
       .findOneAndUpdate(
         {
           coPropertyId,
           inmuebleId,
-          conceptoId: linea.conceptoId,
+          conceptoId,
         },
         [
           {
             $set: {
               coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
               inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
-              conceptoId: { $ifNull: ['$conceptoId', linea.conceptoId] },
+              conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
               balance: {
                 $max: [
                   0,
@@ -774,7 +788,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
         inmuebleId,
         documento.tipoDocumento,
         documento.documentoId,
-        linea.conceptoId,
+        conceptoId,
         parte,
         signo,
       );
