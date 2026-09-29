@@ -230,3 +230,34 @@ describe('LoteRecibosService.aplicar (enqueue path)', () => {
     expect(resultado).toBe(resultadoEsperado);
   });
 });
+
+describe('LoteRecibosService.ejecutarAplicacion — división en tandas', () => {
+  it('con más filas que el tamaño de una tanda, dos filas del mismo inmueble pueden terminar en tandas distintas (concurrentes entre sí)', async () => {
+    // 21 rows: tanda size is 20, so this forces exactly 2 tandas. Rows 0 and
+    // 20 share INMUEBLE_ID — row 0 lands in tanda 1, row 20 lands in tanda
+    // 2, confirming the split is positional and does NOT group by
+    // inmuebleId (the real-world condition Task 3's Review Focus note
+    // relies on `session.withTransaction`'s own retry to make safe).
+    const filas = Array.from({ length: 21 }, (_, i) =>
+      filaBase({ inmuebleCodigo: `fila-${i}` }),
+    );
+    const loteDoc = construirLoteDoc(filas);
+    const connectionMock = construirConnectionMock();
+    const { service } = construirServicio(
+      loteDoc,
+      () => Promise.resolve({ id: new Types.ObjectId().toString() }),
+      connectionMock,
+    );
+
+    await service.ejecutarAplicacion(
+      loteDoc._id.toString(),
+      COPROPERTY_ID,
+      'cuenta-1',
+    );
+
+    // 2 tandas → 2 sessions opened, one per tanda — the second tanda (row
+    // 20 alone) is not merged into the first just because it shares an
+    // inmueble with row 0.
+    expect(connectionMock.connection.startSession).toHaveBeenCalledTimes(2);
+  });
+});
