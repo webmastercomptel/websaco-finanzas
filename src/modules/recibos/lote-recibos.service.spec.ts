@@ -72,7 +72,10 @@ const construirServicio = (
       destinationAccount: 'CTA-1',
       diferenciaConfirmada: 0,
     }),
-    crearEnSesion: jest.fn((_session, _accountId, dto) => crearImpl(dto)),
+    crearEnSesion: jest.fn(
+      (_session: unknown, _accountId: string, dto: Record<string, unknown>) =>
+        crearImpl(dto),
+    ),
   };
 
   const service = new LoteRecibosService(
@@ -216,10 +219,7 @@ describe('LoteRecibosService.aplicar (enqueue path)', () => {
       eventosCola as never,
     );
 
-    const resultado = await service.aplicar(
-      loteDoc._id.toString(),
-      'cuenta-1',
-    );
+    const resultado = await service.aplicar(loteDoc._id.toString(), 'cuenta-1');
 
     expect(cola.add).toHaveBeenCalledWith('aplicar', {
       loteId: loteDoc._id.toString(),
