@@ -3,6 +3,8 @@ import { Types } from 'mongoose';
 import {
   ajustarSaldosCartera,
   ajustarSaldosCarteraPorDistribucion,
+  calcularPartesDistribucion,
+  calcularPartesWaterfall,
   decrementarSaldoFactura,
   decrementarSaldoNotaDebito,
   evaluarAplicacionConDescuento,
@@ -887,5 +889,101 @@ describe('validarDistribucionManual', () => {
         new Map([[concepto, 50000]]),
       ),
     ).toThrow(ConflictException);
+  });
+});
+
+describe('calcularPartesWaterfall', () => {
+  it('llena el último concepto de la factura primero (orden inverso)', () => {
+    const conceptoA = new Types.ObjectId();
+    const conceptoB = new Types.ObjectId();
+    const factura = {
+      total: 100000,
+      outstandingBalance: 40000, // ya se aplicaron 60000 de 100000
+      lines: [
+        { conceptoId: conceptoA, totalAmount: 60000 }, // Administración, sortOrder 1
+        { conceptoId: conceptoB, totalAmount: 40000 }, // Parqueadero, sortOrder 2
+      ],
+    };
+
+    const partes = calcularPartesWaterfall(factura, 60000, -1);
+
+    // El pago de 60000 llenó completo el concepto B (40000) y una parte del A (20000).
+    expect(partes).toEqual([
+      { conceptoId: conceptoB, parte: 40000 },
+      { conceptoId: conceptoA, parte: 20000 },
+    ]);
+  });
+
+  it('no reparte nada cuando la factura no tiene líneas', () => {
+    const partes = calcularPartesWaterfall(
+      { total: 0, outstandingBalance: 0, lines: [] },
+      10000,
+      -1,
+    );
+    expect(partes).toEqual([]);
+  });
+
+  it('con signo 1 (reversión), reparte igual que con signo -1 pero deshaciendo el tramo', () => {
+    const conceptoA = new Types.ObjectId();
+    const factura = {
+      total: 50000,
+      outstandingBalance: 50000, // ya se restauró todo antes de esta llamada
+      lines: [{ conceptoId: conceptoA, totalAmount: 50000 }],
+    };
+
+    const partes = calcularPartesWaterfall(factura, 20000, 1);
+
+    expect(partes).toEqual([{ conceptoId: conceptoA, parte: 20000 }]);
+  });
+});
+
+describe('calcularPartesDistribucion', () => {
+  it('reparte exactamente cuando la aplicación cubre toda la distribución', () => {
+    const conceptoA = new Types.ObjectId();
+    const conceptoB = new Types.ObjectId();
+
+    const partes = calcularPartesDistribucion(
+      [
+        { conceptoId: conceptoA, monto: 30000 },
+        { conceptoId: conceptoB, monto: 20000 },
+      ],
+      50000,
+    );
+
+    expect(partes).toEqual([
+      { conceptoId: conceptoA, parte: 30000 },
+      { conceptoId: conceptoB, parte: 20000 },
+    ]);
+  });
+
+  it('redondea proporcionalmente y deja el remanente en la última línea', () => {
+    const conceptoA = new Types.ObjectId();
+    const conceptoB = new Types.ObjectId();
+
+    // Aplicación parcial: 10000 de una distribución de 30000 (1/3).
+    const partes = calcularPartesDistribucion(
+      [
+        { conceptoId: conceptoA, monto: 10000 },
+        { conceptoId: conceptoB, monto: 20000 },
+      ],
+      10000,
+    );
+
+    // A: round(10000 * 10000/30000) = round(3333.33) = 3333
+    // B (última): 10000 - 3333 = 6667
+    expect(partes).toEqual([
+      { conceptoId: conceptoA, parte: 3333 },
+      { conceptoId: conceptoB, parte: 6667 },
+    ]);
+  });
+
+  it('no reparte nada cuando la distribución está vacía o el monto aplicado es cero', () => {
+    expect(calcularPartesDistribucion([], 10000)).toEqual([]);
+    expect(
+      calcularPartesDistribucion(
+        [{ conceptoId: new Types.ObjectId(), monto: 5000 }],
+        0,
+      ),
+    ).toEqual([]);
   });
 });

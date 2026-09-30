@@ -25,6 +25,15 @@ export const periodoDe = (fecha: Date): Periodo => ({
   month: fecha.getMonth() + 1,
 });
 
+/** `periodoDe` rendered as a stable map key ("2026-06") — the batch-lote
+ *  aplicar() path (`aplicacion-lote-batch.util.ts`) resolves period-open
+ *  status once per DISTINCT month across a whole lote, keyed by this,
+ *  instead of once per row. */
+export const claveMesDe = (fecha: Date): string => {
+  const { year, month } = periodoDe(fecha);
+  return `${year}-${String(month).padStart(2, '0')}`;
+};
+
 @Injectable()
 export class PeriodoService {
   constructor(

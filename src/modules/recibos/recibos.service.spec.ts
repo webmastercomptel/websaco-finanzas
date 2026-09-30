@@ -4228,3 +4228,319 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
     );
   });
 });
+
+// `RecibosService`, `Types` and `ConflictException` are already imported at
+// the top of this file.
+describe('RecibosService.leerDatosBatchAplicacionLote', () => {
+  const COP = new Types.ObjectId();
+  const INMUEBLE_ID = new Types.ObjectId();
+  const FACTURA_ABIERTA_ID = new Types.ObjectId();
+  const FACTURA_CERRADA_ID = new Types.ObjectId();
+
+  const construirServicio = (opciones: {
+    facturas?: Record<string, unknown>[];
+    saldosTotales?: Record<string, unknown>[];
+    copropiedad?: Record<string, unknown> | null;
+    cuentasContables?: Record<string, unknown>[];
+    ultimoLoteFacturacion?: Record<string, unknown> | null;
+    periodoAbierto?: boolean;
+  }) => {
+    const exigirSinLoteAbierto = jest.fn().mockResolvedValue(undefined);
+    const lotesFacturacion = {
+      exigirSinLoteAbierto,
+      obtenerUltimoConsolidado: jest
+        .fn()
+        .mockResolvedValue(opciones.ultimoLoteFacturacion ?? null),
+    };
+    const inmueblesModel = {
+      find: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve([
+            { _id: INMUEBLE_ID, holderId: new Types.ObjectId(), code: '301' },
+          ]),
+      })),
+    };
+    const facturasModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.facturas ?? []),
+      })),
+    };
+    const vacioModel = {
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+    };
+    const saldoTotalDocumentoModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.saldosTotales ?? []),
+      })),
+    };
+    const copropiedadesModel = {
+      findById: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.copropiedad ?? null),
+      })),
+    };
+    const cuentasContablesModel = {
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opciones.cuentasContables ?? []),
+      })),
+    };
+    const periodo = {
+      estaAbierto: jest.fn().mockResolvedValue(opciones.periodoAbierto ?? true),
+    };
+
+    const service = new RecibosService(
+      {} as never, // recibos
+      {} as never, // aplicaciones
+      facturasModel as never,
+      {} as never, // saldos (SaldoCartera)
+      {} as never, // carteraPorDocumento
+      saldoTotalDocumentoModel as never,
+      {} as never, // asientos
+      copropiedadesModel as never,
+      {} as never, // tenant
+      {} as never, // numeracion
+      {} as never, // connection
+      periodo as never,
+      vacioModel as never, // notasDebito
+      lotesFacturacion as never,
+      {} as never, // saldoDocumentoOrigen
+      cuentasContablesModel as never,
+      inmueblesModel as never,
+      undefined, // terceros
+      undefined, // presentacionDocumento
+      vacioModel as never, // saldosIniciales
+      undefined, // tituloDocumento
+    );
+
+    return { service, exigirSinLoteAbierto, periodo };
+  };
+
+  const facturaDoc = (over: Record<string, unknown> = {}) => ({
+    _id: FACTURA_ABIERTA_ID,
+    inmuebleId: INMUEBLE_ID,
+    issueDate: new Date('2026-05-01'),
+    dueDate: new Date('2026-05-10'),
+    ...over,
+  });
+
+  it('abre el índice con la factura abierta y deja afuera la que ya no tiene saldo', async () => {
+    const { service } = construirServicio({
+      facturas: [
+        facturaDoc(),
+        facturaDoc({
+          _id: FACTURA_CERRADA_ID,
+          dueDate: new Date('2026-05-15'),
+        }),
+      ],
+      saldosTotales: [
+        { documentoId: FACTURA_ABIERTA_ID, saldoPendiente: 100000 },
+        // FACTURA_CERRADA_ID no aparece — su saldo ya llegó a 0.
+      ],
+    });
+
+    const datos = await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      [new Date('2026-06-02')],
+    );
+
+    const datosInmueble = datos.indicePorInmueble.get(INMUEBLE_ID.toString())!;
+    expect(datosInmueble.candidatosOrdenados).toHaveLength(1);
+    expect(datosInmueble.candidatosOrdenados[0]).toMatchObject({ tipo: 'FV' });
+    expect(
+      datosInmueble.saldoPorDocumento.get(FACTURA_ABIERTA_ID.toString()),
+    ).toBe(100000);
+  });
+
+  it('llama exigirSinLoteAbierto (una sola vez para todo el lote) y propaga su rechazo', async () => {
+    const { service, exigirSinLoteAbierto } = construirServicio({});
+    exigirSinLoteAbierto.mockRejectedValueOnce(
+      new ConflictException('lote abierto'),
+    );
+
+    await expect(
+      service.leerDatosBatchAplicacionLote(
+        COP,
+        [INMUEBLE_ID],
+        [new Date('2026-06-02')],
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(exigirSinLoteAbierto).toHaveBeenCalledTimes(1);
+  });
+
+  it('resuelve el estado abierto/cerrado por cada mes DISTINTO entre las fechas de pago, no por fila', async () => {
+    const { service, periodo } = construirServicio({});
+
+    await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      // Local-time constructors, not ISO strings — `new Date('2026-07-01')`
+      // parses as UTC midnight, which this repo (America/Bogota, UTC-5)
+      // reads back as June 30 local, silently collapsing to the SAME month
+      // as the other two dates and breaking this test's "two distinct
+      // months" premise. See Task 2's own ledgered ruling.
+      [new Date(2026, 5, 2), new Date(2026, 5, 20), new Date(2026, 6, 1)],
+    );
+
+    // Dos meses distintos (junio, julio) entre tres fechas — una sola
+    // llamada por mes, no una por fila.
+    expect(periodo.estaAbierto).toHaveBeenCalledTimes(2);
+  });
+
+  it('deja copropiedad null cuando no existe, sin lanzar', async () => {
+    const { service } = construirServicio({ copropiedad: null });
+
+    const datos = await service.leerDatosBatchAplicacionLote(
+      COP,
+      [INMUEBLE_ID],
+      [new Date('2026-06-02')],
+    );
+
+    expect(datos.copropiedad).toBeNull();
+  });
+});
+
+// `ConflictException`, `RecibosService` and `Types` are already imported at
+// the top of this file — only this new type import is needed.
+import type { EscrituraFilaAplicacionLote } from './aplicacion-lote-batch.util';
+
+describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
+  const COP = new Types.ObjectId();
+  const SESSION = { id: 'fake-session' } as never;
+
+  const escrituraDe = (
+    documentoId: Types.ObjectId,
+    delta: number,
+  ): EscrituraFilaAplicacionLote => ({
+    reciboId: new Types.ObjectId(),
+    recibo: { coPropertyId: COP },
+    saldoDocumentoOrigen: {},
+    aplicacionesCartera: [{ documentId: documentoId }],
+    asientoContable: {},
+    saldoTotalDocumentoDeltas: [{ documentoId, delta }],
+    saldoCarteraDeltas: [],
+    carteraPorDocumentoDeltas: [],
+  });
+
+  const construirModelosMock = () => ({
+    recibos: { insertMany: jest.fn().mockResolvedValue([]) },
+    saldoDocumentoOrigen: { insertMany: jest.fn().mockResolvedValue([]) },
+    aplicaciones: { insertMany: jest.fn().mockResolvedValue([]) },
+    asientos: { insertMany: jest.fn().mockResolvedValue([]) },
+    saldoTotalDocumento: {
+      // `matchedCount` defaults to "every operation matched" (real Mongo
+      // behavior for a healthy guard) — a fixed `1` here would wrongly
+      // fail a test with 2+ DISTINCT documents even though every one of
+      // them actually had enough balance; the one test that wants a real
+      // guard failure overrides this explicitly.
+      bulkWrite: jest.fn((ops: unknown[]) =>
+        Promise.resolve({ matchedCount: ops.length }),
+      ),
+    },
+    saldos: { bulkWrite: jest.fn().mockResolvedValue({}) },
+    carteraPorDocumento: { bulkWrite: jest.fn().mockResolvedValue({}) },
+  });
+
+  const construirServicio = (
+    modelos: ReturnType<typeof construirModelosMock>,
+  ) =>
+    new RecibosService(
+      modelos.recibos as never,
+      modelos.aplicaciones as never,
+      {} as never, // facturas
+      modelos.saldos as never,
+      modelos.carteraPorDocumento as never,
+      modelos.saldoTotalDocumento as never,
+      modelos.asientos as never,
+      {} as never, // copropiedades
+      {} as never, // tenant
+      {} as never, // numeracion
+      {} as never, // connection
+      {} as never, // periodo
+      {} as never, // notasDebito
+      {} as never, // lotes (LotesFacturacionService)
+      modelos.saldoDocumentoOrigen as never,
+    );
+
+  it('agrupa en un insertMany por colección, en vez de una llamada por fila', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const escrituras = [
+      escrituraDe(new Types.ObjectId(), -50000),
+      escrituraDe(new Types.ObjectId(), -30000),
+    ];
+
+    await service.escribirEscriturasTandaAplicacionLote(
+      SESSION,
+      COP,
+      escrituras,
+    );
+
+    expect(modelos.recibos.insertMany).toHaveBeenCalledTimes(1);
+    expect(modelos.recibos.insertMany).toHaveBeenCalledWith(
+      escrituras.map((e) => e.recibo),
+      { session: SESSION },
+    );
+    expect(modelos.aplicaciones.insertMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('suma en UNA sola operación de bulkWrite los deltas de dos filas que tocan el MISMO documento', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const documentoId = new Types.ObjectId();
+    const escrituras = [
+      escrituraDe(documentoId, -50000),
+      escrituraDe(documentoId, -30000),
+    ];
+
+    await service.escribirEscriturasTandaAplicacionLote(
+      SESSION,
+      COP,
+      escrituras,
+    );
+
+    const [operaciones] = modelos.saldoTotalDocumento.bulkWrite.mock
+      .calls[0] as [
+      {
+        updateOne: {
+          filter: Record<string, unknown>;
+          update: Record<string, unknown>;
+        };
+      }[],
+    ];
+    expect(operaciones).toHaveLength(1);
+    expect(operaciones[0].updateOne.update).toEqual({
+      $inc: { saldoPendiente: -80000 },
+    });
+  });
+
+  it('lanza ConflictException cuando el guard de SaldoTotalDocumento no encuentra suficiente saldo', async () => {
+    const modelos = construirModelosMock();
+    modelos.saldoTotalDocumento.bulkWrite.mockResolvedValue({
+      matchedCount: 0,
+    });
+    const service = construirServicio(modelos);
+
+    await expect(
+      service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [
+        escrituraDe(new Types.ObjectId(), -50000),
+      ]),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('no llama bulkWrite de SaldoTotalDocumento cuando ninguna escritura tiene deltas (solo anticipo)', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const soloAnticipo: EscrituraFilaAplicacionLote = {
+      ...escrituraDe(new Types.ObjectId(), -50000),
+      saldoTotalDocumentoDeltas: [],
+      aplicacionesCartera: [],
+    };
+
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [
+      soloAnticipo,
+    ]);
+
+    expect(modelos.saldoTotalDocumento.bulkWrite).not.toHaveBeenCalled();
+    expect(modelos.aplicaciones.insertMany).not.toHaveBeenCalled();
+  });
+});

@@ -7,6 +7,13 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
+  claveMesDe,
+  type CandidatoAplicacionLote,
+  type DatosBatchAplicacionLote,
+  type DatosInmuebleParaAplicacionLote,
+  type EscrituraFilaAplicacionLote,
+} from './aplicacion-lote-batch.util';
+import {
   Recibo,
   ReciboDocument,
 } from '../../database/schemas/recibos/recibo.schema';
@@ -123,7 +130,7 @@ export interface ContextoCreacionRecibo {
  * reserved for chaining "genera anticipo"), grouped Cancela-antes-que-Abona,
  * Facturas-antes-que-Notas-Débito.
  */
-const redactarObservaciones = (
+export const redactarObservaciones = (
   resumen: ResumenAplicacion[],
   generaAnticipo: boolean,
 ): string => {
@@ -430,6 +437,222 @@ export class RecibosService {
     return { coPropertyId, destinationAccount, diferenciaConfirmada };
   }
 
+  /** `claveMesDe("2026-06")` back to a real `Date` inside that month — any
+   *  day works, `PeriodoService.estaAbierto` only reads year/month off it
+   *  (`periodoDe`, same local-time reasoning that produced the key). */
+  private fechaDeClaveMes(clave: string): Date {
+    const [year, month] = clave.split('-').map(Number);
+    return new Date(year, month - 1, 1);
+  }
+
+  /**
+   * Everything `ejecutarAplicacion()`'s batch-lote path needs, read ONCE
+   * for the WHOLE lote instead of once per row — design §4. Mirrors, but
+   * never calls, `prepararCreacion`'s own reads: `lotes.exigirSinLoteAbierto`
+   * (still throws and aborts before any tanda starts — a refusal costs no
+   * session, same placement `prepararCreacion` already uses),
+   * `lotes.obtenerUltimoConsolidado`, and `periodo.estaAbierto` (this
+   * method's non-throwing twin of `prepararCreacion`'s
+   * `periodo.exigirAbierto`, resolved per DISTINCT month instead of per
+   * row). Candidate documents (Facturas/Notas Débito/Saldos Iniciales) are
+   * fetched via `$in` across EVERY inmueble in the lote, then
+   * cross-referenced against `SaldoTotalDocumento` for a positive balance
+   * — same two-step `ejecutarAplicacionFifo` already does per inmueble,
+   * just widened to the whole batch.
+   */
+  async leerDatosBatchAplicacionLote(
+    coPropertyId: Types.ObjectId,
+    inmuebleIds: Types.ObjectId[],
+    fechasPago: Date[],
+  ): Promise<DatosBatchAplicacionLote> {
+    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+
+    const mesesDistintos = [...new Set(fechasPago.map((f) => claveMesDe(f)))];
+
+    const [
+      inmuebles,
+      facturas,
+      notasDebito,
+      saldosIniciales,
+      copropiedad,
+      cuentasContables,
+      ultimoLoteFacturacion,
+      periodosAbiertos,
+    ] = await Promise.all([
+      this.inmuebles!.find({ coPropertyId, _id: { $in: inmuebleIds } }).exec(),
+      this.facturas
+        .find({
+          coPropertyId,
+          inmuebleId: { $in: inmuebleIds },
+          status: 'emitida',
+        })
+        .exec(),
+      this.notasDebito
+        .find({
+          coPropertyId,
+          inmuebleId: { $in: inmuebleIds },
+          status: 'emitida',
+        })
+        .exec(),
+      this.saldosIniciales
+        ? this.saldosIniciales
+            .find({
+              coPropertyId,
+              inmuebleId: { $in: inmuebleIds },
+              status: 'activo',
+            })
+            .exec()
+        : Promise.resolve([]),
+      this.copropiedades.findById(coPropertyId).exec(),
+      this.cuentasContables!.find({ coPropertyId }).exec(),
+      this.lotes.obtenerUltimoConsolidado(coPropertyId.toString()),
+      Promise.all(
+        mesesDistintos.map((clave) =>
+          this.periodo.estaAbierto(
+            coPropertyId.toString(),
+            this.fechaDeClaveMes(clave),
+          ),
+        ),
+      ),
+    ]);
+
+    const idsDocumentos = [
+      ...facturas.map((f) => f._id),
+      ...notasDebito.map((n) => n._id),
+      ...saldosIniciales.map((s) => s._id),
+    ];
+    const saldosTotales = idsDocumentos.length
+      ? await this.saldoTotalDocumento
+          .find({
+            documentoId: { $in: idsDocumentos },
+            saldoPendiente: { $gt: 0 },
+          })
+          .exec()
+      : [];
+    const saldoPorDocumentoGlobal = new Map(
+      saldosTotales.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
+    const cuentasContablesPorCodigo = new Map(
+      cuentasContables.map((c) => [
+        c.code,
+        {
+          requiereTercero: c.requiresTercero,
+          centroUtilidad: c.profitCenter,
+          centroDestino: c.destinationCenter,
+          flujoCaja: c.cashFlow,
+          requiereDocumentoCruce: c.requiresCrossDocument,
+        },
+      ]),
+    );
+    const periodoAbiertoPorMes = new Map(
+      mesesDistintos.map((clave, i) => [clave, periodosAbiertos[i]]),
+    );
+
+    const indicePorInmueble = new Map<
+      string,
+      DatosInmuebleParaAplicacionLote
+    >();
+    for (const inmueble of inmuebles) {
+      const facturasAbiertas = facturas
+        .filter(
+          (f) =>
+            f.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(f._id.toString()),
+        )
+        .sort(
+          (a, b) =>
+            (a.dueDate ?? a.issueDate).getTime() -
+            (b.dueDate ?? b.issueDate).getTime(),
+        );
+      const notasDebitoAbiertas = notasDebito
+        .filter(
+          (n) =>
+            n.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(n._id.toString()),
+        )
+        .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
+      const saldosInicialesAbiertos = saldosIniciales
+        .filter(
+          (s) =>
+            s.inmuebleId.equals(inmueble._id) &&
+            saldoPorDocumentoGlobal.has(s._id.toString()),
+        )
+        .sort(
+          (a, b) => a.fechaVencimiento.getTime() - b.fechaVencimiento.getTime(),
+        );
+
+      const prioridadDe = (c: CandidatoAplicacionLote): Date =>
+        c.tipo === 'FV'
+          ? (c.doc.dueDate ?? c.doc.issueDate)
+          : c.tipo === 'ND'
+            ? c.doc.issueDate
+            : c.doc.fechaVencimiento;
+
+      const candidatosOrdenados: CandidatoAplicacionLote[] = [
+        ...facturasAbiertas.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'FV',
+          doc,
+        })),
+        ...notasDebitoAbiertas.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'ND',
+          doc,
+        })),
+        ...saldosInicialesAbiertos.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'SI',
+          doc,
+        })),
+      ].sort((a, b) => {
+        const porFecha = prioridadDe(a).getTime() - prioridadDe(b).getTime();
+        if (porFecha !== 0) return porFecha;
+        return a.doc._id.toString().localeCompare(b.doc._id.toString());
+      });
+
+      const saldoPorDocumento = new Map<string, number>();
+      for (const { doc } of candidatosOrdenados) {
+        saldoPorDocumento.set(
+          doc._id.toString(),
+          saldoPorDocumentoGlobal.get(doc._id.toString())!,
+        );
+      }
+
+      indicePorInmueble.set(inmueble._id.toString(), {
+        inmueble: {
+          _id: inmueble._id,
+          holderId: inmueble.holderId,
+          code: inmueble.code,
+        },
+        candidatosOrdenados,
+        saldoPorDocumento,
+      });
+    }
+
+    return {
+      indicePorInmueble,
+      copropiedad: copropiedad
+        ? {
+            receivablesAccount: copropiedad.receivablesAccount,
+            advancesAccount: copropiedad.advancesAccount,
+            discountsDebitAccount: copropiedad.discountsDebitAccount,
+            usesMemorandumAccounts: copropiedad.usesMemorandumAccounts,
+            memorandumDebitAccount: copropiedad.memorandumDebitAccount,
+            memorandumCreditAccount: copropiedad.memorandumCreditAccount,
+            defaultCostCentre: copropiedad.defaultCostCentre,
+            cashFlowCode: copropiedad.cashFlowCode,
+            defaultBankAccountCode: copropiedad.defaultBankAccountCode,
+          }
+        : null,
+      cuentasContablesPorCodigo,
+      periodoAbiertoPorMes,
+      ultimoLoteFacturacion: ultimoLoteFacturacion
+        ? {
+            periodStart: ultimoLoteFacturacion.periodStart,
+            periodEnd: ultimoLoteFacturacion.periodEnd,
+          }
+        : null,
+    };
+  }
+
   /**
    * Everything `crear()`'s transaction callback used to do, unchanged
    * internally — numbering, Recibo/`SaldoDocumentoOrigen` creation, the
@@ -669,6 +892,185 @@ export class RecibosService {
       enviarAOtrosIngresos ? 0 : sobranteReal,
       await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
     );
+  }
+
+  /**
+   * Turns one tanda's worth of `EscrituraFilaAplicacionLote` (Task 5) into
+   * a handful of `insertMany`/`bulkWrite` calls, one per collection —
+   * design §4 step 8. Runs inside the SAME session/transaction
+   * `LoteRecibosService.procesarTanda` already opens; a thrown error here
+   * aborts that transaction exactly like a thrown error inside today's
+   * per-row loop does.
+   */
+  async escribirEscriturasTandaAplicacionLote(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    escrituras: EscrituraFilaAplicacionLote[],
+  ): Promise<void> {
+    if (escrituras.length === 0) return;
+
+    await this.recibos.insertMany(
+      escrituras.map((e) => e.recibo),
+      { session },
+    );
+    await this.saldoDocumentoOrigen.insertMany(
+      escrituras.map((e) => e.saldoDocumentoOrigen),
+      { session },
+    );
+    const aplicacionesCartera = escrituras.flatMap(
+      (e) => e.aplicacionesCartera,
+    );
+    if (aplicacionesCartera.length > 0) {
+      await this.aplicaciones.insertMany(aplicacionesCartera, { session });
+    }
+    await this.asientos.insertMany(
+      escrituras.map((e) => e.asientoContable),
+      { session },
+    );
+
+    // SaldoTotalDocumento — authoritative, guarded, never clamped. One op
+    // per distinct document, delta SUMMED across every row in this tanda
+    // that touched it: safe, because each row's own consumption was
+    // already bounded by `aplicarFifoEnMemoria`'s in-memory tracking, so
+    // the tanda's TOTAL consumption per document is exactly as legitimate
+    // as N separate guarded decrements would have been.
+    const saldoTotalPorDocumento = new Map<string, number>();
+    for (const e of escrituras) {
+      for (const d of e.saldoTotalDocumentoDeltas) {
+        const clave = d.documentoId.toString();
+        saldoTotalPorDocumento.set(
+          clave,
+          (saldoTotalPorDocumento.get(clave) ?? 0) + d.delta,
+        );
+      }
+    }
+    if (saldoTotalPorDocumento.size > 0) {
+      const operaciones = [...saldoTotalPorDocumento].map(([clave, delta]) => ({
+        updateOne: {
+          filter: {
+            documentoId: new Types.ObjectId(clave),
+            $expr: { $gte: ['$saldoPendiente', -delta] },
+          },
+          update: { $inc: { saldoPendiente: delta } },
+        },
+      }));
+      const resultado = await this.saldoTotalDocumento.bulkWrite(operaciones, {
+        session,
+      });
+      if (resultado.matchedCount !== operaciones.length) {
+        throw new ConflictException(
+          'Saldo insuficiente al aplicar uno o más documentos de esta tanda',
+        );
+      }
+    }
+
+    // SaldoCartera — reconcilable cache (see its own schema docblock), same
+    // clamp-at-zero pipeline `ajustarSaldosCartera` already uses. One op per
+    // distinct (inmuebleId, conceptoId), deltas summed the same way as
+    // above — a documented, safe equivalence for a cache that is never
+    // authoritative (its own schema docblock says so).
+    const saldoCarteraPorClave = new Map<
+      string,
+      { inmuebleId: Types.ObjectId; conceptoId: Types.ObjectId; delta: number }
+    >();
+    for (const e of escrituras) {
+      for (const d of e.saldoCarteraDeltas) {
+        const clave = `${d.inmuebleId.toString()}:${d.conceptoId.toString()}`;
+        const previo = saldoCarteraPorClave.get(clave);
+        saldoCarteraPorClave.set(clave, {
+          inmuebleId: d.inmuebleId,
+          conceptoId: d.conceptoId,
+          delta: (previo?.delta ?? 0) + d.delta,
+        });
+      }
+    }
+    if (saldoCarteraPorClave.size > 0) {
+      await this.saldos.bulkWrite(
+        [...saldoCarteraPorClave.values()].map((d) => ({
+          updateOne: {
+            filter: {
+              coPropertyId,
+              inmuebleId: d.inmuebleId,
+              conceptoId: d.conceptoId,
+            },
+            update: [
+              {
+                $set: {
+                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
+                  conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
+                  balance: {
+                    $max: [
+                      0,
+                      { $add: [{ $ifNull: ['$balance', 0] }, d.delta] },
+                    ],
+                  },
+                },
+              },
+            ],
+            upsert: true,
+          },
+        })),
+        { session },
+      );
+    }
+
+    // CarteraPorDocumento — same clamp-at-zero pipeline as
+    // `ajustarCarteraPorDocumento`, one op per distinct (documentoId,
+    // conceptoId).
+    const carteraPorDocumentoPorClave = new Map<
+      string,
+      {
+        documentoId: Types.ObjectId;
+        conceptoId: Types.ObjectId;
+        inmuebleId: Types.ObjectId;
+        tipoDocumento: 'FV' | 'ND' | 'SI';
+        delta: number;
+      }
+    >();
+    for (const e of escrituras) {
+      for (const d of e.carteraPorDocumentoDeltas) {
+        const clave = `${d.documentoId.toString()}:${d.conceptoId.toString()}`;
+        const previo = carteraPorDocumentoPorClave.get(clave);
+        carteraPorDocumentoPorClave.set(clave, {
+          ...d,
+          delta: (previo?.delta ?? 0) + d.delta,
+        });
+      }
+    }
+    if (carteraPorDocumentoPorClave.size > 0) {
+      await this.carteraPorDocumento.bulkWrite(
+        [...carteraPorDocumentoPorClave.values()].map((d) => ({
+          updateOne: {
+            filter: { documentoId: d.documentoId, conceptoId: d.conceptoId },
+            update: [
+              {
+                $set: {
+                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
+                  tipoDocumento: {
+                    $ifNull: ['$tipoDocumento', d.tipoDocumento],
+                  },
+                  documentoId: { $ifNull: ['$documentoId', d.documentoId] },
+                  conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
+                  montoOriginal: { $ifNull: ['$montoOriginal', 0] },
+                  saldoAnterior: { $ifNull: ['$saldoAnterior', 0] },
+                  saldoNuevo: { $ifNull: ['$saldoNuevo', 0] },
+                  saldoPendiente: {
+                    $max: [
+                      0,
+                      { $add: [{ $ifNull: ['$saldoPendiente', 0] }, d.delta] },
+                    ],
+                  },
+                },
+              },
+            ],
+            upsert: true,
+          },
+        })),
+        { session },
+      );
+    }
   }
 
   /**
