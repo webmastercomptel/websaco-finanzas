@@ -86,7 +86,39 @@ Permission keys are Spanish `modulo.accion` strings mapped to CASL rules in exac
 
 ## The contract law
 
-Persistence is English, the API is Spanish, a mapper is the only thing that crosses between them. Shapes go in `src/contracts/index.ts`; each module owns a `<module>.mapper.ts` of pure functions. A controller returns mapper output, never a Mongoose document.
+**Persistence and the API are both Spanish** (schema field migration in
+progress — see `sdd`/plan history for tracking; until a schema file is
+migrated, its fields are still English). A mapper is still the frontier
+between the two, but its job is type conversion (`ObjectId` → `string`),
+composing fields that don't exist on the document (e.g. `saldoPendiente`,
+read live from `SaldoTotalDocumento`/`CarteraPorDocumento`, not a `@Prop`),
+and acting as a security boundary — never language translation. Shapes go in
+`src/contracts/index.ts`; each module owns a `<module>.mapper.ts` of pure
+functions. A controller returns mapper output, never a Mongoose document.
+
+This reverses the original "persistence is English" rule, which drifted into
+an inconsistent English/Spanish mix in the newer financial-document schemas
+and was never actually enforced there. Consolidating on Spanish (not
+English) matches where the codebase already drifted and how its primary
+maintainer works.
+
+**Canonical terms — use these exact names in every schema, no synonyms:**
+
+| Concept | Canonical field name | Do not use |
+| --- | --- | --- |
+| Monetary amount (base case) | `monto` | `amount`, `valor`, `valorRecibido` |
+| Original/first amount | `montoOriginal` | `totalAmount`, `totalMonto`, `totalDigitado` |
+| Document-type discriminator | `tipoDocumento` | `documentType`, `origenTipo` |
+| Reference to another document's id | `documentoId` | `documentId` |
+| Amount already applied (recibos/notas) | `montoAplicado` | `appliedAmount`, `amountApplied` |
+| Due date | `fechaVencimiento` | `dueDate` |
+| Live outstanding balance | `saldoPendiente` | `saldoDisponible`, `outstandingBalance`, `balance` |
+| Frozen balance snapshot (pre/post) | `saldoAnterior` / `saldoNuevo` | `balanceBefore` / `balanceAfter` |
+| Rows in a batch | `filas` / `totalFilas` | `lines` |
+
+Mongoose's own `timestamps: true` fields (`createdAt`/`updatedAt`) stay as-is
+— framework metadata, not domain vocabulary. Don't hand-roll a Spanish
+equivalent (`creadoEn`) alongside them.
 
 ## Layout and where new code goes
 
