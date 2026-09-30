@@ -12,7 +12,6 @@ const filaDe = (
   numerosPorReciboId: Map<string, string>,
 ): LoteRecibosFilaContract => ({
   inmuebleCodigo: fila.inmuebleCodigo,
-  copropiedadCodigo: fila.copropiedadCodigo,
   inmuebleId: fila.inmuebleId ? fila.inmuebleId.toString() : null,
   fechaPago: fila.fechaPago.toISOString(),
   valorRecibido: fila.valorRecibido,

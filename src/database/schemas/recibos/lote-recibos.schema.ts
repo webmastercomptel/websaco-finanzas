@@ -12,17 +12,13 @@ export type LoteRecibosDocument = HydratedDocument<LoteRecibos>;
  * inmueble. `inmuebleId`/`error` are resolved at `cargarArchivo()` time,
  * never by the frontend: the tenancy law says the tenant (and everything
  * scoped to it, an Inmueble included) is never trusted from client input,
- * only looked up against the ACTIVE coproperty. `copropiedadCodigo` is
- * carried purely as a courtesy cross-check against what the file's author
- * intended — never used to resolve or switch tenant.
+ * only looked up against the ACTIVE coproperty — carried via the header,
+ * never re-typed by the user per row.
  */
 @Schema({ _id: false })
 export class LoteRecibosFila {
   @Prop({ required: true, trim: true })
   inmuebleCodigo: string;
-
-  @Prop({ type: String, default: null, trim: true })
-  copropiedadCodigo: string | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Inmueble.name, default: null })
   inmuebleId: Types.ObjectId | null;

@@ -205,10 +205,8 @@ export class LoteRecibosService {
    * Parses no file itself — the frontend already turned the .xlsx into
    * `dto.filas` (same division of labor as
    * `LotesFacturacionService.cargarNovedades()`). Resolves each row's
-   * `inmuebleCodigo` against the ACTIVE coproperty's own Inmuebles — never
-   * against whatever `copropiedadCodigo` the row itself carries, which is
-   * kept only as a display cross-check (the tenancy law: the tenant is
-   * never trusted from client input).
+   * `inmuebleCodigo` against the ACTIVE coproperty's own Inmuebles — the
+   * tenant is never trusted from client input, the header carries it.
    */
   async cargarArchivo(
     id: string,
@@ -226,23 +224,13 @@ export class LoteRecibosService {
       );
     }
 
-    // `_id` IS the tenant id here — findById is correct, not the trap.
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
-    const codigoCopropiedadActiva = copropiedad?.code ?? null;
-
     const inmuebles = await this.inmuebles.find({ coPropertyId }).exec();
     const inmueblePorCodigo = new Map(inmuebles.map((i) => [i.code, i]));
 
     const filas = dto.filas.map((fila) => {
       const inmueble = inmueblePorCodigo.get(fila.inmuebleCodigo);
       let error: string | null = null;
-      if (
-        fila.copropiedadCodigo &&
-        codigoCopropiedadActiva &&
-        fila.copropiedadCodigo !== codigoCopropiedadActiva
-      ) {
-        error = `El código de copropiedad del archivo (${fila.copropiedadCodigo}) no coincide con la copropiedad activa`;
-      } else if (!inmueble) {
+      if (!inmueble) {
         error = `El inmueble ${fila.inmuebleCodigo} no existe en esta copropiedad`;
       } else if (!inmueble.holderId) {
         error = `El inmueble ${fila.inmuebleCodigo} no tiene titular asignado`;
@@ -250,7 +238,6 @@ export class LoteRecibosService {
 
       return {
         inmuebleCodigo: fila.inmuebleCodigo,
-        copropiedadCodigo: fila.copropiedadCodigo ?? null,
         inmuebleId: inmueble?._id ?? null,
         fechaPago: new Date(fila.fechaPago),
         valorRecibido: fila.valorRecibido,

@@ -223,33 +223,6 @@ describe('LoteRecibosService.cargarArchivo', () => {
     expect(update.$set.filas[0].error).toMatch(/no existe/);
   });
 
-  it('marca en error una fila cuyo código de copropiedad no coincide con la activa', async () => {
-    const inmueble = inmuebleDoc({ code: '301' });
-    const lote = loteDoc();
-    const { service, lotesModelo } = construirServicioBasico({
-      lote,
-      inmuebles: [inmueble],
-      copropiedad: { code: '0001' },
-    });
-
-    await service.cargarArchivo('lote-1', CUENTA.toString(), {
-      filas: [
-        {
-          inmuebleCodigo: '301',
-          copropiedadCodigo: '0002',
-          fechaPago: '2026-06-02',
-          valorRecibido: 100000,
-        },
-      ],
-    });
-
-    const [, update] = lotesModelo.findOneAndUpdate.mock.calls[0] as [
-      unknown,
-      { $set: { filas: { error: string | null }[] } },
-    ];
-    expect(update.$set.filas[0].error).toMatch(/no coincide/);
-  });
-
   it('marca en error un inmueble sin titular asignado', async () => {
     const inmueble = inmuebleDoc({ code: '301', holderId: null });
     const lote = loteDoc();

@@ -889,9 +889,6 @@ export interface DocumentoReciboLote {
 /** One row of a Recibos-por-lote upload. */
 export interface LoteRecibosFila {
   inmuebleCodigo: string;
-  /** The código de copropiedad the file's own row carried, if any — a pure
-   *  cross-check display value, never what resolves the tenant. */
-  copropiedadCodigo: string | null;
   inmuebleId: string | null;
   fechaPago: IsoDate;
   valorRecibido: Monto;
