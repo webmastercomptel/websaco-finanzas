@@ -67,7 +67,7 @@ export class SaldoInicialAnticipo {
   })
   inmuebleId: Types.ObjectId;
 
-  /** Frozen at import time from `Inmueble.holderId` — same reasoning as
+  /** Frozen at import time from `Inmueble.titularId` — same reasoning as
    *  `NotaDebito.terceroId`: the party this credit belongs to, fixed at the
    *  moment that matters, never re-derived later. Nullable because a unit's
    *  current titular can itself be unset. */

@@ -11,14 +11,14 @@ export interface FacturaLineaParaAsiento {
    *  accounts (e.g. Nota Débito's single-line posting) keeps its exact
    *  prior behavior without passing this field. */
   accountingReceivableAccount?: string | null;
-  /** The concept's `kind` (`ConceptoCobro.kind`/`FacturaLinea.conceptKind`).
+  /** The concept's `kind` (`ConceptoCobro.tipo`/`FacturaLinea.conceptKind`).
    *  Optional so non-invoice callers (e.g. Nota Débito's single-line
    *  posting) that never set it simply never match `'intereses'` below.
    *  Only `'intereses'` is inspected — see `construirMovimientos`'s
    *  cuentasOrden override. */
   conceptKind?: 'administracion' | 'intereses' | 'otro';
   /** The concept's name, exactly as configured in the Cargos tab
-   *  (`ConceptoCobro.name`/`FacturaLinea.conceptName`) — used verbatim as
+   *  (`ConceptoCobro.nombre`/`FacturaLinea.conceptName`) — used verbatim as
    *  this line's movimiento description, debit and credit alike, so a
    *  bookkeeper reading the ledger sees which cargo each line belongs to.
    *  Optional so non-invoice callers (e.g. Nota Débito's single-line
@@ -442,7 +442,7 @@ export interface DesgloseCuenta {
  * separate `Movimiento` lines, never merged into one that could only carry
  * a single documento cruce. A line with no documento cruce at all — the
  * overwhelming majority, since only an account flagged
- * `requiresCrossDocument` ever carries one — still merges purely by
+ * `requiereDocumentoCruce` ever carries one — still merges purely by
  * account, exactly like before this field existed.
  */
 function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {

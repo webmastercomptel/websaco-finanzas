@@ -498,28 +498,28 @@ export class CopropiedadesService {
       this.cuentasContables.find({ coPropertyId: origen._id }).exec(),
       this.cuentasContables
         .find({ coPropertyId: destinoOid })
-        .distinct('code')
+        .distinct('codigo')
         .exec(),
     ]);
     const codigosDestino = new Set(cuentasDestinoExistentes);
     const cuentasACopiar = cuentasOrigen.filter(
-      (c) => !codigosDestino.has(c.code),
+      (c) => !codigosDestino.has(c.codigo),
     );
     if (cuentasACopiar.length > 0) {
       await this.cuentasContables.insertMany(
         cuentasACopiar.map((c) => ({
           coPropertyId: destinoOid,
-          code: c.code,
-          name: c.name,
-          requiresTercero: c.requiresTercero,
-          isBank: c.isBank,
-          cashFlow: c.cashFlow,
-          profitCenter: c.profitCenter,
-          destinationCenter: c.destinationCenter,
-          requiresCrossDocument: c.requiresCrossDocument,
-          appliesTax: c.appliesTax,
-          taxRate: c.taxRate,
-          active: c.active,
+          codigo: c.codigo,
+          nombre: c.nombre,
+          requiereTercero: c.requiereTercero,
+          esBanco: c.esBanco,
+          flujoCaja: c.flujoCaja,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
+          aplicaImpuesto: c.aplicaImpuesto,
+          tasaImpuesto: c.tasaImpuesto,
+          activo: c.activo,
         })),
       );
     }
@@ -530,10 +530,10 @@ export class CopropiedadesService {
       .find({ coPropertyId: destinoOid })
       .exec();
     const idDestinoPorCodigo = new Map(
-      cuentasDestino.map((c) => [c.code, c._id.toString()]),
+      cuentasDestino.map((c) => [c.codigo, c._id.toString()]),
     );
     const codigoPorIdOrigen = new Map(
-      cuentasOrigen.map((c) => [c._id.toString(), c.code]),
+      cuentasOrigen.map((c) => [c._id.toString(), c.codigo]),
     );
     const remapCuenta = (id: Types.ObjectId | null): string | undefined => {
       if (!id) return undefined;
@@ -549,28 +549,28 @@ export class CopropiedadesService {
     // non-system 'administracion'/'intereses' kind) skips only that row.
     const [conceptosOrigen, nombresDestinoExistentes] = await Promise.all([
       this.conceptosCobro
-        .find({ coPropertyId: origen._id, isSystem: { $ne: true } })
-        .sort({ sortOrder: 1 })
+        .find({ coPropertyId: origen._id, sistema: { $ne: true } })
+        .sort({ orden: 1 })
         .exec(),
       this.conceptosCobro
         .find({ coPropertyId: destinoOid })
-        .distinct('name')
+        .distinct('nombre')
         .exec(),
     ]);
     const nombresDestino = new Set(nombresDestinoExistentes);
     let cargosCopiados = 0;
     for (const concepto of conceptosOrigen) {
-      if (nombresDestino.has(concepto.name)) continue;
+      if (nombresDestino.has(concepto.nombre)) continue;
       try {
         await this.conceptos.create(destinoId, {
-          nombre: concepto.name,
-          tipo: concepto.kind,
-          tasaImpuesto: concepto.taxRate,
+          nombre: concepto.nombre,
+          tipo: concepto.tipo,
+          tasaImpuesto: concepto.tasaImpuesto,
           cuentaDebitoId: remapCuenta(concepto.cuentaDebitoId),
           cuentaCreditoId: remapCuenta(concepto.cuentaCreditoId),
           cuentaImpuestoId: remapCuenta(concepto.cuentaImpuestoId),
           liquidaMora: concepto.liquidaMora,
-          cargaXls: concepto.availableAsNovedad,
+          cargaXls: concepto.cargaXls,
         });
         cargosCopiados += 1;
       } catch {

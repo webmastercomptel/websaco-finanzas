@@ -40,7 +40,7 @@ export interface ModelosDatosImpresionNotaContable {
  * A Nota Contable has no `terceroId` of its own (unlike Nota Crédito/Débito)
  * — it reclassifies within one inmueble's cartera, not against a specific
  * party's document — so `titularNombre` is resolved the same way Cartera
- * por Inmueble resolves it: `Inmueble.holderId` -> `Tercero.name`.
+ * por Inmueble resolves it: `Inmueble.titularId` -> `Tercero.nombre`.
  */
 export async function construirDatosImpresionNotaContable(
   nota: NotaContableDocument,
@@ -55,18 +55,18 @@ export async function construirDatosImpresionNotaContable(
   const [conceptoOrigen, conceptoDestino, inmueble] = await Promise.all([
     modelos.conceptos
       .findOne({ _id: nota.conceptoOrigenId, coPropertyId })
-      .populate('cuentaCreditoId', 'code')
+      .populate('cuentaCreditoId', 'codigo')
       .exec(),
     modelos.conceptos
       .findOne({ _id: nota.conceptoDestinoId, coPropertyId })
-      .populate('cuentaCreditoId', 'code')
+      .populate('cuentaCreditoId', 'codigo')
       .exec(),
     modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
   ]);
 
-  const tercero = inmueble?.holderId
+  const tercero = inmueble?.titularId
     ? await modelos.terceros
-        .findOne({ _id: inmueble.holderId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, coPropertyId })
         .exec()
     : null;
 
@@ -78,9 +78,9 @@ export async function construirDatosImpresionNotaContable(
     CUENTA_SIN_ASIGNAR;
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, code: { $in: [codigoOrigen, codigoDestino] } })
+    .find({ coPropertyId, codigo: { $in: [codigoOrigen, codigoDestino] } })
     .exec();
-  const nombrePorCodigo = new Map(cuentas.map((c) => [c.code, c.name]));
+  const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
 
   const lineas: LineaAsientoImpresion[] = [
     {
@@ -105,8 +105,8 @@ export async function construirDatosImpresionNotaContable(
     tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: fechaNotaContable(nota),
-    inmuebleCodigo: inmueble?.code ?? '—',
-    titularNombre: tercero?.name ?? '—',
+    inmuebleCodigo: inmueble?.codigo ?? '—',
+    titularNombre: tercero?.nombre ?? '—',
     concepto: nota.description,
     monto: nota.monto,
     lineas,

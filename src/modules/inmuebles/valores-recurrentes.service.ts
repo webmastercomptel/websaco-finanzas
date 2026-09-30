@@ -87,14 +87,14 @@ export class ValoresRecurrentesService {
     const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
 
     const [conceptos, valores] = await Promise.all([
-      this.conceptos.find({ coPropertyId }).sort({ sortOrder: 1 }).exec(),
+      this.conceptos.find({ coPropertyId }).sort({ orden: 1 }).exec(),
       this.valoresRecurrentes
         .find({ coPropertyId, inmuebleId: inmuebleOid })
         .exec(),
     ]);
 
     const montoPorConcepto = new Map(
-      valores.map((v) => [v.conceptoId.toString(), v.amount]),
+      valores.map((v) => [v.conceptoId.toString(), v.monto]),
     );
 
     return conceptos.map((concepto) =>
@@ -123,7 +123,7 @@ export class ValoresRecurrentesService {
     // `tipoConcepto` the client might send back, since this DTO carries no
     // such field at all.
     const interesConcepto = await this.conceptos
-      .findOne({ coPropertyId, kind: 'intereses' })
+      .findOne({ coPropertyId, tipo: 'intereses' })
       .exec();
     if (interesConcepto) {
       const lineaIntereses = dto.valores.find(
@@ -131,7 +131,7 @@ export class ValoresRecurrentesService {
       );
       if (lineaIntereses && lineaIntereses.monto > 0) {
         throw new ConflictException(
-          `El concepto "${interesConcepto.name}" se calcula automáticamente sobre la cartera vencida y no admite un valor recurrente fijo`,
+          `El concepto "${interesConcepto.nombre}" se calcula automáticamente sobre la cartera vencida y no admite un valor recurrente fijo`,
         );
       }
     }
@@ -147,7 +147,7 @@ export class ValoresRecurrentesService {
                 inmuebleId: inmuebleOid,
                 conceptoId: conceptoOid,
               },
-              { $set: { amount: linea.monto } },
+              { $set: { monto: linea.monto } },
               { upsert: true },
             )
             .exec();
@@ -177,8 +177,8 @@ export class ValoresRecurrentesService {
 
     const [unidades, valores] = await Promise.all([
       this.inmuebles
-        .find({ coPropertyId, status: 'active' })
-        .sort({ code: 1 })
+        .find({ coPropertyId, estado: 'active' })
+        .sort({ codigo: 1 })
         .exec(),
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
@@ -188,13 +188,13 @@ export class ValoresRecurrentesService {
       const inmuebleKey = v.inmuebleId.toString();
       const porConcepto =
         valoresPorInmueble.get(inmuebleKey) ?? new Map<string, number>();
-      porConcepto.set(v.conceptoId.toString(), v.amount);
+      porConcepto.set(v.conceptoId.toString(), v.monto);
       valoresPorInmueble.set(inmuebleKey, porConcepto);
     }
 
     return unidades.map((u) => ({
       inmuebleId: u._id.toString(),
-      codigo: u.code,
+      codigo: u.codigo,
       valores: [
         ...(valoresPorInmueble.get(u._id.toString()) ??
           new Map<string, number>()),
@@ -251,7 +251,7 @@ export class ValoresRecurrentesService {
           }
 
           const inmueble = await this.inmuebles
-            .findOne({ coPropertyId, code: fila.codigo })
+            .findOne({ coPropertyId, codigo: fila.codigo })
             .exec();
           if (!inmueble) {
             throw new Error(

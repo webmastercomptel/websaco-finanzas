@@ -179,7 +179,7 @@ export interface Tercero {
   tipoPersona: 'natural' | 'juridica';
   /** Full name for a person, trade name for a company. */
   nombre: string;
-  /** Split name parts — see the note on `Tercero.name` in the schema.
+  /** Split name parts — see the note on `Tercero.nombre` in the schema.
    *  `nom1`/`ape1` for `natural`, `razonSocial` for `juridica`; null when
    *  the party was loaded without them (e.g. the Excel import). */
   nom1: string | null;
@@ -2017,7 +2017,7 @@ export interface LineaMovimientoContable {
   baseGravable: number | null;
   /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
    *  a receivable against (Factura, Nota Débito) — present only when this
-   *  line's account is flagged `requiresCrossDocument`. */
+   *  line's account is flagged `requiereDocumentoCruce`. */
   documentoCruce: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null;
 }
 

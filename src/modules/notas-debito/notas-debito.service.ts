@@ -183,18 +183,18 @@ export class NotasDebitoService {
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
       cuentas.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
-      terceroCode: inmueble?.code ?? null,
+      terceroCode: inmueble?.codigo ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
       documentoCruce: documentoCruce ?? null,
@@ -250,8 +250,8 @@ export class NotasDebitoService {
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos
       .findOne({ _id: conceptoId, coPropertyId })
-      .populate('cuentaCreditoId', 'code')
-      .populate('cuentaDebitoId', 'code')
+      .populate('cuentaCreditoId', 'codigo')
+      .populate('cuentaDebitoId', 'codigo')
       .exec();
     if (!concepto) {
       throw new NotFoundException(
@@ -261,7 +261,7 @@ export class NotasDebitoService {
 
     // A Nota Débito freezes the party it was issued to too, same as every
     // other financial document (schema's own `terceroId` docblock) —
-    // resolve the unit's CURRENT titular (`Inmueble.holderId`) into a
+    // resolve the unit's CURRENT titular (`Inmueble.titularId`) into a
     // Tercero reference, same source `LotesFacturacionService` reads for a
     // Factura's own `terceroId`. Also the only place this method verifies
     // `dto.inmuebleId` actually belongs to this coproperty (the tenancy
@@ -274,7 +274,7 @@ export class NotasDebitoService {
         `No se encontró el inmueble ${dto.inmuebleId}`,
       );
     }
-    const terceroId = inmueble.holderId;
+    const terceroId = inmueble.titularId;
 
     const resultado = await this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
@@ -377,7 +377,7 @@ export class NotasDebitoService {
         creada,
         codigoDeCuentaContable(concepto.cuentaDebitoId),
         codigoDeCuentaContable(concepto.cuentaCreditoId),
-        concepto.kind,
+        concepto.tipo,
       );
 
       const final = await this.notasDebito
@@ -385,7 +385,7 @@ export class NotasDebitoService {
         .session(session)
         .exec();
       // Just seeded above, still full — no need to re-read SaldoTotalDocumento.
-      return toNotaDebito(final!, dto.total, inmueble.code);
+      return toNotaDebito(final!, dto.total, inmueble.codigo);
     });
 
     // Presentation generation is no longer triggered here — under the
@@ -488,7 +488,7 @@ export class NotasDebitoService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      inmuebles.map((i) => [i._id.toString(), i.code]),
+      inmuebles.map((i) => [i._id.toString(), i.codigo]),
     );
 
     return {
@@ -611,7 +611,7 @@ export class NotasDebitoService {
     const inmueble = await this.inmuebles
       ?.findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    return inmueble?.code ?? '';
+    return inmueble?.codigo ?? '';
   }
 
   /**
@@ -687,7 +687,7 @@ export class NotasDebitoService {
         this.copropiedades.findById(coPropertyId).session(session).exec(),
         this.conceptos
           .findOne({ _id: nota.conceptoId, coPropertyId })
-          .populate('cuentaCreditoId', 'code')
+          .populate('cuentaCreditoId', 'codigo')
           .session(session)
           .exec(),
       ]);
@@ -708,7 +708,7 @@ export class NotasDebitoService {
       // nothing (never a partial `montoCuentasOrden` like NC/NT need):
       // move the memo pair back only if this ND's own concepto is mora.
       const cuentasOrdenSiAplica =
-        concepto?.kind === 'intereses' ? cuentasOrdenDe(copropiedad) : null;
+        concepto?.tipo === 'intereses' ? cuentasOrdenDe(copropiedad) : null;
       let entries = construirContraAsientoNotaDebito(
         cuentaCartera,
         cuentaIngreso,

@@ -104,7 +104,7 @@ const accountDoc = (over: Record<string, unknown> = {}) => ({
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
+  codigo: '301',
   ...over,
 });
 
@@ -149,7 +149,7 @@ describe('PistaAuditoriaService', () => {
     const f = facturaDoc({ loteId, inmuebleId: inmId, fullNumber: 'FV-100' });
     const lote = loteDoc({ _id: loteId, generatedBy: creadorId });
     const creador = accountDoc({ _id: creadorId, fullName: 'Ana Pérez' });
-    const inm = inmuebleDoc({ _id: inmId, code: '501' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '501' });
 
     const svc = servicio({
       facturas: find([f]),

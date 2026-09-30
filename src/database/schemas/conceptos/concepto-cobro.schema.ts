@@ -34,7 +34,7 @@ export class ConceptoCobro {
   coPropertyId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   /**
    * What the system must understand about this concept beyond its name.
@@ -52,7 +52,7 @@ export class ConceptoCobro {
     enum: ['administracion', 'intereses', 'otro'],
     default: 'otro',
   })
-  kind: 'administracion' | 'intereses' | 'otro';
+  tipo: 'administracion' | 'intereses' | 'otro';
 
   /**
    * VAT rate as a percentage. Zero for almost everything.
@@ -66,11 +66,11 @@ export class ConceptoCobro {
    * here must never alter what an issued invoice says.
    */
   @Prop({ required: true, default: 0, min: 0, max: 100 })
-  taxRate: number;
+  tasaImpuesto: number;
 
   /** Display order in listings and documents. Lower comes first. */
   @Prop({ required: true, default: 100 })
-  sortOrder: number;
+  orden: number;
 
   /** Accounting debit account for this concept's journal entries. */
   @Prop({
@@ -116,7 +116,7 @@ export class ConceptoCobro {
    * real behavior change on deploy (spec §2, §8 Risks).
    */
   @Prop({ required: true, default: false })
-  availableAsNovedad: boolean;
+  cargaXls: boolean;
 
   /**
    * System-created charges (Administración, Intereses, Multas) are seeded
@@ -124,21 +124,21 @@ export class ConceptoCobro {
    * deactivated from the UI — the billing cycle depends on them.
    */
   @Prop({ required: true, default: false })
-  isSystem: boolean;
+  sistema: boolean;
 }
 
 export const ConceptoCobroSchema = SchemaFactory.createForClass(ConceptoCobro);
 
 // Two concepts with the same name in one building are a data-entry mistake that
 // makes every report ambiguous.
-ConceptoCobroSchema.index({ coPropertyId: 1, name: 1 }, { unique: true });
+ConceptoCobroSchema.index({ coPropertyId: 1, nombre: 1 }, { unique: true });
 
 // At most one administration concept and one interest concept per building —
 // code looks these up expecting a single answer.
 ConceptoCobroSchema.index(
-  { coPropertyId: 1, kind: 1 },
+  { coPropertyId: 1, tipo: 1 },
   {
     unique: true,
-    partialFilterExpression: { kind: { $in: ['administracion', 'intereses'] } },
+    partialFilterExpression: { tipo: { $in: ['administracion', 'intereses'] } },
   },
 );

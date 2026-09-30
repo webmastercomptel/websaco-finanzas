@@ -12,15 +12,15 @@ const CUENTA_CREDITO_ID = '507f1f77bcf86cd799439044';
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => CON_ID },
   coPropertyId: { toString: () => COP_ID },
-  name: 'Administración',
-  kind: 'administracion',
-  taxRate: 0,
-  sortOrder: 100,
+  nombre: 'Administración',
+  tipo: 'administracion',
+  tasaImpuesto: 0,
+  orden: 100,
   cuentaDebitoId: null,
   cuentaCreditoId: null,
   liquidaMora: false,
-  availableAsNovedad: false,
-  isSystem: false,
+  cargaXls: false,
+  sistema: false,
   ...over,
 });
 
@@ -56,7 +56,7 @@ const modeloCon = (
       filtros.push(filtro);
       // Distinguishes the name-collision check from the tipo-uniqueness
       // check by which key each filter carries, same as the two real cases.
-      if ('name' in filtro) {
+      if ('nombre' in filtro) {
         return {
           exec: () =>
             Promise.resolve(opts.duplicadoNombre ? { _id: 'x' } : null),
@@ -101,7 +101,7 @@ const crearServicio = (
   );
 
 describe('ConceptosService.findAll', () => {
-  it('filtra por la copropiedad del route param, ordenado por sortOrder', async () => {
+  it('filtra por la copropiedad del route param, ordenado por orden', async () => {
     const modelo = modeloCon([documento()]);
     const service = crearServicio(modelo);
 
@@ -140,7 +140,7 @@ describe('ConceptosService.findAll', () => {
   it('extrae el código de cuenta solo cuando llega poblada', async () => {
     const cuentaPoblada = {
       _id: { toString: () => CUENTA_DEBITO_ID },
-      code: '413501',
+      codigo: '413501',
     };
     const modelo = modeloCon([documento({ cuentaDebitoId: cuentaPoblada })]);
     const service = crearServicio(modelo);
@@ -184,9 +184,9 @@ describe('ConceptosService.create', () => {
 
     expect(modelo.escrituras[0]).toEqual({
       coPropertyId: new Types.ObjectId(COP_ID),
-      sortOrder: 1,
-      name: 'Parqueadero',
-      kind: 'otro',
+      orden: 1,
+      nombre: 'Parqueadero',
+      tipo: 'otro',
     });
   });
 
@@ -206,24 +206,24 @@ describe('ConceptosService.create', () => {
 
     expect(modelo.escrituras[0]).toEqual({
       coPropertyId: new Types.ObjectId(COP_ID),
-      sortOrder: 1,
-      name: 'Interés de mora',
-      kind: 'intereses',
-      taxRate: 0,
+      orden: 1,
+      nombre: 'Interés de mora',
+      tipo: 'intereses',
+      tasaImpuesto: 0,
       cuentaDebitoId: new Types.ObjectId(CUENTA_DEBITO_ID),
       cuentaCreditoId: new Types.ObjectId(CUENTA_CREDITO_ID),
       liquidaMora: true,
-      availableAsNovedad: true,
+      cargaXls: true,
     });
   });
 
   it('el orden se asigna automáticamente, uno más que el mayor existente', async () => {
-    const modelo = modeloCon([documento({ sortOrder: 5 })]);
+    const modelo = modeloCon([documento({ orden: 5 })]);
     const service = crearServicio(modelo);
 
     await service.create(COP_ID, { nombre: 'Parqueadero' });
 
-    expect(modelo.escrituras[0]).toMatchObject({ sortOrder: 6 });
+    expect(modelo.escrituras[0]).toMatchObject({ orden: 6 });
   });
 });
 
@@ -234,7 +234,7 @@ describe('ConceptosService.update', () => {
 
     await service.update(COP_ID, CON_ID, { tasaImpuesto: 19 });
 
-    expect(modelo.escrituras[0]).toEqual({ taxRate: 19 });
+    expect(modelo.escrituras[0]).toEqual({ tasaImpuesto: 19 });
   });
 
   it('no toca cuentaDebitoId/cuentaCreditoId cuando el patch no los menciona', async () => {
@@ -245,7 +245,7 @@ describe('ConceptosService.update', () => {
 
     await service.update(COP_ID, CON_ID, { nombre: 'Administración General' });
 
-    expect(modelo.escrituras[0]).toEqual({ name: 'Administración General' });
+    expect(modelo.escrituras[0]).toEqual({ nombre: 'Administración General' });
   });
 
   it('limpia una cuenta cuando el patch la manda explícitamente vacía', async () => {
@@ -265,19 +265,19 @@ describe('ConceptosService.update', () => {
 
     expect(modelo.escrituras[0]).toEqual({
       liquidaMora: true,
-      availableAsNovedad: true,
+      cargaXls: true,
     });
   });
 
   it('permite editar un cargo de sistema', async () => {
     // Solo eliminar está bloqueado para los tres cargos de sistema — editar
     // no. Ver ConceptosService.delete para el bloqueo real.
-    const modelo = modeloCon([documento({ isSystem: true })]);
+    const modelo = modeloCon([documento({ sistema: true })]);
     const service = crearServicio(modelo);
 
     await service.update(COP_ID, CON_ID, { tasaImpuesto: 19 });
 
-    expect(modelo.escrituras[0]).toEqual({ taxRate: 19 });
+    expect(modelo.escrituras[0]).toEqual({ tasaImpuesto: 19 });
   });
 
   it('no choca consigo mismo al guardar sin cambiar el tipo', async () => {
@@ -288,7 +288,7 @@ describe('ConceptosService.update', () => {
 
     expect(modelo.filtros[1]).toEqual({
       coPropertyId: new Types.ObjectId(COP_ID),
-      kind: 'administracion',
+      tipo: 'administracion',
       _id: { $ne: CON_ID },
     });
   });
@@ -317,7 +317,7 @@ describe('ConceptosService.delete', () => {
   });
 
   it('rechaza eliminar un cargo de sistema', async () => {
-    const modelo = modeloCon([documento({ isSystem: true })]);
+    const modelo = modeloCon([documento({ sistema: true })]);
     const service = crearServicio(modelo);
 
     await expect(service.delete(COP_ID, CON_ID)).rejects.toBeInstanceOf(

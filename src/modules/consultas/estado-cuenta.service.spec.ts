@@ -109,7 +109,7 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
   );
 
 const svcDefaults = (overrides: Record<string, unknown> = {}) => ({
-  inmuebles: mockFindOne({ code: '301', holderId: null }),
+  inmuebles: mockFindOne({ codigo: '301', titularId: null }),
   terceros: mockFindOne(null),
   copropiedades: mockFindById({ phone: null, email: null }),
   ...overrides,
@@ -955,7 +955,7 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoAnterior).toBe(70000);
     });
 
-    it('propietario is null when inmueble has no holderId', async () => {
+    it('propietario is null when inmueble has no titularId', async () => {
       const inmId = id();
       const f = facturaDoc({ inmuebleId: inmId, total: 0 });
 
@@ -1052,11 +1052,13 @@ describe('EstadoCuentaService', () => {
         facturas: mockFind([f]),
         inmuebles: {
           findOne: inmueblesFindOne,
-          exec: jest.fn().mockResolvedValue({ code: '301', holderId }),
+          exec: jest
+            .fn()
+            .mockResolvedValue({ codigo: '301', titularId: holderId }),
         },
         terceros: {
           findOne: tercerosFindOne,
-          exec: jest.fn().mockResolvedValue({ name: 'Juan Perez' }),
+          exec: jest.fn().mockResolvedValue({ nombre: 'Juan Perez' }),
         },
         copropiedades: mockFindById({ phone: null, email: null }),
       });

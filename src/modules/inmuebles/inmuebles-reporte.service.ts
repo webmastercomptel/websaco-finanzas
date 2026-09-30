@@ -22,42 +22,42 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { generarPdfListadoInmuebles } from '../../common/pdf/inmuebles-listado-pdf';
 import type { RespuestaListadoInmuebles } from '../../contracts';
 
-/** The shape `holderId` arrives in when the query populated it — wider than
+/** The shape `titularId` arrives in when the query populated it — wider than
  *  `inmuebles.mapper.ts`'s own `titularDe` pick, since this roster needs the
  *  raw name parts to build its own apellido-first display string (see
- *  `nombreListadoDe`) instead of reusing `Tercero.name`'s stored order. */
+ *  `nombreListadoDe`) instead of reusing `Tercero.nombre`'s stored order. */
 type TitularPoblado = {
-  name: string;
-  personType: 'natural' | 'juridica';
-  firstName: string | null;
-  firstLastName: string | null;
-  secondLastName: string | null;
-  businessName: string | null;
+  nombre: string;
+  tipoPersona: 'natural' | 'juridica';
+  primerNombre: string | null;
+  primerApellido: string | null;
+  segundoApellido: string | null;
+  razonSocial: string | null;
 };
 
 /**
  * "Apellido1 Apellido2 Nombre1" for a natural person — deliberately
- * SHORTER than `Tercero.name`'s own stored order (which also includes
- * `middleName`/segundo nombre), and surname-first (product decision,
+ * SHORTER than `Tercero.nombre`'s own stored order (which also includes
+ * `segundoNombre`), and surname-first (product decision,
  * 2026-09-20): a roster row is one printed/screen line, and the surname is
  * what identifies someone at a glance in a list sorted by unit, not their
- * full legal name — `Tercero.name` itself is untouched, still what
- * Factura/Recibo/every DIAN-facing document prints. `businessName` for a
+ * full legal name — `Tercero.nombre` itself is untouched, still what
+ * Factura/Recibo/every DIAN-facing document prints. `razonSocial` for a
  * legal entity has no "surname" to lead with, so it's used as-is. Falls
- * back to `Tercero.name` only if every relevant part is somehow null (a
+ * back to `Tercero.nombre` only if every relevant part is somehow null (a
  * titular saved before these fields existed, or with a blank name).
  */
 function nombreListadoDe(holder: TitularPoblado | null): string | null {
   if (!holder) return null;
-  if (holder.personType === 'juridica') {
-    return holder.businessName || holder.name;
+  if (holder.tipoPersona === 'juridica') {
+    return holder.razonSocial || holder.nombre;
   }
   const partes = [
-    holder.firstLastName,
-    holder.secondLastName,
-    holder.firstName,
+    holder.primerApellido,
+    holder.segundoApellido,
+    holder.primerNombre,
   ].filter((p): p is string => Boolean(p));
-  return partes.length > 0 ? partes.join(' ') : holder.name;
+  return partes.length > 0 ? partes.join(' ') : holder.nombre;
 }
 
 /** One active unit, already joined with its recurring cargo amounts —
@@ -105,11 +105,11 @@ export class InmueblesReporteService {
     const [copropiedad, inmuebles, conceptos, valores] = await Promise.all([
       this.copropiedades.findById(coPropertyId).exec(),
       this.inmuebles
-        .find({ coPropertyId, status: 'active' })
-        .sort({ code: 1 })
+        .find({ coPropertyId, estado: 'active' })
+        .sort({ codigo: 1 })
         .populate(
-          'holderId',
-          'name personType firstName firstLastName secondLastName businessName',
+          'titularId',
+          'nombre tipoPersona primerNombre primerApellido segundoApellido razonSocial',
         )
         .exec(),
       // `intereses` excluded — it is computed from overdue balances, never a
@@ -118,8 +118,8 @@ export class InmueblesReporteService {
       // listing it for context on the per-unit screen; a printed roster has
       // no per-unit "calculado automáticamente" note to hang it on).
       this.conceptos
-        .find({ coPropertyId, kind: { $ne: 'intereses' } })
-        .sort({ sortOrder: 1 })
+        .find({ coPropertyId, tipo: { $ne: 'intereses' } })
+        .sort({ orden: 1 })
         .exec(),
       this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
@@ -135,12 +135,12 @@ export class InmueblesReporteService {
       const inmuebleId = v.inmuebleId.toString();
       const mapa =
         valoresPorInmueble.get(inmuebleId) ?? new Map<string, number>();
-      mapa.set(v.conceptoId.toString(), v.amount);
+      mapa.set(v.conceptoId.toString(), v.monto);
       valoresPorInmueble.set(inmuebleId, mapa);
     }
 
     const items = inmuebles.map((inm) => {
-      const holder = inm.holderId as unknown as TitularPoblado | null;
+      const holder = inm.titularId as unknown as TitularPoblado | null;
       const propios = valoresPorInmueble.get(inm._id.toString());
       const valoresPorConcepto: Record<string, number> = {};
       for (const concepto of conceptos) {
@@ -148,17 +148,17 @@ export class InmueblesReporteService {
           propios?.get(concepto._id.toString()) ?? 0;
       }
       return {
-        codigo: inm.code,
+        codigo: inm.codigo,
         titular: nombreListadoDe(holder),
         area: inm.area,
-        coeficiente: inm.participationFactor,
+        coeficiente: inm.coeficiente,
         valores: valoresPorConcepto,
       };
     });
 
     const conceptosParaPdf = conceptos.map((c) => ({
       id: c._id.toString(),
-      nombre: c.name,
+      nombre: c.nombre,
     }));
 
     return { copropiedad, items, conceptos: conceptosParaPdf };

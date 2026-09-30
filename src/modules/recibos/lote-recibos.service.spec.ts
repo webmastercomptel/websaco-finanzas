@@ -22,8 +22,8 @@ const numeracionVacia = (): NumeracionService =>
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   coPropertyId: COP,
-  code: '301',
-  holderId: new Types.ObjectId(),
+  codigo: '301',
+  titularId: new Types.ObjectId(),
   ...over,
 });
 
@@ -170,7 +170,7 @@ describe('LoteRecibosService.crear', () => {
 
 describe('LoteRecibosService.cargarArchivo', () => {
   it('resuelve inmuebleId cuando el código existe en la copropiedad activa', async () => {
-    const inmueble = inmuebleDoc({ code: '301' });
+    const inmueble = inmuebleDoc({ codigo: '301' });
     const lote = loteDoc();
     const { service, lotesModelo } = construirServicioBasico({
       lote,
@@ -224,7 +224,7 @@ describe('LoteRecibosService.cargarArchivo', () => {
   });
 
   it('marca en error un inmueble sin titular asignado', async () => {
-    const inmueble = inmuebleDoc({ code: '301', holderId: null });
+    const inmueble = inmuebleDoc({ codigo: '301', titularId: null });
     const lote = loteDoc();
     const { service, lotesModelo } = construirServicioBasico({
       lote,

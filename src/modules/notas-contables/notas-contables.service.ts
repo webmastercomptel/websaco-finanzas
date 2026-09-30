@@ -131,18 +131,18 @@ export class NotasContablesService {
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
       cuentas.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
-      terceroCode: inmueble?.code ?? null,
+      terceroCode: inmueble?.codigo ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
     });
@@ -418,7 +418,7 @@ export class NotasContablesService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.codigo]),
     );
 
     return {
@@ -486,7 +486,7 @@ export class NotasContablesService {
     const inmueble = await this.inmuebles
       ?.findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    return inmueble?.code ?? '';
+    return inmueble?.codigo ?? '';
   }
 
   /**
@@ -625,12 +625,12 @@ export class NotasContablesService {
     const [cuentaOrigenDoc, cuentaDestinoDoc, copropiedad] = await Promise.all([
       this.conceptos
         .findOne({ _id: cuentaOrigenConceptoId, coPropertyId })
-        .populate('cuentaCreditoId', 'code')
+        .populate('cuentaCreditoId', 'codigo')
         .session(session)
         .exec(),
       this.conceptos
         .findOne({ _id: cuentaDestinoConceptoId, coPropertyId })
-        .populate('cuentaCreditoId', 'code')
+        .populate('cuentaCreditoId', 'codigo')
         .session(session)
         .exec(),
       this.copropiedades.findById(coPropertyId).session(session).exec(),
@@ -649,8 +649,8 @@ export class NotasContablesService {
       cuentaDestino,
       nota.monto,
       cuentasOrden,
-      cuentaOrigenDoc?.kind === 'intereses',
-      cuentaDestinoDoc?.kind === 'intereses',
+      cuentaOrigenDoc?.tipo === 'intereses',
+      cuentaDestinoDoc?.tipo === 'intereses',
     );
     entries = await this.conAuxiliares(
       session,

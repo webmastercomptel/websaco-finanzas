@@ -229,14 +229,14 @@ export class LoteRecibosService {
     }
 
     const inmuebles = await this.inmuebles.find({ coPropertyId }).exec();
-    const inmueblePorCodigo = new Map(inmuebles.map((i) => [i.code, i]));
+    const inmueblePorCodigo = new Map(inmuebles.map((i) => [i.codigo, i]));
 
     const filas = dto.filas.map((fila) => {
       const inmueble = inmueblePorCodigo.get(fila.inmuebleCodigo);
       let error: string | null = null;
       if (!inmueble) {
         error = `El inmueble ${fila.inmuebleCodigo} no existe en esta copropiedad`;
-      } else if (!inmueble.holderId) {
+      } else if (!inmueble.titularId) {
         error = `El inmueble ${fila.inmuebleCodigo} no tiene titular asignado`;
       }
 

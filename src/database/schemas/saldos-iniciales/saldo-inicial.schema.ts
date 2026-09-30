@@ -52,7 +52,7 @@ export class SaldoInicialLinea {
   @Prop({ type: String, default: null, trim: true })
   accountingIncomeAccount: string | null;
 
-  /** `ConceptoCobro.kind` at import time — only inspected for `'intereses'`
+  /** `ConceptoCobro.tipo` at import time — only inspected for `'intereses'`
    *  (`NotasCreditoService.crear()`'s own mora-tracking), same reasoning as
    *  `FacturaLinea.conceptKind`. */
   @Prop({

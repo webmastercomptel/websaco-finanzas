@@ -711,7 +711,7 @@ describe('LotesFacturacionService.agregarNovedadLinea', () => {
     };
     const conceptosModelo = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve({ _id: CONCEPTO, kind: 'administracion' }),
+        exec: () => Promise.resolve({ _id: CONCEPTO, tipo: 'administracion' }),
       })),
     };
     const service = new LotesFacturacionService(
@@ -765,11 +765,11 @@ describe('LotesFacturacionService.agregarNovedadLinea', () => {
 describe('LotesFacturacionService.cargarNovedades', () => {
   const unidadCon = (id: string, codigo: string) => ({
     _id: id,
-    code: codigo,
+    codigo,
   });
   const conceptoCon = (id: string, nombre: string) => ({
     _id: id,
-    name: nombre,
+    nombre,
   });
 
   it('resuelve inmueble por código y concepto por nombre, y agrega la novedad sin reemplazar las anteriores', async () => {
@@ -783,16 +783,16 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       })),
     };
     const inmuebles = {
-      findOne: jest.fn(({ code }: Filtro) => ({
+      findOne: jest.fn(({ codigo }: Filtro) => ({
         exec: () =>
-          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+          Promise.resolve(codigo === '301' ? unidadCon('inm-1', '301') : null),
       })),
     };
     const conceptos = {
-      findOne: jest.fn(({ name }: Filtro) => ({
+      findOne: jest.fn(({ nombre }: Filtro) => ({
         exec: () =>
           Promise.resolve(
-            name === 'Multas' ? conceptoCon('con-1', 'Multas') : null,
+            nombre === 'Multas' ? conceptoCon('con-1', 'Multas') : null,
           ),
       })),
     };
@@ -845,9 +845,9 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       })),
     };
     const inmuebles = {
-      findOne: jest.fn(({ code }: Filtro) => ({
+      findOne: jest.fn(({ codigo }: Filtro) => ({
         exec: () =>
-          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+          Promise.resolve(codigo === '301' ? unidadCon('inm-1', '301') : null),
       })),
     };
     const conceptos = {
@@ -908,9 +908,9 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       })),
     };
     const inmuebles = {
-      findOne: jest.fn(({ code }: Filtro) => ({
+      findOne: jest.fn(({ codigo }: Filtro) => ({
         exec: () =>
-          Promise.resolve(code === '301' ? unidadCon('inm-1', '301') : null),
+          Promise.resolve(codigo === '301' ? unidadCon('inm-1', '301') : null),
       })),
     };
     const conceptos = {
@@ -990,9 +990,9 @@ describe('LotesFacturacionService.cargarNovedades', () => {
 
   it('rechaza un concepto que no está habilitado para novedades', async () => {
     // El concepto SÍ existe, solo le falta el flag — probando que
-    // availableAsNovedad realmente filtra, no solo que un concepto
+    // cargaXls realmente filtra, no solo que un concepto
     // inexistente falla. No hay más un flag active/inactive separado en
-    // ConceptoCobro (design note en el schema): availableAsNovedad es todo
+    // ConceptoCobro (design note en el schema): cargaXls es todo
     // lo que la consulta filtra además del nombre.
     const lotes = {
       findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
@@ -1008,7 +1008,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const conceptosFindOne = jest.fn((filtro: Filtro) => ({
       exec: () =>
         Promise.resolve(
-          filtro.availableAsNovedad === true
+          filtro.cargaXls === true
             ? null // este concepto existe pero NO tiene el flag — la
             : // consulta real (con el filtro correcto) no lo encuentra
               conceptoCon('con-1', 'Multas'),
@@ -1037,7 +1037,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ]);
 
     expect(conceptosFindOne).toHaveBeenCalledWith(
-      expect.objectContaining({ availableAsNovedad: true }),
+      expect.objectContaining({ cargaXls: true }),
     );
     expect(resultado.errores).toEqual([
       {
@@ -1189,36 +1189,36 @@ describe('LotesFacturacionService.liquidar', () => {
 
   const unidad = (over: Record<string, unknown> = {}) => ({
     _id: { toString: () => 'inm-1' },
-    code: '301',
+    codigo: '301',
     coPropertyId: COP,
-    holderId: { toString: () => 'ter-1' },
-    status: 'active',
+    titularId: { toString: () => 'ter-1' },
+    estado: 'active',
     ...over,
   });
   const tercero = (over: Record<string, unknown> = {}) => ({
     _id: { toString: () => 'ter-1' },
-    name: 'Ana Pérez',
-    identificationType: 'CC',
-    identificationNumber: '123456',
-    identificationVerificationDigit: null,
-    address: null,
-    city: null,
+    nombre: 'Ana Pérez',
+    tipoIdentificacion: 'CC',
+    numeroIdentificacion: '123456',
+    digitoVerificacion: null,
+    direccion: null,
+    ciudad: null,
     emails: [],
-    phone: null,
+    telefono: null,
     ...over,
   });
   const concepto = (over: Record<string, unknown> = {}) => ({
     _id: { toString: () => 'con-1' },
-    name: 'Administración',
-    kind: 'administracion',
-    taxRate: 0,
-    cuentaCreditoId: { code: '413501' },
+    nombre: 'Administración',
+    tipo: 'administracion',
+    tasaImpuesto: 0,
+    cuentaCreditoId: { codigo: '413501' },
     ...over,
   });
   const valorRecurrente = (over: Record<string, unknown> = {}) => ({
     inmuebleId: { toString: () => 'inm-1' },
     conceptoId: { toString: () => 'con-1' },
-    amount: 520000,
+    monto: 520000,
     ...over,
   });
 
@@ -1343,7 +1343,7 @@ describe('LotesFacturacionService.liquidar', () => {
     // `Inmueble.estado` (product decision, 2026-09-21): un inmueble inactivo
     // nunca debe generar Factura en un ciclo nuevo — la consulta que arma
     // el preview es la única elegibilidad real, así que basta con
-    // verificar que siempre filtra por `status: 'active'`.
+    // verificar que siempre filtra por `estado: 'active'`.
     const m = construirModelos({});
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1367,13 +1367,13 @@ describe('LotesFacturacionService.liquidar', () => {
 
     const llamadas = (m.inmuebles.find as jest.Mock).mock.calls as unknown[][];
     const filtro = llamadas[0]?.[0] as Record<string, unknown> | undefined;
-    expect(filtro?.status).toBe('active');
+    expect(filtro?.estado).toBe('active');
   });
 
   it('congela accountingTaxAccount desde cuentaImpuestoId del concepto', async () => {
     const m = construirModelos({
       conceptos: [
-        concepto({ taxRate: 19, cuentaImpuestoId: { code: '240815' } }),
+        concepto({ tasaImpuesto: 19, cuentaImpuestoId: { codigo: '240815' } }),
       ],
     });
     const service = new LotesFacturacionService(
@@ -1409,7 +1409,7 @@ describe('LotesFacturacionService.liquidar', () => {
     ]);
   });
 
-  it('ordena las líneas por sortOrder del cargo (Administración, Intereses, Multas), no por orden de cómputo', async () => {
+  it('ordena las líneas por orden del cargo (Administración, Intereses, Multas), no por orden de cómputo', async () => {
     // El orden de cómputo real es recurrente -> novedades -> interés (interés
     // siempre al final, para poder calcularlo sobre el saldo ya cargado), pero
     // el orden que debe verse en la factura y en el asiento es el de la
@@ -1418,24 +1418,24 @@ describe('LotesFacturacionService.liquidar', () => {
       conceptos: [
         concepto({
           _id: { toString: () => 'con-admin' },
-          name: 'Administración',
-          kind: 'administracion',
-          sortOrder: 1,
-          cuentaCreditoId: { code: '413501' },
+          nombre: 'Administración',
+          tipo: 'administracion',
+          orden: 1,
+          cuentaCreditoId: { codigo: '413501' },
         }),
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Intereses por Mora',
-          kind: 'intereses',
-          sortOrder: 2,
-          cuentaCreditoId: { code: '413595' },
+          nombre: 'Intereses por Mora',
+          tipo: 'intereses',
+          orden: 2,
+          cuentaCreditoId: { codigo: '413595' },
         }),
         concepto({
           _id: { toString: () => 'con-multas' },
-          name: 'Multas',
-          kind: 'otro',
-          sortOrder: 3,
-          cuentaCreditoId: { code: '413599' },
+          nombre: 'Multas',
+          tipo: 'otro',
+          orden: 3,
+          cuentaCreditoId: { codigo: '413599' },
         }),
       ],
       valoresRecurrentes: [
@@ -1490,7 +1490,7 @@ describe('LotesFacturacionService.liquidar', () => {
   });
 
   it('salta las unidades sin titular', async () => {
-    const m = construirModelos({ unidades: [unidad({ holderId: null })] });
+    const m = construirModelos({ unidades: [unidad({ titularId: null })] });
     const service = new LotesFacturacionService(
       m.lotes as never,
       {} as never, // facturas
@@ -1518,12 +1518,12 @@ describe('LotesFacturacionService.liquidar', () => {
   it('calcula el interés como % del saldo ANTERIOR de Administración, ignorando el saldo de otros conceptos', async () => {
     const m = construirModelos({
       conceptos: [
-        concepto(), // con-1, kind: 'administracion'
+        concepto(), // con-1, tipo: 'administracion'
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Interés por mora',
-          kind: 'intereses',
-          cuentaCreditoId: { code: '413595' },
+          nombre: 'Interés por mora',
+          tipo: 'intereses',
+          cuentaCreditoId: { codigo: '413595' },
         }),
       ],
       saldos: [
@@ -1577,12 +1577,12 @@ describe('LotesFacturacionService.liquidar', () => {
   it('Factura Individual (lote.inmuebleId set): ignora ValorRecurrente y la mora automática — solo lo cargado a mano', async () => {
     const m = construirModelos({
       conceptos: [
-        concepto(), // con-1, kind: 'administracion'
+        concepto(), // con-1, tipo: 'administracion'
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Interés por mora',
-          kind: 'intereses',
-          cuentaCreditoId: { code: '413595' },
+          nombre: 'Interés por mora',
+          tipo: 'intereses',
+          cuentaCreditoId: { codigo: '413595' },
         }),
       ],
       // Saldo vencido que, en un lote normal, SÍ dispararía mora automática
@@ -1651,9 +1651,9 @@ describe('LotesFacturacionService.liquidar', () => {
         concepto(),
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Interés por mora',
-          kind: 'intereses',
-          cuentaCreditoId: { code: '413595' },
+          nombre: 'Interés por mora',
+          tipo: 'intereses',
+          cuentaCreditoId: { codigo: '413595' },
         }),
       ],
       saldos: [
@@ -1700,9 +1700,9 @@ describe('LotesFacturacionService.liquidar', () => {
         concepto(),
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Interés por mora',
-          kind: 'intereses',
-          cuentaCreditoId: { code: '413595' },
+          nombre: 'Interés por mora',
+          tipo: 'intereses',
+          cuentaCreditoId: { codigo: '413595' },
         }),
       ],
       saldos: [
@@ -1773,7 +1773,7 @@ describe('LotesFacturacionService.liquidar', () => {
 
   it('congela el teléfono del titular en holder.phone', async () => {
     const m = construirModelos({
-      terceros: tercero({ phone: '3108458405' }),
+      terceros: tercero({ telefono: '3108458405' }),
     });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -2222,18 +2222,18 @@ describe('LotesFacturacionService.consolidar', () => {
       },
       cuentasContables: [
         {
-          code: '130501',
-          requiresTercero: true,
-          profitCenter: false,
-          destinationCenter: false,
-          cashFlow: false,
+          codigo: '130501',
+          requiereTercero: true,
+          centroUtilidad: false,
+          centroDestino: false,
+          flujoCaja: false,
         },
         {
-          code: '413501',
-          requiresTercero: false,
-          profitCenter: true,
-          destinationCenter: false,
-          cashFlow: true,
+          codigo: '413501',
+          requiereTercero: false,
+          centroUtilidad: true,
+          centroDestino: false,
+          flujoCaja: true,
         },
       ],
     });

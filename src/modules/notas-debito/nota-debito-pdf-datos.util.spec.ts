@@ -40,16 +40,18 @@ const modelosCon = (
   } = {},
 ) => ({
   inmuebles: over.inmuebles ?? {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve({ code: '301' }) })),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ codigo: '301' }),
+    })),
   },
   terceros: over.terceros ?? {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ name: 'JUAN PEREZ' }),
+      exec: () => Promise.resolve({ nombre: 'JUAN PEREZ' }),
     })),
   },
   conceptos: over.conceptos ?? {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ name: 'Multas' }),
+      exec: () => Promise.resolve({ nombre: 'Multas' }),
     })),
   },
   asientos: over.asientos ?? {
@@ -67,8 +69,8 @@ const modelosCon = (
     find: jest.fn(() => ({
       exec: () =>
         Promise.resolve([
-          { code: '130510', name: 'CxC Multas' },
-          { code: '413505', name: 'Ingresos por Multas' },
+          { codigo: '130510', nombre: 'CxC Multas' },
+          { codigo: '413505', nombre: 'Ingresos por Multas' },
         ]),
     })),
   },

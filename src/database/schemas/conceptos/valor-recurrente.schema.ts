@@ -56,7 +56,7 @@ export class ValorRecurrente {
    * nobody could see.
    */
   @Prop({ required: true, default: 0 })
-  amount: number;
+  monto: number;
 }
 
 export const ValorRecurrenteSchema =

@@ -27,12 +27,12 @@ const inmueblesModeloCon = (existentes: string[] = []) => {
   const escrituras: Record<string, unknown>[] = [];
   return {
     escrituras,
-    exists: jest.fn(({ code }: Filtro) => ({
+    exists: jest.fn(({ codigo }: Filtro) => ({
       exec: () => {
         // The service now checks case/whitespace-insensitively — see
         // `InmueblesService.filtroCodigoDuplicado` — so this fake model
         // matches Mongo's own regex semantics instead of a plain string.
-        const { $regex, $options } = code as {
+        const { $regex, $options } = codigo as {
           $regex: string;
           $options?: string;
         };
@@ -67,9 +67,9 @@ const tercerosModeloCon = (porIdentificacion: Record<string, string> = {}) => {
   return {
     creados,
     actualizaciones,
-    findOne: jest.fn(({ identificationNumber }: Filtro) => ({
+    findOne: jest.fn(({ numeroIdentificacion }: Filtro) => ({
       exec: () => {
-        const id = porIdentificacion[identificationNumber as string];
+        const id = porIdentificacion[numeroIdentificacion as string];
         return Promise.resolve(id ? { _id: id } : null);
       },
     })),
@@ -219,7 +219,7 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.create).not.toHaveBeenCalled();
-    expect(inmuebles.escrituras[0]).toMatchObject({ holderId: 'ter-1' });
+    expect(inmuebles.escrituras[0]).toMatchObject({ titularId: 'ter-1' });
   });
 
   it('reimportar actualiza un titular ya existente con los datos de la fila, no lo deja intacto', async () => {
@@ -258,13 +258,13 @@ describe('InmueblesService.importar', () => {
     expect(terceros.actualizaciones[0]).toEqual({
       id: 'ter-1',
       cambios: {
-        personType: 'natural',
-        name: 'Ana Pérez',
-        identificationType: '13',
-        address: 'Calle 10 # 20-30',
-        city: 'Medellin',
-        cityCode: '05001',
-        cityDepartmentCode: '05',
+        tipoPersona: 'natural',
+        nombre: 'Ana Pérez',
+        tipoIdentificacion: '13',
+        direccion: 'Calle 10 # 20-30',
+        ciudad: 'Medellin',
+        ciudadCodigo: '05001',
+        ciudadDepartamentoCodigo: '05',
       },
     });
   });
@@ -295,7 +295,7 @@ describe('InmueblesService.importar', () => {
 
     expect(terceros.actualizaciones).toHaveLength(1);
     expect(terceros.actualizaciones[0].cambios).toEqual({
-      phone: '3000000000',
+      telefono: '3000000000',
     });
   });
 
@@ -319,9 +319,9 @@ describe('InmueblesService.importar', () => {
 
     expect(terceros.creados[0]).toMatchObject({
       coPropertyId: COP,
-      name: 'Ana Pérez',
+      nombre: 'Ana Pérez',
     });
-    expect(inmuebles.escrituras[0]).toMatchObject({ holderId: 'ter-nuevo' });
+    expect(inmuebles.escrituras[0]).toMatchObject({ titularId: 'ter-nuevo' });
   });
 
   it('parte emailTitular en varias direcciones, separadas por coma o punto y coma', async () => {
@@ -410,12 +410,12 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.creados[0]).toMatchObject({
-      personType: 'natural',
-      name: 'Ana María Pérez Gómez',
-      firstName: 'Ana',
-      middleName: 'María',
-      firstLastName: 'Pérez',
-      secondLastName: 'Gómez',
+      tipoPersona: 'natural',
+      nombre: 'Ana María Pérez Gómez',
+      primerNombre: 'Ana',
+      segundoNombre: 'María',
+      primerApellido: 'Pérez',
+      segundoApellido: 'Gómez',
     });
   });
 
@@ -438,9 +438,9 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.creados[0]).toMatchObject({
-      personType: 'juridica',
-      name: 'Ferretería SAS',
-      businessName: 'Ferretería SAS',
+      tipoPersona: 'juridica',
+      nombre: 'Ferretería SAS',
+      razonSocial: 'Ferretería SAS',
     });
   });
 
@@ -461,7 +461,7 @@ describe('InmueblesService.importar', () => {
     await service.importar({ filas: [fila({ codigo: '301' })] });
 
     expect(terceros.create).not.toHaveBeenCalled();
-    expect(inmuebles.escrituras[0].holderId).toBeUndefined();
+    expect(inmuebles.escrituras[0].titularId).toBeUndefined();
   });
 
   it('escribe siempre la copropiedad activa, nunca una de la fila', async () => {
@@ -508,7 +508,7 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.creados[0]).toMatchObject({
-      address: 'Calle 10 # 20-30',
+      direccion: 'Calle 10 # 20-30',
     });
   });
 
@@ -537,9 +537,9 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.creados[0]).toMatchObject({
-      city: 'Medellin',
-      cityCode: '05001',
-      cityDepartmentCode: '05',
+      ciudad: 'Medellin',
+      ciudadCodigo: '05001',
+      ciudadDepartamentoCodigo: '05',
     });
   });
 

@@ -207,7 +207,7 @@ export class ConsecutivosService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      inmueblesDocs.map((i) => [i._id.toString(), i.code]),
+      inmueblesDocs.map((i) => [i._id.toString(), i.codigo]),
     );
 
     const conceptoIds = [
@@ -218,7 +218,7 @@ export class ConsecutivosService {
     const conceptosDocs = conceptoIds.length
       ? await this.conceptosCobro
           .find({ coPropertyId, _id: { $in: conceptoIds } })
-          .sort({ sortOrder: 1 })
+          .sort({ orden: 1 })
           .exec()
       : [];
 
@@ -232,7 +232,7 @@ export class ConsecutivosService {
     return {
       conceptos: conceptosDocs.map((c) => ({
         conceptoId: c._id.toString(),
-        nombre: c.name,
+        nombre: c.nombre,
       })),
       filas,
     };

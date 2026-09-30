@@ -171,7 +171,7 @@ const notaAnticipoDoc = (over: Doc = {}): Doc => ({
 const inmuebleDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
+  codigo: '301',
   ...over,
 });
 
@@ -580,7 +580,7 @@ describe('ConciliacionCarteraService', () => {
 
     describe('anticiposPendientes', () => {
       it('incluye un Recibo con saldo sin aplicar al corte, con inmueble/fecha/número/valor', async () => {
-        const inm = inmuebleDoc({ code: '502' });
+        const inm = inmuebleDoc({ codigo: '502' });
         const r = reciboDoc({
           inmuebleId: inm._id,
           fullNumber: 'RC5',
@@ -716,8 +716,8 @@ describe('ConciliacionCarteraService', () => {
       });
 
       it('totaliza los anticipos pendientes', async () => {
-        const inm1 = inmuebleDoc({ code: '301' });
-        const inm2 = inmuebleDoc({ code: '402' });
+        const inm1 = inmuebleDoc({ codigo: '301' });
+        const inm2 = inmuebleDoc({ codigo: '402' });
         const r1 = reciboDoc({
           inmuebleId: inm1._id,
           receivedAmount: 90000,

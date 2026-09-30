@@ -7,27 +7,30 @@ import type {
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 
-/** The shape `holderId` arrives in when the query populated it. */
-type TitularPoblado = Pick<TerceroDocument, 'name' | 'identificationNumber'> & {
+/** The shape `titularId` arrives in when the query populated it. */
+type TitularPoblado = Pick<
+  TerceroDocument,
+  'nombre' | 'numeroIdentificacion'
+> & {
   _id: Types.ObjectId;
 };
 
 /**
- * Reads the holder off a `holderId` that may or may not have been populated.
+ * Reads the holder off a `titularId` that may or may not have been populated.
  *
  * Returns null rather than a half-filled object when it was not: a listing that
  * quietly shows every unit as unowned because somebody forgot `.populate()` is
  * worse than one that shows nothing, because it looks plausible.
  */
-const titularDe = (holderId: unknown): TitularResumen | null => {
-  if (!holderId || holderId instanceof Types.ObjectId) return null;
-  if (typeof holderId !== 'object' || !('name' in holderId)) return null;
+const titularDe = (titularId: unknown): TitularResumen | null => {
+  if (!titularId || titularId instanceof Types.ObjectId) return null;
+  if (typeof titularId !== 'object' || !('nombre' in titularId)) return null;
 
-  const tercero = holderId as TitularPoblado;
+  const tercero = titularId as TitularPoblado;
   return {
     id: tercero._id.toString(),
-    nombre: tercero.name,
-    identificacion: tercero.identificationNumber ?? null,
+    nombre: tercero.nombre,
+    identificacion: tercero.numeroIdentificacion ?? null,
   };
 };
 
@@ -39,18 +42,18 @@ const titularDe = (holderId: unknown): TitularResumen | null => {
  */
 export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   id: doc._id.toString(),
-  codigo: doc.code,
-  referencia: doc.reference,
-  bloque: doc.block,
-  zona: doc.zone,
-  uso: doc.usage,
+  codigo: doc.codigo,
+  referencia: doc.referencia,
+  bloque: doc.bloque,
+  zona: doc.zona,
+  uso: doc.uso,
   area: doc.area,
-  coeficiente: doc.participationFactor,
-  titular: titularDe(doc.holderId),
-  tipoTitular: doc.holderKind,
-  resideEnElInmueble: doc.holderResides,
-  estadoCartera: doc.collectionStatus,
-  estado: doc.status === 'active' ? 'activo' : 'inactivo',
-  observaciones: doc.notes,
+  coeficiente: doc.coeficiente,
+  titular: titularDe(doc.titularId),
+  tipoTitular: doc.tipoTitular,
+  resideEnElInmueble: doc.resideEnElInmueble,
+  estadoCartera: doc.estadoCartera,
+  estado: doc.estado === 'active' ? 'activo' : 'inactivo',
+  observaciones: doc.observaciones,
   fechaActualizacion: doc.updatedAt.toISOString(),
 });

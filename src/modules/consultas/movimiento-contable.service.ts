@@ -158,9 +158,9 @@ export class MovimientoContableService {
       .exec();
 
     const holderIds = inmuebles
-      .map((i) => i.holderId)
+      .map((i) => i.titularId)
       .filter((id): id is Types.ObjectId => id !== null);
-    const nombreMap = new Map<string, { name: string; nit: string | null }>();
+    const nombreMap = new Map<string, { nombre: string; nit: string | null }>();
     if (holderIds.length > 0) {
       const uniqueHolderIds = [
         ...new Set(holderIds.map((id) => id.toString())),
@@ -169,20 +169,20 @@ export class MovimientoContableService {
         .find({ coPropertyId, _id: { $in: uniqueHolderIds } })
         .exec();
       for (const t of terceros) {
-        const nit = t.identificationNumber
-          ? `${t.identificationNumber}${t.identificationVerificationDigit ? `-${t.identificationVerificationDigit}` : ''}`
+        const nit = t.numeroIdentificacion
+          ? `${t.numeroIdentificacion}${t.digitoVerificacion ? `-${t.digitoVerificacion}` : ''}`
           : null;
-        nombreMap.set(t._id.toString(), { name: t.name, nit });
+        nombreMap.set(t._id.toString(), { nombre: t.nombre, nit });
       }
     }
 
     for (const i of inmuebles) {
-      const holder = i.holderId
-        ? (nombreMap.get(i.holderId.toString()) ?? null)
+      const holder = i.titularId
+        ? (nombreMap.get(i.titularId.toString()) ?? null)
         : null;
       result.set(i._id.toString(), {
-        inmuebleCodigo: i.code,
-        propietario: holder?.name ?? null,
+        inmuebleCodigo: i.codigo,
+        propietario: holder?.nombre ?? null,
         nit: holder?.nit ?? null,
       });
     }
@@ -200,10 +200,10 @@ export class MovimientoContableService {
     if (codigos.length === 0) return map;
 
     const cuentas = await this.cuentasContables
-      .find({ coPropertyId, code: { $in: codigos } })
+      .find({ coPropertyId, codigo: { $in: codigos } })
       .exec();
     for (const c of cuentas) {
-      map.set(c.code, c.name);
+      map.set(c.codigo, c.nombre);
     }
     return map;
   }

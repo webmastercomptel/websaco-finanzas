@@ -56,25 +56,25 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
-  holderId: null,
+  codigo: '301',
+  titularId: null,
   ...over,
 });
 
 const terceroDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  name: 'Juan Perez',
-  identificationNumber: '900123456',
-  identificationVerificationDigit: '7',
+  nombre: 'Juan Perez',
+  numeroIdentificacion: '900123456',
+  digitoVerificacion: '7',
   ...over,
 });
 
 const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '1355-01',
-  name: 'CxC Administracion',
+  codigo: '1355-01',
+  nombre: 'CxC Administracion',
   ...over,
 });
 
@@ -286,8 +286,8 @@ describe('MovimientoContableService', () => {
           exec: jest
             .fn()
             .mockResolvedValue([
-              inmuebleDoc({ _id: inm1, code: '301', holderId: holder1 }),
-              inmuebleDoc({ _id: inm2, code: '302', holderId: null }),
+              inmuebleDoc({ _id: inm1, codigo: '301', titularId: holder1 }),
+              inmuebleDoc({ _id: inm2, codigo: '302', titularId: null }),
             ]),
         },
         terceros: {
@@ -295,7 +295,7 @@ describe('MovimientoContableService', () => {
           exec: jest
             .fn()
             .mockResolvedValue([
-              terceroDoc({ _id: holder1, name: 'Juan Perez' }),
+              terceroDoc({ _id: holder1, nombre: 'Juan Perez' }),
             ]),
         },
       });

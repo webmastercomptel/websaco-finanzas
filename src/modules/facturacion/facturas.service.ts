@@ -287,9 +287,9 @@ export class FacturasService {
     for (const inmueble of inmuebles) {
       const key = inmueble._id.toString();
       resultado.set(key, {
-        referencia: inmueble.reference,
+        referencia: inmueble.referencia,
         totalAnticipos: anticipoPorInmueble.get(key) ?? 0,
-        usage: inmueble.usage,
+        usage: inmueble.uso,
       });
     }
     return resultado;

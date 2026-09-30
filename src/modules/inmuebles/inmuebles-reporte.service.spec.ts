@@ -68,7 +68,7 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
     const service = new InmueblesReporteService(
       modeloInmuebles([]) as never,
       modeloConceptos([
-        { _id: CONCEPTO_ADMIN, name: 'Administración' },
+        { _id: CONCEPTO_ADMIN, nombre: 'Administración' },
       ]) as never,
       modeloValores([]) as never,
       modeloCopropiedades({ name: 'Prueba' }) as never,
@@ -84,22 +84,22 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
     void CONCEPTO_INTERESES; // referenced only to document why it's absent
   });
 
-  it('arma el titular como "Apellido1 Apellido2 Nombre1" para una persona natural, no el orden de Tercero.name', async () => {
+  it('arma el titular como "Apellido1 Apellido2 Nombre1" para una persona natural, no el orden de Tercero.nombre', async () => {
     const service = new InmueblesReporteService(
       modeloInmuebles([
         {
           _id: INMUEBLE_1,
-          code: '301',
+          codigo: '301',
           area: 72,
-          participationFactor: 1.8452,
-          holderId: {
-            name: 'Ana María Pérez Gómez',
-            personType: 'natural',
-            firstName: 'Ana',
-            middleName: 'María',
-            firstLastName: 'Pérez',
-            secondLastName: 'Gómez',
-            businessName: null,
+          coeficiente: 1.8452,
+          titularId: {
+            nombre: 'Ana María Pérez Gómez',
+            tipoPersona: 'natural',
+            primerNombre: 'Ana',
+            segundoNombre: 'María',
+            primerApellido: 'Pérez',
+            segundoApellido: 'Gómez',
+            razonSocial: null,
           },
         },
       ]) as never,
@@ -113,7 +113,7 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
 
     const [, items] = generarPdfListadoInmuebles.mock.calls[0];
     // "Pérez Gómez Ana" — apellidos primero, y sin el segundo nombre
-    // ("María"), justo lo que lo acorta frente a `Tercero.name`.
+    // ("María"), justo lo que lo acorta frente a `Tercero.nombre`.
     expect((items as { titular: string }[])[0].titular).toBe('Pérez Gómez Ana');
   });
 
@@ -122,17 +122,17 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
       modeloInmuebles([
         {
           _id: INMUEBLE_1,
-          code: '301',
+          codigo: '301',
           area: 72,
-          participationFactor: 1.8452,
-          holderId: {
-            name: 'Ferretería SAS',
-            personType: 'juridica',
-            firstName: null,
-            middleName: null,
-            firstLastName: null,
-            secondLastName: null,
-            businessName: 'Ferretería SAS',
+          coeficiente: 1.8452,
+          titularId: {
+            nombre: 'Ferretería SAS',
+            tipoPersona: 'juridica',
+            primerNombre: null,
+            segundoNombre: null,
+            primerApellido: null,
+            segundoApellido: null,
+            razonSocial: 'Ferretería SAS',
           },
         },
       ]) as never,
@@ -153,24 +153,24 @@ describe('InmueblesReporteService.generarListadoPdf', () => {
       modeloInmuebles([
         {
           _id: INMUEBLE_1,
-          code: '301',
+          codigo: '301',
           area: 72,
-          participationFactor: 1.8452,
-          holderId: { name: 'Ana Pérez' },
+          coeficiente: 1.8452,
+          titularId: { nombre: 'Ana Pérez' },
         },
         {
           _id: INMUEBLE_2,
-          code: '302',
+          codigo: '302',
           area: 60,
-          participationFactor: 1.2,
-          holderId: null,
+          coeficiente: 1.2,
+          titularId: null,
         },
       ]) as never,
       modeloConceptos([
-        { _id: CONCEPTO_ADMIN, name: 'Administración' },
+        { _id: CONCEPTO_ADMIN, nombre: 'Administración' },
       ]) as never,
       modeloValores([
-        { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, amount: 350000 },
+        { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, monto: 350000 },
       ]) as never,
       modeloCopropiedades({ name: 'Prueba' }) as never,
       tenant,
@@ -204,24 +204,24 @@ describe('InmueblesReporteService.obtenerListado', () => {
       modeloInmuebles([
         {
           _id: INMUEBLE_1,
-          code: '301',
+          codigo: '301',
           area: 72,
-          participationFactor: 1.8452,
-          holderId: { name: 'Ana Pérez' },
+          coeficiente: 1.8452,
+          titularId: { nombre: 'Ana Pérez' },
         },
         {
           _id: INMUEBLE_2,
-          code: '302',
+          codigo: '302',
           area: 60,
-          participationFactor: 1.2,
-          holderId: null,
+          coeficiente: 1.2,
+          titularId: null,
         },
       ]) as never,
       modeloConceptos([
-        { _id: CONCEPTO_ADMIN, name: 'Administración' },
+        { _id: CONCEPTO_ADMIN, nombre: 'Administración' },
       ]) as never,
       modeloValores([
-        { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, amount: 350000 },
+        { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, monto: 350000 },
       ]) as never,
       modeloCopropiedades({ name: 'Prueba', code: 'PRU' }) as never,
       tenant,

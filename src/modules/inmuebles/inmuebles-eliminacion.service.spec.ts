@@ -80,7 +80,7 @@ const modeloInmueblesRoster = (unidades: { id: string; codigo: string }[]) => ({
   find: jest.fn(() => ({
     select: jest.fn(() => ({
       exec: () =>
-        Promise.resolve(unidades.map((u) => ({ _id: u.id, code: u.codigo }))),
+        Promise.resolve(unidades.map((u) => ({ _id: u.id, codigo: u.codigo }))),
     })),
   })),
   deleteMany: jest.fn(() => ({

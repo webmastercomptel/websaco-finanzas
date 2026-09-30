@@ -150,8 +150,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
           Promise.resolve({
             _id: CONCEPTO,
             coPropertyId: COP,
-            kind: 'administracion',
-            cuentaCreditoId: { code: '4105' },
+            tipo: 'administracion',
+            cuentaCreditoId: { codigo: '4105' },
           }),
         ),
       })),
@@ -195,13 +195,15 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         exec: jest.fn(() => Promise.resolve({ saldoDisponible: 0 })),
       })),
     },
-    // `crear()`'s own terceroId resolution (`Inmueble.holderId`) — no
+    // `crear()`'s own terceroId resolution (`Inmueble.titularId`) — no
     // titular by default; tests exercising a real one override this.
     // `find` backs `findAll`'s own batched `inmuebleCodigo` resolve — empty
     // by default, same reasoning tests that don't care about it stay green.
     inmuebles: {
       findOne: jest.fn(() => ({
-        exec: jest.fn(() => Promise.resolve({ _id: INMUEBLE, holderId: null })),
+        exec: jest.fn(() =>
+          Promise.resolve({ _id: INMUEBLE, titularId: null }),
+        ),
       })),
       find: jest.fn(() => ({
         exec: jest.fn(() => Promise.resolve([])),
@@ -251,7 +253,7 @@ describe('NotasDebitoService', () => {
       expect(resultado.saldoPendiente).toBe(50000);
     });
 
-    it('congela terceroId desde el holderId ACTUAL del inmueble, nunca null a secas — el titular impreso en el PDF depende de esto', async () => {
+    it('congela terceroId desde el titularId ACTUAL del inmueble, nunca null a secas — el titular impreso en el PDF depende de esto', async () => {
       const TITULAR = new Types.ObjectId();
       const notasDebitoMock = {
         create: jest.fn((filas: Record<string, unknown>[]) =>
@@ -267,7 +269,7 @@ describe('NotasDebitoService', () => {
         inmuebles: {
           findOne: jest.fn(() => ({
             exec: jest.fn(() =>
-              Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
+              Promise.resolve({ _id: INMUEBLE, titularId: TITULAR }),
             ),
           })),
         },
@@ -323,9 +325,9 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'administracion',
-                cuentaCreditoId: { code: '4105' },
-                cuentaDebitoId: { code: '130510' },
+                tipo: 'administracion',
+                cuentaCreditoId: { codigo: '4105' },
+                cuentaDebitoId: { codigo: '130510' },
               }),
             ),
           })),
@@ -421,11 +423,11 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve([
                 {
-                  code: '4105',
-                  requiresTercero: false,
-                  profitCenter: false,
-                  destinationCenter: false,
-                  cashFlow: true,
+                  codigo: '4105',
+                  requiereTercero: false,
+                  centroUtilidad: false,
+                  centroDestino: false,
+                  flujoCaja: true,
                 },
               ]),
             ),
@@ -434,11 +436,11 @@ describe('NotasDebitoService', () => {
         inmuebles: {
           findById: jest.fn(() => ({
             session: jest.fn().mockReturnThis(),
-            exec: jest.fn(() => Promise.resolve({ code: '1304' })),
+            exec: jest.fn(() => Promise.resolve({ codigo: '1304' })),
           })),
           findOne: jest.fn(() => ({
             exec: jest.fn(() =>
-              Promise.resolve({ _id: INMUEBLE, holderId: null }),
+              Promise.resolve({ _id: INMUEBLE, titularId: null }),
             ),
           })),
         },
@@ -479,8 +481,8 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'administracion',
-                cuentaCreditoId: { code: '4105' },
+                tipo: 'administracion',
+                cuentaCreditoId: { codigo: '4105' },
               }),
             ),
           })),
@@ -531,8 +533,8 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'intereses',
-                cuentaCreditoId: { code: '413599' },
+                tipo: 'intereses',
+                cuentaCreditoId: { codigo: '413599' },
               }),
             ),
           })),
@@ -665,7 +667,7 @@ describe('NotasDebitoService', () => {
     });
 
     it('al anular, reversa la cuenta de INGRESO del concepto, no la cuenta compartida de la copropiedad (bug real reportado, 2026-09-21)', async () => {
-      // `debitNotesAccount` y `cuentaCreditoId.code` valen distinto a
+      // `debitNotesAccount` y `cuentaCreditoId.codigo` valen distinto a
       // propósito — un test que usara el mismo valor para ambos (como el
       // resto de este archivo) no puede distinguir cuál de las dos se usó
       // de verdad, y así fue como este bug pasó sin verse.
@@ -680,8 +682,8 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'administracion',
-                cuentaCreditoId: { code: '413501-CONCEPTO' },
+                tipo: 'administracion',
+                cuentaCreditoId: { codigo: '413501-CONCEPTO' },
               }),
             ),
           })),
@@ -729,7 +731,7 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'administracion',
+                tipo: 'administracion',
                 cuentaCreditoId: null,
               }),
             ),
@@ -778,8 +780,8 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'administracion',
-                cuentaCreditoId: { code: '4105' },
+                tipo: 'administracion',
+                cuentaCreditoId: { codigo: '4105' },
               }),
             ),
           })),
@@ -830,8 +832,8 @@ describe('NotasDebitoService', () => {
               Promise.resolve({
                 _id: CONCEPTO,
                 coPropertyId: COP,
-                kind: 'intereses',
-                cuentaCreditoId: { code: '413599' },
+                tipo: 'intereses',
+                cuentaCreditoId: { codigo: '413599' },
               }),
             ),
           })),

@@ -55,7 +55,7 @@ export class Movimiento {
 
   /** "Documento Cruce" — which Factura/Nota Débito this line's own balance
    *  movement belongs to, set only when this line's account has
-   *  `requiresCrossDocument` on the chart of accounts. A charge-creation
+   *  `requiereDocumentoCruce` on the chart of accounts. A charge-creation
    *  line (Factura, Nota Débito) self-references — it's creating that exact
    *  receivable; a line that instead REDUCES an existing receivable (Nota
    *  Crédito, Recibo de Caja, aplicación de anticipo) references whichever

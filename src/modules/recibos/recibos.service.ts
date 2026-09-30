@@ -535,13 +535,13 @@ export class RecibosService {
 
     const cuentasContablesPorCodigo = new Map(
       cuentasContables.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
@@ -619,8 +619,8 @@ export class RecibosService {
       indicePorInmueble.set(inmueble._id.toString(), {
         inmueble: {
           _id: inmueble._id,
-          holderId: inmueble.holderId,
-          code: inmueble.code,
+          holderId: inmueble.titularId,
+          code: inmueble.codigo,
         },
         candidatosOrdenados,
         saldoPorDocumento,
@@ -1632,7 +1632,7 @@ export class RecibosService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.codigo]),
     );
 
     return {
@@ -1826,7 +1826,7 @@ export class RecibosService {
     const inmueble = await this.inmuebles
       ?.findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    return inmueble?.code ?? '';
+    return inmueble?.codigo ?? '';
   }
 
   /**
@@ -1972,18 +1972,18 @@ export class RecibosService {
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
       cuentas.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
-      terceroCode: inmueble?.code ?? null,
+      terceroCode: inmueble?.codigo ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
     });

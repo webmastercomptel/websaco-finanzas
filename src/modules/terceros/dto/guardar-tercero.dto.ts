@@ -24,7 +24,7 @@ import {
  */
 class CamposTerceroDto {
   /* ── Nombre ───────────────────────────────────────────────────
-   * Split fields for a `natural` party — see the note on `Tercero.name`.
+   * Split fields for a `natural` party — see the note on `Tercero.nombre`.
    * `nom1`/`ape1` are what DIAN requires (PrimerNombre/PrimerApellido);
    * `nom2`/`ape2` are optional, same as its OtrosNombres/SegundoApellido.
    * `razonSocial` is the `juridica` equivalent. Whichever pair applies wins

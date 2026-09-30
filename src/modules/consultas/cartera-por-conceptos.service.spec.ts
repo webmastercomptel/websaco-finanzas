@@ -34,17 +34,17 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
-  holderId: null,
-  status: 'active',
+  codigo: '301',
+  titularId: null,
+  estado: 'active',
   ...over,
 });
 
 const conceptoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  name: 'Administracion',
-  sortOrder: 100,
+  nombre: 'Administracion',
+  orden: 100,
   ...over,
 });
 
@@ -84,7 +84,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
 
 describe('CarteraPorConceptosService', () => {
   it('sin documentos pendientes, devuelve los conceptos del catalogo y ningun grupo', async () => {
-    const concepto = conceptoDoc({ name: 'Administracion' });
+    const concepto = conceptoDoc({ nombre: 'Administracion' });
     const svc = servicio({ conceptosCobro: find([concepto]) });
 
     const result = await svc.findAll({});
@@ -95,13 +95,17 @@ describe('CarteraPorConceptosService', () => {
     ]);
   });
 
-  it('agrupa los documentos pendientes por inmueble, con titular y celular resueltos desde holderId', async () => {
+  it('agrupa los documentos pendientes por inmueble, con titular y celular resueltos desde titularId', async () => {
     const inmId = id();
-    const holderId = id();
+    const titularId = id();
     const fId = id();
     const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 200000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '301', holderId });
-    const tercero = { _id: holderId, name: 'Juan Perez', phone: '3001234567' };
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301', titularId });
+    const tercero = {
+      _id: titularId,
+      nombre: 'Juan Perez',
+      telefono: '3001234567',
+    };
 
     const svc = servicio({
       facturas: find([f]),
@@ -138,13 +142,13 @@ describe('CarteraPorConceptosService', () => {
     const inmInactivoId = id();
     const inmActivo = inmuebleDoc({
       _id: inmActivoId,
-      code: '301',
-      status: 'active',
+      codigo: '301',
+      estado: 'active',
     });
     const inmInactivo = inmuebleDoc({
       _id: inmInactivoId,
-      code: '402',
-      status: 'inactive',
+      codigo: '402',
+      estado: 'inactive',
     });
     const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
     const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
@@ -169,13 +173,13 @@ describe('CarteraPorConceptosService', () => {
     const inmInactivoId = id();
     const inmActivo = inmuebleDoc({
       _id: inmActivoId,
-      code: '301',
-      status: 'active',
+      codigo: '301',
+      estado: 'active',
     });
     const inmInactivo = inmuebleDoc({
       _id: inmInactivoId,
-      code: '402',
-      status: 'inactive',
+      codigo: '402',
+      estado: 'inactive',
     });
     const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
     const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
@@ -200,13 +204,13 @@ describe('CarteraPorConceptosService', () => {
     const inmInactivoId = id();
     const inmActivo = inmuebleDoc({
       _id: inmActivoId,
-      code: '301',
-      status: 'active',
+      codigo: '301',
+      estado: 'active',
     });
     const inmInactivo = inmuebleDoc({
       _id: inmInactivoId,
-      code: '402',
-      status: 'inactive',
+      codigo: '402',
+      estado: 'inactive',
     });
     const fActivo = facturaDoc({ inmuebleId: inmActivoId, total: 100000 });
     const fInactivo = facturaDoc({ inmuebleId: inmInactivoId, total: 50000 });
@@ -227,7 +231,7 @@ describe('CarteraPorConceptosService', () => {
 
   it('ordena los documentos de un mismo inmueble por fecha ascendente, mezclando FV y ND', async () => {
     const inmId = id();
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const fId = id();
     const ndId = id();
     const f = facturaDoc({
@@ -267,7 +271,7 @@ describe('CarteraPorConceptosService', () => {
 
   it('la fecha manda sobre el número — un número más alto pero fecha más temprana va primero (bug real reportado)', async () => {
     const inmId = id();
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const fId = id();
     const ndId = id();
     // Número más alto (337) pero fecha más temprana — antes de la
@@ -313,7 +317,7 @@ describe('CarteraPorConceptosService', () => {
     const conceptoAdmin = id();
     const conceptoMultas = id();
     const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 150000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: find([f]),
@@ -339,7 +343,7 @@ describe('CarteraPorConceptosService', () => {
     const inmId = id();
     const fId = id();
     const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: find([f]),
@@ -357,8 +361,8 @@ describe('CarteraPorConceptosService', () => {
     const inm10Id = id();
     const f2 = facturaDoc({ inmuebleId: inm2Id, total: 10000 });
     const f10 = facturaDoc({ inmuebleId: inm10Id, total: 10000 });
-    const inm2 = inmuebleDoc({ _id: inm2Id, code: '002' });
-    const inm10 = inmuebleDoc({ _id: inm10Id, code: '010' });
+    const inm2 = inmuebleDoc({ _id: inm2Id, codigo: '002' });
+    const inm10 = inmuebleDoc({ _id: inm10Id, codigo: '010' });
 
     const svc = servicio({
       facturas: find([f10, f2]),
@@ -381,7 +385,7 @@ describe('CarteraPorConceptosService', () => {
       issueDate: new Date('2026-07-01'),
       total: 100000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const facturasFind = jest.fn().mockReturnThis();
     const svc = servicio({
@@ -420,7 +424,7 @@ describe('CarteraPorConceptosService', () => {
         { conceptoId: conceptoMultas, totalAmount: 50000 },
       ],
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: find([f]),
@@ -449,7 +453,7 @@ describe('CarteraPorConceptosService', () => {
       total: 100000,
       issueDate: new Date('2026-06-01'),
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
       documentId: fId,

@@ -49,11 +49,13 @@ const modelosVacios = () => ({
   facturas: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
   notasDebito: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
   inmuebles: {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve({ code: '1201' }) })),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ codigo: '1201' }),
+    })),
   },
   terceros: {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ name: 'ACOSTA BONILLA JOSE ERNESTO' }),
+      exec: () => Promise.resolve({ nombre: 'ACOSTA BONILLA JOSE ERNESTO' }),
     })),
   },
   cuentasContables: {
@@ -167,9 +169,9 @@ describe('construirDatosImpresionRecibo', () => {
     modelos.cuentasContables.find = jest.fn(() => ({
       exec: () =>
         Promise.resolve([
-          { code: '13050501', name: 'CxC Administracion' },
-          { code: '13050502', name: 'CxC Intereses de Mora' },
-          { code: '11100502', name: 'Banco de Occidente' },
+          { codigo: '13050501', nombre: 'CxC Administracion' },
+          { codigo: '13050502', nombre: 'CxC Intereses de Mora' },
+          { codigo: '11100502', nombre: 'Banco de Occidente' },
         ]),
     })) as never;
 

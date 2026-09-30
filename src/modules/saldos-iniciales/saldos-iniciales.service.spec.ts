@@ -217,11 +217,11 @@ const construirServicio = () => {
 
   const inmuebles = {
     find: jest.fn(() => ({
-      exec: () => Promise.resolve([{ _id: INMUEBLE, code: 'AP-101' }]),
+      exec: () => Promise.resolve([{ _id: INMUEBLE, codigo: 'AP-101' }]),
     })),
     findOne: jest.fn(() => ({
       session: jest.fn().mockReturnThis(),
-      exec: () => Promise.resolve({ _id: INMUEBLE, code: 'AP-101' }),
+      exec: () => Promise.resolve({ _id: INMUEBLE, codigo: 'AP-101' }),
     })),
   };
 
@@ -232,8 +232,8 @@ const construirServicio = () => {
         Promise.resolve([
           {
             _id: CONCEPTO,
-            name: 'Administración',
-            kind: 'administracion',
+            nombre: 'Administración',
+            tipo: 'administracion',
             cuentaDebitoId: null,
             cuentaCreditoId: null,
           },

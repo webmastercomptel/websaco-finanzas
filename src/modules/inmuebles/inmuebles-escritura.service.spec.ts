@@ -13,17 +13,17 @@ type Filtro = Record<string, unknown>;
 
 const documento = () => ({
   _id: { toString: () => 'inm-1' },
-  code: '301',
-  block: null,
-  zone: null,
-  usage: null,
+  codigo: '301',
+  bloque: null,
+  zona: null,
+  uso: null,
   area: null,
-  participationFactor: null,
-  holderId: null,
-  holderKind: 'propietario',
-  holderResides: true,
-  collectionStatus: 'vigente',
-  status: 'active',
+  coeficiente: null,
+  titularId: null,
+  tipoTitular: 'propietario',
+  resideEnElInmueble: true,
+  estadoCartera: 'vigente',
+  estado: 'active',
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
 });
 
@@ -86,7 +86,7 @@ describe('InmueblesService.create', () => {
     await service.create({ codigo: '401' });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      code: '401',
+      codigo: '401',
       coPropertyId: COP,
     });
   });
@@ -129,7 +129,7 @@ describe('InmueblesService.create', () => {
     // `InmueblesService.filtroCodigoDuplicado`.
     expect(modelo.filtros[0]).toEqual({
       coPropertyId: COP,
-      code: { $regex: '^301$', $options: 'i' },
+      codigo: { $regex: '^301$', $options: 'i' },
     });
   });
 
@@ -187,7 +187,7 @@ describe('InmueblesService.update', () => {
 
     await service.update('inm-1', { zona: 'Norte' });
 
-    expect(modelo.escrituras[0]).toEqual({ zone: 'Norte' });
+    expect(modelo.escrituras[0]).toEqual({ zona: 'Norte' });
   });
 
   it('traduce estado "inactivo"/"activo" a status "inactive"/"active"', async () => {
@@ -203,10 +203,10 @@ describe('InmueblesService.update', () => {
     );
 
     await service.update('inm-1', { estado: 'inactivo' });
-    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
+    expect(modelo.escrituras[0]).toEqual({ estado: 'inactive' });
 
     await service.update('inm-1', { estado: 'activo' });
-    expect(modelo.escrituras[1]).toEqual({ status: 'active' });
+    expect(modelo.escrituras[1]).toEqual({ estado: 'active' });
   });
 
   it('no toca status cuando el patch no trae estado', async () => {
@@ -223,7 +223,7 @@ describe('InmueblesService.update', () => {
 
     await service.update('inm-1', { zona: 'Norte' });
 
-    expect(modelo.escrituras[0]).not.toHaveProperty('status');
+    expect(modelo.escrituras[0]).not.toHaveProperty('estado');
   });
 
   it('no choca consigo mismo al guardar sin cambiar el código', async () => {
@@ -242,7 +242,7 @@ describe('InmueblesService.update', () => {
 
     expect(modelo.filtros[0]).toEqual({
       coPropertyId: COP,
-      code: { $regex: '^301$', $options: 'i' },
+      codigo: { $regex: '^301$', $options: 'i' },
       _id: { $ne: 'inm-1' },
     });
   });
@@ -267,7 +267,7 @@ describe('InmueblesService.update', () => {
 
     expect(modelo.filtros[0]).toEqual({
       coPropertyId: COP,
-      code: { $regex: '^Torre A-301$', $options: 'i' },
+      codigo: { $regex: '^Torre A-301$', $options: 'i' },
       _id: { $ne: 'inm-1' },
     });
   });

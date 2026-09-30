@@ -6,16 +6,16 @@ const COP = 'cop-1';
 
 const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'cta-1' },
-  code: '11050501',
-  name: 'Caja General',
-  requiresTercero: false,
-  cashFlow: true,
-  profitCenter: false,
-  destinationCenter: false,
-  requiresCrossDocument: false,
-  appliesTax: false,
-  taxRate: 0,
-  active: true,
+  codigo: '11050501',
+  nombre: 'Caja General',
+  requiereTercero: false,
+  flujoCaja: true,
+  centroUtilidad: false,
+  centroDestino: false,
+  requiereDocumentoCruce: false,
+  aplicaImpuesto: false,
+  tasaImpuesto: 0,
+  activo: true,
   ...over,
 });
 
@@ -95,7 +95,7 @@ describe('CuentasContablesService.findAll', () => {
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].active).toBe(true);
+    expect(modelo.filtros[0].activo).toBe(true);
   });
 
   it('estado=inactivo muestra solo las inactivas', async () => {
@@ -104,16 +104,16 @@ describe('CuentasContablesService.findAll', () => {
 
     await service.findAll({ estado: 'inactivo' });
 
-    expect(modelo.filtros[0].active).toBe(false);
+    expect(modelo.filtros[0].activo).toBe(false);
   });
 
-  it('estado=todos no filtra por active', async () => {
+  it('estado=todos no filtra por activo', async () => {
     const modelo = modeloCon([]);
     const service = crearServicio(modelo);
 
     await service.findAll({ estado: 'todos' });
 
-    expect(modelo.filtros[0]).not.toHaveProperty('active');
+    expect(modelo.filtros[0]).not.toHaveProperty('activo');
   });
 
   it('busca por código o por nombre', async () => {
@@ -123,8 +123,8 @@ describe('CuentasContablesService.findAll', () => {
     await service.findAll({ buscar: 'Caja' });
 
     expect(modelo.filtros[0].$or).toEqual([
-      { code: { $regex: 'Caja', $options: 'i' } },
-      { name: { $regex: 'Caja', $options: 'i' } },
+      { codigo: { $regex: 'Caja', $options: 'i' } },
+      { nombre: { $regex: 'Caja', $options: 'i' } },
     ]);
   });
 });
@@ -159,13 +159,13 @@ describe('CuentasContablesService.create', () => {
     expect(modelo.create).toHaveBeenCalledWith(
       expect.objectContaining({
         coPropertyId: COP,
-        code: '11050502',
-        name: 'Banco',
-        requiresTercero: false,
-        isBank: false,
-        cashFlow: false,
-        requiresCrossDocument: false,
-        taxRate: 0,
+        codigo: '11050502',
+        nombre: 'Banco',
+        requiereTercero: false,
+        esBanco: false,
+        flujoCaja: false,
+        requiereDocumentoCruce: false,
+        tasaImpuesto: 0,
       }),
     );
   });
@@ -181,7 +181,7 @@ describe('CuentasContablesService.create', () => {
     });
 
     expect(modelo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ isBank: true }),
+      expect.objectContaining({ esBanco: true }),
     );
   });
 });
@@ -197,7 +197,7 @@ describe('CuentasContablesService.update', () => {
       unknown,
       { $set: Record<string, unknown> },
     ];
-    expect(update.$set).toEqual({ name: 'Caja Principal' });
+    expect(update.$set).toEqual({ nombre: 'Caja Principal' });
   });
 
   it('responde "no existe" cuando el id no corresponde a ninguna', async () => {
@@ -221,7 +221,7 @@ describe('CuentasContablesService.update', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('actualiza esBanco a isBank', async () => {
+  it('actualiza esBanco', async () => {
     const modelo = modeloCon([cuentaDoc()]);
     const service = crearServicio(modelo);
 
@@ -231,7 +231,7 @@ describe('CuentasContablesService.update', () => {
       unknown,
       { $set: Record<string, unknown> },
     ];
-    expect(update.$set).toEqual({ isBank: true });
+    expect(update.$set).toEqual({ esBanco: true });
   });
 });
 
@@ -246,10 +246,10 @@ describe('CuentasContablesService.importar', () => {
     const creadas: Record<string, unknown>[] = [];
     return {
       creadas,
-      exists: jest.fn(({ code }: Filtro) => ({
+      exists: jest.fn(({ codigo }: Filtro) => ({
         exec: () =>
           Promise.resolve(
-            existentes.includes(code as string) ? { _id: 'x' } : null,
+            existentes.includes(codigo as string) ? { _id: 'x' } : null,
           ),
       })),
       create: jest.fn((doc: Record<string, unknown>) => {
@@ -349,8 +349,8 @@ describe('CuentasContablesService.importar', () => {
     });
 
     expect(modelo.creadas[0]).toMatchObject({
-      appliesTax: true,
-      taxRate: 19,
+      aplicaImpuesto: true,
+      tasaImpuesto: 19,
     });
   });
 

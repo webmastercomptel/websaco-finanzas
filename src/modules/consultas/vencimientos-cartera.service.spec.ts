@@ -31,9 +31,9 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
-  holderId: null,
-  status: 'active',
+  codigo: '301',
+  titularId: null,
+  estado: 'active',
   ...over,
 });
 
@@ -80,12 +80,14 @@ describe('VencimientosCarteraService', () => {
         },
         inmuebles: {
           find: jest.fn().mockReturnThis(),
-          exec: jest
-            .fn()
-            .mockResolvedValue([
-              inmuebleDoc({ _id: activoId, code: '101', status: 'active' }),
-              inmuebleDoc({ _id: inactivoId, code: '102', status: 'inactive' }),
-            ]),
+          exec: jest.fn().mockResolvedValue([
+            inmuebleDoc({ _id: activoId, codigo: '101', estado: 'active' }),
+            inmuebleDoc({
+              _id: inactivoId,
+              codigo: '102',
+              estado: 'inactive',
+            }),
+          ]),
         },
       });
     };
@@ -126,11 +128,11 @@ describe('VencimientosCarteraService', () => {
         inmuebles: {
           find: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([
-            inmuebleDoc({ _id: vigenteId, code: '101' }),
+            inmuebleDoc({ _id: vigenteId, codigo: '101' }),
             inmuebleDoc({
               _id: juridicoId,
-              code: '102',
-              collectionStatus: 'juridico',
+              codigo: '102',
+              estadoCartera: 'juridico',
             }),
           ]),
         },
@@ -158,7 +160,7 @@ describe('VencimientosCarteraService', () => {
       dueDate: new Date('2026-08-01'),
       total: 200000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: {
@@ -191,7 +193,7 @@ describe('VencimientosCarteraService', () => {
       dueDate: new Date('2026-08-01'),
       total: 200000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: {
@@ -224,7 +226,7 @@ describe('VencimientosCarteraService', () => {
       dueDate: new Date('2026-08-01'),
       total: 200000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const appEstaNoche = {
       _id: id(),
       documentId: fId,
@@ -264,7 +266,7 @@ describe('VencimientosCarteraService', () => {
       dueDate: futureDate,
       total: 100000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '101' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '101' });
 
     const svc = servicio({
       facturas: {
@@ -302,7 +304,7 @@ describe('VencimientosCarteraService', () => {
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() - diasVencido);
       const f = facturaDoc({ inmuebleId: inmId, dueDate, total: 100000 });
-      const inm = inmuebleDoc({ _id: inmId, code: '901' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '901' });
 
       const svc = servicio({
         facturas: {
@@ -328,7 +330,7 @@ describe('VencimientosCarteraService', () => {
       issueDate: new Date('2026-07-01'),
       total: 50000,
     });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       notasDebito: {
@@ -351,7 +353,7 @@ describe('VencimientosCarteraService', () => {
     const inmId = id();
     const fId = id();
     const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 200000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
       documentId: fId,
@@ -411,12 +413,12 @@ describe('VencimientosCarteraService', () => {
     expect(result.totalCartera).toBe(0);
   });
 
-  it('resuelve inmuebleCodigo y propietario desde Inmueble.holderId -> Tercero.name', async () => {
+  it('resuelve inmuebleCodigo y propietario desde Inmueble.titularId -> Tercero.nombre', async () => {
     const inmId = id();
-    const holderId = id();
+    const titularId = id();
     const f = facturaDoc({ inmuebleId: inmId, total: 100000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '401', holderId });
-    const tercero = { _id: holderId, name: 'Juan Perez' };
+    const inm = inmuebleDoc({ _id: inmId, codigo: '401', titularId });
+    const tercero = { _id: titularId, nombre: 'Juan Perez' };
 
     const svc = servicio({
       facturas: {
@@ -454,8 +456,8 @@ describe('VencimientosCarteraService', () => {
         exec: jest
           .fn()
           .mockResolvedValue([
-            inmuebleDoc({ _id: inm1, code: '11002' }),
-            inmuebleDoc({ _id: inm2, code: '11001' }),
+            inmuebleDoc({ _id: inm1, codigo: '11002' }),
+            inmuebleDoc({ _id: inm2, codigo: '11001' }),
           ]),
       },
     });
@@ -471,7 +473,7 @@ describe('VencimientosCarteraService', () => {
   it('rangos incluye los 9 buckets fijos y totalCartera suma todas las filas', async () => {
     const inmId = id();
     const f = facturaDoc({ inmuebleId: inmId, total: 100000 });
-    const inm = inmuebleDoc({ _id: inmId, code: '301' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
     const svc = servicio({
       facturas: {

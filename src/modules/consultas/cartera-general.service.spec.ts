@@ -135,9 +135,9 @@ describe('CarteraGeneralService', () => {
           find: jest.fn().mockReturnThis(),
           select: jest.fn().mockReturnThis(),
           exec: jest.fn().mockResolvedValue([
-            { _id: inmVigente, collectionStatus: 'vigente' },
-            { _id: inmJuridico, collectionStatus: 'juridico' },
-            { _id: inmDificil, collectionStatus: 'dificil_recaudo' },
+            { _id: inmVigente, estadoCartera: 'vigente' },
+            { _id: inmJuridico, estadoCartera: 'juridico' },
+            { _id: inmDificil, estadoCartera: 'dificil_recaudo' },
           ]),
         },
       });
@@ -363,7 +363,7 @@ describe('CarteraGeneralService', () => {
         conceptoId,
         balance: 20000,
       };
-      const concepto = { _id: conceptoId, name: 'Administración' };
+      const concepto = { _id: conceptoId, nombre: 'Administración' };
 
       const svc = servicio({
         facturas: {
@@ -399,7 +399,7 @@ describe('CarteraGeneralService', () => {
       });
     });
 
-    it('respeta el sortOrder del catalogo de conceptos, no el orden en que llegan las filas de SaldoCartera (bug real reportado)', async () => {
+    it('respeta el orden del catalogo de conceptos, no el orden en que llegan las filas de SaldoCartera (bug real reportado)', async () => {
       const idAdmin = id();
       const idIntereses = id();
       const idMultas = id();
@@ -429,12 +429,12 @@ describe('CarteraGeneralService', () => {
           balance: 5000,
         },
       ];
-      // El catalogo, ya ordenado por sortOrder (como lo devuelve Mongo con
-      // .sort({ sortOrder: 1 })): Administracion, Intereses, Multas.
+      // El catalogo, ya ordenado por orden (como lo devuelve Mongo con
+      // .sort({ orden: 1 })): Administracion, Intereses, Multas.
       const conceptos = [
-        { _id: idAdmin, name: 'Administracion', sortOrder: 100 },
-        { _id: idIntereses, name: 'Intereses', sortOrder: 200 },
-        { _id: idMultas, name: 'Multas', sortOrder: 300 },
+        { _id: idAdmin, nombre: 'Administracion', orden: 100 },
+        { _id: idIntereses, nombre: 'Intereses', orden: 200 },
+        { _id: idMultas, nombre: 'Multas', orden: 300 },
       ];
 
       const svc = servicio({
@@ -491,7 +491,7 @@ describe('CarteraGeneralService', () => {
         },
       ];
       const conceptos = [
-        { _id: idAdmin, name: 'Administracion', sortOrder: 100 },
+        { _id: idAdmin, nombre: 'Administracion', orden: 100 },
       ];
 
       const svc = servicio({

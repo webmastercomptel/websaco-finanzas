@@ -183,8 +183,8 @@ export async function construirDatosImpresionNotaCredito(
   const conceptos = conceptoIds.length
     ? await modelos.conceptosCobro
         .find({ coPropertyId, _id: { $in: conceptoIds } })
-        .populate('cuentaCreditoId', 'code')
-        .populate('cuentaDebitoId', 'code')
+        .populate('cuentaCreditoId', 'codigo')
+        .populate('cuentaDebitoId', 'codigo')
         .exec()
     : [];
   const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
@@ -332,9 +332,9 @@ export async function construirDatosImpresionNotaCredito(
   }
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, code: { $in: [...codigosUsados] } })
+    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
     .exec();
-  const nombrePorCodigo = new Map(cuentas.map((c) => [c.code, c.name]));
+  const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
   for (const linea of lineas) {
     linea.cuentaNombre =
       nombrePorCodigo.get(linea.cuentaCodigo) ?? linea.cuentaCodigo;
@@ -344,8 +344,8 @@ export async function construirDatosImpresionNotaCredito(
     tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: fechaNotaCredito(nota),
-    inmuebleCodigo: inmueble?.code ?? '—',
-    titularNombre: tercero?.name ?? '—',
+    inmuebleCodigo: inmueble?.codigo ?? '—',
+    titularNombre: tercero?.nombre ?? '—',
     concepto: nota.notes ?? MOTIVOS_LABELS[nota.reason] ?? nota.reason,
     monto: nota.totalAmount,
     lineas,

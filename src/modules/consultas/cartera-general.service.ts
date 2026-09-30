@@ -232,10 +232,10 @@ export class CarteraGeneralService {
       ].map((x) => new Types.ObjectId(x));
       const inmuebles = await this.inmuebles
         .find({ coPropertyId, _id: { $in: ids } })
-        .select('collectionStatus')
+        .select('estadoCartera')
         .exec();
       const estadoPorInmueble = new Map(
-        inmuebles.map((i) => [i._id.toString(), i.collectionStatus]),
+        inmuebles.map((i) => [i._id.toString(), i.estadoCartera]),
       );
       for (const doc of documentos) {
         const estado =
@@ -298,7 +298,7 @@ export class CarteraGeneralService {
     }
 
     // Resolve concepto names, in the coproperty's own catalog order — the
-    // same `sortOrder` every other cartera-por-concepto breakdown
+    // same `orden` every other cartera-por-concepto breakdown
     // (CarteraPorInmueble, CarteraPorConceptos) already orders by, instead
     // of Mongo's arbitrary scan order for `saldos` (the bug reported: the
     // "Gráfico"/"Cargos de Cartera" order on Cartera General didn't match
@@ -308,17 +308,17 @@ export class CarteraGeneralService {
     );
     const conceptos = await this.conceptosCobro
       .find({ coPropertyId, _id: { $in: conceptoIds } })
-      .sort({ sortOrder: 1 })
+      .sort({ orden: 1 })
       .exec();
 
     const resultado: CarteraPorConcepto[] = conceptos.map((c) => ({
       conceptoId: c._id.toString(),
-      nombre: c.name,
+      nombre: c.nombre,
       saldo: conceptoMap.get(c._id.toString()) ?? 0,
     }));
 
     // A SaldoCartera row whose ConceptoCobro no longer exists (deleted from
-    // the catalog) has no sortOrder to place it by — appended at the end,
+    // the catalog) has no orden to place it by — appended at the end,
     // same "Desconocido" fallback as before, so its balance still shows up
     // instead of silently vanishing from the total the list/chart sum to.
     const idsConNombre = new Set(conceptos.map((c) => c._id.toString()));

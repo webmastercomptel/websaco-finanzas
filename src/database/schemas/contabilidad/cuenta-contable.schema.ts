@@ -26,51 +26,51 @@ export class CuentaContable {
 
   /** e.g. "11050501" */
   @Prop({ required: true, trim: true })
-  code: string;
+  codigo: string;
 
   /** e.g. "Caja General" */
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   /** "Tercero" column — whether this account requires a Tercero reference. */
   @Prop({ required: true, default: false })
-  requiresTercero: boolean;
+  requiereTercero: boolean;
 
   /** "Banco" column — whether this account represents a bank account, e.g.
    *  to offer as the destination account when posting a Recibo de Caja. */
   @Prop({ required: true, default: false })
-  isBank: boolean;
+  esBanco: boolean;
 
   /** "Flujo Caja" column — cash-flow flag. */
   @Prop({ required: true, default: false })
-  cashFlow: boolean;
+  flujoCaja: boolean;
 
   /** "Centro Utilidad" column. */
   @Prop({ required: true, default: false })
-  profitCenter: boolean;
+  centroUtilidad: boolean;
 
   /** "Centro Destino" column. */
   @Prop({ required: true, default: false })
-  destinationCenter: boolean;
+  centroDestino: boolean;
 
   /** "Doc. Cruce" column — whether this account requires a cross-document. */
   @Prop({ required: true, default: false })
-  requiresCrossDocument: boolean;
+  requiereDocumentoCruce: boolean;
 
-  /** "Aplica Impuesto" column — whether `taxRate` applies at all. */
+  /** "Aplica Impuesto" column — whether `tasaImpuesto` applies at all. */
   @Prop({ required: true, default: false })
-  appliesTax: boolean;
+  aplicaImpuesto: boolean;
 
   /** "tasa %" */
   @Prop({ required: true, default: 0, min: 0, max: 100 })
-  taxRate: number;
+  tasaImpuesto: number;
 
   @Prop({ required: true, default: true })
-  active: boolean;
+  activo: boolean;
 }
 
 export const CuentaContableSchema =
   SchemaFactory.createForClass(CuentaContable);
 
 // Duplicate code within one building is a data-entry mistake.
-CuentaContableSchema.index({ coPropertyId: 1, code: 1 }, { unique: true });
+CuentaContableSchema.index({ coPropertyId: 1, codigo: 1 }, { unique: true });

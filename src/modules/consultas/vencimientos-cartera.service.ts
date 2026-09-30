@@ -313,12 +313,12 @@ export class VencimientosCarteraService {
       .exec();
 
     const holderIds = inmuebles
-      .map((i) => i.holderId)
+      .map((i) => i.titularId)
       .filter((id): id is Types.ObjectId => id !== null);
 
     const terceroMap = new Map<
       string,
-      { name: string; phone?: string | null }
+      { nombre: string; telefono?: string | null }
     >();
     if (holderIds.length > 0) {
       const uniqueHolderIds = [
@@ -331,21 +331,24 @@ export class VencimientosCarteraService {
         })
         .exec();
       for (const t of terceros) {
-        terceroMap.set(t._id.toString(), { name: t.name, phone: t.phone });
+        terceroMap.set(t._id.toString(), {
+          nombre: t.nombre,
+          telefono: t.telefono,
+        });
       }
     }
 
     const result = new Map<string, InmuebleResuelto>();
     for (const i of inmuebles) {
-      const titular = i.holderId
-        ? terceroMap.get(i.holderId.toString())
+      const titular = i.titularId
+        ? terceroMap.get(i.titularId.toString())
         : undefined;
       result.set(i._id.toString(), {
-        codigo: i.code,
-        status: i.status,
-        estadoCartera: i.collectionStatus,
-        propietario: titular?.name ?? null,
-        celular: titular?.phone || null,
+        codigo: i.codigo,
+        status: i.estado,
+        estadoCartera: i.estadoCartera,
+        propietario: titular?.nombre ?? null,
+        celular: titular?.telefono || null,
       });
     }
     return result;

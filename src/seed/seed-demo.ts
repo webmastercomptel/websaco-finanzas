@@ -45,11 +45,15 @@ import {
 
 /** Concepts every building starts with. The first two are not optional. */
 const CONCEPTOS_BASE = [
-  { name: 'Administración', kind: 'administracion' as const, sortOrder: 10 },
-  { name: 'Intereses', kind: 'intereses' as const, sortOrder: 20 },
-  { name: 'Multas', kind: 'otro' as const, sortOrder: 30 },
-  { name: 'Cuota parqueadero', kind: 'otro' as const, sortOrder: 40 },
-  { name: 'Servicios públicos', kind: 'otro' as const, sortOrder: 50 },
+  {
+    nombre: 'Administración',
+    tipo: 'administracion' as const,
+    orden: 10,
+  },
+  { nombre: 'Intereses', tipo: 'intereses' as const, orden: 20 },
+  { nombre: 'Multas', tipo: 'otro' as const, orden: 30 },
+  { nombre: 'Cuota parqueadero', tipo: 'otro' as const, orden: 40 },
+  { nombre: 'Servicios públicos', tipo: 'otro' as const, orden: 50 },
 ];
 
 const EDIFICIOS_ADMINISTRADOS = [
@@ -159,7 +163,7 @@ async function seedDemo(): Promise<void> {
       // the billing cycle is built around.
       for (const concepto of CONCEPTOS_BASE) {
         await conceptos.updateOne(
-          { coPropertyId: copropiedad._id, name: concepto.name },
+          { coPropertyId: copropiedad._id, nombre: concepto.nombre },
           {
             $setOnInsert: {
               coPropertyId: copropiedad._id,
@@ -194,43 +198,46 @@ async function seedDemo(): Promise<void> {
         const esEmpresa = nombre.includes('S.A.') || nombre.includes('Ltda.');
 
         const tercero = await terceros.findOneAndUpdate(
-          { coPropertyId: cop._id, identificationNumber: `${cop.code}-${i}` },
+          {
+            coPropertyId: cop._id,
+            numeroIdentificacion: `${cop.code}-${i}`,
+          },
           {
             $setOnInsert: {
               coPropertyId: cop._id,
-              personType: esEmpresa ? 'juridica' : 'natural',
-              name: nombre,
-              identificationType: esEmpresa ? 'NIT' : 'CC',
-              identificationNumber: `${cop.code}-${i}`,
-              status: 'active',
+              tipoPersona: esEmpresa ? 'juridica' : 'natural',
+              nombre,
+              tipoIdentificacion: esEmpresa ? 'NIT' : 'CC',
+              numeroIdentificacion: `${cop.code}-${i}`,
+              estado: 'active',
             },
           },
           { upsert: true, returnDocument: 'after' },
         );
 
         await inmuebles.updateOne(
-          { coPropertyId: cop._id, code },
+          { coPropertyId: cop._id, codigo: code },
           {
             $setOnInsert: {
               coPropertyId: cop._id,
-              code,
-              block: piso <= 8 ? 'Torre A' : 'Torre B',
+              codigo: code,
+              bloque: piso <= 8 ? 'Torre A' : 'Torre B',
               area: 60 + ((i * 7) % 45),
               // Shares that vary per unit, as they really do — a building where
               // every unit has the same coefficient is not a building.
-              participationFactor:
+              coeficiente:
                 Math.round((100 / cuantas + ((i % 5) - 2) * 0.05) * 10000) /
                 10000,
-              holderId: tercero._id,
-              holderKind: i % 7 === 0 ? 'arrendatario' : 'propietario',
-              holderResides: i % 9 !== 0,
-              collectionStatus:
+              titularId: tercero._id,
+              tipoTitular: i % 7 === 0 ? 'arrendatario' : 'propietario',
+              resideEnElInmueble: i % 9 !== 0,
+              estadoCartera:
                 i % 13 === 0
                   ? 'juridico'
                   : i % 11 === 0
                     ? 'dificil_recaudo'
                     : 'vigente',
-              status: i % 17 === 0 ? 'inactive' : 'active',
+              estado: i % 17 === 0 ? 'inactive' : 'active',
             },
           },
           { upsert: true },

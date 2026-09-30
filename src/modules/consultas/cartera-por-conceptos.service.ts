@@ -105,11 +105,11 @@ export class CarteraPorConceptosService {
 
     const conceptos = await this.conceptosCobro
       .find({ coPropertyId })
-      .sort({ sortOrder: 1 })
+      .sort({ orden: 1 })
       .exec();
     const conceptosContract = conceptos.map((c) => ({
       conceptoId: c._id.toString(),
-      nombre: c.name,
+      nombre: c.nombre,
     }));
 
     const limiteEmision = limiteEmisionParaCorte(fecha);
@@ -188,11 +188,11 @@ export class CarteraPorConceptosService {
 
     const inmuebleById = new Map(inmuebles.map((i) => [i._id.toString(), i]));
     const holderIds = inmuebles
-      .map((i) => i.holderId)
+      .map((i) => i.titularId)
       .filter((id): id is Types.ObjectId => id !== null);
     const tercerosMap = new Map<
       string,
-      { name: string; phone: string | null }
+      { nombre: string; telefono: string | null }
     >();
     if (holderIds.length > 0) {
       const uniqueHolderIds = [
@@ -202,7 +202,10 @@ export class CarteraPorConceptosService {
         .find({ coPropertyId, _id: { $in: uniqueHolderIds } })
         .exec();
       for (const t of terceros) {
-        tercerosMap.set(t._id.toString(), { name: t.name, phone: t.phone });
+        tercerosMap.set(t._id.toString(), {
+          nombre: t.nombre,
+          telefono: t.telefono,
+        });
       }
     }
 
@@ -347,7 +350,7 @@ export class CarteraPorConceptosService {
       if (query.estadoInmueble) {
         const statusEsperado =
           query.estadoInmueble === 'inactivo' ? 'inactive' : 'active';
-        if (inmuebleById.get(inmuebleId)?.status !== statusEsperado) continue;
+        if (inmuebleById.get(inmuebleId)?.estado !== statusEsperado) continue;
       }
 
       // Fecha ascending first, then tipo, then número — matches the
@@ -365,16 +368,16 @@ export class CarteraPorConceptosService {
       );
 
       const inmueble = inmuebleById.get(inmuebleId);
-      const holder = inmueble?.holderId
-        ? tercerosMap.get(inmueble.holderId.toString())
+      const holder = inmueble?.titularId
+        ? tercerosMap.get(inmueble.titularId.toString())
         : undefined;
 
       grupos.push({
         inmuebleId,
-        inmuebleCodigo: inmueble?.code ?? '',
-        titular: holder?.name ?? null,
-        celular: holder?.phone ?? null,
-        estadoCartera: inmueble?.collectionStatus ?? 'vigente',
+        inmuebleCodigo: inmueble?.codigo ?? '',
+        titular: holder?.nombre ?? null,
+        celular: holder?.telefono ?? null,
+        estadoCartera: inmueble?.estadoCartera ?? 'vigente',
         documentos,
         saldoTotal: documentos.reduce((sum, d) => sum + d.saldo, 0),
       });

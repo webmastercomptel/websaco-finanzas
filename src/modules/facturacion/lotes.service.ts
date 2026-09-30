@@ -575,7 +575,7 @@ export class LotesFacturacionService {
 
     for (const [indice, fila] of filas.entries()) {
       const inmueble = await this.inmuebles
-        .findOne({ coPropertyId, code: fila.inmuebleCodigo })
+        .findOne({ coPropertyId, codigo: fila.inmuebleCodigo })
         .exec();
       if (!inmueble) {
         errores.push({
@@ -588,8 +588,8 @@ export class LotesFacturacionService {
       const concepto = await this.conceptos
         .findOne({
           coPropertyId,
-          name: fila.nombreConcepto,
-          availableAsNovedad: true,
+          nombre: fila.nombreConcepto,
+          cargaXls: true,
         })
         .exec();
       if (!concepto) {
@@ -675,7 +675,7 @@ export class LotesFacturacionService {
         `No se encontró el concepto ${dto.conceptoId}`,
       );
     }
-    if (dto.overrides === 'interes' && concepto.kind !== 'intereses') {
+    if (dto.overrides === 'interes' && concepto.tipo !== 'intereses') {
       throw new ConflictException(
         'Solo el concepto de intereses de esta copropiedad puede reemplazar la mora calculada',
       );
@@ -925,7 +925,7 @@ export class LotesFacturacionService {
       this.inmuebles
         .find({
           coPropertyId,
-          status: 'active',
+          estado: 'active',
           ...(lote.inmuebleId ? { _id: lote.inmuebleId } : {}),
         })
         .exec(),
@@ -933,18 +933,18 @@ export class LotesFacturacionService {
       // schema): every declared concept is chargeable, system ones included.
       this.conceptos
         .find({ coPropertyId })
-        .populate('cuentaCreditoId', 'code')
-        .populate('cuentaDebitoId', 'code')
-        .populate('cuentaImpuestoId', 'code')
+        .populate('cuentaCreditoId', 'codigo')
+        .populate('cuentaDebitoId', 'codigo')
+        .populate('cuentaImpuestoId', 'codigo')
         .exec(),
       esIndividual
         ? Promise.resolve([])
         : this.valoresRecurrentes.find({ coPropertyId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
-    const interesConcepto = conceptos.find((c) => c.kind === 'intereses');
+    const interesConcepto = conceptos.find((c) => c.tipo === 'intereses');
     const administracionConcepto = conceptos.find(
-      (c) => c.kind === 'administracion',
+      (c) => c.tipo === 'administracion',
     );
 
     // Both fetched in bulk, ONE round-trip each for every unit in the lote —
@@ -955,7 +955,7 @@ export class LotesFacturacionService {
     // before the loop's own work even started. Same "fetch once outside
     // the loop, index by id" shape already used above for `conceptoPorId`.
     const holderIds = unidades
-      .map((u) => u.holderId)
+      .map((u) => u.titularId)
       .filter((id): id is Types.ObjectId => id !== null);
     const terceros = holderIds.length
       ? await this.terceros
@@ -994,9 +994,9 @@ export class LotesFacturacionService {
     const preview: Record<string, unknown>[] = [];
 
     for (const unidad of unidades) {
-      if (!unidad.holderId) continue;
+      if (!unidad.titularId) continue;
 
-      const tercero = terceroPorId.get(unidad.holderId.toString()) ?? null;
+      const tercero = terceroPorId.get(unidad.titularId.toString()) ?? null;
       const lines: Record<string, unknown>[] = [];
 
       // Every line's `balanceBefore` below reads from this same
@@ -1019,7 +1019,7 @@ export class LotesFacturacionService {
             n.inmuebleId.toString() === unidad._id.toString() &&
             n.conceptoId.toString() === valor.conceptoId.toString(),
         );
-        const monto = override ? override.amount : valor.amount;
+        const monto = override ? override.amount : valor.monto;
         if (monto === 0) continue;
         lines.push(
           this.aLinea(
@@ -1131,17 +1131,17 @@ export class LotesFacturacionService {
       // see them in — interés, for instance, is always computed last even
       // though it should print/post second (Administración, Intereses,
       // Multas…). This reorders the already-computed lines by each line's
-      // own ConceptoCobro.sortOrder, stable on ties, WITHOUT touching the
+      // own ConceptoCobro.orden, stable on ties, WITHOUT touching the
       // balances already frozen on each line above. That order also drives
       // `construirMovimientos`'s per-account grouping (asiento.builder.ts),
       // which is why it reaches Consulta de Movimiento Contable too.
       lines.sort((a, b) => {
         const ordenA =
           conceptoPorId.get((a.conceptoId as Types.ObjectId).toString())
-            ?.sortOrder ?? 0;
+            ?.orden ?? 0;
         const ordenB =
           conceptoPorId.get((b.conceptoId as Types.ObjectId).toString())
-            ?.sortOrder ?? 0;
+            ?.orden ?? 0;
         return ordenA - ordenB;
       });
 
@@ -1156,21 +1156,20 @@ export class LotesFacturacionService {
 
       preview.push({
         inmuebleId: unidad._id,
-        unitCode: unidad.code,
+        unitCode: unidad.codigo,
         terceroId: tercero?._id ?? null,
         holder: tercero
           ? {
-              name: tercero.name,
-              identificationType: tercero.identificationType,
-              identificationNumber: tercero.identificationNumber,
-              identificationVerificationDigit:
-                tercero.identificationVerificationDigit,
-              address: tercero.address,
-              city: tercero.city,
+              name: tercero.nombre,
+              identificationType: tercero.tipoIdentificacion,
+              identificationNumber: tercero.numeroIdentificacion,
+              identificationVerificationDigit: tercero.digitoVerificacion,
+              address: tercero.direccion,
+              city: tercero.ciudad,
               // The PDF prints one address, not a list — see the product
               // decision on `TitularCongelado.email`, 2026-09-22.
               email: tercero.emails[0] ?? null,
-              phone: tercero.phone,
+              phone: tercero.telefono,
             }
           : null,
         lines,
@@ -1941,13 +1940,13 @@ export class LotesFacturacionService {
     const cuentas = await this.cuentasContables.find({ coPropertyId }).exec();
     return new Map(
       cuentas.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
@@ -1963,19 +1962,19 @@ export class LotesFacturacionService {
   private aLinea(
     concepto: {
       _id: Types.ObjectId;
-      name: string;
-      kind: string;
-      taxRate: number;
-      cuentaCreditoId: { code: string } | Types.ObjectId | null;
-      cuentaDebitoId: { code: string } | Types.ObjectId | null;
-      cuentaImpuestoId: { code: string } | Types.ObjectId | null;
+      nombre: string;
+      tipo: string;
+      tasaImpuesto: number;
+      cuentaCreditoId: { codigo: string } | Types.ObjectId | null;
+      cuentaDebitoId: { codigo: string } | Types.ObjectId | null;
+      cuentaImpuestoId: { codigo: string } | Types.ObjectId | null;
     },
     baseAmount: number,
     origen: 'recurrente' | 'novedad' | 'interes',
     novedadId: Types.ObjectId | null = null,
     saldoCorrientePorConcepto: Map<string, number>,
   ): Record<string, unknown> {
-    const taxAmount = Math.round(baseAmount * (concepto.taxRate / 100));
+    const taxAmount = Math.round(baseAmount * (concepto.tasaImpuesto / 100));
     const totalAmount = baseAmount + taxAmount;
     const key = concepto._id.toString();
     const balanceBefore = saldoCorrientePorConcepto.get(key) ?? 0;
@@ -1983,8 +1982,8 @@ export class LotesFacturacionService {
     saldoCorrientePorConcepto.set(key, balanceAfter);
     return {
       conceptoId: concepto._id,
-      conceptName: concepto.name,
-      conceptKind: concepto.kind,
+      conceptName: concepto.nombre,
+      conceptKind: concepto.tipo,
       accountingIncomeAccount: codigoDeCuentaContable(concepto.cuentaCreditoId),
       accountingReceivableAccount: codigoDeCuentaContable(
         concepto.cuentaDebitoId,
@@ -1993,7 +1992,7 @@ export class LotesFacturacionService {
       source: origen,
       novedadId,
       baseAmount,
-      taxRate: concepto.taxRate,
+      taxRate: concepto.tasaImpuesto,
       taxAmount,
       totalAmount,
       // Seeds this line's own pending-balance tracker — see

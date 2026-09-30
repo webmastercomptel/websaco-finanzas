@@ -417,7 +417,7 @@ async function ajustarCarteraPorDocumento(
 /**
  * Splits `montoTotal` across a Factura's lines as a WATERFALL, not
  * proportionally: `factura.lines` arrives sorted by each line's own
- * `ConceptoCobro.sortOrder` ASCENDING (`LotesFacturacionService.consolidar()`
+ * `ConceptoCobro.orden` ASCENDING (`LotesFacturacionService.consolidar()`
  * sorts them that way before freezing the document, "Cargos order" —
  * Administración is seeded first and so normally sits at index 0). This
  * walks them in REVERSE — most-recently-created concept first — filling each

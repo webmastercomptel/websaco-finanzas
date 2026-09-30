@@ -146,13 +146,15 @@ const construirServicio = () => {
       exec: () =>
         Promise.resolve({
           _id: INMUEBLE,
-          code: 'AP-101',
-          holderId: HOLDER,
+          codigo: 'AP-101',
+          titularId: HOLDER,
         }),
     })),
     find: jest.fn(() => ({
       exec: () =>
-        Promise.resolve([{ _id: INMUEBLE, code: 'AP-101', holderId: HOLDER }]),
+        Promise.resolve([
+          { _id: INMUEBLE, codigo: 'AP-101', titularId: HOLDER },
+        ]),
     })),
   };
 

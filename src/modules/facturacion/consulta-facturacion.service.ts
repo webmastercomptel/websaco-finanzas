@@ -85,7 +85,7 @@ export class ConsultaFacturacionService {
     );
 
     // Distinct concepts actually present, resolved to their frozen line
-    // conceptName (never the mutable ConceptoCobro.name) — order is
+    // conceptName (never the mutable ConceptoCobro.nombre) — order is
     // presentational, so it's fine to resolve it from the live catalog even
     // for a historical lote.
     const conceptoIds = new Set<string>();
@@ -104,7 +104,7 @@ export class ConsultaFacturacionService {
           .exec()
       : [];
     const ordenPorId = new Map(
-      catalogo.map((c) => [c._id.toString(), c.sortOrder]),
+      catalogo.map((c) => [c._id.toString(), c.orden]),
     );
     const idsOrdenados = [...conceptoIds].sort((a, b) => {
       const diff = (ordenPorId.get(a) ?? 0) - (ordenPorId.get(b) ?? 0);

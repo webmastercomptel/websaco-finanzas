@@ -55,10 +55,10 @@ export class ConceptosService {
     const oid = new Types.ObjectId(copropiedadId);
     const documentos = await this.conceptos
       .find({ coPropertyId: oid })
-      .populate('cuentaDebitoId', 'code')
-      .populate('cuentaCreditoId', 'code')
-      .populate('cuentaImpuestoId', 'code')
-      .sort({ sortOrder: 1 })
+      .populate('cuentaDebitoId', 'codigo')
+      .populate('cuentaCreditoId', 'codigo')
+      .populate('cuentaImpuestoId', 'codigo')
+      .sort({ orden: 1 })
       .exec();
     return documentos.map(toConcepto);
   }
@@ -69,7 +69,7 @@ export class ConceptosService {
   ): Promise<ConceptoContract> {
     const oid = new Types.ObjectId(copropiedadId);
     const yaExiste = await this.conceptos
-      .exists({ coPropertyId: oid, name: dto.nombre })
+      .exists({ coPropertyId: oid, nombre: dto.nombre })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -80,7 +80,7 @@ export class ConceptosService {
 
     const creado = await this.conceptos.create({
       coPropertyId: oid,
-      sortOrder: await this.siguienteOrden(oid),
+      orden: await this.siguienteOrden(oid),
       ...this.aDocumento(dto),
     });
     return toConcepto(creado);
@@ -94,10 +94,10 @@ export class ConceptosService {
   private async siguienteOrden(coPropertyId: Types.ObjectId): Promise<number> {
     const [ultimo] = await this.conceptos
       .find({ coPropertyId })
-      .sort({ sortOrder: -1 })
+      .sort({ orden: -1 })
       .limit(1)
       .exec();
-    return (ultimo?.sortOrder ?? 0) + 1;
+    return (ultimo?.orden ?? 0) + 1;
   }
 
   /**
@@ -122,7 +122,7 @@ export class ConceptosService {
       const chocaConOtro = await this.conceptos
         .exists({
           coPropertyId: oid,
-          name: dto.nombre,
+          nombre: dto.nombre,
           _id: { $ne: id },
         })
         .exec();
@@ -173,7 +173,7 @@ export class ConceptosService {
     if (!existente) {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
     }
-    if (existente.isSystem) {
+    if (existente.sistema) {
       throw new ConflictException('Los cargos de sistema no pueden eliminarse');
     }
 
@@ -211,7 +211,7 @@ export class ConceptosService {
 
     const filtro: Record<string, unknown> = {
       coPropertyId,
-      kind: tipo,
+      tipo,
     };
     if (idAExcluir) filtro._id = { $ne: idAExcluir };
 
@@ -236,9 +236,9 @@ export class ConceptosService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('name', dto.nombre);
-    set('kind', dto.tipo);
-    set('taxRate', dto.tasaImpuesto);
+    set('nombre', dto.nombre);
+    set('tipo', dto.tipo);
+    set('tasaImpuesto', dto.tasaImpuesto);
     // `?? null` would run even when the caller never sent the field —
     // guarded by `in` so clearing an account is a deliberate empty string,
     // not an accidental wipe from an unrelated patch.
@@ -261,8 +261,8 @@ export class ConceptosService {
       );
     }
     set('liquidaMora', dto.liquidaMora);
-    set('availableAsNovedad', dto.cargaXls);
-    if ('sistema' in dto) set('isSystem', dto.sistema);
+    set('cargaXls', dto.cargaXls);
+    if ('sistema' in dto) set('sistema', dto.sistema);
 
     return doc;
   }

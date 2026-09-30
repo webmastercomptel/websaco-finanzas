@@ -54,11 +54,13 @@ const aplicacionFV = (
 const modelosVacios = () => ({
   facturas: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
   inmuebles: {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve({ code: '1304' }) })),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ codigo: '1304' }),
+    })),
   },
   terceros: {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ name: 'JUAN PEREZ' }),
+      exec: () => Promise.resolve({ nombre: 'JUAN PEREZ' }),
     })),
   },
   cuentasContables: {
@@ -157,8 +159,8 @@ describe('construirDatosImpresionNotaCredito', () => {
     modelos.cuentasContables.find = jest.fn(() => ({
       exec: () =>
         Promise.resolve([
-          { code: '13050501', name: 'CxC Administracion' },
-          { code: '413595', name: 'Devoluciones en Ventas' },
+          { codigo: '13050501', nombre: 'CxC Administracion' },
+          { codigo: '413595', nombre: 'Devoluciones en Ventas' },
         ]),
     })) as never;
 

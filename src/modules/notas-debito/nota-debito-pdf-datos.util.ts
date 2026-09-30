@@ -61,9 +61,9 @@ export async function construirDatosImpresionNotaDebito(
   const movimientos = asiento?.entries ?? [];
   const codigosUsados = new Set(movimientos.map((m) => m.account));
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, code: { $in: [...codigosUsados] } })
+    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
     .exec();
-  const nombrePorCodigo = new Map(cuentas.map((c) => [c.code, c.name]));
+  const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
 
   // Sin referencia a ningún documento puntual (ni facturas ni recibos) —
   // el mismo `null`/`null` que ya usa la línea de banco/anticipo de un
@@ -81,9 +81,9 @@ export async function construirDatosImpresionNotaDebito(
     tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: nota.issueDate,
-    inmuebleCodigo: inmueble?.code ?? '—',
-    titularNombre: tercero?.name ?? '—',
-    concepto: nota.description ?? concepto?.name ?? 'Cargo manual',
+    inmuebleCodigo: inmueble?.codigo ?? '—',
+    titularNombre: tercero?.nombre ?? '—',
+    concepto: nota.description ?? concepto?.nombre ?? 'Cargo manual',
     monto: nota.total,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),

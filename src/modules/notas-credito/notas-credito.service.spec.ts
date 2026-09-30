@@ -426,13 +426,13 @@ const construirServicio = (opts: {
   const inmuebles = opts.cuentasContables && {
     findById: jest.fn(() => ({
       session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
       }),
     })),
     // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
     // `findById` above (called outside any transaction).
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
     })),
   };
 
@@ -566,14 +566,14 @@ describe('NotasCreditoService.crear', () => {
       },
       cuentasContables: [
         {
-          code: '413595',
-          requiresTercero: true,
-          profitCenter: true,
-          destinationCenter: false,
-          cashFlow: false,
+          codigo: '413595',
+          requiereTercero: true,
+          centroUtilidad: true,
+          centroDestino: false,
+          flujoCaja: false,
         },
       ],
-      inmueble: { code: '1304' },
+      inmueble: { codigo: '1304' },
     });
 
     await service.crear('acc-1', dtoBase());
@@ -1205,10 +1205,10 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     const saldoDocumentoOrigen = modeloSaldoDocumentoOrigenUnico(notaCreada);
     const concepto = {
       _id: CONCEPTO,
-      name: 'Multa por parqueo',
-      kind: 'otro',
-      cuentaCreditoId: { code: '413595' },
-      cuentaDebitoId: { code: '130505' },
+      nombre: 'Multa por parqueo',
+      tipo: 'otro',
+      cuentaCreditoId: { codigo: '413595' },
+      cuentaDebitoId: { codigo: '130505' },
     };
 
     const service = new NotasCreditoService(
@@ -1246,7 +1246,7 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     });
   });
 
-  it('cuando el ancla ND no trae terceroId (congelado null desde antes del propio fix de Notas Débito), cae al holderId ACTUAL del inmueble en vez de dejarlo en blanco', async () => {
+  it('cuando el ancla ND no trae terceroId (congelado null desde antes del propio fix de Notas Débito), cae al titularId ACTUAL del inmueble en vez de dejarlo en blanco', async () => {
     const TITULAR = new Types.ObjectId();
     const notaDebito = notaDebitoDoc({ terceroId: null });
     const notaCreada = notaCreditoCreada({
@@ -1259,21 +1259,25 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     const notasCredito = modeloNotasCredito(notaCreada);
     const concepto = {
       _id: CONCEPTO,
-      name: 'Multa por parqueo',
-      kind: 'otro',
-      cuentaCreditoId: { code: '413595' },
-      cuentaDebitoId: { code: '130505' },
+      nombre: 'Multa por parqueo',
+      tipo: 'otro',
+      cuentaCreditoId: { codigo: '413595' },
+      cuentaDebitoId: { codigo: '130505' },
     };
     const inmuebles = {
       findOne: jest.fn(() => ({
         session: () => ({
-          exec: () => Promise.resolve({ _id: INMUEBLE, holderId: TITULAR }),
+          exec: () => Promise.resolve({ _id: INMUEBLE, titularId: TITULAR }),
         }),
         // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain,
         // unlike the terceroId resolution above (called inside a
         // transaction).
         exec: () =>
-          Promise.resolve({ _id: INMUEBLE, holderId: TITULAR, code: '1304' }),
+          Promise.resolve({
+            _id: INMUEBLE,
+            titularId: TITULAR,
+            codigo: '1304',
+          }),
       })),
     };
 
@@ -2472,10 +2476,10 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
               exec: () =>
                 Promise.resolve({
                   _id: CONCEPTO,
-                  name: 'Multa por parqueo',
-                  kind: 'otro',
-                  cuentaCreditoId: { code: '413595' },
-                  cuentaDebitoId: { code: '130505' },
+                  nombre: 'Multa por parqueo',
+                  tipo: 'otro',
+                  cuentaCreditoId: { codigo: '413595' },
+                  cuentaDebitoId: { codigo: '130505' },
                 }),
             }),
           }),

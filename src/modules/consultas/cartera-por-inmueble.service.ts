@@ -139,14 +139,14 @@ export class CarteraPorInmuebleService {
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    const inmuebleCodigo = inmueble?.code ?? '';
+    const inmuebleCodigo = inmueble?.codigo ?? '';
 
     let propietario: string | null = null;
-    if (inmueble?.holderId) {
+    if (inmueble?.titularId) {
       const tercero = await this.terceros
-        .findOne({ _id: inmueble.holderId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, coPropertyId })
         .exec();
-      propietario = tercero?.name ?? null;
+      propietario = tercero?.nombre ?? null;
     }
 
     const limiteEmision = limiteEmisionParaCorte(fecha);
@@ -401,7 +401,7 @@ export class CarteraPorInmuebleService {
     );
 
     const [conceptos, saldos] = await Promise.all([
-      this.conceptosCobro.find({ coPropertyId }).sort({ sortOrder: 1 }).exec(),
+      this.conceptosCobro.find({ coPropertyId }).sort({ orden: 1 }).exec(),
       this.saldosCartera.find({ coPropertyId, inmuebleId }).exec(),
     ]);
     const saldosPorConcepto = new Map<string, number>();
@@ -423,7 +423,7 @@ export class CarteraPorInmuebleService {
       const id = c._id.toString();
       return {
         conceptoId: id,
-        nombre: c.name,
+        nombre: c.nombre,
         monto: saldosPorConcepto.has(id)
           ? saldosPorConcepto.get(id)!
           : (totalesDocumentos.get(id) ?? 0),

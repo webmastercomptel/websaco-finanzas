@@ -247,18 +247,18 @@ export class NotasCreditoService {
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
       cuentas.map((c) => [
-        c.code,
+        c.codigo,
         {
-          requiereTercero: c.requiresTercero,
-          centroUtilidad: c.profitCenter,
-          centroDestino: c.destinationCenter,
-          flujoCaja: c.cashFlow,
-          requiereDocumentoCruce: c.requiresCrossDocument,
+          requiereTercero: c.requiereTercero,
+          centroUtilidad: c.centroUtilidad,
+          centroDestino: c.centroDestino,
+          flujoCaja: c.flujoCaja,
+          requiereDocumentoCruce: c.requiereDocumentoCruce,
         },
       ]),
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
-      terceroCode: inmueble?.code ?? null,
+      terceroCode: inmueble?.codigo ?? null,
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
       documentoCruce: documentoCruce ?? null,
@@ -326,8 +326,8 @@ export class NotasCreditoService {
     const notaDebito = documento as NotaDebitoDocument;
     const concepto = await this.conceptosCobro
       .findOne({ _id: notaDebito.conceptoId, coPropertyId })
-      .populate('cuentaCreditoId', 'code')
-      .populate('cuentaDebitoId', 'code')
+      .populate('cuentaCreditoId', 'codigo')
+      .populate('cuentaDebitoId', 'codigo')
       .session(session)
       .exec();
     return [
@@ -340,8 +340,9 @@ export class NotasCreditoService {
         accountingReceivableAccount: concepto
           ? codigoDeCuentaContable(concepto.cuentaDebitoId)
           : null,
-        conceptKind: concepto?.kind ?? 'otro',
-        conceptName: concepto?.name ?? notaDebito.description ?? 'Nota Débito',
+        conceptKind: concepto?.tipo ?? 'otro',
+        conceptName:
+          concepto?.nombre ?? notaDebito.description ?? 'Nota Débito',
       },
     ];
   }
@@ -465,7 +466,7 @@ export class NotasCreditoService {
       // issuance). A Saldo Inicial never carries one at all (no `terceroId`
       // field — see its own schema). Rather than silently propagate that
       // blank onto the Nota Crédito's own PDF too, fall back to the
-      // inmueble's CURRENT holder, same source (`Inmueble.holderId`) that
+      // inmueble's CURRENT holder, same source (`Inmueble.titularId`) that
       // fix reads.
       const terceroId =
         (dto.tipoDocumento === 'SI'
@@ -477,7 +478,7 @@ export class NotasCreditoService {
             ?.findOne({ _id: inmuebleId, coPropertyId })
             .session(session)
             .exec()
-        )?.holderId ??
+        )?.titularId ??
         null;
 
       const lineasAncla = await this.resolverLineasAncla(
@@ -1835,7 +1836,7 @@ export class NotasCreditoService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      (inmuebles ?? []).map((i) => [i._id.toString(), i.code]),
+      (inmuebles ?? []).map((i) => [i._id.toString(), i.codigo]),
     );
 
     return {
@@ -1999,7 +2000,7 @@ export class NotasCreditoService {
     const inmueble = await this.inmuebles
       ?.findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    return inmueble?.code ?? '';
+    return inmueble?.codigo ?? '';
   }
 
   /** Posts a LATER application's journal entry: debit `cuentaAnticipos`,

@@ -104,7 +104,7 @@ const modeloConceptos = (cuenta: string | null = '413501') => ({
       session: () => ({
         exec: () =>
           Promise.resolve({
-            cuentaCreditoId: cuenta ? { code: cuenta } : null,
+            cuentaCreditoId: cuenta ? { codigo: cuenta } : null,
           }),
       }),
     };
@@ -134,13 +134,13 @@ const construirServicio = (opts: {
   const inmuebles = opts.cuentasContables && {
     findById: jest.fn(() => ({
       session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
       }),
     })),
     // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
     // `findById` above (called outside any transaction).
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
     })),
   };
 
@@ -311,14 +311,14 @@ describe('NotasContablesService.crear', () => {
       }),
       cuentasContables: [
         {
-          code: '413501',
-          requiresTercero: true,
-          profitCenter: false,
-          destinationCenter: false,
-          cashFlow: false,
+          codigo: '413501',
+          requiereTercero: true,
+          centroUtilidad: false,
+          centroDestino: false,
+          flujoCaja: false,
         },
       ],
-      inmueble: { code: '1304' },
+      inmueble: { codigo: '1304' },
     });
 
     await service.crear('acc-1', dtoBase());
@@ -429,12 +429,12 @@ describe('NotasContablesService.crear', () => {
             exec: () => {
               if (filtro._id.equals(CONCEPTO_ORIGEN)) {
                 return Promise.resolve({
-                  cuentaCreditoId: { code: '413501' },
+                  cuentaCreditoId: { codigo: '413501' },
                 });
               }
               if (filtro._id.equals(CONCEPTO_DESTINO)) {
                 return Promise.resolve({
-                  cuentaCreditoId: { code: '413502' },
+                  cuentaCreditoId: { codigo: '413502' },
                 });
               }
               return Promise.resolve(null);
@@ -669,12 +669,12 @@ describe('NotasContablesService.anular', () => {
             exec: () => {
               if (filtro._id.equals(conceptoOrigen)) {
                 return Promise.resolve({
-                  cuentaCreditoId: { code: '413501' },
+                  cuentaCreditoId: { codigo: '413501' },
                 });
               }
               if (filtro._id.equals(conceptoDestino)) {
                 return Promise.resolve({
-                  cuentaCreditoId: { code: '413502' },
+                  cuentaCreditoId: { codigo: '413502' },
                 });
               }
               return Promise.resolve(null);

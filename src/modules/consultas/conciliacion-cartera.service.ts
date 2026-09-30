@@ -480,7 +480,7 @@ export class ConciliacionCarteraService {
           .exec()
       : [];
     const codigoPorInmueble = new Map(
-      inmueblesDoc.map((i) => [i._id.toString(), i.code]),
+      inmueblesDoc.map((i) => [i._id.toString(), i.codigo]),
     );
 
     return recibos

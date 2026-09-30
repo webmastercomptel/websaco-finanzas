@@ -55,11 +55,11 @@ export class CuentasContablesService {
     const filtro: Record<string, unknown> = { coPropertyId };
 
     if (query.estado !== 'todos') {
-      filtro.active = query.estado !== 'inactivo';
+      filtro.activo = query.estado !== 'inactivo';
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ code: patron }, { name: patron }];
+      filtro.$or = [{ codigo: patron }, { nombre: patron }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -68,7 +68,7 @@ export class CuentasContablesService {
     const [documentos, total] = await Promise.all([
       this.cuentas
         .find(filtro)
-        .sort({ code: 1 })
+        .sort({ codigo: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -95,7 +95,7 @@ export class CuentasContablesService {
   async create(dto: CrearCuentaDto): Promise<CuentaContableContract> {
     const coPropertyId = this.tenant.resolveCoPropertyId();
     const yaExiste = await this.cuentas
-      .exists({ coPropertyId, code: dto.codigo })
+      .exists({ coPropertyId, codigo: dto.codigo })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -105,16 +105,16 @@ export class CuentasContablesService {
 
     const creada = await this.cuentas.create({
       coPropertyId,
-      code: dto.codigo,
-      name: dto.nombre,
-      requiresTercero: dto.requiereTercero ?? false,
-      isBank: dto.esBanco ?? false,
-      cashFlow: dto.flujoCaja ?? false,
-      profitCenter: dto.centroUtilidad ?? false,
-      destinationCenter: dto.centroDestino ?? false,
-      requiresCrossDocument: dto.requiereDocumentoCruce ?? false,
-      appliesTax: dto.aplicaImpuesto ?? false,
-      taxRate: dto.tasaImpuesto ?? 0,
+      codigo: dto.codigo,
+      nombre: dto.nombre,
+      requiereTercero: dto.requiereTercero ?? false,
+      esBanco: dto.esBanco ?? false,
+      flujoCaja: dto.flujoCaja ?? false,
+      centroUtilidad: dto.centroUtilidad ?? false,
+      centroDestino: dto.centroDestino ?? false,
+      requiereDocumentoCruce: dto.requiereDocumentoCruce ?? false,
+      aplicaImpuesto: dto.aplicaImpuesto ?? false,
+      tasaImpuesto: dto.tasaImpuesto ?? 0,
     });
 
     return toCuentaContable(creada);
@@ -177,7 +177,7 @@ export class CuentasContablesService {
 
     if (dto.codigo) {
       const choca = await this.cuentas
-        .exists({ coPropertyId, code: dto.codigo, _id: { $ne: id } })
+        .exists({ coPropertyId, codigo: dto.codigo, _id: { $ne: id } })
         .exec();
       if (choca) {
         throw new ConflictException(
@@ -191,18 +191,18 @@ export class CuentasContablesService {
       if (v !== undefined) update[k] = v;
     };
 
-    set('code', dto.codigo);
-    set('name', dto.nombre);
-    set('requiresTercero', dto.requiereTercero);
-    set('isBank', dto.esBanco);
-    set('cashFlow', dto.flujoCaja);
-    set('profitCenter', dto.centroUtilidad);
-    set('destinationCenter', dto.centroDestino);
-    set('requiresCrossDocument', dto.requiereDocumentoCruce);
-    set('appliesTax', dto.aplicaImpuesto);
-    set('taxRate', dto.tasaImpuesto);
+    set('codigo', dto.codigo);
+    set('nombre', dto.nombre);
+    set('requiereTercero', dto.requiereTercero);
+    set('esBanco', dto.esBanco);
+    set('flujoCaja', dto.flujoCaja);
+    set('centroUtilidad', dto.centroUtilidad);
+    set('centroDestino', dto.centroDestino);
+    set('requiereDocumentoCruce', dto.requiereDocumentoCruce);
+    set('aplicaImpuesto', dto.aplicaImpuesto);
+    set('tasaImpuesto', dto.tasaImpuesto);
     if (dto.activo !== undefined) {
-      update.active = dto.activo;
+      update.activo = dto.activo;
     }
 
     const actualizada = await this.cuentas
@@ -237,17 +237,17 @@ export class CuentasContablesService {
         })
         .exec(),
       this.asientos
-        .exists({ coPropertyId, 'entries.account': cuenta.code })
+        .exists({ coPropertyId, 'entries.account': cuenta.codigo })
         .exec(),
       this.copropiedades
         .exists({
           _id: coPropertyId,
           $or: [
-            { receivablesAccount: cuenta.code },
-            { advancesAccount: cuenta.code },
-            { creditNotesAccount: cuenta.code },
-            { debitNotesAccount: cuenta.code },
-            { defaultBankAccountCode: cuenta.code },
+            { receivablesAccount: cuenta.codigo },
+            { advancesAccount: cuenta.codigo },
+            { creditNotesAccount: cuenta.codigo },
+            { debitNotesAccount: cuenta.codigo },
+            { defaultBankAccountCode: cuenta.codigo },
           ],
         })
         .exec(),

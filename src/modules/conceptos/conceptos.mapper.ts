@@ -30,10 +30,10 @@ const idDeCuenta = (
 export const toConcepto = (doc: ConceptoCobroDocument): ConceptoContract => ({
   id: doc._id.toString(),
   copropiedadId: doc.coPropertyId.toString(),
-  nombre: doc.name,
-  tipo: doc.kind,
-  tasaImpuesto: doc.taxRate,
-  orden: doc.sortOrder,
+  nombre: doc.nombre,
+  tipo: doc.tipo,
+  tasaImpuesto: doc.tasaImpuesto,
+  orden: doc.orden,
   cuentaDebitoId: idDeCuenta(doc.cuentaDebitoId),
   cuentaDebitoCodigo: codigoDeCuentaContable(doc.cuentaDebitoId),
   cuentaCreditoId: idDeCuenta(doc.cuentaCreditoId),
@@ -41,6 +41,6 @@ export const toConcepto = (doc: ConceptoCobroDocument): ConceptoContract => ({
   cuentaImpuestoId: idDeCuenta(doc.cuentaImpuestoId),
   cuentaImpuestoCodigo: codigoDeCuentaContable(doc.cuentaImpuestoId),
   liquidaMora: doc.liquidaMora,
-  cargaXls: doc.availableAsNovedad,
-  sistema: doc.isSystem,
+  cargaXls: doc.cargaXls,
+  sistema: doc.sistema,
 });

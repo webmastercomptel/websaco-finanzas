@@ -36,24 +36,24 @@ export class Inmueble {
 
   /** Identifier as residents use it: "301", "Torre A - 301", "Local 2". */
   @Prop({ required: true, trim: true })
-  code: string;
+  codigo: string;
 
   /** Free-text cross-reference to an external record — e.g. this unit's id
    *  in a cadastral registry or the building-management system, when there
-   *  is one. Never used to look anything up internally, unlike `code`. */
+   *  is one. Never used to look anything up internally, unlike `codigo`. */
   @Prop({ type: String, default: null, trim: true })
-  reference: string | null;
+  referencia: string | null;
 
   /** Tower, block or stage. Null where the property has no such division. */
   @Prop({ type: String, default: null, trim: true })
-  block: string | null;
+  bloque: string | null;
 
   /** Zone and use, as the previous system grouped units. */
   @Prop({ type: String, default: null, trim: true })
-  zone: string | null;
+  zona: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  usage: string | null;
+  uso: string | null;
 
   /** Built area in square metres. */
   @Prop({ type: Number, default: null })
@@ -68,7 +68,7 @@ export class Inmueble {
    * stop adding up to 100.
    */
   @Prop({ type: Number, default: null })
-  participationFactor: number | null;
+  coeficiente: number | null;
 
   /**
    * The party responsible for this unit's charges right now.
@@ -83,7 +83,7 @@ export class Inmueble {
     default: null,
     index: true,
   })
-  holderId: Types.ObjectId | null;
+  titularId: Types.ObjectId | null;
 
   /** Whether the responsible party owns the unit or rents it. */
   @Prop({
@@ -91,11 +91,11 @@ export class Inmueble {
     enum: ['propietario', 'arrendatario'],
     default: 'propietario',
   })
-  holderKind: 'propietario' | 'arrendatario';
+  tipoTitular: 'propietario' | 'arrendatario';
 
   /** Whether the responsible party actually lives here. */
   @Prop({ required: true, default: true })
-  holderResides: boolean;
+  resideEnElInmueble: boolean;
 
   /**
    * Collection status, used to steer follow-up rather than to block billing.
@@ -111,7 +111,7 @@ export class Inmueble {
     enum: ['vigente', 'juridico', 'dificil_recaudo'],
     default: 'vigente',
   })
-  collectionStatus: 'vigente' | 'juridico' | 'dificil_recaudo';
+  estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
 
   /**
    * Who to call about this unit, when that is not the holder — a caretaker, a
@@ -119,7 +119,7 @@ export class Inmueble {
    * a human, not a record to join on.
    */
   @Prop({ type: String, default: null, trim: true })
-  contactName: string | null;
+  contacto: string | null;
 
   /**
    * Free notes. Every real property register grows one, and without a field for
@@ -127,15 +127,16 @@ export class Inmueble {
    * invoice.
    */
   @Prop({ type: String, default: null, trim: true })
-  notes: string | null;
+  observaciones: string | null;
 
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const InmuebleSchema = SchemaFactory.createForClass(Inmueble);
 
 // A unit code repeats across coproperties — "301" exists in every building —
-// but must be unique inside one. A plain unique index on `code` would reject
-// the second building's 301; this compound one is what actually models it.
-InmuebleSchema.index({ coPropertyId: 1, code: 1 }, { unique: true });
+// but must be unique inside one. A plain unique index on `codigo` would
+// reject the second building's 301; this compound one is what actually
+// models it.
+InmuebleSchema.index({ coPropertyId: 1, codigo: 1 }, { unique: true });

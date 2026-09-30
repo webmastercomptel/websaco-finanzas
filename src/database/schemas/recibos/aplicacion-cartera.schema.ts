@@ -29,7 +29,7 @@ export class DetalleConceptoAplicacion {
   @Prop({ type: SchemaTypes.ObjectId, required: true })
   conceptoId: Types.ObjectId;
 
-  /** `ConceptoCobro.name`/`FacturaLinea.conceptName` at application time —
+  /** `ConceptoCobro.nombre`/`FacturaLinea.conceptName` at application time —
    *  frozen, same reasoning as `FacturaLinea.conceptName` itself: a later
    *  rename of the concepto must not reword history. */
   @Prop({ required: true, trim: true })

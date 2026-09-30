@@ -9,17 +9,17 @@ type Filtro = Record<string, unknown>;
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'inm-1' },
-  code: '301',
-  block: 'Torre A',
-  zone: null,
-  usage: null,
+  codigo: '301',
+  bloque: 'Torre A',
+  zona: null,
+  uso: null,
   area: 72,
-  participationFactor: 1.8452,
-  holderId: null,
-  holderKind: 'propietario',
-  holderResides: true,
-  collectionStatus: 'vigente',
-  status: 'active',
+  coeficiente: 1.8452,
+  titularId: null,
+  tipoTitular: 'propietario',
+  resideEnElInmueble: true,
+  estadoCartera: 'vigente',
+  estado: 'active',
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...over,
 });
@@ -134,7 +134,7 @@ describe('InmueblesService.findAll', () => {
 
     await service.findAll({});
 
-    expect(modelo.filtros[0]).not.toHaveProperty('status');
+    expect(modelo.filtros[0]).not.toHaveProperty('estado');
   });
 
   it('escapa la búsqueda para que no actúe como expresión regular', async () => {
@@ -153,8 +153,8 @@ describe('InmueblesService.findAll', () => {
 
     await service.findAll({ buscar: 'Torre A (301)' });
 
-    const or = modelo.filtros[0].$or as Array<{ code?: { $regex: string } }>;
-    expect(or[0].code!.$regex).toBe('Torre A \\(301\\)');
+    const or = modelo.filtros[0].$or as Array<{ codigo?: { $regex: string } }>;
+    expect(or[0].codigo!.$regex).toBe('Torre A \\(301\\)');
   });
 
   it('cuenta con el MISMO filtro que lista', async () => {
@@ -178,7 +178,7 @@ describe('InmueblesService.findAll', () => {
   });
 
   describe('buscar por nombre del titular', () => {
-    it('resuelve terceros cuyo nombre matchea y los incluye vía holderId', async () => {
+    it('resuelve terceros cuyo nombre matchea y los incluye vía titularId', async () => {
       const modelo = modeloCon([]);
       const terceroId = new Types.ObjectId();
       const terceros = terceroModeloCon([terceroId]);
@@ -196,13 +196,13 @@ describe('InmueblesService.findAll', () => {
 
       expect(terceros.filtros[0]).toMatchObject({
         coPropertyId: COP,
-        name: { $regex: 'Ana Pérez', $options: 'i' },
+        nombre: { $regex: 'Ana Pérez', $options: 'i' },
       });
       const or = modelo.filtros[0].$or as Array<{
-        code?: unknown;
-        holderId?: { $in: unknown[] };
+        codigo?: unknown;
+        titularId?: { $in: unknown[] };
       }>;
-      expect(or[1].holderId!.$in).toEqual([terceroId]);
+      expect(or[1].titularId!.$in).toEqual([terceroId]);
     });
 
     it('sin terceros que matcheen, el filtro sigue siendo válido (solo busca por código)', async () => {
@@ -248,7 +248,7 @@ describe('InmueblesService.findAll', () => {
   });
 
   it('mapea status "inactive" a estado "inactivo"', async () => {
-    const modelo = modeloCon([documento({ status: 'inactive' })]);
+    const modelo = modeloCon([documento({ estado: 'inactive' })]);
     const service = new InmueblesService(
       modelo as never,
       {} as never,

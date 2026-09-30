@@ -183,8 +183,8 @@ export class EstadoCuentaService {
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    const inmuebleCodigo = inmueble?.code ?? '';
-    const holderId = inmueble?.holderId ?? null;
+    const inmuebleCodigo = inmueble?.codigo ?? '';
+    const holderId = inmueble?.titularId ?? null;
 
     // Resolve propietario name
     let propietario: string | null = null;
@@ -192,7 +192,7 @@ export class EstadoCuentaService {
       const tercero = await this.terceros
         .findOne({ _id: holderId, coPropertyId })
         .exec();
-      propietario = tercero?.name ?? null;
+      propietario = tercero?.nombre ?? null;
     }
 
     // Fetch copropiedad for contact info

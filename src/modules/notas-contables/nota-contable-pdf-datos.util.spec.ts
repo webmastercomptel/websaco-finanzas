@@ -50,13 +50,13 @@ const modelos = (
           return Promise.resolve(
             over.origenCuenta === null
               ? { cuentaCreditoId: null }
-              : { cuentaCreditoId: { code: over.origenCuenta ?? '413501' } },
+              : { cuentaCreditoId: { codigo: over.origenCuenta ?? '413501' } },
           );
         }
         return Promise.resolve(
           over.destinoCuenta === null
             ? { cuentaCreditoId: null }
-            : { cuentaCreditoId: { code: over.destinoCuenta ?? '413502' } },
+            : { cuentaCreditoId: { codigo: over.destinoCuenta ?? '413502' } },
         );
       },
     })),
@@ -67,7 +67,7 @@ const modelos = (
         Promise.resolve(
           'inmueble' in over
             ? over.inmueble
-            : { code: '301', holderId: HOLDER },
+            : { codigo: '301', titularId: HOLDER },
         ),
     })),
   },
@@ -75,7 +75,7 @@ const modelos = (
     findOne: jest.fn(() => ({
       exec: () =>
         Promise.resolve(
-          'tercero' in over ? over.tercero : { name: 'Carlos Mendoza' },
+          'tercero' in over ? over.tercero : { nombre: 'Carlos Mendoza' },
         ),
     })),
   },
@@ -118,7 +118,7 @@ describe('construirDatosImpresionNotaContable', () => {
     expect(datos.totalCredito).toBe(100000);
   });
 
-  it('resuelve inmuebleCodigo y titularNombre vía Inmueble.holderId -> Tercero.name', async () => {
+  it('resuelve inmuebleCodigo y titularNombre vía Inmueble.titularId -> Tercero.nombre', async () => {
     const datos = await construirDatosImpresionNotaContable(
       notaBase(),
       copropiedadBase(),
@@ -131,8 +131,8 @@ describe('construirDatosImpresionNotaContable', () => {
     expect(datos.titularNombre).toBe('Carlos Mendoza');
   });
 
-  it('sin holderId, titularNombre queda en "—" sin consultar Terceros', async () => {
-    const m = modelos({ inmueble: { code: '301', holderId: null } });
+  it('sin titularId, titularNombre queda en "—" sin consultar Terceros', async () => {
+    const m = modelos({ inmueble: { codigo: '301', titularId: null } });
     const datos = await construirDatosImpresionNotaContable(
       notaBase(),
       copropiedadBase(),
@@ -176,7 +176,7 @@ describe('construirDatosImpresionNotaContable', () => {
       modelos({
         origenCuenta: '413501',
         destinoCuenta: '413502',
-        cuentas: [{ code: '413501', name: 'Ingresos TV' }],
+        cuentas: [{ codigo: '413501', nombre: 'Ingresos TV' }],
       }) as never,
       'Nota Contable',
     );

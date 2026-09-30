@@ -95,7 +95,7 @@ export class InmueblesEliminacionService {
 
     const todos = await this.inmuebles
       .find({ coPropertyId })
-      .select('_id code')
+      .select('_id codigo')
       .exec();
     if (todos.length === 0) return { eliminados: 0, bloqueados: [] };
 
@@ -113,7 +113,7 @@ export class InmueblesEliminacionService {
     );
     const bloqueados = todos
       .filter((d) => idsConFactura.has(d._id.toString()))
-      .map((d) => d.code);
+      .map((d) => d.codigo);
     const idsEliminables = eliminables.map((d) => d._id);
 
     await this.valoresRecurrentes

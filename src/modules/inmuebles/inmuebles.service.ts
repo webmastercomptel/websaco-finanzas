@@ -85,12 +85,12 @@ export class InmueblesService {
       // matching it means resolving which terceros match first, then OR-ing
       // that into the unit filter alongside the code match.
       const terceroIds = await this.terceros
-        .find({ coPropertyId, name: regex })
+        .find({ coPropertyId, nombre: regex })
         .distinct('_id')
         .exec();
       filtro.$or = [
-        { code: regex },
-        ...(terceroIds.length ? [{ holderId: { $in: terceroIds } }] : []),
+        { codigo: regex },
+        ...(terceroIds.length ? [{ titularId: { $in: terceroIds } }] : []),
       ];
     }
 
@@ -102,8 +102,8 @@ export class InmueblesService {
     const [documentos, total] = await Promise.all([
       this.inmuebles
         .find(filtro)
-        .populate('holderId', 'name identificationNumber')
-        .sort({ code: 1 })
+        .populate('titularId', 'nombre numeroIdentificacion')
+        .sort({ codigo: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -130,7 +130,7 @@ export class InmueblesService {
 
     const documento = await this.inmuebles
       .findOne({ _id: id, coPropertyId })
-      .populate('holderId', 'name identificationNumber')
+      .populate('titularId', 'nombre numeroIdentificacion')
       .exec();
 
     if (!documento) {
@@ -299,23 +299,23 @@ export class InmueblesService {
             );
           }
 
-          const holderId = await this.resolverTitular(coPropertyId, fila);
+          const titularId = await this.resolverTitular(coPropertyId, fila);
 
           await this.inmuebles.create({
             coPropertyId,
-            code: fila.codigo,
-            reference: fila.referencia,
-            block: fila.bloque,
-            zone: fila.zona,
-            usage: fila.uso,
+            codigo: fila.codigo,
+            referencia: fila.referencia,
+            bloque: fila.bloque,
+            zona: fila.zona,
+            uso: fila.uso,
             area: fila.area,
-            participationFactor: fila.coeficiente,
-            holderId,
-            holderKind: fila.tipoTitular ?? 'propietario',
-            holderResides: fila.resideEnElInmueble ?? false,
-            collectionStatus: fila.estadoCartera ?? 'vigente',
-            contactName: fila.contacto,
-            notes: fila.observaciones,
+            coeficiente: fila.coeficiente,
+            titularId,
+            tipoTitular: fila.tipoTitular ?? 'propietario',
+            resideEnElInmueble: fila.resideEnElInmueble ?? false,
+            estadoCartera: fila.estadoCartera ?? 'vigente',
+            contacto: fila.contacto,
+            observaciones: fila.observaciones,
           });
 
           creados += 1;
@@ -427,7 +427,7 @@ export class InmueblesService {
       const existente = await this.terceros
         .findOne({
           coPropertyId,
-          identificationNumber: fila.numeroIdentificacionTitular,
+          numeroIdentificacion: fila.numeroIdentificacionTitular,
         })
         .exec();
       if (existente) {
@@ -446,22 +446,22 @@ export class InmueblesService {
 
     const creado = await this.terceros.create({
       coPropertyId,
-      personType,
-      name: nombre,
-      firstName: fila.nom1Titular,
-      middleName: fila.nom2Titular,
-      firstLastName: fila.ape1Titular,
-      secondLastName: fila.ape2Titular,
-      businessName: fila.razonSocialTitular,
-      identificationType: fila.tipoIdentificacionTitular,
-      identificationNumber: fila.numeroIdentificacionTitular,
-      identificationVerificationDigit: fila.digitoVerificacionTitular,
+      tipoPersona: personType,
+      nombre: nombre,
+      primerNombre: fila.nom1Titular,
+      segundoNombre: fila.nom2Titular,
+      primerApellido: fila.ape1Titular,
+      segundoApellido: fila.ape2Titular,
+      razonSocial: fila.razonSocialTitular,
+      tipoIdentificacion: fila.tipoIdentificacionTitular,
+      numeroIdentificacion: fila.numeroIdentificacionTitular,
+      digitoVerificacion: fila.digitoVerificacionTitular,
       emails: parseEmails(fila.emailTitular),
-      phone: fila.telefonoTitular,
-      address: fila.direccionTitular,
-      city: ciudad,
-      cityCode: fila.ciudadTitular,
-      cityDepartmentCode: ciudadDepartamento,
+      telefono: fila.telefonoTitular,
+      direccion: fila.direccionTitular,
+      ciudad: ciudad,
+      ciudadCodigo: fila.ciudadTitular,
+      ciudadDepartamentoCodigo: ciudadDepartamento,
     });
     return creado._id;
   }
@@ -490,26 +490,26 @@ export class InmueblesService {
       if (valor !== undefined) cambios[clave] = valor;
     };
 
-    set('personType', personType);
-    set('name', nombre ?? undefined);
-    set('firstName', fila.nom1Titular);
-    set('middleName', fila.nom2Titular);
-    set('firstLastName', fila.ape1Titular);
-    set('secondLastName', fila.ape2Titular);
-    set('businessName', fila.razonSocialTitular);
-    set('identificationType', fila.tipoIdentificacionTitular);
-    set('identificationVerificationDigit', fila.digitoVerificacionTitular);
+    set('tipoPersona', personType);
+    set('nombre', nombre ?? undefined);
+    set('primerNombre', fila.nom1Titular);
+    set('segundoNombre', fila.nom2Titular);
+    set('primerApellido', fila.ape1Titular);
+    set('segundoApellido', fila.ape2Titular);
+    set('razonSocial', fila.razonSocialTitular);
+    set('tipoIdentificacion', fila.tipoIdentificacionTitular);
+    set('digitoVerificacion', fila.digitoVerificacionTitular);
     set(
       'emails',
       fila.emailTitular === undefined
         ? undefined
         : parseEmails(fila.emailTitular),
     );
-    set('phone', fila.telefonoTitular);
-    set('address', fila.direccionTitular);
-    set('city', ciudad);
-    set('cityCode', fila.ciudadTitular);
-    set('cityDepartmentCode', ciudadDepartamento);
+    set('telefono', fila.telefonoTitular);
+    set('direccion', fila.direccionTitular);
+    set('ciudad', ciudad);
+    set('ciudadCodigo', fila.ciudadTitular);
+    set('ciudadDepartamentoCodigo', ciudadDepartamento);
 
     if (Object.keys(cambios).length === 0) return;
     await this.terceros.updateOne({ _id: id }, { $set: cambios }).exec();
@@ -533,7 +533,7 @@ export class InmueblesService {
   ): Record<string, unknown> {
     return {
       coPropertyId,
-      code: { $regex: `^${escapeRegex(codigo.trim())}$`, $options: 'i' },
+      codigo: { $regex: `^${escapeRegex(codigo.trim())}$`, $options: 'i' },
       ...(excluirId ? { _id: { $ne: excluirId } } : {}),
     };
   }
@@ -551,22 +551,22 @@ export class InmueblesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('code', dto.codigo);
-    set('reference', dto.referencia);
-    set('block', dto.bloque);
-    set('zone', dto.zona);
-    set('usage', dto.uso);
+    set('codigo', dto.codigo);
+    set('referencia', dto.referencia);
+    set('bloque', dto.bloque);
+    set('zona', dto.zona);
+    set('uso', dto.uso);
     set('area', dto.area);
-    set('participationFactor', dto.coeficiente);
-    set('holderId', dto.titularId);
-    set('holderKind', dto.tipoTitular);
-    set('holderResides', dto.resideEnElInmueble);
-    set('collectionStatus', dto.estadoCartera);
+    set('coeficiente', dto.coeficiente);
+    set('titularId', dto.titularId);
+    set('tipoTitular', dto.tipoTitular);
+    set('resideEnElInmueble', dto.resideEnElInmueble);
+    set('estadoCartera', dto.estadoCartera);
     if (dto.estado !== undefined) {
-      doc.status = dto.estado === 'inactivo' ? 'inactive' : 'active';
+      doc.estado = dto.estado === 'inactivo' ? 'inactive' : 'active';
     }
-    set('contactName', dto.contacto);
-    set('notes', dto.observaciones);
+    set('contacto', dto.contacto);
+    set('observaciones', dto.observaciones);
 
     return doc;
   }

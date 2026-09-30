@@ -21,27 +21,27 @@ const modeloInmuebles = (existe: boolean) => ({
 
 const conceptoDoc = (over: Record<string, unknown> = {}) => ({
   _id: CONCEPTO_ADMIN,
-  name: 'Administración',
-  kind: 'administracion',
-  sortOrder: 100,
+  nombre: 'Administración',
+  tipo: 'administracion',
+  orden: 100,
   ...over,
 });
 
 /** `find` returns every concept passed in (unfiltered — `obtener` no longer
  *  excludes `intereses` at the query level); `findOne` mimics the
- *  `{ kind: 'intereses' }` lookup `guardar` uses to find that one concept. */
+ *  `{ tipo: 'intereses' }` lookup `guardar` uses to find that one concept. */
 const modeloConceptos = (conceptos: Record<string, unknown>[]) => ({
   find: jest.fn(() => ({
     sort: () => ({ exec: () => Promise.resolve(conceptos) }),
   })),
   findOne: jest.fn((filtro: Filtro) => ({
     exec: () =>
-      Promise.resolve(conceptos.find((c) => c.kind === filtro.kind) ?? null),
+      Promise.resolve(conceptos.find((c) => c.tipo === filtro.tipo) ?? null),
   })),
 });
 
 const modeloValoresRecurrentes = (
-  filas: { conceptoId: Types.ObjectId; amount: number }[],
+  filas: { conceptoId: Types.ObjectId; monto: number }[],
 ) => {
   const escrituras: Record<string, unknown>[] = [];
   const eliminados: Filtro[] = [];
@@ -68,7 +68,7 @@ const modeloValoresRecurrentes = (
 const crearServicio = (opts: {
   inmuebleExiste?: boolean;
   conceptos?: Record<string, unknown>[];
-  valores?: { conceptoId: Types.ObjectId; amount: number }[];
+  valores?: { conceptoId: Types.ObjectId; monto: number }[];
 }) =>
   new ValoresRecurrentesService(
     modeloInmuebles(opts.inmuebleExiste ?? true) as never,
@@ -94,8 +94,8 @@ describe('ValoresRecurrentesService.obtener', () => {
         conceptoDoc(),
         conceptoDoc({
           _id: CONCEPTO_PARQUEADERO,
-          name: 'Cuota Parqueadero',
-          kind: 'otro',
+          nombre: 'Cuota Parqueadero',
+          tipo: 'otro',
         }),
       ],
       valores: [],
@@ -121,7 +121,7 @@ describe('ValoresRecurrentesService.obtener', () => {
 
   it('usa el monto guardado cuando existe una fila para el par inmueble+concepto', async () => {
     const service = crearServicio({
-      valores: [{ conceptoId: CONCEPTO_ADMIN, amount: 350000 }],
+      valores: [{ conceptoId: CONCEPTO_ADMIN, monto: 350000 }],
     });
 
     const resultado = await service.obtener(INMUEBLE_ID);
@@ -135,8 +135,8 @@ describe('ValoresRecurrentesService.obtener', () => {
         conceptoDoc(),
         conceptoDoc({
           _id: CONCEPTO_INTERESES,
-          name: 'Intereses por mora',
-          kind: 'intereses',
+          nombre: 'Intereses por mora',
+          tipo: 'intereses',
         }),
       ],
     });
@@ -180,13 +180,13 @@ describe('ValoresRecurrentesService.guardar', () => {
     });
 
     expect(valoresRecurrentes.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(valoresRecurrentes.escrituras[0]).toMatchObject({ amount: 350000 });
+    expect(valoresRecurrentes.escrituras[0]).toMatchObject({ monto: 350000 });
     expect(valoresRecurrentes.deleteOne).not.toHaveBeenCalled();
   });
 
   it('un monto de 0 borra la fila en vez de guardar un cero', async () => {
     const valoresRecurrentes = modeloValoresRecurrentes([
-      { conceptoId: CONCEPTO_ADMIN, amount: 350000 },
+      { conceptoId: CONCEPTO_ADMIN, monto: 350000 },
     ]);
     const service = new ValoresRecurrentesService(
       modeloInmuebles(true) as never,
@@ -207,7 +207,7 @@ describe('ValoresRecurrentesService.guardar', () => {
 
   it('devuelve la lista refrescada después de guardar', async () => {
     const service = crearServicio({
-      valores: [{ conceptoId: CONCEPTO_ADMIN, amount: 999 }],
+      valores: [{ conceptoId: CONCEPTO_ADMIN, monto: 999 }],
     });
 
     const resultado = await service.guardar(INMUEBLE_ID, {
@@ -226,8 +226,8 @@ describe('ValoresRecurrentesService.guardar', () => {
         conceptoDoc(),
         conceptoDoc({
           _id: CONCEPTO_INTERESES,
-          name: 'Intereses por mora',
-          kind: 'intereses',
+          nombre: 'Intereses por mora',
+          tipo: 'intereses',
         }),
       ]) as never,
       valoresRecurrentes as never,
@@ -255,8 +255,8 @@ describe('ValoresRecurrentesService.guardar', () => {
         conceptoDoc(),
         conceptoDoc({
           _id: CONCEPTO_INTERESES,
-          name: 'Intereses por mora',
-          kind: 'intereses',
+          nombre: 'Intereses por mora',
+          tipo: 'intereses',
         }),
       ]) as never,
       valoresRecurrentes as never,
@@ -274,10 +274,10 @@ describe('ValoresRecurrentesService.guardar', () => {
 
 describe('ValoresRecurrentesService.importarMasivo', () => {
   const modeloInmueblesPorCodigo = (codigosExistentes: string[]) => ({
-    findOne: jest.fn(({ code }: Filtro) => ({
+    findOne: jest.fn(({ codigo }: Filtro) => ({
       exec: () =>
         Promise.resolve(
-          codigosExistentes.includes(code as string)
+          codigosExistentes.includes(codigo as string)
             ? { _id: { toString: () => INMUEBLE_ID } }
             : null,
         ),

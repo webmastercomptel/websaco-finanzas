@@ -376,13 +376,13 @@ const construirServicio = (opts: {
   const inmuebles = opts.cuentasContables && {
     findById: jest.fn(() => ({
       session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
       }),
     })),
     // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
     // `findById` above (called outside any transaction).
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { code: '1304' }),
+      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
     })),
   };
 
@@ -583,14 +583,14 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
       },
       cuentasContables: [
         {
-          code: '210505',
-          requiresTercero: false,
-          profitCenter: false,
-          destinationCenter: false,
-          cashFlow: true,
+          codigo: '210505',
+          requiereTercero: false,
+          centroUtilidad: false,
+          centroDestino: false,
+          flujoCaja: true,
         },
       ],
-      inmueble: { code: '1304' },
+      inmueble: { codigo: '1304' },
     });
 
     await service.crear(CUENTA.toString(), {
@@ -4195,7 +4195,7 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
       reciboCreado: { _id: new Types.ObjectId() },
       tenant: tenantQueExplota(),
       cuentasContables: [],
-      inmueble: { code: '301' },
+      inmueble: { codigo: '301' },
     });
 
     await expect(
@@ -4220,7 +4220,7 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
       reciboCreado: { _id: new Types.ObjectId() },
       tenant: tenantQueExplota(),
       cuentasContables: [],
-      inmueble: { code: '301' },
+      inmueble: { codigo: '301' },
     });
 
     await expect(service.resolverInmuebleCodigo(INMUEBLE, COP)).resolves.toBe(
@@ -4256,7 +4256,11 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
       find: jest.fn(() => ({
         exec: () =>
           Promise.resolve([
-            { _id: INMUEBLE_ID, holderId: new Types.ObjectId(), code: '301' },
+            {
+              _id: INMUEBLE_ID,
+              titularId: new Types.ObjectId(),
+              codigo: '301',
+            },
           ]),
       })),
     };

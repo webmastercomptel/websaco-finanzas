@@ -13,24 +13,24 @@ type Filtro = Record<string, unknown>;
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'ter-1' },
-  personType: 'natural',
-  name: 'Ana Pérez',
-  identificationType: 'CC',
-  identificationNumber: '123456',
-  identificationVerificationDigit: null,
+  tipoPersona: 'natural',
+  nombre: 'Ana Pérez',
+  tipoIdentificacion: 'CC',
+  numeroIdentificacion: '123456',
+  digitoVerificacion: null,
   emails: [],
-  phone: null,
-  address: null,
-  city: null,
-  einvoiceIdentificationType: null,
-  einvoiceIdentificationNumber: null,
-  einvoiceVerificationDigit: null,
-  ciiuCode: null,
-  salesRegime: null,
-  fiscalResponsibilities: [],
-  withholdsIncomeTax: false,
-  withholdsLocalTax: false,
-  status: 'active',
+  telefono: null,
+  direccion: null,
+  ciudad: null,
+  tipoIdentificacionFe: null,
+  numeroIdentificacionFe: null,
+  digitoVerificacionFe: null,
+  codigoCiiu: null,
+  regimenVentas: null,
+  responsabilidadesFiscales: [],
+  retieneRenta: false,
+  retieneIca: false,
+  estado: 'active',
   ...over,
 });
 
@@ -128,8 +128,8 @@ describe('TercerosService.findAll', () => {
     await service.findAll({ buscar: 'Pérez' });
 
     expect(modelo.filtros[0].$or).toEqual([
-      { name: { $regex: 'Pérez', $options: 'i' } },
-      { identificationNumber: { $regex: 'Pérez', $options: 'i' } },
+      { nombre: { $regex: 'Pérez', $options: 'i' } },
+      { numeroIdentificacion: { $regex: 'Pérez', $options: 'i' } },
     ]);
   });
 
@@ -142,7 +142,7 @@ describe('TercerosService.findAll', () => {
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].status).toBe('active');
+    expect(modelo.filtros[0].estado).toBe('active');
   });
 
   it('devuelve el contrato en español', async () => {
@@ -229,8 +229,8 @@ describe('TercerosService.create', () => {
 
     expect(modelo.escrituras[0]).toMatchObject({
       coPropertyId: COP,
-      personType: 'juridica',
-      name: 'Ferretería SAS',
+      tipoPersona: 'juridica',
+      nombre: 'Ferretería SAS',
     });
   });
 
@@ -251,11 +251,11 @@ describe('TercerosService.create', () => {
     });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      name: 'Ana María Pérez Gómez',
-      firstName: 'Ana',
-      middleName: 'María',
-      firstLastName: 'Pérez',
-      secondLastName: 'Gómez',
+      nombre: 'Ana María Pérez Gómez',
+      primerNombre: 'Ana',
+      segundoNombre: 'María',
+      primerApellido: 'Pérez',
+      segundoApellido: 'Gómez',
     });
   });
 
@@ -272,7 +272,7 @@ describe('TercerosService.create', () => {
       ape1: 'Ruiz',
     });
 
-    expect(modelo.escrituras[0]).toMatchObject({ name: 'Luis Ruiz' });
+    expect(modelo.escrituras[0]).toMatchObject({ nombre: 'Luis Ruiz' });
   });
 
   it('persona jurídica: razonSocial pasa a name, ignorando un nombre explícito', async () => {
@@ -289,8 +289,8 @@ describe('TercerosService.create', () => {
     });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      name: 'Inversiones ABC S.A.S.',
-      businessName: 'Inversiones ABC S.A.S.',
+      nombre: 'Inversiones ABC S.A.S.',
+      razonSocial: 'Inversiones ABC S.A.S.',
     });
   });
 
@@ -303,7 +303,7 @@ describe('TercerosService.create', () => {
 
     await service.create({ tipoPersona: 'natural', nombre: 'Carga de Excel' });
 
-    expect(modelo.escrituras[0]).toMatchObject({ name: 'Carga de Excel' });
+    expect(modelo.escrituras[0]).toMatchObject({ nombre: 'Carga de Excel' });
   });
 
   it('rechaza crear persona natural sin nom1+ape1 ni nombre', async () => {
@@ -355,7 +355,7 @@ describe('TercerosService.update', () => {
 
     expect(modelo.filtros[0]).toEqual({
       coPropertyId: COP,
-      identificationNumber: '123456',
+      numeroIdentificacion: '123456',
       _id: { $ne: 'ter-1' },
     });
   });
@@ -375,11 +375,11 @@ describe('TercerosService.update', () => {
   it('editar solo ape2 recalcula name mezclado con nom1/nom2/ape1 ya guardados', async () => {
     const modelo = modeloCon([
       documento({
-        name: 'Ana Pérez',
-        firstName: 'Ana',
-        middleName: null,
-        firstLastName: 'Pérez',
-        secondLastName: null,
+        nombre: 'Ana Pérez',
+        primerNombre: 'Ana',
+        segundoNombre: null,
+        primerApellido: 'Pérez',
+        segundoApellido: null,
       }),
     ]);
     const service = new TercerosService(
@@ -390,8 +390,8 @@ describe('TercerosService.update', () => {
     await service.update('ter-1', { ape2: 'Gómez' });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      secondLastName: 'Gómez',
-      name: 'Ana Pérez Gómez',
+      segundoApellido: 'Gómez',
+      nombre: 'Ana Pérez Gómez',
     });
   });
 
@@ -404,15 +404,15 @@ describe('TercerosService.update', () => {
 
     await service.update('ter-1', { ciudad: 'Bogotá' });
 
-    expect(modelo.escrituras[0]).toEqual({ city: 'Bogotá' });
+    expect(modelo.escrituras[0]).toEqual({ ciudad: 'Bogotá' });
   });
 
   it('editar solo la razón social conserva el resto del registro y no exige volver a enviarla toda', async () => {
     const modelo = modeloCon([
       documento({
-        personType: 'juridica',
-        name: 'Ferretería SAS',
-        businessName: 'Ferretería SAS',
+        tipoPersona: 'juridica',
+        nombre: 'Ferretería SAS',
+        razonSocial: 'Ferretería SAS',
       }),
     ]);
     const service = new TercerosService(
@@ -423,17 +423,17 @@ describe('TercerosService.update', () => {
     await service.update('ter-1', { razonSocial: 'Ferretería y Cía SAS' });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      businessName: 'Ferretería y Cía SAS',
-      name: 'Ferretería y Cía SAS',
+      razonSocial: 'Ferretería y Cía SAS',
+      nombre: 'Ferretería y Cía SAS',
     });
   });
 
   it('rechaza borrar el nombre por completo al editar: limpiar razonSocial y nombre a la vez', async () => {
     const modelo = modeloCon([
       documento({
-        personType: 'juridica',
-        name: 'Ferretería SAS',
-        businessName: 'Ferretería SAS',
+        tipoPersona: 'juridica',
+        nombre: 'Ferretería SAS',
+        razonSocial: 'Ferretería SAS',
       }),
     ]);
     const service = new TercerosService(

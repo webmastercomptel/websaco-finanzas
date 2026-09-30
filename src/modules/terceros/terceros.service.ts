@@ -40,11 +40,11 @@ export class TercerosService {
     const filtro: Record<string, unknown> = { coPropertyId };
 
     if (query.estado !== 'todos') {
-      filtro.status = query.estado === 'inactivo' ? 'inactive' : 'active';
+      filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ name: patron }, { identificationNumber: patron }];
+      filtro.$or = [{ nombre: patron }, { numeroIdentificacion: patron }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -53,7 +53,7 @@ export class TercerosService {
     const [documentos, total] = await Promise.all([
       this.terceros
         .find(filtro)
-        .sort({ name: 1 })
+        .sort({ nombre: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -95,7 +95,7 @@ export class TercerosService {
       const yaExiste = await this.terceros
         .exists({
           coPropertyId,
-          identificationNumber: dto.numeroIdentificacion,
+          numeroIdentificacion: dto.numeroIdentificacion,
         })
         .exec();
       if (yaExiste) {
@@ -124,7 +124,7 @@ export class TercerosService {
 
     const creado = await this.terceros.create({
       ...this.aDocumento(dto),
-      name: nombre,
+      nombre: nombre,
       coPropertyId,
     });
     return toTercero(creado);
@@ -148,7 +148,7 @@ export class TercerosService {
       const chocaConOtro = await this.terceros
         .exists({
           coPropertyId,
-          identificationNumber: dto.numeroIdentificacion,
+          numeroIdentificacion: dto.numeroIdentificacion,
           _id: { $ne: id },
         })
         .exec();
@@ -183,15 +183,15 @@ export class TercerosService {
         throw new NotFoundException(`No se encontró el tercero ${id}`);
       }
 
-      const tipoPersona = dto.tipoPersona ?? actual.personType;
+      const tipoPersona = dto.tipoPersona ?? actual.tipoPersona;
       const nombre = resolverNombreTercero({
         tipoPersona,
-        nombre: dto.nombre ?? actual.name,
-        nom1: dto.nom1 ?? actual.firstName ?? undefined,
-        nom2: dto.nom2 ?? actual.middleName ?? undefined,
-        ape1: dto.ape1 ?? actual.firstLastName ?? undefined,
-        ape2: dto.ape2 ?? actual.secondLastName ?? undefined,
-        razonSocial: dto.razonSocial ?? actual.businessName ?? undefined,
+        nombre: dto.nombre ?? actual.nombre,
+        nom1: dto.nom1 ?? actual.primerNombre ?? undefined,
+        nom2: dto.nom2 ?? actual.segundoNombre ?? undefined,
+        ape1: dto.ape1 ?? actual.primerApellido ?? undefined,
+        ape2: dto.ape2 ?? actual.segundoApellido ?? undefined,
+        razonSocial: dto.razonSocial ?? actual.razonSocial ?? undefined,
       });
       if (!nombre) {
         throw new ConflictException(
@@ -200,7 +200,7 @@ export class TercerosService {
             : 'Debe indicar primer nombre y primer apellido',
         );
       }
-      doc.name = nombre;
+      doc.nombre = nombre;
     }
 
     const actualizado = await this.terceros
@@ -228,31 +228,31 @@ export class TercerosService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('personType', dto.tipoPersona);
-    // `name` is NOT set here — `create`/`update` compute it via
+    set('tipoPersona', dto.tipoPersona);
+    // `nombre` is NOT set here — `create`/`update` compute it via
     // `resolverNombre` and set it explicitly, after this method returns.
-    set('firstName', dto.nom1);
-    set('middleName', dto.nom2);
-    set('firstLastName', dto.ape1);
-    set('secondLastName', dto.ape2);
-    set('businessName', dto.razonSocial);
-    set('identificationType', dto.tipoIdentificacion);
-    set('identificationNumber', dto.numeroIdentificacion);
-    set('identificationVerificationDigit', dto.digitoVerificacion);
+    set('primerNombre', dto.nom1);
+    set('segundoNombre', dto.nom2);
+    set('primerApellido', dto.ape1);
+    set('segundoApellido', dto.ape2);
+    set('razonSocial', dto.razonSocial);
+    set('tipoIdentificacion', dto.tipoIdentificacion);
+    set('numeroIdentificacion', dto.numeroIdentificacion);
+    set('digitoVerificacion', dto.digitoVerificacion);
     set('emails', dto.emails);
-    set('phone', dto.telefono);
-    set('address', dto.direccion);
-    set('city', dto.ciudad);
-    set('cityCode', dto.ciudadCodigo);
-    set('cityDepartmentCode', dto.ciudadDepartamentoCodigo);
-    set('einvoiceIdentificationType', dto.facturacionTipoIdentificacion);
-    set('einvoiceIdentificationNumber', dto.facturacionNumeroIdentificacion);
-    set('einvoiceVerificationDigit', dto.facturacionDigitoVerificacion);
-    set('ciiuCode', dto.codigoCiiu);
-    set('salesRegime', dto.regimenVentas);
-    set('fiscalResponsibilities', dto.responsabilidadesFiscales);
-    set('withholdsIncomeTax', dto.retieneRenta);
-    set('withholdsLocalTax', dto.retieneIca);
+    set('telefono', dto.telefono);
+    set('direccion', dto.direccion);
+    set('ciudad', dto.ciudad);
+    set('ciudadCodigo', dto.ciudadCodigo);
+    set('ciudadDepartamentoCodigo', dto.ciudadDepartamentoCodigo);
+    set('tipoIdentificacionFe', dto.facturacionTipoIdentificacion);
+    set('numeroIdentificacionFe', dto.facturacionNumeroIdentificacion);
+    set('digitoVerificacionFe', dto.facturacionDigitoVerificacion);
+    set('codigoCiiu', dto.codigoCiiu);
+    set('regimenVentas', dto.regimenVentas);
+    set('responsabilidadesFiscales', dto.responsabilidadesFiscales);
+    set('retieneRenta', dto.retieneRenta);
+    set('retieneIca', dto.retieneIca);
 
     return doc;
   }

@@ -18,15 +18,15 @@ const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  code: '301',
+  codigo: '301',
   ...over,
 });
 
 const conceptoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   coPropertyId: COP,
-  name: 'Administracion',
-  sortOrder: 100,
+  nombre: 'Administracion',
+  orden: 100,
   ...over,
 });
 
@@ -94,8 +94,11 @@ describe('ConsecutivosService', () => {
         receivedAmount: 100000,
         receivedDate: new Date('2026-01-15'),
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '301' });
-      const concepto = conceptoDoc({ _id: conceptoId, name: 'Administracion' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
+      const concepto = conceptoDoc({
+        _id: conceptoId,
+        nombre: 'Administracion',
+      });
       const app = {
         _id: id(),
         sourceType: 'RC',
@@ -143,7 +146,7 @@ describe('ConsecutivosService', () => {
         receivedAmount: 50000,
         receivedDate: new Date('2026-01-20'),
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '301' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
       const svc = servicio({
         recibos: find([recibo]),
@@ -176,8 +179,8 @@ describe('ConsecutivosService', () => {
         total: 20000,
         status: 'emitida',
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '302' });
-      const concepto = conceptoDoc({ _id: conceptoId, name: 'Multas' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '302' });
+      const concepto = conceptoDoc({ _id: conceptoId, nombre: 'Multas' });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -223,7 +226,7 @@ describe('ConsecutivosService', () => {
           { conceptoId: conceptoMultas, amount: 10000 },
         ],
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '303' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '303' });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -259,7 +262,7 @@ describe('ConsecutivosService', () => {
         status: 'activo',
         distribution: [],
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '303' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '303' });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -296,7 +299,7 @@ describe('ConsecutivosService', () => {
         monto: 15000,
         status: 'activo',
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '304' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '304' });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -342,8 +345,11 @@ describe('ConsecutivosService', () => {
           { conceptoId, conceptName: 'Administracion', monto: 40000 },
         ],
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '307' });
-      const concepto = conceptoDoc({ _id: conceptoId, name: 'Administracion' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '307' });
+      const concepto = conceptoDoc({
+        _id: conceptoId,
+        nombre: 'Administracion',
+      });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -388,7 +394,7 @@ describe('ConsecutivosService', () => {
         status: 'emitida',
         lines: [{ conceptoId, totalAmount: 50000 }],
       };
-      const inm = inmuebleDoc({ _id: inmId, code: '305' });
+      const inm = inmuebleDoc({ _id: inmId, codigo: '305' });
 
       const svc = servicio({
         consecutivos: findOneStub(
@@ -437,7 +443,7 @@ describe('ConsecutivosService', () => {
       total: 1000,
       status: 'emitida',
     };
-    const inm = inmuebleDoc({ _id: inmId, code: '306' });
+    const inm = inmuebleDoc({ _id: inmId, codigo: '306' });
 
     const svc = servicio({
       consecutivos: findOneStub(

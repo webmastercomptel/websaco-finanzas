@@ -173,9 +173,9 @@ export async function construirDatosImpresionNotaAnticipo(
   }
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, code: { $in: [...codigosUsados] } })
+    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
     .exec();
-  const nombrePorCodigo = new Map(cuentas.map((c) => [c.code, c.name]));
+  const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
   for (const linea of lineas) {
     linea.cuentaNombre =
       nombrePorCodigo.get(linea.cuentaCodigo) ?? linea.cuentaCodigo;
@@ -185,8 +185,8 @@ export async function construirDatosImpresionNotaAnticipo(
     tituloDocumento,
     numeroCompleto: nota.fullNumber,
     fecha: nota.issueDate,
-    inmuebleCodigo: inmueble?.code ?? '—',
-    titularNombre: tercero?.name ?? '—',
+    inmuebleCodigo: inmueble?.codigo ?? '—',
+    titularNombre: tercero?.nombre ?? '—',
     concepto: saldoInicialAnticipoOrigen
       ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.fullNumber}`
       : reciboOrigen

@@ -146,8 +146,8 @@ export class SaldosInicialesService {
 
     const conceptos = await this.conceptosCobro
       .find({ coPropertyId })
-      .populate('cuentaDebitoId', 'code')
-      .populate('cuentaCreditoId', 'code')
+      .populate('cuentaDebitoId', 'codigo')
+      .populate('cuentaCreditoId', 'codigo')
       .exec();
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
 
@@ -169,10 +169,10 @@ export class SaldosInicialesService {
     // this block runs: no lote, no rows, no progress tracking.
     const codigos = [...new Set(dto.filas.map((f) => f.codigoInmueble))];
     const inmueblesEncontrados = await this.inmuebles
-      .find({ coPropertyId, code: { $in: codigos } })
+      .find({ coPropertyId, codigo: { $in: codigos } })
       .exec();
     const inmueblePorCodigo = new Map(
-      inmueblesEncontrados.map((i) => [i.code, i]),
+      inmueblesEncontrados.map((i) => [i.codigo, i]),
     );
 
     const erroresValidacion: ResultadoImportacionSaldosIniciales['errores'] =
@@ -285,7 +285,7 @@ export class SaldosInicialesService {
           }
 
           const inmueble = await this.inmuebles
-            .findOne({ coPropertyId, code: fila.codigoInmueble })
+            .findOne({ coPropertyId, codigo: fila.codigoInmueble })
             .exec();
           if (!inmueble) {
             throw new Error(
@@ -302,14 +302,14 @@ export class SaldosInicialesService {
             }
             return {
               conceptoId: concepto._id,
-              conceptName: concepto.name,
+              conceptName: concepto.nombre,
               accountingReceivableAccount: codigoDeCuentaContable(
                 concepto.cuentaDebitoId,
               ),
               accountingIncomeAccount: codigoDeCuentaContable(
                 concepto.cuentaCreditoId,
               ),
-              conceptKind: concepto.kind,
+              conceptKind: concepto.tipo,
               montoOriginal: cargo.monto,
             };
           });
@@ -324,7 +324,7 @@ export class SaldosInicialesService {
                   coPropertyId,
                   loteId: lote._id,
                   inmuebleId: inmueble._id,
-                  unitCode: inmueble.code,
+                  unitCode: inmueble.codigo,
                   number: numero,
                   tipoDocumentoOriginal: fila.tipoDocumento,
                   numeroOriginal: fila.numero,
@@ -448,7 +448,7 @@ export class SaldosInicialesService {
       this.inmuebles.find({ coPropertyId }).exec(),
     ]);
     const inmuebleCodigoPorId = new Map(
-      inmuebles.map((i) => [i._id.toString(), i.code]),
+      inmuebles.map((i) => [i._id.toString(), i.codigo]),
     );
     const saldosTotales = documentos.length
       ? await this.saldoTotalDocumento
@@ -562,7 +562,7 @@ export class SaldosInicialesService {
         .findOne({ _id: doc.inmuebleId, coPropertyId })
         .session(session)
         .exec();
-      return toSaldoInicial(final!, inmueble?.code ?? '', 0);
+      return toSaldoInicial(final!, inmueble?.codigo ?? '', 0);
     });
   }
 }

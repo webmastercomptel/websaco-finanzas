@@ -373,7 +373,7 @@ describe('FacturasService.findAllRawPorLote', () => {
 
 describe('FacturasService.datosVisualesPdf', () => {
   const construirServicioAnticipos = (config: {
-    inmuebles: { _id: Types.ObjectId; reference: string | null }[];
+    inmuebles: { _id: Types.ObjectId; referencia: string | null }[];
     recibos: {
       _id: Types.ObjectId;
       inmuebleId: Types.ObjectId;
@@ -412,7 +412,7 @@ describe('FacturasService.datosVisualesPdf', () => {
     const recibo1 = new Types.ObjectId();
     const recibo2 = new Types.ObjectId();
     const { service } = construirServicioAnticipos({
-      inmuebles: [{ _id: inmuebleId, reference: 'REF-301' }],
+      inmuebles: [{ _id: inmuebleId, referencia: 'REF-301' }],
       recibos: [
         { _id: recibo1, inmuebleId, status: 'activo' },
         { _id: recibo2, inmuebleId, status: 'activo' },
@@ -434,7 +434,7 @@ describe('FacturasService.datosVisualesPdf', () => {
   it('devuelve totalAnticipos en 0 cuando el inmueble no tiene anticipo pendiente', async () => {
     const inmuebleId = new Types.ObjectId();
     const { service } = construirServicioAnticipos({
-      inmuebles: [{ _id: inmuebleId, reference: null }],
+      inmuebles: [{ _id: inmuebleId, referencia: null }],
       recibos: [],
       saldos: [],
     });

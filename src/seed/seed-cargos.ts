@@ -17,9 +17,9 @@ import {
 const COPROPIEDAD_CODE = '0001';
 
 const CARGOS_SISTEMA = [
-  { name: 'Administración', kind: 'administracion' as const, sortOrder: 1 },
-  { name: 'Intereses por Mora', kind: 'intereses' as const, sortOrder: 2 },
-  { name: 'Multas', kind: 'otro' as const, sortOrder: 3 },
+  { nombre: 'Administración', tipo: 'administracion' as const, orden: 1 },
+  { nombre: 'Intereses por Mora', tipo: 'intereses' as const, orden: 2 },
+  { nombre: 'Multas', tipo: 'otro' as const, orden: 3 },
 ];
 
 async function run() {
@@ -45,11 +45,11 @@ async function run() {
   const existentes = await conceptos.find({ coPropertyId: cop._id }).exec();
   console.log(`Conceptos existentes: ${existentes.length}`);
   existentes.forEach((c) =>
-    console.log(`  - ${c.name} (isSystem: ${c.isSystem})`),
+    console.log(`  - ${c.nombre} (sistema: ${c.sistema})`),
   );
 
   const nuevos = CARGOS_SISTEMA.filter(
-    (s) => !existentes.some((e) => e.kind === s.kind && e.name === s.name),
+    (s) => !existentes.some((e) => e.tipo === s.tipo && e.nombre === s.nombre),
   );
 
   if (nuevos.length === 0) {
@@ -57,14 +57,14 @@ async function run() {
   } else {
     const docs = nuevos.map((c) => ({
       coPropertyId: cop._id,
-      name: c.name,
-      kind: c.kind,
-      taxRate: 0,
-      sortOrder: c.sortOrder,
+      nombre: c.nombre,
+      tipo: c.tipo,
+      tasaImpuesto: 0,
+      orden: c.orden,
       accountingIncomeAccount: null,
-      availableAsNovedad: false,
+      cargaXls: false,
       active: true,
-      isSystem: true,
+      sistema: true,
     }));
     const r = await conceptos.insertMany(docs);
     console.log(`${r.length} cargos de sistema insertados.`);
@@ -72,11 +72,11 @@ async function run() {
 
   const todos = await conceptos
     .find({ coPropertyId: cop._id })
-    .sort({ sortOrder: 1 })
+    .sort({ orden: 1 })
     .exec();
   console.log(`Total conceptos: ${todos.length}`);
   todos.forEach((c) =>
-    console.log(`  - ${c.name} | ${c.kind} | isSystem: ${c.isSystem}`),
+    console.log(`  - ${c.nombre} | ${c.tipo} | sistema: ${c.sistema}`),
   );
 
   await app.close();

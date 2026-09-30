@@ -52,8 +52,8 @@ const factura = (over: Record<string, unknown> = {}) => ({
 
 const concepto = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'con-admin' },
-  name: 'Administración',
-  sortOrder: 1,
+  nombre: 'Administración',
+  orden: 1,
   ...over,
 });
 
@@ -144,7 +144,7 @@ describe('ConsultaFacturacionService.generar', () => {
     expect(resultado.totalesPorConcepto[0].monto).toBe(100000);
   });
 
-  it('ordena los conceptos por sortOrder y luego por nombre', async () => {
+  it('ordena los conceptos por orden y luego por nombre', async () => {
     const service = makeService({
       facturas: [
         factura({
@@ -163,11 +163,11 @@ describe('ConsultaFacturacionService.generar', () => {
         }),
       ],
       conceptos: [
-        concepto({ _id: { toString: () => 'con-admin' }, sortOrder: 1 }),
+        concepto({ _id: { toString: () => 'con-admin' }, orden: 1 }),
         concepto({
           _id: { toString: () => 'con-intereses' },
-          name: 'Intereses',
-          sortOrder: 2,
+          nombre: 'Intereses',
+          orden: 2,
         }),
       ],
     });
@@ -203,8 +203,8 @@ describe('ConsultaFacturacionService.generar', () => {
         concepto(),
         concepto({
           _id: { toString: () => 'con-multas' },
-          name: 'Multas',
-          sortOrder: 2,
+          nombre: 'Multas',
+          orden: 2,
         }),
       ],
     });

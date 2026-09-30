@@ -28,16 +28,16 @@ export const toIso = (
 };
 
 /**
- * Reads the `code` off a possibly-populated CuentaContable reference
- * (`ConceptoCobro.cuentaDebitoId`/`cuentaCreditoId`, `.populate(..., 'code')`).
+ * Reads the `codigo` off a possibly-populated CuentaContable reference
+ * (`ConceptoCobro.cuentaDebitoId`/`cuentaCreditoId`, `.populate(..., 'codigo')`).
  * A raw `ObjectId` (never populated) or a null ref both read as null — the
  * caller decides the fallback (e.g. `CUENTA_SIN_ASIGNAR` at each posting
  * call site), this only ever reports what it actually knows.
  */
 export const codigoDeCuentaContable = (
-  value: Types.ObjectId | { code: string } | null | undefined,
+  value: Types.ObjectId | { codigo: string } | null | undefined,
 ): string | null => {
   if (!value) return null;
   if (value instanceof Types.ObjectId) return null;
-  return value.code;
+  return value.codigo;
 };

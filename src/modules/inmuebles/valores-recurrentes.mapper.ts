@@ -11,7 +11,7 @@ export const toValorRecurrente = (
   monto: number,
 ): ValorRecurrenteContract => ({
   conceptoId: concepto._id.toString(),
-  conceptoNombre: concepto.name,
-  tipoConcepto: concepto.kind,
+  conceptoNombre: concepto.nombre,
+  tipoConcepto: concepto.tipo,
   monto,
 });

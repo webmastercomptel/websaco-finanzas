@@ -55,11 +55,13 @@ const modelosVacios = () => ({
     })),
   },
   inmuebles: {
-    findOne: jest.fn(() => ({ exec: () => Promise.resolve({ code: '1105' }) })),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ codigo: '1105' }),
+    })),
   },
   terceros: {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ name: 'MARIA GOMEZ' }),
+      exec: () => Promise.resolve({ nombre: 'MARIA GOMEZ' }),
     })),
   },
   cuentasContables: {
@@ -166,9 +168,9 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     modelos.cuentasContables.find = jest.fn(() => ({
       exec: () =>
         Promise.resolve([
-          { code: '13050501', name: 'CxC Administracion' },
-          { code: '13050502', name: 'CxC Intereses de Mora' },
-          { code: '210505', name: 'Anticipos de Clientes' },
+          { codigo: '13050501', nombre: 'CxC Administracion' },
+          { codigo: '13050502', nombre: 'CxC Intereses de Mora' },
+          { codigo: '210505', nombre: 'Anticipos de Clientes' },
         ]),
     })) as never;
 

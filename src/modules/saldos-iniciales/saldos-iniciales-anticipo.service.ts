@@ -142,10 +142,10 @@ export class SaldosInicialesAnticipoService {
     // this block runs: no lote, no rows, no progress tracking.
     const codigos = [...new Set(dto.filas.map((f) => f.codigoInmueble))];
     const inmueblesEncontrados = await this.inmuebles
-      .find({ coPropertyId, code: { $in: codigos } })
+      .find({ coPropertyId, codigo: { $in: codigos } })
       .exec();
     const inmueblePorCodigo = new Map(
-      inmueblesEncontrados.map((i) => [i.code, i]),
+      inmueblesEncontrados.map((i) => [i.codigo, i]),
     );
 
     const erroresValidacion: ResultadoImportacionSaldosInicialesAnticipo['errores'] =
@@ -243,7 +243,7 @@ export class SaldosInicialesAnticipoService {
           }
 
           const inmueble = await this.inmuebles
-            .findOne({ coPropertyId, code: fila.codigoInmueble })
+            .findOne({ coPropertyId, codigo: fila.codigoInmueble })
             .exec();
           if (!inmueble) {
             throw new Error(
@@ -262,9 +262,9 @@ export class SaldosInicialesAnticipoService {
                   inmuebleId: inmueble._id,
                   // Frozen from the unit's CURRENT titular — same source
                   // `NotaDebitoService`/`NotaCreditoService` read for their
-                  // own `terceroId` (`Inmueble.holderId`).
-                  terceroId: inmueble.holderId,
-                  unitCode: inmueble.code,
+                  // own `terceroId` (`Inmueble.titularId`).
+                  terceroId: inmueble.titularId,
+                  unitCode: inmueble.codigo,
                   number: numero,
                   tipoDocumentoOriginal: fila.tipoDocumento,
                   numeroOriginal: fila.numero,
@@ -343,7 +343,7 @@ export class SaldosInicialesAnticipoService {
       this.inmuebles.find({ coPropertyId }).exec(),
     ]);
     const inmuebleCodigoPorId = new Map(
-      inmuebles.map((i) => [i._id.toString(), i.code]),
+      inmuebles.map((i) => [i._id.toString(), i.codigo]),
     );
     const saldos = documentos.length
       ? await this.saldoDocumentoOrigen

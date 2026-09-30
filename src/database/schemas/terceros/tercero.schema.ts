@@ -37,7 +37,7 @@ export class Tercero {
 
   /** Natural person or legal entity — decides which name fields apply. */
   @Prop({ required: true, enum: ['natural', 'juridica'], default: 'natural' })
-  personType: 'natural' | 'juridica';
+  tipoPersona: 'natural' | 'juridica';
 
   /**
    * Display name: full name for a person, trade name for a company.
@@ -57,47 +57,47 @@ export class Tercero {
    * directly rather than guessing a split.
    */
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   /**
-   * "Nom1"/"Nom2"/"Ape1"/"Ape2" — only meaningful when `personType` is
-   * `natural`. `firstName` and `firstLastName` are the two DIAN requires
+   * "Nom1"/"Nom2"/"Ape1"/"Ape2" — only meaningful when `tipoPersona` is
+   * `natural`. `primerNombre` and `primerApellido` are the two DIAN requires
    * (PrimerNombre/PrimerApellido); the other two are optional, same as the
-   * DIAN schema's OtrosNombres/SegundoApellido. Kept separate from `name` so
-   * accounting-interface exports and future DIAN electronic-invoicing files
-   * can report each part on its own — `name` alone loses the split once
-   * concatenated.
+   * DIAN schema's OtrosNombres/SegundoApellido. Kept separate from `nombre`
+   * so accounting-interface exports and future DIAN electronic-invoicing
+   * files can report each part on its own — `nombre` alone loses the split
+   * once concatenated.
    */
   @Prop({ type: String, default: null, trim: true })
-  firstName: string | null;
+  primerNombre: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  middleName: string | null;
+  segundoNombre: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  firstLastName: string | null;
+  primerApellido: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  secondLastName: string | null;
+  segundoApellido: string | null;
 
   /**
-   * "Razón social" — only meaningful when `personType` is `juridica`. Kept
-   * apart from `name` for the same reporting reason as the four fields
+   * "Razón social" — only meaningful when `tipoPersona` is `juridica`. Kept
+   * apart from `nombre` for the same reporting reason as the four fields
    * above, even though today the two are identical for a company.
    */
   @Prop({ type: String, default: null, trim: true })
-  businessName: string | null;
+  razonSocial: string | null;
 
   /** CC, NIT, CE, passport. Free text — the catalogue varies by country. */
   @Prop({ type: String, default: null, trim: true })
-  identificationType: string | null;
+  tipoIdentificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  identificationNumber: string | null;
+  numeroIdentificacion: string | null;
 
   /** Verification digit, apart from the number. Same reasoning as Copropiedad. */
   @Prop({ type: String, default: null, trim: true })
-  identificationVerificationDigit: string | null;
+  digitoVerificacion: string | null;
 
   /**
    * A party often answers to more than one inbox — an owner and their
@@ -110,10 +110,10 @@ export class Tercero {
   emails: string[];
 
   @Prop({ type: String, default: null, trim: true })
-  phone: string | null;
+  telefono: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  address: string | null;
+  direccion: string | null;
 
   /**
    * The city's display NAME — unchanged meaning, so every existing
@@ -125,19 +125,19 @@ export class Tercero {
    * expects a human name here.
    */
   @Prop({ type: String, default: null, trim: true })
-  city: string | null;
+  ciudad: string | null;
 
-  /** DANE municipio code — see the note on `city`. */
+  /** DANE municipio code — see the note on `ciudad`. */
   @Prop({ type: String, default: null, trim: true })
-  cityCode: string | null;
+  ciudadCodigo: string | null;
 
   /**
-   * DANE department code. Technically derivable as `cityCode`'s own first
+   * DANE department code. Technically derivable as `ciudadCodigo`'s own first
    * two digits (that is how DANE encodes it), but stored explicitly so
    * nothing downstream has to know that encoding detail to read it.
    */
   @Prop({ type: String, default: null, trim: true })
-  cityDepartmentCode: string | null;
+  ciudadDepartamentoCodigo: string | null;
 
   /* ── Electronic invoicing ─────────────────────────────────────
    *
@@ -154,21 +154,21 @@ export class Tercero {
    */
 
   @Prop({ type: String, default: null, trim: true })
-  einvoiceIdentificationType: string | null;
+  tipoIdentificacionFe: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  einvoiceIdentificationNumber: string | null;
+  numeroIdentificacionFe: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  einvoiceVerificationDigit: string | null;
+  digitoVerificacionFe: string | null;
 
   /** Economic-activity code (CIIU). */
   @Prop({ type: String, default: null, trim: true })
-  ciiuCode: string | null;
+  codigoCiiu: string | null;
 
   /** Sales-tax regime as the authority names it. */
   @Prop({ type: String, default: null, trim: true })
-  salesRegime: string | null;
+  regimenVentas: string | null;
 
   /**
    * Fiscal responsibilities, as codes. A party can carry several at once, so
@@ -176,18 +176,18 @@ export class Tercero {
    * lost.
    */
   @Prop({ type: [String], required: true, default: [] })
-  fiscalResponsibilities: string[];
+  responsabilidadesFiscales: string[];
 
   /** Subject to withholding at source. */
   @Prop({ required: true, default: false })
-  withholdsIncomeTax: boolean;
+  retieneRenta: boolean;
 
   /** Subject to municipal industry-and-commerce withholding. */
   @Prop({ required: true, default: false })
-  withholdsLocalTax: boolean;
+  retieneIca: boolean;
 
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const TerceroSchema = SchemaFactory.createForClass(Tercero);
@@ -198,9 +198,9 @@ export const TerceroSchema = SchemaFactory.createForClass(Tercero);
 // building often loads units before it has the owner's papers, and a global
 // unique index would let exactly one of those blanks exist.
 TerceroSchema.index(
-  { coPropertyId: 1, identificationNumber: 1 },
+  { coPropertyId: 1, numeroIdentificacion: 1 },
   {
     unique: true,
-    partialFilterExpression: { identificationNumber: { $type: 'string' } },
+    partialFilterExpression: { numeroIdentificacion: { $type: 'string' } },
   },
 );

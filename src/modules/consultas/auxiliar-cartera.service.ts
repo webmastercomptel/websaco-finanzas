@@ -109,13 +109,13 @@ export class AuxiliarCarteraService {
     const inmueble = await this.inmuebles
       .findOne({ _id: inmuebleId, coPropertyId })
       .exec();
-    const inmuebleCodigo = inmueble?.code ?? '';
+    const inmuebleCodigo = inmueble?.codigo ?? '';
     let propietario: string | null = null;
-    if (inmueble?.holderId) {
+    if (inmueble?.titularId) {
       const tercero = await this.terceros
-        .findOne({ _id: inmueble.holderId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, coPropertyId })
         .exec();
-      propietario = tercero?.name ?? null;
+      propietario = tercero?.nombre ?? null;
     }
 
     // Step 1: fetch all documents for this inmueble (no date filter — see §5)

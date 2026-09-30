@@ -347,7 +347,7 @@ export class PistaAuditoriaService {
     }
     const codigoInmuebleMap = new Map<string, string>();
     for (const i of inmuebles) {
-      codigoInmuebleMap.set(i._id.toString(), i.code);
+      codigoInmuebleMap.set(i._id.toString(), i.codigo);
     }
 
     // Distinct-actor list for the frontend's own Usuario filter dropdown —
