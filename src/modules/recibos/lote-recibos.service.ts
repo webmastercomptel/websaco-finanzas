@@ -46,6 +46,10 @@ import {
   type DatosTrabajoAplicacionLoteRecibos,
   type ResultadoAplicacionLoteRecibos,
 } from './colas/aplicacion-lote-recibos.constants';
+import {
+  procesarFilasTandaAplicacionLote,
+  type DatosBatchAplicacionLote,
+} from './aplicacion-lote-batch.util';
 
 /** Rows per shared transaction — matches
  *  `TAMANO_TANDA_CONSOLIDACION` (facturación) exactly; same conservative
@@ -387,6 +391,35 @@ export class LoteRecibosService {
       numero: numerosReservados[i],
     }));
 
+    // NEW — design §4: every coproperty-wide read AND every FIFO-candidate
+    // read for the WHOLE lote, once, before any tanda opens. Empty when
+    // `pendientesConNumero` is empty (a fully-retried, already-applied
+    // lote) — `leerDatosBatchAplicacionLote` handles an empty `$in` list
+    // the same way `ejecutarAplicacionFifo` always handled an inmueble
+    // with no open documents: an empty result, never an error.
+    const inmuebleIds = [
+      ...new Set(
+        pendientesConNumero.map((p) => p.fila.inmuebleId!.toString()),
+      ),
+    ].map((idInmueble) => new Types.ObjectId(idInmueble));
+    const fechasPago = pendientesConNumero.map((p) => p.fila.fechaPago);
+    const datosBatch = await this.recibosService.leerDatosBatchAplicacionLote(
+      coPropertyId,
+      inmuebleIds,
+      fechasPago,
+    );
+
+    // Coproperty-wide and deterministic across every row in this lote —
+    // see this plan's own Global Constraints on why this now surfaces
+    // once, up front, instead of once per row.
+    const destinationAccount =
+      lote.cuentaDestino ?? datosBatch.copropiedad?.defaultBankAccountCode;
+    if (!destinationAccount) {
+      throw new BadRequestException(
+        'La cuenta destino es requerida cuando no hay cuenta predeterminada en la copropiedad.',
+      );
+    }
+
     const tandas = this.dividirEnTandas(
       pendientesConNumero,
       TAMANO_TANDA_APLICACION_LOTE_RECIBOS,
@@ -396,7 +429,14 @@ export class LoteRecibosService {
       tandas,
       CONCURRENCIA_TANDAS_APLICACION_LOTE_RECIBOS,
       (tanda) =>
-        this.procesarTanda(tanda, { lote, coPropertyId, accountId, errores }),
+        this.procesarTanda(tanda, {
+          lote,
+          coPropertyId,
+          accountId,
+          errores,
+          datosBatch,
+          destinationAccount,
+        }),
     );
 
     // `filasElegibles` holds the SAME subdocument references the loop above
@@ -472,6 +512,25 @@ export class LoteRecibosService {
    * `numero` is this row's pre-reserved `NumeroAsignado` (reserved as a
    * whole block before any tanda opens — see `ejecutarAplicacion`).
    */
+  /**
+   * Validates + FIFO-applies the whole tanda purely in memory
+   * (`procesarFilasTandaAplicacionLote`, Task 6) BEFORE opening any
+   * session. If any row is invalid, nothing is written and every row in
+   * the tanda is marked errored with the SAME collateral-message shape
+   * `ejecutarAplicacionFifo`'s old catch block produced — decided here
+   * instead of via a Mongo rollback. Only when EVERY row validates does
+   * this open the tanda's shared transaction and hand the escrituras to
+   * `RecibosService.escribirEscriturasTandaAplicacionLote` (Task 7).
+   *
+   * The generic catch below now only ever fires for a genuine DB-level
+   * failure DURING the bulk writes themselves (connection drop, an
+   * unexpected guard failure) — there is no single "culprit fila" in a
+   * bulk-write model (several rows can share one `bulkWrite` op), so every
+   * row in the tanda gets the SAME raw error message, not the
+   * culprit/collateral wording the validation-failure path above still
+   * produces. A deliberate, narrow, documented difference from today —
+   * see this plan's own report.
+   */
   private async procesarTanda(
     tanda: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
     ctx: {
@@ -479,72 +538,58 @@ export class LoteRecibosService {
       coPropertyId: Types.ObjectId;
       accountId: string;
       errores: ErrorAplicacionLoteRecibos[];
+      datosBatch: DatosBatchAplicacionLote;
+      destinationAccount: string;
     },
   ): Promise<void> {
+    for (const { fila } of tanda) {
+      fila.error = null; // limpia cualquier error de un intento anterior
+    }
+
+    const resultado = procesarFilasTandaAplicacionLote(tanda, ctx.datosBatch, {
+      coPropertyId: ctx.coPropertyId,
+      accountId: ctx.accountId,
+      medioPago: ctx.lote.medioPago,
+      destinationAccount: ctx.destinationAccount,
+    });
+
+    if (!resultado.ok) {
+      for (const { fila, indice } of tanda) {
+        fila.reciboId = null;
+        const mensaje = resultado.erroresPorIndice.get(indice)!;
+        fila.error = mensaje;
+        ctx.errores.push({
+          fila: indice + 1,
+          inmuebleCodigo: fila.inmuebleCodigo,
+          mensaje,
+        });
+      }
+      return;
+    }
+
     let sesion: ClientSession | undefined;
-    let indiceCulpable: number | null = null;
     try {
       sesion = await this.connection.startSession();
       const session = sesion;
       await session.withTransaction(async () => {
-        for (const { fila, indice, numero } of tanda) {
-          fila.error = null; // limpia cualquier error de un intento anterior
-          try {
-            const inmueble = await this.inmuebles
-              .findOne({ _id: fila.inmuebleId, coPropertyId: ctx.coPropertyId })
-              .session(session)
-              .exec();
-            if (!inmueble || !inmueble.holderId) {
-              throw new BadRequestException(
-                `El inmueble ${fila.inmuebleCodigo} ya no tiene titular asignado`,
-              );
-            }
-
-            const dto = {
-              codigo: ctx.lote.codigo,
-              inmuebleId: inmueble._id.toString(),
-              terceroId: inmueble.holderId.toString(),
-              montoRecibido: fila.valorRecibido,
-              fechaRecibo: fila.fechaPago.toISOString(),
-              medioPago: ctx.lote.medioPago,
-              cuentaDestino: ctx.lote.cuentaDestino ?? undefined,
-              aplicacionAutomatica: true as const,
-            };
-
-            const contexto = await this.recibosService.prepararCreacion(
-              dto,
-              ctx.coPropertyId,
-            );
-            const recibo = await this.recibosService.crearEnSesion(
-              session,
-              ctx.accountId,
-              dto,
-              contexto,
-              numero,
-            );
-            fila.reciboId = new Types.ObjectId(recibo.id);
-          } catch (err) {
-            indiceCulpable = indice;
-            throw err;
-          }
-        }
+        await this.recibosService.escribirEscriturasTandaAplicacionLote(
+          session,
+          ctx.coPropertyId,
+          resultado.escrituras,
+        );
       });
+      for (const [i, { fila }] of tanda.entries()) {
+        fila.reciboId = resultado.escrituras[i].reciboId;
+      }
     } catch (err) {
       const mensaje = err instanceof Error ? err.message : 'Error desconocido';
       for (const { fila, indice } of tanda) {
-        // La transacción entera de la tanda se revirtió — ninguna fila de
-        // esta tanda quedó realmente persistida, sin importar qué reciboId
-        // haya quedado asignado en memoria antes de que la fila culpable
-        // fallara.
         fila.reciboId = null;
-        fila.error =
-          indice === indiceCulpable
-            ? mensaje
-            : `Revertida junto con la fila ${(indiceCulpable ?? indice) + 1}, que falló: ${mensaje}`;
+        fila.error = mensaje;
         ctx.errores.push({
           fila: indice + 1,
           inmuebleCodigo: fila.inmuebleCodigo,
-          mensaje: fila.error,
+          mensaje,
         });
       }
     } finally {
