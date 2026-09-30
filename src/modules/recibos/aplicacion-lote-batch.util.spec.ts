@@ -2,11 +2,13 @@ import { Types } from 'mongoose';
 import {
   aplicarFifoEnMemoria,
   construirEscrituraFilaAplicacion,
+  procesarFilasTandaAplicacionLote,
   validarFilaAplicacionLote,
   type DatosBatchAplicacionLote,
   type DatosInmuebleParaAplicacionLote,
   type ResultadoFifoEnMemoria,
 } from './aplicacion-lote-batch.util';
+import type { LoteRecibosFila } from '../../database/schemas/recibos/lote-recibos.schema';
 
 const INMUEBLE_ID = new Types.ObjectId();
 
@@ -422,5 +424,153 @@ describe('construirEscrituraFilaAplicacion', () => {
 
     expect(escritura.saldoDocumentoOrigen.documentoId).toBe(escritura.reciboId);
     expect(escritura.asientoContable.reciboId).toBe(escritura.reciboId);
+  });
+});
+
+const filaTanda = (
+  over: Partial<LoteRecibosFila> = {},
+): { fila: LoteRecibosFila; indice: number; numero: { prefijo: string; numero: number; completo: string } } => ({
+  fila: {
+    inmuebleId: new Types.ObjectId(),
+    inmuebleCodigo: '301',
+    fechaPago: new Date('2026-06-02'),
+    valorRecibido: 100000,
+    reciboId: null,
+    error: null,
+    ...over,
+  } as LoteRecibosFila,
+  indice: 0,
+  numero: { prefijo: 'RC', numero: 1, completo: 'RC-1' },
+});
+
+const datosParaInmueble = (
+  inmuebleId: Types.ObjectId,
+): DatosBatchAplicacionLote => ({
+  indicePorInmueble: new Map([
+    [
+      inmuebleId.toString(),
+      {
+        inmueble: { _id: inmuebleId, holderId: new Types.ObjectId(), code: '301' },
+        candidatosOrdenados: [],
+        saldoPorDocumento: new Map(),
+      },
+    ],
+  ]),
+  copropiedad: null,
+  cuentasContablesPorCodigo: new Map(),
+  periodoAbiertoPorMes: new Map(),
+  ultimoLoteFacturacion: null,
+});
+
+const ctxTanda = () => ({
+  coPropertyId: new Types.ObjectId(),
+  accountId: 'cuenta-1',
+  medioPago: 'transferencia' as const,
+  destinationAccount: '111005',
+});
+
+describe('procesarFilasTandaAplicacionLote', () => {
+  it('todas las filas válidas: produce una escritura por fila, cada una con su propio reciboId', () => {
+    const inmuebleA = new Types.ObjectId();
+    const inmuebleB = new Types.ObjectId();
+    const datos: DatosBatchAplicacionLote = {
+      ...datosParaInmueble(inmuebleA),
+      periodoAbiertoPorMes: new Map([['2026-06', true]]),
+    };
+    datos.indicePorInmueble.set(inmuebleB.toString(), {
+      inmueble: { _id: inmuebleB, holderId: new Types.ObjectId(), code: '302' },
+      candidatosOrdenados: [],
+      saldoPorDocumento: new Map(),
+    });
+
+    const filas = [
+      filaTanda({ inmuebleId: inmuebleA }),
+      { ...filaTanda({ inmuebleId: inmuebleB }), indice: 1 },
+    ];
+
+    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+
+    expect(resultado.ok).toBe(true);
+    if (!resultado.ok) throw new Error('expected ok');
+    expect(resultado.escrituras).toHaveLength(2);
+    expect(resultado.escrituras[0].reciboId).not.toEqual(resultado.escrituras[1].reciboId);
+  });
+
+  it('una fila inválida anula TODA la tanda con el mismo mensaje-colateral que produce hoy procesarTanda', () => {
+    const inmuebleA = new Types.ObjectId();
+    const datos = {
+      ...datosParaInmueble(inmuebleA),
+      periodoAbiertoPorMes: new Map([['2026-06', false]]), // mes cerrado
+    };
+    const filas = [
+      filaTanda({ inmuebleId: inmuebleA }),
+      { ...filaTanda({ inmuebleId: inmuebleA }), indice: 1 },
+    ];
+
+    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+
+    expect(resultado.ok).toBe(false);
+    if (resultado.ok) throw new Error('expected error');
+    expect(resultado.erroresPorIndice.get(0)).toMatch(/06\/2026 está cerrado/);
+    expect(resultado.erroresPorIndice.get(1)).toMatch(/Revertida junto con la fila 1, que falló/);
+  });
+
+  it('dos filas del mismo tanda contra el mismo inmueble comparten y consumen el mismo saldoPorDocumento', () => {
+    const inmuebleA = new Types.ObjectId();
+    const documentoId = new Types.ObjectId();
+    const datos: DatosBatchAplicacionLote = {
+      indicePorInmueble: new Map([
+        [
+          inmuebleA.toString(),
+          {
+            inmueble: { _id: inmuebleA, holderId: new Types.ObjectId(), code: '301' },
+            candidatosOrdenados: [
+              {
+                tipo: 'FV',
+                doc: {
+                  _id: documentoId,
+                  inmuebleId: inmuebleA,
+                  number: 42,
+                  total: 150000,
+                  discountAmount: 0,
+                  discountDeadline: null,
+                  dueDate: new Date('2026-05-10'),
+                  issueDate: new Date('2026-05-01'),
+                  lines: [
+                    {
+                      conceptoId: new Types.ObjectId(),
+                      conceptName: 'Administración',
+                      conceptKind: 'administracion',
+                      accountingReceivableAccount: '130505',
+                      accountingIncomeAccount: '413505',
+                      totalAmount: 150000,
+                    },
+                  ],
+                } as never,
+              },
+            ],
+            saldoPorDocumento: new Map([[documentoId.toString(), 150000]]),
+          },
+        ],
+      ]),
+      copropiedad: null,
+      cuentasContablesPorCodigo: new Map(),
+      periodoAbiertoPorMes: new Map([['2026-06', true]]),
+      ultimoLoteFacturacion: null,
+    };
+
+    const filas = [
+      filaTanda({ inmuebleId: inmuebleA, valorRecibido: 90000 }),
+      { ...filaTanda({ inmuebleId: inmuebleA, valorRecibido: 90000 }), indice: 1 },
+    ];
+
+    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+
+    expect(resultado.ok).toBe(true);
+    if (!resultado.ok) throw new Error('expected ok');
+    // 150000 repartidos entre dos pagos de 90000: la primera fila aplica
+    // 90000, la segunda solo puede aplicar los 60000 que quedan.
+    expect(resultado.escrituras[0].saldoTotalDocumentoDeltas[0].delta).toBe(-90000);
+    expect(resultado.escrituras[1].saldoTotalDocumentoDeltas[0].delta).toBe(-60000);
   });
 });

@@ -22,6 +22,7 @@ import {
   CUENTA_SIN_ASIGNAR,
 } from '../facturacion/asiento.builder';
 import { redactarObservaciones } from './recibos.service';
+import type { LoteRecibosFila } from '../../database/schemas/recibos/lote-recibos.schema';
 
 /** The inmueble fields this whole module ever reads — deliberately narrow
  *  (never the full `InmuebleDocument`) so the pure functions below stay
@@ -581,4 +582,83 @@ export function construirEscrituraFilaAplicacion(ctx: {
       (a) => a.carteraPorDocumentoDeltas,
     ),
   };
+}
+
+export type ResultadoTandaAplicacionLote =
+  | { ok: true; escrituras: EscrituraFilaAplicacionLote[] }
+  | { ok: false; erroresPorIndice: Map<number, string> };
+
+/** Same collateral-message shape `LoteRecibosService.procesarTanda`'s own
+ *  catch block produces today (`lote-recibos.service.ts:519-536`) — the
+ *  culprit row keeps its own message, every other row in the tanda gets
+ *  attributed to it. `indiceCulpable`/every `indice` here are the SAME
+ *  0-based index into `lote.filas` `ejecutarAplicacion` already threads
+ *  through `pendientesConNumero`. */
+function construirErrorTanda(
+  filas: { indice: number }[],
+  indiceCulpable: number,
+  mensajeCulpable: string,
+): ResultadoTandaAplicacionLote {
+  const erroresPorIndice = new Map<number, string>();
+  for (const { indice } of filas) {
+    erroresPorIndice.set(
+      indice,
+      indice === indiceCulpable
+        ? mensajeCulpable
+        : `Revertida junto con la fila ${indiceCulpable + 1}, que falló: ${mensajeCulpable}`,
+    );
+  }
+  return { ok: false, erroresPorIndice };
+}
+
+/**
+ * Runs Tasks 2/4/5 per row of ONE tanda, sequentially and in order, against
+ * the shared `datos` (same instance for the whole tanda — this is what
+ * lets a later row see an earlier row's own `saldoPorDocumento`
+ * consumption, design §4 step 6). The FIRST invalid row stops the loop
+ * immediately: nothing after it is even evaluated, mirroring the "whole
+ * tanda goes down together" semantics `procesarTanda`'s transaction gives
+ * today, just decided here instead of via rollback.
+ */
+export function procesarFilasTandaAplicacionLote(
+  filas: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
+  datos: DatosBatchAplicacionLote,
+  ctx: {
+    coPropertyId: Types.ObjectId;
+    accountId: string;
+    medioPago: PaymentMethod;
+    destinationAccount: string;
+  },
+): ResultadoTandaAplicacionLote {
+  const escrituras: EscrituraFilaAplicacionLote[] = [];
+
+  for (const { fila, indice, numero } of filas) {
+    const validacion = validarFilaAplicacionLote(fila, datos);
+    if (!validacion.valido) {
+      return construirErrorTanda(filas, indice, validacion.mensaje);
+    }
+
+    const datosInmueble = datos.indicePorInmueble.get(fila.inmuebleId!.toString())!;
+    const resultadoFifo = aplicarFifoEnMemoria(
+      datosInmueble,
+      fila.valorRecibido,
+      fila.fechaPago,
+      datos.copropiedad?.usesMemorandumAccounts ?? false,
+    );
+    const escritura = construirEscrituraFilaAplicacion({
+      coPropertyId: ctx.coPropertyId,
+      accountId: ctx.accountId,
+      fila,
+      numero,
+      medioPago: ctx.medioPago,
+      destinationAccount: ctx.destinationAccount,
+      datosInmueble,
+      copropiedad: datos.copropiedad,
+      cuentasContablesPorCodigo: datos.cuentasContablesPorCodigo,
+      resultadoFifo,
+    });
+    escrituras.push(escritura);
+  }
+
+  return { ok: true, escrituras };
 }
