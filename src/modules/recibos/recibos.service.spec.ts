@@ -4389,3 +4389,129 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
     expect(datos.copropiedad).toBeNull();
   });
 });
+
+// `ConflictException`, `RecibosService` and `Types` are already imported at
+// the top of this file — only this new type import is needed.
+import type { EscrituraFilaAplicacionLote } from './aplicacion-lote-batch.util';
+
+describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
+  const COP = new Types.ObjectId();
+  const SESSION = { id: 'fake-session' } as never;
+
+  const escrituraDe = (
+    documentoId: Types.ObjectId,
+    delta: number,
+  ): EscrituraFilaAplicacionLote => ({
+    reciboId: new Types.ObjectId(),
+    recibo: { coPropertyId: COP },
+    saldoDocumentoOrigen: {},
+    aplicacionesCartera: [{ documentId: documentoId }],
+    asientoContable: {},
+    saldoTotalDocumentoDeltas: [{ documentoId, delta }],
+    saldoCarteraDeltas: [],
+    carteraPorDocumentoDeltas: [],
+  });
+
+  const construirModelosMock = () => ({
+    recibos: { insertMany: jest.fn().mockResolvedValue([]) },
+    saldoDocumentoOrigen: { insertMany: jest.fn().mockResolvedValue([]) },
+    aplicaciones: { insertMany: jest.fn().mockResolvedValue([]) },
+    asientos: { insertMany: jest.fn().mockResolvedValue([]) },
+    saldoTotalDocumento: {
+      // `matchedCount` defaults to "every operation matched" (real Mongo
+      // behavior for a healthy guard) — a fixed `1` here would wrongly
+      // fail a test with 2+ DISTINCT documents even though every one of
+      // them actually had enough balance; the one test that wants a real
+      // guard failure overrides this explicitly.
+      bulkWrite: jest.fn((ops: unknown[]) =>
+        Promise.resolve({ matchedCount: ops.length }),
+      ),
+    },
+    saldos: { bulkWrite: jest.fn().mockResolvedValue({}) },
+    carteraPorDocumento: { bulkWrite: jest.fn().mockResolvedValue({}) },
+  });
+
+  const construirServicio = (modelos: ReturnType<typeof construirModelosMock>) =>
+    new RecibosService(
+      modelos.recibos as never,
+      modelos.aplicaciones as never,
+      {} as never, // facturas
+      modelos.saldos as never,
+      modelos.carteraPorDocumento as never,
+      modelos.saldoTotalDocumento as never,
+      modelos.asientos as never,
+      {} as never, // copropiedades
+      {} as never, // tenant
+      {} as never, // numeracion
+      {} as never, // connection
+      {} as never, // periodo
+      {} as never, // notasDebito
+      {} as never, // lotes (LotesFacturacionService)
+      modelos.saldoDocumentoOrigen as never,
+    );
+
+  it('agrupa en un insertMany por colección, en vez de una llamada por fila', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const escrituras = [
+      escrituraDe(new Types.ObjectId(), -50000),
+      escrituraDe(new Types.ObjectId(), -30000),
+    ];
+
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, escrituras);
+
+    expect(modelos.recibos.insertMany).toHaveBeenCalledTimes(1);
+    expect(modelos.recibos.insertMany).toHaveBeenCalledWith(
+      escrituras.map((e) => e.recibo),
+      { session: SESSION },
+    );
+    expect(modelos.aplicaciones.insertMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('suma en UNA sola operación de bulkWrite los deltas de dos filas que tocan el MISMO documento', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const documentoId = new Types.ObjectId();
+    const escrituras = [
+      escrituraDe(documentoId, -50000),
+      escrituraDe(documentoId, -30000),
+    ];
+
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, escrituras);
+
+    const [operaciones] = modelos.saldoTotalDocumento.bulkWrite.mock.calls[0] as [
+      { updateOne: { filter: Record<string, unknown>; update: Record<string, unknown> } }[],
+    ];
+    expect(operaciones).toHaveLength(1);
+    expect(operaciones[0].updateOne.update).toEqual({
+      $inc: { saldoPendiente: -80000 },
+    });
+  });
+
+  it('lanza ConflictException cuando el guard de SaldoTotalDocumento no encuentra suficiente saldo', async () => {
+    const modelos = construirModelosMock();
+    modelos.saldoTotalDocumento.bulkWrite.mockResolvedValue({ matchedCount: 0 });
+    const service = construirServicio(modelos);
+
+    await expect(
+      service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [
+        escrituraDe(new Types.ObjectId(), -50000),
+      ]),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('no llama bulkWrite de SaldoTotalDocumento cuando ninguna escritura tiene deltas (solo anticipo)', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const soloAnticipo: EscrituraFilaAplicacionLote = {
+      ...escrituraDe(new Types.ObjectId(), -50000),
+      saldoTotalDocumentoDeltas: [],
+      aplicacionesCartera: [],
+    };
+
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [soloAnticipo]);
+
+    expect(modelos.saldoTotalDocumento.bulkWrite).not.toHaveBeenCalled();
+    expect(modelos.aplicaciones.insertMany).not.toHaveBeenCalled();
+  });
+});

@@ -11,6 +11,7 @@ import {
   type CandidatoAplicacionLote,
   type DatosBatchAplicacionLote,
   type DatosInmuebleParaAplicacionLote,
+  type EscrituraFilaAplicacionLote,
 } from './aplicacion-lote-batch.util';
 import {
   Recibo,
@@ -885,6 +886,178 @@ export class RecibosService {
       enviarAOtrosIngresos ? 0 : sobranteReal,
       await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
     );
+  }
+
+  /**
+   * Turns one tanda's worth of `EscrituraFilaAplicacionLote` (Task 5) into
+   * a handful of `insertMany`/`bulkWrite` calls, one per collection —
+   * design §4 step 8. Runs inside the SAME session/transaction
+   * `LoteRecibosService.procesarTanda` already opens; a thrown error here
+   * aborts that transaction exactly like a thrown error inside today's
+   * per-row loop does.
+   */
+  async escribirEscriturasTandaAplicacionLote(
+    session: ClientSession,
+    coPropertyId: Types.ObjectId,
+    escrituras: EscrituraFilaAplicacionLote[],
+  ): Promise<void> {
+    if (escrituras.length === 0) return;
+
+    await this.recibos.insertMany(
+      escrituras.map((e) => e.recibo),
+      { session },
+    );
+    await this.saldoDocumentoOrigen.insertMany(
+      escrituras.map((e) => e.saldoDocumentoOrigen),
+      { session },
+    );
+    const aplicacionesCartera = escrituras.flatMap((e) => e.aplicacionesCartera);
+    if (aplicacionesCartera.length > 0) {
+      await this.aplicaciones.insertMany(aplicacionesCartera, { session });
+    }
+    await this.asientos.insertMany(
+      escrituras.map((e) => e.asientoContable),
+      { session },
+    );
+
+    // SaldoTotalDocumento — authoritative, guarded, never clamped. One op
+    // per distinct document, delta SUMMED across every row in this tanda
+    // that touched it: safe, because each row's own consumption was
+    // already bounded by `aplicarFifoEnMemoria`'s in-memory tracking, so
+    // the tanda's TOTAL consumption per document is exactly as legitimate
+    // as N separate guarded decrements would have been.
+    const saldoTotalPorDocumento = new Map<string, number>();
+    for (const e of escrituras) {
+      for (const d of e.saldoTotalDocumentoDeltas) {
+        const clave = d.documentoId.toString();
+        saldoTotalPorDocumento.set(
+          clave,
+          (saldoTotalPorDocumento.get(clave) ?? 0) + d.delta,
+        );
+      }
+    }
+    if (saldoTotalPorDocumento.size > 0) {
+      const operaciones = [...saldoTotalPorDocumento].map(([clave, delta]) => ({
+        updateOne: {
+          filter: {
+            documentoId: new Types.ObjectId(clave),
+            $expr: { $gte: ['$saldoPendiente', -delta] },
+          },
+          update: { $inc: { saldoPendiente: delta } },
+        },
+      }));
+      const resultado = await this.saldoTotalDocumento.bulkWrite(operaciones, {
+        session,
+      });
+      if (resultado.matchedCount !== operaciones.length) {
+        throw new ConflictException(
+          'Saldo insuficiente al aplicar uno o más documentos de esta tanda',
+        );
+      }
+    }
+
+    // SaldoCartera — reconcilable cache (see its own schema docblock), same
+    // clamp-at-zero pipeline `ajustarSaldosCartera` already uses. One op per
+    // distinct (inmuebleId, conceptoId), deltas summed the same way as
+    // above — a documented, safe equivalence for a cache that is never
+    // authoritative (its own schema docblock says so).
+    const saldoCarteraPorClave = new Map<
+      string,
+      { inmuebleId: Types.ObjectId; conceptoId: Types.ObjectId; delta: number }
+    >();
+    for (const e of escrituras) {
+      for (const d of e.saldoCarteraDeltas) {
+        const clave = `${d.inmuebleId.toString()}:${d.conceptoId.toString()}`;
+        const previo = saldoCarteraPorClave.get(clave);
+        saldoCarteraPorClave.set(clave, {
+          inmuebleId: d.inmuebleId,
+          conceptoId: d.conceptoId,
+          delta: (previo?.delta ?? 0) + d.delta,
+        });
+      }
+    }
+    if (saldoCarteraPorClave.size > 0) {
+      await this.saldos.bulkWrite(
+        [...saldoCarteraPorClave.values()].map((d) => ({
+          updateOne: {
+            filter: {
+              coPropertyId,
+              inmuebleId: d.inmuebleId,
+              conceptoId: d.conceptoId,
+            },
+            update: [
+              {
+                $set: {
+                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
+                  conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
+                  balance: {
+                    $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, d.delta] }],
+                  },
+                },
+              },
+            ],
+            upsert: true,
+          },
+        })),
+        { session },
+      );
+    }
+
+    // CarteraPorDocumento — same clamp-at-zero pipeline as
+    // `ajustarCarteraPorDocumento`, one op per distinct (documentoId,
+    // conceptoId).
+    const carteraPorDocumentoPorClave = new Map<
+      string,
+      {
+        documentoId: Types.ObjectId;
+        conceptoId: Types.ObjectId;
+        inmuebleId: Types.ObjectId;
+        tipoDocumento: 'FV' | 'ND' | 'SI';
+        delta: number;
+      }
+    >();
+    for (const e of escrituras) {
+      for (const d of e.carteraPorDocumentoDeltas) {
+        const clave = `${d.documentoId.toString()}:${d.conceptoId.toString()}`;
+        const previo = carteraPorDocumentoPorClave.get(clave);
+        carteraPorDocumentoPorClave.set(clave, {
+          ...d,
+          delta: (previo?.delta ?? 0) + d.delta,
+        });
+      }
+    }
+    if (carteraPorDocumentoPorClave.size > 0) {
+      await this.carteraPorDocumento.bulkWrite(
+        [...carteraPorDocumentoPorClave.values()].map((d) => ({
+          updateOne: {
+            filter: { documentoId: d.documentoId, conceptoId: d.conceptoId },
+            update: [
+              {
+                $set: {
+                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
+                  tipoDocumento: { $ifNull: ['$tipoDocumento', d.tipoDocumento] },
+                  documentoId: { $ifNull: ['$documentoId', d.documentoId] },
+                  conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
+                  montoOriginal: { $ifNull: ['$montoOriginal', 0] },
+                  saldoAnterior: { $ifNull: ['$saldoAnterior', 0] },
+                  saldoNuevo: { $ifNull: ['$saldoNuevo', 0] },
+                  saldoPendiente: {
+                    $max: [
+                      0,
+                      { $add: [{ $ifNull: ['$saldoPendiente', 0] }, d.delta] },
+                    ],
+                  },
+                },
+              },
+            ],
+            upsert: true,
+          },
+        })),
+        { session },
+      );
+    }
   }
 
   /**
