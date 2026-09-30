@@ -519,7 +519,7 @@ const filaTanda = (
     reciboId: null,
     error: null,
     ...over,
-  } as LoteRecibosFila,
+  },
   indice: 0,
   numero: { prefijo: 'RC', numero: 1, completo: 'RC-1' },
 });
