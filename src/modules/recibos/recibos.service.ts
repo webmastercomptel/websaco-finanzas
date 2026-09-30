@@ -129,7 +129,7 @@ export interface ContextoCreacionRecibo {
  * reserved for chaining "genera anticipo"), grouped Cancela-antes-que-Abona,
  * Facturas-antes-que-Notas-Débito.
  */
-const redactarObservaciones = (
+export const redactarObservaciones = (
   resumen: ResumenAplicacion[],
   generaAnticipo: boolean,
 ): string => {

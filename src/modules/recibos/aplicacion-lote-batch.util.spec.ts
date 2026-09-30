@@ -1,9 +1,11 @@
 import { Types } from 'mongoose';
 import {
   aplicarFifoEnMemoria,
+  construirEscrituraFilaAplicacion,
   validarFilaAplicacionLote,
   type DatosBatchAplicacionLote,
   type DatosInmuebleParaAplicacionLote,
+  type ResultadoFifoEnMemoria,
 } from './aplicacion-lote-batch.util';
 
 const INMUEBLE_ID = new Types.ObjectId();
@@ -268,5 +270,157 @@ describe('aplicarFifoEnMemoria', () => {
       discountApplied: 0,
     });
     expect(resultado.resumen[0]).toEqual({ tipo: 'ND', numero: 7, completa: true });
+  });
+});
+
+const resultadoFifoBase = (
+  over: Partial<ResultadoFifoEnMemoria> = {},
+): ResultadoFifoEnMemoria => ({
+  aplicaciones: [],
+  desglose: [],
+  montoAplicadoMora: 0,
+  montoDescuentoTotal: 0,
+  resumen: [],
+  montoSinAplicar: 0,
+  ...over,
+});
+
+const ctxBase = () => ({
+  coPropertyId: new Types.ObjectId(),
+  accountId: 'cuenta-1',
+  fila: { valorRecibido: 100000, fechaPago: new Date('2026-06-02') },
+  numero: { prefijo: 'RC', numero: 1, completo: 'RC-1' },
+  medioPago: 'transferencia' as const,
+  destinationAccount: '111005',
+  datosInmueble: {
+    inmueble: { _id: new Types.ObjectId(), holderId: new Types.ObjectId(), code: '301' },
+    candidatosOrdenados: [],
+    saldoPorDocumento: new Map(),
+  },
+  copropiedad: null,
+  cuentasContablesPorCodigo: new Map(),
+});
+
+describe('construirEscrituraFilaAplicacion', () => {
+  it('anticipo puro (sin aplicaciones): notes dice "Genera anticipo", saldoDocumentoOrigen queda con el total', () => {
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      resultadoFifo: resultadoFifoBase({ montoSinAplicar: 100000 }),
+    });
+
+    expect(escritura.recibo.notes).toBe('Genera anticipo');
+    expect(escritura.saldoDocumentoOrigen.saldoDisponible).toBe(100000);
+    expect(escritura.aplicacionesCartera).toHaveLength(0);
+  });
+
+  it('cancela completo una factura: notes dice "Cancela factura N", sin anticipo', () => {
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      resultadoFifo: resultadoFifoBase({
+        resumen: [{ tipo: 'FV', numero: 42, completa: true }],
+        // `aplicaciones` debe ser consistente con `resumen`/`montoSinAplicar`
+        // — la nota se deriva de `resumen`, pero `sobrante` se deriva de
+        // `aplicaciones` (mismo patrón que `crearEnSesion` original, que
+        // tampoco confía en `montoSinAplicar` directo — ver ledger de esta
+        // tarea). Un `aplicaciones` vacío con `montoSinAplicar: 0` fabricado
+        // aparte es un fixture inconsistente, no un caso real.
+        aplicaciones: [
+          {
+            tipo: 'FV',
+            documentId: new Types.ObjectId(),
+            numeroDocumento: 42,
+            montoAplicado: 100000,
+            discountApplied: 0,
+            detalleConceptos: [],
+            saldoTotalDocumentoDelta: -100000,
+            saldoCarteraDeltas: [],
+            carteraPorDocumentoDeltas: [],
+          },
+        ],
+        montoSinAplicar: 0,
+      }),
+    });
+
+    expect(escritura.recibo.notes).toBe('Cancela factura 42');
+    expect(escritura.saldoDocumentoOrigen.saldoDisponible).toBe(0);
+  });
+
+  it('abona parcialmente una factura (no la completa): notes dice "Abona a factura N"', () => {
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      resultadoFifo: resultadoFifoBase({
+        resumen: [{ tipo: 'FV', numero: 42, completa: false }],
+        aplicaciones: [
+          {
+            tipo: 'FV',
+            documentId: new Types.ObjectId(),
+            numeroDocumento: 42,
+            montoAplicado: 100000,
+            discountApplied: 0,
+            detalleConceptos: [],
+            saldoTotalDocumentoDelta: -100000,
+            saldoCarteraDeltas: [],
+            carteraPorDocumentoDeltas: [],
+          },
+        ],
+        montoSinAplicar: 0,
+      }),
+    });
+
+    expect(escritura.recibo.notes).toBe('Abona a factura 42');
+  });
+
+  it('un descuento por pronto pago que cancela la factura: notes sigue diciendo "Cancela", y el asiento incluye la línea de descuento', () => {
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      // 100000 de factura menos 5000 de descuento = 95000 de cash real
+      // necesario — el recibo debe traer EXACTAMENTE eso, o el sobrante
+      // (100000 - 95000) generaría anticipo real, no un fixture roto.
+      fila: { valorRecibido: 95000, fechaPago: new Date('2026-06-02') },
+      copropiedad: {
+        receivablesAccount: '130505',
+        advancesAccount: '280505',
+        discountsDebitAccount: '530505',
+        usesMemorandumAccounts: false,
+        memorandumDebitAccount: null,
+        memorandumCreditAccount: null,
+        defaultCostCentre: null,
+        cashFlowCode: null,
+        defaultBankAccountCode: null,
+      },
+      resultadoFifo: resultadoFifoBase({
+        resumen: [{ tipo: 'FV', numero: 42, completa: true }],
+        montoDescuentoTotal: 5000,
+        aplicaciones: [
+          {
+            tipo: 'FV',
+            documentId: new Types.ObjectId(),
+            numeroDocumento: 42,
+            montoAplicado: 100000,
+            discountApplied: 5000,
+            detalleConceptos: [],
+            saldoTotalDocumentoDelta: -100000,
+            saldoCarteraDeltas: [],
+            carteraPorDocumentoDeltas: [],
+          },
+        ],
+        montoSinAplicar: 0,
+      }),
+    });
+
+    expect(escritura.recibo.notes).toBe('Cancela factura 42');
+    expect(
+      escritura.asientoContable.entries.some((m: { account: string }) => m.account === '530505'),
+    ).toBe(true);
+  });
+
+  it('el Recibo, SaldoDocumentoOrigen y AsientoContable comparten el mismo reciboId pre-generado', () => {
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      resultadoFifo: resultadoFifoBase({ montoSinAplicar: 100000 }),
+    });
+
+    expect(escritura.saldoDocumentoOrigen.documentoId).toBe(escritura.reciboId);
+    expect(escritura.asientoContable.reciboId).toBe(escritura.reciboId);
   });
 });

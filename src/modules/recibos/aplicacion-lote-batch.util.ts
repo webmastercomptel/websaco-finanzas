@@ -13,6 +13,15 @@ import {
   type DesgloseCarteraAplicacion,
   type ResumenAplicacion,
 } from './cruce.util';
+import type { NumeroAsignado } from '../../common/numeracion/numeracion.service';
+import type { PaymentMethod } from '../../database/schemas/recibos/recibo.schema';
+import {
+  construirAsientoCruce,
+  cuentasOrdenDe,
+  enriquecerMovimientosConAuxiliares,
+  CUENTA_SIN_ASIGNAR,
+} from '../facturacion/asiento.builder';
+import { redactarObservaciones } from './recibos.service';
 
 /** The inmueble fields this whole module ever reads — deliberately narrow
  *  (never the full `InmuebleDocument`) so the pure functions below stay
@@ -422,5 +431,154 @@ export function aplicarFifoEnMemoria(
     montoDescuentoTotal,
     resumen,
     montoSinAplicar: restante,
+  };
+}
+
+export interface EscrituraFilaAplicacionLote {
+  reciboId: Types.ObjectId;
+  recibo: Record<string, unknown>;
+  saldoDocumentoOrigen: Record<string, unknown>;
+  aplicacionesCartera: Record<string, unknown>[];
+  asientoContable: Record<string, unknown>;
+  saldoTotalDocumentoDeltas: { documentoId: Types.ObjectId; delta: number }[];
+  saldoCarteraDeltas: {
+    inmuebleId: Types.ObjectId;
+    conceptoId: Types.ObjectId;
+    delta: number;
+  }[];
+  carteraPorDocumentoDeltas: {
+    documentoId: Types.ObjectId;
+    conceptoId: Types.ObjectId;
+    inmuebleId: Types.ObjectId;
+    tipoDocumento: 'FV' | 'ND' | 'SI';
+    delta: number;
+  }[];
+}
+
+/**
+ * Builds every insert/delta this row's Recibo needs, purely from
+ * `resultadoFifo` (Task 4) — no DB, no session. Skips every branch
+ * `crearEnSesion` only runs for manual/`destinoSobrante` mode — see this
+ * task's own docblock above for the full list — so `notes` is computed
+ * up front and baked directly into the Recibo insert document, and the
+ * post-creation `findOneAndUpdate` `crearEnSesion` needs disappears
+ * entirely for this path.
+ */
+export function construirEscrituraFilaAplicacion(ctx: {
+  coPropertyId: Types.ObjectId;
+  accountId: string;
+  fila: { valorRecibido: number; fechaPago: Date };
+  numero: NumeroAsignado;
+  medioPago: PaymentMethod;
+  destinationAccount: string;
+  datosInmueble: DatosInmuebleParaAplicacionLote;
+  copropiedad: CopropiedadParaAplicacionLote | null;
+  cuentasContablesPorCodigo: Map<string, MarcasCuentaContable>;
+  resultadoFifo: ResultadoFifoEnMemoria;
+}): EscrituraFilaAplicacionLote {
+  const reciboId = new Types.ObjectId();
+  const totalAplicado = ctx.resultadoFifo.aplicaciones.reduce(
+    (acc, a) => acc + a.montoAplicado,
+    0,
+  );
+  const cashAplicado = totalAplicado - ctx.resultadoFifo.montoDescuentoTotal;
+  const sobrante = ctx.fila.valorRecibido - cashAplicado;
+  const notes = redactarObservaciones(ctx.resultadoFifo.resumen, sobrante > 0) || null;
+
+  const cuentaCartera = ctx.copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaAnticipos = ctx.copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaDescuentos = ctx.copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentasOrden = cuentasOrdenDe(ctx.copropiedad);
+  const desgloseCartera = ctx.resultadoFifo.desglose.map((d) => ({
+    account: d.cuenta ?? cuentaCartera,
+    monto: d.monto,
+    tipoDocumento: d.tipoDocumento,
+    numeroDocumento: d.numeroDocumento,
+  }));
+
+  let entries = construirAsientoCruce(
+    ctx.destinationAccount,
+    cuentaCartera,
+    cuentaAnticipos,
+    totalAplicado,
+    sobrante,
+    'RC',
+    cuentasOrden,
+    desgloseCartera,
+    ctx.resultadoFifo.montoAplicadoMora,
+    ctx.resultadoFifo.montoDescuentoTotal > 0
+      ? { cuenta: cuentaDescuentos, monto: ctx.resultadoFifo.montoDescuentoTotal }
+      : undefined,
+  );
+  entries = enriquecerMovimientosConAuxiliares(
+    entries,
+    ctx.cuentasContablesPorCodigo,
+    {
+      terceroCode: ctx.datosInmueble.inmueble.code,
+      centroCosto: ctx.copropiedad?.defaultCostCentre ?? null,
+      flujoCajaCodigo: ctx.copropiedad?.cashFlowCode ?? null,
+    },
+  );
+
+  return {
+    reciboId,
+    recibo: {
+      coPropertyId: ctx.coPropertyId,
+      inmuebleId: ctx.datosInmueble.inmueble._id,
+      terceroId: ctx.datosInmueble.inmueble.holderId,
+      prefix: ctx.numero.prefijo,
+      number: ctx.numero.numero,
+      fullNumber: ctx.numero.completo,
+      receivedAmount: ctx.fila.valorRecibido,
+      receivedDate: ctx.fila.fechaPago,
+      paymentMethod: ctx.medioPago,
+      destinationAccount: ctx.destinationAccount,
+      reference: null,
+      notes,
+      appliedAmount: 0,
+      unappliedAmount: ctx.fila.valorRecibido,
+      status: 'activo',
+      generatedBy: ctx.accountId,
+      otherIncomeAmount: 0,
+    },
+    saldoDocumentoOrigen: {
+      coPropertyId: ctx.coPropertyId,
+      tipoDocumento: 'RC',
+      documentoId: reciboId,
+      montoOriginal: ctx.fila.valorRecibido,
+      saldoDisponible: sobrante,
+    },
+    aplicacionesCartera: ctx.resultadoFifo.aplicaciones.map((a) => ({
+      coPropertyId: ctx.coPropertyId,
+      sourceType: 'RC',
+      sourceId: reciboId,
+      documentType: a.tipo,
+      documentId: a.documentId,
+      amountApplied: a.montoAplicado,
+      discountApplied: a.discountApplied,
+      detalleConceptos: a.detalleConceptos,
+      status: 'activa',
+      appliedAt: new Date(),
+      sourceDate: ctx.fila.fechaPago,
+      appliedBy: ctx.accountId,
+    })),
+    asientoContable: {
+      coPropertyId: ctx.coPropertyId,
+      loteId: null,
+      facturaId: null,
+      reciboId,
+      date: ctx.fila.fechaPago,
+      entries,
+    },
+    saldoTotalDocumentoDeltas: ctx.resultadoFifo.aplicaciones.map((a) => ({
+      documentoId: a.documentId,
+      delta: a.saldoTotalDocumentoDelta,
+    })),
+    saldoCarteraDeltas: ctx.resultadoFifo.aplicaciones.flatMap(
+      (a) => a.saldoCarteraDeltas,
+    ),
+    carteraPorDocumentoDeltas: ctx.resultadoFifo.aplicaciones.flatMap(
+      (a) => a.carteraPorDocumentoDeltas,
+    ),
   };
 }
