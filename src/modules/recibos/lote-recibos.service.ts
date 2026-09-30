@@ -398,9 +398,7 @@ export class LoteRecibosService {
     // the same way `ejecutarAplicacionFifo` always handled an inmueble
     // with no open documents: an empty result, never an error.
     const inmuebleIds = [
-      ...new Set(
-        pendientesConNumero.map((p) => p.fila.inmuebleId!.toString()),
-      ),
+      ...new Set(pendientesConNumero.map((p) => p.fila.inmuebleId!.toString())),
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const fechasPago = pendientesConNumero.map((p) => p.fila.fechaPago);
     const datosBatch = await this.recibosService.leerDatosBatchAplicacionLote(

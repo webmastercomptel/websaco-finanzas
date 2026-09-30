@@ -301,12 +301,18 @@ export function aplicarFifoEnMemoria(
         totalAmount: l.totalAmount,
       }));
       const partes = calcularPartesWaterfall(
-        { total: factura.total, outstandingBalance: saldoPendienteDespues, lines },
+        {
+          total: factura.total,
+          outstandingBalance: saldoPendienteDespues,
+          lines,
+        },
         monto,
         -1,
       );
       const detalleConceptos = partes.map((p) => {
-        const linea = factura.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(p.conceptoId),
+        );
         return {
           conceptoId: p.conceptoId,
           conceptName: linea?.conceptName ?? 'Concepto',
@@ -314,7 +320,9 @@ export function aplicarFifoEnMemoria(
         };
       });
       for (const p of partes) {
-        const linea = factura.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+        const linea = factura.lines.find((l) =>
+          l.conceptoId.equals(p.conceptoId),
+        );
         if (p.parte !== 0) {
           desglose.push({
             cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
@@ -370,12 +378,18 @@ export function aplicarFifoEnMemoria(
       totalAmount: l.montoOriginal,
     }));
     const partes = calcularPartesWaterfall(
-      { total: saldoInicial.total, outstandingBalance: saldoPendienteDespues, lines },
+      {
+        total: saldoInicial.total,
+        outstandingBalance: saldoPendienteDespues,
+        lines,
+      },
       monto,
       -1,
     );
     const detalleConceptos = partes.map((p) => {
-      const linea = saldoInicial.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+      const linea = saldoInicial.lines.find((l) =>
+        l.conceptoId.equals(p.conceptoId),
+      );
       return {
         conceptoId: p.conceptoId,
         conceptName: linea?.conceptName ?? 'Concepto',
@@ -383,7 +397,9 @@ export function aplicarFifoEnMemoria(
       };
     });
     for (const p of partes) {
-      const linea = saldoInicial.lines.find((l) => l.conceptoId.equals(p.conceptoId));
+      const linea = saldoInicial.lines.find((l) =>
+        l.conceptoId.equals(p.conceptoId),
+      );
       if (p.parte !== 0) {
         desglose.push({
           cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
@@ -484,11 +500,15 @@ export function construirEscrituraFilaAplicacion(ctx: {
   );
   const cashAplicado = totalAplicado - ctx.resultadoFifo.montoDescuentoTotal;
   const sobrante = ctx.fila.valorRecibido - cashAplicado;
-  const notes = redactarObservaciones(ctx.resultadoFifo.resumen, sobrante > 0) || null;
+  const notes =
+    redactarObservaciones(ctx.resultadoFifo.resumen, sobrante > 0) || null;
 
-  const cuentaCartera = ctx.copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-  const cuentaAnticipos = ctx.copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
-  const cuentaDescuentos = ctx.copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaCartera =
+    ctx.copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaAnticipos =
+    ctx.copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaDescuentos =
+    ctx.copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
   const cuentasOrden = cuentasOrdenDe(ctx.copropiedad);
   const desgloseCartera = ctx.resultadoFifo.desglose.map((d) => ({
     account: d.cuenta ?? cuentaCartera,
@@ -508,7 +528,10 @@ export function construirEscrituraFilaAplicacion(ctx: {
     desgloseCartera,
     ctx.resultadoFifo.montoAplicadoMora,
     ctx.resultadoFifo.montoDescuentoTotal > 0
-      ? { cuenta: cuentaDescuentos, monto: ctx.resultadoFifo.montoDescuentoTotal }
+      ? {
+          cuenta: cuentaDescuentos,
+          monto: ctx.resultadoFifo.montoDescuentoTotal,
+        }
       : undefined,
   );
   entries = enriquecerMovimientosConAuxiliares(
@@ -638,7 +661,9 @@ export function procesarFilasTandaAplicacionLote(
       return construirErrorTanda(filas, indice, validacion.mensaje);
     }
 
-    const datosInmueble = datos.indicePorInmueble.get(fila.inmuebleId!.toString())!;
+    const datosInmueble = datos.indicePorInmueble.get(
+      fila.inmuebleId!.toString(),
+    )!;
     const resultadoFifo = aplicarFifoEnMemoria(
       datosInmueble,
       fila.valorRecibido,

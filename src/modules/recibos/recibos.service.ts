@@ -549,7 +549,10 @@ export class RecibosService {
       mesesDistintos.map((clave, i) => [clave, periodosAbiertos[i]]),
     );
 
-    const indicePorInmueble = new Map<string, DatosInmuebleParaAplicacionLote>();
+    const indicePorInmueble = new Map<
+      string,
+      DatosInmuebleParaAplicacionLote
+    >();
     for (const inmueble of inmuebles) {
       const facturasAbiertas = facturas
         .filter(
@@ -587,15 +590,18 @@ export class RecibosService {
             : c.doc.fechaVencimiento;
 
       const candidatosOrdenados: CandidatoAplicacionLote[] = [
-        ...facturasAbiertas.map(
-          (doc): CandidatoAplicacionLote => ({ tipo: 'FV', doc }),
-        ),
-        ...notasDebitoAbiertas.map(
-          (doc): CandidatoAplicacionLote => ({ tipo: 'ND', doc }),
-        ),
-        ...saldosInicialesAbiertos.map(
-          (doc): CandidatoAplicacionLote => ({ tipo: 'SI', doc }),
-        ),
+        ...facturasAbiertas.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'FV',
+          doc,
+        })),
+        ...notasDebitoAbiertas.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'ND',
+          doc,
+        })),
+        ...saldosInicialesAbiertos.map((doc): CandidatoAplicacionLote => ({
+          tipo: 'SI',
+          doc,
+        })),
       ].sort((a, b) => {
         const porFecha = prioridadDe(a).getTime() - prioridadDe(b).getTime();
         if (porFecha !== 0) return porFecha;
@@ -911,7 +917,9 @@ export class RecibosService {
       escrituras.map((e) => e.saldoDocumentoOrigen),
       { session },
     );
-    const aplicacionesCartera = escrituras.flatMap((e) => e.aplicacionesCartera);
+    const aplicacionesCartera = escrituras.flatMap(
+      (e) => e.aplicacionesCartera,
+    );
     if (aplicacionesCartera.length > 0) {
       await this.aplicaciones.insertMany(aplicacionesCartera, { session });
     }
@@ -992,7 +1000,10 @@ export class RecibosService {
                   inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
                   conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
                   balance: {
-                    $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, d.delta] }],
+                    $max: [
+                      0,
+                      { $add: [{ $ifNull: ['$balance', 0] }, d.delta] },
+                    ],
                   },
                 },
               },
@@ -1037,7 +1048,9 @@ export class RecibosService {
                 $set: {
                   coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
                   inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
-                  tipoDocumento: { $ifNull: ['$tipoDocumento', d.tipoDocumento] },
+                  tipoDocumento: {
+                    $ifNull: ['$tipoDocumento', d.tipoDocumento],
+                  },
                   documentoId: { $ifNull: ['$documentoId', d.documentoId] },
                   conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
                   montoOriginal: { $ifNull: ['$montoOriginal', 0] },

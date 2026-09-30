@@ -373,7 +373,11 @@ const datosBatchQueValidaTodo = (
     filas.map((f) => [
       f.inmuebleId.toString(),
       {
-        inmueble: { _id: f.inmuebleId, holderId: new Types.ObjectId(), code: f.inmuebleCodigo },
+        inmueble: {
+          _id: f.inmuebleId,
+          holderId: new Types.ObjectId(),
+          code: f.inmuebleCodigo,
+        },
         candidatosOrdenados: [],
         saldoPorDocumento: new Map(),
       },
@@ -454,8 +458,12 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
     );
 
     expect(errores).toHaveLength(0);
-    expect(recibosService.leerDatosBatchAplicacionLote).toHaveBeenCalledTimes(1);
-    expect(recibosService.escribirEscriturasTandaAplicacionLote).toHaveBeenCalledTimes(1);
+    expect(recibosService.leerDatosBatchAplicacionLote).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(
+      recibosService.escribirEscriturasTandaAplicacionLote,
+    ).toHaveBeenCalledTimes(1);
     expect(lote.status).toBe('aplicado');
     expect(filas[0].reciboId).not.toBeNull();
   });
@@ -481,12 +489,11 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
 
     await service.ejecutarAplicacion(lote._id.toString(), COP, 'cuenta-1');
 
-    expect(recibosService.leerDatosBatchAplicacionLote).toHaveBeenCalledTimes(1);
-    const llamada = recibosService.leerDatosBatchAplicacionLote.mock.calls[0] as [
-      Types.ObjectId,
-      Types.ObjectId[],
-      Date[],
-    ];
+    expect(recibosService.leerDatosBatchAplicacionLote).toHaveBeenCalledTimes(
+      1,
+    );
+    const llamada = recibosService.leerDatosBatchAplicacionLote.mock
+      .calls[0] as [Types.ObjectId, Types.ObjectId[], Date[]];
     expect(llamada[1]).toHaveLength(2);
     expect(llamada[2]).toHaveLength(2);
   });
@@ -514,7 +521,9 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
   it('una falla de escritura genuina (bulkWrite) dentro de la transacción marca TODA la tanda con el mismo mensaje', async () => {
     const filas = [filaBase(), filaBase({ inmuebleCodigo: '302' })];
     const lote = construirLoteDoc(filas);
-    const escribirImpl = jest.fn().mockRejectedValue(new Error('conexión perdida'));
+    const escribirImpl = jest
+      .fn()
+      .mockRejectedValue(new Error('conexión perdida'));
     const { service } = construirServicio(lote, { escribirImpl });
 
     const { errores } = await service.ejecutarAplicacion(
@@ -539,7 +548,9 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
 
     await service.ejecutarAplicacion(lote._id.toString(), COP, 'cuenta-1');
 
-    expect(recibosService.escribirEscriturasTandaAplicacionLote).not.toHaveBeenCalled();
+    expect(
+      recibosService.escribirEscriturasTandaAplicacionLote,
+    ).not.toHaveBeenCalled();
     expect(connection.startSession).not.toHaveBeenCalled();
     expect(lote.status).toBe('aplicado');
   });
@@ -619,7 +630,9 @@ describe('LoteRecibosService.aplicar (enqueue path)', () => {
 
     await service.aplicar(lote._id.toString(), 'cuenta-1');
 
-    expect(recibosService.escribirEscriturasTandaAplicacionLote).toHaveBeenCalledTimes(1);
+    expect(
+      recibosService.escribirEscriturasTandaAplicacionLote,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('con cola configurada, encola el trabajo y espera su resultado', async () => {
