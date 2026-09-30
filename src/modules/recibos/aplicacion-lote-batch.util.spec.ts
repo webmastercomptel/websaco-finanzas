@@ -19,7 +19,11 @@ const datosBase = (
     [
       INMUEBLE_ID.toString(),
       {
-        inmueble: { _id: INMUEBLE_ID, holderId: new Types.ObjectId(), code: '301' },
+        inmueble: {
+          _id: INMUEBLE_ID,
+          holderId: new Types.ObjectId(),
+          code: '301',
+        },
         candidatosOrdenados: [],
         saldoPorDocumento: new Map(),
       },
@@ -60,7 +64,9 @@ describe('validarFilaAplicacionLote', () => {
       datosBase({ periodoAbiertoPorMes: new Map([['2026-06', false]]) }),
     );
     expect(resultado.valido).toBe(false);
-    expect((resultado as { mensaje: string }).mensaje).toMatch(/06\/2026 está cerrado/);
+    expect((resultado as { mensaje: string }).mensaje).toMatch(
+      /06\/2026 está cerrado/,
+    );
   });
 
   it('cada fila se valida contra el período abierto de SU PROPIO mes en un lote con varios meses', () => {
@@ -115,12 +121,22 @@ describe('validarFilaAplicacionLote', () => {
   });
 });
 
+/** `candidatosOrdenados` is typed loosely (never the strict Mongoose
+ *  document union) on purpose — every caller below hand-rolls plain
+ *  object doc fixtures (not real Mongoose documents), and casting each one
+ *  individually would fight `.doc._id`-style direct property access in
+ *  the same test. `as never` here is the single place that trade-off is
+ *  made, matching this repo's own convention for hand-rolled mocks. */
 const inmuebleDatos = (
-  candidatosOrdenados: DatosInmuebleParaAplicacionLote['candidatosOrdenados'],
+  candidatosOrdenados: { tipo: string; doc: Record<string, unknown> }[],
   saldos: Record<string, number>,
 ): DatosInmuebleParaAplicacionLote => ({
-  inmueble: { _id: new Types.ObjectId(), holderId: new Types.ObjectId(), code: '301' },
-  candidatosOrdenados,
+  inmueble: {
+    _id: new Types.ObjectId(),
+    holderId: new Types.ObjectId(),
+    code: '301',
+  },
+  candidatosOrdenados: candidatosOrdenados as never,
   saldoPorDocumento: new Map(Object.entries(saldos)),
 });
 
@@ -128,6 +144,10 @@ const facturaCandidato = (over: Record<string, unknown> = {}) => {
   const conceptoId = new Types.ObjectId();
   return {
     tipo: 'FV' as const,
+    // Plain object, not a real Mongoose FacturaDocument — `as never`, same
+    // cast this file's other hand-rolled candidate fixtures already use
+    // (see the Nota Débito candidate below), since a hand-rolled test
+    // double can never structurally satisfy Mongoose's real Document type.
     doc: {
       _id: new Types.ObjectId(),
       inmuebleId: new Types.ObjectId(),
@@ -156,7 +176,12 @@ describe('aplicarFifoEnMemoria', () => {
   it('deja el monto completo como anticipo cuando el inmueble no tiene documentos abiertos (pura anticipo)', () => {
     const datos = inmuebleDatos([], {});
 
-    const resultado = aplicarFifoEnMemoria(datos, 250000, new Date('2026-06-02'), false);
+    const resultado = aplicarFifoEnMemoria(
+      datos,
+      250000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     expect(resultado.aplicaciones).toHaveLength(0);
     expect(resultado.montoSinAplicar).toBe(250000);
@@ -169,12 +194,21 @@ describe('aplicarFifoEnMemoria', () => {
       [candidato.doc._id.toString()]: 100000,
     });
 
-    const resultado = aplicarFifoEnMemoria(datos, 100000, new Date('2026-06-02'), false);
+    const resultado = aplicarFifoEnMemoria(
+      datos,
+      100000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     expect(resultado.montoSinAplicar).toBe(0);
     expect(resultado.aplicaciones).toHaveLength(1);
     expect(resultado.aplicaciones[0].montoAplicado).toBe(100000);
-    expect(resultado.resumen[0]).toEqual({ tipo: 'FV', numero: 1, completa: true });
+    expect(resultado.resumen[0]).toEqual({
+      tipo: 'FV',
+      numero: 1,
+      completa: true,
+    });
     expect(datos.saldoPorDocumento.get(candidato.doc._id.toString())).toBe(0);
   });
 
@@ -184,8 +218,18 @@ describe('aplicarFifoEnMemoria', () => {
       [candidato.doc._id.toString()]: 100000,
     });
 
-    const primeraFila = aplicarFifoEnMemoria(datos, 60000, new Date('2026-06-02'), false);
-    const segundaFila = aplicarFifoEnMemoria(datos, 60000, new Date('2026-06-02'), false);
+    const primeraFila = aplicarFifoEnMemoria(
+      datos,
+      60000,
+      new Date('2026-06-02'),
+      false,
+    );
+    const segundaFila = aplicarFifoEnMemoria(
+      datos,
+      60000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     expect(primeraFila.aplicaciones[0].montoAplicado).toBe(60000);
     // Solo quedaban 40000 quando corrió la segunda fila.
@@ -204,7 +248,12 @@ describe('aplicarFifoEnMemoria', () => {
       [candidato.doc._id.toString()]: 100000,
     });
 
-    const resultado = aplicarFifoEnMemoria(datos, 95000, new Date('2026-06-02'), false);
+    const resultado = aplicarFifoEnMemoria(
+      datos,
+      95000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     expect(resultado.aplicaciones[0].montoAplicado).toBe(100000);
     expect(resultado.aplicaciones[0].discountApplied).toBe(5000);
@@ -240,7 +289,12 @@ describe('aplicarFifoEnMemoria', () => {
       [candidato.doc._id.toString()]: 120000,
     });
 
-    const resultado = aplicarFifoEnMemoria(datos, 120000, new Date('2026-06-02'), false);
+    const resultado = aplicarFifoEnMemoria(
+      datos,
+      120000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     // Orden inverso: la línea de intereses (última en `lines`) se llena
     // primero — ver el docblock de `calcularPartesWaterfall`.
@@ -260,18 +314,29 @@ describe('aplicarFifoEnMemoria', () => {
         conceptoId,
         description: 'Multa por parqueadero',
         issueDate: new Date('2026-05-05'),
-      },
+      } as never, // not a real NotaDebitoDocument — same reasoning as facturaCandidato's own cast
     };
-    const datos = inmuebleDatos([candidato], { [notaDebitoId.toString()]: 30000 });
+    const datos = inmuebleDatos([candidato], {
+      [notaDebitoId.toString()]: 30000,
+    });
 
-    const resultado = aplicarFifoEnMemoria(datos, 30000, new Date('2026-06-02'), false);
+    const resultado = aplicarFifoEnMemoria(
+      datos,
+      30000,
+      new Date('2026-06-02'),
+      false,
+    );
 
     expect(resultado.aplicaciones[0]).toMatchObject({
       tipo: 'ND',
       montoAplicado: 30000,
       discountApplied: 0,
     });
-    expect(resultado.resumen[0]).toEqual({ tipo: 'ND', numero: 7, completa: true });
+    expect(resultado.resumen[0]).toEqual({
+      tipo: 'ND',
+      numero: 7,
+      completa: true,
+    });
   });
 });
 
@@ -295,7 +360,11 @@ const ctxBase = () => ({
   medioPago: 'transferencia' as const,
   destinationAccount: '111005',
   datosInmueble: {
-    inmueble: { _id: new Types.ObjectId(), holderId: new Types.ObjectId(), code: '301' },
+    inmueble: {
+      _id: new Types.ObjectId(),
+      holderId: new Types.ObjectId(),
+      code: '301',
+    },
     candidatosOrdenados: [],
     saldoPorDocumento: new Map(),
   },
@@ -412,7 +481,9 @@ describe('construirEscrituraFilaAplicacion', () => {
 
     expect(escritura.recibo.notes).toBe('Cancela factura 42');
     expect(
-      escritura.asientoContable.entries.some((m: { account: string }) => m.account === '530505'),
+      (escritura.asientoContable.entries as { account: string }[]).some(
+        (m) => m.account === '530505',
+      ),
     ).toBe(true);
   });
 
@@ -429,7 +500,11 @@ describe('construirEscrituraFilaAplicacion', () => {
 
 const filaTanda = (
   over: Partial<LoteRecibosFila> = {},
-): { fila: LoteRecibosFila; indice: number; numero: { prefijo: string; numero: number; completo: string } } => ({
+): {
+  fila: LoteRecibosFila;
+  indice: number;
+  numero: { prefijo: string; numero: number; completo: string };
+} => ({
   fila: {
     inmuebleId: new Types.ObjectId(),
     inmuebleCodigo: '301',
@@ -450,7 +525,11 @@ const datosParaInmueble = (
     [
       inmuebleId.toString(),
       {
-        inmueble: { _id: inmuebleId, holderId: new Types.ObjectId(), code: '301' },
+        inmueble: {
+          _id: inmuebleId,
+          holderId: new Types.ObjectId(),
+          code: '301',
+        },
         candidatosOrdenados: [],
         saldoPorDocumento: new Map(),
       },
@@ -488,12 +567,18 @@ describe('procesarFilasTandaAplicacionLote', () => {
       { ...filaTanda({ inmuebleId: inmuebleB }), indice: 1 },
     ];
 
-    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+    const resultado = procesarFilasTandaAplicacionLote(
+      filas,
+      datos,
+      ctxTanda(),
+    );
 
     expect(resultado.ok).toBe(true);
     if (!resultado.ok) throw new Error('expected ok');
     expect(resultado.escrituras).toHaveLength(2);
-    expect(resultado.escrituras[0].reciboId).not.toEqual(resultado.escrituras[1].reciboId);
+    expect(resultado.escrituras[0].reciboId).not.toEqual(
+      resultado.escrituras[1].reciboId,
+    );
   });
 
   it('una fila inválida anula TODA la tanda con el mismo mensaje-colateral que produce hoy procesarTanda', () => {
@@ -507,12 +592,18 @@ describe('procesarFilasTandaAplicacionLote', () => {
       { ...filaTanda({ inmuebleId: inmuebleA }), indice: 1 },
     ];
 
-    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+    const resultado = procesarFilasTandaAplicacionLote(
+      filas,
+      datos,
+      ctxTanda(),
+    );
 
     expect(resultado.ok).toBe(false);
     if (resultado.ok) throw new Error('expected error');
     expect(resultado.erroresPorIndice.get(0)).toMatch(/06\/2026 está cerrado/);
-    expect(resultado.erroresPorIndice.get(1)).toMatch(/Revertida junto con la fila 1, que falló/);
+    expect(resultado.erroresPorIndice.get(1)).toMatch(
+      /Revertida junto con la fila 1, que falló/,
+    );
   });
 
   it('dos filas del mismo tanda contra el mismo inmueble comparten y consumen el mismo saldoPorDocumento', () => {
@@ -523,7 +614,11 @@ describe('procesarFilasTandaAplicacionLote', () => {
         [
           inmuebleA.toString(),
           {
-            inmueble: { _id: inmuebleA, holderId: new Types.ObjectId(), code: '301' },
+            inmueble: {
+              _id: inmuebleA,
+              holderId: new Types.ObjectId(),
+              code: '301',
+            },
             candidatosOrdenados: [
               {
                 tipo: 'FV',
@@ -561,16 +656,27 @@ describe('procesarFilasTandaAplicacionLote', () => {
 
     const filas = [
       filaTanda({ inmuebleId: inmuebleA, valorRecibido: 90000 }),
-      { ...filaTanda({ inmuebleId: inmuebleA, valorRecibido: 90000 }), indice: 1 },
+      {
+        ...filaTanda({ inmuebleId: inmuebleA, valorRecibido: 90000 }),
+        indice: 1,
+      },
     ];
 
-    const resultado = procesarFilasTandaAplicacionLote(filas, datos, ctxTanda());
+    const resultado = procesarFilasTandaAplicacionLote(
+      filas,
+      datos,
+      ctxTanda(),
+    );
 
     expect(resultado.ok).toBe(true);
     if (!resultado.ok) throw new Error('expected ok');
     // 150000 repartidos entre dos pagos de 90000: la primera fila aplica
     // 90000, la segunda solo puede aplicar los 60000 que quedan.
-    expect(resultado.escrituras[0].saldoTotalDocumentoDeltas[0].delta).toBe(-90000);
-    expect(resultado.escrituras[1].saldoTotalDocumentoDeltas[0].delta).toBe(-60000);
+    expect(resultado.escrituras[0].saldoTotalDocumentoDeltas[0].delta).toBe(
+      -90000,
+    );
+    expect(resultado.escrituras[1].saldoTotalDocumentoDeltas[0].delta).toBe(
+      -60000,
+    );
   });
 });

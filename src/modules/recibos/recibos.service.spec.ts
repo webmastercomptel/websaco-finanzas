@@ -4230,9 +4230,7 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
 });
 
 // `RecibosService`, `Types` and `ConflictException` are already imported at
-// the top of this file — only this new type import is needed.
-import type { DatosBatchAplicacionLote } from './aplicacion-lote-batch.util';
-
+// the top of this file.
 describe('RecibosService.leerDatosBatchAplicacionLote', () => {
   const COP = new Types.ObjectId();
   const INMUEBLE_ID = new Types.ObjectId();
@@ -4267,7 +4265,9 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
         exec: () => Promise.resolve(opciones.facturas ?? []),
       })),
     };
-    const vacioModel = { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) };
+    const vacioModel = {
+      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+    };
     const saldoTotalDocumentoModel = {
       find: jest.fn(() => ({
         exec: () => Promise.resolve(opciones.saldosTotales ?? []),
@@ -4326,7 +4326,10 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
     const { service } = construirServicio({
       facturas: [
         facturaDoc(),
-        facturaDoc({ _id: FACTURA_CERRADA_ID, dueDate: new Date('2026-05-15') }),
+        facturaDoc({
+          _id: FACTURA_CERRADA_ID,
+          dueDate: new Date('2026-05-15'),
+        }),
       ],
       saldosTotales: [
         { documentoId: FACTURA_ABIERTA_ID, saldoPendiente: 100000 },
@@ -4343,17 +4346,23 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
     const datosInmueble = datos.indicePorInmueble.get(INMUEBLE_ID.toString())!;
     expect(datosInmueble.candidatosOrdenados).toHaveLength(1);
     expect(datosInmueble.candidatosOrdenados[0]).toMatchObject({ tipo: 'FV' });
-    expect(datosInmueble.saldoPorDocumento.get(FACTURA_ABIERTA_ID.toString())).toBe(
-      100000,
-    );
+    expect(
+      datosInmueble.saldoPorDocumento.get(FACTURA_ABIERTA_ID.toString()),
+    ).toBe(100000);
   });
 
   it('llama exigirSinLoteAbierto (una sola vez para todo el lote) y propaga su rechazo', async () => {
     const { service, exigirSinLoteAbierto } = construirServicio({});
-    exigirSinLoteAbierto.mockRejectedValueOnce(new ConflictException('lote abierto'));
+    exigirSinLoteAbierto.mockRejectedValueOnce(
+      new ConflictException('lote abierto'),
+    );
 
     await expect(
-      service.leerDatosBatchAplicacionLote(COP, [INMUEBLE_ID], [new Date('2026-06-02')]),
+      service.leerDatosBatchAplicacionLote(
+        COP,
+        [INMUEBLE_ID],
+        [new Date('2026-06-02')],
+      ),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(exigirSinLoteAbierto).toHaveBeenCalledTimes(1);
   });
@@ -4431,7 +4440,9 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
     carteraPorDocumento: { bulkWrite: jest.fn().mockResolvedValue({}) },
   });
 
-  const construirServicio = (modelos: ReturnType<typeof construirModelosMock>) =>
+  const construirServicio = (
+    modelos: ReturnType<typeof construirModelosMock>,
+  ) =>
     new RecibosService(
       modelos.recibos as never,
       modelos.aplicaciones as never,
@@ -4458,7 +4469,11 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
       escrituraDe(new Types.ObjectId(), -30000),
     ];
 
-    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, escrituras);
+    await service.escribirEscriturasTandaAplicacionLote(
+      SESSION,
+      COP,
+      escrituras,
+    );
 
     expect(modelos.recibos.insertMany).toHaveBeenCalledTimes(1);
     expect(modelos.recibos.insertMany).toHaveBeenCalledWith(
@@ -4477,10 +4492,20 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
       escrituraDe(documentoId, -30000),
     ];
 
-    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, escrituras);
+    await service.escribirEscriturasTandaAplicacionLote(
+      SESSION,
+      COP,
+      escrituras,
+    );
 
-    const [operaciones] = modelos.saldoTotalDocumento.bulkWrite.mock.calls[0] as [
-      { updateOne: { filter: Record<string, unknown>; update: Record<string, unknown> } }[],
+    const [operaciones] = modelos.saldoTotalDocumento.bulkWrite.mock
+      .calls[0] as [
+      {
+        updateOne: {
+          filter: Record<string, unknown>;
+          update: Record<string, unknown>;
+        };
+      }[],
     ];
     expect(operaciones).toHaveLength(1);
     expect(operaciones[0].updateOne.update).toEqual({
@@ -4490,7 +4515,9 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
 
   it('lanza ConflictException cuando el guard de SaldoTotalDocumento no encuentra suficiente saldo', async () => {
     const modelos = construirModelosMock();
-    modelos.saldoTotalDocumento.bulkWrite.mockResolvedValue({ matchedCount: 0 });
+    modelos.saldoTotalDocumento.bulkWrite.mockResolvedValue({
+      matchedCount: 0,
+    });
     const service = construirServicio(modelos);
 
     await expect(
@@ -4509,7 +4536,9 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
       aplicacionesCartera: [],
     };
 
-    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [soloAnticipo]);
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [
+      soloAnticipo,
+    ]);
 
     expect(modelos.saldoTotalDocumento.bulkWrite).not.toHaveBeenCalled();
     expect(modelos.aplicaciones.insertMany).not.toHaveBeenCalled();
