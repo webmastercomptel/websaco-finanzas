@@ -1,18 +1,15 @@
-import { createElement } from 'react';
-import { StyleSheet, Text, View } from '@react-pdf/renderer';
-import type { Style } from '@react-pdf/types';
-import { formatoFecha } from './pdf-helpers';
-import {
-  reporteDocumentoMultiPagina,
-  renderizarPdf,
-  CONTENT_WIDTH_PT_HORIZONTAL,
-} from './react/document';
-import { CreditoWebsaco } from './react/credito-websaco';
+import { createElement, type ReactElement } from 'react';
+import { formatoFecha, formatoPesoSinSimbolo } from './pdf-helpers';
 import { EncabezadoInforme } from './react/encabezado-informe';
-import { FONDO_ZEBRA } from './react/paleta';
-import { truncarTexto } from './react/text-measure';
+import {
+  construirPdfTablaAgrupada,
+  numeroSinTipo,
+  type ColumnaTablaAgrupada,
+  type LineaTablaAgrupada,
+} from './react/tabla-agrupada';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type {
+  FilaVencimientoCartera,
   RangoVencimiento,
   RespuestaVencimientosCartera,
 } from '../../contracts';
@@ -29,52 +26,28 @@ const RANGOS: { rango: RangoVencimiento; etiqueta: string }[] = [
   { rango: 'dias_720_mas', etiqueta: '+720' },
 ];
 
-interface ColumnaTabla {
-  titulo: string;
-  peso: number;
-  numerica: boolean;
-}
+const COLUMNAS_RANGO: ColumnaTablaAgrupada[] = RANGOS.map((r) => ({
+  titulo: r.etiqueta,
+  peso: 0.9,
+  numerica: true,
+}));
 
-const COLUMNAS: ColumnaTabla[] = [
-  { titulo: 'Código', peso: 0.9, numerica: false },
-  { titulo: 'Nombre', peso: 1.6, numerica: false },
-  { titulo: 'Tipo', peso: 0.6, numerica: false },
-  { titulo: 'Número', peso: 1.2, numerica: false },
-  { titulo: 'Fecha', peso: 0.9, numerica: false },
-  { titulo: 'Vence', peso: 0.9, numerica: false },
-  { titulo: 'Días', peso: 0.6, numerica: true },
-  { titulo: 'Saldo', peso: 1.1, numerica: true },
-  ...RANGOS.map((r) => ({ titulo: r.etiqueta, peso: 1, numerica: true })),
-];
-const PESO_TOTAL = COLUMNAS.reduce((acc, c) => acc + c.peso, 0);
-/** Absolute pt widths, precomputed from the same weights the flex columns
- *  use — needed by `truncarTexto`, which measures against a real width,
- *  not a flex ratio. */
-const ANCHOS_PT = COLUMNAS.map(
-  (c) => (c.peso / PESO_TOTAL) * CONTENT_WIDTH_PT_HORIZONTAL,
-);
+const ESTADO_INMUEBLE_LABELS = { activo: 'Activos', inactivo: 'Inactivos' };
+const ESTADO_CARTERA_LABELS = {
+  vigente: 'Vigente',
+  juridico: 'En Jurídico',
+  dificil_recaudo: 'Difícil Recaudo',
+};
 
-const FUENTE_DATOS = 6.5;
-
-/** Rows per page, computed by hand rather than left to react-pdf's
- *  automatic `wrap` pagination — a masthead+table-header repeated via
- *  `fixed` on every page turned out to NOT reserve its own height against
- *  react-pdf's row-fitting estimate (verified empirically: raising the
- *  page's bottom padding shrank the row count per page correctly, but the
- *  last 1-2 rows kept overlapping the fixed footer regardless of how much
- *  padding was added — the estimate and the actual fixed-element geometry
- *  were fighting each other, not converging). Manual, per-page `<Page>`
- *  elements (`reporteDocumentoMultiPagina`, already built for the
- *  facturas-lote/prefacturas-lote merge) sidestep the interaction
- *  entirely — same approach the pdf-lib original used (`nuevaPagina()`),
- *  just built once instead of triggered by a live cursor position.
- *  612 (landscape height) − 100 (top+bottom padding) − ~50 (masthead+table
- *  header) − ~20 (footer clearance) ≈ 442pt ÷ ~10.5pt/row ≈ 42; kept at 38
- *  for headroom against `Text`'s own line-height rounding. */
-const FILAS_POR_PAGINA = 38;
-
-function formatoPesoCompacto(valor: number): string {
-  return valor.toLocaleString('es-CO', { maximumFractionDigits: 0 });
+export interface FiltroPdfVencimientos {
+  inmuebleId?: string;
+  rango?: RangoVencimiento;
+  /** Already applied server-side by `VencimientosCarteraService` — only
+   *  used here to name the filter in the subtitle. */
+  estadoInmueble?: 'activo' | 'inactivo';
+  /** Same as `estadoInmueble`: applied upstream, named in the subtitle. */
+  estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo';
+  tipo?: 'resumido' | 'detallado';
 }
 
 /** Narrows `reporte` to one inmueble and/or one aging bucket — the same
@@ -83,7 +56,7 @@ function formatoPesoCompacto(valor: number): string {
  *  whichever filters were active instead of always printing everything. */
 function filtrarReporte(
   reporte: RespuestaVencimientosCartera,
-  filtro: { inmuebleId?: string; rango?: RangoVencimiento },
+  filtro: FiltroPdfVencimientos,
 ): RespuestaVencimientosCartera {
   if (!filtro.inmuebleId && !filtro.rango) return reporte;
 
@@ -106,173 +79,171 @@ function filtrarReporte(
   return { ...reporte, filas, rangos, totalCartera };
 }
 
-function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
-  if (items.length === 0) return [[]];
-  const paginas: T[][] = [];
-  for (let i = 0; i < items.length; i += porPagina) {
-    paginas.push(items.slice(i, i + porPagina));
-  }
-  return paginas;
+/** The bucket columns' cells for a set of rows: each bucket's summed saldo. */
+function montosPorRango(filas: FilaVencimientoCartera[]): string[] {
+  return RANGOS.map((r) =>
+    formatoPesoSinSimbolo(
+      filas
+        .filter((f) => f.rango === r.rango)
+        .reduce((sum, f) => sum + f.saldo, 0),
+    ),
+  );
 }
 
-const styles = StyleSheet.create({
-  filaEncabezado: {
-    flexDirection: 'row',
-    backgroundColor: '#ededed',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#999999',
-    paddingVertical: 3,
-    marginTop: 6,
-    marginBottom: 3,
-  },
-  fila: {
-    flexDirection: 'row',
-    paddingVertical: 1.5,
-  },
-  filaPar: {
-    backgroundColor: FONDO_ZEBRA,
-  },
-  filaFinal: {
-    flexDirection: 'row',
-    backgroundColor: '#ededed',
-    paddingVertical: 3,
-    marginTop: 2,
-  },
-  celdaEncabezado: {
-    fontSize: 7,
-    fontFamily: 'Helvetica-Bold',
-  },
-  celda: {
-    fontSize: FUENTE_DATOS,
-    fontFamily: 'Helvetica',
-  },
-  celdaFinal: {
-    fontSize: FUENTE_DATOS,
-    fontFamily: 'Helvetica-Bold',
-  },
-});
-
-const celdaEstilo = (
-  i: number,
-  variante: 'encabezado' | 'normal' | 'final',
-): Style => ({
-  flexGrow: COLUMNAS[i].peso,
-  flexBasis: 0,
-  textAlign: COLUMNAS[i].numerica ? 'right' : 'left',
-  paddingRight: 3,
-  ...(variante === 'encabezado'
-    ? styles.celdaEncabezado
-    : variante === 'final'
-      ? styles.celdaFinal
-      : styles.celda),
-});
+/** Rows grouped by inmueble, keeping the service's own order (código, then
+ *  fecha). */
+function agruparPorInmueble(
+  filas: FilaVencimientoCartera[],
+): FilaVencimientoCartera[][] {
+  const grupos = new Map<string, FilaVencimientoCartera[]>();
+  for (const f of filas) {
+    const lista = grupos.get(f.inmuebleId) ?? [];
+    lista.push(f);
+    grupos.set(f.inmuebleId, lista);
+  }
+  return [...grupos.values()];
+}
 
 /**
- * Generates a real PDF for Vencimientos de Cartera: every pending document
- * coproperty-wide, aged into its own column — 17 columns total (8 fixed +
- * 9 aging buckets, all fixed, never per-coproperty dynamic). `filtro`
- * narrows to one inmueble and/or one aging bucket, matching whatever's
- * active on screen.
+ * Generates the Vencimientos de Cartera PDF in one of two shapes, the same
+ * split Cartera por Conceptos offers (product request, 2026-09-28):
  *
- * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
- * toggle). Paginated by hand (see `FILAS_POR_PAGINA`'s docblock) — one
- * `<Page>` per row-chunk, each carrying its own masthead + table header, the
- * TOTAL row only on the last one.
+ * - "detallado" (default): one row per pending document, grouped under an
+ *   "Inmueble — Propietario — Celular" header with a per-inmueble subtotal,
+ *   its saldo repeated under whichever aging-bucket column it falls into.
+ * - "resumido": one row per inmueble — its total saldo split across the
+ *   aging buckets.
+ *
+ * Both close with a TOTALES row, print amounts without "$", and share
+ * `construirPdfTablaAgrupada`'s fonts and manual pagination. `filtro`
+ * narrows to one inmueble and/or one aging bucket, matching the screen; the
+ * unit/collection-status filters were already applied by the service and
+ * are only named in the subtitle here.
  */
 export async function generarPdfVencimientosCartera(
   reporteCompleto: RespuestaVencimientosCartera,
   copropiedad: CopropiedadDocument,
-  filtro: { inmuebleId?: string; rango?: RangoVencimiento } = {},
+  filtro: FiltroPdfVencimientos = {},
 ): Promise<Buffer> {
   const reporte = filtrarReporte(reporteCompleto, filtro);
-  const subtitulo = `Corte al ${formatoFecha(reporte.fechaCorte)}`;
-  const totalPorRango = new Map(reporte.rangos.map((r) => [r.rango, r.valor]));
+  const tipo = filtro.tipo ?? 'detallado';
 
-  const celda = (
-    texto: string,
-    i: number,
-    variante: 'encabezado' | 'normal' | 'final',
-  ) =>
-    createElement(
-      Text,
-      { key: i, style: celdaEstilo(i, variante) },
-      variante === 'normal'
-        ? truncarTexto(texto, ANCHOS_PT[i], FUENTE_DATOS)
-        : texto,
-    );
-
-  const bloquesFilas = agruparEnPaginas(reporte.filas, FILAS_POR_PAGINA);
+  const partesSubtitulo = [
+    tipo === 'resumido' ? 'Resumido' : 'Detallado',
+    `Corte al ${formatoFecha(reporte.fechaCorte)}`,
+    filtro.estadoCartera
+      ? `Estado Cartera: ${ESTADO_CARTERA_LABELS[filtro.estadoCartera]}`
+      : null,
+  ].filter((p): p is string => p !== null);
+  // The unit-status filter gets its own line under the title (product
+  // request, 2026-09-29), same as Cartera por Conceptos.
+  const lineaInmuebles = filtro.estadoInmueble
+    ? `Inmuebles: ${ESTADO_INMUEBLE_LABELS[filtro.estadoInmueble]}`
+    : null;
+  // Computed once, outside any page — every page's footer shows the same
+  // instant (stamped next to "Generado con", not in the masthead).
   const fechaGeneracion = new Date();
+  const crearEncabezado = (): ReactElement =>
+    createElement(EncabezadoInforme, {
+      copropiedad,
+      titulo: 'VENCIMIENTOS DE CARTERA',
+      subtitulo: [
+        partesSubtitulo.join(' — '),
+        ...(lineaInmuebles ? [lineaInmuebles] : []),
+      ],
+    });
 
-  const paginas = bloquesFilas.map((bloque, indicePagina) => {
-    const esUltima = indicePagina === bloquesFilas.length - 1;
-
-    return createElement(
-      View,
-      null,
-      createElement(EncabezadoInforme, {
-        copropiedad,
-        titulo: 'VENCIMIENTOS DE CARTERA',
-        subtitulo,
-        fechaGeneracion,
-      }),
-      createElement(
-        View,
-        { style: styles.filaEncabezado, wrap: false },
-        ...COLUMNAS.map((c, i) => celda(c.titulo, i, 'encabezado')),
+  const grupos = agruparPorInmueble(reporte.filas);
+  const totales = {
+    etiqueta: 'TOTALES',
+    valores: [
+      formatoPesoSinSimbolo(reporte.totalCartera),
+      ...RANGOS.map((r) =>
+        formatoPesoSinSimbolo(
+          reporte.rangos.find((x) => x.rango === r.rango)?.valor ?? 0,
+        ),
       ),
+    ],
+  };
 
-      ...bloque.map((f, filaIdx) => {
-        const valores = [
-          f.inmuebleCodigo,
-          f.propietario ?? '—',
-          f.tipo,
-          f.numeroCompleto,
-          formatoFecha(f.fecha),
-          formatoFecha(f.vence),
-          String(f.diasMora),
-          formatoPesoCompacto(f.saldo),
-          ...RANGOS.map((r) =>
-            f.rango === r.rango ? formatoPesoCompacto(f.saldo) : '',
-          ),
-        ];
-        return createElement(
-          View,
-          {
-            key: filaIdx,
-            style:
-              filaIdx % 2 === 1 ? [styles.fila, styles.filaPar] : styles.fila,
-            wrap: false,
-          },
-          ...valores.map((v, i) => celda(v, i, 'normal')),
-        );
-      }),
-
-      esUltima
-        ? createElement(
-            View,
-            { style: styles.filaFinal, wrap: false },
-            ...[
-              'TOTAL',
-              '',
-              '',
-              '',
-              '',
-              '',
-              '',
-              formatoPesoCompacto(reporte.totalCartera),
-              ...RANGOS.map((r) =>
-                formatoPesoCompacto(totalPorRango.get(r.rango) ?? 0),
-              ),
-            ].map((v, i) => celda(v, i, 'final')),
-          )
-        : null,
-
-      createElement(CreditoWebsaco, {}),
+  if (tipo === 'resumido') {
+    const lineas: LineaTablaAgrupada[][] = grupos.map((filas, i) => {
+      const f = filas[0];
+      return [
+        {
+          clase: 'documento',
+          par: i % 2 === 1,
+          celdas: [
+            f.inmuebleCodigo,
+            f.propietario ?? '—',
+            f.celular ?? '—',
+            formatoPesoSinSimbolo(filas.reduce((s, x) => s + x.saldo, 0)),
+            ...montosPorRango(filas),
+          ],
+        },
+      ];
+    });
+    return construirPdfTablaAgrupada(
+      crearEncabezado,
+      [
+        { titulo: 'Inmueble', peso: 0.8, numerica: false },
+        { titulo: 'Propietario', peso: 2, numerica: false },
+        { titulo: 'Celular', peso: 1, numerica: false },
+        { titulo: 'Saldo', peso: 1, numerica: true },
+        ...COLUMNAS_RANGO,
+      ],
+      lineas,
+      totales,
+      fechaGeneracion,
     );
-  });
+  }
 
-  return renderizarPdf(
-    reporteDocumentoMultiPagina(paginas, { orientacion: 'horizontal' }),
+  const lineas: LineaTablaAgrupada[][] = grupos.map((filas) => {
+    const f = filas[0];
+    return [
+      {
+        clase: 'grupo',
+        texto: `Inmueble ${f.inmuebleCodigo} — ${f.propietario ?? 'Sin propietario'} — Celular: ${f.celular ?? '—'}`,
+      },
+      ...filas.map((d, i): LineaTablaAgrupada => ({
+        clase: 'documento',
+        par: i % 2 === 1,
+        celdas: [
+          d.tipo,
+          numeroSinTipo(d.numeroCompleto),
+          formatoFecha(d.fecha),
+          formatoFecha(d.vence),
+          String(d.diasMora),
+          formatoPesoSinSimbolo(d.saldo),
+          ...RANGOS.map((r) =>
+            d.rango === r.rango ? formatoPesoSinSimbolo(d.saldo) : '',
+          ),
+        ],
+      })),
+      {
+        clase: 'subtotal',
+        etiqueta: `Total inmueble ${f.inmuebleCodigo}`,
+        valores: [
+          '',
+          formatoPesoSinSimbolo(filas.reduce((s, x) => s + x.saldo, 0)),
+          ...montosPorRango(filas),
+        ],
+      },
+    ];
+  });
+  return construirPdfTablaAgrupada(
+    crearEncabezado,
+    [
+      { titulo: 'Tipo', peso: 0.5, numerica: false },
+      { titulo: 'Número', peso: 0.9, numerica: false },
+      { titulo: 'Fecha', peso: 0.8, numerica: false },
+      { titulo: 'Vence', peso: 0.8, numerica: false },
+      { titulo: 'Días', peso: 0.5, numerica: true },
+      { titulo: 'Saldo', peso: 1, numerica: true },
+      ...COLUMNAS_RANGO,
+    ],
+    lineas,
+    { ...totales, valores: ['', ...totales.valores] },
+    fechaGeneracion,
   );
 }

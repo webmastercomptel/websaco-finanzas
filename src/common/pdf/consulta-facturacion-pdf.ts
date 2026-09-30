@@ -25,7 +25,7 @@ const FONT_DATA = 7;
 /** Rows per page, computed by hand rather than left to react-pdf's automatic
  *  `wrap` pagination — same reasoning as `vencimientos-cartera-pdf.ts`'s own
  *  `FILAS_POR_PAGINA`. */
-const FILAS_POR_PAGINA = 30;
+const FILAS_POR_PAGINA = 36;
 
 /** Same grouping-thousands format as `formatoPeso`, minus the "$ " prefix —
  *  this table is dense enough (up to sixteen columns) that the symbol on
@@ -237,7 +237,6 @@ export async function generarPdfConsultaFacturacion(
         copropiedad,
         titulo: 'CONSULTA DE FACTURACIÓN',
         subtitulo,
-        fechaGeneracion,
       }),
 
       createElement(
@@ -267,7 +266,7 @@ export async function generarPdfConsultaFacturacion(
           )
         : null,
 
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     );
   });
 

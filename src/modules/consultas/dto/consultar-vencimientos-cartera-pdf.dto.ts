@@ -29,4 +29,21 @@ export class ConsultarVencimientosCarteraPdfDto {
   @IsOptional()
   @IsIn(RANGOS_VALIDOS)
   rango?: RangoVencimiento;
+
+  /** See `ConsultarVencimientosCarteraDto.estadoInmueble`. */
+  @IsOptional()
+  @IsIn(['activo', 'inactivo'])
+  estadoInmueble?: 'activo' | 'inactivo';
+
+  /** See `ConsultarVencimientosCarteraDto.estadoCartera`. */
+  @IsOptional()
+  @IsIn(['vigente', 'juridico', 'dificil_recaudo'])
+  estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo';
+
+  /** "resumido" = one row per inmueble; "detallado" (default) = one row
+   *  per document, grouped by inmueble — same split as Cartera por
+   *  Conceptos. */
+  @IsOptional()
+  @IsIn(['resumido', 'detallado'])
+  tipo?: 'resumido' | 'detallado';
 }

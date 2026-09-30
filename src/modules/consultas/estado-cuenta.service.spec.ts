@@ -191,6 +191,65 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoAnterior).toBe(150000);
     });
 
+    it('documentosSaldoAnterior lista las facturas anteriores con saldo y suma exactamente saldoAnterior', async () => {
+      const inmId = id();
+      const fPagadaId = id();
+      const fParcialId = id();
+      const rId = id();
+      const fPagada = facturaDoc({
+        _id: fPagadaId,
+        inmuebleId: inmId,
+        fullNumber: 'FV-0010',
+        total: 100000,
+        issueDate: new Date('2025-11-01'),
+      });
+      const fParcial = facturaDoc({
+        _id: fParcialId,
+        inmuebleId: inmId,
+        fullNumber: 'FV-0020',
+        total: 200000,
+        issueDate: new Date('2025-12-01'),
+        dueDate: new Date('2025-12-15'),
+      });
+      // Emitida dentro del período — no forma parte del saldo anterior.
+      const fDelPeriodo = facturaDoc({
+        inmuebleId: inmId,
+        fullNumber: 'FV-0030',
+        total: 300000,
+        issueDate: new Date('2026-01-05'),
+      });
+      const r = reciboDoc({ _id: rId, receivedDate: new Date('2025-12-20') });
+      const apps = [
+        appDoc(rId, 'RC', { documentId: fPagadaId, amountApplied: 100000 }),
+        appDoc(rId, 'RC', { documentId: fParcialId, amountApplied: 50000 }),
+      ];
+
+      const svc = servicio({
+        facturas: mockFind([fPagada, fParcial, fDelPeriodo]),
+        recibos: mockFind([r]),
+        aplicaciones: mockFind(apps),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.saldoAnterior).toBe(150000);
+      expect(result.documentosSaldoAnterior).toEqual([
+        {
+          tipo: 'FV',
+          numeroCompleto: 'FV-0020',
+          fecha: '2025-12-01T00:00:00.000Z',
+          vence: '2025-12-15T00:00:00.000Z',
+          saldo: 150000,
+        },
+      ]);
+      expect(result.ajusteSaldoAnterior).toBe(0);
+    });
+
     it('el concepto de una Factura es su nombre de documento, no una oración con su número (que ya tiene columna propia)', async () => {
       const inmId = id();
       const f = facturaDoc({

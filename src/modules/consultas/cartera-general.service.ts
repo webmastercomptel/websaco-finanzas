@@ -25,14 +25,20 @@ import {
   ConceptoCobro,
   ConceptoCobroDocument,
 } from '../../database/schemas/conceptos/concepto-cobro.schema';
+import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import {
   calcularDocumentosConSaldoAFecha,
   finDelDiaCorte,
 } from './cartera-historica.util';
+import { RANGOS, clasificarVencido } from './vencimientos-cartera.service';
 import type {
   RespuestaCarteraGeneral,
   CarteraPorConcepto,
+  LineaParticipacionCartera,
   RecaudoMensual,
 } from '../../contracts';
 import type { ConsultarCarteraGeneralDto } from './dto/consultar-cartera-general.dto';
@@ -73,6 +79,8 @@ export class CarteraGeneralService {
     private readonly tenant: TenantContextService,
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
   ) {}
 
   async findAll(
@@ -117,8 +125,51 @@ export class CarteraGeneralService {
       }
     }
 
-    const porcentajeVencido =
-      totalCartera > 0 ? (totalVencido / totalCartera) * 100 : 0;
+    const participacion = (monto: number): number =>
+      totalCartera > 0 ? (monto / totalCartera) * 100 : 0;
+    const porcentajeVencido = participacion(totalVencido);
+
+    // Análisis de Vencimientos: same vencido/pendiente split as the KPIs
+    // above, then each overdue document into the same fixed buckets
+    // Vencimientos de Cartera uses — so the buckets always sum back to
+    // `totalVencido`.
+    const montoPorRango = new Map<string, number>(
+      RANGOS.map((r) => [r.key, 0]),
+    );
+    for (const doc of documentos) {
+      if (doc.fechaReferencia < fecha) {
+        const rango = clasificarVencido(
+          calcularDiasMora(doc.fechaReferencia, fecha),
+        );
+        montoPorRango.set(
+          rango,
+          (montoPorRango.get(rango) ?? 0) + doc.montoPendiente,
+        );
+      }
+    }
+    const analisisVencimientos: LineaParticipacionCartera[] = [
+      {
+        etiqueta: 'Sin vencer',
+        monto: totalPendiente,
+        porcentaje: participacion(totalPendiente),
+      },
+      ...RANGOS.map((r) => {
+        const monto = montoPorRango.get(r.key) ?? 0;
+        return {
+          etiqueta: r.etiqueta,
+          monto,
+          porcentaje: participacion(monto),
+        };
+      }),
+    ];
+
+    const carteraPorEstado = (
+      await this.calcularCarteraPorEstado(coPropertyId, documentos)
+    ).map(({ etiqueta, monto }) => ({
+      etiqueta,
+      monto,
+      porcentaje: participacion(monto),
+    }));
 
     // diasPromedioMora: average across inmuebles currently vencido at fecha
     const diasMoraMap = new Map<string, number>();
@@ -154,11 +205,49 @@ export class CarteraGeneralService {
       totalVencido,
       totalPendiente,
       porcentajeVencido,
+      porcentajePendiente: participacion(totalPendiente),
       totalCarteraMesAnterior,
       diasPromedioMora: Math.round(diasPromedioMora * 10) / 10,
       carteraPorConcepto,
       tendenciaRecaudo,
+      analisisVencimientos,
+      carteraPorEstado,
     };
+  }
+
+  /**
+   * Splits the point-in-time balance by each owning unit's CURRENT
+   * `collectionStatus` (there's no history of that field — a unit moved to
+   * jurídico today counts as jurídico for any cut-off date). A unit missing
+   * from the catalog falls back to `vigente`, the schema's own default.
+   */
+  private async calcularCarteraPorEstado(
+    coPropertyId: Types.ObjectId,
+    documentos: { inmuebleId: Types.ObjectId; montoPendiente: number }[],
+  ): Promise<{ etiqueta: string; monto: number }[]> {
+    const montos = { vigente: 0, juridico: 0, dificil_recaudo: 0 };
+    if (documentos.length > 0) {
+      const ids = [
+        ...new Set(documentos.map((d) => d.inmuebleId.toString())),
+      ].map((x) => new Types.ObjectId(x));
+      const inmuebles = await this.inmuebles
+        .find({ coPropertyId, _id: { $in: ids } })
+        .select('collectionStatus')
+        .exec();
+      const estadoPorInmueble = new Map(
+        inmuebles.map((i) => [i._id.toString(), i.collectionStatus]),
+      );
+      for (const doc of documentos) {
+        const estado =
+          estadoPorInmueble.get(doc.inmuebleId.toString()) ?? 'vigente';
+        montos[estado] += doc.montoPendiente;
+      }
+    }
+    return [
+      { etiqueta: 'Cartera Vigente', monto: montos.vigente },
+      { etiqueta: 'Cartera en Prejurídico', monto: montos.juridico },
+      { etiqueta: 'Cartera de Difícil Cobro', monto: montos.dificil_recaudo },
+    ];
   }
 
   /** Compute totalCartera at the last day of the month before `fecha`. */

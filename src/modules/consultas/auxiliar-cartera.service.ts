@@ -359,7 +359,11 @@ export class AuxiliarCarteraService {
       inmuebleCodigo,
       propietario,
       desde: desde.toISOString(),
-      hasta: hasta.toISOString(),
+      // The calendar day the caller asked for, never the extended
+      // `finDelDiaCorte` instant used for filtering above — that one reads
+      // as the NEXT day in UTC (31/07 printed as 01/08, bug real reportado),
+      // and every consumer formats this field as a plain date.
+      hasta: new Date(query.hasta).toISOString(),
       saldoInicial,
       movimientos,
       totalDebitos,

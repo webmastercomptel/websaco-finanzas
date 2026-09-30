@@ -1,4 +1,15 @@
-import { formatoPeso, formatoSaldoConFavor } from './pdf-helpers';
+import {
+  formatoPeso,
+  formatoPesoSinSimbolo,
+  formatoSaldoConFavor,
+} from './pdf-helpers';
+
+describe('formatoPesoSinSimbolo', () => {
+  it('formatea con separador de miles y sin el signo $', () => {
+    expect(formatoPesoSinSimbolo(1234567)).toBe('1.234.567');
+    expect(formatoPesoSinSimbolo(1234567.8)).toBe('1.234.568');
+  });
+});
 
 describe('formatoSaldoConFavor', () => {
   it('agrega el sufijo "(A Favor)" cuando el valor es negativo — saldo a favor del propietario', () => {

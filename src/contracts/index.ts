@@ -1337,6 +1337,9 @@ export interface FilaVencimientoCartera {
   inmuebleId: string;
   inmuebleCodigo: string;
   propietario: string | null;
+  /** The owner's phone — printed in the grouped PDF's per-inmueble
+   *  header, same as Cartera por Conceptos. */
+  celular: string | null;
   /** A Saldo Inicial row carries its own original code (e.g. "FV", "ND")
    *  here instead of the literal "SI" — see `TipoDocumentoKardex`'s own
    *  comment. */
@@ -1506,16 +1509,32 @@ export interface RecaudoMensual {
   monto: number;
 }
 
+/** One line of a Cartera General breakdown: an amount plus its share of
+ *  `totalCartera` (0–100). */
+export interface LineaParticipacionCartera {
+  etiqueta: string;
+  monto: number;
+  porcentaje: number;
+}
+
 /** Response shape for GET /consultas/cartera-general. */
 export interface RespuestaCarteraGeneral {
   totalCartera: number;
   totalVencido: number;
   totalPendiente: number;
   porcentajeVencido: number;
+  /** `totalPendiente`'s share of `totalCartera` (0–100). */
+  porcentajePendiente: number;
   totalCarteraMesAnterior: number | null;
   diasPromedioMora: number;
   carteraPorConcepto: CarteraPorConcepto[];
   tendenciaRecaudo: RecaudoMensual[];
+  /** "Sin vencer" first, then the same fixed aging buckets as Vencimientos
+   *  de Cartera (1-30 … +720), every bucket present even at 0. */
+  analisisVencimientos: LineaParticipacionCartera[];
+  /** Balance split by the owning unit's `estadoCartera` — always three
+   *  lines, in order: Vigente, Prejurídico, Difícil Cobro. */
+  carteraPorEstado: LineaParticipacionCartera[];
 }
 
 /* ── Estado de Cuenta (§4) ──────────────────────────────────────── */
@@ -1605,6 +1624,27 @@ export interface RespuestaEstadoCuenta {
    *  período consultado — un anticipo vivo es un saldo actual, no un
    *  movimiento de un período específico. Vacío cuando no tiene ninguno. */
   anticipos: AnticipoPendienteEstadoCuenta[];
+  /** Los documentos (Facturas, Notas Débito, Saldos Iniciales) fechados
+   *  antes de `periodStart` que todavía debían algo a esa fecha — la
+   *  relación que conforma `saldoAnterior`, calculada con la misma regla
+   *  (cargo menos abonos cuyo documento de origen es anterior al período).
+   *  Su suma más `ajusteSaldoAnterior` es exactamente `saldoAnterior`. */
+  documentosSaldoAnterior: DocumentoSaldoAnteriorEstadoCuenta[];
+  /** Lo que `saldoAnterior` incluye y no pertenece a ningún documento de
+   *  la relación — p. ej. un abono fechado antes del período aplicado a un
+   *  documento emitido después. Normalmente 0. */
+  ajusteSaldoAnterior: number;
+}
+
+/** One document still owed as of `periodStart` — a line of the Estado de
+ *  Cuenta's "saldo anterior" breakdown. */
+export interface DocumentoSaldoAnteriorEstadoCuenta {
+  /** A Saldo Inicial carries its own original code (e.g. "FV"). */
+  tipo: string;
+  numeroCompleto: string;
+  fecha: string;
+  vence: string | null;
+  saldo: number;
 }
 
 /* ── Conciliación de Cartera (coproperty-wide) ──────────────────── */

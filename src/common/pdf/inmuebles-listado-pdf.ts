@@ -88,7 +88,7 @@ function anchosDeColumna(cantidadConceptos: number): number[] {
  *  exactly the "header doesn't repeat" symptom this whole manual-pagination
  *  approach exists to avoid. 30 was verified, on the same 60-row render, to
  *  land exactly on the page boundary with visible headroom to spare. */
-const FILAS_POR_PAGINA = 30;
+const FILAS_POR_PAGINA = 32;
 
 const styles = StyleSheet.create({
   filaEncabezado: {
@@ -136,9 +136,10 @@ function agruparEnPaginas<T>(items: T[], porPagina: number): T[][] {
  * Facturación this never caps or groups concept columns: every concepto in
  * the catalog gets its own, shrinking width instead.
  *
- * Every page repeats the same header (nombre, NIT, título, and "Generado:"
- * right under the title — see `EncabezadoInforme`'s own `fechaGeneracionEnTitulo`)
- * plus the column-title bar — a roster long enough to paginate is exactly
+ * Every page repeats the same header (nombre, NIT, título) plus the
+ * column-title bar, and a footer stamping the generation date/time next to
+ * "Generado con" (moved there from the title, 2026-09-29, same as every
+ * other listing) — a roster long enough to paginate is exactly
  * the case where a reader needs both on every sheet, not just the first.
  * React-pdf, built directly (no pdf-lib version kept behind a `?version=`
  * toggle). Paginated by hand (see `FILAS_POR_PAGINA`'s docblock) — that
@@ -220,8 +221,6 @@ export async function generarPdfListadoInmuebles(
       createElement(EncabezadoInforme, {
         copropiedad,
         titulo: 'LISTADO DE INMUEBLES',
-        fechaGeneracion,
-        fechaGeneracionEnTitulo: true,
       }),
 
       createElement(
@@ -243,7 +242,7 @@ export async function generarPdfListadoInmuebles(
         ),
       ),
 
-      createElement(CreditoWebsaco, {}),
+      createElement(CreditoWebsaco, { fechaGeneracion }),
     ),
   );
 

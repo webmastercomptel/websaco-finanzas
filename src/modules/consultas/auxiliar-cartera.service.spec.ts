@@ -428,4 +428,19 @@ describe('AuxiliarCarteraService', () => {
       });
     });
   });
+
+  describe('período devuelto', () => {
+    it('devuelve el día "hasta" pedido, no el instante extendido al fin del día en Colombia (bug real: 31/07 salía como 01/08)', async () => {
+      const svc = servicio();
+
+      const result = await svc.findAll({
+        inmuebleId: INMUEBLE.toString(),
+        desde: '2026-07-01',
+        hasta: '2026-07-31',
+      });
+
+      expect(result.desde).toBe('2026-07-01T00:00:00.000Z');
+      expect(result.hasta).toBe('2026-07-31T00:00:00.000Z');
+    });
+  });
 });

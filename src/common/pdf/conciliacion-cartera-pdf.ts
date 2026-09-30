@@ -5,6 +5,7 @@ import { reporteDocumento, renderizarPdf } from './react/document';
 import { EncabezadoDocumento } from './react/encabezado-documento';
 import { FilaLabelValor } from './react/fila-label-valor';
 import { Tabla } from './react/tabla';
+import { CreditoWebsaco } from './react/credito-websaco';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { RespuestaConciliacionCartera } from '../../contracts';
 
@@ -62,6 +63,7 @@ export async function generarPdfConciliacionCartera(
       titulo: 'CONCILIACIÓN DE CARTERA',
       subtitulo: `Período ${formatoFecha(reporte.periodStart)} al ${formatoFecha(reporte.periodEnd)}`,
       mostrarLogo: copropiedad.showLogoOnDocuments,
+      soloNit: true,
     }),
 
     createElement(FilaLabelValor, {
@@ -86,16 +88,18 @@ export async function generarPdfConciliacionCartera(
       anchosRelativos: [3, 1, 1, 1.3, 1.3],
       striped: true,
       fontSize: 8.5,
+      // One totals line, each total under its own column (product request,
+      // 2026-09-28) — replaces the two separate "Total Valor Débito/Crédito"
+      // label rows that used to follow the table.
+      filaTotales: [
+        'Totales',
+        '',
+        '',
+        formatoPeso(reporte.totalDebito),
+        formatoPeso(reporte.totalCredito),
+      ],
     }),
 
-    createElement(FilaLabelValor, {
-      label: 'Total Valor Débito:',
-      valor: formatoPeso(reporte.totalDebito),
-    }),
-    createElement(FilaLabelValor, {
-      label: 'Total Valor Crédito:',
-      valor: formatoPeso(reporte.totalCredito),
-    }),
     createElement(FilaLabelValor, {
       label: 'Saldo de Cartera Calculado:',
       valor: formatoPeso(reporte.saldoCarteraCalculado),
@@ -156,6 +160,10 @@ export async function generarPdfConciliacionCartera(
             valor: formatoPeso(reporte.totalAnticiposPendientes),
           }),
         ),
+
+    // Same "Generado con" + "Página i/N" footer every other report closes
+    // with (product request, 2026-09-28).
+    createElement(CreditoWebsaco, {}),
   );
 
   return renderizarPdf(reporteDocumento(contenido));
