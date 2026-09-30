@@ -115,6 +115,9 @@ maintainer works.
 | Live outstanding balance | `saldoPendiente` | `saldoDisponible`, `outstandingBalance`, `balance` |
 | Frozen balance snapshot (pre/post) | `saldoAnterior` / `saldoNuevo` | `balanceBefore` / `balanceAfter` |
 | Rows in a batch | `filas` / `totalFilas` | `lines` |
+| Tenant reference (the tenancy-law field) | `copropiedadId` | `coPropertyId` — **not yet renamed as of batch 1**, see migration tracking; still `coPropertyId` in code until its own dedicated global batch lands |
+| Electronic-invoicing identification (Tercero) | `tipoIdentificacionFe` / `numeroIdentificacionFe` / `digitoVerificacionFe` | `einvoiceIdentificationType` etc. |
+| Collections/arrears status (Inmueble) | `estadoCartera` | `collectionStatus` |
 
 Mongoose's own `timestamps: true` fields (`createdAt`/`updatedAt`) stay as-is
 — framework metadata, not domain vocabulary. Don't hand-roll a Spanish
