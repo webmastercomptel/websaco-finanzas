@@ -246,9 +246,9 @@ export class ValoresRecurrentesService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
-          if (fila.codigoCopropiedad !== copropiedad.code) {
+          if (fila.codigoCopropiedad !== copropiedad.codigo) {
             throw new Error(
-              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
             );
           }
 

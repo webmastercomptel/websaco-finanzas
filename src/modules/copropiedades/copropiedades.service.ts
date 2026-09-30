@@ -87,16 +87,14 @@ export class CopropiedadesService {
     const filtro: Record<string, unknown> = {};
 
     if (query.estado !== 'todos') {
-      filtro.status = query.estado === 'inactivo' ? 'inactive' : 'active';
+      filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ code: patron }, { name: patron }];
+      filtro.$or = [{ codigo: patron }, { nombre: patron }];
     }
     if (query.entidadAdministradoraId) {
-      filtro.managingEntityId = new Types.ObjectId(
-        query.entidadAdministradoraId,
-      );
+      filtro.entidadId = new Types.ObjectId(query.entidadAdministradoraId);
     }
 
     const pagina = query.pagina ?? 1;
@@ -105,8 +103,8 @@ export class CopropiedadesService {
     const [documentos, total] = await Promise.all([
       this.copropiedades
         .find(filtro)
-        .populate('managingEntityId', 'name')
-        .sort({ code: -1 })
+        .populate('entidadId', 'nombre')
+        .sort({ codigo: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -114,7 +112,7 @@ export class CopropiedadesService {
     ]);
 
     const usuariosPorCopropiedad = await this.usuariosAdministradores(
-      documentos.filter((d) => !d.managingEntityId).map((d) => d._id),
+      documentos.filter((d) => !d.entidadId).map((d) => d._id),
     );
 
     return {
@@ -144,12 +142,12 @@ export class CopropiedadesService {
    */
   private async pisoActual(): Promise<number> {
     const [maximo] = await this.copropiedades
-      .find({ code: /^\d+$/ })
-      .sort({ code: -1 })
+      .find({ codigo: /^\d+$/ })
+      .sort({ codigo: -1 })
       .collation({ locale: 'en_US', numericOrdering: true })
       .limit(1)
       .exec();
-    const pisoCopropiedades = maximo ? parseInt(maximo.code, 10) : 0;
+    const pisoCopropiedades = maximo ? parseInt(maximo.codigo, 10) : 0;
 
     const contadorActual = await this.contador.findOne({}).exec();
     const pisoContador = contadorActual?.valor ?? 0;
@@ -187,12 +185,12 @@ export class CopropiedadesService {
   async findOne(id: string): Promise<CopropiedadContract> {
     const documento = await this.copropiedades
       .findById(id)
-      .populate('managingEntityId', 'name')
+      .populate('entidadId', 'nombre')
       .exec();
     if (!documento) {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
     }
-    const usuariosPorCopropiedad = documento.managingEntityId
+    const usuariosPorCopropiedad = documento.entidadId
       ? new Map<string, string>()
       : await this.usuariosAdministradores([documento._id]);
     return toCopropiedad(
@@ -212,28 +210,28 @@ export class CopropiedadesService {
     copropiedadId: Types.ObjectId,
   ): Promise<CopropiedadResumenContract[]> {
     const propia = await this.copropiedades.findById(copropiedadId).exec();
-    if (!propia?.managingEntityId) return [];
+    if (!propia?.entidadId) return [];
 
     const hermanas = await this.copropiedades
       .find({
-        managingEntityId: propia.managingEntityId,
-        status: 'active',
+        entidadId: propia.entidadId,
+        estado: 'active',
         _id: { $ne: copropiedadId },
       })
-      .sort({ code: 1 })
+      .sort({ codigo: 1 })
       .exec();
 
     return hermanas.map((h) => ({
       id: h._id.toString(),
-      codigo: h.code,
-      nombre: h.name,
+      codigo: h.codigo,
+      nombre: h.nombre,
     }));
   }
 
   /**
    * The account(s) with an active Asignación scoped directly to each given
    * coproperty — one batch query for the page, not one per row. Callers
-   * only pass ids of buildings with no `managingEntityId`: an entidad grant
+   * only pass ids of buildings with no `entidadId`: an entidad grant
    * covers a building through the company, never through a per-building
    * Asignación row, so a managed building's "who has access" question is
    * already answered by `entidadAdministradora`.
@@ -245,9 +243,9 @@ export class CopropiedadesService {
 
     const asignaciones = await this.asignaciones
       .find({
-        scope: 'copropiedad',
+        alcance: 'copropiedad',
         copropiedadId: { $in: coPropertyIds },
-        status: 'active',
+        estado: 'active',
       })
       .exec();
     if (asignaciones.length === 0) return new Map();
@@ -259,7 +257,7 @@ export class CopropiedadesService {
       .find({ _id: { $in: accountIds } })
       .exec();
     const nombrePorCuenta = new Map(
-      cuentas.map((c) => [c._id.toString(), c.fullName]),
+      cuentas.map((c) => [c._id.toString(), c.nombreCompleto]),
     );
 
     const nombresPorCopropiedad = new Map<string, string[]>();
@@ -287,10 +285,10 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     this.validarActivacionGestionEdificios(cambios, null);
 
-    const code = await this.siguienteCodigo();
+    const codigo = await this.siguienteCodigo();
     const creada = await this.copropiedades.create({
       ...cambios,
-      code,
+      codigo,
     });
 
     await this.auditoria.registrar({
@@ -299,7 +297,7 @@ export class CopropiedadesService {
       accion: 'crear',
       entidadTipo: 'copropiedad',
       entidadId: creada._id.toString(),
-      entidadEtiqueta: creada.name,
+      entidadEtiqueta: creada.nombre,
     });
 
     // Created in this order so their auto-assigned sortOrder lands 1, 2, 3 —
@@ -413,7 +411,7 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     const actual = await this.copropiedades
       .findById(id)
-      .select('usesBuildingManagement taxId taxIdVerificationDigit')
+      .select('usaGestionEdificios nit digitoVerificacion')
       .lean()
       .exec();
     if (!actual) {
@@ -435,7 +433,7 @@ export class CopropiedadesService {
       accion: 'actualizar',
       entidadTipo: 'copropiedad',
       entidadId: actualizada._id.toString(),
-      entidadEtiqueta: actualizada.name,
+      entidadEtiqueta: actualizada.nombre,
     });
 
     return this.findOne(actualizada._id.toString());
@@ -481,9 +479,9 @@ export class CopropiedadesService {
       );
     }
     if (
-      !destino.managingEntityId ||
-      !origen.managingEntityId ||
-      !destino.managingEntityId.equals(origen.managingEntityId)
+      !destino.entidadId ||
+      !origen.entidadId ||
+      !destino.entidadId.equals(origen.entidadId)
     ) {
       throw new ConflictException(
         'Ambas copropiedades deben pertenecer a la misma entidad administradora',
@@ -582,28 +580,28 @@ export class CopropiedadesService {
     // 3) Parámetros de facturación — only the fields still at their schema
     // default on destino, never overwriting something already configured.
     const camposParametrosTexto: (keyof Copropiedad)[] = [
-      'defaultBankAccountCode',
-      'billingNotes',
-      'defaultCostCentre',
-      'otherIncomeDebitAccount',
-      'otherIncomeCreditAccount',
-      'discountsDebitAccount',
-      'discountsCreditAccount',
-      'memorandumDebitAccount',
-      'memorandumCreditAccount',
-      'cashFlowCode',
+      'cuentaBancariaDefecto',
+      'notasFacturacion',
+      'centroCostoDefecto',
+      'otrosIngresosCuentaDebito',
+      'otrosIngresosCuentaCredito',
+      'descuentosCuentaDebito',
+      'descuentosCuentaCredito',
+      'cuentaOrdenDebito',
+      'cuentaOrdenCredito',
+      'flujoCajaCodigo',
     ];
     const camposParametrosNumero: (keyof Copropiedad)[] = [
-      'discountPercentage',
-      'discountFixedValue',
-      'discountGraceDays',
-      'lateFeeInterestRate',
+      'descuentoPorcentaje',
+      'descuentoValorFijo',
+      'descuentoDiasGracia',
+      'moraTasaInteres',
     ];
     const camposParametrosBooleano: (keyof Copropiedad)[] = [
-      'discountEnabled',
-      'discountAppliesWithLateFee',
-      'lateFeeEnabled',
-      'usesMemorandumAccounts',
+      'descuentoHabilitado',
+      'descuentoAplicaConMora',
+      'moraHabilitada',
+      'usaCuentasOrden',
     ];
 
     const setParametros: Record<string, unknown> = {};
@@ -622,11 +620,8 @@ export class CopropiedadesService {
         setParametros[campo] = true;
       }
     }
-    if (
-      destino.lateFeeValueLimit === null &&
-      origen.lateFeeValueLimit !== null
-    ) {
-      setParametros.lateFeeValueLimit = origen.lateFeeValueLimit;
+    if (destino.moraValorLimite === null && origen.moraValorLimite !== null) {
+      setParametros.moraValorLimite = origen.moraValorLimite;
     }
 
     if (Object.keys(setParametros).length > 0) {
@@ -641,14 +636,14 @@ export class CopropiedadesService {
       accion: 'actualizar',
       entidadTipo: 'copropiedad',
       entidadId: destinoId,
-      entidadEtiqueta: `${destino.name} — configuración copiada desde ${origen.name} (${cuentasACopiar.length} cuentas, ${cargosCopiados} cargos)`,
+      entidadEtiqueta: `${destino.nombre} — configuración copiada desde ${origen.nombre} (${cuentasACopiar.length} cuentas, ${cargosCopiados} cargos)`,
     });
 
     return this.findOne(destinoId);
   }
 
   /**
-   * Gates `usesBuildingManagement: true` behind a complete NIT — see spec
+   * Gates `usaGestionEdificios: true` behind a complete NIT — see spec
    * `building-management-activation`. Evaluated against the RESULTING
    * document (incoming `cambios` merged onto `actual`), not the DTO alone,
    * so activating the flag while relying on a NIT already on file is
@@ -661,27 +656,27 @@ export class CopropiedadesService {
     cambios: Record<string, unknown>,
     actual: Pick<
       Copropiedad,
-      'usesBuildingManagement' | 'taxId' | 'taxIdVerificationDigit'
+      'usaGestionEdificios' | 'nit' | 'digitoVerificacion'
     > | null,
   ): void {
     const claves = [
-      'usesBuildingManagement',
-      'taxId',
-      'taxIdVerificationDigit',
+      'usaGestionEdificios',
+      'nit',
+      'digitoVerificacion',
     ] as const;
     if (!claves.some((clave) => clave in cambios)) return;
 
     const efectivo = (clave: (typeof claves)[number]): unknown =>
       clave in cambios ? cambios[clave] : (actual?.[clave] ?? null);
 
-    if (efectivo('usesBuildingManagement') !== true) return;
+    if (efectivo('usaGestionEdificios') !== true) return;
 
     const completo = (valor: unknown): boolean =>
       typeof valor === 'string' && valor.trim() !== '';
 
     if (
-      !completo(efectivo('taxId')) ||
-      !completo(efectivo('taxIdVerificationDigit'))
+      !completo(efectivo('nit')) ||
+      !completo(efectivo('digitoVerificacion'))
     ) {
       throw new BadRequestException(
         'Para activar la gestión de edificios la copropiedad debe tener NIT y dígito de verificación.',
@@ -709,28 +704,28 @@ export class CopropiedadesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('name', dto.nombre);
-    set('taxId', dto.nit);
-    set('taxIdVerificationDigit', dto.digitoVerificacion);
-    set('address', dto.direccion);
-    set('city', dto.ciudad);
-    set('phone', dto.telefono);
+    set('nombre', dto.nombre);
+    set('nit', dto.nit);
+    set('digitoVerificacion', dto.digitoVerificacion);
+    set('direccion', dto.direccion);
+    set('ciudad', dto.ciudad);
+    set('telefono', dto.telefono);
     set('email', dto.email);
-    set('showLogoOnDocuments', dto.mostrarLogo);
-    set('usesBuildingManagement', dto.usaGestionEdificios);
-    set('receivablesAccount', dto.cuentaContableCartera);
-    set('advancesAccount', dto.cuentaAnticipos);
-    set('creditNotesAccount', dto.cuentaDevoluciones);
+    set('mostrarLogo', dto.mostrarLogo);
+    set('usaGestionEdificios', dto.usaGestionEdificios);
+    set('cuentaContableCartera', dto.cuentaContableCartera);
+    set('cuentaAnticipos', dto.cuentaAnticipos);
+    set('cuentaDevoluciones', dto.cuentaDevoluciones);
     if ('estado' in dto && dto.estado !== undefined) {
-      doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
+      doc.estado = dto.estado === 'activo' ? 'active' : 'inactive';
     }
 
     if (dto.entidadAdministradoraId !== undefined) {
-      doc.managingEntityId = dto.entidadAdministradoraId;
-      doc.administratorName = null;
+      doc.entidadId = dto.entidadAdministradoraId;
+      doc.nombreAdministrador = null;
     } else if (dto.nombreAdministrador !== undefined) {
-      doc.administratorName = dto.nombreAdministrador;
-      doc.managingEntityId = null;
+      doc.nombreAdministrador = dto.nombreAdministrador;
+      doc.entidadId = null;
     }
 
     return doc;

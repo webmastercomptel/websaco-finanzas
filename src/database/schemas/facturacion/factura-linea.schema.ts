@@ -67,7 +67,7 @@ export class FacturaLinea {
   accountingIncomeAccount: string | null;
 
   /** This concept's DEBIT account — null falls back to the coproperty's
-   *  shared `receivablesAccount` at posting time, the same way
+   *  shared `cuentaContableCartera` at posting time, the same way
    *  `accountingIncomeAccount` falls back to `CUENTA_SIN_ASIGNAR`. See
    *  `construirMovimientos` (asiento.builder.ts). */
   @Prop({ type: String, default: null, trim: true })

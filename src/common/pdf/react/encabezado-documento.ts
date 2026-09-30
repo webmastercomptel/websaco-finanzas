@@ -102,7 +102,7 @@ const styles = StyleSheet.create({
  * to the right of the copropiedad's own name — not next to the document
  * title, where an earlier pass mistakenly placed it (that spot is the
  * title's own right-aligned line, which stays logo-free now).
- * Every one of those callers passes `copropiedad.showLogoOnDocuments`
+ * Every one of those callers passes `copropiedad.mostrarLogo`
  * straight through rather than a literal `true` — a coproperty can opt
  * back OUT per its own "Copropiedades" record (default on), since the
  * earlier product feedback that removed the logo in the first place came
@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
  * General, Auxiliar de Cartera, Estado de Cuenta and Conciliación de
  * Cartera (product decision, 2026-09-28); Factura keeps the full block.
  *
- * Cartera General likewise now passes `copropiedad.showLogoOnDocuments` to
+ * Cartera General likewise now passes `copropiedad.mostrarLogo` to
  * `mostrarLogo` (product decision, 2026-09-28), same rule as the others.
  *
  * `EncabezadoInforme` is this same letterhead's horizontal/landscape
@@ -154,10 +154,10 @@ export function EncabezadoDocumento(props: {
     mostrarLogo,
     soloNit,
   } = props;
-  const nit = copropiedad.taxId
-    ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
+  const nit = copropiedad.nit
+    ? `${copropiedad.nit}${copropiedad.digitoVerificacion ? `-${copropiedad.digitoVerificacion}` : ''}`
     : '—';
-  const direccion = [copropiedad.address, copropiedad.city]
+  const direccion = [copropiedad.direccion, copropiedad.ciudad]
     .filter(Boolean)
     .join(' - ');
 
@@ -182,7 +182,7 @@ export function EncabezadoDocumento(props: {
       createElement(
         View,
         { style: styles.filaBanner },
-        createElement(Text, { style: styles.nombre }, copropiedad.name),
+        createElement(Text, { style: styles.nombre }, copropiedad.nombre),
         mostrarLogo
           ? createElement(Image, {
               style: styles.logoBanner,
@@ -199,7 +199,7 @@ export function EncabezadoDocumento(props: {
         { style: styles.datos },
         filaDato('NIT', nit),
         soloNit ? null : filaDato('Dirección', direccion || '—'),
-        soloNit ? null : filaDato('Celular', copropiedad.phone ?? '—'),
+        soloNit ? null : filaDato('Celular', copropiedad.telefono ?? '—'),
         soloNit ? null : filaDato('Email', copropiedad.email ?? '—'),
       ),
       createElement(

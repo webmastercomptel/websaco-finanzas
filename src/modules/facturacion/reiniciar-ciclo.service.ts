@@ -224,7 +224,7 @@ export class ReiniciarCicloService {
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (
       !copropiedad ||
-      !CODIGOS_COPROPIEDAD_PRUEBA.includes(copropiedad.code)
+      !CODIGOS_COPROPIEDAD_PRUEBA.includes(copropiedad.codigo)
     ) {
       throw new ForbiddenException(
         'Esta operación solo está disponible en las copropiedades de pruebas.',

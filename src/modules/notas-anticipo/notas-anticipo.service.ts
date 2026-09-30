@@ -201,8 +201,8 @@ export class NotasAnticipoService {
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
-      defaultCostCentre: string | null;
-      cashFlowCode: string | null;
+      centroCostoDefecto: string | null;
+      flujoCajaCodigo: string | null;
     } | null,
     entries: Movimiento[],
   ): Promise<Movimiento[]> {
@@ -225,8 +225,8 @@ export class NotasAnticipoService {
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
       terceroCode: inmueble?.codigo ?? null,
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
     });
   }
 
@@ -425,7 +425,7 @@ export class NotasAnticipoService {
       // `ContextoAplicacion.sourceDate`'s own docblock).
       sourceDate: fechaEmision,
       accountId,
-      usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
+      usaCuentasOrden: copropiedad?.usaCuentasOrden ?? false,
     };
 
     const { totalAplicado, desglose, montoAplicadoMora } = dto.aplicaciones
@@ -704,7 +704,7 @@ export class NotasAnticipoService {
 
       // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
       // below, where the ORIGINAL code read it) — the desglose loop right
-      // below needs `usesMemorandumAccounts` too, via `cuentaCarteraDeLinea`.
+      // below needs `usaCuentasOrden` too, via `cuentaCarteraDeLinea`.
       const copropiedad = await this.copropiedades
         .findById(copropiedadId)
         .session(session)
@@ -761,18 +761,18 @@ export class NotasAnticipoService {
               { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
             );
             for (const parte of partesSI) {
-              const linea = saldoInicialDoc.lines.find((l) =>
+              const linea = saldoInicialDoc.filas.find((l) =>
                 l.conceptoId.equals(parte.conceptoId),
               );
               if (parte.parte !== 0) {
                 desglose.push({
                   cuenta: cuentaCarteraDeLinea(
                     linea,
-                    copropiedad?.usesMemorandumAccounts ?? false,
+                    copropiedad?.usaCuentasOrden ?? false,
                   ),
                   monto: parte.parte,
                   tipoDocumento: 'SI',
-                  numeroDocumento: saldoInicialDoc.number,
+                  numeroDocumento: saldoInicialDoc.numero,
                 });
               }
               if (linea?.conceptKind === 'intereses') {
@@ -844,7 +844,7 @@ export class NotasAnticipoService {
                 desglose.push({
                   cuenta: cuentaCarteraDeLinea(
                     linea,
-                    copropiedad?.usesMemorandumAccounts ?? false,
+                    copropiedad?.usaCuentasOrden ?? false,
                   ),
                   monto: parte.parte,
                   tipoDocumento: 'FV',
@@ -887,9 +887,9 @@ export class NotasAnticipoService {
       // `copropiedad` was already fetched above, for the desglose loop's
       // own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
-        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
-        copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
       const desgloseCartera = desglose.map((d) => ({
         account: d.cuenta ?? cuentaCartera,
         monto: d.monto,
@@ -981,8 +981,9 @@ export class NotasAnticipoService {
       .findById(copropiedadId)
       .session(session)
       .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos = copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
       account: d.cuenta ?? cuentaCartera,
       monto: d.monto,

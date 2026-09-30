@@ -43,13 +43,13 @@ const servicio = (opts: {
 
 const copropiedad = (
   id: Types.ObjectId,
-  code: string,
+  codigo: string,
   entidad?: Types.ObjectId,
 ) => ({
   _id: id,
-  code,
-  name: `Edificio ${code}`,
-  managingEntityId: entidad ?? null,
+  codigo,
+  nombre: `Edificio ${codigo}`,
+  entidadId: entidad ?? null,
 });
 
 describe('AccesoService.copropiedadesDe', () => {
@@ -65,9 +65,9 @@ describe('AccesoService.copropiedadesDe', () => {
     const service = servicio({
       asignaciones: [
         {
-          scope: 'copropiedad',
+          alcance: 'copropiedad',
           copropiedadId: copA,
-          permissions: ['facturas.ver'],
+          permisos: ['facturas.ver'],
         },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
@@ -89,9 +89,9 @@ describe('AccesoService.copropiedadesDe', () => {
     const service = servicio({
       asignaciones: [
         {
-          scope: 'entidad',
+          alcance: 'entidad',
           entidadId: entidadA,
-          permissions: ['facturas.ver', 'recibos.crear'],
+          permisos: ['facturas.ver', 'recibos.crear'],
         },
       ],
       entidades: [{ _id: entidadA }],
@@ -107,14 +107,14 @@ describe('AccesoService.copropiedadesDe', () => {
   });
 
   it('una entidad inactiva no otorga nada', async () => {
-    // La consulta de entidades filtra por status activo, así que no vuelve
+    // La consulta de entidades filtra por estado activo, así que no vuelve
     // ninguna: el acceso por esa vía desaparece.
     const service = servicio({
       asignaciones: [
         {
-          scope: 'entidad',
+          alcance: 'entidad',
           entidadId: entidadA,
-          permissions: ['facturas.ver'],
+          permisos: ['facturas.ver'],
         },
       ],
       entidades: [],
@@ -130,7 +130,7 @@ describe('AccesoService.copropiedadesDe', () => {
     // Fila mal armada: no debe romper la resolución del resto.
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', copropiedadId: null, permissions: ['x.y'] },
+        { alcance: 'copropiedad', copropiedadId: null, permisos: ['x.y'] },
       ],
       copropiedades: [],
     });
@@ -144,7 +144,7 @@ describe('AccesoService.copropiedadesDe', () => {
     // `describir` sólo trae las activas; la asignación existe pero no rinde.
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', copropiedadId: copC, permissions: ['x.y'] },
+        { alcance: 'copropiedad', copropiedadId: copC, permisos: ['x.y'] },
       ],
       copropiedades: [],
     });
@@ -174,9 +174,9 @@ describe('AccesoService.accesoA', () => {
     const service = servicio({
       asignaciones: [
         {
-          scope: 'copropiedad',
+          alcance: 'copropiedad',
           copropiedadId: copA,
-          permissions: ['facturas.ver'],
+          permisos: ['facturas.ver'],
         },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
@@ -190,7 +190,7 @@ describe('AccesoService.accesoA', () => {
   it('devuelve null para una copropiedad que no tiene asignada', async () => {
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', copropiedadId: copA, permissions: [] },
+        { alcance: 'copropiedad', copropiedadId: copA, permisos: [] },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
     });

@@ -178,7 +178,7 @@ export class InmueblesReporteService {
   async obtenerListado(): Promise<RespuestaListadoInmuebles> {
     const { copropiedad, items, conceptos } = await this.construirListado();
     return {
-      copropiedadCodigo: copropiedad.code,
+      copropiedadCodigo: copropiedad.codigo,
       conceptos: conceptos.map((c) => ({ conceptoId: c.id, nombre: c.nombre })),
       items,
     };

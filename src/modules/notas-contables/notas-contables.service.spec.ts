@@ -43,9 +43,9 @@ const modeloCopropiedad = (over: Record<string, unknown> = {}) => ({
     session: () => ({
       exec: () =>
         Promise.resolve({
-          usesMemorandumAccounts: false,
-          memorandumDebitAccount: null,
-          memorandumCreditAccount: null,
+          usaCuentasOrden: false,
+          cuentaOrdenDebito: null,
+          cuentaOrdenCredito: null,
           ...over,
         }),
     }),
@@ -306,8 +306,8 @@ describe('NotasContablesService.crear', () => {
     const { service, asientos } = construirServicio({
       notaCreada,
       copropiedades: modeloCopropiedad({
-        defaultCostCentre: 'CC-01',
-        cashFlowCode: 'FC-OPER',
+        centroCostoDefecto: 'CC-01',
+        flujoCajaCodigo: 'FC-OPER',
       }),
       cuentasContables: [
         {

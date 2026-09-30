@@ -23,11 +23,11 @@ const notaBase = (over: Record<string, unknown> = {}): NotaDebitoDocument =>
 
 const copropiedadBase = (): CopropiedadDocument =>
   ({
-    name: 'Conjunto Residencial Los Alamos',
-    taxId: '900123456',
-    taxIdVerificationDigit: '7',
-    showLogoOnDocuments: true,
-    receivablesAccount: '130500',
+    nombre: 'Conjunto Residencial Los Alamos',
+    nit: '900123456',
+    digitoVerificacion: '7',
+    mostrarLogo: true,
+    cuentaContableCartera: '130500',
   }) as unknown as CopropiedadDocument;
 
 const modelosCon = (

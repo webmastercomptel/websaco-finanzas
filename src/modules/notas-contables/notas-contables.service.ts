@@ -119,8 +119,8 @@ export class NotasContablesService {
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
-      defaultCostCentre: string | null;
-      cashFlowCode: string | null;
+      centroCostoDefecto: string | null;
+      flujoCajaCodigo: string | null;
     } | null,
     entries: ReturnType<typeof construirMovimientosReclasificacion>,
   ): Promise<ReturnType<typeof construirMovimientosReclasificacion>> {
@@ -143,8 +143,8 @@ export class NotasContablesService {
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
       terceroCode: inmueble?.codigo ?? null,
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
     });
   }
 

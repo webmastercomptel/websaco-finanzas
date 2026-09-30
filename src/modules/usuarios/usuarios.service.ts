@@ -50,11 +50,11 @@ export class UsuariosService {
     const filtro: Record<string, unknown> = {};
 
     if (query.estado !== 'todos') {
-      filtro.status = query.estado === 'inactivo' ? 'inactive' : 'active';
+      filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ fullName: patron }, { email: patron }];
+      filtro.$or = [{ nombreCompleto: patron }, { email: patron }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -63,7 +63,7 @@ export class UsuariosService {
     const [cuentas, total] = await Promise.all([
       this.accounts
         .find(filtro)
-        .sort({ fullName: 1 })
+        .sort({ nombreCompleto: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -131,15 +131,15 @@ export class UsuariosService {
     const cuenta = await this.accounts.create({
       firebaseUid: uid,
       email: correo,
-      fullName: dto.nombre,
-      isPlatformAdmin: dto.esAdministradorPlataforma ?? false,
-      status: 'active',
+      nombreCompleto: dto.nombre,
+      esAdministradorPlataforma: dto.esAdministradorPlataforma ?? false,
+      estado: 'active',
     });
 
     if (!dto.esAdministradorPlataforma && dto.alcance) {
       await this.asignaciones.create({
         accountId: cuenta._id,
-        scope: dto.alcance,
+        alcance: dto.alcance,
         copropiedadId:
           dto.alcance === 'copropiedad' && dto.copropiedadId
             ? new Types.ObjectId(dto.copropiedadId)
@@ -148,8 +148,8 @@ export class UsuariosService {
           dto.alcance === 'entidad' && dto.entidadId
             ? new Types.ObjectId(dto.entidadId)
             : null,
-        permissions: dto.permisos ?? [],
-        status: 'active',
+        permisos: dto.permisos ?? [],
+        estado: 'active',
       });
     }
 
@@ -182,14 +182,14 @@ export class UsuariosService {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
     }
 
-    if (dto.nombre !== undefined) cuenta.fullName = dto.nombre;
+    if (dto.nombre !== undefined) cuenta.nombreCompleto = dto.nombre;
     if (dto.esAdministradorPlataforma !== undefined) {
-      cuenta.isPlatformAdmin = dto.esAdministradorPlataforma;
+      cuenta.esAdministradorPlataforma = dto.esAdministradorPlataforma;
     }
 
     // A `pendiente:` account has no real Firebase identity yet to disable —
     // see seed-admin.ts. Skipping the call is safe, not a gap: the local
-    // `status` check in FirebaseAuthGuard is what actually locks such an
+    // `estado` check in FirebaseAuthGuard is what actually locks such an
     // account out the moment its owner claims it and signs in.
     if (dto.estado !== undefined && esIdentidadReal(cuenta.firebaseUid)) {
       await this.firebaseUsuarios.establecerHabilitado(
@@ -198,7 +198,7 @@ export class UsuariosService {
       );
     }
     if (dto.estado !== undefined) {
-      cuenta.status = dto.estado === 'activo' ? 'active' : 'inactive';
+      cuenta.estado = dto.estado === 'activo' ? 'active' : 'inactive';
     }
 
     if (dto.nuevaPassword && esIdentidadReal(cuenta.firebaseUid)) {
@@ -220,7 +220,7 @@ export class UsuariosService {
       accion: 'actualizar',
       entidadTipo: 'usuario',
       entidadId: cuenta._id.toString(),
-      entidadEtiqueta: cuenta.fullName,
+      entidadEtiqueta: cuenta.nombreCompleto,
     });
 
     return this.findOne(id);
@@ -239,13 +239,13 @@ export class UsuariosService {
     dto: ActualizarUsuarioDto,
   ): Promise<void> {
     const actual = await this.asignaciones
-      .findOne({ accountId, status: 'active' })
+      .findOne({ accountId, estado: 'active' })
       .sort({ createdAt: -1 })
       .exec();
 
     const mismoObjetivo =
       actual != null &&
-      actual.scope === dto.alcance &&
+      actual.alcance === dto.alcance &&
       (dto.alcance === 'copropiedad'
         ? actual.copropiedadId?.toString() === dto.copropiedadId
         : actual.entidadId?.toString() === dto.entidadId);
@@ -253,19 +253,19 @@ export class UsuariosService {
     if (mismoObjetivo) {
       // Same target: changing what someone may do there is not the same
       // event as changing WHERE they may do it, and does not need a new row.
-      actual.permissions = dto.permisos ?? actual.permissions;
+      actual.permisos = dto.permisos ?? actual.permisos;
       await actual.save();
       return;
     }
 
     if (actual) {
-      actual.status = 'inactive';
+      actual.estado = 'inactive';
       await actual.save();
     }
 
     await this.asignaciones.create({
       accountId,
-      scope: dto.alcance,
+      alcance: dto.alcance,
       copropiedadId:
         dto.alcance === 'copropiedad' && dto.copropiedadId
           ? new Types.ObjectId(dto.copropiedadId)
@@ -274,8 +274,8 @@ export class UsuariosService {
         dto.alcance === 'entidad' && dto.entidadId
           ? new Types.ObjectId(dto.entidadId)
           : null,
-      permissions: dto.permisos ?? [],
-      status: 'active',
+      permisos: dto.permisos ?? [],
+      estado: 'active',
     });
   }
 
@@ -286,9 +286,9 @@ export class UsuariosService {
     if (accountIds.length === 0) return new Map();
 
     const filas = await this.asignaciones
-      .find({ accountId: { $in: accountIds }, status: 'active' })
-      .populate('copropiedadId', 'name')
-      .populate('entidadId', 'name')
+      .find({ accountId: { $in: accountIds }, estado: 'active' })
+      .populate('copropiedadId', 'nombre')
+      .populate('entidadId', 'nombre')
       .sort({ createdAt: -1 })
       .exec();
 

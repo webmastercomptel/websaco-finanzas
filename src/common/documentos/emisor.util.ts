@@ -17,23 +17,24 @@ import type { EmisorPlantillaFactura } from '../../contracts';
 export function emisorDe(
   copropiedad: CopropiedadDocument,
 ): EmisorPlantillaFactura {
-  const nitCompleto = copropiedad.taxId
-    ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
+  const nitCompleto = copropiedad.nit
+    ? `${copropiedad.nit}${copropiedad.digitoVerificacion ? `-${copropiedad.digitoVerificacion}` : ''}`
     : '—';
   const direccionCompleta =
-    [copropiedad.address, copropiedad.city].filter(Boolean).join(' - ') || '—';
+    [copropiedad.direccion, copropiedad.ciudad].filter(Boolean).join(' - ') ||
+    '—';
   return {
-    nombre: copropiedad.name,
-    nit: copropiedad.taxId,
-    digitoVerificacion: copropiedad.taxIdVerificationDigit,
-    direccion: copropiedad.address,
-    ciudad: copropiedad.city,
-    telefono: copropiedad.phone,
+    nombre: copropiedad.nombre,
+    nit: copropiedad.nit,
+    digitoVerificacion: copropiedad.digitoVerificacion,
+    direccion: copropiedad.direccion,
+    ciudad: copropiedad.ciudad,
+    telefono: copropiedad.telefono,
     email: copropiedad.email,
-    mostrarLogo: copropiedad.showLogoOnDocuments,
+    mostrarLogo: copropiedad.mostrarLogo,
     nitCompleto,
     direccionCompleta,
-    telefonoMostrado: copropiedad.phone ?? '—',
+    telefonoMostrado: copropiedad.telefono ?? '—',
     emailMostrado: copropiedad.email ?? '—',
   };
 }

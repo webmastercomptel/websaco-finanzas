@@ -12,38 +12,39 @@ export type CopropiedadDocument = HydratedDocument<Copropiedad>;
  * Finanzas owns this collection outright — the product is sold on its own, so
  * a client may have no other system to take a catalog from.
  *
- * Fields are English (persistence) and reach the client in Spanish through a
- * mapper. See contracts/index.ts.
+ * Persistence and the API are both Spanish — see "the contract law" in
+ * CLAUDE.md. A mapper still sits between the two, but its job is type
+ * conversion and composing live-read fields, never language translation.
  */
 @Schema({ timestamps: true, collection: 'copropiedades' })
 export class Copropiedad {
   /** Human-readable identifier, e.g. "COP-001". What people say out loud. */
   @Prop({ required: true, unique: true, trim: true })
-  code: string;
+  codigo: string;
 
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   /**
    * Colombian tax id, stored WITHOUT the verification digit, which lives apart
-   * in `taxIdVerificationDigit`. Keeping them in one string is what forces
-   * every consumer to re-split it, and they will not all split it the same way.
+   * in `digitoVerificacion`. Keeping them in one string is what forces every
+   * consumer to re-split it, and they will not all split it the same way.
    */
   @Prop({ type: String, default: null, trim: true })
-  taxId: string | null;
+  nit: string | null;
 
   /** Single digit that closes the NIT. Null while the NIT itself is unknown. */
   @Prop({ type: String, default: null, trim: true })
-  taxIdVerificationDigit: string | null;
+  digitoVerificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  address: string | null;
+  direccion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  city: string | null;
+  ciudad: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  phone: string | null;
+  telefono: string | null;
 
   @Prop({ type: String, default: null, trim: true })
   email: string | null;
@@ -58,14 +59,14 @@ export class Copropiedad {
    * decision, 2026-09-19) — this field is an opt-OUT, not an opt-in.
    */
   @Prop({ required: true, default: true })
-  showLogoOnDocuments: boolean;
+  mostrarLogo: boolean;
 
   /**
    * The company that administers this building, when one does. Null when it
    * is administered directly — which is why this is nullable rather than
    * required — but "directly" never means unattended: a real person still
    * runs it, just without a company between them and the building. See
-   * `administratorName` below for what that null case actually looks like.
+   * `nombreAdministrador` below for what that null case actually looks like.
    *
    * Assignments made at the company level reach every building pointing here,
    * so moving a building between companies changes who can operate it without
@@ -77,7 +78,7 @@ export class Copropiedad {
     default: null,
     index: true,
   })
-  managingEntityId: Types.ObjectId | null;
+  entidadId: Types.ObjectId | null;
 
   /**
    * An internal note for when there is no managing company on file — e.g.
@@ -86,13 +87,13 @@ export class Copropiedad {
    *
    * This is NOT how a directly-administered building gets a real
    * administrator. That is a person — an `Account`, provisioned through
-   * Usuarios — holding an `Asignacion` with `scope: 'copropiedad'` pointing
+   * Usuarios — holding an `Asignacion` with `alcance: 'copropiedad'` pointing
    * here. There is always somebody running a building; without a managing
    * company it is simply a named individual instead of one reached through a
    * company's portfolio, never nobody.
    */
   @Prop({ type: String, default: null, trim: true })
-  administratorName: string | null;
+  nombreAdministrador: string | null;
 
   /**
    * Inactive means "stop billing it", not "delete it": its invoices and
@@ -100,7 +101,7 @@ export class Copropiedad {
    * for the same reason nothing removes a financial document.
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 
   /**
    * Whether this coproperty ALSO uses the building-management system, and so
@@ -112,32 +113,32 @@ export class Copropiedad {
    * not a disabled feature, it is not part of what they bought.
    */
   @Prop({ required: true, default: false })
-  usesBuildingManagement: boolean;
+  usaGestionEdificios: boolean;
 
   /**
    * Free-text receivables account every consolidated invoice for this
    * building debits — same reasoning as ConceptoCobro.accountingIncomeAccount.
    */
   @Prop({ type: String, default: null, trim: true })
-  receivablesAccount: string | null;
+  cuentaContableCartera: string | null;
 
   /**
    * Free-text liability account for money received but not yet applied to
    * any document — a Recibo's anticipo. Same reasoning and shape as
-   * `receivablesAccount`; `construirAsientoRecibo` (asiento.builder.ts)
+   * `cuentaContableCartera`; `construirAsientoRecibo` (asiento.builder.ts)
    * credits this account for a Recibo's `unappliedAmount`.
    */
   @Prop({ type: String, default: null, trim: true })
-  advancesAccount: string | null;
+  cuentaAnticipos: string | null;
 
   /**
    * Free-text expense/contra-revenue account debited when a Nota Crédito is
-   * issued — same reasoning and shape as `receivablesAccount`/
-   * `advancesAccount`. `construirAsientoCruce` (asiento.builder.ts) debits
+   * issued — same reasoning and shape as `cuentaContableCartera`/
+   * `cuentaAnticipos`. `construirAsientoCruce` (asiento.builder.ts) debits
    * this account for a Nota Crédito's full `montoTotal`.
    */
   @Prop({ type: String, default: null, trim: true })
-  creditNotesAccount: string | null;
+  cuentaDevoluciones: string | null;
 
   /**
    * Free-text revenue account credited when a Nota Débito is issued —
@@ -145,48 +146,48 @@ export class Copropiedad {
    * the Nota Débito's `total`. Same reasoning as the other account fields.
    */
   @Prop({ type: String, default: null, trim: true })
-  debitNotesAccount: string | null;
+  cuentaNotasDebito: string | null;
 
   // ── Parámetros de Facturación (§4) ──────────────────────────────
 
   @Prop({ required: true, default: false })
-  discountEnabled: boolean;
+  descuentoHabilitado: boolean;
 
   @Prop({ required: true, default: 0 })
-  discountPercentage: number;
+  descuentoPorcentaje: number;
 
   @Prop({ required: true, default: 0 })
-  discountFixedValue: number;
+  descuentoValorFijo: number;
 
   @Prop({ required: true, default: 0 })
-  discountGraceDays: number;
+  descuentoDiasGracia: number;
 
   @Prop({ required: true, default: false })
-  discountAppliesWithLateFee: boolean;
+  descuentoAplicaConMora: boolean;
 
   @Prop({ required: true, default: false })
-  lateFeeEnabled: boolean;
+  moraHabilitada: boolean;
 
   @Prop({ required: true, default: 0 })
-  lateFeeInterestRate: number;
+  moraTasaInteres: number;
 
   /**
    * Minimum overdue balance a unit must owe before mora is calculated at
    * all — NOT a ceiling on the mora amount. Below this, `construirPreview()`
    * (lotes.service.ts) charges nothing rather than a token amount on a
    * trivial balance. Null means no threshold: mora is always calculated
-   * when `lateFeeEnabled`. Name kept as `ValueLimit` for now — the value it
+   * when `moraHabilitada`. Name kept as `ValorLimite` for now — the value it
    * limits changed (from "how much mora" to "whether mora applies"), the
    * field itself did not move.
    */
   @Prop({ type: Number, default: null })
-  lateFeeValueLimit: number | null;
+  moraValorLimite: number | null;
 
   @Prop({ type: String, default: null, trim: true })
-  defaultBankAccountCode: string | null;
+  cuentaBancariaDefecto: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  billingNotes: string | null;
+  notasFacturacion: string | null;
 
   /**
    * Cost centre for accounting purposes — one per coproperty, not per unit.
@@ -195,16 +196,16 @@ export class Copropiedad {
    * that varies unit by unit.
    */
   @Prop({ type: String, default: null, trim: true })
-  defaultCostCentre: string | null;
+  centroCostoDefecto: string | null;
 
   /**
    * Cash-flow classification code for accounting purposes — one per
-   * coproperty, same reasoning and shape as `defaultCostCentre` right above.
+   * coproperty, same reasoning and shape as `centroCostoDefecto` right above.
    * Applied to every journal line whose account has `flujoCaja` set on the
    * chart of accounts.
    */
   @Prop({ type: String, default: null, trim: true })
-  cashFlowCode: string | null;
+  flujoCajaCodigo: string | null;
 
   /**
    * Free-text accounting codes carried over from the predecessor system's
@@ -213,29 +214,29 @@ export class Copropiedad {
    * `navigation.tsx`). These six survive as coproperty-level parameters
    * because they are not tied to a `ConceptoCobro` line item: they feed the
    * accounting coding of facturación, recibos and notas directly, the same
-   * way `receivablesAccount`/`advancesAccount`/`creditNotesAccount`/
-   * `debitNotesAccount` above do. Not yet read by `asiento.builder.ts` or any
+   * way `cuentaContableCartera`/`cuentaAnticipos`/`cuentaDevoluciones`/
+   * `cuentaNotasDebito` above do. Not yet read by `asiento.builder.ts` or any
    * document service — persisted here so "Parámetros de Facturación" has
    * somewhere to keep them until that wiring lands.
    */
   @Prop({ type: String, default: null, trim: true })
-  otherIncomeDebitAccount: string | null;
+  otrosIngresosCuentaDebito: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  otherIncomeCreditAccount: string | null;
+  otrosIngresosCuentaCredito: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  discountsDebitAccount: string | null;
+  descuentosCuentaDebito: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  discountsCreditAccount: string | null;
+  descuentosCuentaCredito: string | null;
 
   /** "Cuentas de orden" — memorandum/off-balance-sheet accounts. */
   @Prop({ type: String, default: null, trim: true })
-  memorandumDebitAccount: string | null;
+  cuentaOrdenDebito: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  memorandumCreditAccount: string | null;
+  cuentaOrdenCredito: string | null;
 
   /**
    * The predecessor system's `codeordendb`/`codeordencr` toggle: when 'S',
@@ -248,7 +249,7 @@ export class Copropiedad {
    * false — most coproperties never used it.
    */
   @Prop({ required: true, default: false })
-  usesMemorandumAccounts: boolean;
+  usaCuentasOrden: boolean;
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);

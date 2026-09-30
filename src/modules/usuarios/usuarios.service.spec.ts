@@ -15,9 +15,9 @@ const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   firebaseUid: 'uid-real-1',
   email: 'ana@ejemplo.com',
-  fullName: 'Ana Pérez',
-  isPlatformAdmin: false,
-  status: 'active',
+  nombreCompleto: 'Ana Pérez',
+  esAdministradorPlataforma: false,
+  estado: 'active',
   save: jest.fn().mockResolvedValue(undefined),
   ...over,
 });
@@ -25,11 +25,11 @@ const cuentaDoc = (over: Record<string, unknown> = {}) => ({
 const asignacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   accountId: new Types.ObjectId(),
-  scope: 'copropiedad',
+  alcance: 'copropiedad',
   copropiedadId: new Types.ObjectId(),
   entidadId: null,
-  permissions: ['inmuebles.gestionar'],
-  status: 'active',
+  permisos: ['inmuebles.gestionar'],
+  estado: 'active',
   save: jest.fn().mockResolvedValue(undefined),
   ...over,
 });
@@ -251,11 +251,11 @@ describe('UsuariosService.create', () => {
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: 'copropiedad',
+        alcance: 'copropiedad',
         // The tenancy law: stored as an ObjectId, never the raw string —
         // see TenantContextService.resolveCoPropertyId's docblock.
         copropiedadId: new Types.ObjectId(copId),
-        permissions: ['inmuebles.gestionar'],
+        permisos: ['inmuebles.gestionar'],
       }),
     );
   });
@@ -344,7 +344,7 @@ describe('UsuariosService.update', () => {
     await service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR);
 
     expect(establecerHabilitado).toHaveBeenCalledWith('uid-real-1', false);
-    expect(cuenta.status).toBe('inactive');
+    expect(cuenta.estado).toBe('inactive');
   });
 
   it('una cuenta pendiente de reclamar no llama a Firebase', async () => {
@@ -365,7 +365,7 @@ describe('UsuariosService.update', () => {
     await service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR);
 
     expect(establecerHabilitado).not.toHaveBeenCalled();
-    expect(cuenta.status).toBe('inactive');
+    expect(cuenta.estado).toBe('inactive');
   });
 
   it('resetea la contraseña solo cuando se pide', async () => {
@@ -436,7 +436,7 @@ describe('UsuariosService.update', () => {
       ACTOR,
     );
 
-    expect(anterior.status).toBe('inactive');
+    expect(anterior.estado).toBe('inactive');
     expect(anterior.save).toHaveBeenCalled();
     expect(
       asignacionesGuardadas.some(
@@ -478,8 +478,8 @@ describe('UsuariosService.update', () => {
     );
 
     expect(asignacionesModel.create).not.toHaveBeenCalled();
-    expect(actual.permissions).toEqual(['facturas.ver']);
-    expect(actual.status).toBe('active');
+    expect(actual.permisos).toEqual(['facturas.ver']);
+    expect(actual.estado).toBe('active');
   });
 
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
@@ -504,7 +504,7 @@ describe('UsuariosService.update', () => {
       accion: 'actualizar',
       entidadTipo: 'usuario',
       entidadId: cuenta._id.toString(),
-      entidadEtiqueta: cuenta.fullName,
+      entidadEtiqueta: cuenta.nombreCompleto,
     });
   });
 

@@ -159,7 +159,7 @@ export class LoteFacturacion {
 
   // Fixed-value form of the discount, used INSTEAD of `earlyPaymentDiscount`
   // when that percentage is 0 — same exclusion rule as
-  // `Copropiedad.discountFixedValue`, which this defaults from at `crear()`
+  // `Copropiedad.descuentoValorFijo`, which this defaults from at `crear()`
   // time (same pattern as `discountGraceDays` below).
   @Prop({ required: true, default: 0 })
   earlyPaymentDiscountFixedValue: number;
@@ -172,7 +172,7 @@ export class LoteFacturacion {
 
   /**
    * Minimum overdue balance before mora is calculated for a unit this run —
-   * not a ceiling. See the note on `Copropiedad.lateFeeValueLimit`, which
+   * not a ceiling. See the note on `Copropiedad.moraValorLimite`, which
    * this defaults from at `crear()` time; a coproperty admin may override it
    * per-lote here without changing the standing parameter.
    */

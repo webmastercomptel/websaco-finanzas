@@ -7,7 +7,7 @@ const COP = new Types.ObjectId();
 
 const copropiedad = (over: Record<string, unknown> = {}) => ({
   _id: COP,
-  code: '0001',
+  codigo: '0001',
   ...over,
 });
 
@@ -198,7 +198,7 @@ const makeService = (
 describe('ReiniciarCicloService.reiniciar', () => {
   it('rechaza cuando la copropiedad activa no está en la lista de pruebas (0001-0003)', async () => {
     const modelos = makeModelos({
-      copropiedad: copropiedad({ code: 'COP-002' }),
+      copropiedad: copropiedad({ codigo: 'COP-002' }),
     });
     const service = makeService(modelos);
 
@@ -210,9 +210,9 @@ describe('ReiniciarCicloService.reiniciar', () => {
 
   it.each(['0001', '0002', '0003'])(
     'acepta la copropiedad de pruebas %s',
-    async (code) => {
+    async (codigo) => {
       const modelos = makeModelos({
-        copropiedad: copropiedad({ code }),
+        copropiedad: copropiedad({ codigo }),
         deletedCounts: { facturas: 1 },
       });
       const service = makeService(modelos);
@@ -226,7 +226,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
 
   it('rechaza la copropiedad 0004 — es un cliente real, no de pruebas', async () => {
     const modelos = makeModelos({
-      copropiedad: copropiedad({ code: '0004' }),
+      copropiedad: copropiedad({ codigo: '0004' }),
     });
     const service = makeService(modelos);
 

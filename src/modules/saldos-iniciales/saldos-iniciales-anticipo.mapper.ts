@@ -22,7 +22,7 @@ export const toSaldoInicialAnticipo = (
   monto: doc.montoOriginal,
   saldoDisponible,
   estado: doc.status,
-  motivoAnulacion: doc.voidedReason,
-  detalleAnulacion: doc.voidedDetail,
-  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  motivoAnulacion: doc.motivoAnulacion,
+  detalleAnulacion: doc.detalleAnulacion,
+  fechaAnulacion: doc.fechaAnulacion ? doc.fechaAnulacion.toISOString() : null,
 });

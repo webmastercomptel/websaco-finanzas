@@ -52,7 +52,7 @@ export interface FacturaParaAsiento {
  */
 export const CUENTA_SIN_ASIGNAR = 'SIN-CUENTA-ASIGNADA';
 
-/** The `codeordendb`/`codeordencr` pair from `usesMemorandumAccounts` — see
+/** The `codeordendb`/`codeordencr` pair from `usaCuentasOrden` — see
  *  the note on that field in copropiedad.schema.ts. */
 export interface CuentasOrden {
   debito: string;
@@ -62,9 +62,9 @@ export interface CuentasOrden {
 /** The coproperty shape `cuentasOrdenDe` needs — structurally matches
  *  `CopropiedadDocument`, kept minimal so callers don't have to import it. */
 export interface CopropiedadParaCuentasOrden {
-  usesMemorandumAccounts: boolean;
-  memorandumDebitAccount: string | null;
-  memorandumCreditAccount: string | null;
+  usaCuentasOrden: boolean;
+  cuentaOrdenDebito: string | null;
+  cuentaOrdenCredito: string | null;
 }
 
 /**
@@ -77,10 +77,10 @@ export interface CopropiedadParaCuentasOrden {
 export function cuentasOrdenDe(
   copropiedad: CopropiedadParaCuentasOrden | null | undefined,
 ): CuentasOrden | null {
-  if (!copropiedad?.usesMemorandumAccounts) return null;
+  if (!copropiedad?.usaCuentasOrden) return null;
   return {
-    debito: copropiedad.memorandumDebitAccount ?? CUENTA_SIN_ASIGNAR,
-    credito: copropiedad.memorandumCreditAccount ?? CUENTA_SIN_ASIGNAR,
+    debito: copropiedad.cuentaOrdenDebito ?? CUENTA_SIN_ASIGNAR,
+    credito: copropiedad.cuentaOrdenCredito ?? CUENTA_SIN_ASIGNAR,
   };
 }
 
@@ -135,7 +135,7 @@ function movimientosCuentasOrden(
  * line was the bug this fixes. A line's debit account is its own
  * `accountingReceivableAccount` — set per `ConceptoCobro.cuentaDebitoId` —
  * falling back to the shared `cuentaCartera` (the coproperty's
- * `receivablesAccount`) when that concept has none configured; its credit
+ * `cuentaContableCartera`) when that concept has none configured; its credit
  * account is `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`),
  * falling back to `CUENTA_SIN_ASIGNAR`.
  *
@@ -844,7 +844,7 @@ export function construirContraAsientoAplicacionAnticipo(
  *
  * `descuento`, when given, reverses the discount debit `construirAsientoCruce`
  * posted at creation: a credit back to `descuento.cuenta` for `descuento.monto`
- * (Copropiedad's `discountsCreditAccount` — the "give-back" side, distinct
+ * (Copropiedad's `descuentosCuentaCredito` — the "give-back" side, distinct
  * from the debit-side account creation used). `montoAplicado` here is
  * already the full cartera amount (cash plus discount, same convention as
  * `construirAsientoCruce`), and `montoOrigen` is the Recibo's own cached
@@ -874,7 +874,7 @@ export function construirContraAsientoCruce(
   desgloseOrigen?: DesgloseCuenta[],
   // Mirrors `construirAsientoCruce`'s own `descripcionAnticipo`: RecibosService
   // passes this together with a `cuentaAnticipos` already swapped to
-  // `otherIncomeCreditAccount` when voiding a Recibo whose surplus went to
+  // `otrosIngresosCuentaCredito` when voiding a Recibo whose surplus went to
   // Otros Ingresos, not a client anticipo. `undefined` (every other caller)
   // falls back to `d.contraDebitoAnticipo` below.
   descripcionAnticipo?: string,

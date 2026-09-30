@@ -136,8 +136,8 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         session: jest.fn().mockReturnThis(),
         exec: jest.fn(() =>
           Promise.resolve({
-            receivablesAccount: '1305',
-            debitNotesAccount: '4105',
+            cuentaContableCartera: '1305',
+            cuentaNotasDebito: '4105',
           }),
         ),
       })),
@@ -409,10 +409,10 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '4105',
-                defaultCostCentre: 'CC-01',
-                cashFlowCode: 'FC-OPER',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                centroCostoDefecto: 'CC-01',
+                flujoCajaCodigo: 'FC-OPER',
               }),
             ),
           })),
@@ -492,11 +492,11 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '4105',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
             ),
           })),
@@ -544,11 +544,11 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '4105',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
             ),
           })),
@@ -667,7 +667,7 @@ describe('NotasDebitoService', () => {
     });
 
     it('al anular, reversa la cuenta de INGRESO del concepto, no la cuenta compartida de la copropiedad (bug real reportado, 2026-09-21)', async () => {
-      // `debitNotesAccount` y `cuentaCreditoId.codigo` valen distinto a
+      // `cuentaNotasDebito` y `cuentaCreditoId.codigo` valen distinto a
       // propósito — un test que usara el mismo valor para ambos (como el
       // resto de este archivo) no puede distinguir cuál de las dos se usó
       // de verdad, y así fue como este bug pasó sin verse.
@@ -693,8 +693,8 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '413599-COPROPIEDAD',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '413599-COPROPIEDAD',
               }),
             ),
           })),
@@ -742,8 +742,8 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '413599-COPROPIEDAD',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '413599-COPROPIEDAD',
               }),
             ),
           })),
@@ -791,11 +791,11 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '4105',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
             ),
           })),
@@ -843,11 +843,11 @@ describe('NotasDebitoService', () => {
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
               Promise.resolve({
-                receivablesAccount: '1305',
-                debitNotesAccount: '4105',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
             ),
           })),

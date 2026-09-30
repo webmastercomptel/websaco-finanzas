@@ -45,7 +45,7 @@ export class Asignacion {
 
   /** Which of the two shapes this grant is. */
   @Prop({ required: true, enum: ['copropiedad', 'entidad'] })
-  scope: 'copropiedad' | 'entidad';
+  alcance: 'copropiedad' | 'entidad';
 
   /** Set when scope is `copropiedad`, null otherwise. */
   @Prop({
@@ -80,7 +80,7 @@ export class Asignacion {
    * assignment there.
    */
   @Prop({ type: [String], required: true, default: [] })
-  permissions: string[];
+  permisos: string[];
 
   /**
    * Inactive revokes access while keeping the record of who once had it. Do not
@@ -88,7 +88,7 @@ export class Asignacion {
    * question an auditor will eventually ask.
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const AsignacionSchema = SchemaFactory.createForClass(Asignacion);
@@ -101,7 +101,7 @@ AsignacionSchema.index(
   { accountId: 1, copropiedadId: 1 },
   {
     unique: true,
-    partialFilterExpression: { scope: 'copropiedad' },
+    partialFilterExpression: { alcance: 'copropiedad' },
   },
 );
 
@@ -109,7 +109,7 @@ AsignacionSchema.index(
   { accountId: 1, entidadId: 1 },
   {
     unique: true,
-    partialFilterExpression: { scope: 'entidad' },
+    partialFilterExpression: { alcance: 'entidad' },
   },
 );
 
@@ -127,7 +127,7 @@ AsignacionSchema.index(
 // keyword would change how the hook is invoked, not just how it reads.
 /* eslint-disable-next-line @typescript-eslint/require-await */
 AsignacionSchema.pre('validate', async function () {
-  const esCopropiedad = this.scope === 'copropiedad';
+  const esCopropiedad = this.alcance === 'copropiedad';
   const tieneCopropiedad = this.copropiedadId != null;
   const tieneEntidad = this.entidadId != null;
 

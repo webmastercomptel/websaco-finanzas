@@ -116,7 +116,7 @@ export async function generarPdfAuxiliarCartera(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: 'Auxiliar de Cartera',
-      mostrarLogo: copropiedad.showLogoOnDocuments,
+      mostrarLogo: copropiedad.mostrarLogo,
       soloNit: true,
     }),
 

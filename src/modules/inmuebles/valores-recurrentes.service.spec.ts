@@ -296,8 +296,8 @@ describe('ValoresRecurrentesService.importarMasivo', () => {
     finalizar: jest.fn().mockResolvedValue(undefined),
   });
 
-  const copropiedadModeloCon = (code: string) => ({
-    findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
+  const copropiedadModeloCon = (codigo: string) => ({
+    findById: jest.fn(() => ({ exec: () => Promise.resolve({ codigo }) })),
   });
 
   it('una fila con código de copropiedad que no coincide falla sola, el resto sigue', async () => {

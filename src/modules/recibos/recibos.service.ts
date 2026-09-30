@@ -427,7 +427,7 @@ export class RecibosService {
     const destinationAccount =
       dto.cuentaDestino ??
       (await this.copropiedades.findById(copropiedadId).exec())
-        ?.defaultBankAccountCode;
+        ?.cuentaBancariaDefecto;
     if (!destinationAccount) {
       throw new BadRequestException(
         'La cuenta destino es requerida cuando no hay cuenta predeterminada en la copropiedad.',
@@ -631,15 +631,15 @@ export class RecibosService {
       indicePorInmueble,
       copropiedad: copropiedad
         ? {
-            receivablesAccount: copropiedad.receivablesAccount,
-            advancesAccount: copropiedad.advancesAccount,
-            discountsDebitAccount: copropiedad.discountsDebitAccount,
-            usesMemorandumAccounts: copropiedad.usesMemorandumAccounts,
-            memorandumDebitAccount: copropiedad.memorandumDebitAccount,
-            memorandumCreditAccount: copropiedad.memorandumCreditAccount,
-            defaultCostCentre: copropiedad.defaultCostCentre,
-            cashFlowCode: copropiedad.cashFlowCode,
-            defaultBankAccountCode: copropiedad.defaultBankAccountCode,
+            cuentaContableCartera: copropiedad.cuentaContableCartera,
+            cuentaAnticipos: copropiedad.cuentaAnticipos,
+            descuentosCuentaDebito: copropiedad.descuentosCuentaDebito,
+            usaCuentasOrden: copropiedad.usaCuentasOrden,
+            cuentaOrdenDebito: copropiedad.cuentaOrdenDebito,
+            cuentaOrdenCredito: copropiedad.cuentaOrdenCredito,
+            centroCostoDefecto: copropiedad.centroCostoDefecto,
+            flujoCajaCodigo: copropiedad.flujoCajaCodigo,
+            cuentaBancariaDefecto: copropiedad.cuentaBancariaDefecto,
           }
         : null,
       cuentasContablesPorCodigo,
@@ -1171,7 +1171,7 @@ export class RecibosService {
 
       // Fetched up here (not down with `cuentaCartera`/`cuentaAnticipos`
       // below, where the ORIGINAL code read it) because the desglose loop
-      // right below needs `usesMemorandumAccounts` too, via
+      // right below needs `usaCuentasOrden` too, via
       // `cuentaCarteraDeLinea` — same one Mongoose call now serves both.
       const copropiedad = await this.copropiedades
         .findById(copropiedadId)
@@ -1223,18 +1223,18 @@ export class RecibosService {
               { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
             );
             for (const parte of partes) {
-              const linea = saldoInicialDoc.lines.find((l) =>
+              const linea = saldoInicialDoc.filas.find((l) =>
                 l.conceptoId.equals(parte.conceptoId),
               );
               if (parte.parte !== 0) {
                 desglose.push({
                   cuenta: cuentaCarteraDeLinea(
                     linea,
-                    copropiedad?.usesMemorandumAccounts ?? false,
+                    copropiedad?.usaCuentasOrden ?? false,
                   ),
                   monto: parte.parte,
                   tipoDocumento: 'SI',
-                  numeroDocumento: saldoInicialDoc.number,
+                  numeroDocumento: saldoInicialDoc.numero,
                 });
               }
               if (linea?.conceptKind === 'intereses') {
@@ -1324,7 +1324,7 @@ export class RecibosService {
               desglose.push({
                 cuenta: cuentaCarteraDeLinea(
                   linea,
-                  copropiedad?.usesMemorandumAccounts ?? false,
+                  copropiedad?.usaCuentasOrden ?? false,
                 ),
                 monto: parte.parte,
                 tipoDocumento: 'FV',
@@ -1405,11 +1405,11 @@ export class RecibosService {
       // replayed from the loop above. `copropiedad` was already fetched
       // above, for the desglose loop's own `cuentaCarteraDeLinea` calls.
       const cuentaCartera =
-        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
-        copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
       const cuentaDescuentos =
-        copropiedad?.discountsCreditAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.descuentosCuentaCredito ?? CUENTA_SIN_ASIGNAR;
       const desgloseCartera = desglose.map((d) => ({
         account: d.cuenta ?? cuentaCartera,
         monto: d.monto,
@@ -1441,7 +1441,7 @@ export class RecibosService {
       // Anticipos) reproduces the original, untouched behavior exactly.
       const reversaOtrosIngresos = otherIncomeAmount > 0;
       const cuentaAnticiposReversar = reversaOtrosIngresos
-        ? (copropiedad?.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR)
+        ? (copropiedad?.otrosIngresosCuentaCredito ?? CUENTA_SIN_ASIGNAR)
         : cuentaAnticipos;
       const montoAnticiposReversar = reversaOtrosIngresos
         ? otherIncomeAmount
@@ -1892,7 +1892,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
-        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
+        usaCuentasOrden: copropiedad?.usaCuentasOrden ?? false,
       },
       solicitadas,
       descuentoConfirmadoExtra,
@@ -1943,7 +1943,7 @@ export class RecibosService {
         sourceId: recibo._id,
         sourceDate: recibo.receivedDate,
         accountId,
-        usesMemorandumAccounts: copropiedad?.usesMemorandumAccounts ?? false,
+        usaCuentasOrden: copropiedad?.usaCuentasOrden ?? false,
       },
       montoDisponible,
     );
@@ -1965,8 +1965,8 @@ export class RecibosService {
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
-      defaultCostCentre: string | null;
-      cashFlowCode: string | null;
+      centroCostoDefecto: string | null;
+      flujoCajaCodigo: string | null;
     } | null,
     entries: ReturnType<typeof construirAsientoCruce>,
   ): Promise<ReturnType<typeof construirAsientoCruce>> {
@@ -1989,8 +1989,8 @@ export class RecibosService {
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
       terceroCode: inmueble?.codigo ?? null,
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
     });
   }
 
@@ -2020,7 +2020,7 @@ export class RecibosService {
     // User-confirmed destination for a payment SURPLUS (manual mode only
     // — see `CrearReciboDto.destinoSobrante`'s own docblock). `undefined`/
     // `'anticipo'` reproduces today's only behavior; `'otros_ingresos'`
-    // credits `otherIncomeCreditAccount` instead of `advancesAccount`, with
+    // credits `otrosIngresosCuentaCredito` instead of `cuentaAnticipos`, with
     // its own description — `crear()` is what actually stops that money
     // from staying re-appliable (`SaldoDocumentoOrigen`), this method only
     // decides which account the journal entry credits.
@@ -2030,17 +2030,18 @@ export class RecibosService {
       .findById(copropiedadId)
       .session(session)
       .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos =
       destinoSobrante === 'otros_ingresos'
-        ? (copropiedad?.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR)
-        : (copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR);
+        ? (copropiedad?.otrosIngresosCuentaCredito ?? CUENTA_SIN_ASIGNAR)
+        : (copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR);
     const descripcionAnticipo =
       destinoSobrante === 'otros_ingresos'
         ? 'Otros ingresos — recibo de caja'
         : undefined;
     const cuentaDescuentos =
-      copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
+      copropiedad?.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
     // `cuenta: null` (no accountingReceivableAccount for that concepto, or a
     // Nota Débito application) resolves to the coproperty's shared
     // cuentaCartera.

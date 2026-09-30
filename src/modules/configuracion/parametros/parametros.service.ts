@@ -50,26 +50,26 @@ export class ParametrosService {
       );
     }
     return {
-      descuentoHabilitado: doc.discountEnabled,
-      porcentajeDescuento: doc.discountPercentage,
-      valorFijoDescuento: doc.discountFixedValue,
-      diasGraciaDescuento: doc.discountGraceDays,
-      descuentoAplicaConMora: doc.discountAppliesWithLateFee,
-      moraHabilitada: doc.lateFeeEnabled,
-      tasaInteresMora: doc.lateFeeInterestRate,
-      topeValorMora: doc.lateFeeValueLimit,
-      cuentaBancoPredeterminada: doc.defaultBankAccountCode,
-      observacionesFacturacion: doc.billingNotes,
-      centroCostos: doc.defaultCostCentre,
-      otrosIngresosDebito: doc.otherIncomeDebitAccount,
-      otrosIngresosCredito: doc.otherIncomeCreditAccount,
-      descuentosDebito: doc.discountsDebitAccount,
-      descuentosCredito: doc.discountsCreditAccount,
-      cuentasOrdenDebito: doc.memorandumDebitAccount,
-      cuentasOrdenCredito: doc.memorandumCreditAccount,
-      usaCuentasOrden: doc.usesMemorandumAccounts,
-      cuentaAnticipos: doc.advancesAccount,
-      codigoFlujoCaja: doc.cashFlowCode,
+      descuentoHabilitado: doc.descuentoHabilitado,
+      porcentajeDescuento: doc.descuentoPorcentaje,
+      valorFijoDescuento: doc.descuentoValorFijo,
+      diasGraciaDescuento: doc.descuentoDiasGracia,
+      descuentoAplicaConMora: doc.descuentoAplicaConMora,
+      moraHabilitada: doc.moraHabilitada,
+      tasaInteresMora: doc.moraTasaInteres,
+      topeValorMora: doc.moraValorLimite,
+      cuentaBancoPredeterminada: doc.cuentaBancariaDefecto,
+      observacionesFacturacion: doc.notasFacturacion,
+      centroCostos: doc.centroCostoDefecto,
+      otrosIngresosDebito: doc.otrosIngresosCuentaDebito,
+      otrosIngresosCredito: doc.otrosIngresosCuentaCredito,
+      descuentosDebito: doc.descuentosCuentaDebito,
+      descuentosCredito: doc.descuentosCuentaCredito,
+      cuentasOrdenDebito: doc.cuentaOrdenDebito,
+      cuentasOrdenCredito: doc.cuentaOrdenCredito,
+      usaCuentasOrden: doc.usaCuentasOrden,
+      cuentaAnticipos: doc.cuentaAnticipos,
+      codigoFlujoCaja: doc.flujoCajaCodigo,
     };
   }
 
@@ -81,26 +81,26 @@ export class ParametrosService {
       if (v !== undefined) update[k] = v;
     };
 
-    set('discountEnabled', dto.descuentoHabilitado);
-    set('discountPercentage', dto.porcentajeDescuento);
-    set('discountFixedValue', dto.valorFijoDescuento);
-    set('discountGraceDays', dto.diasGraciaDescuento);
-    set('discountAppliesWithLateFee', dto.descuentoAplicaConMora);
-    set('lateFeeEnabled', dto.moraHabilitada);
-    set('lateFeeInterestRate', dto.tasaInteresMora);
-    set('lateFeeValueLimit', dto.topeValorMora);
-    set('defaultBankAccountCode', dto.cuentaBancoPredeterminada);
-    set('billingNotes', dto.observacionesFacturacion);
-    set('defaultCostCentre', dto.centroCostos);
-    set('otherIncomeDebitAccount', dto.otrosIngresosDebito);
-    set('otherIncomeCreditAccount', dto.otrosIngresosCredito);
-    set('discountsDebitAccount', dto.descuentosDebito);
-    set('discountsCreditAccount', dto.descuentosCredito);
-    set('memorandumDebitAccount', dto.cuentasOrdenDebito);
-    set('memorandumCreditAccount', dto.cuentasOrdenCredito);
-    set('usesMemorandumAccounts', dto.usaCuentasOrden);
-    set('advancesAccount', dto.cuentaAnticipos);
-    set('cashFlowCode', dto.codigoFlujoCaja);
+    set('descuentoHabilitado', dto.descuentoHabilitado);
+    set('descuentoPorcentaje', dto.porcentajeDescuento);
+    set('descuentoValorFijo', dto.valorFijoDescuento);
+    set('descuentoDiasGracia', dto.diasGraciaDescuento);
+    set('descuentoAplicaConMora', dto.descuentoAplicaConMora);
+    set('moraHabilitada', dto.moraHabilitada);
+    set('moraTasaInteres', dto.tasaInteresMora);
+    set('moraValorLimite', dto.topeValorMora);
+    set('cuentaBancariaDefecto', dto.cuentaBancoPredeterminada);
+    set('notasFacturacion', dto.observacionesFacturacion);
+    set('centroCostoDefecto', dto.centroCostos);
+    set('otrosIngresosCuentaDebito', dto.otrosIngresosDebito);
+    set('otrosIngresosCuentaCredito', dto.otrosIngresosCredito);
+    set('descuentosCuentaDebito', dto.descuentosDebito);
+    set('descuentosCuentaCredito', dto.descuentosCredito);
+    set('cuentaOrdenDebito', dto.cuentasOrdenDebito);
+    set('cuentaOrdenCredito', dto.cuentasOrdenCredito);
+    set('usaCuentasOrden', dto.usaCuentasOrden);
+    set('cuentaAnticipos', dto.cuentaAnticipos);
+    set('flujoCajaCodigo', dto.codigoFlujoCaja);
 
     const updated = await this.copropiedades
       .findByIdAndUpdate(
@@ -117,26 +117,26 @@ export class ParametrosService {
     }
 
     return {
-      descuentoHabilitado: updated.discountEnabled,
-      porcentajeDescuento: updated.discountPercentage,
-      valorFijoDescuento: updated.discountFixedValue,
-      diasGraciaDescuento: updated.discountGraceDays,
-      descuentoAplicaConMora: updated.discountAppliesWithLateFee,
-      moraHabilitada: updated.lateFeeEnabled,
-      tasaInteresMora: updated.lateFeeInterestRate,
-      topeValorMora: updated.lateFeeValueLimit,
-      cuentaBancoPredeterminada: updated.defaultBankAccountCode,
-      observacionesFacturacion: updated.billingNotes,
-      centroCostos: updated.defaultCostCentre,
-      otrosIngresosDebito: updated.otherIncomeDebitAccount,
-      otrosIngresosCredito: updated.otherIncomeCreditAccount,
-      descuentosDebito: updated.discountsDebitAccount,
-      descuentosCredito: updated.discountsCreditAccount,
-      cuentasOrdenDebito: updated.memorandumDebitAccount,
-      cuentasOrdenCredito: updated.memorandumCreditAccount,
-      usaCuentasOrden: updated.usesMemorandumAccounts,
-      cuentaAnticipos: updated.advancesAccount,
-      codigoFlujoCaja: updated.cashFlowCode,
+      descuentoHabilitado: updated.descuentoHabilitado,
+      porcentajeDescuento: updated.descuentoPorcentaje,
+      valorFijoDescuento: updated.descuentoValorFijo,
+      diasGraciaDescuento: updated.descuentoDiasGracia,
+      descuentoAplicaConMora: updated.descuentoAplicaConMora,
+      moraHabilitada: updated.moraHabilitada,
+      tasaInteresMora: updated.moraTasaInteres,
+      topeValorMora: updated.moraValorLimite,
+      cuentaBancoPredeterminada: updated.cuentaBancariaDefecto,
+      observacionesFacturacion: updated.notasFacturacion,
+      centroCostos: updated.centroCostoDefecto,
+      otrosIngresosDebito: updated.otrosIngresosCuentaDebito,
+      otrosIngresosCredito: updated.otrosIngresosCuentaCredito,
+      descuentosDebito: updated.descuentosCuentaDebito,
+      descuentosCredito: updated.descuentosCuentaCredito,
+      cuentasOrdenDebito: updated.cuentaOrdenDebito,
+      cuentasOrdenCredito: updated.cuentaOrdenCredito,
+      usaCuentasOrden: updated.usaCuentasOrden,
+      cuentaAnticipos: updated.cuentaAnticipos,
+      codigoFlujoCaja: updated.flujoCajaCodigo,
     };
   }
 }

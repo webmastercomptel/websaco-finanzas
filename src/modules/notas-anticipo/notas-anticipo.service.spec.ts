@@ -396,8 +396,8 @@ const construirServicio = (
       session: () => ({
         exec: () =>
           Promise.resolve({
-            receivablesAccount: '130501',
-            advancesAccount: '210505',
+            cuentaContableCartera: '130501',
+            cuentaAnticipos: '210505',
           }),
       }),
     })),

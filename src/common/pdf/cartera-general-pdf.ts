@@ -60,7 +60,7 @@ const tablaParticipacion = (
  * product request 2026-09-28, which also dropped the Tendencia de Recaudo
  * section, the Mes Anterior / Días Promedio Mora lines and the letterhead's
  * Dirección/Celular/Email (`soloNit`), added the WebSACO mark to the banner
- * whenever the coproperty's `showLogoOnDocuments` allows it (same rule as
+ * whenever the coproperty's `mostrarLogo` allows it (same rule as
  * Recibo/Notas), and kept the standard `CreditoWebsaco` footer.
  */
 export async function generarPdfCarteraGeneral(
@@ -80,7 +80,7 @@ export async function generarPdfCarteraGeneral(
       titulo: 'CARTERA GENERAL',
       subtitulo: `Corte al ${formatoFecha(fechaCorte)}`,
       soloNit: true,
-      mostrarLogo: copropiedad.showLogoOnDocuments,
+      mostrarLogo: copropiedad.mostrarLogo,
     }),
     createElement(FilaLabelValor, {
       label: 'Total Cartera:',

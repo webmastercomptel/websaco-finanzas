@@ -343,7 +343,7 @@ export class PistaAuditoriaService {
 
     const nombreCuentaMap = new Map<string, string>();
     for (const c of cuentas) {
-      nombreCuentaMap.set(c._id.toString(), c.fullName);
+      nombreCuentaMap.set(c._id.toString(), c.nombreCompleto);
     }
     const codigoInmuebleMap = new Map<string, string>();
     for (const i of inmuebles) {

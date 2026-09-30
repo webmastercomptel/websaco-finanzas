@@ -119,40 +119,40 @@ async function seedDemo(): Promise<void> {
 
     // 1. The managing company.
     const entidad = await entidades.findOneAndUpdate(
-      { code: 'ENT-001' },
+      { codigo: 'ENT-001' },
       {
         $setOnInsert: {
-          code: 'ENT-001',
-          name: 'Administraciones Calad',
-          status: 'active',
+          codigo: 'ENT-001',
+          nombre: 'Administraciones Calad',
+          estado: 'active',
         },
       },
       { upsert: true, returnDocument: 'after' },
     );
-    console.log(`Entidad ${entidad.name} lista.`);
+    console.log(`Entidad ${entidad.nombre} lista.`);
 
     // 2. The buildings. Ten under the company, two self-administered — enough
     // to show that both routes to access resolve, not just the common one.
     const definiciones = [
-      ...EDIFICIOS_ADMINISTRADOS.map((name, i) => ({
-        code: `COP-${String(i + 1).padStart(3, '0')}`,
-        name,
-        managingEntityId: entidad._id,
-        administratorName: null,
+      ...EDIFICIOS_ADMINISTRADOS.map((nombre, i) => ({
+        codigo: `COP-${String(i + 1).padStart(3, '0')}`,
+        nombre,
+        entidadId: entidad._id,
+        nombreAdministrador: null,
       })),
-      ...EDIFICIOS_INDEPENDIENTES.map((name, i) => ({
-        code: `COP-${String(EDIFICIOS_ADMINISTRADOS.length + i + 1).padStart(3, '0')}`,
-        name,
-        managingEntityId: null,
-        administratorName: 'Administración propia',
+      ...EDIFICIOS_INDEPENDIENTES.map((nombre, i) => ({
+        codigo: `COP-${String(EDIFICIOS_ADMINISTRADOS.length + i + 1).padStart(3, '0')}`,
+        nombre,
+        entidadId: null,
+        nombreAdministrador: 'Administración propia',
       })),
     ];
 
     let creadas = 0;
     for (const def of definiciones) {
       const resultado = await copropiedades.findOneAndUpdate(
-        { code: def.code },
-        { $setOnInsert: { ...def, status: 'active', city: 'Bogotá' } },
+        { codigo: def.codigo },
+        { $setOnInsert: { ...def, estado: 'active', ciudad: 'Bogotá' } },
         { upsert: true, returnDocument: 'after', includeResultMetadata: true },
       );
 
@@ -183,7 +183,7 @@ async function seedDemo(): Promise<void> {
 
     // 4. Units, each with the party responsible for it. Without these there is
     // nothing to bill and every screen downstream is empty.
-    const todas = await copropiedades.find().select('_id code').lean().exec();
+    const todas = await copropiedades.find().select('_id codigo').lean().exec();
     let unidades = 0;
 
     for (const [indice, cop] of todas.entries()) {
@@ -200,7 +200,7 @@ async function seedDemo(): Promise<void> {
         const tercero = await terceros.findOneAndUpdate(
           {
             copropiedadId: cop._id,
-            numeroIdentificacion: `${cop.code}-${i}`,
+            numeroIdentificacion: `${cop.codigo}-${i}`,
           },
           {
             $setOnInsert: {
@@ -208,7 +208,7 @@ async function seedDemo(): Promise<void> {
               tipoPersona: esEmpresa ? 'juridica' : 'natural',
               nombre,
               tipoIdentificacion: esEmpresa ? 'NIT' : 'CC',
-              numeroIdentificacion: `${cop.code}-${i}`,
+              numeroIdentificacion: `${cop.codigo}-${i}`,
               estado: 'active',
             },
           },

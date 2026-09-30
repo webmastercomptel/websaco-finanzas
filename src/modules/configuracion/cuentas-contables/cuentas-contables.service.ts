@@ -149,9 +149,9 @@ export class CuentasContablesService {
 
     for (const [indice, fila] of dto.filas.entries()) {
       try {
-        if (fila.codigoCopropiedad !== copropiedad.code) {
+        if (fila.codigoCopropiedad !== copropiedad.codigo) {
           throw new Error(
-            `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+            `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
           );
         }
 
@@ -245,11 +245,11 @@ export class CuentasContablesService {
         .exists({
           _id: copropiedadId,
           $or: [
-            { receivablesAccount: cuenta.codigo },
-            { advancesAccount: cuenta.codigo },
-            { creditNotesAccount: cuenta.codigo },
-            { debitNotesAccount: cuenta.codigo },
-            { defaultBankAccountCode: cuenta.codigo },
+            { cuentaContableCartera: cuenta.codigo },
+            { cuentaAnticipos: cuenta.codigo },
+            { cuentaDevoluciones: cuenta.codigo },
+            { cuentaNotasDebito: cuenta.codigo },
+            { cuentaBancariaDefecto: cuenta.codigo },
           ],
         })
         .exec(),

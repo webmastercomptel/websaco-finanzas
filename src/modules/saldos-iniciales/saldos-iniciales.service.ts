@@ -114,11 +114,11 @@ export class SaldosInicialesService {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
         { copropiedadId },
-        { $inc: { nextNumber: 1 } },
+        { $inc: { siguienteNumero: 1 } },
         { new: true, upsert: true, session },
       )
       .exec();
-    return actualizado.nextNumber;
+    return actualizado.siguienteNumero;
   }
 
   /**
@@ -156,7 +156,7 @@ export class SaldosInicialesService {
     // clears this and allows a fresh attempt, without ever deleting
     // anything.
     const activos = await this.saldosIniciales
-      .countDocuments({ copropiedadId, status: 'activo' })
+      .countDocuments({ copropiedadId, estado: 'activo' })
       .exec();
     if (activos > 0) {
       throw new ConflictException(
@@ -182,11 +182,11 @@ export class SaldosInicialesService {
 
     dto.filas.forEach((fila, indice) => {
       const numeroFila = indice + 1;
-      if (fila.codigoCopropiedad !== copropiedad.code) {
+      if (fila.codigoCopropiedad !== copropiedad.codigo) {
         erroresValidacion.push({
           fila: numeroFila,
           inmuebleCodigo: fila.codigoInmueble,
-          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
         });
         return;
       }
@@ -259,7 +259,7 @@ export class SaldosInicialesService {
         copropiedadId,
         totalFilas: 0,
         totalMonto: 0,
-        importedBy: accountId,
+        importadoPor: accountId,
       },
     ]);
 
@@ -278,9 +278,9 @@ export class SaldosInicialesService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
-          if (fila.codigoCopropiedad !== copropiedad.code) {
+          if (fila.codigoCopropiedad !== copropiedad.codigo) {
             throw new Error(
-              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
             );
           }
 
@@ -302,7 +302,7 @@ export class SaldosInicialesService {
             }
             return {
               conceptoId: concepto._id,
-              conceptName: concepto.nombre,
+              nombreConcepto: concepto.nombre,
               accountingReceivableAccount: codigoDeCuentaContable(
                 concepto.cuentaDebitoId,
               ),
@@ -324,16 +324,16 @@ export class SaldosInicialesService {
                   copropiedadId,
                   loteId: lote._id,
                   inmuebleId: inmueble._id,
-                  unitCode: inmueble.codigo,
-                  number: numero,
+                  codigoInmueble: inmueble.codigo,
+                  numero,
                   tipoDocumentoOriginal: fila.tipoDocumento,
                   numeroOriginal: fila.numero,
                   fecha: new Date(fila.fecha),
                   fechaVencimiento: new Date(fila.fechaVencimiento),
-                  lines: lineas,
-                  total,
-                  status: 'activo',
-                  generatedBy: accountId,
+                  filas: lineas,
+                  monto: total,
+                  estado: 'activo',
+                  generadoPor: accountId,
                 },
               ],
               { session },
@@ -491,7 +491,7 @@ export class SaldosInicialesService {
       if (!doc) {
         throw new NotFoundException(`No se encontró el saldo inicial ${id}`);
       }
-      if (doc.status === 'anulado') {
+      if (doc.estado === 'anulado') {
         throw new ConflictException(
           `El saldo inicial ${doc.numeroOriginal} ya está anulado`,
         );
@@ -543,11 +543,11 @@ export class SaldosInicialesService {
           { _id: saldoInicialId, copropiedadId },
           {
             $set: {
-              status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
+              estado: 'anulado',
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
             },
           },
           { session },

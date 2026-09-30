@@ -37,12 +37,12 @@ export class Movimiento {
   @Prop({ type: String, default: null, trim: true })
   tercero?: string | null;
 
-  /** The coproperty's single `defaultCostCentre` — set only when this
+  /** The coproperty's single `centroCostoDefecto` — set only when this
    *  line's account has `centroUtilidad`/`centroDestino`. */
   @Prop({ type: String, default: null, trim: true })
   centroCosto?: string | null;
 
-  /** The coproperty's single `cashFlowCode` — set only when this line's
+  /** The coproperty's single `flujoCajaCodigo` — set only when this line's
    *  account has `flujoCaja`. */
   @Prop({ type: String, default: null, trim: true })
   flujoCaja?: string | null;

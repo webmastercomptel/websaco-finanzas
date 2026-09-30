@@ -118,6 +118,20 @@ maintainer works.
 | Tenant reference (the tenancy-law field) | `copropiedadId` | `coPropertyId` — renamed globally in its own dedicated batch; only `resolveCoPropertyId()`/`activeCoPropertyIdOrNull()` (TS method names) and the `X-CoProperty-Id` HTTP header stay in English, both wire/API-level, not the schema field |
 | Electronic-invoicing identification (Tercero) | `tipoIdentificacionFe` / `numeroIdentificacionFe` / `digitoVerificacionFe` | `einvoiceIdentificationType` etc. |
 | Collections/arrears status (Inmueble) | `estadoCartera` | `collectionStatus` |
+| Active/inactive record status (Account, Asignacion, Copropiedad, EntidadAdministradora, Inmueble, Tercero) | `estado` | `status` — enum VALUES stay English (`'active'`/`'inactive'`) even though the field name is Spanish; this is an established inconsistency from batch 1, not something to silently "fix" mid-batch |
+| Colombian tax id (Copropiedad, EntidadAdministradora — the entity's own NIT, not a party's identification) | `nit` | `taxId` — paired with the already-established `digitoVerificacion` |
+| Assignment target discriminator (Asignacion) | `alcance` | `scope` |
+| Permission-key list (Asignacion) | `permisos` | `permissions` — note `AccesoCopropiedad.permissions` (acceso.service.ts's own return shape, not a schema) and `IRequestUser.isPlatformAdmin`/`.permissions` stay English on purpose, see next row |
+| Internal "who is this request" object (`IRequestUser`, CASL's `user.isPlatformAdmin`) | *(unchanged, English)* | Never rename `isPlatformAdmin`/`permissions`/`nombre` on `IRequestUser` to match `Account`/`Asignacion` — it's a request-scoped interface, not persistence, same carve-out as `resolveCoPropertyId()` |
+| Running-ordinal counter's next value (Consecutivo\* schemas) | `siguienteNumero` | `nextNumber` — confirm per-schema: several out-of-scope `numeracion`/`facturacion`/`recibos` counters still use `nextNumber`, only rename the specific Consecutivo schema you're migrating |
+| Voiding metadata (a document's own anulación, e.g. SaldoInicial/SaldoInicialAnticipo) | `motivoAnulacion` / `detalleAnulacion` / `fechaAnulacion` / `anuladoPor` | `voidedReason` / `voidedDetail` / `voidedAt` / `voidedBy` — still English on `Recibo`/`Factura`/`NotaCredito`/`NotaDebito`/`NotaContable`/`NotaAnticipo` (facturacion/recibos/notas-\*, not yet migrated); don't rename those until their own batch |
+| Who created a document (frozen actor reference) | `generadoPor` | `generatedBy` — same per-schema caveat as `siguienteNumero`/anulación above |
+
+**Two fields deliberately left English mid-batch (saldos-iniciales, this batch) — a structural/duck-typed contract with an un-migrated sibling schema, not an oversight:**
+
+- `SaldoInicialAnticipo.fullNumber` / `.receivedDate` / `.status` — `cruce.util.ts`'s `OrigenAplicacion` interface and `decrementarSaldoDocumentoOrigen<T>` read these exact property names off *either* a `ReciboDocument` or a `SaldoInicialAnticipoDocument`, generically. `Recibo` (recibos/, not yet migrated) still names its own fields this way. Renaming only one side breaks the duck-typed match with zero compiler error (every field on that shared shape happens to be optional/generic), so it must wait until `Recibo` itself is migrated in the same change.
+- `SaldoInicialLinea.accountingReceivableAccount` / `.accountingIncomeAccount` / `.conceptKind` — `cuentaCarteraDeLinea` (cruce.util.ts) reads these exact names off *either* a `FacturaLinea` or a `SaldoInicialLinea` object. Same reasoning, same fix timing (with `Factura`'s own batch). `SaldoInicialLinea.conceptName` → `nombreConcepto` was safe to rename — it isn't part of that shared read.
+- When facturacion/recibos/notas-\* schemas are eventually migrated, grep for `cuentaCarteraDeLinea`, `OrigenAplicacion`, and `decrementarSaldoDocumentoOrigen` first — those are the exact seams where a "rename this schema's fields" batch has to touch two schemas at once instead of one.
 
 Mongoose's own `timestamps: true` fields (`createdAt`/`updatedAt`) stay as-is
 — framework metadata, not domain vocabulary. Don't hand-roll a Spanish

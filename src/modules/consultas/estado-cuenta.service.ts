@@ -197,7 +197,7 @@ export class EstadoCuentaService {
 
     // Fetch copropiedad for contact info
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
-    const copropiedadTelefono = copropiedad?.phone ?? null;
+    const copropiedadTelefono = copropiedad?.telefono ?? null;
     const copropiedadEmail = copropiedad?.email ?? null;
 
     // Find the period's own Factura for fechaEmision — not status-filtered,
@@ -341,7 +341,7 @@ export class EstadoCuentaService {
         tipo: 'SI',
         numeroCompleto: si.numeroOriginal,
         concepto: ETIQUETA_DOCUMENTO.SI,
-        cargo: si.total,
+        cargo: si.monto,
         abono: null,
         categoria: null,
       });
@@ -486,7 +486,7 @@ export class EstadoCuentaService {
         numeroCompleto: si.numeroOriginal,
         fecha: si.fecha,
         vence: si.fechaVencimiento,
-        total: si.total,
+        total: si.monto,
       })),
     ].filter((d) => d.fecha < desde);
     const documentosSaldoAnterior = cargosAnteriores

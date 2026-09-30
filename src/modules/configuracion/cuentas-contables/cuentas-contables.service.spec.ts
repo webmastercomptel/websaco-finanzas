@@ -260,11 +260,11 @@ describe('CuentasContablesService.importar', () => {
   };
 
   /** `copropiedades.findById(copropiedadId).exec()` — the per-row
-   *  `codigoCopropiedad` check reads `.code` from this. Defaults to
+   *  `codigoCopropiedad` check reads `.codigo` from this. Defaults to
    *  matching every `fila` below so existing tests are unaffected; only the
    *  mismatch test overrides it. */
-  const copropiedadModeloCon = (code: string = CODIGO_COPROPIEDAD) => ({
-    findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
+  const copropiedadModeloCon = (codigo: string = CODIGO_COPROPIEDAD) => ({
+    findById: jest.fn(() => ({ exec: () => Promise.resolve({ codigo }) })),
   });
 
   const servicioImportar = (

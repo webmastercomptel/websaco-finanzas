@@ -1165,9 +1165,9 @@ describe('cuentasOrdenDe', () => {
   it('devuelve null cuando la copropiedad no usa cuentas de orden', () => {
     expect(
       cuentasOrdenDe({
-        usesMemorandumAccounts: false,
-        memorandumDebitAccount: '831505',
-        memorandumCreditAccount: '831510',
+        usaCuentasOrden: false,
+        cuentaOrdenDebito: '831505',
+        cuentaOrdenCredito: '831510',
       }),
     ).toBeNull();
     expect(cuentasOrdenDe(null)).toBeNull();
@@ -1177,9 +1177,9 @@ describe('cuentasOrdenDe', () => {
   it('resuelve el par cuando está habilitado, con reserva para cuentas sin asignar', () => {
     expect(
       cuentasOrdenDe({
-        usesMemorandumAccounts: true,
-        memorandumDebitAccount: '831505',
-        memorandumCreditAccount: null,
+        usaCuentasOrden: true,
+        cuentaOrdenDebito: '831505',
+        cuentaOrdenCredito: null,
       }),
     ).toEqual({ debito: '831505', credito: 'SIN-CUENTA-ASIGNADA' });
   });

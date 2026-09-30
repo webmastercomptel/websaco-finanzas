@@ -78,7 +78,7 @@ export class FirebaseAuthGuard implements CanActivate {
       return true;
     }
 
-    if (cuenta.status !== 'active') {
+    if (cuenta.estado !== 'active') {
       // Distinct from "no account": somebody deliberately switched this person
       // off, and they should be told rather than shown an empty app.
       throw new ForbiddenException('Tu cuenta está desactivada');
@@ -142,8 +142,8 @@ export class FirebaseAuthGuard implements CanActivate {
     cuenta: {
       _id: unknown;
       email: string;
-      fullName: string;
-      isPlatformAdmin: boolean;
+      nombreCompleto: string;
+      esAdministradorPlataforma: boolean;
     },
     request: Request,
   ): Promise<IRequestUser> {
@@ -152,8 +152,8 @@ export class FirebaseAuthGuard implements CanActivate {
       uid: decoded.uid,
       email: cuenta.email,
       accountId,
-      nombre: cuenta.fullName,
-      isPlatformAdmin: cuenta.isPlatformAdmin,
+      nombre: cuenta.nombreCompleto,
+      isPlatformAdmin: cuenta.esAdministradorPlataforma,
       permissions: [],
     };
 
@@ -164,7 +164,7 @@ export class FirebaseAuthGuard implements CanActivate {
     const acceso = await this.acceso.accesoA(
       accountId,
       solicitada,
-      cuenta.isPlatformAdmin,
+      cuenta.esAdministradorPlataforma,
     );
     if (!acceso) {
       this.logger.warn(

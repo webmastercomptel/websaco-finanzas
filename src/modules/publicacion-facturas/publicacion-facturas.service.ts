@@ -93,13 +93,13 @@ export class PublicacionFacturasService {
   async encolar(evento: LoteFacturasPdfConfirmadoEvent): Promise<void> {
     const copropiedad = await this.copropiedades
       .findById(evento.copropiedadId)
-      .select('usesBuildingManagement taxId')
+      .select('usaGestionEdificios nit')
       .lean()
       .exec();
 
-    if (!copropiedad?.usesBuildingManagement) return;
+    if (!copropiedad?.usaGestionEdificios) return;
 
-    if (!copropiedad.taxId) {
+    if (!copropiedad.nit) {
       this.logger.warn(
         `La copropiedad ${evento.copropiedadId} tiene la gestión de edificios activa pero sin NIT; se omite la publicación del lote ${evento.loteId}.`,
       );
@@ -114,7 +114,7 @@ export class PublicacionFacturasService {
             $setOnInsert: {
               copropiedadId: new Types.ObjectId(evento.copropiedadId),
               loteId: new Types.ObjectId(evento.loteId),
-              taxId: copropiedad.taxId,
+              taxId: copropiedad.nit,
               invoiceNumbers: evento.numerosFactura,
               objectPath: evento.objectPath,
               status: 'pendiente',

@@ -74,14 +74,14 @@ export class SaldoInicialAnticipo {
   @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
-  /** Frozen — same reasoning as `SaldoInicial.unitCode`. */
+  /** Frozen — same reasoning as `SaldoInicial.codigoInmueble`. */
   @Prop({ required: true, trim: true })
-  unitCode: string;
+  codigoInmueble: string;
 
   /** Internal ordinal (`ConsecutivoSaldoInicialAnticipo`) — never a real
-   *  consecutivo, same reasoning as `SaldoInicial.number`. */
+   *  consecutivo, same reasoning as `SaldoInicial.numero`. */
   @Prop({ required: true })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true, maxlength: 20 })
   tipoDocumentoOriginal: string;
@@ -90,17 +90,22 @@ export class SaldoInicialAnticipo {
   numeroOriginal: string;
 
   /** This system's own frozen display string (`tipoDocumentoOriginal` +
-   *  `numeroOriginal`) — never a real consecutivo, but named `fullNumber` so
-   *  it satisfies `cruce.util.ts`'s `OrigenAplicacion` shape the exact same
-   *  way `Recibo.fullNumber` does. */
+   *  `numeroOriginal`) — never a real consecutivo, but named `fullNumber`
+   *  (deliberately English, NOT `numeroCompleto`) so it satisfies
+   *  `cruce.util.ts`'s `OrigenAplicacion` shape the exact same way
+   *  `Recibo.fullNumber` does — that interface is structurally typed, and
+   *  `Recibo` (out of scope this batch) still names its own field this way.
+   *  Renaming this one alone would stop this document from satisfying the
+   *  shape `ContextoAplicacion<SaldoInicialAnticipoDocument>` needs. */
   @Prop({ required: true, trim: true })
   fullNumber: string;
 
   /** When this money actually arrived, per the client's previous system —
-   *  same semantic as `Recibo.receivedDate`, same field name so this
-   *  document satisfies `cruce.util.ts`'s `OrigenAplicacion` shape without
-   *  any adapter. Drives pronto-pago discount eligibility exactly like a
-   *  real Recibo's own `receivedDate` would (`evaluarAplicacionConDescuento`
+   *  same semantic as `Recibo.receivedDate`, same field name (deliberately
+   *  English, same reasoning as `fullNumber` above) so this document
+   *  satisfies `cruce.util.ts`'s `OrigenAplicacion` shape without any
+   *  adapter. Drives pronto-pago discount eligibility exactly like a real
+   *  Recibo's own `receivedDate` would (`evaluarAplicacionConDescuento`
    *  reads it regardless of which collection the origin came from). */
   @Prop({ required: true })
   receivedDate: Date;
@@ -108,6 +113,13 @@ export class SaldoInicialAnticipo {
   @Prop({ required: true })
   montoOriginal: number;
 
+  // `status` is deliberately NOT `estado` here, unlike every other renamed
+  // field on this document: `decrementarSaldoDocumentoOrigen` (cruce.util.ts)
+  // is ONE generic function shared verbatim with `Recibo` (still English,
+  // out of scope this batch) — it queries `{ status: estadoActivo }` with a
+  // hardcoded key against whichever model it's given. Renaming this field
+  // alone, without also touching that shared out-of-scope function, would
+  // silently break every query it runs against this collection.
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
   status: 'activo' | 'anulado';
 
@@ -116,19 +128,19 @@ export class SaldoInicialAnticipo {
     enum: VOID_REASONS_SALDO_INICIAL_ANTICIPO,
     default: null,
   })
-  voidedReason: VoidReasonSaldoInicialAnticipo | null;
+  motivoAnulacion: VoidReasonSaldoInicialAnticipo | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 }
 
 export const SaldoInicialAnticipoSchema =

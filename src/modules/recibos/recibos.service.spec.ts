@@ -323,8 +323,8 @@ const modeloCopropiedades = () => ({
     session: () => ({
       exec: () =>
         Promise.resolve({
-          receivablesAccount: '130501',
-          advancesAccount: '210505',
+          cuentaContableCartera: '130501',
+          cuentaAnticipos: '210505',
         }),
     }),
   })),
@@ -573,10 +573,10 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                defaultCostCentre: 'CC-01',
-                cashFlowCode: 'FC-OPER',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                centroCostoDefecto: 'CC-01',
+                flujoCajaCodigo: 'FC-OPER',
               }),
           }),
         })),
@@ -658,7 +658,7 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     }),
   });
 
-  it('usa defaultBankAccountCode cuando el DTO no trae cuentaDestino', async () => {
+  it('usa cuentaBancariaDefecto cuando el DTO no trae cuentaDestino', async () => {
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
@@ -682,9 +682,9 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     const { service, recibos } = construirServicio({
       reciboCreado,
       copropiedades: modeloCopropiedadesCon({
-        receivablesAccount: '130501',
-        advancesAccount: '210505',
-        defaultBankAccountCode: '999000',
+        cuentaContableCartera: '130501',
+        cuentaAnticipos: '210505',
+        cuentaBancariaDefecto: '999000',
       }),
     });
 
@@ -703,13 +703,13 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     expect(payloads[0].destinationAccount).toBe('999000');
   });
 
-  it('rechaza crear el recibo cuando faltan cuentaDestino Y defaultBankAccountCode', async () => {
+  it('rechaza crear el recibo cuando faltan cuentaDestino Y cuentaBancariaDefecto', async () => {
     const { service } = construirServicio({
       reciboCreado: {},
       copropiedades: modeloCopropiedadesCon({
-        receivablesAccount: '130501',
-        advancesAccount: '210505',
-        defaultBankAccountCode: null,
+        cuentaContableCartera: '130501',
+        cuentaAnticipos: '210505',
+        cuentaBancariaDefecto: null,
       }),
     });
 
@@ -1154,11 +1154,11 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              usesMemorandumAccounts: true,
-              memorandumDebitAccount: '831505',
-              memorandumCreditAccount: '831510',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              usaCuentasOrden: true,
+              cuentaOrdenDebito: '831505',
+              cuentaOrdenCredito: '831510',
             }),
         }),
       })),
@@ -1244,11 +1244,11 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              usesMemorandumAccounts: true,
-              memorandumDebitAccount: '831505',
-              memorandumCreditAccount: '831510',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              usaCuentasOrden: true,
+              cuentaOrdenDebito: '831505',
+              cuentaOrdenCredito: '831510',
             }),
         }),
       })),
@@ -1588,9 +1588,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              discountsDebitAccount: '540501',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              descuentosCuentaDebito: '540501',
             }),
         }),
       })),
@@ -1719,9 +1719,9 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              discountsDebitAccount: '540501',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              descuentosCuentaDebito: '540501',
             }),
         }),
       })),
@@ -1845,9 +1845,9 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              otherIncomeCreditAccount: '429505',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              otrosIngresosCuentaCredito: '429505',
             }),
         }),
       })),
@@ -3054,11 +3054,11 @@ describe('RecibosService.anular', () => {
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              usesMemorandumAccounts: true,
-              memorandumDebitAccount: '831505',
-              memorandumCreditAccount: '831510',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              usaCuentasOrden: true,
+              cuentaOrdenDebito: '831505',
+              cuentaOrdenCredito: '831510',
             }),
         }),
       })),
@@ -3316,7 +3316,7 @@ describe('RecibosService.anular', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('con otherIncomeAmount > 0, debita otherIncomeCreditAccount (no advancesAccount) y NO infla la reversión de cartera', async () => {
+  it('con otherIncomeAmount > 0, debita otrosIngresosCuentaCredito (no cuentaAnticipos) y NO infla la reversión de cartera', async () => {
     const facturaId = new Types.ObjectId();
     // 500000 recibidos: 200000 a cartera, 300000 confirmados como Otros
     // Ingresos — `SaldoDocumentoOrigen` fue decrementado por AMBOS
@@ -3361,9 +3361,9 @@ describe('RecibosService.anular', () => {
         session: () => ({
           exec: () =>
             Promise.resolve({
-              receivablesAccount: '130501',
-              advancesAccount: '210505',
-              otherIncomeCreditAccount: '429505',
+              cuentaContableCartera: '130501',
+              cuentaAnticipos: '210505',
+              otrosIngresosCuentaCredito: '429505',
             }),
         }),
       })),
@@ -3416,7 +3416,7 @@ describe('RecibosService.anular', () => {
         ?.amount,
     ).toBe(200000);
     // Los 300000 de Otros Ingresos se revierten a SU cuenta, no a
-    // advancesAccount (210505) — no hubo ningún renglón ahí.
+    // cuentaAnticipos (210505) — no hubo ningún renglón ahí.
     const otrosIngresos = entries.find(
       (m) => m.account === '429505' && m.type === 'debito',
     );

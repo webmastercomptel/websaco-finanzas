@@ -31,7 +31,7 @@ async function run() {
     getModelToken(ConceptoCobro.name),
   );
 
-  const cop = await copropiedades.findOne({ code: COPROPIEDAD_CODE }).exec();
+  const cop = await copropiedades.findOne({ codigo: COPROPIEDAD_CODE }).exec();
   if (!cop) {
     console.error(
       `No se encontró la copropiedad con código ${COPROPIEDAD_CODE}`,
@@ -40,7 +40,7 @@ async function run() {
     process.exit(1);
   }
 
-  console.log(`Copropiedad: ${cop.name} (${cop._id.toString()})`);
+  console.log(`Copropiedad: ${cop.nombre} (${cop._id.toString()})`);
 
   const existentes = await conceptos.find({ copropiedadId: cop._id }).exec();
   console.log(`Conceptos existentes: ${existentes.length}`);

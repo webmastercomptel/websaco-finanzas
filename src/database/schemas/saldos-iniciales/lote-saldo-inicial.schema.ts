@@ -28,7 +28,7 @@ export class LoteSaldoInicial {
   totalMonto: number;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  importedBy: Types.ObjectId;
+  importadoPor: Types.ObjectId;
 }
 
 export const LoteSaldoInicialSchema =

@@ -111,7 +111,7 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
 const svcDefaults = (overrides: Record<string, unknown> = {}) => ({
   inmuebles: mockFindOne({ codigo: '301', titularId: null }),
   terceros: mockFindOne(null),
-  copropiedades: mockFindById({ phone: null, email: null }),
+  copropiedades: mockFindById({ telefono: null, email: null }),
   ...overrides,
 });
 
@@ -981,7 +981,7 @@ describe('EstadoCuentaService', () => {
         facturas: mockFind([f]),
         ...svcDefaults({
           copropiedades: mockFindById({
-            phone: '601-555-1234',
+            telefono: '601-555-1234',
             email: 'admin@cop.com',
           }),
         }),
@@ -1060,7 +1060,7 @@ describe('EstadoCuentaService', () => {
           findOne: tercerosFindOne,
           exec: jest.fn().mockResolvedValue({ nombre: 'Juan Perez' }),
         },
-        copropiedades: mockFindById({ phone: null, email: null }),
+        copropiedades: mockFindById({ telefono: null, email: null }),
       });
 
       await svc.findAll({

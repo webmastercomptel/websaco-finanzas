@@ -94,11 +94,11 @@ export class SaldosInicialesAnticipoService {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
         { copropiedadId },
-        { $inc: { nextNumber: 1 } },
+        { $inc: { siguienteNumero: 1 } },
         { new: true, upsert: true, session },
       )
       .exec();
-    return actualizado.nextNumber;
+    return actualizado.siguienteNumero;
   }
 
   /**
@@ -155,11 +155,11 @@ export class SaldosInicialesAnticipoService {
 
     dto.filas.forEach((fila, indice) => {
       const numeroFila = indice + 1;
-      if (fila.codigoCopropiedad !== copropiedad.code) {
+      if (fila.codigoCopropiedad !== copropiedad.codigo) {
         erroresValidacion.push({
           fila: numeroFila,
           inmuebleCodigo: fila.codigoInmueble,
-          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
         });
         return;
       }
@@ -217,7 +217,7 @@ export class SaldosInicialesAnticipoService {
         copropiedadId,
         totalFilas: 0,
         totalMonto: 0,
-        importedBy: accountId,
+        importadoPor: accountId,
       },
     ]);
 
@@ -236,9 +236,9 @@ export class SaldosInicialesAnticipoService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
-          if (fila.codigoCopropiedad !== copropiedad.code) {
+          if (fila.codigoCopropiedad !== copropiedad.codigo) {
             throw new Error(
-              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+              `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
             );
           }
 
@@ -264,15 +264,15 @@ export class SaldosInicialesAnticipoService {
                   // `NotaDebitoService`/`NotaCreditoService` read for their
                   // own `terceroId` (`Inmueble.titularId`).
                   terceroId: inmueble.titularId,
-                  unitCode: inmueble.codigo,
-                  number: numero,
+                  codigoInmueble: inmueble.codigo,
+                  numero,
                   tipoDocumentoOriginal: fila.tipoDocumento,
                   numeroOriginal: fila.numero,
                   fullNumber: `${fila.tipoDocumento} ${fila.numero}`,
                   receivedDate: new Date(fila.fecha),
                   montoOriginal: fila.valor,
                   status: 'activo',
-                  generatedBy: accountId,
+                  generadoPor: accountId,
                 },
               ],
               { session },
@@ -415,10 +415,10 @@ export class SaldosInicialesAnticipoService {
           {
             $set: {
               status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
             },
           },
           { session },
@@ -429,7 +429,7 @@ export class SaldosInicialesAnticipoService {
         .findOne({ _id: saldoInicialAnticipoId, copropiedadId })
         .session(session)
         .exec();
-      return toSaldoInicialAnticipo(final!, doc.unitCode, 0);
+      return toSaldoInicialAnticipo(final!, doc.codigoInmueble, 0);
     });
   }
 }

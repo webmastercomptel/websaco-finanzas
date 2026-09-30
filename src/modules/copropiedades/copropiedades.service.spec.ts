@@ -55,19 +55,19 @@ const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'cop-1' },
-  code: 'COP-001',
-  name: 'Terrazas de Granada',
-  taxId: null,
-  taxIdVerificationDigit: null,
-  address: null,
-  city: null,
-  phone: null,
+  codigo: 'COP-001',
+  nombre: 'Terrazas de Granada',
+  nit: null,
+  digitoVerificacion: null,
+  direccion: null,
+  ciudad: null,
+  telefono: null,
   email: null,
-  managingEntityId: null,
-  administratorName: null,
-  status: 'active',
-  usesBuildingManagement: false,
-  showLogoOnDocuments: true,
+  entidadId: null,
+  nombreAdministrador: null,
+  estado: 'active',
+  usaGestionEdificios: false,
+  mostrarLogo: true,
   ...over,
 });
 
@@ -144,7 +144,7 @@ describe('CopropiedadesService.findAll', () => {
   it('devuelve el nombre de la entidad administradora cuando la trae poblada', async () => {
     const modelo = modeloCon([
       documento({
-        managingEntityId: { _id: { toString: () => 'ent-1' }, name: 'Calad' },
+        entidadId: { _id: { toString: () => 'ent-1' }, nombre: 'Calad' },
       }),
     ]);
     const service = new CopropiedadesService(
@@ -169,7 +169,7 @@ describe('CopropiedadesService.findAll', () => {
 
   it('devuelve null cuando no hay entidad administradora en el archivo', async () => {
     const modelo = modeloCon([
-      documento({ managingEntityId: null, administratorName: 'Portería' }),
+      documento({ entidadId: null, nombreAdministrador: 'Portería' }),
     ]);
     const service = new CopropiedadesService(
       modelo as never,
@@ -190,7 +190,7 @@ describe('CopropiedadesService.findAll', () => {
   });
 
   it('sin entidad, usa el nombre de la cuenta con Asignación activa a la copropiedad', async () => {
-    const modelo = modeloCon([documento({ managingEntityId: null })]);
+    const modelo = modeloCon([documento({ entidadId: null })]);
     const asignaciones = mockAsignaciones([
       {
         accountId: { toString: () => 'acc-1' },
@@ -198,7 +198,7 @@ describe('CopropiedadesService.findAll', () => {
       },
     ]);
     const accounts = mockAccounts([
-      { _id: { toString: () => 'acc-1' }, fullName: 'Juana Restrepo' },
+      { _id: { toString: () => 'acc-1' }, nombreCompleto: 'Juana Restrepo' },
     ]);
     const service = new CopropiedadesService(
       modelo as never,
@@ -218,7 +218,7 @@ describe('CopropiedadesService.findAll', () => {
   });
 
   it('junta los nombres cuando hay más de una cuenta asignada', async () => {
-    const modelo = modeloCon([documento({ managingEntityId: null })]);
+    const modelo = modeloCon([documento({ entidadId: null })]);
     const asignaciones = mockAsignaciones([
       {
         accountId: { toString: () => 'acc-1' },
@@ -230,8 +230,8 @@ describe('CopropiedadesService.findAll', () => {
       },
     ]);
     const accounts = mockAccounts([
-      { _id: { toString: () => 'acc-1' }, fullName: 'Juana Restrepo' },
-      { _id: { toString: () => 'acc-2' }, fullName: 'Carlos Vega' },
+      { _id: { toString: () => 'acc-1' }, nombreCompleto: 'Juana Restrepo' },
+      { _id: { toString: () => 'acc-2' }, nombreCompleto: 'Carlos Vega' },
     ]);
     const service = new CopropiedadesService(
       modelo as never,
@@ -253,7 +253,7 @@ describe('CopropiedadesService.findAll', () => {
   it('con entidad administradora, no consulta Asignaciones — el grant es por la entidad', async () => {
     const modelo = modeloCon([
       documento({
-        managingEntityId: { _id: { toString: () => 'ent-1' }, name: 'Calad' },
+        entidadId: { _id: { toString: () => 'ent-1' }, nombre: 'Calad' },
       }),
     ]);
     const asignaciones = mockAsignaciones();
@@ -276,7 +276,7 @@ describe('CopropiedadesService.findAll', () => {
   });
 
   it('sin ninguna Asignación activa, usuarioAdministrador queda null', async () => {
-    const modelo = modeloCon([documento({ managingEntityId: null })]);
+    const modelo = modeloCon([documento({ entidadId: null })]);
     const service = new CopropiedadesService(
       modelo as never,
       mockContador() as never,
@@ -297,7 +297,7 @@ describe('CopropiedadesService.findAll', () => {
 
 describe('CopropiedadesService.create', () => {
   it('asigna el código automáticamente desde el contador', async () => {
-    const modelo = modeloCon([documento({ name: 'Nueva Copro' })]);
+    const modelo = modeloCon([documento({ nombre: 'Nueva Copro' })]);
     const contador = mockContador(9);
     const service = new CopropiedadesService(
       modelo as never,
@@ -313,13 +313,13 @@ describe('CopropiedadesService.create', () => {
 
     await service.create({ nombre: 'Nueva Copro' }, ACTOR);
 
-    expect(modelo.escrituras[0]).toMatchObject({ code: '0010' });
+    expect(modelo.escrituras[0]).toMatchObject({ codigo: '0010' });
   });
 
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
     // findById(0)-tras-create necesita una fila para el re-lectura poblada
     // que create() hace al final; el nombre viene de ahí, no de `escrituras`.
-    const modelo = modeloCon([documento({ name: 'Nueva Copro' })]);
+    const modelo = modeloCon([documento({ nombre: 'Nueva Copro' })]);
     const auditoria = mockAuditoria();
     const service = new CopropiedadesService(
       modelo as never,
@@ -385,7 +385,7 @@ describe('CopropiedadesService.update', () => {
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
 
-    expect(modelo.escrituras[0]).toEqual({ city: 'Medellín' });
+    expect(modelo.escrituras[0]).toEqual({ ciudad: 'Medellín' });
   });
 
   it('permite apagar el logo de WebSACO en los documentos de esta copropiedad', async () => {
@@ -404,7 +404,7 @@ describe('CopropiedadesService.update', () => {
 
     await service.update('cop-1', { mostrarLogo: false }, ACTOR);
 
-    expect(modelo.escrituras[0]).toEqual({ showLogoOnDocuments: false });
+    expect(modelo.escrituras[0]).toEqual({ mostrarLogo: false });
   });
 
   it('nombrar una entidad administradora borra la nota interna', async () => {
@@ -424,8 +424,8 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { entidadAdministradoraId: 'ent-9' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
-      managingEntityId: 'ent-9',
-      administratorName: null,
+      entidadId: 'ent-9',
+      nombreAdministrador: null,
     });
   });
 
@@ -446,8 +446,8 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { nombreAdministrador: 'Portería' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
-      administratorName: 'Portería',
-      managingEntityId: null,
+      nombreAdministrador: 'Portería',
+      entidadId: null,
     });
   });
 
@@ -467,7 +467,7 @@ describe('CopropiedadesService.update', () => {
 
     await service.update('cop-1', { estado: 'inactivo' }, ACTOR);
 
-    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
+    expect(modelo.escrituras[0]).toEqual({ estado: 'inactive' });
   });
 
   it('responde "no existe" cuando el id no corresponde a ninguna', async () => {
@@ -558,7 +558,7 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { cuentaContableCartera: '130501' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
-      receivablesAccount: '130501',
+      cuentaContableCartera: '130501',
     });
   });
 
@@ -579,7 +579,7 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { cuentaAnticipos: '210505' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
-      advancesAccount: '210505',
+      cuentaAnticipos: '210505',
     });
   });
 
@@ -600,7 +600,7 @@ describe('CopropiedadesService.update', () => {
     await service.update('cop-1', { cuentaDevoluciones: '413595' }, ACTOR);
 
     expect(modelo.escrituras[0]).toEqual({
-      creditNotesAccount: '413595',
+      cuentaDevoluciones: '413595',
     });
   });
 });
@@ -626,7 +626,7 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
   };
 
   it('crear con el flag en true y sin NIT: rechaza', async () => {
-    const { service } = construirService([documento({ name: 'X' })]);
+    const { service } = construirService([documento({ nombre: 'X' })]);
 
     await expect(
       service.create({ nombre: 'X', usaGestionEdificios: true }, ACTOR),
@@ -634,7 +634,7 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
   });
 
   it('crear con el flag en true y NIT completo: acepta', async () => {
-    const { modelo, service } = construirService([documento({ name: 'X' })]);
+    const { modelo, service } = construirService([documento({ nombre: 'X' })]);
 
     await service.create(
       {
@@ -647,18 +647,18 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     );
 
     expect(modelo.escrituras[0]).toMatchObject({
-      usesBuildingManagement: true,
-      taxId: '900123456',
-      taxIdVerificationDigit: '7',
+      usaGestionEdificios: true,
+      nit: '900123456',
+      digitoVerificacion: '7',
     });
   });
 
   it('actualizar activa el flag y provee el NIT en el mismo request: acepta', async () => {
     const { modelo, service } = construirService([
       documento({
-        usesBuildingManagement: false,
-        taxId: null,
-        taxIdVerificationDigit: null,
+        usaGestionEdificios: false,
+        nit: null,
+        digitoVerificacion: null,
       }),
     ]);
 
@@ -673,32 +673,32 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     );
 
     expect(modelo.escrituras[0]).toEqual({
-      usesBuildingManagement: true,
-      taxId: '900123456',
-      taxIdVerificationDigit: '7',
+      usaGestionEdificios: true,
+      nit: '900123456',
+      digitoVerificacion: '7',
     });
   });
 
   it('actualizar activa el flag pero el NIT ya está en el archivo: acepta, usa el NIT existente', async () => {
     const { modelo, service } = construirService([
       documento({
-        usesBuildingManagement: false,
-        taxId: '900123456',
-        taxIdVerificationDigit: '7',
+        usaGestionEdificios: false,
+        nit: '900123456',
+        digitoVerificacion: '7',
       }),
     ]);
 
     await service.update('cop-1', { usaGestionEdificios: true }, ACTOR);
 
-    expect(modelo.escrituras[0]).toEqual({ usesBuildingManagement: true });
+    expect(modelo.escrituras[0]).toEqual({ usaGestionEdificios: true });
   });
 
   it('actualizar activa el flag sin NIT en ningún lado: rechaza', async () => {
     const { service } = construirService([
       documento({
-        usesBuildingManagement: false,
-        taxId: null,
-        taxIdVerificationDigit: null,
+        usaGestionEdificios: false,
+        nit: null,
+        digitoVerificacion: null,
       }),
     ]);
 
@@ -716,23 +716,23 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     // tres claves — no sólo que pasaría de todos modos con un NIT completo.
     const { modelo, service } = construirService([
       documento({
-        usesBuildingManagement: true,
-        taxId: null,
-        taxIdVerificationDigit: null,
+        usaGestionEdificios: true,
+        nit: null,
+        digitoVerificacion: null,
       }),
     ]);
 
     await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
 
-    expect(modelo.escrituras[0]).toEqual({ city: 'Cali' });
+    expect(modelo.escrituras[0]).toEqual({ ciudad: 'Cali' });
   });
 
   it('dígito de verificación "0" cuenta como presente, no como faltante', async () => {
     const { modelo, service } = construirService([
       documento({
-        usesBuildingManagement: false,
-        taxId: null,
-        taxIdVerificationDigit: null,
+        usaGestionEdificios: false,
+        nit: null,
+        digitoVerificacion: null,
       }),
     ]);
 
@@ -743,7 +743,7 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     );
 
     expect(modelo.escrituras[0]).toMatchObject({
-      taxIdVerificationDigit: '0',
+      digitoVerificacion: '0',
     });
   });
 });

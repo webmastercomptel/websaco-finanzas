@@ -201,7 +201,7 @@ export class VencimientosCarteraService {
       const aplicadoActivo = apps
         .filter((a) => activeAsOf(a, fechaCorte))
         .reduce((sum, a) => sum + a.amountApplied, 0);
-      const saldo = Math.max(0, si.total - aplicadoActivo);
+      const saldo = Math.max(0, si.monto - aplicadoActivo);
       if (saldo <= 0) continue;
 
       filasRaw.push({

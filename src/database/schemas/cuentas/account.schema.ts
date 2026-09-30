@@ -33,7 +33,7 @@ export class Account {
   email: string;
 
   @Prop({ required: true, trim: true })
-  fullName: string;
+  nombreCompleto: string;
 
   /**
    * Platform operator: sees every coproperty and bypasses assignments. This is
@@ -42,7 +42,7 @@ export class Account {
    * outside it.
    */
   @Prop({ required: true, default: false })
-  isPlatformAdmin: boolean;
+  esAdministradorPlataforma: boolean;
 
   /**
    * Inactive locks the person out while keeping their name attached to
@@ -50,7 +50,7 @@ export class Account {
    * keep pointing at whoever voided it.
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const AccountSchema = SchemaFactory.createForClass(Account);

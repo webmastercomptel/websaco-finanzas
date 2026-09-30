@@ -7,26 +7,26 @@ const tenant = () => ({ resolveCoPropertyId: () => COP }) as never;
 
 const copropiedadDoc = (over: Record<string, unknown> = {}) => ({
   _id: COP,
-  discountEnabled: false,
-  discountPercentage: 0,
-  discountFixedValue: 0,
-  discountGraceDays: 0,
-  discountAppliesWithLateFee: false,
-  lateFeeEnabled: false,
-  lateFeeInterestRate: 0,
-  lateFeeValueLimit: null,
-  defaultBankAccountCode: null,
-  billingNotes: null,
-  defaultCostCentre: null,
-  otherIncomeDebitAccount: null,
-  otherIncomeCreditAccount: null,
-  discountsDebitAccount: null,
-  discountsCreditAccount: null,
-  memorandumDebitAccount: null,
-  memorandumCreditAccount: null,
-  usesMemorandumAccounts: false,
-  advancesAccount: null,
-  cashFlowCode: null,
+  descuentoHabilitado: false,
+  descuentoPorcentaje: 0,
+  descuentoValorFijo: 0,
+  descuentoDiasGracia: 0,
+  descuentoAplicaConMora: false,
+  moraHabilitada: false,
+  moraTasaInteres: 0,
+  moraValorLimite: null,
+  cuentaBancariaDefecto: null,
+  notasFacturacion: null,
+  centroCostoDefecto: null,
+  otrosIngresosCuentaDebito: null,
+  otrosIngresosCuentaCredito: null,
+  descuentosCuentaDebito: null,
+  descuentosCuentaCredito: null,
+  cuentaOrdenDebito: null,
+  cuentaOrdenCredito: null,
+  usaCuentasOrden: false,
+  cuentaAnticipos: null,
+  flujoCajaCodigo: null,
   ...over,
 });
 
@@ -37,9 +37,9 @@ describe('ParametrosService.findOne', () => {
         exec: () =>
           Promise.resolve(
             copropiedadDoc({
-              discountEnabled: true,
-              lateFeeInterestRate: 2.5,
-              defaultBankAccountCode: '111005',
+              descuentoHabilitado: true,
+              moraTasaInteres: 2.5,
+              cuentaBancariaDefecto: '111005',
             }),
           ),
       })),
@@ -86,7 +86,7 @@ describe('ParametrosService.update', () => {
   it('solo escribe los campos enviados', async () => {
     const findByIdAndUpdate = jest.fn(
       (_id: unknown, _update: Record<string, unknown>) => ({
-        exec: () => Promise.resolve(copropiedadDoc({ lateFeeEnabled: true })),
+        exec: () => Promise.resolve(copropiedadDoc({ moraHabilitada: true })),
       }),
     );
     const copropiedades = { findByIdAndUpdate };
@@ -98,7 +98,7 @@ describe('ParametrosService.update', () => {
       unknown,
       { $set: Record<string, unknown> },
     ];
-    expect(update.$set).toEqual({ lateFeeEnabled: true });
+    expect(update.$set).toEqual({ moraHabilitada: true });
   });
 
   it('responde "no existe" cuando la copropiedad no se encuentra', async () => {

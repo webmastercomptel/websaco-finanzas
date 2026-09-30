@@ -276,7 +276,7 @@ export async function calcularDocumentosConSaldoAFecha(
 
   for (const si of saldosIniciales) {
     const docApps = appsByDoc.get(si._id.toString()) ?? [];
-    const monto = saldoDocumentoAFecha(si.total, docApps, fecha);
+    const monto = saldoDocumentoAFecha(si.monto, docApps, fecha);
     if (monto > 0) {
       resultado.push({
         inmuebleId: si.inmuebleId,

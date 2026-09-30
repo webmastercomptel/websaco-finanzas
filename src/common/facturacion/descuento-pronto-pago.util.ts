@@ -39,7 +39,7 @@ const SIN_DESCUENTO: DescuentoProntoPago = {
  * amount rounds to 0 or below, or — the default business rule — this
  * cycle already charged mora. `descuentoAplicaConMora` (Parámetros de
  * Facturación's own "Descuento Aplica Con Mora" toggle,
- * `Copropiedad.discountAppliesWithLateFee`) is the explicit override: when
+ * `Copropiedad.descuentoAplicaConMora`) is the explicit override: when
  * `true`, mora no longer forfeits the discount.
  *
  * The result is computed ONCE — at a real invoice's `consolidar()` time,

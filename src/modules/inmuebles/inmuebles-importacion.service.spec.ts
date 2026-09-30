@@ -14,11 +14,11 @@ const fila = (over: Record<string, unknown> = {}) => ({
 });
 
 /** `copropiedades.findById(copropiedadId).exec()` — the whole-file
- *  `codigoCopropiedad` check reads `.code` from this before anything is
+ *  `codigoCopropiedad` check reads `.codigo` from this before anything is
  *  wiped. Defaults to matching every `fila()` above so existing tests are
  *  unaffected; only the mismatch test overrides it. */
-const copropiedadModeloCon = (code: string = CODIGO_COPROPIEDAD) => ({
-  findById: jest.fn(() => ({ exec: () => Promise.resolve({ code }) })),
+const copropiedadModeloCon = (codigo: string = CODIGO_COPROPIEDAD) => ({
+  findById: jest.fn(() => ({ exec: () => Promise.resolve({ codigo }) })),
 });
 
 /** Records every code checked and every unit written; codes in `existentes`

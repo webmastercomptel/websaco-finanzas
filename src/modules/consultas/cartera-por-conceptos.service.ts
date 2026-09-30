@@ -314,14 +314,14 @@ export class CarteraPorConceptosService {
       const apps = appsByDoc.get(si._id.toString()) ?? [];
       const saldoActivo = Math.max(
         0,
-        si.total -
+        si.monto -
           apps
             .filter((a) => activeAsOf(a, fecha))
             .reduce((sum, a) => sum + a.amountApplied, 0),
       );
-      const factor = si.total > 0 ? saldoActivo / si.total : 0;
+      const factor = si.monto > 0 ? saldoActivo / si.monto : 0;
       const cargosFallback: Record<string, number> = {};
-      for (const line of si.lines) {
+      for (const line of si.filas) {
         const key = line.conceptoId.toString();
         cargosFallback[key] =
           (cargosFallback[key] ?? 0) + line.montoOriginal * factor;
@@ -332,7 +332,7 @@ export class CarteraPorConceptosService {
         si._id,
         si.tipoDocumentoOriginal,
         si.numeroOriginal,
-        si.number,
+        si.numero,
         si.fecha,
         si.fechaVencimiento,
         saldoActivo,

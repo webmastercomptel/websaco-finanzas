@@ -29,7 +29,7 @@ export class ConsecutivoSaldoInicial {
   copropiedadId: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })
-  nextNumber: number;
+  siguienteNumero: number;
 }
 
 export const ConsecutivoSaldoInicialSchema = SchemaFactory.createForClass(

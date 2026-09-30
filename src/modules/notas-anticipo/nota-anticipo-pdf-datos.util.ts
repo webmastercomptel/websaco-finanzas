@@ -68,8 +68,8 @@ export async function construirDatosImpresionNotaAnticipo(
   // `construirDatosImpresionRecibo`'s identical parameter.
   tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
-  const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-  const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaCartera = copropiedad.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+  const cuentaAnticipos = copropiedad.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
 
   const facturaIds = aplicaciones
     .filter((a) => a.documentType === 'FV')
@@ -201,6 +201,6 @@ export async function construirDatosImpresionNotaAnticipo(
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
     emisor: emisorDe(copropiedad),
-    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
+    logoFilas: copropiedad.mostrarLogo ? [{}] : [],
   };
 }

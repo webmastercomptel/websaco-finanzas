@@ -79,7 +79,7 @@ export class CrearReciboDto {
   /** Explicit user confirmation (manual mode only — see
    *  `RecibosService.crear()`'s own note) to send the shortfall between
    *  `aplicaciones`' sum and `montoRecibido` to the coproperty's own
-   *  `discountsDebitAccount`, instead of rejecting the request outright.
+   *  `descuentosCuentaDebito`, instead of rejecting the request outright.
    *  Never inferred/automatic: a receipt short by a small amount could be a
    *  digitación error, not a deliberate write-off — the caller must ask. */
   @IsOptional()
@@ -90,7 +90,7 @@ export class CrearReciboDto {
    *  what `aplicaciones` asked for) — `'anticipo'` reproduces today's
    *  always-silent behavior (client credit, re-appliable later);
    *  `'otros_ingresos'` books it as revenue instead, to
-   *  `discountsCreditAccount`'s sibling `otherIncomeCreditAccount`, and it
+   *  `descuentosCuentaCredito`'s sibling `otrosIngresosCuentaCredito`, and it
    *  stops being available for a future Nota de Anticipo. Required
    *  whenever a manual submission produces a surplus — never inferred,
    *  same reasoning as `confirmarDescuentoFaltante`. Automática/FIFO never

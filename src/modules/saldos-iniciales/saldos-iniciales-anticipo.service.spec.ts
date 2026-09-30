@@ -125,19 +125,19 @@ const construirServicio = () => {
     updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
 
-  let nextNumber = 0;
+  let siguienteNumero = 0;
   const consecutivos = {
     findOneAndUpdate: jest.fn(() => ({
       exec: () => {
-        nextNumber += 1;
-        return Promise.resolve({ nextNumber });
+        siguienteNumero += 1;
+        return Promise.resolve({ siguienteNumero });
       },
     })),
   };
 
   const copropiedades = {
     findById: jest.fn(() => ({
-      exec: () => Promise.resolve({ code: '0001' }),
+      exec: () => Promise.resolve({ codigo: '0001' }),
     })),
   };
 

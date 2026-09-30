@@ -10,29 +10,29 @@ import type { AsignacionDocument } from '../../database/schemas/cuentas/asignaci
 /** Reads a populated reference's name off a field that may still be a raw id. */
 const nombreDe = (ref: unknown): { id: string; nombre: string } | null => {
   if (!ref || ref instanceof Types.ObjectId) return null;
-  if (typeof ref !== 'object' || !('name' in ref)) return null;
-  const r = ref as { _id: Types.ObjectId; name: string };
-  return { id: r._id.toString(), nombre: r.name };
+  if (typeof ref !== 'object' || !('nombre' in ref)) return null;
+  const r = ref as { _id: Types.ObjectId; nombre: string };
+  return { id: r._id.toString(), nombre: r.nombre };
 };
 
 /**
- * Maps one assignment to the Spanish contract. Persistence is English, the
- * API is Spanish — see "the contract law" in CLAUDE.md.
+ * Maps one assignment to the Spanish contract. Persistence and the API are
+ * both Spanish — see "the contract law" in CLAUDE.md.
  */
 export const toAsignacionResumen = (
   doc: AsignacionDocument,
 ): AsignacionResumen => {
   const copropiedad =
-    doc.scope === 'copropiedad' ? nombreDe(doc.copropiedadId) : null;
-  const entidad = doc.scope === 'entidad' ? nombreDe(doc.entidadId) : null;
+    doc.alcance === 'copropiedad' ? nombreDe(doc.copropiedadId) : null;
+  const entidad = doc.alcance === 'entidad' ? nombreDe(doc.entidadId) : null;
 
   return {
-    alcance: doc.scope,
+    alcance: doc.alcance,
     copropiedadId: copropiedad?.id ?? null,
     copropiedadNombre: copropiedad?.nombre ?? null,
     entidadId: entidad?.id ?? null,
     entidadNombre: entidad?.nombre ?? null,
-    permisos: doc.permissions,
+    permisos: doc.permisos,
   };
 };
 
@@ -44,9 +44,9 @@ export const toUsuario = (
   asignacion: AsignacionDocument | null,
 ): UsuarioContract => ({
   id: cuenta._id.toString(),
-  nombre: cuenta.fullName,
+  nombre: cuenta.nombreCompleto,
   email: cuenta.email,
-  esAdministradorPlataforma: cuenta.isPlatformAdmin,
-  estado: cuenta.status === 'active' ? 'activo' : 'inactivo',
+  esAdministradorPlataforma: cuenta.esAdministradorPlataforma,
+  estado: cuenta.estado === 'active' ? 'activo' : 'inactivo',
   asignacion: asignacion ? toAsignacionResumen(asignacion) : null,
 });

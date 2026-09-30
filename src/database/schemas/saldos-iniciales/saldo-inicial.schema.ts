@@ -30,11 +30,24 @@ export class SaldoInicialLinea {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  conceptName: string;
+  nombreConcepto: string;
+
+  // `accountingReceivableAccount`/`accountingIncomeAccount`/`conceptKind`
+  // below are deliberately NOT renamed, unlike every other field on this
+  // document: `cuentaCarteraDeLinea` (cruce.util.ts) is ONE shared function,
+  // called with either a `FacturaLinea` or a `SaldoInicialLinea` object, that
+  // reads these exact property names off whichever it's given — a
+  // structurally-typed, duck-typed contract (`LineaParaDesglose`), same
+  // reasoning as `SaldoInicialAnticipo.fullNumber`/`receivedDate`. Every
+  // property on that interface is optional, so renaming these would NOT
+  // fail typecheck — it would silently make `cuentaCarteraDeLinea` return
+  // `null` for every Saldo Inicial line instead, a real accounting bug with
+  // no compiler signal. `FacturaLinea` (facturacion/, out of scope this
+  // batch) still names its own fields this way.
 
   /** This concept's DEBIT account, frozen the same way `FacturaLinea`'s own
    *  `accountingReceivableAccount` is — null falls back to the coproperty's
-   *  shared `receivablesAccount` at posting time, the same way a Factura
+   *  shared `cuentaContableCartera` at posting time, the same way a Factura
    *  line does (see `construirMovimientos`, asiento.builder.ts). Only ever
    *  read once a real Recibo/Nota Crédito collects part of this balance —
    *  the import itself never posts to accounting. */
@@ -114,14 +127,14 @@ export class SaldoInicial {
   /** Frozen — same reasoning as `Factura.unitCode`: a unit's code changing
    *  later must not alter what was already imported. */
   @Prop({ required: true, trim: true })
-  unitCode: string;
+  codigoInmueble: string;
 
   /** Internal ordinal (`ConsecutivoSaldoInicial`) — NEVER a real DIAN
    *  consecutivo, see that schema's own docblock. Only exists so this
-   *  document has a bare `number` to print/redact wherever a Factura/Nota
+   *  document has a bare `numero` to print/redact wherever a Factura/Nota
    *  Débito's own `number` already shows. */
   @Prop({ required: true })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true, maxlength: 20 })
   tipoDocumentoOriginal: string;
@@ -136,28 +149,28 @@ export class SaldoInicial {
   fechaVencimiento: Date;
 
   @Prop({ type: [SaldoInicialLineaSchema], required: true, default: [] })
-  lines: SaldoInicialLinea[];
+  filas: SaldoInicialLinea[];
 
   @Prop({ required: true })
-  total: number;
+  monto: number;
 
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
-  status: 'activo' | 'anulado';
+  estado: 'activo' | 'anulado';
 
   @Prop({ type: String, enum: VOID_REASONS_SALDO_INICIAL, default: null })
-  voidedReason: VoidReasonSaldoInicial | null;
+  motivoAnulacion: VoidReasonSaldoInicial | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 }
 
 export const SaldoInicialSchema = SchemaFactory.createForClass(SaldoInicial);

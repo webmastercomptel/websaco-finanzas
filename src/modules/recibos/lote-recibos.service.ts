@@ -400,7 +400,7 @@ export class LoteRecibosService {
     // see this plan's own Global Constraints on why this now surfaces
     // once, up front, instead of once per row.
     const destinationAccount =
-      lote.cuentaDestino ?? datosBatch.copropiedad?.defaultBankAccountCode;
+      lote.cuentaDestino ?? datosBatch.copropiedad?.cuentaBancariaDefecto;
     if (!destinationAccount) {
       throw new BadRequestException(
         'La cuenta destino es requerida cuando no hay cuenta predeterminada en la copropiedad.',

@@ -257,11 +257,11 @@ export class InmueblesService {
 
     const erroresCodigo: ResultadoImportacionInmuebles['errores'] = [];
     dto.filas.forEach((fila, indice) => {
-      if (fila.codigoCopropiedad !== copropiedad.code) {
+      if (fila.codigoCopropiedad !== copropiedad.codigo) {
         erroresCodigo.push({
           fila: indice + 1,
           codigo: fila.codigo ?? null,
-          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.code})`,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
         });
       }
     });

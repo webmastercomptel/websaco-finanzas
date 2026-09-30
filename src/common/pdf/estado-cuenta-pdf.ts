@@ -31,7 +31,7 @@ const ANCHOS_MOVIMIENTOS = [0.9, 1.1, 2.2, 1, 1];
  * the data the JSON endpoint returns.
  *
  * Reuses `EncabezadoDocumento` with `soloNit` (only NIT under the name) and
- * the WebSACO mark per `showLogoOnDocuments`, then the same Inmueble/Nombre +
+ * the WebSACO mark per `mostrarLogo`, then the same Inmueble/Nombre +
  * Periodo block as Auxiliar de Cartera (`BloqueInmueblePeriodo`) — product
  * request 2026-09-28, which also dropped the "Generado:" timestamp row the
  * Auxiliar never had. Closes with `CreditoWebsaco` ("Generado con" +
@@ -65,7 +65,7 @@ export async function generarPdfEstadoCuenta(
     createElement(EncabezadoDocumento, {
       copropiedad,
       titulo: 'Estado de Cuenta',
-      mostrarLogo: copropiedad.showLogoOnDocuments,
+      mostrarLogo: copropiedad.mostrarLogo,
       soloNit: true,
     }),
 

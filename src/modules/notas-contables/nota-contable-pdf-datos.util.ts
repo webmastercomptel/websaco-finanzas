@@ -113,6 +113,6 @@ export async function construirDatosImpresionNotaContable(
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
     emisor: emisorDe(copropiedad),
-    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
+    logoFilas: copropiedad.mostrarLogo ? [{}] : [],
   };
 }

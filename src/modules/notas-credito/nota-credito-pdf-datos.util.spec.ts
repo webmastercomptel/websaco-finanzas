@@ -30,13 +30,13 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
-    name: 'Conjunto Residencial Los Alamos',
-    taxId: '900123456',
-    taxIdVerificationDigit: '7',
-    showLogoOnDocuments: true,
-    receivablesAccount: '130500',
-    advancesAccount: '210505',
-    creditNotesAccount: '413595',
+    nombre: 'Conjunto Residencial Los Alamos',
+    nit: '900123456',
+    digitoVerificacion: '7',
+    mostrarLogo: true,
+    cuentaContableCartera: '130500',
+    cuentaAnticipos: '210505',
+    cuentaDevoluciones: '413595',
     ...over,
   }) as unknown as CopropiedadDocument;
 
@@ -262,7 +262,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       notaBase({ totalAmount: 100000 }),
       0,
       [],
-      copropiedadBase({ creditNotesAccount: '413595' }),
+      copropiedadBase({ cuentaDevoluciones: '413595' }),
       COP,
       modelosVacios() as never,
       'Nota de Crédito',

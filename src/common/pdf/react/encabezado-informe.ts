@@ -109,8 +109,8 @@ export function EncabezadoInforme(props: {
     fechaGeneracion,
     fechaGeneracionEnTitulo,
   } = props;
-  const nit = copropiedad.taxId
-    ? `${copropiedad.taxId}${copropiedad.taxIdVerificationDigit ? `-${copropiedad.taxIdVerificationDigit}` : ''}`
+  const nit = copropiedad.nit
+    ? `${copropiedad.nit}${copropiedad.digitoVerificacion ? `-${copropiedad.digitoVerificacion}` : ''}`
     : '—';
   const textoGenerado = fechaGeneracion
     ? `Generado: ${formatoFechaHora(fechaGeneracion)}`
@@ -122,7 +122,7 @@ export function EncabezadoInforme(props: {
     createElement(
       View,
       { style: styles.banner },
-      createElement(Text, { style: styles.nombre }, copropiedad.name),
+      createElement(Text, { style: styles.nombre }, copropiedad.nombre),
     ),
     createElement(
       View,

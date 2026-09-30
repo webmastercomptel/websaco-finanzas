@@ -465,16 +465,16 @@ describe('FacturasService.datosVisualesPdf', () => {
 /** Minimal `Copropiedad` fixture — every field `emisorDe`/
  *  `datosPlantillaPreliminar` reads. */
 const copropiedadBase = (over: Record<string, unknown> = {}) => ({
-  name: 'Conjunto Residencial Alcázares',
-  taxId: '900123456',
-  taxIdVerificationDigit: '7',
-  address: 'Calle 1 # 2-3',
-  city: 'Bogotá',
-  phone: '6011234567',
+  nombre: 'Conjunto Residencial Alcázares',
+  nit: '900123456',
+  digitoVerificacion: '7',
+  direccion: 'Calle 1 # 2-3',
+  ciudad: 'Bogotá',
+  telefono: '6011234567',
   email: 'admin@alcazares.com',
-  showLogoOnDocuments: true,
-  billingNotes: null,
-  discountAppliesWithLateFee: false,
+  mostrarLogo: true,
+  notasFacturacion: null,
+  descuentoAplicaConMora: false,
   ...over,
 });
 
@@ -566,7 +566,7 @@ describe('FacturasService.datosPlantilla', () => {
 
     const datos = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ name: 'Conjunto X', taxId: '900999999' }) as never,
+      copropiedadBase({ nombre: 'Conjunto X', nit: '900999999' }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
 
@@ -593,10 +593,10 @@ describe('FacturasService.datosPlantilla', () => {
     const datos = await service.datosPlantilla(
       factura as never,
       copropiedadBase({
-        taxId: null,
-        taxIdVerificationDigit: null,
-        address: null,
-        city: null,
+        nit: null,
+        digitoVerificacion: null,
+        direccion: null,
+        ciudad: null,
       }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
@@ -611,7 +611,7 @@ describe('FacturasService.datosPlantilla', () => {
 
     const datos = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ phone: null, email: null }) as never,
+      copropiedadBase({ telefono: null, email: null }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
 
@@ -625,12 +625,12 @@ describe('FacturasService.datosPlantilla', () => {
 
     const conLogo = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ showLogoOnDocuments: true }) as never,
+      copropiedadBase({ mostrarLogo: true }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
     const sinLogo = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ showLogoOnDocuments: false }) as never,
+      copropiedadBase({ mostrarLogo: false }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
 
@@ -698,18 +698,18 @@ describe('FacturasService.datosPlantilla', () => {
     expect(sinIvaNiAnticipos.anticiposFilas).toEqual([]);
   });
 
-  it('notasFilas trae las notas solo cuando la copropiedad tiene billingNotes', async () => {
+  it('notasFilas trae las notas solo cuando la copropiedad tiene notasFacturacion', async () => {
     const { service } = construirServicioConTitulo();
     const factura = facturaParaPlantilla();
 
     const conNotas = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ billingNotes: 'Consignar en cuenta 123' }) as never,
+      copropiedadBase({ notasFacturacion: 'Consignar en cuenta 123' }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
     const sinNotas = await service.datosPlantilla(
       factura as never,
-      copropiedadBase({ billingNotes: null }) as never,
+      copropiedadBase({ notasFacturacion: null }) as never,
       { referencia: null, totalAnticipos: 0, usage: null },
     );
 
@@ -1028,7 +1028,7 @@ describe('FacturasService.datosPlantillaPreliminar', () => {
     const datos = service.datosPlantillaPreliminar(
       preliminarBase() as never,
       loteBase() as never,
-      copropiedadBase({ name: 'Conjunto Y' }) as never,
+      copropiedadBase({ nombre: 'Conjunto Y' }) as never,
     );
 
     expect(datos.emisor.nombre).toBe('Conjunto Y');

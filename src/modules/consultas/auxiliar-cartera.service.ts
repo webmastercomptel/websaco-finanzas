@@ -240,7 +240,7 @@ export class AuxiliarCarteraService {
         numeroCompleto: si.numeroOriginal,
         concepto: 'Saldo Inicial',
         refCruce: null,
-        debito: si.total,
+        debito: si.monto,
         credito: null,
       });
     }

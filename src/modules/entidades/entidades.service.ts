@@ -44,11 +44,11 @@ export class EntidadesService {
     const filtro: Record<string, unknown> = {};
 
     if (query.estado !== 'todos') {
-      filtro.status = query.estado === 'inactivo' ? 'inactive' : 'active';
+      filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ code: patron }, { name: patron }];
+      filtro.$or = [{ codigo: patron }, { nombre: patron }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -57,7 +57,7 @@ export class EntidadesService {
     const [documentos, total] = await Promise.all([
       this.entidades
         .find(filtro)
-        .sort({ code: 1 })
+        .sort({ codigo: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -89,10 +89,10 @@ export class EntidadesService {
     dto: CrearEntidadDto,
     actor: { accountId: string; nombre: string },
   ): Promise<EntidadContract> {
-    const code = await this.siguienteCodigo();
+    const codigo = await this.siguienteCodigo();
     const creada = await this.entidades.create({
       ...this.aDocumento(dto),
-      code,
+      codigo,
     });
 
     await this.auditoria.registrar({
@@ -101,7 +101,7 @@ export class EntidadesService {
       accion: 'crear',
       entidadTipo: 'entidad-administradora',
       entidadId: creada._id.toString(),
-      entidadEtiqueta: creada.name,
+      entidadEtiqueta: creada.nombre,
     });
 
     return toEntidad(creada);
@@ -135,7 +135,7 @@ export class EntidadesService {
       accion: 'actualizar',
       entidadTipo: 'entidad-administradora',
       entidadId: actualizada._id.toString(),
-      entidadEtiqueta: actualizada.name,
+      entidadEtiqueta: actualizada.nombre,
     });
 
     return toEntidad(actualizada);
@@ -150,12 +150,12 @@ export class EntidadesService {
    */
   private async pisoActual(): Promise<number> {
     const [maximo] = await this.entidades
-      .find({ code: /^\d+$/ })
-      .sort({ code: -1 })
+      .find({ codigo: /^\d+$/ })
+      .sort({ codigo: -1 })
       .collation({ locale: 'en_US', numericOrdering: true })
       .limit(1)
       .exec();
-    const pisoEntidades = maximo ? parseInt(maximo.code, 10) : 0;
+    const pisoEntidades = maximo ? parseInt(maximo.codigo, 10) : 0;
 
     const contadorActual = await this.contador.findOne({}).exec();
     const pisoContador = contadorActual?.valor ?? 0;
@@ -208,13 +208,13 @@ export class EntidadesService {
       if (valor !== undefined) doc[clave] = valor;
     };
 
-    set('name', dto.nombre);
-    set('taxId', dto.nit);
-    set('taxIdVerificationDigit', dto.digitoVerificacion);
+    set('nombre', dto.nombre);
+    set('nit', dto.nit);
+    set('digitoVerificacion', dto.digitoVerificacion);
     set('email', dto.email);
-    set('phone', dto.telefono);
+    set('telefono', dto.telefono);
     if ('estado' in dto && dto.estado !== undefined) {
-      doc.status = dto.estado === 'activo' ? 'active' : 'inactive';
+      doc.estado = dto.estado === 'activo' ? 'active' : 'inactive';
     }
 
     return doc;

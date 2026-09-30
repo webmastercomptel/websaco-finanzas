@@ -26,7 +26,7 @@ export class ConsecutivoSaldoInicialAnticipo {
   copropiedadId: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })
-  nextNumber: number;
+  siguienteNumero: number;
 }
 
 export const ConsecutivoSaldoInicialAnticipoSchema =

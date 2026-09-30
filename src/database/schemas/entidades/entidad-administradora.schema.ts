@@ -25,22 +25,22 @@ export type EntidadAdministradoraDocument =
 @Schema({ timestamps: true, collection: 'entidades_administradoras' })
 export class EntidadAdministradora {
   @Prop({ required: true, unique: true, trim: true })
-  code: string;
+  codigo: string;
 
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   @Prop({ type: String, default: null, trim: true })
-  taxId: string | null;
+  nit: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  taxIdVerificationDigit: string | null;
+  digitoVerificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
   email: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  phone: string | null;
+  telefono: string | null;
 
   /**
    * Inactive suspends the access its assignments grant, without touching the
@@ -49,7 +49,7 @@ export class EntidadAdministradora {
    * stop that company's staff from being the ones doing it.
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const EntidadAdministradoraSchema = SchemaFactory.createForClass(

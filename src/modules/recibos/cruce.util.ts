@@ -835,7 +835,7 @@ interface LineaParaDesglose {
  * Which account a payment applied against `linea` credits, to zero out
  * whatever was posted for it at invoice time — mirrors
  * `construirMovimientos`'s own `usaCuentasOrden` check (asiento.builder.ts):
- * an `intereses` (mora) línea, on a coproperty that `usesMemorandumAccounts`,
+ * an `intereses` (mora) línea, on a coproperty that `usaCuentasOrden`,
  * was NEVER debited to its own `accountingReceivableAccount` when invoiced —
  * `construirMovimientos` posted the memorandum pair there instead, since
  * mora income isn't recognized until it's actually collected. So collecting
@@ -849,9 +849,9 @@ interface LineaParaDesglose {
  */
 export function cuentaCarteraDeLinea(
   linea: LineaParaDesglose | null | undefined,
-  usesMemorandumAccounts: boolean,
+  usaCuentasOrden: boolean,
 ): string | null {
-  if (linea?.conceptKind === 'intereses' && usesMemorandumAccounts) {
+  if (linea?.conceptKind === 'intereses' && usaCuentasOrden) {
     return linea.accountingIncomeAccount ?? null;
   }
   return linea?.accountingReceivableAccount ?? null;
@@ -1001,10 +1001,10 @@ export interface ContextoAplicacion<
    *  field's own schema docblock for why. */
   sourceDate: Date;
   accountId: string;
-  /** The coproperty's `usesMemorandumAccounts` (Copropiedad schema) — decides
+  /** The coproperty's `usaCuentasOrden` (Copropiedad schema) — decides
    *  which account an `intereses` línea's desglose entry credits, see
    *  `cuentaCarteraDeLinea`'s own docblock. */
-  usesMemorandumAccounts: boolean;
+  usaCuentasOrden: boolean;
 }
 
 /**
@@ -1061,7 +1061,7 @@ export async function ejecutarAplicacionManual<
     sourceId,
     sourceDate,
     accountId,
-    usesMemorandumAccounts,
+    usaCuentasOrden,
   } = ctx;
 
   // `recibo.unappliedAmount` is no longer a field the (now immutable)
@@ -1211,9 +1211,9 @@ export async function ejecutarAplicacionManual<
       const saldoInicialActual = {
         _id: saldoInicialDoc._id,
         inmuebleId: saldoInicialDoc.inmuebleId,
-        total: saldoInicialDoc.total,
+        total: saldoInicialDoc.monto,
         outstandingBalance: saldoPrevioInicial?.saldoPendiente ?? 0,
-        lines: saldoInicialDoc.lines.map((l) => ({
+        lines: saldoInicialDoc.filas.map((l) => ({
           conceptoId: l.conceptoId,
           totalAmount: l.montoOriginal,
         })),
@@ -1273,25 +1273,25 @@ export async function ejecutarAplicacionManual<
           );
 
       const detalleConceptosSI = partesSI.map((parte) => {
-        const linea = saldoInicial.lines.find((l) =>
+        const linea = saldoInicial.filas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         return {
           conceptoId: parte.conceptoId,
-          conceptName: linea?.conceptName ?? 'Concepto',
+          conceptName: linea?.nombreConcepto ?? 'Concepto',
           monto: parte.parte,
         };
       });
       for (const parte of partesSI) {
-        const linea = saldoInicial.lines.find((l) =>
+        const linea = saldoInicial.filas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         if (parte.parte !== 0) {
           desglose.push({
-            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+            cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
             monto: parte.parte,
             tipoDocumento: 'SI',
-            numeroDocumento: saldoInicial.number,
+            numeroDocumento: saldoInicial.numero,
           });
         }
         if (linea?.conceptKind === 'intereses') {
@@ -1323,7 +1323,7 @@ export async function ejecutarAplicacionManual<
       creadas.push(creadaSI);
       resumen.push({
         tipo: 'SI',
-        numero: saldoInicial.number,
+        numero: saldoInicial.numero,
         completa: saldoInicial.outstandingBalance === 0,
       });
       continue;
@@ -1462,7 +1462,7 @@ export async function ejecutarAplicacionManual<
       );
       if (parte.parte !== 0) {
         desglose.push({
-          cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+          cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
           monto: parte.parte,
           tipoDocumento: 'FV',
           numeroDocumento: factura.number,
@@ -1571,7 +1571,7 @@ export async function ejecutarAplicacionFifo<
     sourceId,
     sourceDate,
     accountId,
-    usesMemorandumAccounts,
+    usaCuentasOrden,
   } = ctx;
 
   // Candidate documents are bounded to this ONE inmueble (a small set) —
@@ -1808,9 +1808,9 @@ export async function ejecutarAplicacionFifo<
           {
             _id: saldoInicialActualizado._id,
             inmuebleId: saldoInicialActualizado.inmuebleId,
-            total: saldoInicialActualizado.total,
+            total: saldoInicialActualizado.monto,
             outstandingBalance: saldoInicialActualizado.outstandingBalance,
-            lines: saldoInicialActualizado.lines.map((l) => ({
+            lines: saldoInicialActualizado.filas.map((l) => ({
               conceptoId: l.conceptoId,
               totalAmount: l.montoOriginal,
             })),
@@ -1820,25 +1820,25 @@ export async function ejecutarAplicacionFifo<
           'SI',
         );
         const detalleConceptosSI = partesSI.map((parte) => {
-          const linea = saldoInicialActualizado.lines.find((l) =>
+          const linea = saldoInicialActualizado.filas.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
           return {
             conceptoId: parte.conceptoId,
-            conceptName: linea?.conceptName ?? 'Concepto',
+            conceptName: linea?.nombreConcepto ?? 'Concepto',
             monto: parte.parte,
           };
         });
         for (const parte of partesSI) {
-          const linea = saldoInicialActualizado.lines.find((l) =>
+          const linea = saldoInicialActualizado.filas.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
           if (parte.parte !== 0) {
             desglose.push({
-              cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+              cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
               monto: parte.parte,
               tipoDocumento: 'SI',
-              numeroDocumento: saldoInicialActualizado.number,
+              numeroDocumento: saldoInicialActualizado.numero,
             });
           }
           if (linea?.conceptKind === 'intereses') {
@@ -1869,7 +1869,7 @@ export async function ejecutarAplicacionFifo<
         aplicadas.push(creadaSI);
         resumen.push({
           tipo: 'SI',
-          numero: saldoInicialActualizado.number,
+          numero: saldoInicialActualizado.numero,
           completa: saldoInicialActualizado.outstandingBalance === 0,
         });
         restante -= cashUsado;
@@ -1910,7 +1910,7 @@ export async function ejecutarAplicacionFifo<
         );
         if (parte.parte !== 0) {
           desglose.push({
-            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+            cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
             monto: parte.parte,
             tipoDocumento: 'FV',
             numeroDocumento: facturaActualizada.number,

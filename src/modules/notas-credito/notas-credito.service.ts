@@ -234,8 +234,8 @@ export class NotasCreditoService {
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
-      defaultCostCentre: string | null;
-      cashFlowCode: string | null;
+      centroCostoDefecto: string | null;
+      flujoCajaCodigo: string | null;
     } | null,
     entries: ReturnType<typeof construirAsientoCruce>,
     documentoCruce?: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null,
@@ -259,8 +259,8 @@ export class NotasCreditoService {
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
       terceroCode: inmueble?.codigo ?? null,
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
       documentoCruce: documentoCruce ?? null,
     });
   }
@@ -314,13 +314,13 @@ export class NotasCreditoService {
       // `accountingIncomeAccount` is deliberately `null` here (nothing was
       // ever posted as income in THIS system for an opening balance).
       const saldoInicial = documento as SaldoInicialDocument;
-      return saldoInicial.lines.map((linea) => ({
+      return saldoInicial.filas.map((linea) => ({
         conceptoId: linea.conceptoId,
         totalAmount: linea.montoOriginal,
         accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
         accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
         conceptKind: linea.conceptKind,
-        conceptName: linea.conceptName,
+        conceptName: linea.nombreConcepto,
       }));
     }
     const notaDebito = documento as NotaDebitoDocument;
@@ -434,8 +434,9 @@ export class NotasCreditoService {
       // §6), just the enum this document's own schema actually declares.
       const anclaVigente =
         dto.tipoDocumento === 'SI'
-          ? (documentoAncla as SaldoInicialDocument).status === 'activo'
-          : documentoAncla.status === 'emitida';
+          ? (documentoAncla as SaldoInicialDocument).estado === 'activo'
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).status ===
+            'emitida';
       // `numeroDocumentoAncla` — a Saldo Inicial has no `fullNumber` (see its
       // own schema docblock); `numeroOriginal` is the closest equivalent for
       // an error message a human reads.
@@ -443,6 +444,14 @@ export class NotasCreditoService {
         dto.tipoDocumento === 'SI'
           ? (documentoAncla as SaldoInicialDocument).numeroOriginal
           : (documentoAncla as FacturaDocument | NotaDebitoDocument).fullNumber;
+      // The anchor's bare number — `SaldoInicial.numero` vs
+      // `Factura`/`NotaDebito.number` (out of scope this batch, still
+      // English). Resolved once here, same reasoning as
+      // `numeroDocumentoAncla` right above.
+      const numeroAncla =
+        dto.tipoDocumento === 'SI'
+          ? (documentoAncla as SaldoInicialDocument).numero
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).number;
       if (!anclaVigente) {
         throw new ConflictException(
           `${etiquetaAncla} ${numeroDocumentoAncla} está anulada y no admite una nota crédito`,
@@ -643,7 +652,7 @@ export class NotasCreditoService {
           cuenta: lineaAncla?.accountingIncomeAccount ?? null,
           monto: linea.monto,
           tipoDocumento: dto.tipoDocumento,
-          numeroDocumento: documentoAncla.number,
+          numeroDocumento: numeroAncla,
         });
       }
 
@@ -731,7 +740,7 @@ export class NotasCreditoService {
             cuenta: lineaAncla?.accountingReceivableAccount ?? null,
             monto: parte.parte,
             tipoDocumento: dto.tipoDocumento,
-            numeroDocumento: documentoAncla.number,
+            numeroDocumento: numeroAncla,
           });
         }
         await this.aplicaciones.create(
@@ -783,7 +792,7 @@ export class NotasCreditoService {
         desgloseOrigen,
         montoAplicadoMora,
         dto.tipoDocumento,
-        documentoAncla.number,
+        numeroAncla,
       );
 
       const final = await this.notasCredito
@@ -1626,11 +1635,11 @@ export class NotasCreditoService {
         .session(session)
         .exec();
       const cuentaCartera =
-        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
       const cuentaAnticipos =
-        copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
       const cuentaDevoluciones =
-        copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaDevoluciones ?? CUENTA_SIN_ASIGNAR;
       // Restores the SAME per-concepto income accounts `postearAsientoCreacion`
       // actually debited — read fresh rather than reused from the loop above,
       // since the anchor is only touched there when an ACTIVE application
@@ -1690,7 +1699,14 @@ export class NotasCreditoService {
         copropiedad,
         entries,
         documentoAncla
-          ? { tipo: anclaTipo, numero: documentoAncla.number }
+          ? {
+              tipo: anclaTipo,
+              numero:
+                anclaTipo === 'SI'
+                  ? (documentoAncla as SaldoInicialDocument).numero
+                  : (documentoAncla as FacturaDocument | NotaDebitoDocument)
+                      .number,
+            }
           : null,
       );
       await this.asientos.create(
@@ -2019,8 +2035,9 @@ export class NotasCreditoService {
       .findById(copropiedadId)
       .session(session)
       .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos = copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
       account: d.cuenta ?? cuentaCartera,
       monto: d.monto,
@@ -2095,10 +2112,11 @@ export class NotasCreditoService {
       .findById(copropiedadId)
       .session(session)
       .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-    const cuentaAnticipos = copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+    const cuentaAnticipos = copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
     const cuentaDevoluciones =
-      copropiedad?.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+      copropiedad?.cuentaDevoluciones ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
       account: d.cuenta ?? cuentaCartera,
       monto: d.monto,

@@ -107,10 +107,10 @@ export async function construirDatosImpresionNotaCredito(
   // `construirDatosImpresionRecibo`'s identical parameter.
   tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
-  const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-  const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaCartera = copropiedad.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+  const cuentaAnticipos = copropiedad.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
   const cuentaDevoluciones =
-    copropiedad.creditNotesAccount ?? CUENTA_SIN_ASIGNAR;
+    copropiedad.cuentaDevoluciones ?? CUENTA_SIN_ASIGNAR;
 
   const anclaTipo = tipoAnclaDe(nota);
   const anclaId = idAnclaDe(nota);
@@ -248,7 +248,7 @@ export async function construirDatosImpresionNotaCredito(
       );
       for (const detalle of detalles) {
         const lineaSI = detalle.conceptoId
-          ? saldoInicial?.lines.find((l) =>
+          ? saldoInicial?.filas.find((l) =>
               l.conceptoId.equals(detalle.conceptoId),
             )
           : undefined;
@@ -258,7 +258,7 @@ export async function construirDatosImpresionNotaCredito(
           cuentaCodigo: codigo,
           cuentaNombre: '',
           tipoDocumento: 'SI',
-          numeroDocumento: saldoInicial?.number ?? null,
+          numeroDocumento: saldoInicial?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
@@ -314,7 +314,7 @@ export async function construirDatosImpresionNotaCredito(
     // income in this system for an opening balance), so this falls straight
     // through to `cuentaDevoluciones`, same as an unconfigured Factura/ND
     // concept.
-    const lineaSaldoInicial = saldoInicialAncla?.lines.find((l) =>
+    const lineaSaldoInicial = saldoInicialAncla?.filas.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
     const codigo =
@@ -354,6 +354,6 @@ export async function construirDatosImpresionNotaCredito(
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
     emisor: emisorDe(copropiedad),
-    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
+    logoFilas: copropiedad.mostrarLogo ? [{}] : [],
   };
 }

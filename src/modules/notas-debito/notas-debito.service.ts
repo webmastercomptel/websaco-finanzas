@@ -170,8 +170,8 @@ export class NotasDebitoService {
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
-      defaultCostCentre: string | null;
-      cashFlowCode: string | null;
+      centroCostoDefecto: string | null;
+      flujoCajaCodigo: string | null;
     } | null,
     entries: ReturnType<typeof construirMovimientos>,
     documentoCruce?: { tipo: 'FV' | 'ND'; numero: number } | null,
@@ -195,8 +195,8 @@ export class NotasDebitoService {
     );
     return enriquecerMovimientosConAuxiliares(entries, marcas, {
       terceroCode: inmueble?.codigo ?? null,
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
       documentoCruce: documentoCruce ?? null,
     });
   }
@@ -368,7 +368,7 @@ export class NotasDebitoService {
       // account (cuentaDebitoId), credit its income account (cuentaCreditoId)
       // — same per-concepto accounts a Factura line codes with, per
       // `construirMovimientos`'s own docblock. Falls back to the
-      // coproperty's shared `receivablesAccount` only when the concepto has
+      // coproperty's shared `cuentaContableCartera` only when the concepto has
       // no `cuentaDebitoId` configured (that fallback lives inside
       // `construirMovimientos` itself).
       await this.postearAsientoCreacion(
@@ -696,11 +696,11 @@ export class NotasDebitoService {
           .exec(),
       ]);
       const cuentaCartera =
-        copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+        copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
       // Reverses the SAME income account `postearAsientoCreacion` credited
       // (the concepto's own `cuentaCreditoId`, per `crear()`'s own comment
       // above) — production bug (2026-09-21): this used to read
-      // `copropiedad.debitNotesAccount`, a coproperty-wide field nothing
+      // `copropiedad.cuentaNotasDebito`, a coproperty-wide field nothing
       // else in this document's own lifecycle writes to, landing on
       // `CUENTA_SIN_ASIGNAR` whenever it was unset regardless of the
       // concepto's real account. Same class of bug `NotasCreditoService`'s
@@ -909,7 +909,8 @@ export class NotasDebitoService {
       .findById(copropiedadId)
       .session(session)
       .exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
     const incomeAccount = cuentaIngreso ?? CUENTA_SIN_ASIGNAR;
 
     let entries = construirMovimientos(

@@ -27,9 +27,9 @@ const decodedToken = (over: Partial<DecodedIdToken> = {}): DecodedIdToken =>
 const cuentaActiva = {
   _id: 'acc-1',
   email: EMAIL,
-  fullName: 'Santiago',
-  isPlatformAdmin: false,
-  status: 'active',
+  nombreCompleto: 'Santiago',
+  esAdministradorPlataforma: false,
+  estado: 'active',
 };
 
 const acceso = (over: Partial<AccesoCopropiedad> = {}): AccesoCopropiedad => ({
@@ -169,7 +169,7 @@ describe('FirebaseAuthGuard — cuenta local', () => {
     // aplicación vacía.
     const { guard, context } = harness({
       headers: bearer(),
-      cuenta: { ...cuentaActiva, status: 'inactive' },
+      cuenta: { ...cuentaActiva, estado: 'inactive' },
     });
 
     await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
@@ -183,8 +183,8 @@ describe('FirebaseAuthGuard — cuenta local', () => {
       headers: bearer(),
       cuenta: {
         ...cuentaActiva,
-        fullName: 'Otro Nombre',
-        isPlatformAdmin: true,
+        nombreCompleto: 'Otro Nombre',
+        esAdministradorPlataforma: true,
       },
     });
 

@@ -50,7 +50,7 @@ class CamposCopropiedadDto {
   email?: string;
 
   /** Whether the WebSACO mark prints on this coproperty's own financial
-   *  documents — see `Copropiedad.showLogoOnDocuments`'s own docblock. */
+   *  documents — see `Copropiedad.mostrarLogo`'s own docblock. */
   @IsOptional()
   @IsBoolean()
   mostrarLogo?: boolean;

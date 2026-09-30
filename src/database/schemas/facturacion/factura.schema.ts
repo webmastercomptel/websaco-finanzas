@@ -124,7 +124,7 @@ export class Factura {
    * Administración cargo, and frozen here forever after, same immutability
    * as every other field above (`total`, `lines`, …) — an invoice's terms
    * never change after it is issued. 0 when the invoice carries any mora
-   * line and `Copropiedad.discountAppliesWithLateFee` is false (the
+   * line and `Copropiedad.descuentoAplicaConMora` is false (the
    * default), or when the lote had no discount configured at all. See
    * `calcularDescuentoProntoPago` (`common/facturacion/descuento-pronto-
    * pago.util.ts`) for the exact rule.

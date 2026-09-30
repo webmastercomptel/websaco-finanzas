@@ -20,15 +20,15 @@ export const toSaldoInicial = (
   numeroOriginal: doc.numeroOriginal,
   fecha: doc.fecha.toISOString(),
   fechaVencimiento: doc.fechaVencimiento.toISOString(),
-  lineas: doc.lines.map((linea) => ({
+  lineas: doc.filas.map((linea) => ({
     conceptoId: linea.conceptoId.toString(),
-    nombreConcepto: linea.conceptName,
+    nombreConcepto: linea.nombreConcepto,
     monto: linea.montoOriginal,
   })),
-  total: doc.total,
+  total: doc.monto,
   saldoPendiente,
-  estado: doc.status,
-  motivoAnulacion: doc.voidedReason,
-  detalleAnulacion: doc.voidedDetail,
-  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  estado: doc.estado,
+  motivoAnulacion: doc.motivoAnulacion,
+  detalleAnulacion: doc.detalleAnulacion,
+  fechaAnulacion: doc.fechaAnulacion ? doc.fechaAnulacion.toISOString() : null,
 });

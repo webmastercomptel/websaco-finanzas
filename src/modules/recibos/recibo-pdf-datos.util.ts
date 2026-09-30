@@ -48,8 +48,8 @@ export interface ModelosDatosImpresionRecibo {
  * `construirAsientoCruce`'s own `descuento` debit) is added when this
  * Recibo absorbed one.
  *
- * The leftover line itself credits `advancesAccount` OR
- * `otherIncomeCreditAccount` depending on `recibo.otherIncomeAmount` — same
+ * The leftover line itself credits `cuentaAnticipos` OR
+ * `otrosIngresosCuentaCredito` depending on `recibo.otherIncomeAmount` — same
  * choice `postearAsientoRecibo` made at creation (`destinoSobrante`), never
  * unconditionally Anticipos.
  */
@@ -65,12 +65,12 @@ export async function construirDatosImpresionRecibo(
   // nothing was configured. No longer hardcoded here.
   tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
-  const cuentaCartera = copropiedad.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
-  const cuentaAnticipos = copropiedad.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+  const cuentaCartera = copropiedad.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
+  const cuentaAnticipos = copropiedad.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
   const cuentaOtrosIngresos =
-    copropiedad.otherIncomeCreditAccount ?? CUENTA_SIN_ASIGNAR;
+    copropiedad.otrosIngresosCuentaCredito ?? CUENTA_SIN_ASIGNAR;
   const cuentaDescuentos =
-    copropiedad.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
+    copropiedad.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
 
   const facturaIds = aplicaciones
     .filter((a) => a.documentType === 'FV')
@@ -231,6 +231,6 @@ export async function construirDatosImpresionRecibo(
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),
     emisor: emisorDe(copropiedad),
-    logoFilas: copropiedad.showLogoOnDocuments ? [{}] : [],
+    logoFilas: copropiedad.mostrarLogo ? [{}] : [],
   };
 }

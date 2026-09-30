@@ -25,13 +25,13 @@ const ACTOR = { accountId: 'actor-1', nombre: 'Admin Test' };
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'ent-1' },
-  code: 'ENT-001',
-  name: 'Administraciones Calad',
-  taxId: null,
-  taxIdVerificationDigit: null,
+  codigo: 'ENT-001',
+  nombre: 'Administraciones Calad',
+  nit: null,
+  digitoVerificacion: null,
   email: null,
-  phone: null,
-  status: 'active',
+  telefono: null,
+  estado: 'active',
   ...over,
 });
 
@@ -101,8 +101,8 @@ describe('EntidadesService.findAll', () => {
     await service.findAll({ buscar: 'Calad' });
 
     expect(modelo.filtros[0].$or).toEqual([
-      { code: { $regex: 'Calad', $options: 'i' } },
-      { name: { $regex: 'Calad', $options: 'i' } },
+      { codigo: { $regex: 'Calad', $options: 'i' } },
+      { nombre: { $regex: 'Calad', $options: 'i' } },
     ]);
   });
 
@@ -116,7 +116,7 @@ describe('EntidadesService.findAll', () => {
 
     await service.findAll({});
 
-    expect(modelo.filtros[0].status).toBe('active');
+    expect(modelo.filtros[0].estado).toBe('active');
   });
 
   it('devuelve el contrato en español', async () => {
@@ -170,8 +170,8 @@ describe('EntidadesService.create', () => {
       { upsert: true, returnDocument: 'after' },
     );
     expect(modelo.escrituras[0]).toEqual({
-      code: '0042',
-      name: 'Nueva Entidad',
+      codigo: '0042',
+      nombre: 'Nueva Entidad',
     });
   });
 
@@ -245,7 +245,7 @@ describe('EntidadesService.update', () => {
       ACTOR,
     );
 
-    expect(modelo.escrituras[0]).toEqual({ status: 'inactive' });
+    expect(modelo.escrituras[0]).toEqual({ estado: 'inactive' });
     expect(resultado.estado).toBe('activo'); // el doc devuelto por el stub
   });
 

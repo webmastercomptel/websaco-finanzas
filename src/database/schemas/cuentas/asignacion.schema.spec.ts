@@ -30,26 +30,28 @@ const validar = async (
 describe('AsignacionSchema — forma del otorgamiento', () => {
   it('acepta una asignación a una copropiedad', async () => {
     await expect(
-      validar({ scope: 'copropiedad', copropiedadId: copropiedad }),
+      validar({ alcance: 'copropiedad', copropiedadId: copropiedad }),
     ).resolves.toBeNull();
   });
 
   it('acepta una asignación a una entidad administradora', async () => {
     await expect(
-      validar({ scope: 'entidad', entidadId: entidad }),
+      validar({ alcance: 'entidad', entidadId: entidad }),
     ).resolves.toBeNull();
   });
 
   it('rechaza alcance copropiedad sin copropiedad', async () => {
     // Guardaría bien y después no otorgaría nada, que se lee como "los
     // permisos están rotos" en vez de "esta fila está mal armada".
-    await expect(validar({ scope: 'copropiedad' })).resolves.toBeInstanceOf(
+    await expect(validar({ alcance: 'copropiedad' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
   it('rechaza alcance entidad sin entidad', async () => {
-    await expect(validar({ scope: 'entidad' })).resolves.toBeInstanceOf(Error);
+    await expect(validar({ alcance: 'entidad' })).resolves.toBeInstanceOf(
+      Error,
+    );
   });
 
   it('rechaza una fila que apunte a las dos cosas a la vez', async () => {
@@ -57,7 +59,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
     // creó, y adivinarlo otorgaría acceso que nadie pidió.
     await expect(
       validar({
-        scope: 'copropiedad',
+        alcance: 'copropiedad',
         copropiedadId: copropiedad,
         entidadId: entidad,
       }),
@@ -65,7 +67,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
 
     await expect(
       validar({
-        scope: 'entidad',
+        alcance: 'entidad',
         copropiedadId: copropiedad,
         entidadId: entidad,
       }),
@@ -73,27 +75,27 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
   });
 
   it('el mensaje de error dice qué falta', async () => {
-    const error = await validar({ scope: 'entidad' });
+    const error = await validar({ alcance: 'entidad' });
 
     expect(error?.message).toContain('entidadId');
   });
 
   it('exige un alcance conocido', async () => {
     await expect(
-      validar({ scope: 'inventado', copropiedadId: copropiedad }),
+      validar({ alcance: 'inventado', copropiedadId: copropiedad }),
     ).resolves.toBeInstanceOf(Error);
   });
 
   it('arranca sin permisos, nunca con permisos por defecto', () => {
     const doc = new AsignacionModel({
       accountId: cuenta,
-      scope: 'copropiedad',
+      alcance: 'copropiedad',
       copropiedadId: copropiedad,
     });
 
     // Un default distinto de vacío otorgaría acceso que nadie escribió.
-    expect(doc.permissions).toEqual([]);
-    expect(doc.status).toBe('active');
+    expect(doc.permisos).toEqual([]);
+    expect(doc.estado).toBe('active');
   });
 });
 
@@ -108,7 +110,7 @@ describe('AsignacionSchema — índices', () => {
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({
       unique: true,
-      partialFilterExpression: { scope: 'copropiedad' },
+      partialFilterExpression: { alcance: 'copropiedad' },
     });
   });
 
@@ -120,7 +122,7 @@ describe('AsignacionSchema — índices', () => {
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({
       unique: true,
-      partialFilterExpression: { scope: 'entidad' },
+      partialFilterExpression: { alcance: 'entidad' },
     });
   });
 });

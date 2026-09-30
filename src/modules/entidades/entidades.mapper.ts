@@ -5,18 +5,19 @@ import type { EntidadAdministradoraDocument } from '../../database/schemas/entid
 /**
  * Maps a managing-entity document to the Spanish API contract.
  *
- * Persistence is English, the API is Spanish, and this is the only place the
- * two meet — see "the contract law" in CLAUDE.md.
+ * Persistence and the API are both Spanish — see "the contract law" in
+ * CLAUDE.md. This mapper's job is type conversion, never language
+ * translation.
  */
 export const toEntidad = (
   doc: EntidadAdministradoraDocument,
 ): EntidadContract => ({
   id: doc._id.toString(),
-  codigo: doc.code,
-  nombre: doc.name,
-  nit: doc.taxId,
-  digitoVerificacion: doc.taxIdVerificationDigit,
+  codigo: doc.codigo,
+  nombre: doc.nombre,
+  nit: doc.nit,
+  digitoVerificacion: doc.digitoVerificacion,
   email: doc.email,
-  telefono: doc.phone,
-  estado: doc.status === 'active' ? 'activo' : 'inactivo',
+  telefono: doc.telefono,
+  estado: doc.estado === 'active' ? 'activo' : 'inactivo',
 });

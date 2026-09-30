@@ -97,7 +97,7 @@ const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
 
 const accountDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  fullName: 'Sin Nombre',
+  nombreCompleto: 'Sin Nombre',
   ...over,
 });
 
@@ -148,7 +148,7 @@ describe('PistaAuditoriaService', () => {
     const inmId = id();
     const f = facturaDoc({ loteId, inmuebleId: inmId, fullNumber: 'FV-100' });
     const lote = loteDoc({ _id: loteId, generatedBy: creadorId });
-    const creador = accountDoc({ _id: creadorId, fullName: 'Ana Pérez' });
+    const creador = accountDoc({ _id: creadorId, nombreCompleto: 'Ana Pérez' });
     const inm = inmuebleDoc({ _id: inmId, codigo: '501' });
 
     const svc = servicio({
@@ -208,8 +208,11 @@ describe('PistaAuditoriaService', () => {
       voidedAt: new Date('2026-08-10T09:00:00.000Z'),
       createdAt: new Date('2026-08-05T15:30:00.000Z'),
     });
-    const creador = accountDoc({ _id: creadorId, fullName: 'Creador' });
-    const anulador = accountDoc({ _id: anuladorId, fullName: 'Anulador' });
+    const creador = accountDoc({ _id: creadorId, nombreCompleto: 'Creador' });
+    const anulador = accountDoc({
+      _id: anuladorId,
+      nombreCompleto: 'Anulador',
+    });
 
     const svc = servicio({
       recibos: find([r]),
@@ -366,8 +369,8 @@ describe('PistaAuditoriaService', () => {
       recibos: find([r]),
       notasCredito: find([nc]),
       accounts: find([
-        accountDoc({ _id: userA, fullName: 'Beto' }),
-        accountDoc({ _id: userB, fullName: 'Ana' }),
+        accountDoc({ _id: userA, nombreCompleto: 'Beto' }),
+        accountDoc({ _id: userB, nombreCompleto: 'Ana' }),
       ]),
     });
 

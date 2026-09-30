@@ -376,9 +376,9 @@ const modeloCopropiedades = () => ({
     session: () => ({
       exec: () =>
         Promise.resolve({
-          receivablesAccount: '130501',
-          advancesAccount: '210505',
-          creditNotesAccount: '413595',
+          cuentaContableCartera: '130501',
+          cuentaAnticipos: '210505',
+          cuentaDevoluciones: '413595',
         }),
     }),
   })),
@@ -555,11 +555,11 @@ describe('NotasCreditoService.crear', () => {
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                creditNotesAccount: '413595',
-                defaultCostCentre: 'CC-01',
-                cashFlowCode: 'FC-OPER',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                centroCostoDefecto: 'CC-01',
+                flujoCajaCodigo: 'FC-OPER',
               }),
           }),
         })),
@@ -614,12 +614,12 @@ describe('NotasCreditoService.crear', () => {
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                creditNotesAccount: '413595',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
           }),
         })),
@@ -663,12 +663,12 @@ describe('NotasCreditoService.crear', () => {
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                creditNotesAccount: '413595',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
           }),
         })),
@@ -732,12 +732,12 @@ describe('NotasCreditoService.crear', () => {
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                creditNotesAccount: '413595',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
           }),
         })),
@@ -1091,7 +1091,7 @@ describe('NotasCreditoService.crear', () => {
 
   it('debita la cuenta de ingreso PROPIA de cada concepto (accountingIncomeAccount de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
     // Reportado en producción: el PDF salía con "Sin cuenta asignada" en el
-    // débito porque copropiedad.creditNotesAccount no estaba configurada —
+    // débito porque copropiedad.cuentaDevoluciones no estaba configurada —
     // pero además, aun configurada, una sola cuenta para TODA la nota es
     // incorrecto: debe reversar el ingreso de cada concepto en la MISMA
     // cuenta que se acreditó al facturarlo (ConceptoCobro.cuentaCreditoId,
@@ -2036,12 +2036,12 @@ describe('NotasCreditoService.anular', () => {
           session: () => ({
             exec: () =>
               Promise.resolve({
-                receivablesAccount: '130501',
-                advancesAccount: '210505',
-                creditNotesAccount: '413595',
-                usesMemorandumAccounts: true,
-                memorandumDebitAccount: '831505',
-                memorandumCreditAccount: '831510',
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                usaCuentasOrden: true,
+                cuentaOrdenDebito: '831505',
+                cuentaOrdenCredito: '831510',
               }),
           }),
         })),

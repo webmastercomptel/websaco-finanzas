@@ -26,12 +26,12 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
-    name: 'Conjunto Residencial Los Alamos',
-    taxId: '900123456',
-    taxIdVerificationDigit: '7',
-    showLogoOnDocuments: true,
-    receivablesAccount: '130500',
-    advancesAccount: '210505',
+    nombre: 'Conjunto Residencial Los Alamos',
+    nit: '900123456',
+    digitoVerificacion: '7',
+    mostrarLogo: true,
+    cuentaContableCartera: '130500',
+    cuentaAnticipos: '210505',
     ...over,
   }) as unknown as CopropiedadDocument;
 

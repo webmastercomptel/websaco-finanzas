@@ -89,8 +89,8 @@ const EVENTO: LoteFacturasPdfConfirmadoEvent = {
 describe('PublicacionFacturasService.encolar', () => {
   it('la copropiedad con el flag apagado no escribe ninguna fila', async () => {
     const copropiedades = mockCopropiedades({
-      usesBuildingManagement: false,
-      taxId: null,
+      usaGestionEdificios: false,
+      nit: null,
     });
     const filas = mockFilas();
     const service = new PublicacionFacturasService(
@@ -107,8 +107,8 @@ describe('PublicacionFacturasService.encolar', () => {
 
   it('el flag activo sin NIT tampoco escribe (fila legacy, se omite con warning)', async () => {
     const copropiedades = mockCopropiedades({
-      usesBuildingManagement: true,
-      taxId: null,
+      usaGestionEdificios: true,
+      nit: null,
     });
     const filas = mockFilas();
     const service = new PublicacionFacturasService(
@@ -125,8 +125,8 @@ describe('PublicacionFacturasService.encolar', () => {
 
   it('hace upsert con $setOnInsert cuando el flag y el NIT están completos', async () => {
     const copropiedades = mockCopropiedades({
-      usesBuildingManagement: true,
-      taxId: '900123456',
+      usaGestionEdificios: true,
+      nit: '900123456',
     });
     const filas = mockFilas();
     const service = new PublicacionFacturasService(
@@ -159,8 +159,8 @@ describe('PublicacionFacturasService.encolar', () => {
 
   it('un E11000 (carrera de upserts concurrentes) se traga como no-op', async () => {
     const copropiedades = mockCopropiedades({
-      usesBuildingManagement: true,
-      taxId: '900123456',
+      usaGestionEdificios: true,
+      nit: '900123456',
     });
     const error = Object.assign(new Error('duplicate key'), { code: 11000 });
     const filas = mockFilas({
@@ -178,8 +178,8 @@ describe('PublicacionFacturasService.encolar', () => {
 
   it('un error que NO es E11000 se propaga', async () => {
     const copropiedades = mockCopropiedades({
-      usesBuildingManagement: true,
-      taxId: '900123456',
+      usaGestionEdificios: true,
+      nit: '900123456',
     });
     const filas = mockFilas({
       updateOne: jest.fn(() => ({

@@ -129,7 +129,7 @@ describe('LotesFacturacionService.crear', () => {
       {} as never, // terceros
       {
         findById: jest.fn(() => ({
-          exec: () => Promise.resolve({ lateFeeEnabled: false }),
+          exec: () => Promise.resolve({ moraHabilitada: false }),
         })),
       } as never, // copropiedades
       tenantQueDevuelve(COP),
@@ -155,7 +155,7 @@ describe('LotesFacturacionService.crear', () => {
     });
   });
 
-  it('sin interesMora en el DTO, usa la tasa de la copropiedad solo si lateFeeEnabled está activo', async () => {
+  it('sin interesMora en el DTO, usa la tasa de la copropiedad solo si moraHabilitada está activo', async () => {
     const lotes = lotesModeloCon();
     const service = new LotesFacturacionService(
       lotes as never,
@@ -172,9 +172,9 @@ describe('LotesFacturacionService.crear', () => {
         findById: jest.fn(() => ({
           exec: () =>
             Promise.resolve({
-              lateFeeEnabled: true,
-              lateFeeInterestRate: 2.5,
-              lateFeeValueLimit: 50000,
+              moraHabilitada: true,
+              moraTasaInteres: 2.5,
+              moraValorLimite: 50000,
             }),
         })),
       } as never, // copropiedades
@@ -197,7 +197,7 @@ describe('LotesFacturacionService.crear', () => {
     });
   });
 
-  it('sin interesMora en el DTO y lateFeeEnabled apagado, no cobra mora aunque haya una tasa guardada', async () => {
+  it('sin interesMora en el DTO y moraHabilitada apagado, no cobra mora aunque haya una tasa guardada', async () => {
     // El toggle debe gatear el default de verdad — no basta con leer la
     // tasa e ignorar si está habilitada.
     const lotes = lotesModeloCon();
@@ -216,9 +216,9 @@ describe('LotesFacturacionService.crear', () => {
         findById: jest.fn(() => ({
           exec: () =>
             Promise.resolve({
-              lateFeeEnabled: false,
-              lateFeeInterestRate: 2.5,
-              lateFeeValueLimit: 50000,
+              moraHabilitada: false,
+              moraTasaInteres: 2.5,
+              moraValorLimite: 50000,
             }),
         })),
       } as never, // copropiedades
@@ -380,9 +380,9 @@ describe('LotesFacturacionService.crear', () => {
         findById: jest.fn(() => ({
           exec: () =>
             Promise.resolve({
-              discountEnabled: true,
-              discountPercentage: 5,
-              discountFixedValue: 0,
+              descuentoHabilitado: true,
+              descuentoPorcentaje: 5,
+              descuentoValorFijo: 0,
             }),
         })),
       } as never,
@@ -417,9 +417,9 @@ describe('LotesFacturacionService.crear', () => {
         findById: jest.fn(() => ({
           exec: () =>
             Promise.resolve({
-              discountEnabled: true,
-              discountPercentage: 0,
-              discountFixedValue: 15000,
+              descuentoHabilitado: true,
+              descuentoPorcentaje: 0,
+              descuentoValorFijo: 15000,
             }),
         })),
       } as never,
@@ -437,7 +437,7 @@ describe('LotesFacturacionService.crear', () => {
     });
   });
 
-  it('no hereda nada cuando discountEnabled está apagado, aunque haya % o valor fijo guardados', async () => {
+  it('no hereda nada cuando descuentoHabilitado está apagado, aunque haya % o valor fijo guardados', async () => {
     const lotes = lotesModeloCon();
     const service = new LotesFacturacionService(
       lotes as never,
@@ -454,9 +454,9 @@ describe('LotesFacturacionService.crear', () => {
         findById: jest.fn(() => ({
           exec: () =>
             Promise.resolve({
-              discountEnabled: false,
-              discountPercentage: 5,
-              discountFixedValue: 15000,
+              descuentoHabilitado: false,
+              descuentoPorcentaje: 5,
+              descuentoValorFijo: 15000,
             }),
         })),
       } as never,
@@ -480,9 +480,9 @@ describe('LotesFacturacionService.crear', () => {
       findById: jest.fn(() => ({
         exec: () =>
           Promise.resolve({
-            discountEnabled: true,
-            discountPercentage: 5,
-            discountFixedValue: 0,
+            descuentoHabilitado: true,
+            descuentoPorcentaje: 5,
+            descuentoValorFijo: 0,
           }),
       })),
     };
@@ -2052,7 +2052,9 @@ describe('LotesFacturacionService.consolidar', () => {
     const copropiedades = {
       findById: jest.fn(() => ({
         exec: () =>
-          Promise.resolve(opts.copropiedad ?? { receivablesAccount: '130501' }),
+          Promise.resolve(
+            opts.copropiedad ?? { cuentaContableCartera: '130501' },
+          ),
       })),
     };
     const cuentasContables = {
@@ -2216,9 +2218,9 @@ describe('LotesFacturacionService.consolidar', () => {
   it('agrega tercero/centroCosto/flujoCaja a las líneas cuya cuenta lo requiere', async () => {
     const m = construirModelos({
       copropiedad: {
-        receivablesAccount: '130501',
-        defaultCostCentre: 'CC-01',
-        cashFlowCode: 'FC-OPER',
+        cuentaContableCartera: '130501',
+        centroCostoDefecto: 'CC-01',
+        flujoCajaCodigo: 'FC-OPER',
       },
       cuentasContables: [
         {
@@ -2820,8 +2822,8 @@ describe('LotesFacturacionService.consolidar', () => {
         discountDeadline: new Date('2026-08-10'),
       },
       copropiedad: {
-        receivablesAccount: '130501',
-        discountAppliesWithLateFee: false,
+        cuentaContableCartera: '130501',
+        descuentoAplicaConMora: false,
       },
       preview: [
         preliminar({
@@ -2858,8 +2860,8 @@ describe('LotesFacturacionService.consolidar', () => {
         discountDeadline: new Date('2026-08-10'),
       },
       copropiedad: {
-        receivablesAccount: '130501',
-        discountAppliesWithLateFee: true,
+        cuentaContableCartera: '130501',
+        descuentoAplicaConMora: true,
       },
       preview: [
         preliminar({

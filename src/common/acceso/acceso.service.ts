@@ -53,7 +53,7 @@ export class AccesoService {
     if (isPlatformAdmin) return this.todasLasCopropiedades();
 
     const asignaciones = await this.asignaciones
-      .find({ accountId: new Types.ObjectId(accountId), status: 'active' })
+      .find({ accountId: new Types.ObjectId(accountId), estado: 'active' })
       .lean()
       .exec();
 
@@ -68,12 +68,12 @@ export class AccesoService {
       permisosPorCopropiedad.set(id, actuales);
     };
 
-    const directas = asignaciones.filter((a) => a.scope === 'copropiedad');
+    const directas = asignaciones.filter((a) => a.alcance === 'copropiedad');
     for (const a of directas) {
-      if (a.copropiedadId) acumular(a.copropiedadId.toString(), a.permissions);
+      if (a.copropiedadId) acumular(a.copropiedadId.toString(), a.permisos);
     }
 
-    const porEntidad = asignaciones.filter((a) => a.scope === 'entidad');
+    const porEntidad = asignaciones.filter((a) => a.alcance === 'entidad');
     if (porEntidad.length > 0) {
       const entidadIds = porEntidad
         .map((a) => a.entidadId)
@@ -82,7 +82,7 @@ export class AccesoService {
       // A suspended company suspends the access its grants provide, without
       // touching the buildings themselves.
       const activas = await this.entidades
-        .find({ _id: { $in: entidadIds }, status: 'active' })
+        .find({ _id: { $in: entidadIds }, estado: 'active' })
         .select('_id')
         .lean()
         .exec();
@@ -100,10 +100,10 @@ export class AccesoService {
 
         const administradas = await this.copropiedades
           .find({
-            managingEntityId: { $in: entidadObjectIds },
-            status: 'active',
+            entidadId: { $in: entidadObjectIds },
+            estado: 'active',
           })
-          .select('_id managingEntityId')
+          .select('_id entidadId')
           .lean()
           .exec();
 
@@ -111,12 +111,12 @@ export class AccesoService {
         // permissions of that grant land on each of them.
         const permisosPorEntidad = new Map<string, string[]>();
         for (const a of deEntidadesActivas) {
-          permisosPorEntidad.set(a.entidadId!.toString(), a.permissions);
+          permisosPorEntidad.set(a.entidadId!.toString(), a.permisos);
         }
 
         for (const c of administradas) {
           const permisos =
-            permisosPorEntidad.get(c.managingEntityId?.toString() ?? '') ?? [];
+            permisosPorEntidad.get(c.entidadId?.toString() ?? '') ?? [];
           acumular(c._id.toString(), permisos);
         }
       }
@@ -148,16 +148,16 @@ export class AccesoService {
   /** Platform operators see every active building, with no assignment needed. */
   private async todasLasCopropiedades(): Promise<AccesoCopropiedad[]> {
     const todas = await this.copropiedades
-      .find({ status: 'active' })
-      .select('_id code name')
-      .sort({ name: 1 })
+      .find({ estado: 'active' })
+      .select('_id codigo nombre')
+      .sort({ nombre: 1 })
       .lean()
       .exec();
 
     return todas.map((c) => ({
       copropiedadId: c._id.toString(),
-      codigo: c.code,
-      nombre: c.name,
+      codigo: c.codigo,
+      nombre: c.nombre,
       // Left empty deliberately: a platform admin is granted everything by the
       // ability factory, not by carrying a copy of every permission key.
       permissions: [],
@@ -173,11 +173,11 @@ export class AccesoService {
     accountId: string,
   ): Promise<'copropiedad' | 'entidad' | null> {
     const asignacion = await this.asignaciones
-      .findOne({ accountId: new Types.ObjectId(accountId), status: 'active' })
-      .select('scope')
+      .findOne({ accountId: new Types.ObjectId(accountId), estado: 'active' })
+      .select('alcance')
       .lean()
       .exec();
-    return asignacion?.scope ?? null;
+    return asignacion?.alcance ?? null;
   }
 
   /** Loads names for the resolved ids, dropping any that is not active. */
@@ -190,17 +190,17 @@ export class AccesoService {
     const encontradas = await this.copropiedades
       .find({
         _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
-        status: 'active',
+        estado: 'active',
       })
-      .select('_id code name')
-      .sort({ name: 1 })
+      .select('_id codigo nombre')
+      .sort({ nombre: 1 })
       .lean()
       .exec();
 
     return encontradas.map((c) => ({
       copropiedadId: c._id.toString(),
-      codigo: c.code,
-      nombre: c.name,
+      codigo: c.codigo,
+      nombre: c.nombre,
       permissions: permisosDe(c._id.toString()),
     }));
   }

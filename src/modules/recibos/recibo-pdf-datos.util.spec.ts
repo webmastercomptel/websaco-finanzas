@@ -25,12 +25,12 @@ const copropiedadBase = (
   over: Record<string, unknown> = {},
 ): CopropiedadDocument =>
   ({
-    name: 'Conjunto Residencial Los Alamos',
-    taxId: '900123456',
-    taxIdVerificationDigit: '7',
-    showLogoOnDocuments: true,
-    receivablesAccount: '130500',
-    advancesAccount: '210505',
+    nombre: 'Conjunto Residencial Los Alamos',
+    nit: '900123456',
+    digitoVerificacion: '7',
+    mostrarLogo: true,
+    cuentaContableCartera: '130500',
+    cuentaAnticipos: '210505',
     ...over,
   }) as unknown as CopropiedadDocument;
 
@@ -107,7 +107,7 @@ describe('construirDatosImpresionRecibo', () => {
     const datos = await construirDatosImpresionRecibo(
       reciboBase(),
       [],
-      copropiedadBase({ showLogoOnDocuments: false }),
+      copropiedadBase({ mostrarLogo: false }),
       COP,
       modelosVacios() as never,
       'Recibo de Caja',
@@ -279,7 +279,7 @@ describe('construirDatosImpresionRecibo', () => {
     const datos = await construirDatosImpresionRecibo(
       reciboBase({ receivedAmount: 1000000 }),
       [aplicacion],
-      copropiedadBase({ discountsDebitAccount: '530525' }),
+      copropiedadBase({ descuentosCuentaDebito: '530525' }),
       COP,
       modelosVacios() as never,
       'Recibo de Caja',
@@ -306,7 +306,7 @@ describe('construirDatosImpresionRecibo', () => {
     const datos = await construirDatosImpresionRecibo(
       reciboBase({ receivedAmount: 500000, otherIncomeAmount: 200000 }),
       [aplicacion],
-      copropiedadBase({ otherIncomeCreditAccount: '429505' }),
+      copropiedadBase({ otrosIngresosCuentaCredito: '429505' }),
       COP,
       modelosVacios() as never,
       'Recibo de Caja',

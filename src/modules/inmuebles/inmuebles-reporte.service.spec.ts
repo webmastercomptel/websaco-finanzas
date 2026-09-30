@@ -223,7 +223,7 @@ describe('InmueblesReporteService.obtenerListado', () => {
       modeloValores([
         { inmuebleId: INMUEBLE_1, conceptoId: CONCEPTO_ADMIN, monto: 350000 },
       ]) as never,
-      modeloCopropiedades({ name: 'Prueba', code: 'PRU' }) as never,
+      modeloCopropiedades({ nombre: 'Prueba', codigo: 'PRU' }) as never,
       tenant,
     );
 

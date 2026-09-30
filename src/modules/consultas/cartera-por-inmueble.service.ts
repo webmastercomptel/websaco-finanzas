@@ -352,7 +352,7 @@ export class CarteraPorInmuebleService {
           ? saldoVivoSi
           : Math.max(
               0,
-              si.total -
+              si.monto -
                 apps
                   .filter((a) => activeAsOf(a, fecha))
                   .reduce((sum, a) => sum + a.amountApplied, 0),
@@ -372,9 +372,9 @@ export class CarteraPorInmuebleService {
           );
         }
       } else {
-        const factor = si.total > 0 ? saldo / si.total : 0;
+        const factor = si.monto > 0 ? saldo / si.monto : 0;
         cargosDoc = {};
-        for (const line of si.lines) {
+        for (const line of si.filas) {
           const key = line.conceptoId.toString();
           const monto = line.montoOriginal * factor;
           cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;

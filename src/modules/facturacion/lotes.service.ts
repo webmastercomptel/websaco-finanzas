@@ -308,27 +308,27 @@ export class LotesFacturacionService {
 
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
 
-    const discountGraceDays =
-      dto.diasGraciaDescuento ?? copropiedad?.discountGraceDays ?? 0;
+    const descuentoDiasGracia =
+      dto.diasGraciaDescuento ?? copropiedad?.descuentoDiasGracia ?? 0;
 
     // The percentage and the fixed value are mutually exclusive at the
     // Parámetros de Facturación level (Copropiedad's own rule): only
     // inherit from there when the caller sent NEITHER explicitly — same
-    // "caller wins, else inherit" pattern as `discountGraceDays` above and
-    // `lateInterestRate` below. `discountPercentage` wins whenever it is
-    // `> 0`; `discountFixedValue` is the fallback, taken only when the
+    // "caller wins, else inherit" pattern as `descuentoDiasGracia` above and
+    // `lateInterestRate` below. `descuentoPorcentaje` wins whenever it is
+    // `> 0`; `descuentoValorFijo` is the fallback, taken only when the
     // percentage is absent.
     let earlyPaymentDiscount = dto.descuentoProntoPago;
     let earlyPaymentDiscountFixedValue = dto.valorFijoDescuentoProntoPago;
     if (
       earlyPaymentDiscount === undefined &&
       earlyPaymentDiscountFixedValue === undefined &&
-      copropiedad?.discountEnabled
+      copropiedad?.descuentoHabilitado
     ) {
-      if (copropiedad.discountPercentage > 0) {
-        earlyPaymentDiscount = copropiedad.discountPercentage;
-      } else if (copropiedad.discountFixedValue > 0) {
-        earlyPaymentDiscountFixedValue = copropiedad.discountFixedValue;
+      if (copropiedad.descuentoPorcentaje > 0) {
+        earlyPaymentDiscount = copropiedad.descuentoPorcentaje;
+      } else if (copropiedad.descuentoValorFijo > 0) {
+        earlyPaymentDiscountFixedValue = copropiedad.descuentoValorFijo;
       }
     }
 
@@ -348,7 +348,7 @@ export class LotesFacturacionService {
       // DST-free offset — not a guarantee worth relying on.
       discountDeadline = new Date(dto.fechaFacturacion);
       discountDeadline.setUTCDate(
-        discountDeadline.getUTCDate() + discountGraceDays - 1,
+        discountDeadline.getUTCDate() + descuentoDiasGracia - 1,
       );
     }
 
@@ -362,12 +362,12 @@ export class LotesFacturacionService {
       periodEnd: new Date(dto.periodoHasta),
       earlyPaymentDiscount: earlyPaymentDiscount ?? 0,
       earlyPaymentDiscountFixedValue: earlyPaymentDiscountFixedValue ?? 0,
-      discountGraceDays,
+      discountGraceDays: descuentoDiasGracia,
       lateInterestRate:
         dto.interesMora ??
-        (copropiedad?.lateFeeEnabled ? copropiedad.lateFeeInterestRate : 0),
+        (copropiedad?.moraHabilitada ? copropiedad.moraTasaInteres : 0),
       lateInterestCap:
-        dto.topeInteresMora ?? copropiedad?.lateFeeValueLimit ?? null,
+        dto.topeInteresMora ?? copropiedad?.moraValorLimite ?? null,
       discountDeadline,
       serviceSuspensionDate: dto.fechaSuspension
         ? new Date(dto.fechaSuspension)
@@ -1101,7 +1101,7 @@ export class LotesFacturacionService {
             )?.balance ?? 0;
           // `lateInterestCap` is a MINIMUM overdue balance to bother
           // charging mora at all, not a ceiling on the amount — see the
-          // note on `Copropiedad.lateFeeValueLimit`. Null means no
+          // note on `Copropiedad.moraValorLimite`. Null means no
           // threshold: mora is always calculated when the rate is set.
           const minimo = lote.lateInterestCap;
           const alcanzaElMinimo =
@@ -1296,12 +1296,13 @@ export class LotesFacturacionService {
     );
 
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
-    const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    const cuentaCartera =
+      copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
     const cuentasOrden = cuentasOrdenDe(copropiedad);
     const marcasPorCuenta = await this.marcasCuentasPorCodigo(copropiedadId);
     const contextoAuxiliares = {
-      centroCosto: copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
+      centroCosto: copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: copropiedad?.flujoCajaCodigo ?? null,
     };
 
     // Resume support: if an earlier attempt at this same Lote already
@@ -1753,7 +1754,7 @@ export class LotesFacturacionService {
       ctx.lote.earlyPaymentDiscount,
       ctx.lote.earlyPaymentDiscountFixedValue,
       ctx.lote.discountDeadline,
-      ctx.copropiedad?.discountAppliesWithLateFee ?? false,
+      ctx.copropiedad?.descuentoAplicaConMora ?? false,
     );
 
     const facturaId = new Types.ObjectId();

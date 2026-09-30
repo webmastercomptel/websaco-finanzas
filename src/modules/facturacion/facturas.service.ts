@@ -473,7 +473,7 @@ export class FacturasService {
       descuento,
       visuales?.totalAnticipos ?? 0,
       visuales?.referencia ?? null,
-      copropiedad.billingNotes?.trim() || null,
+      copropiedad.notasFacturacion?.trim() || null,
       titulo,
       emisorDe(copropiedad),
       resolucion,
@@ -518,7 +518,7 @@ export class FacturasService {
       lote.earlyPaymentDiscount,
       lote.earlyPaymentDiscountFixedValue,
       lote.discountDeadline,
-      copropiedad.discountAppliesWithLateFee,
+      copropiedad.descuentoAplicaConMora,
     );
     const descuento =
       discountAmount > 0 && discountDeadline
@@ -529,7 +529,7 @@ export class FacturasService {
       descuento,
       datosVisuales?.totalAnticipos ?? 0,
       datosVisuales?.referencia ?? null,
-      copropiedad.billingNotes?.trim() || null,
+      copropiedad.notasFacturacion?.trim() || null,
       // Never resolved via TituloDocumentoService: a Prefactura is a
       // preview, not a real document type — it has no row of its own under
       // "Tabla de Documentos", literally "Prefactura" always.

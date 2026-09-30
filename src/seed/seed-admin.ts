@@ -55,8 +55,8 @@ async function seedAdmin(): Promise<void> {
     const existente = await accounts.findOne({ email }).exec();
 
     if (existente) {
-      existente.isPlatformAdmin = true;
-      existente.status = 'active';
+      existente.esAdministradorPlataforma = true;
+      existente.estado = 'active';
       await existente.save();
       console.log(
         `Cuenta ${email} ya existía. Confirmado: administrador de plataforma y activa.`,
@@ -70,9 +70,9 @@ async function seedAdmin(): Promise<void> {
       // quietly shadow the correct binding.
       firebaseUid: `pendiente:${email}`,
       email,
-      fullName: 'Administrador de plataforma',
-      isPlatformAdmin: true,
-      status: 'active',
+      nombreCompleto: 'Administrador de plataforma',
+      esAdministradorPlataforma: true,
+      estado: 'active',
     });
 
     console.log(`Cuenta ${email} creada como administrador de plataforma.`);

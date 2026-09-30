@@ -38,15 +38,15 @@ export interface InmuebleParaAplicacionLote {
  *  `asiento.builder.ts`'s own `CopropiedadParaCuentasOrden`, so any value
  *  of this shape is also valid input to `cuentasOrdenDe`. */
 export interface CopropiedadParaAplicacionLote {
-  receivablesAccount: string | null;
-  advancesAccount: string | null;
-  discountsDebitAccount: string | null;
-  usesMemorandumAccounts: boolean;
-  memorandumDebitAccount: string | null;
-  memorandumCreditAccount: string | null;
-  defaultCostCentre: string | null;
-  cashFlowCode: string | null;
-  defaultBankAccountCode: string | null;
+  cuentaContableCartera: string | null;
+  cuentaAnticipos: string | null;
+  descuentosCuentaDebito: string | null;
+  usaCuentasOrden: boolean;
+  cuentaOrdenDebito: string | null;
+  cuentaOrdenCredito: string | null;
+  centroCostoDefecto: string | null;
+  flujoCajaCodigo: string | null;
+  cuentaBancariaDefecto: string | null;
 }
 
 /** One FIFO candidate, already resolved to its real document — kept as a
@@ -211,7 +211,7 @@ export function aplicarFifoEnMemoria(
   datosInmueble: DatosInmuebleParaAplicacionLote,
   montoDisponible: number,
   fechaRecibo: Date,
-  usesMemorandumAccounts: boolean,
+  usaCuentasOrden: boolean,
 ): ResultadoFifoEnMemoria {
   const aplicaciones: AplicacionEnMemoria[] = [];
   const desglose: DesgloseCarteraAplicacion[] = [];
@@ -325,7 +325,7 @@ export function aplicarFifoEnMemoria(
         );
         if (p.parte !== 0) {
           desglose.push({
-            cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+            cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
             monto: p.parte,
             tipoDocumento: 'FV',
             numeroDocumento: factura.number,
@@ -373,13 +373,13 @@ export function aplicarFifoEnMemoria(
     const saldoPendienteDespues = saldoPendiente - monto;
     datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
 
-    const lines = saldoInicial.lines.map((l) => ({
+    const lines = saldoInicial.filas.map((l) => ({
       conceptoId: l.conceptoId,
       totalAmount: l.montoOriginal,
     }));
     const partes = calcularPartesWaterfall(
       {
-        total: saldoInicial.total,
+        total: saldoInicial.monto,
         outstandingBalance: saldoPendienteDespues,
         lines,
       },
@@ -387,25 +387,25 @@ export function aplicarFifoEnMemoria(
       -1,
     );
     const detalleConceptos = partes.map((p) => {
-      const linea = saldoInicial.lines.find((l) =>
+      const linea = saldoInicial.filas.find((l) =>
         l.conceptoId.equals(p.conceptoId),
       );
       return {
         conceptoId: p.conceptoId,
-        conceptName: linea?.conceptName ?? 'Concepto',
+        conceptName: linea?.nombreConcepto ?? 'Concepto',
         monto: p.parte,
       };
     });
     for (const p of partes) {
-      const linea = saldoInicial.lines.find((l) =>
+      const linea = saldoInicial.filas.find((l) =>
         l.conceptoId.equals(p.conceptoId),
       );
       if (p.parte !== 0) {
         desglose.push({
-          cuenta: cuentaCarteraDeLinea(linea, usesMemorandumAccounts),
+          cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
           monto: p.parte,
           tipoDocumento: 'SI',
-          numeroDocumento: saldoInicial.number,
+          numeroDocumento: saldoInicial.numero,
         });
       }
       if (linea?.conceptKind === 'intereses') {
@@ -415,7 +415,7 @@ export function aplicarFifoEnMemoria(
     aplicaciones.push({
       tipo: 'SI',
       documentId: documentoId,
-      numeroDocumento: saldoInicial.number,
+      numeroDocumento: saldoInicial.numero,
       montoAplicado: monto,
       discountApplied: 0,
       detalleConceptos,
@@ -435,7 +435,7 @@ export function aplicarFifoEnMemoria(
     });
     resumen.push({
       tipo: 'SI',
-      numero: saldoInicial.number,
+      numero: saldoInicial.numero,
       completa: saldoPendienteDespues === 0,
     });
     restante -= monto;
@@ -504,11 +504,11 @@ export function construirEscrituraFilaAplicacion(ctx: {
     redactarObservaciones(ctx.resultadoFifo.resumen, sobrante > 0) || null;
 
   const cuentaCartera =
-    ctx.copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
+    ctx.copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
   const cuentaAnticipos =
-    ctx.copropiedad?.advancesAccount ?? CUENTA_SIN_ASIGNAR;
+    ctx.copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
   const cuentaDescuentos =
-    ctx.copropiedad?.discountsDebitAccount ?? CUENTA_SIN_ASIGNAR;
+    ctx.copropiedad?.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
   const cuentasOrden = cuentasOrdenDe(ctx.copropiedad);
   const desgloseCartera = ctx.resultadoFifo.desglose.map((d) => ({
     account: d.cuenta ?? cuentaCartera,
@@ -539,8 +539,8 @@ export function construirEscrituraFilaAplicacion(ctx: {
     ctx.cuentasContablesPorCodigo,
     {
       terceroCode: ctx.datosInmueble.inmueble.code,
-      centroCosto: ctx.copropiedad?.defaultCostCentre ?? null,
-      flujoCajaCodigo: ctx.copropiedad?.cashFlowCode ?? null,
+      centroCosto: ctx.copropiedad?.centroCostoDefecto ?? null,
+      flujoCajaCodigo: ctx.copropiedad?.flujoCajaCodigo ?? null,
     },
   );
 
@@ -703,7 +703,7 @@ export function procesarFilasTandaAplicacionLote(
       datosInmueble,
       fila.valorRecibido,
       fila.fechaPago,
-      datos.copropiedad?.usesMemorandumAccounts ?? false,
+      datos.copropiedad?.usaCuentasOrden ?? false,
     );
     const escritura = construirEscrituraFilaAplicacion({
       copropiedadId: ctx.copropiedadId,
