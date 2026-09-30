@@ -576,6 +576,15 @@ export class LoteRecibosService {
           resultado.escrituras,
         );
       });
+      // Merge this tanda's in-memory consumption into the SHARED batch data
+      // only now that its write actually committed — never before (final
+      // review, Important finding C2). A later tanda for the same
+      // inmueble reads `ctx.datosBatch.indicePorInmueble` fresh each time
+      // it starts, so this is the only point a later tanda can observe an
+      // earlier one's FIFO consumption.
+      for (const [clave, datosInmueble] of resultado.indiceActualizado) {
+        ctx.datosBatch.indicePorInmueble.set(clave, datosInmueble);
+      }
       for (const [i, { fila }] of tanda.entries()) {
         fila.reciboId = resultado.escrituras[i].reciboId;
       }

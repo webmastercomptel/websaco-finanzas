@@ -495,6 +495,12 @@ describe('construirEscrituraFilaAplicacion', () => {
 
     expect(escritura.saldoDocumentoOrigen.documentoId).toBe(escritura.reciboId);
     expect(escritura.asientoContable.reciboId).toBe(escritura.reciboId);
+    // The Recibo insert document itself must carry the SAME pre-generated
+    // _id, or insertMany() lets Mongo auto-generate a different one and
+    // every other document above ends up pointing at a Recibo that was
+    // never actually created — silent, permanent data corruption on every
+    // successful row. Found in the final whole-branch review.
+    expect(escritura.recibo._id).toBe(escritura.reciboId);
   });
 });
 
@@ -678,5 +684,94 @@ describe('procesarFilasTandaAplicacionLote', () => {
     expect(resultado.escrituras[1].saldoTotalDocumentoDeltas[0].delta).toBe(
       -60000,
     );
+  });
+
+  it('C2 (final review, Important) — una tanda que falla no deja el índice compartido con saldo parcialmente consumido', () => {
+    // Row 0 (junio, período abierto) would legitimately consume 90000 of a
+    // 150000 factura — but row 1 (julio, período CERRADO) fails validation
+    // right after, aborting the whole tanda. The shared `datos` object is
+    // what LoteRecibosService.procesarTanda keeps reusing for every LATER
+    // tanda in this same lote — if row 0's in-memory consumption leaked
+    // into it despite the tanda failing, a later tanda for the same
+    // inmueble would see a wrong (too-low) balance for a Factura the
+    // database still shows fully open.
+    const inmuebleA = new Types.ObjectId();
+    const documentoId = new Types.ObjectId();
+    const datos: DatosBatchAplicacionLote = {
+      indicePorInmueble: new Map([
+        [
+          inmuebleA.toString(),
+          {
+            inmueble: {
+              _id: inmuebleA,
+              holderId: new Types.ObjectId(),
+              code: '301',
+            },
+            candidatosOrdenados: [
+              {
+                tipo: 'FV',
+                doc: {
+                  _id: documentoId,
+                  inmuebleId: inmuebleA,
+                  number: 42,
+                  total: 150000,
+                  discountAmount: 0,
+                  discountDeadline: null,
+                  dueDate: new Date('2026-05-10'),
+                  issueDate: new Date('2026-05-01'),
+                  lines: [
+                    {
+                      conceptoId: new Types.ObjectId(),
+                      conceptName: 'Administración',
+                      conceptKind: 'administracion',
+                      accountingReceivableAccount: '130505',
+                      accountingIncomeAccount: '413505',
+                      totalAmount: 150000,
+                    },
+                  ],
+                } as never,
+              },
+            ],
+            saldoPorDocumento: new Map([[documentoId.toString(), 150000]]),
+          },
+        ],
+      ]),
+      copropiedad: null,
+      cuentasContablesPorCodigo: new Map(),
+      periodoAbiertoPorMes: new Map([
+        ['2026-06', true],
+        ['2026-07', false],
+      ]),
+      ultimoLoteFacturacion: null,
+    };
+
+    const filas = [
+      filaTanda({
+        inmuebleId: inmuebleA,
+        valorRecibido: 90000,
+        fechaPago: new Date(2026, 5, 2),
+      }),
+      {
+        ...filaTanda({
+          inmuebleId: inmuebleA,
+          valorRecibido: 50000,
+          fechaPago: new Date(2026, 6, 1),
+        }),
+        indice: 1,
+      },
+    ];
+
+    const resultado = procesarFilasTandaAplicacionLote(
+      filas,
+      datos,
+      ctxTanda(),
+    );
+
+    expect(resultado.ok).toBe(false);
+    expect(
+      datos.indicePorInmueble
+        .get(inmuebleA.toString())!
+        .saldoPorDocumento.get(documentoId.toString()),
+    ).toBe(150000);
   });
 });

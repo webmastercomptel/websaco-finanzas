@@ -547,6 +547,7 @@ export function construirEscrituraFilaAplicacion(ctx: {
   return {
     reciboId,
     recibo: {
+      _id: reciboId,
       coPropertyId: ctx.coPropertyId,
       inmuebleId: ctx.datosInmueble.inmueble._id,
       terceroId: ctx.datosInmueble.inmueble.holderId,
@@ -608,7 +609,18 @@ export function construirEscrituraFilaAplicacion(ctx: {
 }
 
 export type ResultadoTandaAplicacionLote =
-  | { ok: true; escrituras: EscrituraFilaAplicacionLote[] }
+  | {
+      ok: true;
+      escrituras: EscrituraFilaAplicacionLote[];
+      /** The per-inmueble `saldoPorDocumento` state AFTER this tanda's FIFO
+       *  math, for every inmueble this tanda actually touched — the
+       *  caller (`LoteRecibosService.procesarTanda`) merges this into the
+       *  shared `DatosBatchAplicacionLote` ONLY once this tanda's write
+       *  transaction actually commits (final review, Important finding
+       *  C2: a failed tanda must never leak its in-memory consumption
+       *  into the state a LATER tanda reads). */
+      indiceActualizado: Map<string, DatosInmuebleParaAplicacionLote>;
+    }
   | { ok: false; erroresPorIndice: Map<number, string> };
 
 /** Same collateral-message shape `LoteRecibosService.procesarTanda`'s own
@@ -636,12 +648,18 @@ function construirErrorTanda(
 
 /**
  * Runs Tasks 2/4/5 per row of ONE tanda, sequentially and in order, against
- * the shared `datos` (same instance for the whole tanda — this is what
- * lets a later row see an earlier row's own `saldoPorDocumento`
- * consumption, design §4 step 6). The FIRST invalid row stops the loop
- * immediately: nothing after it is even evaluated, mirroring the "whole
- * tanda goes down together" semantics `procesarTanda`'s transaction gives
- * today, just decided here instead of via rollback.
+ * a TANDA-LOCAL clone of the touched inmuebles' `saldoPorDocumento` maps —
+ * never the shared `datos.indicePorInmueble` directly (final review,
+ * Important finding C2). The clone is what lets a later row in the SAME
+ * tanda see an earlier row's own consumption (design §4 step 6); cloning
+ * it, instead of mutating the shared entry in place, is what lets a
+ * FAILED tanda's partial consumption disappear along with it — the shared
+ * state only ever advances via the `indiceActualizado` this function
+ * returns on success, which the caller merges in ONLY after this tanda's
+ * write transaction actually commits. The FIRST invalid row stops the
+ * loop immediately: nothing after it is even evaluated, mirroring the
+ * "whole tanda goes down together" semantics `procesarTanda`'s
+ * transaction gives today, just decided here instead of via rollback.
  */
 export function procesarFilasTandaAplicacionLote(
   filas: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
@@ -654,6 +672,25 @@ export function procesarFilasTandaAplicacionLote(
   },
 ): ResultadoTandaAplicacionLote {
   const escrituras: EscrituraFilaAplicacionLote[] = [];
+  // Cloned lazily, per inmueble, the first time this tanda touches it —
+  // `inmueble`/`candidatosOrdenados` are read-only for the whole run and
+  // shared by reference; only `saldoPorDocumento` (the mutable part) gets
+  // its own `Map` copy, so mutating it here never reaches the original.
+  const indiceLocal = new Map<string, DatosInmuebleParaAplicacionLote>();
+  const datosInmuebleLocal = (
+    clave: string,
+  ): DatosInmuebleParaAplicacionLote => {
+    const existente = indiceLocal.get(clave);
+    if (existente) return existente;
+    const original = datos.indicePorInmueble.get(clave)!;
+    const copia: DatosInmuebleParaAplicacionLote = {
+      inmueble: original.inmueble,
+      candidatosOrdenados: original.candidatosOrdenados,
+      saldoPorDocumento: new Map(original.saldoPorDocumento),
+    };
+    indiceLocal.set(clave, copia);
+    return copia;
+  };
 
   for (const { fila, indice, numero } of filas) {
     const validacion = validarFilaAplicacionLote(fila, datos);
@@ -661,9 +698,7 @@ export function procesarFilasTandaAplicacionLote(
       return construirErrorTanda(filas, indice, validacion.mensaje);
     }
 
-    const datosInmueble = datos.indicePorInmueble.get(
-      fila.inmuebleId!.toString(),
-    )!;
+    const datosInmueble = datosInmuebleLocal(fila.inmuebleId!.toString());
     const resultadoFifo = aplicarFifoEnMemoria(
       datosInmueble,
       fila.valorRecibido,
@@ -685,5 +720,5 @@ export function procesarFilasTandaAplicacionLote(
     escrituras.push(escritura);
   }
 
-  return { ok: true, escrituras };
+  return { ok: true, escrituras, indiceActualizado: indiceLocal };
 }
