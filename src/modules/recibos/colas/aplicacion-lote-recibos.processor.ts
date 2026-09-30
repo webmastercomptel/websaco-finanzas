@@ -19,7 +19,7 @@ export class AplicacionLoteRecibosProcessor extends WorkerHost {
   ): Promise<ResultadoAplicacionLoteRecibos> {
     return this.loteRecibos.ejecutarAplicacion(
       job.data.loteId,
-      new Types.ObjectId(job.data.coPropertyId),
+      new Types.ObjectId(job.data.copropiedadId),
       job.data.accountId,
       job,
     );

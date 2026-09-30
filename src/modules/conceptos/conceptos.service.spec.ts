@@ -11,7 +11,7 @@ const CUENTA_CREDITO_ID = '507f1f77bcf86cd799439044';
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => CON_ID },
-  coPropertyId: { toString: () => COP_ID },
+  copropiedadId: { toString: () => COP_ID },
   nombre: 'Administración',
   tipo: 'administracion',
   tasaImpuesto: 0,
@@ -108,7 +108,7 @@ describe('ConceptosService.findAll', () => {
     await service.findAll(COP_ID);
 
     expect(modelo.filtros[0]).toEqual({
-      coPropertyId: new Types.ObjectId(COP_ID),
+      copropiedadId: new Types.ObjectId(COP_ID),
     });
   });
 
@@ -183,7 +183,7 @@ describe('ConceptosService.create', () => {
     await service.create(COP_ID, { nombre: 'Parqueadero', tipo: 'otro' });
 
     expect(modelo.escrituras[0]).toEqual({
-      coPropertyId: new Types.ObjectId(COP_ID),
+      copropiedadId: new Types.ObjectId(COP_ID),
       orden: 1,
       nombre: 'Parqueadero',
       tipo: 'otro',
@@ -205,7 +205,7 @@ describe('ConceptosService.create', () => {
     });
 
     expect(modelo.escrituras[0]).toEqual({
-      coPropertyId: new Types.ObjectId(COP_ID),
+      copropiedadId: new Types.ObjectId(COP_ID),
       orden: 1,
       nombre: 'Interés de mora',
       tipo: 'intereses',
@@ -287,7 +287,7 @@ describe('ConceptosService.update', () => {
     await service.update(COP_ID, CON_ID, { tipo: 'administracion' });
 
     expect(modelo.filtros[1]).toEqual({
-      coPropertyId: new Types.ObjectId(COP_ID),
+      copropiedadId: new Types.ObjectId(COP_ID),
       tipo: 'administracion',
       _id: { $ne: CON_ID },
     });
@@ -312,7 +312,7 @@ describe('ConceptosService.delete', () => {
 
     expect(modelo.deleteOne).toHaveBeenCalledWith({
       _id: CON_ID,
-      coPropertyId: new Types.ObjectId(COP_ID),
+      copropiedadId: new Types.ObjectId(COP_ID),
     });
   });
 

@@ -11,7 +11,7 @@ const COP = new Types.ObjectId();
 
 const lote = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'lote-1' },
-  coPropertyId: COP,
+  copropiedadId: COP,
   number: 12,
   status: 'consolidado',
   billingDate: new Date('2026-08-06'),
@@ -33,7 +33,7 @@ const linea = (over: Record<string, unknown> = {}) => ({
 
 const factura = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'fac-1' },
-  coPropertyId: COP,
+  copropiedadId: COP,
   loteId: 'lote-1',
   inmuebleId: { toString: () => 'inm-1' },
   unitCode: '301',

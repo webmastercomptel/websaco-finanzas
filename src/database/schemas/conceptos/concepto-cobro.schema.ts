@@ -31,7 +31,7 @@ export class ConceptoCobro {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
   nombre: string;
@@ -131,12 +131,12 @@ export const ConceptoCobroSchema = SchemaFactory.createForClass(ConceptoCobro);
 
 // Two concepts with the same name in one building are a data-entry mistake that
 // makes every report ambiguous.
-ConceptoCobroSchema.index({ coPropertyId: 1, nombre: 1 }, { unique: true });
+ConceptoCobroSchema.index({ copropiedadId: 1, nombre: 1 }, { unique: true });
 
 // At most one administration concept and one interest concept per building —
 // code looks these up expecting a single answer.
 ConceptoCobroSchema.index(
-  { coPropertyId: 1, tipo: 1 },
+  { copropiedadId: 1, tipo: 1 },
   {
     unique: true,
     partialFilterExpression: { tipo: { $in: ['administracion', 'intereses'] } },

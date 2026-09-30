@@ -194,7 +194,7 @@ describe('CopropiedadesService.findAll', () => {
     const asignaciones = mockAsignaciones([
       {
         accountId: { toString: () => 'acc-1' },
-        coPropertyId: { toString: () => 'cop-1' },
+        copropiedadId: { toString: () => 'cop-1' },
       },
     ]);
     const accounts = mockAccounts([
@@ -222,11 +222,11 @@ describe('CopropiedadesService.findAll', () => {
     const asignaciones = mockAsignaciones([
       {
         accountId: { toString: () => 'acc-1' },
-        coPropertyId: { toString: () => 'cop-1' },
+        copropiedadId: { toString: () => 'cop-1' },
       },
       {
         accountId: { toString: () => 'acc-2' },
-        coPropertyId: { toString: () => 'cop-1' },
+        copropiedadId: { toString: () => 'cop-1' },
       },
     ]);
     const accounts = mockAccounts([

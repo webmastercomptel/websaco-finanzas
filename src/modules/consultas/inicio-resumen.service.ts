@@ -46,14 +46,14 @@ export class InicioResumenService {
   ) {}
 
   async findResumen(): Promise<RespuestaInicioResumen> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // "Último periodo facturado": the periodStart/periodEnd of the most
     // recently ISSUED active Factura (max issueDate) — a brand-new
     // coproperty with no Factura yet has no period at all, a legitimate
     // empty state (spec's "Empty-state" note), never an error.
     const ultimaFactura = await this.facturas
-      .findOne({ coPropertyId, status: 'emitida' })
+      .findOne({ copropiedadId, status: 'emitida' })
       .sort({ issueDate: -1 })
       .exec();
 
@@ -67,7 +67,7 @@ export class InicioResumenService {
     // period pair (a lote run issues many Facturas for the same period).
     const facturasDelPeriodo = await this.facturas
       .find({
-        coPropertyId,
+        copropiedadId,
         status: 'emitida',
         periodStart,
         periodEnd,
@@ -99,7 +99,7 @@ export class InicioResumenService {
     // per-inmueble).
     const recibosDelPeriodo = await this.recibos
       .find({
-        coPropertyId,
+        copropiedadId,
         status: 'activo',
         receivedDate: { $gte: periodStart, $lte: periodEnd },
       })
@@ -122,7 +122,7 @@ export class InicioResumenService {
       const reciboIds = recibosDelPeriodo.map((r) => r._id);
       const aplicacionesDelPeriodo = await this.aplicaciones
         .find({
-          coPropertyId,
+          copropiedadId,
           sourceType: 'RC',
           status: 'activa',
           sourceId: { $in: reciboIds },

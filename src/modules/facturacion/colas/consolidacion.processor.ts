@@ -25,7 +25,7 @@ export class ConsolidacionProcessor extends WorkerHost {
   ): Promise<ResultadoConsolidacion> {
     return this.lotes.ejecutarConsolidacion(
       job.data.loteId,
-      new Types.ObjectId(job.data.coPropertyId),
+      new Types.ObjectId(job.data.copropiedadId),
       job,
     );
   }

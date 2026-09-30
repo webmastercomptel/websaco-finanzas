@@ -86,8 +86,8 @@ export class FirebaseAuthGuard implements CanActivate {
 
     request.user = await this.construirUsuario(decoded, cuenta, request);
 
-    if (request.user.coPropertyId) {
-      this.cls.set(ACTIVE_COPROPERTY_KEY, request.user.coPropertyId);
+    if (request.user.copropiedadId) {
+      this.cls.set(ACTIVE_COPROPERTY_KEY, request.user.copropiedadId);
     }
     return true;
   }
@@ -175,7 +175,7 @@ export class FirebaseAuthGuard implements CanActivate {
 
     return {
       ...base,
-      coPropertyId: acceso.coPropertyId,
+      copropiedadId: acceso.copropiedadId,
       permissions: acceso.permissions,
     };
   }

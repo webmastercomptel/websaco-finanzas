@@ -42,7 +42,7 @@ export interface ModelosDatosImpresionNotaDebito {
 export async function construirDatosImpresionNotaDebito(
   nota: NotaDebitoDocument,
   copropiedad: CopropiedadDocument,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaDebito,
   // Resolved by the caller (`NotasDebitoService.datosImpresion`, via
   // `TituloDocumentoService.resolverGenerico('ND', ...)`) — see
@@ -50,18 +50,18 @@ export async function construirDatosImpresionNotaDebito(
   tituloDocumento: string,
 ): Promise<DatosReciboImpresion> {
   const [inmueble, tercero, concepto, asiento] = await Promise.all([
-    modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
+    modelos.inmuebles.findOne({ _id: nota.inmuebleId, copropiedadId }).exec(),
     nota.terceroId
-      ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
+      ? modelos.terceros.findOne({ _id: nota.terceroId, copropiedadId }).exec()
       : Promise.resolve(null),
-    modelos.conceptos.findOne({ _id: nota.conceptoId, coPropertyId }).exec(),
-    modelos.asientos.findOne({ coPropertyId, notaDebitoId: nota._id }).exec(),
+    modelos.conceptos.findOne({ _id: nota.conceptoId, copropiedadId }).exec(),
+    modelos.asientos.findOne({ copropiedadId, notaDebitoId: nota._id }).exec(),
   ]);
 
   const movimientos = asiento?.entries ?? [];
   const codigosUsados = new Set(movimientos.map((m) => m.account));
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
+    .find({ copropiedadId, codigo: { $in: [...codigosUsados] } })
     .exec();
   const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
 

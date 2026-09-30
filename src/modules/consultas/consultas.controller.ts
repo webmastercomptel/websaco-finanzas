@@ -104,12 +104,12 @@ export class ConsultasController {
     @Query() query: ListarAuxiliarCarteraDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.auxiliarCartera.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -136,12 +136,12 @@ export class ConsultasController {
     @Query() query: ConsultarVencimientosCarteraPdfDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.vencimientosCartera.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -174,12 +174,12 @@ export class ConsultasController {
     @Query() query: ConsultarCarteraGeneralDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.carteraGeneral.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -211,12 +211,12 @@ export class ConsultasController {
     @Query() query: ConsultarCarteraPorInmuebleDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.carteraPorInmueble.findOne(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -243,12 +243,12 @@ export class ConsultasController {
     @Query() query: ConsultarCarteraPorConceptosPdfDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.carteraPorConceptos.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -298,12 +298,12 @@ export class ConsultasController {
     @Query('duplicado') duplicado: string | undefined,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const estado = await this.estadoCuenta.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -342,12 +342,12 @@ export class ConsultasController {
     @Query() query: ConsultarConciliacionCarteraDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.conciliacionCartera.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -377,12 +377,12 @@ export class ConsultasController {
     @Query() query: ConsultarMovimientoContablePdfDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.movimientoContable.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -421,12 +421,12 @@ export class ConsultasController {
     @Query() query: ConsultarConsecutivosDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.consecutivos.findAll(query);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 

@@ -21,7 +21,7 @@ const conexionCon = (session: ReturnType<typeof sesionFalsa>) =>
 
 const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: null,
   conceptoId: CONCEPTO,
@@ -149,7 +149,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
         exec: jest.fn(() =>
           Promise.resolve({
             _id: CONCEPTO,
-            coPropertyId: COP,
+            copropiedadId: COP,
             tipo: 'administracion',
             cuentaCreditoId: { codigo: '4105' },
           }),
@@ -324,7 +324,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'administracion',
                 cuentaCreditoId: { codigo: '4105' },
                 cuentaDebitoId: { codigo: '130510' },
@@ -480,7 +480,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'administracion',
                 cuentaCreditoId: { codigo: '4105' },
               }),
@@ -532,7 +532,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'intereses',
                 cuentaCreditoId: { codigo: '413599' },
               }),
@@ -681,7 +681,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'administracion',
                 cuentaCreditoId: { codigo: '413501-CONCEPTO' },
               }),
@@ -730,7 +730,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'administracion',
                 cuentaCreditoId: null,
               }),
@@ -779,7 +779,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'administracion',
                 cuentaCreditoId: { codigo: '4105' },
               }),
@@ -831,7 +831,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               Promise.resolve({
                 _id: CONCEPTO,
-                coPropertyId: COP,
+                copropiedadId: COP,
                 tipo: 'intereses',
                 cuentaCreditoId: { codigo: '413599' },
               }),

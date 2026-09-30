@@ -39,7 +39,7 @@ export class Recibo {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -137,9 +137,9 @@ export const ReciboSchema = SchemaFactory.createForClass(Recibo);
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), but a compound index here makes
 // that guarantee visible to the database too — same reasoning as
-// FacturaSchema's own {coPropertyId, fullNumber} index.
-ReciboSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+// FacturaSchema's own {copropiedadId, fullNumber} index.
+ReciboSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
 
 // GET /recibos?conAnticipoDisponible=true, usually combined with inmuebleId
 // (design §5) — this is the exact shape of that query.
-ReciboSchema.index({ coPropertyId: 1, inmuebleId: 1, unappliedAmount: 1 });
+ReciboSchema.index({ copropiedadId: 1, inmuebleId: 1, unappliedAmount: 1 });

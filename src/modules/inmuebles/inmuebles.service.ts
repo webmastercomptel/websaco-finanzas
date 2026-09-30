@@ -68,13 +68,13 @@ export class InmueblesService {
   async findAll(
     query: ListarInmueblesDto,
   ): Promise<Paginado<InmuebleContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     // Both `activo` and `inactivo` units show here (unlike
     // `LotesFacturacionService`'s own billing-eligibility query, which
     // filters to `status: 'active'` and only there — see `Inmueble.estado`'s
     // own contract note): a unit marked `inactivo` still has to be findable
     // and editable, if only to flip it back.
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const filtro: Record<string, unknown> = { copropiedadId };
 
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
@@ -85,7 +85,7 @@ export class InmueblesService {
       // matching it means resolving which terceros match first, then OR-ing
       // that into the unit filter alongside the code match.
       const terceroIds = await this.terceros
-        .find({ coPropertyId, nombre: regex })
+        .find({ copropiedadId, nombre: regex })
         .distinct('_id')
         .exec();
       filtro.$or = [
@@ -126,10 +126,10 @@ export class InmueblesService {
    * somebody forgets the comparison it is served.
    */
   async findOne(id: string): Promise<InmuebleContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const documento = await this.inmuebles
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .populate('titularId', 'nombre numeroIdentificacion')
       .exec();
 
@@ -150,10 +150,10 @@ export class InmueblesService {
    * body — a caller must not be able to create a unit inside another building.
    */
   async create(dto: CrearInmuebleDto): Promise<InmuebleContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const yaExiste = await this.inmuebles
-      .exists(this.filtroCodigoDuplicado(coPropertyId, dto.codigo))
+      .exists(this.filtroCodigoDuplicado(copropiedadId, dto.codigo))
       .exec();
     if (yaExiste) {
       // Checked here as well as by the unique index, so the person gets a
@@ -165,7 +165,7 @@ export class InmueblesService {
 
     const creado = await this.inmuebles.create({
       ...this.aDocumento(dto),
-      coPropertyId,
+      copropiedadId,
     });
 
     // Re-read populated: the created document holds a raw id for the holder,
@@ -184,14 +184,14 @@ export class InmueblesService {
     id: string,
     dto: ActualizarInmuebleDto,
   ): Promise<InmuebleContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (dto.codigo) {
       // Another unit in the same building already using the code. `$ne`
       // excludes this one, so saving without changing the code is not a clash
       // with itself.
       const chocaConOtro = await this.inmuebles
-        .exists(this.filtroCodigoDuplicado(coPropertyId, dto.codigo, id))
+        .exists(this.filtroCodigoDuplicado(copropiedadId, dto.codigo, id))
         .exec();
       if (chocaConOtro) {
         throw new ConflictException(
@@ -204,7 +204,7 @@ export class InmueblesService {
       .findOneAndUpdate(
         // The tenant is part of the match, not a check afterwards: this is what
         // stops an id from another building being edited.
-        { _id: id, coPropertyId },
+        { _id: id, copropiedadId },
         { $set: this.aDocumento(dto) },
         { returnDocument: 'after' },
       )
@@ -244,14 +244,14 @@ export class InmueblesService {
   async importar(
     dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // `_id` IS the tenant id here — findById is correct, not the trap (see
     // backend/CLAUDE.md's own note on this exact mistake).
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -285,13 +285,13 @@ export class InmueblesService {
     // `finally` so a thrown error never leaves a stuck row behind.
     const total = dto.filas.length;
     const intervalo = this.progreso.intervalo(total);
-    await this.progreso.iniciar(coPropertyId, 'inmuebles', total);
+    await this.progreso.iniciar(copropiedadId, 'inmuebles', total);
 
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
           const yaExiste = await this.inmuebles
-            .exists(this.filtroCodigoDuplicado(coPropertyId, fila.codigo))
+            .exists(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
             .exec();
           if (yaExiste) {
             throw new Error(
@@ -299,10 +299,10 @@ export class InmueblesService {
             );
           }
 
-          const titularId = await this.resolverTitular(coPropertyId, fila);
+          const titularId = await this.resolverTitular(copropiedadId, fila);
 
           await this.inmuebles.create({
-            coPropertyId,
+            copropiedadId,
             codigo: fila.codigo,
             referencia: fila.referencia,
             bloque: fila.bloque,
@@ -330,7 +330,7 @@ export class InmueblesService {
         const completadas = indice + 1;
         if (completadas % intervalo === 0 || completadas === total) {
           await this.progreso.actualizar(
-            coPropertyId,
+            copropiedadId,
             'inmuebles',
             completadas,
             total,
@@ -338,7 +338,7 @@ export class InmueblesService {
         }
       }
     } finally {
-      await this.progreso.finalizar(coPropertyId, 'inmuebles');
+      await this.progreso.finalizar(copropiedadId, 'inmuebles');
     }
 
     return {
@@ -353,8 +353,8 @@ export class InmueblesService {
   /** Null while no import is currently running for the active coproperty —
    *  see `ProgresoImportacionService.obtener`. */
   async obtenerProgresoImportacion(): Promise<ProgresoActual | null> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.progreso.obtener(coPropertyId, 'inmuebles');
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.progreso.obtener(copropiedadId, 'inmuebles');
   }
 
   /**
@@ -383,7 +383,7 @@ export class InmueblesService {
    * recognizes. A bad code fails only this row, same as a repeated codigo.
    */
   private async resolverTitular(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     fila: FilaImportarInmuebleDto,
   ): Promise<Types.ObjectId | undefined> {
     const personType = fila.razonSocialTitular ? 'juridica' : 'natural';
@@ -426,7 +426,7 @@ export class InmueblesService {
     if (fila.numeroIdentificacionTitular) {
       const existente = await this.terceros
         .findOne({
-          coPropertyId,
+          copropiedadId,
           numeroIdentificacion: fila.numeroIdentificacionTitular,
         })
         .exec();
@@ -445,7 +445,7 @@ export class InmueblesService {
     if (!nombre) return undefined;
 
     const creado = await this.terceros.create({
-      coPropertyId,
+      copropiedadId,
       tipoPersona: personType,
       nombre: nombre,
       primerNombre: fila.nom1Titular,
@@ -527,12 +527,12 @@ export class InmueblesService {
    * distinct units. Anchored so "301" cannot match "3010".
    */
   private filtroCodigoDuplicado(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     excluirId?: string,
   ): Record<string, unknown> {
     return {
-      coPropertyId,
+      copropiedadId,
       codigo: { $regex: `^${escapeRegex(codigo.trim())}$`, $options: 'i' },
       ...(excluirId ? { _id: { $ne: excluirId } } : {}),
     };

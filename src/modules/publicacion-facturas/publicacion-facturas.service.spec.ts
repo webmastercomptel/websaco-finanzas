@@ -60,7 +60,7 @@ const mockStorage = (
 
 const FILA_BASE: FilaReclamada = {
   _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
-  coPropertyId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+  copropiedadId: new Types.ObjectId('507f1f77bcf86cd799439011'),
   loteId: new Types.ObjectId('507f1f77bcf86cd799439012'),
   taxId: '900123456',
   invoiceNumbers: ['FV-1', 'FV-2'],
@@ -80,7 +80,7 @@ const COPROPERTY_ID = '507f1f77bcf86cd799439011';
 const LOTE_ID = '507f1f77bcf86cd799439012';
 
 const EVENTO: LoteFacturasPdfConfirmadoEvent = {
-  coPropertyId: COPROPERTY_ID,
+  copropiedadId: COPROPERTY_ID,
   loteId: LOTE_ID,
   objectPath: 'coproprietats/cop-1/lotes/lote-1.pdf',
   numerosFactura: ['FV-1', 'FV-2'],

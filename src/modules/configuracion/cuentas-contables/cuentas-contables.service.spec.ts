@@ -158,7 +158,7 @@ describe('CuentasContablesService.create', () => {
 
     expect(modelo.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        coPropertyId: COP,
+        copropiedadId: COP,
         codigo: '11050502',
         nombre: 'Banco',
         requiereTercero: false,
@@ -259,7 +259,7 @@ describe('CuentasContablesService.importar', () => {
     };
   };
 
-  /** `copropiedades.findById(coPropertyId).exec()` — the per-row
+  /** `copropiedades.findById(copropiedadId).exec()` — the per-row
    *  `codigoCopropiedad` check reads `.code` from this. Defaults to
    *  matching every `fila` below so existing tests are unaffected; only the
    *  mismatch test overrides it. */
@@ -394,7 +394,7 @@ describe('CuentasContablesService.delete', () => {
 
     expect(modelo.deleteOne).toHaveBeenCalledWith({
       _id: 'cta-1',
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
   });
 

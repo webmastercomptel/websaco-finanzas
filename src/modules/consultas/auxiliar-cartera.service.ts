@@ -96,7 +96,7 @@ export class AuxiliarCarteraService {
   async findAll(
     query: ListarAuxiliarCarteraDto,
   ): Promise<RespuestaAuxiliarCartera> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.desde);
     // A bare "hasta" date, as the frontend defaults it to "today" in
@@ -107,13 +107,13 @@ export class AuxiliarCarteraService {
     const hasta = finDelDiaCorte(new Date(query.hasta));
 
     const inmueble = await this.inmuebles
-      .findOne({ _id: inmuebleId, coPropertyId })
+      .findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     const inmuebleCodigo = inmueble?.codigo ?? '';
     let propietario: string | null = null;
     if (inmueble?.titularId) {
       const tercero = await this.terceros
-        .findOne({ _id: inmueble.titularId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, copropiedadId })
         .exec();
       propietario = tercero?.nombre ?? null;
     }
@@ -137,17 +137,17 @@ export class AuxiliarCarteraService {
       notasContables,
       notasAnticipo,
     ] = await Promise.all([
-      this.facturas.find({ coPropertyId, inmuebleId }).exec(),
+      this.facturas.find({ copropiedadId, inmuebleId }).exec(),
       this.notasDebito
-        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .find({ copropiedadId, inmuebleId, status: 'emitida' })
         .exec(),
-      this.saldosIniciales.find({ coPropertyId, inmuebleId }).exec(),
-      this.recibos.find({ coPropertyId, inmuebleId }).exec(),
-      this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
+      this.saldosIniciales.find({ copropiedadId, inmuebleId }).exec(),
+      this.recibos.find({ copropiedadId, inmuebleId }).exec(),
+      this.notasCredito.find({ copropiedadId, inmuebleId }).exec(),
       this.notasContables
-        .find({ coPropertyId, inmuebleId, status: 'activo' })
+        .find({ copropiedadId, inmuebleId, status: 'activo' })
         .exec(),
-      this.notasAnticipo.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasAnticipo.find({ copropiedadId, inmuebleId }).exec(),
     ]);
 
     // Step 2: fetch active applications for the source documents (RC + NC + NA)
@@ -159,7 +159,7 @@ export class AuxiliarCarteraService {
     const aplicaciones = sourceIds.length
       ? await this.aplicaciones
           .find({
-            coPropertyId,
+            copropiedadId,
             sourceId: { $in: sourceIds },
             status: 'activa',
           })

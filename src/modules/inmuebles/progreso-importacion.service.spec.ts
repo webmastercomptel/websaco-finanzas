@@ -49,7 +49,10 @@ describe('ProgresoImportacionService', () => {
 
     await service.iniciar(COP, 'inmuebles', 10);
 
-    expect(modelo.filtros[0]).toEqual({ coPropertyId: COP, kind: 'inmuebles' });
+    expect(modelo.filtros[0]).toEqual({
+      copropiedadId: COP,
+      kind: 'inmuebles',
+    });
     expect(modelo.escrituras[0]).toEqual({ $set: { current: 0, total: 10 } });
   });
 
@@ -69,7 +72,7 @@ describe('ProgresoImportacionService', () => {
     await service.finalizar(COP, 'inmuebles');
 
     expect(modelo.deleteOne).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
       kind: 'inmuebles',
     });
   });

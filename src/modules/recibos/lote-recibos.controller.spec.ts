@@ -17,7 +17,7 @@ const construirController = (
 ) => {
   const loteDoc = {
     _id: LOTE_ID,
-    coPropertyId: COPROPERTY_ID,
+    copropiedadId: COPROPERTY_ID,
     status: overrides.estado ?? 'aplicado',
     filas,
   };
@@ -79,7 +79,7 @@ describe('LoteRecibosController.solicitarGeneracionRecibos', () => {
     expect(recibosService.datosImpresion).toHaveBeenCalledTimes(2);
     expect(generacion.solicitar).toHaveBeenCalledWith(
       'RC',
-      expect.objectContaining({ _id: LOTE_ID, coPropertyId: COPROPERTY_ID }),
+      expect.objectContaining({ _id: LOTE_ID, copropiedadId: COPROPERTY_ID }),
       expect.arrayContaining([
         expect.objectContaining({ reciboId: RECIBO_ID_1.toString() }),
         expect.objectContaining({ reciboId: RECIBO_ID_2.toString() }),

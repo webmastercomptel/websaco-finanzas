@@ -105,7 +105,7 @@ export class LoteFacturacion {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
   number: number;
@@ -258,14 +258,14 @@ export const LoteFacturacionSchema =
 
 // At most one run in flight per coproperty at a time — a second one would
 // make "which lote am I liquidando" ambiguous. Explicit name required: the
-// key pattern is identical to the general-purpose `coPropertyId` index
+// key pattern is identical to the general-purpose `copropiedadId` index
 // implied by that field's own `index: true` (kept for unscoped lookups like
-// findAll()'s `find({coPropertyId})`, which must also match consolidado
+// findAll()'s `find({copropiedadId})`, which must also match consolidado
 // rows this partial index deliberately excludes) — without distinct names,
 // Mongoose auto-names both `coPropertyId_1` and MongoDB rejects the second
 // with IndexOptionsConflict, silently leaving this uniqueness unenforced.
 LoteFacturacionSchema.index(
-  { coPropertyId: 1 },
+  { copropiedadId: 1 },
   {
     unique: true,
     partialFilterExpression: { status: { $in: ['borrador', 'liquidado'] } },

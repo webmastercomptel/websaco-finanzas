@@ -9,7 +9,7 @@ type Filtro = Record<string, unknown>;
 
 const documento = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'fac-1' },
-  coPropertyId: COP,
+  copropiedadId: COP,
   loteId: { toString: () => 'lote-1' },
   inmuebleId: { toString: () => 'inm-1' },
   unitCode: '301',
@@ -192,7 +192,7 @@ describe('FacturasService.findAll', () => {
 
     await service.findAll({});
 
-    expect(facturas.filtros[0].coPropertyId).toBe(COP);
+    expect(facturas.filtros[0].copropiedadId).toBe(COP);
   });
 
   it('devuelve el contrato en español, con el titular congelado', async () => {
@@ -215,7 +215,7 @@ describe('FacturasService.findOne', () => {
 
     await service.findOne('fac-1');
 
-    expect(facturas.filtros[0]).toEqual({ _id: 'fac-1', coPropertyId: COP });
+    expect(facturas.filtros[0]).toEqual({ _id: 'fac-1', copropiedadId: COP });
   });
 
   it('responde "no existe" para una factura de otra copropiedad', async () => {
@@ -235,7 +235,7 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
     await service.findAll({ conSaldoPendiente: true });
 
     expect(saldoTotalDocumento.filtros[0]).toMatchObject({
-      coPropertyId: COP,
+      copropiedadId: COP,
       tipoDocumento: 'FV',
       saldoPendiente: { $gt: 0 },
     });
@@ -357,7 +357,7 @@ describe('FacturasService.findAllRawPorLote', () => {
     await service.findAllRawPorLote('lote-1');
 
     expect(facturas.filtros[0]).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       loteId: 'lote-1',
     });
   });
@@ -482,7 +482,7 @@ const copropiedadBase = (over: Record<string, unknown> = {}) => ({
  *  off an already-issued invoice. */
 const facturaParaPlantilla = (over: Record<string, unknown> = {}) => ({
   inmuebleId: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   resolucionId: null,
   prefix: 'CONJ-2026',
   discountAmount: 0,
@@ -539,7 +539,7 @@ const construirServicioConTitulo = (
 };
 
 describe('FacturasService.datosPlantilla', () => {
-  it('llama a TituloDocumentoService.resolverFactura con el coPropertyId, el resolucionId y el prefix PROPIOS de la factura', async () => {
+  it('llama a TituloDocumentoService.resolverFactura con el copropiedadId, el resolucionId y el prefix PROPIOS de la factura', async () => {
     const { service, tituloDocumento } = construirServicioConTitulo();
     const resolucionId = new Types.ObjectId();
     const factura = facturaParaPlantilla({

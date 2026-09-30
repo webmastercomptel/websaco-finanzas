@@ -22,7 +22,7 @@ export class CuentaContable {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** e.g. "11050501" */
   @Prop({ required: true, trim: true })
@@ -73,4 +73,4 @@ export const CuentaContableSchema =
   SchemaFactory.createForClass(CuentaContable);
 
 // Duplicate code within one building is a data-entry mistake.
-CuentaContableSchema.index({ coPropertyId: 1, codigo: 1 }, { unique: true });
+CuentaContableSchema.index({ copropiedadId: 1, codigo: 1 }, { unique: true });

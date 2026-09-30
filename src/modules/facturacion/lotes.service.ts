@@ -133,7 +133,7 @@ type FilaNumerada = {
 type ContextoTanda = {
   loteId: string;
   lote: LoteFacturacionDocument;
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   cuentaCartera: string;
   cuentasOrden: CuentasOrden | null;
   marcasPorCuenta: Map<string, MarcasCuentaContable> | undefined;
@@ -253,11 +253,11 @@ export class LotesFacturacionService {
    * partial unique index on LoteFacturacion for why only one may exist.
    */
   async crear(accountId: string, dto: CrearLoteDto): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const yaHayUno = await this.lotes
       .exists({
-        coPropertyId,
+        copropiedadId,
         status: { $in: ['borrador', 'liquidado'] },
       })
       .exec();
@@ -279,7 +279,7 @@ export class LotesFacturacionService {
     // consecutivo, same "a refusal costs no session" discipline as every
     // other pre-transaction guard in this codebase.
     const ultimoConsolidado = await this.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     if (ultimoConsolidado) {
       const fechaFacturacion = new Date(dto.fechaFacturacion);
@@ -302,9 +302,11 @@ export class LotesFacturacionService {
       }
     }
 
-    const numero = await this.numeracion.siguienteLote(coPropertyId.toString());
+    const numero = await this.numeracion.siguienteLote(
+      copropiedadId.toString(),
+    );
 
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
 
     const discountGraceDays =
       dto.diasGraciaDescuento ?? copropiedad?.discountGraceDays ?? 0;
@@ -351,7 +353,7 @@ export class LotesFacturacionService {
     }
 
     const creado = await this.lotes.create({
-      coPropertyId,
+      copropiedadId,
       number: numero,
       status: 'borrador',
       billingDate: new Date(dto.fechaFacturacion),
@@ -403,11 +405,11 @@ export class LotesFacturacionService {
     accountId: string,
     dto: CrearFacturaIndividualDto,
   ): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const yaHayUno = await this.lotes
       .exists({
-        coPropertyId,
+        copropiedadId,
         status: { $in: ['borrador', 'liquidado'] },
       })
       .exec();
@@ -419,7 +421,7 @@ export class LotesFacturacionService {
     }
 
     const inmueble = await this.inmuebles
-      .findOne({ _id: dto.inmuebleId, coPropertyId })
+      .findOne({ _id: dto.inmuebleId, copropiedadId })
       .exec();
     if (!inmueble) {
       throw new NotFoundException(
@@ -428,7 +430,7 @@ export class LotesFacturacionService {
     }
 
     const ultimoConsolidado = await this.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     if (!ultimoConsolidado) {
       throw new BadRequestException(
@@ -438,10 +440,12 @@ export class LotesFacturacionService {
       );
     }
 
-    const numero = await this.numeracion.siguienteLote(coPropertyId.toString());
+    const numero = await this.numeracion.siguienteLote(
+      copropiedadId.toString(),
+    );
 
     const creado = await this.lotes.create({
-      coPropertyId,
+      copropiedadId,
       number: numero,
       status: 'borrador',
       inmuebleId: new Types.ObjectId(dto.inmuebleId),
@@ -480,8 +484,8 @@ export class LotesFacturacionService {
    * specific unit/concept has nothing to do with which dates the run covers.
    */
   async actualizar(id: string, dto: ActualizarLoteDto): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
@@ -527,7 +531,7 @@ export class LotesFacturacionService {
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: id, coPropertyId },
+        { _id: id, copropiedadId },
         { $set: doc },
         { returnDocument: 'after' },
       )
@@ -560,8 +564,10 @@ export class LotesFacturacionService {
     loteId: string,
     filas: NovedadFilaDto[],
   ): Promise<ResultadoCargaNovedades> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -575,7 +581,7 @@ export class LotesFacturacionService {
 
     for (const [indice, fila] of filas.entries()) {
       const inmueble = await this.inmuebles
-        .findOne({ coPropertyId, codigo: fila.inmuebleCodigo })
+        .findOne({ copropiedadId, codigo: fila.inmuebleCodigo })
         .exec();
       if (!inmueble) {
         errores.push({
@@ -587,7 +593,7 @@ export class LotesFacturacionService {
 
       const concepto = await this.conceptos
         .findOne({
-          coPropertyId,
+          copropiedadId,
           nombre: fila.nombreConcepto,
           cargaXls: true,
         })
@@ -612,7 +618,7 @@ export class LotesFacturacionService {
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
         { $push: { adjustments: { $each: novedades } } },
         { returnDocument: 'after' },
       )
@@ -623,7 +629,7 @@ export class LotesFacturacionService {
       actualizado.status === 'liquidado' &&
       novedades.length > 0
     ) {
-      await this.recalcularYPersistirPreview(actualizado, coPropertyId);
+      await this.recalcularYPersistirPreview(actualizado, copropiedadId);
     }
 
     return { total: filas.length, cargadas: novedades.length, errores };
@@ -642,8 +648,10 @@ export class LotesFacturacionService {
     loteId: string,
     dto: AgregarNovedadLineaDto,
   ): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -660,7 +668,7 @@ export class LotesFacturacionService {
     }
 
     const inmueble = await this.inmuebles
-      .findOne({ _id: dto.inmuebleId, coPropertyId })
+      .findOne({ _id: dto.inmuebleId, copropiedadId })
       .exec();
     if (!inmueble) {
       throw new NotFoundException(
@@ -668,7 +676,7 @@ export class LotesFacturacionService {
       );
     }
     const concepto = await this.conceptos
-      .findOne({ _id: dto.conceptoId, coPropertyId })
+      .findOne({ _id: dto.conceptoId, copropiedadId })
       .exec();
     if (!concepto) {
       throw new NotFoundException(
@@ -700,7 +708,7 @@ export class LotesFacturacionService {
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
         { $push: { adjustments: nuevaNovedad } },
         { returnDocument: 'after' },
       )
@@ -712,7 +720,7 @@ export class LotesFacturacionService {
     }
 
     if (actualizado.status === 'liquidado') {
-      return this.recalcularYPersistirPreview(actualizado, coPropertyId);
+      return this.recalcularYPersistirPreview(actualizado, copropiedadId);
     }
     return toLote(actualizado);
   }
@@ -729,8 +737,10 @@ export class LotesFacturacionService {
     novedadId: string,
     dto: EditarNovedadLineaDto,
   ): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -754,7 +764,7 @@ export class LotesFacturacionService {
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId, status: { $ne: 'consolidado' } },
+        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
         { $set: { adjustments: lote.adjustments } },
         { returnDocument: 'after' },
       )
@@ -766,7 +776,7 @@ export class LotesFacturacionService {
     }
 
     if (actualizado.status === 'liquidado') {
-      return this.recalcularYPersistirPreview(actualizado, coPropertyId);
+      return this.recalcularYPersistirPreview(actualizado, copropiedadId);
     }
     return toLote(actualizado);
   }
@@ -781,9 +791,9 @@ export class LotesFacturacionService {
    * LoteFacturacion, kept literal (not `$ne: 'consolidado'`) so the two can
    * never silently diverge if a fourth status is ever added to the enum.
    */
-  async exigirSinLoteAbierto(coPropertyId: string): Promise<void> {
+  async exigirSinLoteAbierto(copropiedadId: string): Promise<void> {
     const abierto = await this.lotes
-      .findOne({ coPropertyId, status: { $in: ['borrador', 'liquidado'] } })
+      .findOne({ copropiedadId, status: { $in: ['borrador', 'liquidado'] } })
       .exec();
     if (abierto) {
       throw new ConflictException(
@@ -803,10 +813,10 @@ export class LotesFacturacionService {
    * error.
    */
   async obtenerUltimoConsolidado(
-    coPropertyId: string,
+    copropiedadId: string,
   ): Promise<LoteFacturacionDocument | null> {
     return this.lotes
-      .findOne({ coPropertyId, status: 'consolidado' })
+      .findOne({ copropiedadId, status: 'consolidado' })
       .sort({ number: -1 })
       .exec();
   }
@@ -843,12 +853,12 @@ export class LotesFacturacionService {
    *  for why that gap is accepted rather than solved with a transaction. */
   private async recalcularYPersistirPreview(
     lote: LoteFacturacionDocument,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<LoteContract> {
-    const preview = await this.construirPreview(lote, coPropertyId);
+    const preview = await this.construirPreview(lote, copropiedadId);
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: lote._id, coPropertyId, status: { $ne: 'consolidado' } },
+        { _id: lote._id, copropiedadId, status: { $ne: 'consolidado' } },
         { $set: { preview } },
         { returnDocument: 'after' },
       )
@@ -868,8 +878,10 @@ export class LotesFacturacionService {
    * re-run reflects edits already made instead of discarding them.
    */
   async liquidar(loteId: string): Promise<LoteContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -879,11 +891,11 @@ export class LotesFacturacionService {
       );
     }
 
-    const preview = await this.construirPreview(lote, coPropertyId);
+    const preview = await this.construirPreview(lote, copropiedadId);
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId },
+        { _id: loteId, copropiedadId },
         { $set: { preview, status: 'liquidado' } },
         { returnDocument: 'after' },
       )
@@ -908,7 +920,7 @@ export class LotesFacturacionService {
    */
   private async construirPreview(
     lote: LoteFacturacionDocument,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Record<string, unknown>[]> {
     // A Factura Individual (`lote.inmuebleId` set) scopes the whole preview
     // to that one unit, and — product decision — never auto-populates from
@@ -924,7 +936,7 @@ export class LotesFacturacionService {
     const [unidades, conceptos, valoresRecurrentes] = await Promise.all([
       this.inmuebles
         .find({
-          coPropertyId,
+          copropiedadId,
           estado: 'active',
           ...(lote.inmuebleId ? { _id: lote.inmuebleId } : {}),
         })
@@ -932,14 +944,14 @@ export class LotesFacturacionService {
       // No more active/inactive switch on a concepto (design note on the
       // schema): every declared concept is chargeable, system ones included.
       this.conceptos
-        .find({ coPropertyId })
+        .find({ copropiedadId })
         .populate('cuentaCreditoId', 'codigo')
         .populate('cuentaDebitoId', 'codigo')
         .populate('cuentaImpuestoId', 'codigo')
         .exec(),
       esIndividual
         ? Promise.resolve([])
-        : this.valoresRecurrentes.find({ coPropertyId }).exec(),
+        : this.valoresRecurrentes.find({ copropiedadId }).exec(),
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
     const interesConcepto = conceptos.find((c) => c.tipo === 'intereses');
@@ -959,13 +971,13 @@ export class LotesFacturacionService {
       .filter((id): id is Types.ObjectId => id !== null);
     const terceros = holderIds.length
       ? await this.terceros
-          .find({ _id: { $in: holderIds }, coPropertyId })
+          .find({ _id: { $in: holderIds }, copropiedadId })
           .exec()
       : [];
     const terceroPorId = new Map(terceros.map((t) => [t._id.toString(), t]));
 
     // `unidad._id` kept as the real ObjectId instance in this `$in`, never
-    // `.toString()`'d: `SaldoCartera`'s `inmuebleId`/`coPropertyId` paths
+    // `.toString()`'d: `SaldoCartera`'s `inmuebleId`/`copropiedadId` paths
     // compile as `Mixed` rather than a real ObjectId SchemaType under the
     // installed mongoose/@nestjs-mongoose pair (`@nestjs/mongoose`'s
     // `isMongooseSchemaType()` doesn't recognize `Types.ObjectId` — the BSON
@@ -980,7 +992,7 @@ export class LotesFacturacionService {
     const unidadIds = unidades.map((u) => u._id);
     const saldos = unidadIds.length
       ? await this.saldos
-          .find({ coPropertyId, inmuebleId: { $in: unidadIds } })
+          .find({ copropiedadId, inmuebleId: { $in: unidadIds } })
           .exec()
       : [];
     const saldosPorUnidad = new Map<string, (typeof saldos)[number][]>();
@@ -1200,15 +1212,15 @@ export class LotesFacturacionService {
   async consolidar(
     loteId: string,
   ): Promise<{ lote: LoteContract; errores: ErrorConsolidacion[] }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (!this.cola || !this.eventosCola) {
-      return this.ejecutarConsolidacion(loteId, coPropertyId);
+      return this.ejecutarConsolidacion(loteId, copropiedadId);
     }
 
     const trabajo = await this.cola.add(NOMBRE_TRABAJO_CONSOLIDACION, {
       loteId,
-      coPropertyId: coPropertyId.toString(),
+      copropiedadId: copropiedadId.toString(),
     });
     return trabajo.waitUntilFinished(this.eventosCola);
   }
@@ -1256,10 +1268,12 @@ export class LotesFacturacionService {
    */
   async ejecutarConsolidacion(
     loteId: string,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     job?: Job<DatosTrabajoConsolidacion, ResultadoConsolidacion>,
   ): Promise<ResultadoConsolidacion> {
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -1276,12 +1290,15 @@ export class LotesFacturacionService {
       );
     }
 
-    await this.periodo.exigirAbierto(coPropertyId.toString(), lote.billingDate);
+    await this.periodo.exigirAbierto(
+      copropiedadId.toString(),
+      lote.billingDate,
+    );
 
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
     const cuentasOrden = cuentasOrdenDe(copropiedad);
-    const marcasPorCuenta = await this.marcasCuentasPorCodigo(coPropertyId);
+    const marcasPorCuenta = await this.marcasCuentasPorCodigo(copropiedadId);
     const contextoAuxiliares = {
       centroCosto: copropiedad?.defaultCostCentre ?? null,
       flujoCajaCodigo: copropiedad?.cashFlowCode ?? null,
@@ -1290,7 +1307,7 @@ export class LotesFacturacionService {
     // Resume support: if an earlier attempt at this same Lote already
     // created some Facturas before a resolution-exhaustion blocker stopped
     // it, a retry must never re-invoice those units — nothing else in this
-    // method (not the {coPropertyId, fullNumber} index, which only stops
+    // method (not the {copropiedadId, fullNumber} index, which only stops
     // number reuse) would catch that, and a fresh number would just create
     // a second, duplicate invoice while double-incrementing SaldoCartera.
     //
@@ -1302,11 +1319,11 @@ export class LotesFacturacionService {
     // on every retry instead of being silently re-invoiced (a second real
     // DIAN number) or silently left incomplete.
     const facturasExistentes = await this.facturas
-      .find({ coPropertyId, loteId, status: 'emitida' })
+      .find({ copropiedadId, loteId, status: 'emitida' })
       .exec();
     const idsExistentes = facturasExistentes.map((f) => f._id.toString());
     const asientosExistentes = await this.asientos
-      .find({ coPropertyId, loteId, facturaId: { $in: idsExistentes } })
+      .find({ copropiedadId, loteId, facturaId: { $in: idsExistentes } })
       .exec();
     // facturaId is typed nullable now (AsientoContable also anchors to a
     // Recibo, with facturaId: null), but this query's own filter —
@@ -1397,7 +1414,7 @@ export class LotesFacturacionService {
       filasPendientes.length && conceptoIdsPendientes.length
         ? await this.saldos
             .find({
-              coPropertyId,
+              copropiedadId,
               inmuebleId: { $in: filasPendientes.map((p) => p.inmuebleId) },
               conceptoId: { $in: conceptoIdsPendientes },
             })
@@ -1417,7 +1434,7 @@ export class LotesFacturacionService {
     // than requested if the active resolution runs out partway through.
     const { numeros: numerosReservados } =
       await this.numeracion.reservarBloqueFacturas(
-        coPropertyId.toString(),
+        copropiedadId.toString(),
         filasPendientes.length,
       );
 
@@ -1464,7 +1481,7 @@ export class LotesFacturacionService {
       });
       await this.lotes
         .updateOne(
-          { _id: loteId, coPropertyId },
+          { _id: loteId, copropiedadId },
           {
             $set: {
               progress: { current: filasCompletadas, total: totalPendientes },
@@ -1493,7 +1510,7 @@ export class LotesFacturacionService {
     const contextoTanda: ContextoTanda = {
       loteId,
       lote,
-      coPropertyId,
+      copropiedadId,
       cuentaCartera,
       cuentasOrden,
       marcasPorCuenta,
@@ -1532,7 +1549,7 @@ export class LotesFacturacionService {
     const consolidadoDelTodo = errores.length === 0;
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, coPropertyId },
+        { _id: loteId, copropiedadId },
         {
           $set: {
             status: consolidadoDelTodo ? 'consolidado' : 'liquidado',
@@ -1743,7 +1760,7 @@ export class LotesFacturacionService {
 
     const facturaDoc = {
       _id: facturaId,
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       loteId: ctx.loteId,
       inmuebleId: preliminar.inmuebleId,
       unitCode: preliminar.unitCode,
@@ -1773,7 +1790,7 @@ export class LotesFacturacionService {
     // `SaldoTotalDocumento`'s own docblock for why this can't just be
     // `sum(CarteraPorDocumento.saldoPendiente)` computed on demand.
     const saldoTotalDoc = {
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       tipoDocumento: 'FV' as const,
       documentoId: facturaId,
       total: preliminar.total,
@@ -1785,14 +1802,14 @@ export class LotesFacturacionService {
     const saldosOps = preliminar.lines.map((linea) => ({
       updateOne: {
         filter: {
-          coPropertyId: ctx.coPropertyId,
+          copropiedadId: ctx.copropiedadId,
           inmuebleId: preliminar.inmuebleId,
           conceptoId: linea.conceptoId,
         },
         update: {
           $inc: { balance: linea.totalAmount },
           $setOnInsert: {
-            coPropertyId: ctx.coPropertyId,
+            copropiedadId: ctx.copropiedadId,
             inmuebleId: preliminar.inmuebleId,
             conceptoId: linea.conceptoId,
           },
@@ -1806,7 +1823,7 @@ export class LotesFacturacionService {
     // independent, redundantly-maintained audit control; see
     // `CarteraPorDocumento`'s own docblock).
     const carteraDocs = preliminar.lines.map((linea) => ({
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       inmuebleId: preliminar.inmuebleId,
       tipoDocumento: 'FV' as const,
       documentoId: facturaId,
@@ -1833,7 +1850,7 @@ export class LotesFacturacionService {
       : entries;
 
     const asientoDoc = {
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       loteId: ctx.loteId,
       facturaId: facturaId.toString(),
       date: ctx.lote.billingDate,
@@ -1854,18 +1871,18 @@ export class LotesFacturacionService {
   }
 
   async findAll(): Promise<LoteContract[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const documentos = await this.lotes
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ number: -1 })
       .exec();
     return documentos.map(toLote);
   }
 
   async findOne(id: string): Promise<LoteFacturacionDetalle> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.lotes
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!documento) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
@@ -1877,9 +1894,9 @@ export class LotesFacturacionService {
    *  needs the parent Lote's dates (billingDate/dueDate/periodStart/
    *  periodEnd) that the mapped contract does not carry per row. */
   async findOneRaw(id: string): Promise<LoteFacturacionDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.lotes
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!documento) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
@@ -1901,8 +1918,8 @@ export class LotesFacturacionService {
    * time, so a mistaken one blocks every new attempt until it is gone.
    */
   async cancelar(id: string): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
@@ -1911,7 +1928,7 @@ export class LotesFacturacionService {
         `El lote ${id} ya está consolidado y generó facturas reales; no puede cancelarse`,
       );
     }
-    await this.lotes.deleteOne({ _id: id, coPropertyId }).exec();
+    await this.lotes.deleteOne({ _id: id, copropiedadId }).exec();
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —
@@ -1924,7 +1941,7 @@ export class LotesFacturacionService {
    *  recurrente/interes line never touched manually — see FacturaLinea's
    *  schema comment. */
   /**
-   * One `find({coPropertyId})` for the whole chart of accounts, reused for
+   * One `find({copropiedadId})` for the whole chart of accounts, reused for
    * every unit in `consolidar()`'s loop — same "fetch once outside the
    * per-unit loop" shape as `conceptos`/`valoresRecurrentes` in
    * `construirPreview()`. Returns `undefined` (not an empty Map) when
@@ -1934,10 +1951,10 @@ export class LotesFacturacionService {
    * entirely in the latter.
    */
   private async marcasCuentasPorCodigo(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Map<string, MarcasCuentaContable> | undefined> {
     if (!this.cuentasContables) return undefined;
-    const cuentas = await this.cuentasContables.find({ coPropertyId }).exec();
+    const cuentas = await this.cuentasContables.find({ copropiedadId }).exec();
     return new Map(
       cuentas.map((c) => [
         c.codigo,

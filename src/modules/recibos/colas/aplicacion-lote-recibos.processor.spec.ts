@@ -9,16 +9,16 @@ describe('AplicacionLoteRecibosProcessor', () => {
     };
     const processor = new AplicacionLoteRecibosProcessor(loteRecibos as never);
 
-    const coPropertyId = new Types.ObjectId().toString();
+    const copropiedadId = new Types.ObjectId().toString();
     const job = {
-      data: { loteId: 'lote-1', coPropertyId, accountId: 'cuenta-1' },
+      data: { loteId: 'lote-1', copropiedadId, accountId: 'cuenta-1' },
     };
 
     const salida = await processor.process(job as never);
 
     expect(loteRecibos.ejecutarAplicacion).toHaveBeenCalledWith(
       'lote-1',
-      new Types.ObjectId(coPropertyId),
+      new Types.ObjectId(copropiedadId),
       'cuenta-1',
       job,
     );

@@ -112,7 +112,7 @@ import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
 
 export interface ContextoCreacionRecibo {
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   destinationAccount: string;
   diferenciaConfirmada: number;
 }
@@ -316,7 +316,7 @@ export class RecibosService {
    * BEFORE it opens its own shared per-tanda transaction, exactly mirroring
    * where `crear()` itself runs this today (outside any transaction).
    *
-   * `coPropertyId` is the CALLER's job to resolve, never this method's —
+   * `copropiedadId` is the CALLER's job to resolve, never this method's —
    * `crear()` below resolves it from CLS right before calling, exactly as
    * it always has; `LoteRecibosService.ejecutarAplicacion` resolves it
    * once on the HTTP request thread (before it ever enqueues anything) and
@@ -332,7 +332,7 @@ export class RecibosService {
    */
   async prepararCreacion(
     dto: CrearReciboDto,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<ContextoCreacionRecibo> {
     if (dto.aplicaciones?.length && dto.aplicacionAutomatica) {
       throw new BadRequestException(
@@ -402,7 +402,7 @@ export class RecibosService {
     // `new Date()`, the instant the operation actually happened, never a
     // caller-supplied date.
     await this.periodo.exigirAbierto(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
       new Date(dto.fechaRecibo),
     );
     // The payment date must fall in the same month/year as the last
@@ -411,7 +411,7 @@ export class RecibosService {
     // longer being) billed. A coproperty that has never consolidated a
     // lote has no "current period" yet, so nothing to validate against.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fechaRecibo),
@@ -422,11 +422,11 @@ export class RecibosService {
     // FacturaPreliminar total can still move while a billing run is open, so
     // a Recibo applied against them mid-run would settle against numbers
     // about to change.
-    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+    await this.lotes.exigirSinLoteAbierto(copropiedadId.toString());
 
     const destinationAccount =
       dto.cuentaDestino ??
-      (await this.copropiedades.findById(coPropertyId).exec())
+      (await this.copropiedades.findById(copropiedadId).exec())
         ?.defaultBankAccountCode;
     if (!destinationAccount) {
       throw new BadRequestException(
@@ -434,7 +434,7 @@ export class RecibosService {
       );
     }
 
-    return { coPropertyId, destinationAccount, diferenciaConfirmada };
+    return { copropiedadId, destinationAccount, diferenciaConfirmada };
   }
 
   /** `claveMesDe("2026-06")` back to a real `Date` inside that month — any
@@ -461,11 +461,11 @@ export class RecibosService {
    * just widened to the whole batch.
    */
   async leerDatosBatchAplicacionLote(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleIds: Types.ObjectId[],
     fechasPago: Date[],
   ): Promise<DatosBatchAplicacionLote> {
-    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+    await this.lotes.exigirSinLoteAbierto(copropiedadId.toString());
 
     const mesesDistintos = [...new Set(fechasPago.map((f) => claveMesDe(f)))];
 
@@ -479,17 +479,17 @@ export class RecibosService {
       ultimoLoteFacturacion,
       periodosAbiertos,
     ] = await Promise.all([
-      this.inmuebles!.find({ coPropertyId, _id: { $in: inmuebleIds } }).exec(),
+      this.inmuebles!.find({ copropiedadId, _id: { $in: inmuebleIds } }).exec(),
       this.facturas
         .find({
-          coPropertyId,
+          copropiedadId,
           inmuebleId: { $in: inmuebleIds },
           status: 'emitida',
         })
         .exec(),
       this.notasDebito
         .find({
-          coPropertyId,
+          copropiedadId,
           inmuebleId: { $in: inmuebleIds },
           status: 'emitida',
         })
@@ -497,19 +497,19 @@ export class RecibosService {
       this.saldosIniciales
         ? this.saldosIniciales
             .find({
-              coPropertyId,
+              copropiedadId,
               inmuebleId: { $in: inmuebleIds },
               status: 'activo',
             })
             .exec()
         : Promise.resolve([]),
-      this.copropiedades.findById(coPropertyId).exec(),
-      this.cuentasContables!.find({ coPropertyId }).exec(),
-      this.lotes.obtenerUltimoConsolidado(coPropertyId.toString()),
+      this.copropiedades.findById(copropiedadId).exec(),
+      this.cuentasContables!.find({ copropiedadId }).exec(),
+      this.lotes.obtenerUltimoConsolidado(copropiedadId.toString()),
       Promise.all(
         mesesDistintos.map((clave) =>
           this.periodo.estaAbierto(
-            coPropertyId.toString(),
+            copropiedadId.toString(),
             this.fechaDeClaveMes(clave),
           ),
         ),
@@ -681,12 +681,13 @@ export class RecibosService {
     contexto: ContextoCreacionRecibo,
     numeroReservado?: NumeroAsignado,
   ): Promise<ReciboContract> {
-    const { coPropertyId, destinationAccount, diferenciaConfirmada } = contexto;
+    const { copropiedadId, destinationAccount, diferenciaConfirmada } =
+      contexto;
 
     const numero =
       numeroReservado ??
       (await this.numeracion.siguienteDocumento(
-        coPropertyId.toString(),
+        copropiedadId.toString(),
         dto.codigo,
         session,
       ));
@@ -694,7 +695,7 @@ export class RecibosService {
     const [creado] = await this.recibos.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           inmuebleId: new Types.ObjectId(dto.inmuebleId),
           terceroId: new Types.ObjectId(dto.terceroId),
           prefix: numero.prefijo,
@@ -721,7 +722,7 @@ export class RecibosService {
     await this.saldoDocumentoOrigen.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           tipoDocumento: 'RC',
           documentoId: creado._id,
           montoOriginal: dto.montoRecibido,
@@ -739,7 +740,7 @@ export class RecibosService {
     if (dto.aplicaciones?.length) {
       const resultado = await this.aplicarManual(
         session,
-        coPropertyId,
+        copropiedadId,
         creado,
         dto.aplicaciones,
         accountId,
@@ -758,7 +759,7 @@ export class RecibosService {
     } else if (dto.aplicacionAutomatica) {
       const resultado = await this.aplicarFifo(
         session,
-        coPropertyId,
+        copropiedadId,
         creado,
         dto.montoRecibido,
         accountId,
@@ -825,7 +826,7 @@ export class RecibosService {
     if (Object.keys(camposFrozen).length > 0) {
       await this.recibos
         .findOneAndUpdate(
-          { _id: creado._id, coPropertyId },
+          { _id: creado._id, copropiedadId },
           { $set: camposFrozen },
           { session },
         )
@@ -838,12 +839,12 @@ export class RecibosService {
     // this same call (design decision, Task 2: a pure anticipo still has
     // an accounting effect — it must reconcile against the bank).
     const reciboActual = await this.recibos
-      .findOne({ _id: creado._id, coPropertyId })
+      .findOne({ _id: creado._id, copropiedadId })
       .session(session)
       .exec();
     await this.postearAsientoRecibo(
       session,
-      coPropertyId,
+      copropiedadId,
       reciboActual!,
       totalAplicadoAhora,
       sobranteReal,
@@ -865,7 +866,7 @@ export class RecibosService {
         this.recibos,
         this.saldoDocumentoOrigen,
         session,
-        coPropertyId,
+        copropiedadId,
         creado._id,
         sobranteReal,
         'activo',
@@ -873,7 +874,7 @@ export class RecibosService {
     }
 
     const final = await this.recibos
-      .findOne({ _id: creado._id, coPropertyId })
+      .findOne({ _id: creado._id, copropiedadId })
       .session(session)
       .exec();
     // "Aplicado" is the full amount CREDITED TO CARTERA — cartera-cash
@@ -890,7 +891,7 @@ export class RecibosService {
       final!,
       totalAplicadoAhora,
       enviarAOtrosIngresos ? 0 : sobranteReal,
-      await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
+      await this.resolverInmuebleCodigo(final!.inmuebleId, copropiedadId),
     );
   }
 
@@ -904,7 +905,7 @@ export class RecibosService {
    */
   async escribirEscriturasTandaAplicacionLote(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     escrituras: EscrituraFilaAplicacionLote[],
   ): Promise<void> {
     if (escrituras.length === 0) return;
@@ -989,14 +990,14 @@ export class RecibosService {
         [...saldoCarteraPorClave.values()].map((d) => ({
           updateOne: {
             filter: {
-              coPropertyId,
+              copropiedadId,
               inmuebleId: d.inmuebleId,
               conceptoId: d.conceptoId,
             },
             update: [
               {
                 $set: {
-                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
                   inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
                   conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
                   balance: {
@@ -1046,7 +1047,7 @@ export class RecibosService {
             update: [
               {
                 $set: {
-                  coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+                  copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
                   inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
                   tipoDocumento: {
                     $ifNull: ['$tipoDocumento', d.tipoDocumento],
@@ -1089,8 +1090,8 @@ export class RecibosService {
    * internally.
    */
   async crear(accountId: string, dto: CrearReciboDto): Promise<ReciboContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const contexto = await this.prepararCreacion(dto, coPropertyId);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const contexto = await this.prepararCreacion(dto, copropiedadId);
     return this.transaccion((session) =>
       this.crearEnSesion(session, accountId, dto, contexto),
     );
@@ -1114,14 +1115,14 @@ export class RecibosService {
     dto: AnularReciboDto,
     accountId: string,
   ): Promise<ReciboContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // The reversing asiento is dated by the user, never by the server clock
     // — same rule as `crear()`'s own `fechaRecibo` check, same reasoning: an
     // accountant here never works off "today", every document date in the
     // ledger is theirs to declare. A refusal costs no session.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fecha),
@@ -1131,7 +1132,7 @@ export class RecibosService {
 
     return this.transaccion(async (session) => {
       const reciboDoc = await this.recibos
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       if (!reciboDoc) {
@@ -1160,7 +1161,7 @@ export class RecibosService {
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
-          coPropertyId,
+          copropiedadId,
           sourceType: 'RC',
           sourceId: recibo._id,
           status: 'activa',
@@ -1173,7 +1174,7 @@ export class RecibosService {
       // right below needs `usesMemorandumAccounts` too, via
       // `cuentaCarteraDeLinea` — same one Mongoose call now serves both.
       const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
+        .findById(copropiedadId)
         .session(session)
         .exec();
 
@@ -1197,7 +1198,7 @@ export class RecibosService {
           // `actualizarRemanentesLinea` — those write to a Factura-only
           // `lines[].remainingAmount` field a Saldo Inicial doesn't have.
           const saldoInicialDoc = await this.saldosIniciales
-            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            ?.findOne({ _id: aplicacion.documentId, copropiedadId })
             .session(session)
             .exec();
           if (saldoInicialDoc) {
@@ -1211,7 +1212,7 @@ export class RecibosService {
               this.saldos,
               this.carteraPorDocumento,
               session,
-              coPropertyId,
+              copropiedadId,
               saldoInicialDoc.inmuebleId,
               aplicacion.detalleConceptos.map((d) => ({
                 conceptoId: d.conceptoId,
@@ -1244,7 +1245,7 @@ export class RecibosService {
 
           await this.aplicaciones
             .findOneAndUpdate(
-              { _id: aplicacion._id, coPropertyId },
+              { _id: aplicacion._id, copropiedadId },
               { $set: { status: 'revertida', revertedAt: new Date() } },
               { session },
             )
@@ -1260,7 +1261,7 @@ export class RecibosService {
         // branch below looks that Nota Débito up instead, for its own
         // documento cruce número.
         const facturaDoc = await this.facturas
-          .findOne({ _id: aplicacion.documentId, coPropertyId })
+          .findOne({ _id: aplicacion.documentId, copropiedadId })
           .session(session)
           .exec();
 
@@ -1293,7 +1294,7 @@ export class RecibosService {
             this.saldos,
             this.carteraPorDocumento,
             session,
-            coPropertyId,
+            copropiedadId,
             factura.inmuebleId,
             aplicacion.detalleConceptos.map((d) => ({
               conceptoId: d.conceptoId,
@@ -1306,7 +1307,7 @@ export class RecibosService {
           await actualizarRemanentesLinea(
             this.facturas,
             session,
-            coPropertyId,
+            copropiedadId,
             factura._id,
             partes.map((parte) => ({
               conceptoId: parte.conceptoId,
@@ -1336,7 +1337,7 @@ export class RecibosService {
           }
         } else {
           const notaDebitoDoc = await this.notasDebito
-            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .findOne({ _id: aplicacion.documentId, copropiedadId })
             .session(session)
             .exec();
           if (notaDebitoDoc) {
@@ -1365,7 +1366,7 @@ export class RecibosService {
               this.saldos,
               this.carteraPorDocumento,
               session,
-              coPropertyId,
+              copropiedadId,
               notaDebitoDoc.inmuebleId,
               aplicacion.detalleConceptos.map((d) => ({
                 conceptoId: d.conceptoId,
@@ -1389,7 +1390,7 @@ export class RecibosService {
 
         await this.aplicaciones
           .findOneAndUpdate(
-            { _id: aplicacion._id, coPropertyId },
+            { _id: aplicacion._id, copropiedadId },
             { $set: { status: 'revertida', revertedAt: new Date() } },
             { session },
           )
@@ -1467,7 +1468,7 @@ export class RecibosService {
       );
       entries = await this.conAuxiliares(
         session,
-        coPropertyId,
+        copropiedadId,
         recibo.inmuebleId,
         copropiedad,
         entries,
@@ -1475,7 +1476,7 @@ export class RecibosService {
       await this.asientos.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             loteId: null,
             facturaId: null,
             reciboId: recibo._id,
@@ -1500,7 +1501,7 @@ export class RecibosService {
       // here as the deliberate choice).
       await this.recibos
         .findOneAndUpdate(
-          { _id: id, coPropertyId },
+          { _id: id, copropiedadId },
           {
             $set: {
               status: 'anulado',
@@ -1529,14 +1530,14 @@ export class RecibosService {
         .exec();
 
       const final = await this.recibos
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       return toRecibo(
         final!,
         0,
         0,
-        await this.resolverInmuebleCodigo(final!.inmuebleId, coPropertyId),
+        await this.resolverInmuebleCodigo(final!.inmuebleId, copropiedadId),
       );
     });
   }
@@ -1550,8 +1551,8 @@ export class RecibosService {
    * `findOne` below.
    */
   async findAll(query: ListarRecibosDto): Promise<Paginado<ReciboContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
     if (query.conAnticipoDisponible) {
@@ -1560,7 +1561,7 @@ export class RecibosService {
       // pattern `FacturasService.findAll` already uses on the charge side.
       const conSaldo = await this.saldoDocumentoOrigen
         .find({
-          coPropertyId,
+          copropiedadId,
           tipoDocumento: 'RC',
           saldoDisponible: { $gt: 0 },
         })
@@ -1599,7 +1600,7 @@ export class RecibosService {
       ids.length
         ? this.aplicaciones
             .find({
-              coPropertyId,
+              copropiedadId,
               sourceType: 'RC',
               sourceId: { $in: ids },
               status: 'activa',
@@ -1628,7 +1629,7 @@ export class RecibosService {
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const inmuebles = inmuebleIds.length
       ? await this.inmuebles
-          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          ?.find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -1668,8 +1669,10 @@ export class RecibosService {
    * assembled through `toReciboDetalle` (Task 3).
    */
   async findOne(id: string): Promise<ReciboDetalle> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const recibo = await this.recibos.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const recibo = await this.recibos
+      .findOne({ _id: id, copropiedadId })
+      .exec();
     if (!recibo) {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
@@ -1681,7 +1684,7 @@ export class RecibosService {
       ? saldoOrigen.montoOriginal - saldoOrigen.saldoDisponible
       : 0;
     const aplicaciones = await this.aplicaciones
-      .find({ coPropertyId, sourceType: 'RC', sourceId: recibo._id })
+      .find({ copropiedadId, sourceType: 'RC', sourceId: recibo._id })
       .sort({ appliedAt: 1 })
       .exec();
     // Same convention `anular()` already documents on its own
@@ -1711,11 +1714,11 @@ export class RecibosService {
       .map((a) => a.documentId);
     const [facturasDoc, notasDebitoDoc] = await Promise.all([
       facturaIds.length
-        ? this.facturas.find({ coPropertyId, _id: { $in: facturaIds } }).exec()
+        ? this.facturas.find({ copropiedadId, _id: { $in: facturaIds } }).exec()
         : [],
       notaDebitoIds.length
         ? this.notasDebito
-            .find({ coPropertyId, _id: { $in: notaDebitoIds } })
+            .find({ copropiedadId, _id: { $in: notaDebitoIds } })
             .exec()
         : [],
     ]);
@@ -1738,7 +1741,7 @@ export class RecibosService {
       appliedAmount,
       unappliedAmount,
       aplicaciones,
-      await this.resolverInmuebleCodigo(recibo.inmuebleId, coPropertyId),
+      await this.resolverInmuebleCodigo(recibo.inmuebleId, copropiedadId),
       numerosPorDocumento,
       presentacion,
     );
@@ -1748,8 +1751,10 @@ export class RecibosService {
    * Returns the raw Mongoose document — used by PDF generation.
    */
   async findOneRaw(id: string): Promise<ReciboDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const recibo = await this.recibos.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const recibo = await this.recibos
+      .findOne({ _id: id, copropiedadId })
+      .exec();
     if (!recibo) {
       throw new NotFoundException(`No se encontró el recibo ${id}`);
     }
@@ -1765,23 +1770,23 @@ export class RecibosService {
    * changed (JSON now, instead of feeding a react-pdf tree).
    */
   async datosImpresion(id: string): Promise<DatosReciboImpresion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const recibo = await this.findOneRaw(id);
     const [aplicacionesActivas, copropiedad] = await Promise.all([
       this.aplicaciones
         .find({
-          coPropertyId,
+          copropiedadId,
           sourceType: 'RC',
           sourceId: recibo._id,
           status: 'activa',
         })
         .sort({ appliedAt: 1 })
         .exec(),
-      this.copropiedades.findById(coPropertyId).exec(),
+      this.copropiedades.findById(copropiedadId).exec(),
     ]);
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
     // Non-null: always injected in the real app, same convention as every
@@ -1790,13 +1795,13 @@ export class RecibosService {
     // positional-mock tests that never exercise this path.
     const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
       'RC',
-      coPropertyId,
+      copropiedadId,
     );
     return construirDatosImpresionRecibo(
       recibo,
       aplicacionesActivas,
       copropiedad,
-      coPropertyId,
+      copropiedadId,
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
@@ -1814,17 +1819,17 @@ export class RecibosService {
    * every reader looks it up here. Same fallback (`?? ''`) as
    * `CarteraPorConceptosService`'s identical live-resolve.
    *
-   * `coPropertyId` is the caller's to resolve, same reasoning as
+   * `copropiedadId` is the caller's to resolve, same reasoning as
    * `prepararCreacion` above — every call site already has it in scope
    * from its own earlier `resolveCoPropertyId()` (or, from
    * `crearEnSesion`, from the batch job's own threaded-through value).
    */
   async resolverInmuebleCodigo(
     inmuebleId: Types.ObjectId,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<string> {
     const inmueble = await this.inmuebles
-      ?.findOne({ _id: inmuebleId, coPropertyId })
+      ?.findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     return inmueble?.codigo ?? '';
   }
@@ -1837,9 +1842,9 @@ export class RecibosService {
     sourceType: 'RC' | 'NC',
     sourceId: Types.ObjectId,
   ): Promise<AplicacionCarteraDocument[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.aplicaciones
-      .find({ coPropertyId, sourceType, sourceId, status: 'activa' })
+      .find({ copropiedadId, sourceType, sourceId, status: 'activa' })
       .sort({ appliedAt: 1 })
       .exec();
   }
@@ -1853,7 +1858,7 @@ export class RecibosService {
    */
   private async aplicarManual(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     recibo: ReciboDocument,
     solicitadas: AplicacionSolicitadaDto[],
     accountId: string,
@@ -1866,7 +1871,7 @@ export class RecibosService {
     montoDescuentoTotal: number;
   }> {
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
     return ejecutarAplicacionManual(
@@ -1881,7 +1886,7 @@ export class RecibosService {
         saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
-        coPropertyId,
+        copropiedadId,
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
@@ -1903,7 +1908,7 @@ export class RecibosService {
    */
   private async aplicarFifo(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     recibo: ReciboDocument,
     montoDisponible: number,
     accountId: string,
@@ -1917,7 +1922,7 @@ export class RecibosService {
     montoDescuentoTotal: number;
   }> {
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
     return ejecutarAplicacionFifo(
@@ -1932,7 +1937,7 @@ export class RecibosService {
         saldoDocumentoOrigen: this.saldoDocumentoOrigen,
         recibos: this.recibos,
         session,
-        coPropertyId,
+        copropiedadId,
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
@@ -1957,7 +1962,7 @@ export class RecibosService {
    */
   private async conAuxiliares(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
       defaultCostCentre: string | null;
@@ -1967,7 +1972,7 @@ export class RecibosService {
   ): Promise<ReturnType<typeof construirAsientoCruce>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
-      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.cuentasContables.find({ copropiedadId }).session(session).exec(),
       this.inmuebles?.findById(inmuebleId).session(session).exec(),
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
@@ -2000,7 +2005,7 @@ export class RecibosService {
    */
   private async postearAsientoRecibo(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     recibo: ReciboDocument,
     montoAplicado: number,
     montoSinAplicar: number,
@@ -2022,7 +2027,7 @@ export class RecibosService {
     destinoSobrante?: 'anticipo' | 'otros_ingresos',
   ): Promise<void> {
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -2064,7 +2069,7 @@ export class RecibosService {
     );
     entries = await this.conAuxiliares(
       session,
-      coPropertyId,
+      copropiedadId,
       recibo.inmuebleId,
       copropiedad,
       entries,
@@ -2073,7 +2078,7 @@ export class RecibosService {
     await this.asientos.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           loteId: null,
           facturaId: null,
           reciboId: recibo._id,

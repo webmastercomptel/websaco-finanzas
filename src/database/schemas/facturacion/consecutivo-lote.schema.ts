@@ -22,7 +22,7 @@ export class ConsecutivoLote {
     unique: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** The last number handed out (post-increment value, via {returnDocument: 'after'}).
    *  Moves forward only. */

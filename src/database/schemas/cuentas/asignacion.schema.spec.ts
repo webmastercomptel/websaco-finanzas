@@ -30,7 +30,7 @@ const validar = async (
 describe('AsignacionSchema — forma del otorgamiento', () => {
   it('acepta una asignación a una copropiedad', async () => {
     await expect(
-      validar({ scope: 'copropiedad', coPropertyId: copropiedad }),
+      validar({ scope: 'copropiedad', copropiedadId: copropiedad }),
     ).resolves.toBeNull();
   });
 
@@ -58,7 +58,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
     await expect(
       validar({
         scope: 'copropiedad',
-        coPropertyId: copropiedad,
+        copropiedadId: copropiedad,
         entidadId: entidad,
       }),
     ).resolves.toBeInstanceOf(Error);
@@ -66,7 +66,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
     await expect(
       validar({
         scope: 'entidad',
-        coPropertyId: copropiedad,
+        copropiedadId: copropiedad,
         entidadId: entidad,
       }),
     ).resolves.toBeInstanceOf(Error);
@@ -80,7 +80,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
 
   it('exige un alcance conocido', async () => {
     await expect(
-      validar({ scope: 'inventado', coPropertyId: copropiedad }),
+      validar({ scope: 'inventado', copropiedadId: copropiedad }),
     ).resolves.toBeInstanceOf(Error);
   });
 
@@ -88,7 +88,7 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
     const doc = new AsignacionModel({
       accountId: cuenta,
       scope: 'copropiedad',
-      coPropertyId: copropiedad,
+      copropiedadId: copropiedad,
     });
 
     // Un default distinto de vacío otorgaría acceso que nadie escribió.
@@ -100,9 +100,9 @@ describe('AsignacionSchema — forma del otorgamiento', () => {
 describe('AsignacionSchema — índices', () => {
   it('la unicidad por copropiedad está acotada a ese alcance', () => {
     // Sin el filtro parcial, todas las filas de alcance "entidad" tienen
-    // coPropertyId null y chocarían entre sí en un índice único común.
+    // copropiedadId null y chocarían entre sí en un índice único común.
     const indice = indices().find(
-      ([campos]) => campos.accountId === 1 && campos.coPropertyId === 1,
+      ([campos]) => campos.accountId === 1 && campos.copropiedadId === 1,
     );
 
     expect(indice).toBeDefined();

@@ -33,7 +33,7 @@ export class PeriodoContable {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** Four digits. */
   @Prop({ required: true })
@@ -63,6 +63,6 @@ export const PeriodoContableSchema =
 
 // One row per month per building, and the lookup every document write performs.
 PeriodoContableSchema.index(
-  { coPropertyId: 1, year: 1, month: 1 },
+  { copropiedadId: 1, year: 1, month: 1 },
   { unique: true },
 );

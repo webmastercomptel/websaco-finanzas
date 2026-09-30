@@ -100,12 +100,12 @@ export class InmueblesReporteService {
     items: ItemListado[];
     conceptos: { id: string; nombre: string }[];
   }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const [copropiedad, inmuebles, conceptos, valores] = await Promise.all([
-      this.copropiedades.findById(coPropertyId).exec(),
+      this.copropiedades.findById(copropiedadId).exec(),
       this.inmuebles
-        .find({ coPropertyId, estado: 'active' })
+        .find({ copropiedadId, estado: 'active' })
         .sort({ codigo: 1 })
         .populate(
           'titularId',
@@ -118,15 +118,15 @@ export class InmueblesReporteService {
       // listing it for context on the per-unit screen; a printed roster has
       // no per-unit "calculado automáticamente" note to hang it on).
       this.conceptos
-        .find({ coPropertyId, tipo: { $ne: 'intereses' } })
+        .find({ copropiedadId, tipo: { $ne: 'intereses' } })
         .sort({ orden: 1 })
         .exec(),
-      this.valoresRecurrentes.find({ coPropertyId }).exec(),
+      this.valoresRecurrentes.find({ copropiedadId }).exec(),
     ]);
 
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 

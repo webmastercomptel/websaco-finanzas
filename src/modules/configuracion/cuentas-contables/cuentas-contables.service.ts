@@ -51,8 +51,8 @@ export class CuentasContablesService {
   async findAll(
     query: ListarCuentasDto,
   ): Promise<Paginado<CuentaContableContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
 
     if (query.estado !== 'todos') {
       filtro.activo = query.estado !== 'inactivo';
@@ -84,8 +84,8 @@ export class CuentasContablesService {
   }
 
   async findOne(id: string): Promise<CuentaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const doc = await this.cuentas.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const doc = await this.cuentas.findOne({ _id: id, copropiedadId }).exec();
     if (!doc) {
       throw new NotFoundException(`No se encontró la cuenta ${id}`);
     }
@@ -93,9 +93,9 @@ export class CuentasContablesService {
   }
 
   async create(dto: CrearCuentaDto): Promise<CuentaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const yaExiste = await this.cuentas
-      .exists({ coPropertyId, codigo: dto.codigo })
+      .exists({ copropiedadId, codigo: dto.codigo })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -104,7 +104,7 @@ export class CuentasContablesService {
     }
 
     const creada = await this.cuentas.create({
-      coPropertyId,
+      copropiedadId,
       codigo: dto.codigo,
       nombre: dto.nombre,
       requiereTercero: dto.requiereTercero ?? false,
@@ -133,14 +133,14 @@ export class CuentasContablesService {
   async importar(
     dto: ImportarCuentasDto,
   ): Promise<ResultadoImportacionCuentas> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // `_id` IS the tenant id here — findById is correct, not the trap (see
     // backend/CLAUDE.md's own note on this exact mistake).
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -173,11 +173,11 @@ export class CuentasContablesService {
     id: string,
     dto: ActualizarCuentaDto,
   ): Promise<CuentaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (dto.codigo) {
       const choca = await this.cuentas
-        .exists({ coPropertyId, codigo: dto.codigo, _id: { $ne: id } })
+        .exists({ copropiedadId, codigo: dto.codigo, _id: { $ne: id } })
         .exec();
       if (choca) {
         throw new ConflictException(
@@ -207,7 +207,7 @@ export class CuentasContablesService {
 
     const actualizada = await this.cuentas
       .findOneAndUpdate(
-        { _id: id, coPropertyId },
+        { _id: id, copropiedadId },
         { $set: update },
         { returnDocument: 'after' },
       )
@@ -220,8 +220,10 @@ export class CuentasContablesService {
   }
 
   async delete(id: string): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const cuenta = await this.cuentas.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const cuenta = await this.cuentas
+      .findOne({ _id: id, copropiedadId })
+      .exec();
     if (!cuenta) {
       throw new NotFoundException(`No se encontró la cuenta ${id}`);
     }
@@ -229,7 +231,7 @@ export class CuentasContablesService {
     const [enConceptos, enAsientos, enCopropiedad] = await Promise.all([
       this.conceptos
         .exists({
-          coPropertyId,
+          copropiedadId,
           $or: [
             { cuentaDebitoId: cuenta._id },
             { cuentaCreditoId: cuenta._id },
@@ -237,11 +239,11 @@ export class CuentasContablesService {
         })
         .exec(),
       this.asientos
-        .exists({ coPropertyId, 'entries.account': cuenta.codigo })
+        .exists({ copropiedadId, 'entries.account': cuenta.codigo })
         .exec(),
       this.copropiedades
         .exists({
-          _id: coPropertyId,
+          _id: copropiedadId,
           $or: [
             { receivablesAccount: cuenta.codigo },
             { advancesAccount: cuenta.codigo },
@@ -269,6 +271,6 @@ export class CuentasContablesService {
       );
     }
 
-    await this.cuentas.deleteOne({ _id: id, coPropertyId }).exec();
+    await this.cuentas.deleteOne({ _id: id, copropiedadId }).exec();
   }
 }

@@ -103,8 +103,8 @@ export class FacturasService {
   }
 
   async findAll(query: ListarFacturasDto): Promise<Paginado<FacturaContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
@@ -121,7 +121,11 @@ export class FacturasService {
       // `SaldoTotalDocumento` first (see that schema's own docblock), same
       // pattern `NotasDebitoService.findAll` already uses.
       const conSaldo = await this.saldoTotalDocumento
-        .find({ coPropertyId, tipoDocumento: 'FV', saldoPendiente: { $gt: 0 } })
+        .find({
+          copropiedadId,
+          tipoDocumento: 'FV',
+          saldoPendiente: { $gt: 0 },
+        })
         .exec();
       filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
@@ -171,9 +175,9 @@ export class FacturasService {
   }
 
   async findOne(id: string): Promise<FacturaContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.facturas
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!documento) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
@@ -198,9 +202,9 @@ export class FacturasService {
    * accepts (`FacturaLean`).
    */
   async findOneRaw(id: string): Promise<FacturaLean> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.facturas
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .lean()
       .exec();
     if (!documento) {
@@ -224,9 +228,9 @@ export class FacturasService {
    * ceiling.
    */
   async findAllRawPorLote(loteId: string) {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.facturas
-      .find({ coPropertyId, loteId })
+      .find({ copropiedadId, loteId })
       .sort({ unitCode: 1 })
       .lean()
       .exec();
@@ -249,7 +253,7 @@ export class FacturasService {
   async datosVisualesPdf(
     inmuebleIds: Types.ObjectId[],
   ): Promise<Map<string, DatosVisualesFactura>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const ids = [...new Set(inmuebleIds.map((id) => id.toString()))].map(
       (id) => new Types.ObjectId(id),
     );
@@ -257,16 +261,16 @@ export class FacturasService {
     if (ids.length === 0) return resultado;
 
     const [inmuebles, recibosActivos] = await Promise.all([
-      this.inmuebles.find({ _id: { $in: ids }, coPropertyId }).exec(),
+      this.inmuebles.find({ _id: { $in: ids }, copropiedadId }).exec(),
       this.recibos
-        .find({ coPropertyId, inmuebleId: { $in: ids }, status: 'activo' })
+        .find({ copropiedadId, inmuebleId: { $in: ids }, status: 'activo' })
         .exec(),
     ]);
 
     const saldos = recibosActivos.length
       ? await this.saldoDocumentoOrigen
           .find({
-            coPropertyId,
+            copropiedadId,
             tipoDocumento: 'RC',
             documentoId: { $in: recibosActivos.map((r) => r._id) },
           })
@@ -460,7 +464,7 @@ export class FacturasService {
     // own comment) — left optional only for existing positional-mock tests
     // that never exercise this path.
     const { titulo, resolucion } = await this.tituloDocumento!.resolverFactura(
-      factura.coPropertyId,
+      factura.copropiedadId,
       factura.resolucionId,
       factura.prefix,
     );

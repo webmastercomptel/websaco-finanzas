@@ -180,18 +180,18 @@ export async function calcularDocumentosConSaldoAFecha(
     saldosIniciales?: Model<SaldoInicialDocument>;
     aplicaciones: Model<AplicacionCarteraDocument>;
   },
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   fecha: Date,
   opciones?: { inmuebleId?: Types.ObjectId; conceptoId?: Types.ObjectId },
 ): Promise<DocumentoConSaldoAFecha[]> {
   const limiteEmision = limiteEmisionParaCorte(fecha);
   const facturasFilter: Record<string, unknown> = {
-    coPropertyId,
+    copropiedadId,
     status: 'emitida',
     issueDate: { $lte: limiteEmision },
   };
   const ndFilter: Record<string, unknown> = {
-    coPropertyId,
+    copropiedadId,
     status: 'emitida',
     issueDate: { $lte: limiteEmision },
   };
@@ -201,7 +201,7 @@ export async function calcularDocumentosConSaldoAFecha(
   // way for consistency and to correctly exclude one from a cutoff BEFORE
   // its own declared date.
   const siFilter: Record<string, unknown> = {
-    coPropertyId,
+    copropiedadId,
     status: 'activo',
     fecha: { $lte: limiteEmision },
   };
@@ -233,7 +233,7 @@ export async function calcularDocumentosConSaldoAFecha(
 
   const aplicaciones = docIds.length
     ? await models.aplicaciones
-        .find({ coPropertyId, documentId: { $in: docIds } })
+        .find({ copropiedadId, documentId: { $in: docIds } })
         .exec()
     : [];
 

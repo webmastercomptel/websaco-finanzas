@@ -187,7 +187,7 @@ export class LotesController {
     @Param('id') id: string,
     @Param('inmuebleId') inmuebleId: string,
   ): Promise<DocumentoPrefactura> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
     const preliminar = lote.preview.find(
       (p) => p.inmuebleId.toString() === inmuebleId,
@@ -199,13 +199,13 @@ export class LotesController {
     }
     const [copropiedad, datosVisualesPorInmueble, plantilla] =
       await Promise.all([
-        this.copropiedades.findById(coPropertyId).exec(),
+        this.copropiedades.findById(copropiedadId).exec(),
         this.facturas.datosVisualesPdf([preliminar.inmuebleId]),
         this.plantillas.findOne('FV'),
       ]);
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -234,7 +234,7 @@ export class LotesController {
   async obtenerDocumentosPrefacturas(
     @Param('id') id: string,
   ): Promise<DocumentoPrefacturaLote[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
     if (lote.preview.length === 0) {
       throw new NotFoundException(
@@ -242,12 +242,12 @@ export class LotesController {
       );
     }
     const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
-      this.copropiedades.findById(coPropertyId).exec(),
+      this.copropiedades.findById(copropiedadId).exec(),
       this.facturas.datosVisualesPdf(lote.preview.map((p) => p.inmuebleId)),
     ]);
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -309,7 +309,7 @@ export class LotesController {
   async solicitarGeneracionFacturas(
     @Param('id') id: string,
   ): Promise<SolicitudGeneracionFacturaLote> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
 
     const facturasLean = await this.facturas.findAllRawPorLote(id);
@@ -320,12 +320,12 @@ export class LotesController {
     }
 
     const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
-      this.copropiedades.findById(coPropertyId).exec(),
+      this.copropiedades.findById(copropiedadId).exec(),
       this.facturas.datosVisualesPdf(facturasLean.map((f) => f.inmuebleId)),
     ]);
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -374,7 +374,7 @@ export class LotesController {
     @Param('id') id: string,
     @Body() dto: ConfirmarGeneracionDocumentoDto,
   ): Promise<{ objectPath: string }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
     const resultado = await this.generacion.confirmar(
       'FV',
@@ -390,13 +390,13 @@ export class LotesController {
     // returns 200, with no crash window in between. The listener swallows
     // every error itself, so publishing can never fail this confirmation.
     await this.eventos.emitAsync(LOTE_FACTURAS_PDF_CONFIRMADO, {
-      coPropertyId: coPropertyId.toString(),
+      copropiedadId: copropiedadId.toString(),
       loteId: lote._id.toString(),
       objectPath: resultado.objectPath,
       numerosFactura: facturasLean.map((f) => f.fullNumber),
     } satisfies LoteFacturasPdfConfirmadoEvent);
 
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (facturasLean.length > 0 && copropiedad) {
       const datosVisualesPorInmueble = await this.facturas.datosVisualesPdf(
         facturasLean.map((f) => f.inmuebleId),
@@ -486,12 +486,12 @@ export class LotesController {
     @Param('id') id: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const reporte = await this.consultaFacturacion.generar(id);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 

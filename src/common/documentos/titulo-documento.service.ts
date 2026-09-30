@@ -74,10 +74,10 @@ export class TituloDocumentoService {
   /** The title for one of the five non-Factura document types. */
   async resolverGenerico(
     tipoDocumento: CodigoDocumentoGenerico,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<string> {
     const fila = await this.consecutivos
-      .findOne({ coPropertyId, code: tipoDocumento })
+      .findOne({ copropiedadId, code: tipoDocumento })
       .exec();
     return fila?.displayName ?? TITULOS_POR_DEFECTO[tipoDocumento];
   }
@@ -99,7 +99,7 @@ export class TituloDocumentoService {
    * must never move).
    */
   async resolverFactura(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     resolucionId: Types.ObjectId | null,
     facturaPrefix: string,
   ): Promise<{
@@ -110,7 +110,7 @@ export class TituloDocumentoService {
       const resolucion = await this.resoluciones.findById(resolucionId).exec();
       if (resolucion) {
         const tituloPorDefecto =
-          await this.tituloFacturaPorDefecto(coPropertyId);
+          await this.tituloFacturaPorDefecto(copropiedadId);
         return {
           titulo: resolucion.displayName ?? tituloPorDefecto,
           resolucion: {
@@ -128,7 +128,7 @@ export class TituloDocumentoService {
       }
     }
     return {
-      titulo: await this.tituloFacturaPorDefecto(coPropertyId),
+      titulo: await this.tituloFacturaPorDefecto(copropiedadId),
       resolucion: null,
     };
   }
@@ -140,10 +140,10 @@ export class TituloDocumentoService {
    *  plain consecutivo second — never treated as "just another generic
    *  document type"). */
   private async tituloFacturaPorDefecto(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<string> {
     const fila = await this.consecutivos
-      .findOne({ coPropertyId, code: 'FV' })
+      .findOne({ copropiedadId, code: 'FV' })
       .exec();
     return fila?.displayName ?? TITULO_FACTURA_POR_DEFECTO;
   }

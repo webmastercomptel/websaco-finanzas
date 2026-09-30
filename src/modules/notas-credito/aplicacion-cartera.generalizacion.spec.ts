@@ -35,7 +35,7 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
   const cuenta = new Types.ObjectId();
 
   const filaDeRecibo = new AplicacionModel({
-    coPropertyId: copropiedad,
+    copropiedadId: copropiedad,
     sourceType: 'RC',
     sourceId: recibo,
     documentType: 'FV',
@@ -47,7 +47,7 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
   });
 
   const filaDeNotaCredito = new AplicacionModel({
-    coPropertyId: copropiedad,
+    copropiedadId: copropiedad,
     sourceType: 'NC',
     sourceId: notaCredito,
     documentType: 'FV',

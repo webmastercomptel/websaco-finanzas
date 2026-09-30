@@ -16,7 +16,7 @@ const tercero = new Types.ObjectId();
 const cuenta = new Types.ObjectId();
 
 const base = (over: Record<string, unknown> = {}) => ({
-  coPropertyId: copropiedad,
+  copropiedadId: copropiedad,
   inmuebleId: inmueble,
   terceroId: tercero,
   fullNumber: 'RC-1',
@@ -76,7 +76,7 @@ describe('ReciboSchema — forma', () => {
 describe('ReciboSchema — índices', () => {
   it('el número completo es único por copropiedad', () => {
     const indice = indices().find(
-      ([campos]) => campos.coPropertyId === 1 && campos.fullNumber === 1,
+      ([campos]) => campos.copropiedadId === 1 && campos.fullNumber === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });
@@ -85,7 +85,7 @@ describe('ReciboSchema — índices', () => {
   it('indexa copropiedad + inmueble + saldo sin aplicar, para conAnticipoDisponible', () => {
     const indice = indices().find(
       ([campos]) =>
-        campos.coPropertyId === 1 &&
+        campos.copropiedadId === 1 &&
         campos.inmuebleId === 1 &&
         campos.unappliedAmount === 1,
     );

@@ -147,7 +147,7 @@ describe('NotasCreditoController.findAll / findOne', () => {
 describe('NotasCreditoController.solicitarGeneracion', () => {
   const notaFixture = () => ({
     _id: new Types.ObjectId(),
-    coPropertyId: new Types.ObjectId(),
+    copropiedadId: new Types.ObjectId(),
     fullNumber: 'NC-001-0001',
   });
 

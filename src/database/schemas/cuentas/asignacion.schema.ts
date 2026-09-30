@@ -54,7 +54,7 @@ export class Asignacion {
     default: null,
     index: true,
   })
-  coPropertyId: Types.ObjectId | null;
+  copropiedadId: Types.ObjectId | null;
 
   /** Set when scope is `entidad`, null otherwise. */
   @Prop({
@@ -98,7 +98,7 @@ export const AsignacionSchema = SchemaFactory.createForClass(Asignacion);
 // order. Partial indexes because the unused column is null on every row of the
 // other shape, and a plain compound unique index would collide on those nulls.
 AsignacionSchema.index(
-  { accountId: 1, coPropertyId: 1 },
+  { accountId: 1, copropiedadId: 1 },
   {
     unique: true,
     partialFilterExpression: { scope: 'copropiedad' },
@@ -114,7 +114,7 @@ AsignacionSchema.index(
 );
 
 // Guards the shape itself: a grant must name exactly the target its scope says
-// it does. Without this, a row with scope 'entidad' and only a coPropertyId
+// it does. Without this, a row with scope 'entidad' and only a copropiedadId
 // would save happily and then grant nothing, which reads as "the permission
 // system is broken" rather than "this row is malformed".
 // Written as a zero-argument hook that throws, rather than the `next(err)`
@@ -128,17 +128,17 @@ AsignacionSchema.index(
 /* eslint-disable-next-line @typescript-eslint/require-await */
 AsignacionSchema.pre('validate', async function () {
   const esCopropiedad = this.scope === 'copropiedad';
-  const tieneCopropiedad = this.coPropertyId != null;
+  const tieneCopropiedad = this.copropiedadId != null;
   const tieneEntidad = this.entidadId != null;
 
   if (esCopropiedad && (!tieneCopropiedad || tieneEntidad)) {
     throw new Error(
-      'Una asignación de alcance "copropiedad" debe llevar coPropertyId y no entidadId.',
+      'Una asignación de alcance "copropiedad" debe llevar copropiedadId y no entidadId.',
     );
   }
   if (!esCopropiedad && (!tieneEntidad || tieneCopropiedad)) {
     throw new Error(
-      'Una asignación de alcance "entidad" debe llevar entidadId y no coPropertyId.',
+      'Una asignación de alcance "entidad" debe llevar entidadId y no copropiedadId.',
     );
   }
 });

@@ -136,10 +136,10 @@ describe('InmueblesEliminacionService.eliminarTodosEliminables', () => {
     expect(resultado).toEqual({ eliminados: 2, bloqueados: ['102'] });
     expect(inmuebles.deleteMany).toHaveBeenCalledWith({
       _id: { $in: ['inm-1', 'inm-3'] },
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(valoresRecurrentes.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId: { $in: ['inm-1', 'inm-3'] },
     });
   });

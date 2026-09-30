@@ -57,7 +57,7 @@ export async function construirDatosImpresionRecibo(
   recibo: ReciboDocument,
   aplicaciones: AplicacionCarteraDocument[],
   copropiedad: CopropiedadDocument,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   modelos: ModelosDatosImpresionRecibo,
   // Resolved by the caller (`RecibosService.datosImpresion`, via
   // `TituloDocumentoService.resolverGenerico('RC', ...)`) — the "Tabla de
@@ -81,13 +81,17 @@ export async function construirDatosImpresionRecibo(
 
   const [facturas, notas, inmueble, tercero] = await Promise.all([
     facturaIds.length > 0
-      ? modelos.facturas.find({ _id: { $in: facturaIds }, coPropertyId }).exec()
+      ? modelos.facturas
+          .find({ _id: { $in: facturaIds }, copropiedadId })
+          .exec()
       : Promise.resolve([]),
     notaIds.length > 0
-      ? modelos.notasDebito.find({ _id: { $in: notaIds }, coPropertyId }).exec()
+      ? modelos.notasDebito
+          .find({ _id: { $in: notaIds }, copropiedadId })
+          .exec()
       : Promise.resolve([]),
-    modelos.inmuebles.findOne({ _id: recibo.inmuebleId, coPropertyId }).exec(),
-    modelos.terceros.findOne({ _id: recibo.terceroId, coPropertyId }).exec(),
+    modelos.inmuebles.findOne({ _id: recibo.inmuebleId, copropiedadId }).exec(),
+    modelos.terceros.findOne({ _id: recibo.terceroId, copropiedadId }).exec(),
   ]);
 
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
@@ -207,7 +211,7 @@ export async function construirDatosImpresionRecibo(
   });
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
+    .find({ copropiedadId, codigo: { $in: [...codigosUsados] } })
     .exec();
   const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
   for (const linea of lineas) {

@@ -19,7 +19,7 @@ export class LoteSaldoInicial {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
   totalFilas: number;

@@ -103,10 +103,12 @@ export class LoteRecibosService {
     private readonly eventosCola?: QueueEvents,
   ) {}
 
-  private async siguienteNumero(coPropertyId: Types.ObjectId): Promise<number> {
+  private async siguienteNumero(
+    copropiedadId: Types.ObjectId,
+  ): Promise<number> {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
-        { coPropertyId },
+        { copropiedadId },
         { $inc: { nextNumber: 1 } },
         { new: true, upsert: true },
       )
@@ -120,14 +122,14 @@ export class LoteRecibosService {
    *  `numerosPorDocumento`. */
   private async numerosPorRecibo(
     lote: LoteRecibosDocument,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Map<string, string>> {
     const reciboIds = lote.filas
       .map((f) => f.reciboId)
       .filter((id): id is Types.ObjectId => id !== null);
     if (reciboIds.length === 0) return new Map();
     const recibos = await this.recibos
-      .find({ coPropertyId, _id: { $in: reciboIds } })
+      .find({ copropiedadId, _id: { $in: reciboIds } })
       .exec();
     return new Map(recibos.map((r) => [r._id.toString(), r.fullNumber]));
   }
@@ -136,10 +138,10 @@ export class LoteRecibosService {
     accountId: string,
     dto: CrearLoteRecibosDto,
   ): Promise<LoteRecibosContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const yaHayUno = await this.lotes
-      .exists({ coPropertyId, status: { $in: ['borrador', 'cargado'] } })
+      .exists({ copropiedadId, status: { $in: ['borrador', 'cargado'] } })
       .exec();
     if (yaHayUno) {
       throw new ConflictException(
@@ -148,9 +150,9 @@ export class LoteRecibosService {
       );
     }
 
-    const numero = await this.siguienteNumero(coPropertyId);
+    const numero = await this.siguienteNumero(copropiedadId);
     const creado = await this.lotes.create({
-      coPropertyId,
+      copropiedadId,
       number: numero,
       status: 'borrador',
       codigo: dto.codigo,
@@ -166,23 +168,23 @@ export class LoteRecibosService {
   }
 
   async findOne(id: string): Promise<LoteRecibosContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
-    const numeros = await this.numerosPorRecibo(lote, coPropertyId);
+    const numeros = await this.numerosPorRecibo(lote, copropiedadId);
     return toLoteRecibos(lote, numeros);
   }
 
-  /** The raw hydrated document — `_id`/`coPropertyId` as `ObjectId`, not the
+  /** The raw hydrated document — `_id`/`copropiedadId` as `ObjectId`, not the
    *  mapped Spanish contract `findOne()` returns — for callers that need to
    *  hand this lote to `GeneracionDocumentoService`'s generic
-   *  `{_id, coPropertyId}` doc parameter, same role `LotesFacturacionService
+   *  `{_id, copropiedadId}` doc parameter, same role `LotesFacturacionService
    *  .findOneRaw` plays for Factura's own combined-PDF routes. */
   async findOneRaw(id: string): Promise<LoteRecibosDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
@@ -192,14 +194,14 @@ export class LoteRecibosService {
   /** Most recent first — same ordering `useLotes()` already expects from
    *  Facturación's own listing. */
   async findAll(): Promise<LoteRecibosContract[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const lotes = await this.lotes
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ number: -1 })
       .exec();
     return Promise.all(
       lotes.map(async (lote) => {
-        const numeros = await this.numerosPorRecibo(lote, coPropertyId);
+        const numeros = await this.numerosPorRecibo(lote, copropiedadId);
         return toLoteRecibos(lote, numeros);
       }),
     );
@@ -217,8 +219,8 @@ export class LoteRecibosService {
     accountId: string,
     dto: CargarFilasLoteRecibosDto,
   ): Promise<LoteRecibosContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
@@ -228,7 +230,7 @@ export class LoteRecibosService {
       );
     }
 
-    const inmuebles = await this.inmuebles.find({ coPropertyId }).exec();
+    const inmuebles = await this.inmuebles.find({ copropiedadId }).exec();
     const inmueblePorCodigo = new Map(inmuebles.map((i) => [i.codigo, i]));
 
     const filas = dto.filas.map((fila) => {
@@ -252,7 +254,7 @@ export class LoteRecibosService {
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: id, coPropertyId },
+        { _id: id, copropiedadId },
         { $set: { filas, status: 'cargado', generatedBy: accountId } },
         { new: true },
       )
@@ -262,8 +264,8 @@ export class LoteRecibosService {
   }
 
   async cancelar(id: string): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
@@ -272,7 +274,7 @@ export class LoteRecibosService {
         `El lote ${lote.number} ya está aplicado y generó recibos reales; no puede cancelarse`,
       );
     }
-    await this.lotes.deleteOne({ _id: id, coPropertyId }).exec();
+    await this.lotes.deleteOne({ _id: id, copropiedadId }).exec();
   }
 
   /**
@@ -286,15 +288,15 @@ export class LoteRecibosService {
     id: string,
     accountId: string,
   ): Promise<ResultadoAplicacionLoteRecibos> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (!this.cola || !this.eventosCola) {
-      return this.ejecutarAplicacion(id, coPropertyId, accountId);
+      return this.ejecutarAplicacion(id, copropiedadId, accountId);
     }
 
     const trabajo = await this.cola.add(
       NOMBRE_TRABAJO_APLICACION_LOTE_RECIBOS,
-      { loteId: id, coPropertyId: coPropertyId.toString(), accountId },
+      { loteId: id, copropiedadId: copropiedadId.toString(), accountId },
     );
     return trabajo.waitUntilFinished(this.eventosCola);
   }
@@ -318,7 +320,7 @@ export class LoteRecibosService {
    */
   async ejecutarAplicacion(
     id: string,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     accountId: string,
     job?: Job<
       DatosTrabajoAplicacionLoteRecibos,
@@ -326,7 +328,7 @@ export class LoteRecibosService {
     >,
   ): Promise<ResultadoAplicacionLoteRecibos> {
     void job; // reserved for future progress reporting — see plan's Review Focus
-    const lote = await this.lotes.findOne({ _id: id, coPropertyId }).exec();
+    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
@@ -364,12 +366,12 @@ export class LoteRecibosService {
 
     // Reserved ONCE, up front, OUTSIDE every tanda's transaction — see
     // `NumeracionService.reservarBloqueDocumentos`'s own docblock for why:
-    // every row in this lote shares the SAME `(coPropertyId, lote.codigo)`
+    // every row in this lote shares the SAME `(copropiedadId, lote.codigo)`
     // counter, so letting each tanda's transaction `$inc` it individually
     // would write-conflict concurrent tandas against each other.
     const { numeros: numerosReservados } =
       await this.numeracion.reservarBloqueDocumentos(
-        coPropertyId.toString(),
+        copropiedadId.toString(),
         lote.codigo,
         pendientes.length,
       );
@@ -389,7 +391,7 @@ export class LoteRecibosService {
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const fechasPago = pendientesConNumero.map((p) => p.fila.fechaPago);
     const datosBatch = await this.recibosService.leerDatosBatchAplicacionLote(
-      coPropertyId,
+      copropiedadId,
       inmuebleIds,
       fechasPago,
     );
@@ -416,7 +418,7 @@ export class LoteRecibosService {
       (tanda) =>
         this.procesarTanda(tanda, {
           lote,
-          coPropertyId,
+          copropiedadId,
           accountId,
           errores,
           datosBatch,
@@ -439,7 +441,7 @@ export class LoteRecibosService {
     lote.markModified('filas');
     await lote.save();
 
-    const numeros = await this.numerosPorRecibo(lote, coPropertyId);
+    const numeros = await this.numerosPorRecibo(lote, copropiedadId);
     return { lote: toLoteRecibos(lote, numeros), errores };
   }
 
@@ -520,7 +522,7 @@ export class LoteRecibosService {
     tanda: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
     ctx: {
       lote: LoteRecibosDocument;
-      coPropertyId: Types.ObjectId;
+      copropiedadId: Types.ObjectId;
       accountId: string;
       errores: ErrorAplicacionLoteRecibos[];
       datosBatch: DatosBatchAplicacionLote;
@@ -532,7 +534,7 @@ export class LoteRecibosService {
     }
 
     const resultado = procesarFilasTandaAplicacionLote(tanda, ctx.datosBatch, {
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       accountId: ctx.accountId,
       medioPago: ctx.lote.medioPago,
       destinationAccount: ctx.destinationAccount,
@@ -559,7 +561,7 @@ export class LoteRecibosService {
       await session.withTransaction(async () => {
         await this.recibosService.escribirEscriturasTandaAplicacionLote(
           session,
-          ctx.coPropertyId,
+          ctx.copropiedadId,
           resultado.escrituras,
         );
       });

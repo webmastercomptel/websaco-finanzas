@@ -93,7 +93,7 @@ export class CarteraPorConceptosService {
   async findAll(
     query: ConsultarCarteraPorConceptosDto,
   ): Promise<RespuestaCarteraPorConceptos> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const fecha = query.fecha
       ? finDelDiaCorte(new Date(query.fecha))
       : new Date();
@@ -104,7 +104,7 @@ export class CarteraPorConceptosService {
       !query.fecha || fecha.getTime() >= finDelDiaCorte(new Date()).getTime();
 
     const conceptos = await this.conceptosCobro
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ orden: 1 })
       .exec();
     const conceptosContract = conceptos.map((c) => ({
@@ -116,21 +116,21 @@ export class CarteraPorConceptosService {
     const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'emitida',
           issueDate: { $lte: limiteEmision },
         })
         .exec(),
       this.notasDebito
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'emitida',
           issueDate: { $lte: limiteEmision },
         })
         .exec(),
       this.saldosIniciales
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'activo',
           fecha: { $lte: limiteEmision },
         })
@@ -149,11 +149,11 @@ export class CarteraPorConceptosService {
     const [aplicaciones, carteraPorDocumentoRows, saldoTotalRows, inmuebles] =
       await Promise.all([
         this.aplicaciones
-          .find({ coPropertyId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentId: { $in: docIds } })
           .exec(),
         esConsultaVigente
           ? this.carteraPorDocumento
-              .find({ coPropertyId, documentoId: { $in: docIds } })
+              .find({ copropiedadId, documentoId: { $in: docIds } })
               .exec()
           : Promise.resolve([]),
         esConsultaVigente
@@ -161,7 +161,7 @@ export class CarteraPorConceptosService {
               .find({ documentoId: { $in: docIds } })
               .exec()
           : Promise.resolve([]),
-        this.inmuebles.find({ coPropertyId }).exec(),
+        this.inmuebles.find({ copropiedadId }).exec(),
       ]);
 
     const appsByDoc = new Map<string, typeof aplicaciones>();
@@ -199,7 +199,7 @@ export class CarteraPorConceptosService {
         ...new Set(holderIds.map((id) => id.toString())),
       ].map((id) => new Types.ObjectId(id));
       const terceros = await this.terceros
-        .find({ coPropertyId, _id: { $in: uniqueHolderIds } })
+        .find({ copropiedadId, _id: { $in: uniqueHolderIds } })
         .exec();
       for (const t of terceros) {
         tercerosMap.set(t._id.toString(), {

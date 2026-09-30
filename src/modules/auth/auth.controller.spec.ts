@@ -56,7 +56,7 @@ describe('AuthController.me', () => {
   it('lista las copropiedades que puede operar', async () => {
     const { servicio } = accesoQueDevuelve([
       {
-        coPropertyId: 'cop-1',
+        copropiedadId: 'cop-1',
         codigo: 'COP-001',
         nombre: 'Terrazas de Granada',
         permissions: ['facturas.ver'],
@@ -77,7 +77,7 @@ describe('AuthController.me', () => {
     // use para decidir, y esa decisión no es suya.
     const { servicio } = accesoQueDevuelve([
       {
-        coPropertyId: 'cop-1',
+        copropiedadId: 'cop-1',
         codigo: 'COP-001',
         nombre: 'Terrazas',
         permissions: ['facturas.anular'],

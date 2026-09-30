@@ -93,7 +93,7 @@ export class SaldoInicial {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -167,7 +167,7 @@ export const SaldoInicialSchema = SchemaFactory.createForClass(SaldoInicial);
 // "the same document" if they upload it again.
 SaldoInicialSchema.index(
   {
-    coPropertyId: 1,
+    copropiedadId: 1,
     inmuebleId: 1,
     tipoDocumentoOriginal: 1,
     numeroOriginal: 1,

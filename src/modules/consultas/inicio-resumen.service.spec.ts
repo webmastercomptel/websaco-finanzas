@@ -67,7 +67,7 @@ describe('InicioResumenService', () => {
       const periodEnd = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         periodStart,
         periodEnd,
       };
@@ -76,7 +76,7 @@ describe('InicioResumenService', () => {
         facturas: facturasModel(ultimaFactura, [
           {
             _id: id(),
-            coPropertyId: COP,
+            copropiedadId: COP,
             status: 'emitida',
             periodStart,
             periodEnd,
@@ -105,7 +105,7 @@ describe('InicioResumenService', () => {
       const facturas = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'emitida',
           periodStart,
           periodEnd,
@@ -125,7 +125,7 @@ describe('InicioResumenService', () => {
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'emitida',
           periodStart,
           periodEnd,
@@ -170,7 +170,7 @@ describe('InicioResumenService', () => {
       const periodEnd = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         periodStart,
         periodEnd,
       };
@@ -178,14 +178,14 @@ describe('InicioResumenService', () => {
       const recibos = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'activo',
           receivedDate: new Date('2026-08-15'),
           receivedAmount: 300000,
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'activo',
           receivedDate: new Date('2026-08-20'),
           receivedAmount: 200000,
@@ -214,7 +214,7 @@ describe('InicioResumenService', () => {
       const periodEnd = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         periodStart,
         periodEnd,
       };
@@ -223,7 +223,7 @@ describe('InicioResumenService', () => {
       const recibos = [
         {
           _id: reciboId,
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'activo',
           receivedDate: new Date('2026-08-10'),
           receivedAmount: 1_000_000,
@@ -236,7 +236,7 @@ describe('InicioResumenService', () => {
       const aplicaciones = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           sourceType: 'RC',
           sourceId: reciboId,
           status: 'activa',
@@ -277,7 +277,7 @@ describe('InicioResumenService', () => {
       const periodEnd = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         periodStart,
         periodEnd,
       };
@@ -286,7 +286,7 @@ describe('InicioResumenService', () => {
       const recibos = [
         {
           _id: reciboId,
-          coPropertyId: COP,
+          copropiedadId: COP,
           status: 'activo',
           receivedDate: new Date('2026-08-10'),
           receivedAmount: 100000,
@@ -297,7 +297,7 @@ describe('InicioResumenService', () => {
       const aplicaciones = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           sourceType: 'RC',
           sourceId: reciboId,
           status: 'activa',

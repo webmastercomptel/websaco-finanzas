@@ -6,7 +6,7 @@ const id = () => new Types.ObjectId();
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   loteId: id(),
   inmuebleId: id(),
   fullNumber: 'FV-001',
@@ -20,14 +20,14 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   generatedBy: id(),
   ...over,
 });
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'RC-001',
   receivedAmount: 100000,
@@ -41,7 +41,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaCreditoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'NC-001',
   totalAmount: 30000,
@@ -55,7 +55,7 @@ const notaCreditoDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'ND-001',
   total: 40000,
@@ -69,7 +69,7 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaContableDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'NT-001',
   monto: 15000,
@@ -83,7 +83,7 @@ const notaContableDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'NA-001',
   appliedAmount: 25000,
@@ -103,7 +103,7 @@ const accountDoc = (over: Record<string, unknown> = {}) => ({
 
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '301',
   ...over,
 });

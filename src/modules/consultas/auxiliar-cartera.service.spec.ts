@@ -8,7 +8,7 @@ const id = () => new Types.ObjectId();
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   fullNumber: 'FV-001',
   issueDate: new Date('2026-08-01'),
@@ -19,7 +19,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   fullNumber: 'RC-001',
   ...over,
@@ -27,7 +27,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
 
 const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   fullNumber: 'ND-001',
   issueDate: new Date('2026-08-15'),
@@ -39,7 +39,7 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
 
 const ntDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   fullNumber: 'NT-001',
   monto: 30000,
@@ -51,7 +51,7 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   fullNumber: 'NA-001',
   ...over,
@@ -63,7 +63,7 @@ const aplicacionDoc = (
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   sourceType: 'RC',
   sourceId,
   documentType: 'FV',

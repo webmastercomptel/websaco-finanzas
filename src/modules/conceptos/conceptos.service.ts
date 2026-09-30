@@ -54,7 +54,7 @@ export class ConceptosService {
   async findAll(copropiedadId: string): Promise<ConceptoContract[]> {
     const oid = new Types.ObjectId(copropiedadId);
     const documentos = await this.conceptos
-      .find({ coPropertyId: oid })
+      .find({ copropiedadId: oid })
       .populate('cuentaDebitoId', 'codigo')
       .populate('cuentaCreditoId', 'codigo')
       .populate('cuentaImpuestoId', 'codigo')
@@ -69,7 +69,7 @@ export class ConceptosService {
   ): Promise<ConceptoContract> {
     const oid = new Types.ObjectId(copropiedadId);
     const yaExiste = await this.conceptos
-      .exists({ coPropertyId: oid, nombre: dto.nombre })
+      .exists({ copropiedadId: oid, nombre: dto.nombre })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -79,7 +79,7 @@ export class ConceptosService {
     await this.verificarUnicidadPorTipo(oid, dto.tipo);
 
     const creado = await this.conceptos.create({
-      coPropertyId: oid,
+      copropiedadId: oid,
       orden: await this.siguienteOrden(oid),
       ...this.aDocumento(dto),
     });
@@ -91,9 +91,9 @@ export class ConceptosService {
    * fact anyone types in, so the UI does not show a field for it at all.
    * Each new concept lands one past whatever the building already has.
    */
-  private async siguienteOrden(coPropertyId: Types.ObjectId): Promise<number> {
+  private async siguienteOrden(copropiedadId: Types.ObjectId): Promise<number> {
     const [ultimo] = await this.conceptos
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ orden: -1 })
       .limit(1)
       .exec();
@@ -112,7 +112,7 @@ export class ConceptosService {
   ): Promise<ConceptoContract> {
     const oid = new Types.ObjectId(copropiedadId);
     const existente = await this.conceptos
-      .findOne({ _id: id, coPropertyId: oid })
+      .findOne({ _id: id, copropiedadId: oid })
       .exec();
     if (!existente) {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
@@ -121,7 +121,7 @@ export class ConceptosService {
     if (dto.nombre) {
       const chocaConOtro = await this.conceptos
         .exists({
-          coPropertyId: oid,
+          copropiedadId: oid,
           nombre: dto.nombre,
           _id: { $ne: id },
         })
@@ -138,7 +138,7 @@ export class ConceptosService {
 
     const actualizado = await this.conceptos
       .findOneAndUpdate(
-        { _id: id, coPropertyId: oid },
+        { _id: id, copropiedadId: oid },
         { $set: this.aDocumento(dto) },
         { returnDocument: 'after' },
       )
@@ -163,12 +163,12 @@ export class ConceptosService {
    *   cycle — deleting it would silently drop that charge from every future
    *   lote instead of erroring.
    *
-   * Both checks are `coPropertyId`-scoped, same as everything else here.
+   * Both checks are `copropiedadId`-scoped, same as everything else here.
    */
   async delete(copropiedadId: string, id: string): Promise<void> {
     const oid = new Types.ObjectId(copropiedadId);
     const existente = await this.conceptos
-      .findOne({ _id: id, coPropertyId: oid })
+      .findOne({ _id: id, copropiedadId: oid })
       .exec();
     if (!existente) {
       throw new NotFoundException(`No se encontró el cargo ${id}`);
@@ -179,8 +179,8 @@ export class ConceptosService {
 
     const conceptoId = new Types.ObjectId(id);
     const [enSaldos, enRecurrentes] = await Promise.all([
-      this.saldos.exists({ coPropertyId: oid, conceptoId }).exec(),
-      this.valoresRecurrentes.exists({ coPropertyId: oid, conceptoId }).exec(),
+      this.saldos.exists({ copropiedadId: oid, conceptoId }).exec(),
+      this.valoresRecurrentes.exists({ copropiedadId: oid, conceptoId }).exec(),
     ]);
     if (enSaldos) {
       throw new ConflictException(
@@ -193,7 +193,7 @@ export class ConceptosService {
       );
     }
 
-    await this.conceptos.deleteOne({ _id: id, coPropertyId: oid }).exec();
+    await this.conceptos.deleteOne({ _id: id, copropiedadId: oid }).exec();
   }
 
   /**
@@ -203,14 +203,14 @@ export class ConceptosService {
    * duplicate-key error.
    */
   private async verificarUnicidadPorTipo(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     tipo: string | undefined,
     idAExcluir?: string,
   ): Promise<void> {
     if (tipo !== 'administracion' && tipo !== 'intereses') return;
 
     const filtro: Record<string, unknown> = {
-      coPropertyId,
+      copropiedadId,
       tipo,
     };
     if (idAExcluir) filtro._id = { $ne: idAExcluir };

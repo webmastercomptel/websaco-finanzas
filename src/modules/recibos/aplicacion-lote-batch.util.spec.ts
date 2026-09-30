@@ -353,7 +353,7 @@ const resultadoFifoBase = (
 });
 
 const ctxBase = () => ({
-  coPropertyId: new Types.ObjectId(),
+  copropiedadId: new Types.ObjectId(),
   accountId: 'cuenta-1',
   fila: { valorRecibido: 100000, fechaPago: new Date('2026-06-02') },
   numero: { prefijo: 'RC', numero: 1, completo: 'RC-1' },
@@ -548,7 +548,7 @@ const datosParaInmueble = (
 });
 
 const ctxTanda = () => ({
-  coPropertyId: new Types.ObjectId(),
+  copropiedadId: new Types.ObjectId(),
   accountId: 'cuenta-1',
   medioPago: 'transferencia' as const,
   destinationAccount: '111005',

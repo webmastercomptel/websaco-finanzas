@@ -3,7 +3,7 @@ import { PublicacionFacturasListener } from './publicacion-facturas.listener';
 import type { LoteFacturasPdfConfirmadoEvent } from '../../common/eventos/lote-facturas-pdf-confirmado.event';
 
 const EVENTO: LoteFacturasPdfConfirmadoEvent = {
-  coPropertyId: '507f1f77bcf86cd799439011',
+  copropiedadId: '507f1f77bcf86cd799439011',
   loteId: '507f1f77bcf86cd799439012',
   objectPath: 'coproprietats/cop-1/lotes/lote-1.pdf',
   numerosFactura: ['FV-1'],

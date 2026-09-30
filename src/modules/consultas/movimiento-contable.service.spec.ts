@@ -10,7 +10,7 @@ const asientoDoc = (
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   date: new Date('2026-08-15'),
   entries: [
     {
@@ -39,7 +39,7 @@ const asientoDoc = (
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'FV-001',
   ...over,
@@ -47,7 +47,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   fullNumber: 'RC-001',
   ...over,
@@ -55,7 +55,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
 
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '301',
   titularId: null,
   ...over,
@@ -63,7 +63,7 @@ const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
 
 const terceroDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   nombre: 'Juan Perez',
   numeroIdentificacion: '900123456',
   digitoVerificacion: '7',
@@ -72,7 +72,7 @@ const terceroDoc = (over: Record<string, unknown> = {}) => ({
 
 const cuentaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '1355-01',
   nombre: 'CxC Administracion',
   ...over,
@@ -148,7 +148,7 @@ describe('MovimientoContableService', () => {
       ]);
     });
 
-    it('passes a date range filter to AsientoContable.find, scoped only by coPropertyId', async () => {
+    it('passes a date range filter to AsientoContable.find, scoped only by copropiedadId', async () => {
       const asientosFind = jest.fn().mockReturnThis();
 
       const svc = servicio({
@@ -165,7 +165,7 @@ describe('MovimientoContableService', () => {
       });
 
       expect(asientosFind).toHaveBeenCalledWith({
-        coPropertyId: COP,
+        copropiedadId: COP,
         date: { $gte: new Date('2026-01-01'), $lte: new Date('2026-12-31') },
       });
       expect(result.movimientos).toEqual([]);
@@ -175,7 +175,7 @@ describe('MovimientoContableService', () => {
       const f = facturaDoc({ fullNumber: 'FV-001' });
       const nc = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: id(),
         fullNumber: 'NC-001',
       };
@@ -221,7 +221,7 @@ describe('MovimientoContableService', () => {
     it('resuelve el ancla notaAnticipoId como tipoDocumento NA', async () => {
       const na = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: id(),
         fullNumber: 'NA-001',
       };

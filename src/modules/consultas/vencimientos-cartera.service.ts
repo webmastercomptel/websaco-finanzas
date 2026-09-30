@@ -100,7 +100,7 @@ export class VencimientosCarteraService {
   async findAll(
     query: ConsultarVencimientosCarteraDto,
   ): Promise<RespuestaVencimientosCartera> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     // `fecha` stays the raw calendar day — `calcularDiasMora` and the
     // sinVencer/vencido split below truncate it with LOCAL `setHours`, so
     // it must still fall on the picked calendar day once truncated.
@@ -115,13 +115,13 @@ export class VencimientosCarteraService {
 
     const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
-        .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
+        .find({ copropiedadId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
       this.notasDebito
-        .find({ coPropertyId, status: 'emitida', issueDate: { $lte: fecha } })
+        .find({ copropiedadId, status: 'emitida', issueDate: { $lte: fecha } })
         .exec(),
       this.saldosIniciales
-        .find({ coPropertyId, status: 'activo', fecha: { $lte: fecha } })
+        .find({ copropiedadId, status: 'activo', fecha: { $lte: fecha } })
         .exec(),
     ]);
 
@@ -132,7 +132,7 @@ export class VencimientosCarteraService {
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
-          .find({ coPropertyId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentId: { $in: docIds } })
           .exec()
       : [];
 
@@ -217,7 +217,7 @@ export class VencimientosCarteraService {
     if (filasRaw.length === 0) return empty(fecha);
 
     const inmuebleData = await this.resolveInmuebles(
-      coPropertyId,
+      copropiedadId,
       filasRaw.map((r) => r.inmuebleId),
     );
 
@@ -302,14 +302,14 @@ export class VencimientosCarteraService {
   /** Batch-fetch inmueble codes, both statuses and the owner's name/phone
    *  for the units involved. */
   private async resolveInmuebles(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleIds: Types.ObjectId[],
   ): Promise<Map<string, InmuebleResuelto>> {
     const uniqueIds = [...new Set(inmuebleIds.map((id) => id.toString()))].map(
       (id) => new Types.ObjectId(id),
     );
     const inmuebles = await this.inmuebles
-      .find({ coPropertyId, _id: { $in: uniqueIds } })
+      .find({ copropiedadId, _id: { $in: uniqueIds } })
       .exec();
 
     const holderIds = inmuebles
@@ -326,7 +326,7 @@ export class VencimientosCarteraService {
       ];
       const terceros = await this.terceros
         .find({
-          coPropertyId,
+          copropiedadId,
           _id: { $in: uniqueHolderIds.map((id) => new Types.ObjectId(id)) },
         })
         .exec();

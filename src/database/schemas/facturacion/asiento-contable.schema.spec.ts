@@ -26,7 +26,7 @@ const validar = async (
   campos: Record<string, unknown>,
 ): Promise<Error | null> => {
   const doc = new AsientoModel({
-    coPropertyId: copropiedad,
+    copropiedadId: copropiedad,
     date: new Date('2026-08-27'),
     entries: entradasBalanceadas,
     ...campos,
@@ -52,7 +52,7 @@ describe('AsientoContableSchema — anclaje Factura/Lote (existente) vs Recibo (
 
   it('loteId y facturaId son opcionales ahora (default null)', () => {
     const doc = new AsientoModel({
-      coPropertyId: copropiedad,
+      copropiedadId: copropiedad,
       date: new Date(),
       entries: entradasBalanceadas,
       reciboId: recibo,

@@ -42,12 +42,12 @@ export class PeriodoService {
   ) {}
 
   /** Whether a document dated `fecha` may still be posted. */
-  async estaAbierto(coPropertyId: string, fecha: Date): Promise<boolean> {
+  async estaAbierto(copropiedadId: string, fecha: Date): Promise<boolean> {
     const { year, month } = periodoDe(fecha);
 
     const periodo = await this.periodos
       .findOne({
-        coPropertyId: new Types.ObjectId(coPropertyId),
+        copropiedadId: new Types.ObjectId(copropiedadId),
         year,
         month,
       })
@@ -75,8 +75,8 @@ export class PeriodoService {
    * with a credit note dated TODAY that references the old document. You post
    * into the open period and point backwards.
    */
-  async exigirAbierto(coPropertyId: string, fecha: Date): Promise<void> {
-    if (await this.estaAbierto(coPropertyId, fecha)) return;
+  async exigirAbierto(copropiedadId: string, fecha: Date): Promise<void> {
+    if (await this.estaAbierto(copropiedadId, fecha)) return;
 
     const { year, month } = periodoDe(fecha);
     throw new ConflictException(

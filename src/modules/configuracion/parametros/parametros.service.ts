@@ -42,11 +42,11 @@ export class ParametrosService {
   ) {}
 
   async findOne(): Promise<ParametrosFacturacion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const doc = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const doc = await this.copropiedades.findById(copropiedadId).exec();
     if (!doc) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
     return {
@@ -74,7 +74,7 @@ export class ParametrosService {
   }
 
   async update(dto: ActualizarParametrosDto): Promise<ParametrosFacturacion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const update: Record<string, unknown> = {};
     const set = (k: string, v: unknown): void => {
@@ -104,7 +104,7 @@ export class ParametrosService {
 
     const updated = await this.copropiedades
       .findByIdAndUpdate(
-        coPropertyId,
+        copropiedadId,
         { $set: update },
         { returnDocument: 'after' },
       )
@@ -112,7 +112,7 @@ export class ParametrosService {
 
     if (!updated) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 

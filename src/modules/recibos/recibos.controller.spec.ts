@@ -117,7 +117,7 @@ describe('RecibosController.solicitarGeneracion', () => {
   it('junta el recibo y sus datos de impresión, y delega en GeneracionDocumentoService', async () => {
     const recibo = {
       _id: new Types.ObjectId(),
-      coPropertyId: new Types.ObjectId(),
+      copropiedadId: new Types.ObjectId(),
     };
     const datos = { tituloDocumento: 'Recibo de Caja' };
     const recibos = {

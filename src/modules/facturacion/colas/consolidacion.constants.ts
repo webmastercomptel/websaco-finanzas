@@ -22,7 +22,7 @@ export type DatosTrabajoConsolidacion = {
   /** Serialized `ObjectId` — a job runs outside any HTTP request's CLS
    *  context, so it can never resolve the tenant itself; the caller
    *  resolves it once and hands it over as plain data. */
-  coPropertyId: string;
+  copropiedadId: string;
 };
 
 export type ResultadoConsolidacion = {

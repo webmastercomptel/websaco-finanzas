@@ -33,7 +33,7 @@ const cuentaActiva = {
 };
 
 const acceso = (over: Partial<AccesoCopropiedad> = {}): AccesoCopropiedad => ({
-  coPropertyId: 'cop-1',
+  copropiedadId: 'cop-1',
   codigo: 'COP-001',
   nombre: 'Terrazas',
   permissions: ['facturas.ver'],
@@ -203,7 +203,7 @@ describe('FirebaseAuthGuard — copropiedad activa', () => {
 
     await guard.canActivate(context);
 
-    expect(request.user?.coPropertyId).toBeUndefined();
+    expect(request.user?.copropiedadId).toBeUndefined();
     expect(cls[ACTIVE_COPROPERTY_KEY]).toBeUndefined();
     expect(accesoA).not.toHaveBeenCalled();
   });
@@ -215,7 +215,7 @@ describe('FirebaseAuthGuard — copropiedad activa', () => {
 
     await guard.canActivate(context);
 
-    expect(request.user?.coPropertyId).toBe('cop-1');
+    expect(request.user?.copropiedadId).toBe('cop-1');
     expect(cls[ACTIVE_COPROPERTY_KEY]).toBe('cop-1');
   });
 

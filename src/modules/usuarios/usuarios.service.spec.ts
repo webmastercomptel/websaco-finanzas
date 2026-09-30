@@ -26,7 +26,7 @@ const asignacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   accountId: new Types.ObjectId(),
   scope: 'copropiedad',
-  coPropertyId: new Types.ObjectId(),
+  copropiedadId: new Types.ObjectId(),
   entidadId: null,
   permissions: ['inmuebles.gestionar'],
   status: 'active',
@@ -254,7 +254,7 @@ describe('UsuariosService.create', () => {
         scope: 'copropiedad',
         // The tenancy law: stored as an ObjectId, never the raw string —
         // see TenantContextService.resolveCoPropertyId's docblock.
-        coPropertyId: new Types.ObjectId(copId),
+        copropiedadId: new Types.ObjectId(copId),
         permissions: ['inmuebles.gestionar'],
       }),
     );
@@ -441,8 +441,9 @@ describe('UsuariosService.update', () => {
     expect(
       asignacionesGuardadas.some(
         (g) =>
-          (g as { coPropertyId?: Types.ObjectId }).coPropertyId?.toString() ===
-          nuevaCopId,
+          (
+            g as { copropiedadId?: Types.ObjectId }
+          ).copropiedadId?.toString() === nuevaCopId,
       ),
     ).toBe(true);
   });
@@ -452,7 +453,7 @@ describe('UsuariosService.update', () => {
     const copId = new Types.ObjectId();
     const actual = asignacionDoc({
       accountId: cuenta._id,
-      coPropertyId: copId,
+      copropiedadId: copId,
     });
     const { accounts, asignacionesModel } = construirModelos({
       cuentas: [cuenta],

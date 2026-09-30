@@ -21,7 +21,7 @@ const numeracionVacia = (): NumeracionService =>
 
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '301',
   titularId: new Types.ObjectId(),
   ...over,
@@ -33,7 +33,7 @@ const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
  *  stubs" discipline for services that mutate a fetched document. */
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   number: 1,
   status: 'cargado',
   creadoEn: new Date('2026-06-10T14:30:00.000Z'),
@@ -643,7 +643,7 @@ describe('LoteRecibosService.aplicar (enqueue path)', () => {
 
     expect(cola.add).toHaveBeenCalledWith('aplicar', {
       loteId: lote._id.toString(),
-      coPropertyId: COP.toString(),
+      copropiedadId: COP.toString(),
       accountId: 'cuenta-1',
     });
     expect(trabajo.waitUntilFinished).toHaveBeenCalledWith(eventosCola);

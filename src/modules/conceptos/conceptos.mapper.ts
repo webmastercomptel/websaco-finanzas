@@ -29,7 +29,7 @@ const idDeCuenta = (
  */
 export const toConcepto = (doc: ConceptoCobroDocument): ConceptoContract => ({
   id: doc._id.toString(),
-  copropiedadId: doc.coPropertyId.toString(),
+  copropiedadId: doc.copropiedadId.toString(),
   nombre: doc.nombre,
   tipo: doc.tipo,
   tasaImpuesto: doc.tasaImpuesto,

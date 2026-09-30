@@ -43,7 +43,7 @@ export class ConsecutivoDocumento {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   // `type: String` is not optional here: the declared type is a union of string
   // literals, which @nestjs/mongoose cannot infer, and it fails at schema load
@@ -91,6 +91,6 @@ export const ConsecutivoDocumentoSchema =
 // independent of category. A second row for the same code would silently
 // split its sequence in two, and both halves would look correct on their own.
 ConsecutivoDocumentoSchema.index(
-  { coPropertyId: 1, code: 1 },
+  { copropiedadId: 1, code: 1 },
   { unique: true },
 );

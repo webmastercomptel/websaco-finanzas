@@ -47,7 +47,7 @@ const lotesFacturacionFalso = (ultimoConsolidado: unknown = null) =>
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
   status: 'emitida',
@@ -1147,7 +1147,7 @@ describe('NotasCreditoService.crear', () => {
 describe('NotasCreditoService.crear — ancla Nota Débito', () => {
   const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
-    coPropertyId: COP,
+    copropiedadId: COP,
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     conceptoId: CONCEPTO,
@@ -1435,7 +1435,7 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
 
 const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   // `facturaId`/`distribution` were missing from the brief's own fixture —
   // harmless for the pre-existing `aplicar()` tests below (they never touch
@@ -2603,7 +2603,7 @@ describe('NotasCreditoService.findAll', () => {
       (notasCredito as unknown as { filtroUsado: Record<string, unknown> })
         .filtroUsado,
     ).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId: INMUEBLE.toString(),
       status: 'activo',
       $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],

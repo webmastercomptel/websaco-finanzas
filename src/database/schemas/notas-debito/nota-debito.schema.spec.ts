@@ -15,7 +15,7 @@ const concepto = new Types.ObjectId();
 const cuenta = new Types.ObjectId();
 
 const base = (over: Record<string, unknown> = {}) => ({
-  coPropertyId: copropiedad,
+  copropiedadId: copropiedad,
   inmuebleId: inmueble,
   terceroId: tercero,
   conceptoId: concepto,
@@ -111,7 +111,7 @@ describe('NotaDebitoSchema — forma', () => {
 describe('NotaDebitoSchema — índices', () => {
   it('el número completo es único por copropiedad', () => {
     const indice = indices().find(
-      ([campos]) => campos.coPropertyId === 1 && campos.fullNumber === 1,
+      ([campos]) => campos.copropiedadId === 1 && campos.fullNumber === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });
@@ -120,7 +120,7 @@ describe('NotaDebitoSchema — índices', () => {
   it('indexa copropiedad + inmueble + saldo pendiente, para el listado por unidad', () => {
     const indice = indices().find(
       ([campos]) =>
-        campos.coPropertyId === 1 &&
+        campos.copropiedadId === 1 &&
         campos.inmuebleId === 1 &&
         campos.outstandingBalance === 1,
     );

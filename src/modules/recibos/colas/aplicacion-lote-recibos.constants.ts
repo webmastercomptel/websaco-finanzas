@@ -11,7 +11,7 @@ export const EVENTOS_COLA_APLICACION_LOTE_RECIBOS = Symbol(
 
 export type DatosTrabajoAplicacionLoteRecibos = {
   loteId: string;
-  coPropertyId: string;
+  copropiedadId: string;
   accountId: string;
 };
 

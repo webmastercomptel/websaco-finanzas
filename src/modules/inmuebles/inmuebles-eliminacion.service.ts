@@ -45,10 +45,10 @@ export class InmueblesEliminacionService {
   ) {}
 
   async eliminar(id: string): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const existe = await this.inmuebles
-      .exists({ _id: id, coPropertyId })
+      .exists({ _id: id, copropiedadId })
       .exec();
     if (!existe) {
       throw new NotFoundException(`No se encontró el inmueble ${id}`);
@@ -58,7 +58,7 @@ export class InmueblesEliminacionService {
     // never trusts a client-supplied "no lo he facturado", the same way no
     // other guard in this app does.
     const facturado = await this.facturas
-      .exists({ coPropertyId, inmuebleId: id })
+      .exists({ copropiedadId, inmuebleId: id })
       .exec();
     if (facturado) {
       throw new ConflictException(
@@ -70,9 +70,9 @@ export class InmueblesEliminacionService {
     // template, never posted anywhere on its own — so it is removed
     // outright along with the unit, not retired.
     await this.valoresRecurrentes
-      .deleteMany({ coPropertyId, inmuebleId: id })
+      .deleteMany({ copropiedadId, inmuebleId: id })
       .exec();
-    await this.inmuebles.deleteOne({ _id: id, coPropertyId }).exec();
+    await this.inmuebles.deleteOne({ _id: id, copropiedadId }).exec();
   }
 
   /**
@@ -91,10 +91,10 @@ export class InmueblesEliminacionService {
     eliminados: number;
     bloqueados: string[];
   }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const todos = await this.inmuebles
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .select('_id codigo')
       .exec();
     if (todos.length === 0) return { eliminados: 0, bloqueados: [] };
@@ -102,7 +102,7 @@ export class InmueblesEliminacionService {
     const idsConFactura = new Set(
       (
         await this.facturas.distinct('inmuebleId', {
-          coPropertyId,
+          copropiedadId,
           inmuebleId: { $in: todos.map((d) => d._id) },
         })
       ).map((id) => id.toString()),
@@ -117,10 +117,10 @@ export class InmueblesEliminacionService {
     const idsEliminables = eliminables.map((d) => d._id);
 
     await this.valoresRecurrentes
-      .deleteMany({ coPropertyId, inmuebleId: { $in: idsEliminables } })
+      .deleteMany({ copropiedadId, inmuebleId: { $in: idsEliminables } })
       .exec();
     await this.inmuebles
-      .deleteMany({ _id: { $in: idsEliminables }, coPropertyId })
+      .deleteMany({ _id: { $in: idsEliminables }, copropiedadId })
       .exec();
 
     return { eliminados: idsEliminables.length, bloqueados };

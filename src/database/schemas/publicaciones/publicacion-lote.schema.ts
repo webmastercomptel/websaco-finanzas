@@ -32,7 +32,7 @@ export class PublicacionLote {
     ref: Copropiedad.name,
     required: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** Unique per batch — see the `unico_publicacion_por_lote` index below,
    *  which is what makes `encolar`'s upsert idempotent. */

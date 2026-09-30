@@ -40,7 +40,7 @@ export class SaldoTotalDocumento {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: DOCUMENT_TYPES })
   tipoDocumento: DocumentType;
@@ -65,6 +65,6 @@ export const SaldoTotalDocumentoSchema =
 
 SaldoTotalDocumentoSchema.index({ documentoId: 1 }, { unique: true });
 // GET /notas-debito?inmuebleId=...-shaped "con saldo pendiente" queries —
-// same role the old `{ coPropertyId, inmuebleId, outstandingBalance }` index
+// same role the old `{ copropiedadId, inmuebleId, outstandingBalance }` index
 // on NotaDebito played; those candidate queries now join through here.
-SaldoTotalDocumentoSchema.index({ coPropertyId: 1, saldoPendiente: 1 });
+SaldoTotalDocumentoSchema.index({ copropiedadId: 1, saldoPendiente: 1 });

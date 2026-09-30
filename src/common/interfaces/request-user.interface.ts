@@ -22,7 +22,7 @@ export interface IRequestUser {
   /** Platform root: bypasses ability checks entirely. */
   isPlatformAdmin?: boolean;
   /** The active coproperty for this request (from X-CoProperty-Id). */
-  coPropertyId?: string;
+  copropiedadId?: string;
   /** Role ids backing the permissions below. */
   roleIds?: string[];
   /** Union of permission keys (`modulo.accion`) across the caller's roles. */

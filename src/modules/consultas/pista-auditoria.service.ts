@@ -125,7 +125,7 @@ export class PistaAuditoriaService {
   async findAll(
     filtros: ConsultarPistaAuditoriaDto,
   ): Promise<RespuestaPistaAuditoria> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const pagina = filtros.pagina ?? 1;
     const porPagina = filtros.porPagina ?? 50;
 
@@ -141,12 +141,12 @@ export class PistaAuditoriaService {
       notasContables,
       notasAnticipo,
     ] = await Promise.all([
-      this.facturas.find({ coPropertyId }).exec(),
-      this.recibos.find({ coPropertyId }).exec(),
-      this.notasCredito.find({ coPropertyId }).exec(),
-      this.notasDebito.find({ coPropertyId }).exec(),
-      this.notasContables.find({ coPropertyId }).exec(),
-      this.notasAnticipo.find({ coPropertyId }).exec(),
+      this.facturas.find({ copropiedadId }).exec(),
+      this.recibos.find({ copropiedadId }).exec(),
+      this.notasCredito.find({ copropiedadId }).exec(),
+      this.notasDebito.find({ copropiedadId }).exec(),
+      this.notasContables.find({ copropiedadId }).exec(),
+      this.notasAnticipo.find({ copropiedadId }).exec(),
     ]);
 
     // Factura's own creator lives on its LoteFacturacion — batch-resolve
@@ -156,7 +156,7 @@ export class PistaAuditoriaService {
       (id) => new Types.ObjectId(id),
     );
     const lotes = loteIds.length
-      ? await this.lotes.find({ coPropertyId, _id: { $in: loteIds } }).exec()
+      ? await this.lotes.find({ copropiedadId, _id: { $in: loteIds } }).exec()
       : [];
     const loteGeneratedByMap = new Map<string, Types.ObjectId>();
     for (const lote of lotes) {
@@ -336,7 +336,7 @@ export class PistaAuditoriaService {
         : Promise.resolve([]),
       inmuebleIds.length
         ? this.inmuebles
-            .find({ coPropertyId, _id: { $in: inmuebleIds } })
+            .find({ copropiedadId, _id: { $in: inmuebleIds } })
             .exec()
         : Promise.resolve([]),
     ]);

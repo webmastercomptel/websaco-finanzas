@@ -198,7 +198,7 @@ export class NotasAnticipoService {
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
   private async conAuxiliares(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
       defaultCostCentre: string | null;
@@ -208,7 +208,7 @@ export class NotasAnticipoService {
   ): Promise<Movimiento[]> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
-      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.cuentasContables.find({ copropiedadId }).session(session).exec(),
       this.inmuebles?.findById(inmuebleId).session(session).exec(),
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
@@ -253,14 +253,14 @@ export class NotasAnticipoService {
       );
     }
 
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // A refusal costs no session — same placement/reasoning as
     // RecibosService.crear()'s own check: SaldoCartera and every Factura's
     // outstandingBalance can still move while a billing run is open, so a
     // Nota de Anticipo applied mid-run could cross against numbers about to
     // change.
-    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+    await this.lotes.exigirSinLoteAbierto(copropiedadId.toString());
 
     // The document's own date must fall within the last consolidated
     // billing run's period — same rule, same reasoning, same helper as
@@ -268,7 +268,7 @@ export class NotasAnticipoService {
     // coproperty that has never consolidated a lote has no "current period"
     // yet, so nothing to validate against.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fechaEmision),
@@ -287,7 +287,7 @@ export class NotasAnticipoService {
           );
         }
         const origenDoc = await this.saldosInicialesAnticipo
-          .findOne({ _id: dto.reciboOrigenId, coPropertyId, status: 'activo' })
+          .findOne({ _id: dto.reciboOrigenId, copropiedadId, status: 'activo' })
           .session(session)
           .exec();
         if (!origenDoc) {
@@ -297,7 +297,7 @@ export class NotasAnticipoService {
         }
         return this.crearSobreOrigen(
           session,
-          coPropertyId,
+          copropiedadId,
           accountId,
           dto,
           fechaEmision,
@@ -308,7 +308,7 @@ export class NotasAnticipoService {
       }
 
       const origenDoc = await this.recibos
-        .findOne({ _id: dto.reciboOrigenId, coPropertyId, status: 'activo' })
+        .findOne({ _id: dto.reciboOrigenId, copropiedadId, status: 'activo' })
         .session(session)
         .exec();
       if (!origenDoc) {
@@ -318,7 +318,7 @@ export class NotasAnticipoService {
       }
       return this.crearSobreOrigen(
         session,
-        coPropertyId,
+        copropiedadId,
         accountId,
         dto,
         fechaEmision,
@@ -346,7 +346,7 @@ export class NotasAnticipoService {
    */
   private async crearSobreOrigen<TOrigen extends OrigenAplicacion>(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     accountId: string,
     dto: CrearNotaAnticipoDto,
     fechaEmision: Date,
@@ -374,7 +374,7 @@ export class NotasAnticipoService {
     }
 
     const numero = await this.numeracion.siguienteDocumento(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
       dto.codigo,
       session,
     );
@@ -382,7 +382,7 @@ export class NotasAnticipoService {
     const [creada] = await this.notasAnticipo.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           inmuebleId: origen.inmuebleId,
           terceroId: origen.terceroId,
           origenTipo,
@@ -400,7 +400,7 @@ export class NotasAnticipoService {
     );
 
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
 
@@ -415,7 +415,7 @@ export class NotasAnticipoService {
       saldoDocumentoOrigen: this.saldoDocumentoOrigen,
       recibos: origenModel,
       session,
-      coPropertyId,
+      copropiedadId,
       recibo: origen,
       sourceType: 'NA' as const,
       sourceId: creada._id,
@@ -470,7 +470,7 @@ export class NotasAnticipoService {
 
     await this.notasAnticipo
       .findOneAndUpdate(
-        { _id: creada._id, coPropertyId },
+        { _id: creada._id, copropiedadId },
         { $set: { appliedAmount: totalAplicado } },
         { session },
       )
@@ -478,7 +478,7 @@ export class NotasAnticipoService {
 
     await this.postearAsientoCreacion(
       session,
-      coPropertyId,
+      copropiedadId,
       { _id: creada._id, inmuebleId: origen.inmuebleId },
       fechaEmision,
       totalAplicado,
@@ -487,7 +487,7 @@ export class NotasAnticipoService {
     );
 
     const final = await this.notasAnticipo
-      .findOne({ _id: creada._id, coPropertyId })
+      .findOne({ _id: creada._id, copropiedadId })
       .session(session)
       .exec();
     return toNotaAnticipo(
@@ -503,26 +503,26 @@ export class NotasAnticipoService {
    * `construirDatosImpresionNotaAnticipo` UNCHANGED.
    */
   async datosImpresion(id: string): Promise<DatosReciboImpresion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.findOneRaw(id);
     const [aplicacionesActivas, copropiedad] = await Promise.all([
       this.findAplicaciones(id),
-      this.copropiedades.findById(coPropertyId).exec(),
+      this.copropiedades.findById(copropiedadId).exec(),
     ]);
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
     const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
       'NA',
-      coPropertyId,
+      copropiedadId,
     );
     return construirDatosImpresionNotaAnticipo(
       nota,
       aplicacionesActivas,
       copropiedad,
-      coPropertyId,
+      copropiedadId,
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
@@ -539,8 +539,8 @@ export class NotasAnticipoService {
   async findAll(
     query: ListarNotaAnticipoDto,
   ): Promise<Paginado<NotaAnticipoContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
     if (query.reciboOrigenId) filtro.reciboOrigenId = query.reciboOrigenId;
     if (query.origenTipo) filtro.origenTipo = query.origenTipo;
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
@@ -565,7 +565,7 @@ export class NotasAnticipoService {
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const inmuebles = inmuebleIds.length
       ? await this.inmuebles
-          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          ?.find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -590,15 +590,15 @@ export class NotasAnticipoService {
 
   /** Full detail, cargo por cargo — mirrors `RecibosService.findOne`. */
   async findOne(id: string): Promise<NotaAnticipoDetalle> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasAnticipo
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota de anticipo ${id}`);
     }
     const aplicaciones = await this.aplicaciones
-      .find({ coPropertyId, sourceType: 'NA', sourceId: nota._id })
+      .find({ copropiedadId, sourceType: 'NA', sourceId: nota._id })
       .sort({ appliedAt: 1 })
       .exec();
 
@@ -615,17 +615,17 @@ export class NotasAnticipoService {
       [
         facturaIds.length
           ? this.facturas
-              .find({ coPropertyId, _id: { $in: facturaIds } })
+              .find({ copropiedadId, _id: { $in: facturaIds } })
               .exec()
           : [],
         notaDebitoIds.length
           ? this.notasDebito
-              .find({ coPropertyId, _id: { $in: notaDebitoIds } })
+              .find({ copropiedadId, _id: { $in: notaDebitoIds } })
               .exec()
           : [],
         saldoInicialIds.length
           ? this.saldosIniciales
-              ?.find({ coPropertyId, _id: { $in: saldoInicialIds } })
+              ?.find({ copropiedadId, _id: { $in: saldoInicialIds } })
               .exec()
           : [],
       ],
@@ -664,13 +664,13 @@ export class NotasAnticipoService {
     dto: AnularNotaAnticipoDto,
     accountId: string,
   ): Promise<NotaAnticipoContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // The reversing asiento is dated by the user, never by the server clock
     // — same rule Recibos/Notas Crédito apply to their own anulación. A
     // refusal costs no session.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fecha),
@@ -680,7 +680,7 @@ export class NotasAnticipoService {
 
     return this.transaccion(async (session) => {
       const nota = await this.notasAnticipo
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       if (!nota) {
@@ -694,7 +694,7 @@ export class NotasAnticipoService {
 
       const aplicacionesActivas = await this.aplicaciones
         .find({
-          coPropertyId,
+          copropiedadId,
           sourceType: 'NA',
           sourceId: nota._id,
           status: 'activa',
@@ -706,7 +706,7 @@ export class NotasAnticipoService {
       // below, where the ORIGINAL code read it) — the desglose loop right
       // below needs `usesMemorandumAccounts` too, via `cuentaCarteraDeLinea`.
       const copropiedad = await this.copropiedades
-        .findById(coPropertyId)
+        .findById(copropiedadId)
         .session(session)
         .exec();
 
@@ -722,7 +722,7 @@ export class NotasAnticipoService {
             aplicacion.amountApplied,
           );
           const notaDebitoDoc = await this.notasDebito
-            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .findOne({ _id: aplicacion.documentId, copropiedadId })
             .session(session)
             .exec();
           desglose.push({
@@ -742,7 +742,7 @@ export class NotasAnticipoService {
             aplicacion.amountApplied,
           );
           const saldoInicialDoc = await this.saldosIniciales
-            ?.findOne({ _id: aplicacion.documentId, coPropertyId })
+            ?.findOne({ _id: aplicacion.documentId, copropiedadId })
             .session(session)
             .exec();
           if (saldoInicialDoc) {
@@ -750,7 +750,7 @@ export class NotasAnticipoService {
               this.saldos,
               this.carteraPorDocumento,
               session,
-              coPropertyId,
+              copropiedadId,
               saldoInicialDoc.inmuebleId,
               aplicacion.detalleConceptos.map((d) => ({
                 conceptoId: d.conceptoId,
@@ -782,7 +782,7 @@ export class NotasAnticipoService {
           }
         } else {
           const facturaDoc = await this.facturas
-            .findOne({ _id: aplicacion.documentId, coPropertyId })
+            .findOne({ _id: aplicacion.documentId, copropiedadId })
             .session(session)
             .exec();
 
@@ -814,7 +814,7 @@ export class NotasAnticipoService {
               this.saldos,
               this.carteraPorDocumento,
               session,
-              coPropertyId,
+              copropiedadId,
               factura.inmuebleId,
               aplicacion.detalleConceptos.map((d) => ({
                 conceptoId: d.conceptoId,
@@ -827,7 +827,7 @@ export class NotasAnticipoService {
             await actualizarRemanentesLinea(
               this.facturas,
               session,
-              coPropertyId,
+              copropiedadId,
               factura._id,
               partes.map((parte) => ({
                 conceptoId: parte.conceptoId,
@@ -867,7 +867,7 @@ export class NotasAnticipoService {
 
         await this.aplicaciones
           .findOneAndUpdate(
-            { _id: aplicacion._id, coPropertyId },
+            { _id: aplicacion._id, copropiedadId },
             { $set: { status: 'revertida', revertedAt: new Date() } },
             { session },
           )
@@ -907,7 +907,7 @@ export class NotasAnticipoService {
       );
       entries = await this.conAuxiliares(
         session,
-        coPropertyId,
+        copropiedadId,
         nota.inmuebleId,
         copropiedad,
         entries,
@@ -915,7 +915,7 @@ export class NotasAnticipoService {
       await this.asientos.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             loteId: null,
             facturaId: null,
             reciboId: null,
@@ -936,7 +936,7 @@ export class NotasAnticipoService {
 
       await this.notasAnticipo
         .findOneAndUpdate(
-          { _id: id, coPropertyId },
+          { _id: id, copropiedadId },
           {
             $set: {
               status: 'anulado',
@@ -951,7 +951,7 @@ export class NotasAnticipoService {
         .exec();
 
       const final = await this.notasAnticipo
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       return toNotaAnticipo(
@@ -970,7 +970,7 @@ export class NotasAnticipoService {
    */
   private async postearAsientoCreacion(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     nota: { _id: Types.ObjectId; inmuebleId: Types.ObjectId },
     fechaEmision: Date,
     montoAplicado: number,
@@ -978,7 +978,7 @@ export class NotasAnticipoService {
     montoAplicadoMora: number,
   ): Promise<void> {
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -1000,7 +1000,7 @@ export class NotasAnticipoService {
     );
     entries = await this.conAuxiliares(
       session,
-      coPropertyId,
+      copropiedadId,
       nota.inmuebleId,
       copropiedad,
       entries,
@@ -1009,7 +1009,7 @@ export class NotasAnticipoService {
     await this.asientos.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           loteId: null,
           facturaId: null,
           reciboId: null,
@@ -1030,9 +1030,9 @@ export class NotasAnticipoService {
    * `RecibosService`/`NotasCreditoService`'s own `findOneRaw` play.
    */
   async findOneRaw(id: string): Promise<NotaAnticipoDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasAnticipo
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota de anticipo ${id}`);
@@ -1047,9 +1047,9 @@ export class NotasAnticipoService {
    * `CarteraPorConceptosService`'s identical live-resolve.
    */
   async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmueble = await this.inmuebles
-      ?.findOne({ _id: inmuebleId, coPropertyId })
+      ?.findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     return inmueble?.codigo ?? '';
   }
@@ -1059,9 +1059,9 @@ export class NotasAnticipoService {
    * (mirrors `RecibosService.findAplicacionesForSource`).
    */
   async findAplicaciones(id: string): Promise<AplicacionCarteraDocument[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.aplicaciones
-      .find({ coPropertyId, sourceType: 'NA', sourceId: id, status: 'activa' })
+      .find({ copropiedadId, sourceType: 'NA', sourceId: id, status: 'activa' })
       .sort({ appliedAt: 1 })
       .exec();
   }

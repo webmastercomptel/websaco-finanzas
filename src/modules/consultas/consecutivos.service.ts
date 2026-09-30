@@ -125,12 +125,12 @@ export class ConsecutivosService {
   async findAll(
     query: ConsultarConsecutivosDto,
   ): Promise<RespuestaConsecutivos> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const desde = new Date(query.desde);
     const hasta = new Date(query.hasta);
 
     const consecutivo = await this.consecutivos
-      .findOne({ coPropertyId, code: query.codigo })
+      .findOne({ copropiedadId, code: query.codigo })
       .exec();
     if (!consecutivo) {
       throw new NotFoundException(
@@ -142,7 +142,7 @@ export class ConsecutivosService {
     switch (consecutivo.category) {
       case 'IN':
         filasInternas = await this.filasRecibos(
-          coPropertyId,
+          copropiedadId,
           consecutivo.code,
           consecutivo.prefix,
           desde,
@@ -151,7 +151,7 @@ export class ConsecutivosService {
         break;
       case 'NC':
         filasInternas = await this.filasNotasCredito(
-          coPropertyId,
+          copropiedadId,
           consecutivo.code,
           consecutivo.prefix,
           desde,
@@ -160,7 +160,7 @@ export class ConsecutivosService {
         break;
       case 'ND':
         filasInternas = await this.filasNotasDebito(
-          coPropertyId,
+          copropiedadId,
           consecutivo.code,
           consecutivo.prefix,
           desde,
@@ -170,14 +170,14 @@ export class ConsecutivosService {
       case 'NT':
         filasInternas = [
           ...(await this.filasNotasContables(
-            coPropertyId,
+            copropiedadId,
             consecutivo.code,
             consecutivo.prefix,
             desde,
             hasta,
           )),
           ...(await this.filasNotasAnticipo(
-            coPropertyId,
+            copropiedadId,
             consecutivo.code,
             consecutivo.prefix,
             desde,
@@ -187,7 +187,7 @@ export class ConsecutivosService {
         break;
       case 'FV':
         filasInternas = await this.filasFacturas(
-          coPropertyId,
+          copropiedadId,
           consecutivo.code,
           consecutivo.prefix,
           desde,
@@ -203,7 +203,7 @@ export class ConsecutivosService {
     ].map((id) => new Types.ObjectId(id));
     const inmueblesDocs = inmuebleIds.length
       ? await this.inmuebles
-          .find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -217,7 +217,7 @@ export class ConsecutivosService {
     ].map((id) => new Types.ObjectId(id));
     const conceptosDocs = conceptoIds.length
       ? await this.conceptosCobro
-          .find({ coPropertyId, _id: { $in: conceptoIds } })
+          .find({ copropiedadId, _id: { $in: conceptoIds } })
           .sort({ orden: 1 })
           .exec()
       : [];
@@ -239,7 +239,7 @@ export class ConsecutivosService {
   }
 
   private async filasRecibos(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
@@ -247,7 +247,7 @@ export class ConsecutivosService {
   ): Promise<FilaInterna[]> {
     const recibos = await this.recibos
       .find({
-        coPropertyId,
+        copropiedadId,
         prefix,
         receivedDate: { $gte: desde, $lte: hasta },
       })
@@ -257,7 +257,7 @@ export class ConsecutivosService {
     const reciboIds = recibos.map((r) => r._id);
     const aplicaciones = await this.aplicaciones
       .find({
-        coPropertyId,
+        copropiedadId,
         sourceType: 'RC',
         sourceId: { $in: reciboIds },
         status: 'activa',
@@ -287,7 +287,7 @@ export class ConsecutivosService {
   }
 
   private async filasNotasCredito(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
@@ -297,7 +297,7 @@ export class ConsecutivosService {
     // by prefix/status alone and filter by the resolved date in JS, same
     // fallback `fechaNotaCredito` exists for.
     const notas = await this.notasCredito
-      .find({ coPropertyId, prefix, status: 'activo' })
+      .find({ copropiedadId, prefix, status: 'activo' })
       .exec();
 
     return notas
@@ -326,7 +326,7 @@ export class ConsecutivosService {
   }
 
   private async filasNotasDebito(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
@@ -334,7 +334,7 @@ export class ConsecutivosService {
   ): Promise<FilaInterna[]> {
     const notas = await this.notasDebito
       .find({
-        coPropertyId,
+        copropiedadId,
         prefix,
         status: 'emitida',
         issueDate: { $gte: desde, $lte: hasta },
@@ -354,14 +354,14 @@ export class ConsecutivosService {
   }
 
   private async filasNotasContables(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
     hasta: Date,
   ): Promise<FilaInterna[]> {
     const notas = await this.notasContables
-      .find({ coPropertyId, prefix, status: 'activo' })
+      .find({ copropiedadId, prefix, status: 'activo' })
       .exec();
 
     return notas
@@ -383,7 +383,7 @@ export class ConsecutivosService {
   }
 
   private async filasNotasAnticipo(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
@@ -391,7 +391,7 @@ export class ConsecutivosService {
   ): Promise<FilaInterna[]> {
     const notas = await this.notasAnticipo
       .find({
-        coPropertyId,
+        copropiedadId,
         prefix,
         status: 'activo',
         issueDate: { $gte: desde, $lte: hasta },
@@ -402,7 +402,7 @@ export class ConsecutivosService {
     const notaIds = notas.map((n) => n._id);
     const aplicaciones = await this.aplicaciones
       .find({
-        coPropertyId,
+        copropiedadId,
         sourceType: 'NA',
         sourceId: { $in: notaIds },
         status: 'activa',
@@ -432,7 +432,7 @@ export class ConsecutivosService {
   }
 
   private async filasFacturas(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     codigo: string,
     prefix: string,
     desde: Date,
@@ -440,7 +440,7 @@ export class ConsecutivosService {
   ): Promise<FilaInterna[]> {
     const facturas = await this.facturas
       .find({
-        coPropertyId,
+        copropiedadId,
         prefix,
         status: 'emitida',
         issueDate: { $gte: desde, $lte: hasta },

@@ -37,7 +37,7 @@ export class Factura {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -214,4 +214,4 @@ export const FacturaSchema = SchemaFactory.createForClass(Factura);
 // (NumeracionService's atomic reservation), but a compound index here makes
 // that guarantee visible to the database too, not just to the code path
 // that happens to be the only writer today.
-FacturaSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+FacturaSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });

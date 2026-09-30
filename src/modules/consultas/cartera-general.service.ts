@@ -86,7 +86,7 @@ export class CarteraGeneralService {
   async findAll(
     query: ConsultarCarteraGeneralDto,
   ): Promise<RespuestaCarteraGeneral> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     // `fecha` stays the raw calendar day — `calcularDiasMora` and the
     // vencido/pendiente split below truncate it with LOCAL `setHours`, so
     // it must still fall on the picked calendar day once truncated.
@@ -107,7 +107,7 @@ export class CarteraGeneralService {
         saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
-      coPropertyId,
+      copropiedadId,
       fechaCorte,
     );
 
@@ -164,7 +164,7 @@ export class CarteraGeneralService {
     ];
 
     const carteraPorEstado = (
-      await this.calcularCarteraPorEstado(coPropertyId, documentos)
+      await this.calcularCarteraPorEstado(copropiedadId, documentos)
     ).map(({ etiqueta, monto }) => ({
       etiqueta,
       monto,
@@ -188,17 +188,17 @@ export class CarteraGeneralService {
 
     // totalCarteraMesAnterior: same computation at last day of previous month
     const totalCarteraMesAnterior = await this.calcularTotalCarteraMesAnterior(
-      coPropertyId,
+      copropiedadId,
       fecha,
     );
 
     // §4: cartera por concepto (always "as of now")
     const carteraPorConcepto =
-      await this.calcularCarteraPorConcepto(coPropertyId);
+      await this.calcularCarteraPorConcepto(copropiedadId);
 
     // §4: tendencia recaudo (last 6 calendar months up to today — always
     // "as of now", ignores `fecha` entirely, same as carteraPorConcepto)
-    const tendenciaRecaudo = await this.calcularTendenciaRecaudo(coPropertyId);
+    const tendenciaRecaudo = await this.calcularTendenciaRecaudo(copropiedadId);
 
     return {
       totalCartera,
@@ -222,7 +222,7 @@ export class CarteraGeneralService {
    * from the catalog falls back to `vigente`, the schema's own default.
    */
   private async calcularCarteraPorEstado(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     documentos: { inmuebleId: Types.ObjectId; montoPendiente: number }[],
   ): Promise<{ etiqueta: string; monto: number }[]> {
     const montos = { vigente: 0, juridico: 0, dificil_recaudo: 0 };
@@ -231,7 +231,7 @@ export class CarteraGeneralService {
         ...new Set(documentos.map((d) => d.inmuebleId.toString())),
       ].map((x) => new Types.ObjectId(x));
       const inmuebles = await this.inmuebles
-        .find({ coPropertyId, _id: { $in: ids } })
+        .find({ copropiedadId, _id: { $in: ids } })
         .select('estadoCartera')
         .exec();
       const estadoPorInmueble = new Map(
@@ -252,7 +252,7 @@ export class CarteraGeneralService {
 
   /** Compute totalCartera at the last day of the month before `fecha`. */
   private async calcularTotalCarteraMesAnterior(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     fecha: Date,
   ): Promise<number> {
     // Last day of previous month, in UTC — `setDate`/`setHours` (local)
@@ -270,7 +270,7 @@ export class CarteraGeneralService {
         saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
-      coPropertyId,
+      copropiedadId,
       prevMonth,
     );
 
@@ -282,10 +282,10 @@ export class CarteraGeneralService {
    * Always "as of now" — no historical dimension.
    */
   private async calcularCarteraPorConcepto(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<CarteraPorConcepto[]> {
     const saldos = await this.saldosCartera
-      .find({ coPropertyId, balance: { $gt: 0 } })
+      .find({ copropiedadId, balance: { $gt: 0 } })
       .exec();
 
     if (saldos.length === 0) return [];
@@ -307,7 +307,7 @@ export class CarteraGeneralService {
       (id) => new Types.ObjectId(id),
     );
     const conceptos = await this.conceptosCobro
-      .find({ coPropertyId, _id: { $in: conceptoIds } })
+      .find({ copropiedadId, _id: { $in: conceptoIds } })
       .sort({ orden: 1 })
       .exec();
 
@@ -341,7 +341,7 @@ export class CarteraGeneralService {
    * currently active applications count.
    */
   private async calcularTendenciaRecaudo(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<RecaudoMensual[]> {
     const hoy = new Date();
 
@@ -352,7 +352,7 @@ export class CarteraGeneralService {
 
     const apps = await this.aplicaciones
       .find({
-        coPropertyId,
+        copropiedadId,
         status: 'activa',
         appliedAt: { $gte: startMonth, $lte: hoy },
       })

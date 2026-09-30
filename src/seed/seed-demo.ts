@@ -163,10 +163,10 @@ async function seedDemo(): Promise<void> {
       // the billing cycle is built around.
       for (const concepto of CONCEPTOS_BASE) {
         await conceptos.updateOne(
-          { coPropertyId: copropiedad._id, nombre: concepto.nombre },
+          { copropiedadId: copropiedad._id, nombre: concepto.nombre },
           {
             $setOnInsert: {
-              coPropertyId: copropiedad._id,
+              copropiedadId: copropiedad._id,
               ...concepto,
               active: true,
             },
@@ -199,12 +199,12 @@ async function seedDemo(): Promise<void> {
 
         const tercero = await terceros.findOneAndUpdate(
           {
-            coPropertyId: cop._id,
+            copropiedadId: cop._id,
             numeroIdentificacion: `${cop.code}-${i}`,
           },
           {
             $setOnInsert: {
-              coPropertyId: cop._id,
+              copropiedadId: cop._id,
               tipoPersona: esEmpresa ? 'juridica' : 'natural',
               nombre,
               tipoIdentificacion: esEmpresa ? 'NIT' : 'CC',
@@ -216,10 +216,10 @@ async function seedDemo(): Promise<void> {
         );
 
         await inmuebles.updateOne(
-          { coPropertyId: cop._id, codigo: code },
+          { copropiedadId: cop._id, codigo: code },
           {
             $setOnInsert: {
-              coPropertyId: cop._id,
+              copropiedadId: cop._id,
               codigo: code,
               bloque: piso <= 8 ? 'Torre A' : 'Torre B',
               area: 60 + ((i * 7) % 45),

@@ -6,7 +6,7 @@ import type { EmisorPlantillaFactura } from '../../contracts';
  * pdfmake template needs it — see `EmisorPlantillaFactura`'s own docblock
  * (contracts/index.ts) for why this is genuinely live and, for a Factura,
  * must be frozen via `printSnapshot` rather than re-derived from
- * `coPropertyId` on every read.
+ * `copropiedadId` on every read.
  *
  * Shared by `FacturasService` and the five document types that print
  * through `DatosReciboImpresion` (Recibo, Nota Crédito/Débito/Contable/

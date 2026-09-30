@@ -53,15 +53,15 @@ export class ConceptosController {
   @Get()
   @CheckAbility({ action: 'read', subject: 'ConceptoCobro' })
   findAll(): Promise<ConceptoCobro[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.conceptos.findAll(coPropertyId.toString());
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.conceptos.findAll(copropiedadId.toString());
   }
 
   @Post()
   @CheckAbility({ action: 'create', subject: 'ConceptoCobro' })
   create(@Body() dto: CrearConceptoDto): Promise<ConceptoCobro> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.conceptos.create(coPropertyId.toString(), dto);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.conceptos.create(copropiedadId.toString(), dto);
   }
 
   @Patch(':id')
@@ -70,15 +70,15 @@ export class ConceptosController {
     @Param('id') id: string,
     @Body() dto: ActualizarConceptoDto,
   ): Promise<ConceptoCobro> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.conceptos.update(coPropertyId.toString(), id, dto);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.conceptos.update(copropiedadId.toString(), id, dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
   @CheckAbility({ action: 'manage', subject: 'ConceptoCobro' })
   delete(@Param('id') id: string): Promise<void> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.conceptos.delete(coPropertyId.toString(), id);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.conceptos.delete(copropiedadId.toString(), id);
   }
 }

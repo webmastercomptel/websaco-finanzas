@@ -48,7 +48,7 @@ export class NotaDebito {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -119,11 +119,11 @@ export const NotaDebitoSchema = SchemaFactory.createForClass(NotaDebito);
 
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as Recibo/Factura.
-NotaDebitoSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+NotaDebitoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
 
 // GET /notas-debito?inmuebleId=...-shaped query — outstanding balance per unit.
 NotaDebitoSchema.index({
-  coPropertyId: 1,
+  copropiedadId: 1,
   inmuebleId: 1,
   outstandingBalance: 1,
 });

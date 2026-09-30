@@ -55,9 +55,11 @@ export class ConsultaFacturacionService {
   ) {}
 
   async generar(loteId: string): Promise<RespuestaConsultaFacturacion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
-    const lote = await this.lotes.findOne({ _id: loteId, coPropertyId }).exec();
+    const lote = await this.lotes
+      .findOne({ _id: loteId, copropiedadId })
+      .exec();
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
@@ -68,7 +70,7 @@ export class ConsultaFacturacionService {
     }
 
     const facturas = await this.facturas
-      .find({ coPropertyId, loteId, status: 'emitida' })
+      .find({ copropiedadId, loteId, status: 'emitida' })
       .sort({ unitCode: 1 })
       .exec();
 
@@ -100,7 +102,7 @@ export class ConsultaFacturacionService {
 
     const catalogo = conceptoIds.size
       ? await this.conceptos
-          .find({ coPropertyId, _id: { $in: [...conceptoIds] } })
+          .find({ copropiedadId, _id: { $in: [...conceptoIds] } })
           .exec()
       : [];
     const ordenPorId = new Map(

@@ -87,7 +87,7 @@ describe('InmueblesService.create', () => {
 
     expect(modelo.escrituras[0]).toMatchObject({
       codigo: '401',
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
   });
 
@@ -128,7 +128,7 @@ describe('InmueblesService.create', () => {
     // Case/whitespace-insensitive on purpose — see
     // `InmueblesService.filtroCodigoDuplicado`.
     expect(modelo.filtros[0]).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       codigo: { $regex: '^301$', $options: 'i' },
     });
   });
@@ -168,7 +168,7 @@ describe('InmueblesService.update', () => {
 
     await service.update('inm-1', { zona: 'Norte' });
 
-    expect(modelo.filtros[0]).toEqual({ _id: 'inm-1', coPropertyId: COP });
+    expect(modelo.filtros[0]).toEqual({ _id: 'inm-1', copropiedadId: COP });
   });
 
   it('solo escribe los campos que vinieron en el patch', async () => {
@@ -241,7 +241,7 @@ describe('InmueblesService.update', () => {
     await service.update('inm-1', { codigo: '301' });
 
     expect(modelo.filtros[0]).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       codigo: { $regex: '^301$', $options: 'i' },
       _id: { $ne: 'inm-1' },
     });
@@ -266,7 +266,7 @@ describe('InmueblesService.update', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(modelo.filtros[0]).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       codigo: { $regex: '^Torre A-301$', $options: 'i' },
       _id: { $ne: 'inm-1' },
     });

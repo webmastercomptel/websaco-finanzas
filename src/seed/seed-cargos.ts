@@ -42,7 +42,7 @@ async function run() {
 
   console.log(`Copropiedad: ${cop.name} (${cop._id.toString()})`);
 
-  const existentes = await conceptos.find({ coPropertyId: cop._id }).exec();
+  const existentes = await conceptos.find({ copropiedadId: cop._id }).exec();
   console.log(`Conceptos existentes: ${existentes.length}`);
   existentes.forEach((c) =>
     console.log(`  - ${c.nombre} (sistema: ${c.sistema})`),
@@ -56,7 +56,7 @@ async function run() {
     console.log('Ya existen todos los cargos de sistema.');
   } else {
     const docs = nuevos.map((c) => ({
-      coPropertyId: cop._id,
+      copropiedadId: cop._id,
       nombre: c.nombre,
       tipo: c.tipo,
       tasaImpuesto: 0,
@@ -71,7 +71,7 @@ async function run() {
   }
 
   const todos = await conceptos
-    .find({ coPropertyId: cop._id })
+    .find({ copropiedadId: cop._id })
     .sort({ orden: 1 })
     .exec();
   console.log(`Total conceptos: ${todos.length}`);

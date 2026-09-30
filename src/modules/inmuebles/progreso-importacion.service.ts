@@ -42,14 +42,14 @@ export class ProgresoImportacionService {
   /** Call once before the import loop starts. A `total` of 0 skips writing
    *  anything — nothing to poll for a file with no rows. */
   async iniciar(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     kind: TipoImportacion,
     total: number,
   ): Promise<void> {
     if (total === 0) return;
     await this.progresos
       .updateOne(
-        { coPropertyId, kind },
+        { copropiedadId, kind },
         { $set: { current: 0, total } },
         { upsert: true },
       )
@@ -60,14 +60,14 @@ export class ProgresoImportacionService {
    *  this every `intervalo(total)` rows (or on the last row), not every
    *  row. */
   async actualizar(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     kind: TipoImportacion,
     current: number,
     total: number,
   ): Promise<void> {
     await this.progresos
       .updateOne(
-        { coPropertyId, kind },
+        { copropiedadId, kind },
         { $set: { current, total } },
         { upsert: true },
       )
@@ -77,19 +77,19 @@ export class ProgresoImportacionService {
   /** Call once the import is over, success or failure — its absence IS
    *  "nothing in progress" (see `obtener`), never a row left at 100%. */
   async finalizar(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     kind: TipoImportacion,
   ): Promise<void> {
-    await this.progresos.deleteOne({ coPropertyId, kind }).exec();
+    await this.progresos.deleteOne({ copropiedadId, kind }).exec();
   }
 
   /** Null means no import of this kind is currently running for this
    *  coproperty — the frontend's cue to stop polling. */
   async obtener(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     kind: TipoImportacion,
   ): Promise<ProgresoActual | null> {
-    const doc = await this.progresos.findOne({ coPropertyId, kind }).exec();
+    const doc = await this.progresos.findOne({ copropiedadId, kind }).exec();
     return doc ? { actual: doc.current, total: doc.total } : null;
   }
 }

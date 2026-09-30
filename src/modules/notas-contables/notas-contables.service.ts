@@ -116,7 +116,7 @@ export class NotasContablesService {
   /** See `RecibosService.conAuxiliares`'s own docblock — identical shape. */
   private async conAuxiliares(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
       defaultCostCentre: string | null;
@@ -126,7 +126,7 @@ export class NotasContablesService {
   ): Promise<ReturnType<typeof construirMovimientosReclasificacion>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
-      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.cuentasContables.find({ copropiedadId }).session(session).exec(),
       this.inmuebles?.findById(inmuebleId).session(session).exec(),
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
@@ -180,7 +180,7 @@ export class NotasContablesService {
     accountId: string,
     dto: CrearNotaContableDto,
   ): Promise<NotaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(dto.inmuebleId);
     const documentoId = new Types.ObjectId(dto.documentoId);
     const conceptoOrigenId = new Types.ObjectId(dto.conceptoOrigenId);
@@ -212,14 +212,14 @@ export class NotasContablesService {
     // yet, so nothing to validate against. A refusal costs no session —
     // same placement as `RecibosService.crear()`'s own periodo/lotes checks.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fecha),
       ultimoLote,
       'La fecha de la nota',
     );
-    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+    await this.lotes.exigirSinLoteAbierto(copropiedadId.toString());
 
     const resultado = await this.transaccion(async (session) => {
       // Read origin concepto's current balance ON THIS DOCUMENT — the ONLY
@@ -230,7 +230,7 @@ export class NotasContablesService {
       // vigente, o su saldo es menor" shape every other cruce guard uses.
       const filaOrigen = await this.carteraPorDocumento
         .findOne({
-          coPropertyId,
+          copropiedadId,
           inmuebleId,
           documentoId,
           conceptoId: conceptoOrigenId,
@@ -247,7 +247,7 @@ export class NotasContablesService {
       }
 
       const numero = await this.numeracion.siguienteDocumento(
-        coPropertyId.toString(),
+        copropiedadId.toString(),
         dto.codigo,
         session,
       );
@@ -255,7 +255,7 @@ export class NotasContablesService {
       const [creada] = await this.notasContables.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             inmuebleId,
             tipoDocumento: dto.tipoDocumento,
             documentoId,
@@ -281,7 +281,7 @@ export class NotasContablesService {
         this.saldos,
         this.carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         inmuebleId,
         [{ conceptoId: conceptoOrigenId, monto: dto.monto }],
         dto.monto,
@@ -298,7 +298,7 @@ export class NotasContablesService {
         this.saldos,
         this.carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         inmuebleId,
         [{ conceptoId: conceptoDestinoId, monto: dto.monto }],
         dto.monto,
@@ -310,7 +310,7 @@ export class NotasContablesService {
       // date — never `new Date()`.
       await this.postearAsiento(
         session,
-        coPropertyId,
+        copropiedadId,
         creada,
         conceptoOrigenId,
         conceptoDestinoId,
@@ -318,7 +318,7 @@ export class NotasContablesService {
       );
 
       const final = await this.notasContables
-        .findOne({ _id: creada._id, coPropertyId })
+        .findOne({ _id: creada._id, copropiedadId })
         .session(session)
         .exec();
       return toNotaContable(
@@ -342,22 +342,22 @@ export class NotasContablesService {
    * `construirDatosImpresionNotaContable` UNCHANGED.
    */
   async datosImpresion(id: string): Promise<DatosReciboImpresion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.findOneRaw(id);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
     const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
       'NT',
-      coPropertyId,
+      copropiedadId,
     );
     return construirDatosImpresionNotaContable(
       nota,
       copropiedad,
-      coPropertyId,
+      copropiedadId,
       {
         conceptos: this.conceptos,
         inmuebles: this.inmuebles!,
@@ -376,8 +376,8 @@ export class NotasContablesService {
   async findAll(
     query: ListarNotaContableDto,
   ): Promise<Paginado<NotaContableContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
     if (query.fechaDesde || query.fechaHasta) {
@@ -414,7 +414,7 @@ export class NotasContablesService {
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const inmuebles = inmuebleIds.length
       ? await this.inmuebles
-          ?.find({ coPropertyId, _id: { $in: inmuebleIds } })
+          ?.find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -442,9 +442,9 @@ export class NotasContablesService {
    * unlike every prior module).
    */
   async findOne(id: string): Promise<NotaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasContables
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota contable ${id}`);
@@ -465,9 +465,9 @@ export class NotasContablesService {
    * Returns the raw Mongoose document — used by PDF generation.
    */
   async findOneRaw(id: string): Promise<NotaContableDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasContables
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota contable ${id}`);
@@ -482,9 +482,9 @@ export class NotasContablesService {
    * `CarteraPorConceptosService`'s identical live-resolve.
    */
   async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmueble = await this.inmuebles
-      ?.findOne({ _id: inmuebleId, coPropertyId })
+      ?.findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     return inmueble?.codigo ?? '';
   }
@@ -498,14 +498,14 @@ export class NotasContablesService {
     dto: AnularNotaContableDto,
     accountId: string,
   ): Promise<NotaContableContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // The reversing asiento is dated by the user, never by the server clock
     // — same rule as creation, same reasoning: the accountant controls
     // every document date in the ledger, this system never assumes "today".
     // A refusal costs no session — same placement as `crear()`'s own check.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fecha),
@@ -515,7 +515,7 @@ export class NotasContablesService {
 
     return this.transaccion(async (session) => {
       const nota = await this.notasContables
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       if (!nota) {
@@ -541,7 +541,7 @@ export class NotasContablesService {
         this.saldos,
         this.carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         nota.inmuebleId,
         [{ conceptoId: nota.conceptoOrigenId, monto: nota.monto }],
         nota.monto,
@@ -552,7 +552,7 @@ export class NotasContablesService {
         this.saldos,
         this.carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         nota.inmuebleId,
         [{ conceptoId: nota.conceptoDestinoId, monto: nota.monto }],
         nota.monto,
@@ -564,7 +564,7 @@ export class NotasContablesService {
       // anulación's own declared date, never the note's original date.
       await this.postearAsiento(
         session,
-        coPropertyId,
+        copropiedadId,
         nota,
         nota.conceptoDestinoId,
         nota.conceptoOrigenId,
@@ -573,7 +573,7 @@ export class NotasContablesService {
 
       await this.notasContables
         .findOneAndUpdate(
-          { _id: id, coPropertyId },
+          { _id: id, copropiedadId },
           {
             $set: {
               status: 'anulado',
@@ -588,7 +588,7 @@ export class NotasContablesService {
         .exec();
 
       const final = await this.notasContables
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       return toNotaContable(
@@ -616,7 +616,7 @@ export class NotasContablesService {
    */
   private async postearAsiento(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     nota: NotaContableDocument,
     cuentaOrigenConceptoId: Types.ObjectId,
     cuentaDestinoConceptoId: Types.ObjectId,
@@ -624,16 +624,16 @@ export class NotasContablesService {
   ): Promise<void> {
     const [cuentaOrigenDoc, cuentaDestinoDoc, copropiedad] = await Promise.all([
       this.conceptos
-        .findOne({ _id: cuentaOrigenConceptoId, coPropertyId })
+        .findOne({ _id: cuentaOrigenConceptoId, copropiedadId })
         .populate('cuentaCreditoId', 'codigo')
         .session(session)
         .exec(),
       this.conceptos
-        .findOne({ _id: cuentaDestinoConceptoId, coPropertyId })
+        .findOne({ _id: cuentaDestinoConceptoId, copropiedadId })
         .populate('cuentaCreditoId', 'codigo')
         .session(session)
         .exec(),
-      this.copropiedades.findById(coPropertyId).session(session).exec(),
+      this.copropiedades.findById(copropiedadId).session(session).exec(),
     ]);
 
     const cuentaOrigen =
@@ -654,7 +654,7 @@ export class NotasContablesService {
     );
     entries = await this.conAuxiliares(
       session,
-      coPropertyId,
+      copropiedadId,
       nota.inmuebleId,
       copropiedad,
       entries,
@@ -663,7 +663,7 @@ export class NotasContablesService {
     await this.asientos.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           loteId: null,
           facturaId: null,
           reciboId: null,

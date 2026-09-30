@@ -89,7 +89,7 @@ const modeloRecibos = (creado: Record<string, unknown>) => ({
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   status: 'emitida',
   outstandingBalance: 500000,
@@ -102,7 +102,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   conceptoId: new Types.ObjectId(),
   status: 'emitida',
@@ -347,7 +347,7 @@ const construirServicio = (opts: {
   /** Default: `tenantQueDevuelve(COP)`. Los tests del job en cola (sin CLS)
    *  pasan un tenant que explota, para probar que `prepararCreacion`/
    *  `resolverInmuebleCodigo` nunca lo llaman cuando reciben un
-   *  `coPropertyId` explícito. */
+   *  `copropiedadId` explícito. */
   tenant?: TenantContextService;
 }) => {
   const session = sesionFalsa();
@@ -637,7 +637,7 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
     });
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: reciboCreado._id, coPropertyId: COP },
+      { _id: reciboCreado._id, copropiedadId: COP },
       { $set: { notes: 'Genera anticipo' } },
       expect.anything(),
     );
@@ -1320,7 +1320,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
   it('rechaza — todo o nada — aplicar contra una factura de OTRO inmueble', async () => {
     // FIFO filtra sus candidatas por inmuebleId; el modo manual acepta el
     // documentoId que le manden, y `decrementarSaldoFactura` sólo mira
-    // {_id, coPropertyId, status, saldo}. Sin este chequeo, un recibo de una
+    // {_id, copropiedadId, status, saldo}. Sin este chequeo, un recibo de una
     // unidad se podía cruzar contra la factura de OTRA unidad de la misma
     // copropiedad, y las dos vistas de saldo por inmueble quedaban corruptas.
     const OTRO_INMUEBLE = new Types.ObjectId();
@@ -1507,7 +1507,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     });
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: reciboCreado._id, coPropertyId: COP },
+      { _id: reciboCreado._id, copropiedadId: COP },
       { $set: { notes: 'Cancela factura 173' } },
       expect.anything(),
     );
@@ -2651,7 +2651,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     });
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: reciboCreado._id, coPropertyId: COP },
+      { _id: reciboCreado._id, copropiedadId: COP },
       { $set: { notes: 'Abona a factura 340' } },
       expect.anything(),
     );
@@ -2661,7 +2661,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
 describe('RecibosService.anular', () => {
   const reciboActivo = (over: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
-    coPropertyId: COP,
+    copropiedadId: COP,
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     prefix: 'RC',
@@ -2768,7 +2768,7 @@ describe('RecibosService.anular', () => {
       expect.objectContaining({ returnDocument: 'after' }),
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: aplicacionActiva._id, coPropertyId: COP },
+      { _id: aplicacionActiva._id, copropiedadId: COP },
       { $set: { status: 'revertida', revertedAt: expect.any(Date) as Date } },
       expect.objectContaining({ session: expect.anything() as unknown }),
     );
@@ -2779,7 +2779,7 @@ describe('RecibosService.anular', () => {
     // dejara de escribir voidedDetail, o que lo confundiera con voidedReason,
     // pasaría inadvertido sin esta aserción.
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: recibo._id.toString(), coPropertyId: COP },
+      { _id: recibo._id.toString(), copropiedadId: COP },
       {
         $set: {
           status: 'anulado',
@@ -3500,7 +3500,7 @@ describe('RecibosService.findAll', () => {
 
     await service.findAll({});
 
-    expect(recibos.filtros[0]).toMatchObject({ coPropertyId: COP });
+    expect(recibos.filtros[0]).toMatchObject({ copropiedadId: COP });
   });
 
   it('aplica conAnticipoDisponible resolviendo candidatos desde SaldoDocumentoOrigen', async () => {
@@ -4178,7 +4178,7 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
   // middleware HTTP, nunca dentro de un worker de cola. Un tenant que
   // explota reproduce exactamente ese entorno: si cualquiera de estos
   // métodos igual llama a `resolveCoPropertyId()` en vez de usar el
-  // `coPropertyId` explícito que se le pasó, el mock revienta y prueba el
+  // `copropiedadId` explícito que se le pasó, el mock revienta y prueba el
   // bug real reportado en producción ("No hay una copropiedad activa para
   // esta petición" al hacer clic en "Actualizar Cartera").
   const tenantQueExplota = (): TenantContextService =>
@@ -4190,7 +4190,7 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
       },
     }) as unknown as TenantContextService;
 
-  it('prepararCreacion no llama a resolveCoPropertyId cuando recibe un coPropertyId explícito', async () => {
+  it('prepararCreacion no llama a resolveCoPropertyId cuando recibe un copropiedadId explícito', async () => {
     const { service } = construirServicio({
       reciboCreado: { _id: new Types.ObjectId() },
       tenant: tenantQueExplota(),
@@ -4212,10 +4212,10 @@ describe('RecibosService — dentro de un job en cola (sin CLS)', () => {
         },
         COP,
       ),
-    ).resolves.toMatchObject({ coPropertyId: COP });
+    ).resolves.toMatchObject({ copropiedadId: COP });
   });
 
-  it('resolverInmuebleCodigo no llama a resolveCoPropertyId cuando recibe un coPropertyId explícito', async () => {
+  it('resolverInmuebleCodigo no llama a resolveCoPropertyId cuando recibe un copropiedadId explícito', async () => {
     const { service } = construirServicio({
       reciboCreado: { _id: new Types.ObjectId() },
       tenant: tenantQueExplota(),
@@ -4416,7 +4416,7 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
     delta: number,
   ): EscrituraFilaAplicacionLote => ({
     reciboId: new Types.ObjectId(),
-    recibo: { coPropertyId: COP },
+    recibo: { copropiedadId: COP },
     saldoDocumentoOrigen: {},
     aplicacionesCartera: [{ documentId: documentoId }],
     asientoContable: {},

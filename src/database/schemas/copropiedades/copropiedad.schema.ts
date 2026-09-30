@@ -7,7 +7,7 @@ export type CopropiedadDocument = HydratedDocument<Copropiedad>;
 
 /**
  * A building this system bills for. Also the tenant: nearly every other
- * collection carries a `coPropertyId` and is filtered by it.
+ * collection carries a `copropiedadId` and is filtered by it.
  *
  * Finanzas owns this collection outright — the product is sold on its own, so
  * a client may have no other system to take a catalog from.

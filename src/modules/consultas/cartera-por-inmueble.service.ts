@@ -115,7 +115,7 @@ export class CarteraPorInmuebleService {
   async findOne(
     query: ConsultarCarteraPorInmuebleDto,
   ): Promise<RespuestaCarteraPorInmueble> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     // A bare "YYYY-MM-DD" parses as that day's midnight (00:00:00.000Z),
     // which would exclude anything dated that same day with a real
@@ -137,14 +137,14 @@ export class CarteraPorInmuebleService {
       !query.fecha || fecha.getTime() >= finDelDiaCorte(new Date()).getTime();
 
     const inmueble = await this.inmuebles
-      .findOne({ _id: inmuebleId, coPropertyId })
+      .findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     const inmuebleCodigo = inmueble?.codigo ?? '';
 
     let propietario: string | null = null;
     if (inmueble?.titularId) {
       const tercero = await this.terceros
-        .findOne({ _id: inmueble.titularId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, copropiedadId })
         .exec();
       propietario = tercero?.nombre ?? null;
     }
@@ -153,7 +153,7 @@ export class CarteraPorInmuebleService {
     const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
         .find({
-          coPropertyId,
+          copropiedadId,
           inmuebleId,
           status: 'emitida',
           issueDate: { $lte: limiteEmision },
@@ -161,7 +161,7 @@ export class CarteraPorInmuebleService {
         .exec(),
       this.notasDebito
         .find({
-          coPropertyId,
+          copropiedadId,
           inmuebleId,
           status: 'emitida',
           issueDate: { $lte: limiteEmision },
@@ -169,7 +169,7 @@ export class CarteraPorInmuebleService {
         .exec(),
       this.saldosIniciales
         .find({
-          coPropertyId,
+          copropiedadId,
           inmuebleId,
           status: 'activo',
           fecha: { $lte: limiteEmision },
@@ -184,7 +184,7 @@ export class CarteraPorInmuebleService {
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
-          .find({ coPropertyId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentId: { $in: docIds } })
           .exec()
       : [];
 
@@ -204,7 +204,7 @@ export class CarteraPorInmuebleService {
     const carteraPorDocumentoRows =
       esConsultaVigente && docIds.length
         ? await this.carteraPorDocumento
-            .find({ coPropertyId, inmuebleId, documentoId: { $in: docIds } })
+            .find({ copropiedadId, inmuebleId, documentoId: { $in: docIds } })
             .exec()
         : [];
     const carteraDocById = new Map<string, Map<string, number>>();
@@ -401,8 +401,8 @@ export class CarteraPorInmuebleService {
     );
 
     const [conceptos, saldos] = await Promise.all([
-      this.conceptosCobro.find({ coPropertyId }).sort({ orden: 1 }).exec(),
-      this.saldosCartera.find({ coPropertyId, inmuebleId }).exec(),
+      this.conceptosCobro.find({ copropiedadId }).sort({ orden: 1 }).exec(),
+      this.saldosCartera.find({ copropiedadId, inmuebleId }).exec(),
     ]);
     const saldosPorConcepto = new Map<string, number>();
     for (const s of saldos) {

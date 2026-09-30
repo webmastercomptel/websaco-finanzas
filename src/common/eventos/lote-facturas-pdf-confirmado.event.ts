@@ -12,7 +12,7 @@
 export const LOTE_FACTURAS_PDF_CONFIRMADO = 'lote-facturas.pdf-confirmado';
 
 export interface LoteFacturasPdfConfirmadoEvent {
-  coPropertyId: string;
+  copropiedadId: string;
   loteId: string;
   objectPath: string;
   /**

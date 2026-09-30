@@ -6,7 +6,7 @@ const id = () => new Types.ObjectId();
 
 const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   category: 'IN',
   code: 'RC',
   prefix: 'RC',
@@ -17,14 +17,14 @@ const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
 
 const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '301',
   ...over,
 });
 
 const conceptoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   nombre: 'Administracion',
   orden: 100,
   ...over,
@@ -87,7 +87,7 @@ describe('ConsecutivosService', () => {
       const conceptoId = id();
       const recibo = {
         _id: reciboId,
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 5,
         fullNumber: 'RC-5',
@@ -139,7 +139,7 @@ describe('ConsecutivosService', () => {
       const inmId = id();
       const recibo = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 6,
         fullNumber: 'RC-6',
@@ -170,7 +170,7 @@ describe('ConsecutivosService', () => {
       const conceptoId = id();
       const nd = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         conceptoId,
         number: 3,
@@ -214,7 +214,7 @@ describe('ConsecutivosService', () => {
       const conceptoMultas = id();
       const nc = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 2,
         fullNumber: 'NC-2',
@@ -252,7 +252,7 @@ describe('ConsecutivosService', () => {
       const inmId = id();
       const nc = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 1,
         fullNumber: 'NC-1',
@@ -289,7 +289,7 @@ describe('ConsecutivosService', () => {
       const conceptoDestino = id();
       const nt = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 4,
         fullNumber: 'NT-4',
@@ -328,7 +328,7 @@ describe('ConsecutivosService', () => {
       const notaId = id();
       const na = {
         _id: notaId,
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 1,
         fullNumber: 'NA-1',
@@ -385,7 +385,7 @@ describe('ConsecutivosService', () => {
       const conceptoId = id();
       const f = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         number: 100,
         fullNumber: 'FV-100',
@@ -423,7 +423,7 @@ describe('ConsecutivosService', () => {
     const inmId = id();
     const nd1 = {
       _id: id(),
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId: inmId,
       conceptoId: id(),
       number: 9,
@@ -434,7 +434,7 @@ describe('ConsecutivosService', () => {
     };
     const nd2 = {
       _id: id(),
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId: inmId,
       conceptoId: id(),
       number: 2,

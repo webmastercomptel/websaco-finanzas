@@ -47,7 +47,7 @@ export class AuthController {
       nombre: user.nombre ?? null,
       esAdministradorPlataforma,
       copropiedades: copropiedades.map((c) => ({
-        id: c.coPropertyId,
+        id: c.copropiedadId,
         codigo: c.codigo,
         nombre: c.nombre,
       })),

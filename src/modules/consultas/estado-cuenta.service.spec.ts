@@ -6,7 +6,7 @@ const id = () => new Types.ObjectId();
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   issueDate: new Date('2026-01-15'),
   dueDate: new Date('2026-02-01'),
@@ -21,21 +21,21 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   fullNumber: 'RC-001-001',
   ...over,
 });
 
 const ncDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   fullNumber: 'NC-001-001',
   ...over,
 });
 
 const ntDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   fullNumber: 'NT-001-001',
   description: 'Reclasificación',
   monto: 50000,
@@ -46,7 +46,7 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
 
 const naDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   fullNumber: 'NA-001-001',
   issueDate: new Date('2026-01-25'),
   ...over,
@@ -58,7 +58,7 @@ const appDoc = (
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   sourceType,
   sourceId,
   documentType: 'FV' as const,
@@ -81,7 +81,7 @@ const mockFindById = (data: unknown = null) => ({
   exec: jest.fn().mockResolvedValue(data),
 });
 
-/** For `inmuebles`/`terceros` — both now resolved via `findOne({_id, coPropertyId})`. */
+/** For `inmuebles`/`terceros` — both now resolved via `findOne({_id, copropiedadId})`. */
 const mockFindOne = (data: unknown = null) => ({
   findOne: jest.fn().mockReturnThis(),
   exec: jest.fn().mockResolvedValue(data),
@@ -881,7 +881,7 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ inmuebleId: inmId, total: 0 });
       const nd = {
         _id: ndId,
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         fullNumber: 'ND-0003',
         total: 50000,
@@ -1040,7 +1040,7 @@ describe('EstadoCuentaService', () => {
       expect(result.fechaEmision).toBe('2026-01-15T00:00:00.000Z');
     });
 
-    it('filtra la consulta a Inmueble y Tercero por coPropertyId (tenancy law)', async () => {
+    it('filtra la consulta a Inmueble y Tercero por copropiedadId (tenancy law)', async () => {
       const inmId = id();
       const holderId = id();
       const f = facturaDoc({ inmuebleId: inmId, total: 0 });
@@ -1070,10 +1070,10 @@ describe('EstadoCuentaService', () => {
       });
 
       expect(inmueblesFindOne).toHaveBeenCalledWith(
-        expect.objectContaining({ coPropertyId: COP }),
+        expect.objectContaining({ copropiedadId: COP }),
       );
       expect(tercerosFindOne).toHaveBeenCalledWith(
-        expect.objectContaining({ coPropertyId: COP }),
+        expect.objectContaining({ copropiedadId: COP }),
       );
     });
 

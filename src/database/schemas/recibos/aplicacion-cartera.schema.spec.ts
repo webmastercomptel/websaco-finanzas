@@ -17,7 +17,7 @@ const factura = new Types.ObjectId();
 const cuenta = new Types.ObjectId();
 
 const base = (over: Record<string, unknown> = {}) => ({
-  coPropertyId: copropiedad,
+  copropiedadId: copropiedad,
   sourceType: 'RC',
   sourceId: recibo,
   documentType: 'FV',
@@ -99,7 +99,7 @@ describe('AplicacionCarteraSchema — índices (generalización, no duplicación
   });
 
   it('declara exactamente dos índices propios (documento y source) — ninguno de más', () => {
-    // Además de los `index: true` de `_id`/`coPropertyId` que Mongoose agrega
+    // Además de los `index: true` de `_id`/`copropiedadId` que Mongoose agrega
     // por su cuenta, este schema declara sus dos índices compuestos y nada
     // más — una tercera entrada acá sería el síntoma exacto del bug de
     // AsientoContable.facturaId: un índice viejo sobreviviendo al lado del

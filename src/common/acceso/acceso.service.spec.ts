@@ -66,7 +66,7 @@ describe('AccesoService.copropiedadesDe', () => {
       asignaciones: [
         {
           scope: 'copropiedad',
-          coPropertyId: copA,
+          copropiedadId: copA,
           permissions: ['facturas.ver'],
         },
       ],
@@ -77,7 +77,7 @@ describe('AccesoService.copropiedadesDe', () => {
 
     expect(resultado).toHaveLength(1);
     expect(resultado[0]).toMatchObject({
-      coPropertyId: copA.toString(),
+      copropiedadId: copA.toString(),
       codigo: 'COP-A',
       permissions: ['facturas.ver'],
     });
@@ -130,7 +130,7 @@ describe('AccesoService.copropiedadesDe', () => {
     // Fila mal armada: no debe romper la resolución del resto.
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', coPropertyId: null, permissions: ['x.y'] },
+        { scope: 'copropiedad', copropiedadId: null, permissions: ['x.y'] },
       ],
       copropiedades: [],
     });
@@ -144,7 +144,7 @@ describe('AccesoService.copropiedadesDe', () => {
     // `describir` sólo trae las activas; la asignación existe pero no rinde.
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', coPropertyId: copC, permissions: ['x.y'] },
+        { scope: 'copropiedad', copropiedadId: copC, permissions: ['x.y'] },
       ],
       copropiedades: [],
     });
@@ -175,7 +175,7 @@ describe('AccesoService.accesoA', () => {
       asignaciones: [
         {
           scope: 'copropiedad',
-          coPropertyId: copA,
+          copropiedadId: copA,
           permissions: ['facturas.ver'],
         },
       ],
@@ -190,7 +190,7 @@ describe('AccesoService.accesoA', () => {
   it('devuelve null para una copropiedad que no tiene asignada', async () => {
     const service = servicio({
       asignaciones: [
-        { scope: 'copropiedad', coPropertyId: copA, permissions: [] },
+        { scope: 'copropiedad', copropiedadId: copA, permissions: [] },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
     });

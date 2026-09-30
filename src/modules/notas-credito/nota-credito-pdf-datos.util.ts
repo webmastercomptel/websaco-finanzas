@@ -100,7 +100,7 @@ export async function construirDatosImpresionNotaCredito(
   montoSinAplicar: number,
   aplicaciones: AplicacionCarteraDocument[],
   copropiedad: CopropiedadDocument,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaCredito,
   // Resolved by the caller (`NotasCreditoService.datosImpresion`, via
   // `TituloDocumentoService.resolverGenerico('NC', ...)`) — see
@@ -141,7 +141,7 @@ export async function construirDatosImpresionNotaCredito(
       facturaIdsPorClave.size
         ? modelos.facturas
             .find({
-              coPropertyId,
+              copropiedadId,
               _id: { $in: [...facturaIdsPorClave.values()] },
             })
             .exec()
@@ -149,7 +149,7 @@ export async function construirDatosImpresionNotaCredito(
       notaDebitoIdsPorClave.size
         ? modelos.notasDebito
             .find({
-              coPropertyId,
+              copropiedadId,
               _id: { $in: [...notaDebitoIdsPorClave.values()] },
             })
             .exec()
@@ -157,14 +157,16 @@ export async function construirDatosImpresionNotaCredito(
       saldoInicialIdsPorClave.size
         ? modelos.saldosIniciales
             ?.find({
-              coPropertyId,
+              copropiedadId,
               _id: { $in: [...saldoInicialIdsPorClave.values()] },
             })
             .exec()
         : Promise.resolve([]),
-      modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
+      modelos.inmuebles.findOne({ _id: nota.inmuebleId, copropiedadId }).exec(),
       nota.terceroId
-        ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
+        ? modelos.terceros
+            .findOne({ _id: nota.terceroId, copropiedadId })
+            .exec()
         : Promise.resolve(null),
     ]);
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
@@ -182,7 +184,7 @@ export async function construirDatosImpresionNotaCredito(
   const conceptoIds = notasDebito.map((n) => n.conceptoId);
   const conceptos = conceptoIds.length
     ? await modelos.conceptosCobro
-        .find({ coPropertyId, _id: { $in: conceptoIds } })
+        .find({ copropiedadId, _id: { $in: conceptoIds } })
         .populate('cuentaCreditoId', 'codigo')
         .populate('cuentaDebitoId', 'codigo')
         .exec()
@@ -332,7 +334,7 @@ export async function construirDatosImpresionNotaCredito(
   }
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
+    .find({ copropiedadId, codigo: { $in: [...codigosUsados] } })
     .exec();
   const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
   for (const linea of lineas) {

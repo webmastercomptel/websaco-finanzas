@@ -9,7 +9,7 @@ import { ACTIVE_COPROPERTY_KEY } from './tenant-context.constants';
  *
  * The ONLY trustworthy source is CLS, populated per request from the
  * `X-CoProperty-Id` header AFTER the caller's assignment has been validated.
- * A client-supplied explicit id (e.g. a `?coPropertyId=` query param) is NOT
+ * A client-supplied explicit id (e.g. a `?copropiedadId=` query param) is NOT
  * trusted: it may only echo the already-validated active tenant, and any
  * mismatch is a cross-tenant attempt. Callers should prefer the no-argument
  * form.

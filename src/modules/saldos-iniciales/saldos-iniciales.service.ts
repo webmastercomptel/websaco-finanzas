@@ -108,12 +108,12 @@ export class SaldosInicialesService {
   }
 
   private async siguienteNumero(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     session: ClientSession,
   ): Promise<number> {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
-        { coPropertyId },
+        { copropiedadId },
         { $inc: { nextNumber: 1 } },
         { new: true, upsert: true, session },
       )
@@ -133,19 +133,19 @@ export class SaldosInicialesService {
     accountId: string,
     dto: ImportarSaldosInicialesDto,
   ): Promise<ResultadoImportacionSaldosIniciales> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // `_id` IS the tenant id here — findById is correct, not the trap (see
     // backend/CLAUDE.md's own note on this exact mistake).
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
     const conceptos = await this.conceptosCobro
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .populate('cuentaDebitoId', 'codigo')
       .populate('cuentaCreditoId', 'codigo')
       .exec();
@@ -156,7 +156,7 @@ export class SaldosInicialesService {
     // clears this and allows a fresh attempt, without ever deleting
     // anything.
     const activos = await this.saldosIniciales
-      .countDocuments({ coPropertyId, status: 'activo' })
+      .countDocuments({ copropiedadId, status: 'activo' })
       .exec();
     if (activos > 0) {
       throw new ConflictException(
@@ -169,7 +169,7 @@ export class SaldosInicialesService {
     // this block runs: no lote, no rows, no progress tracking.
     const codigos = [...new Set(dto.filas.map((f) => f.codigoInmueble))];
     const inmueblesEncontrados = await this.inmuebles
-      .find({ coPropertyId, codigo: { $in: codigos } })
+      .find({ copropiedadId, codigo: { $in: codigos } })
       .exec();
     const inmueblePorCodigo = new Map(
       inmueblesEncontrados.map((i) => [i.codigo, i]),
@@ -256,7 +256,7 @@ export class SaldosInicialesService {
     // final tallies once every row has been attempted.
     const [lote] = await this.lotes.create([
       {
-        coPropertyId,
+        copropiedadId,
         totalFilas: 0,
         totalMonto: 0,
         importedBy: accountId,
@@ -273,7 +273,7 @@ export class SaldosInicialesService {
     // never leaves a stuck row behind.
     const total = dto.filas.length;
     const intervalo = this.progreso.intervalo(total);
-    await this.progreso.iniciar(coPropertyId, 'saldos-iniciales', total);
+    await this.progreso.iniciar(copropiedadId, 'saldos-iniciales', total);
 
     try {
       for (const [indice, fila] of dto.filas.entries()) {
@@ -285,7 +285,7 @@ export class SaldosInicialesService {
           }
 
           const inmueble = await this.inmuebles
-            .findOne({ coPropertyId, codigo: fila.codigoInmueble })
+            .findOne({ copropiedadId, codigo: fila.codigoInmueble })
             .exec();
           if (!inmueble) {
             throw new Error(
@@ -316,12 +316,12 @@ export class SaldosInicialesService {
           const total = lineas.reduce((sum, l) => sum + l.montoOriginal, 0);
 
           await this.transaccion(async (session) => {
-            const numero = await this.siguienteNumero(coPropertyId, session);
+            const numero = await this.siguienteNumero(copropiedadId, session);
 
             const [creado] = await this.saldosIniciales.create(
               [
                 {
-                  coPropertyId,
+                  copropiedadId,
                   loteId: lote._id,
                   inmuebleId: inmueble._id,
                   unitCode: inmueble.codigo,
@@ -342,7 +342,7 @@ export class SaldosInicialesService {
             await this.saldoTotalDocumento.create(
               [
                 {
-                  coPropertyId,
+                  copropiedadId,
                   tipoDocumento: 'SI',
                   documentoId: creado._id,
                   total,
@@ -358,7 +358,7 @@ export class SaldosInicialesService {
               // this document was never seeded before.
               const saldoAnteriorRow = await this.saldosCartera
                 .findOne({
-                  coPropertyId,
+                  copropiedadId,
                   inmuebleId: inmueble._id,
                   conceptoId: linea.conceptoId,
                 })
@@ -369,7 +369,7 @@ export class SaldosInicialesService {
               await this.carteraPorDocumento.create(
                 [
                   {
-                    coPropertyId,
+                    copropiedadId,
                     inmuebleId: inmueble._id,
                     tipoDocumento: 'SI',
                     documentoId: creado._id,
@@ -386,7 +386,7 @@ export class SaldosInicialesService {
               await this.saldosCartera
                 .findOneAndUpdate(
                   {
-                    coPropertyId,
+                    copropiedadId,
                     inmuebleId: inmueble._id,
                     conceptoId: linea.conceptoId,
                   },
@@ -410,7 +410,7 @@ export class SaldosInicialesService {
         const completadas = indice + 1;
         if (completadas % intervalo === 0 || completadas === total) {
           await this.progreso.actualizar(
-            coPropertyId,
+            copropiedadId,
             'saldos-iniciales',
             completadas,
             total,
@@ -418,7 +418,7 @@ export class SaldosInicialesService {
         }
       }
     } finally {
-      await this.progreso.finalizar(coPropertyId, 'saldos-iniciales');
+      await this.progreso.finalizar(copropiedadId, 'saldos-iniciales');
     }
 
     await this.lotes
@@ -434,18 +434,18 @@ export class SaldosInicialesService {
   /** Null while no import is currently running for the active coproperty —
    *  see `ProgresoImportacionService.obtener`. */
   async obtenerProgresoImportacion(): Promise<ProgresoActual | null> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.progreso.obtener(coPropertyId, 'saldos-iniciales');
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.progreso.obtener(copropiedadId, 'saldos-iniciales');
   }
 
   async listar(): Promise<SaldoInicialContract[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const [documentos, inmuebles] = await Promise.all([
       this.saldosIniciales
-        .find({ coPropertyId })
+        .find({ copropiedadId })
         .sort({ createdAt: -1 })
         .exec(),
-      this.inmuebles.find({ coPropertyId }).exec(),
+      this.inmuebles.find({ copropiedadId }).exec(),
     ]);
     const inmuebleCodigoPorId = new Map(
       inmuebles.map((i) => [i._id.toString(), i.codigo]),
@@ -480,12 +480,12 @@ export class SaldosInicialesService {
     dto: AnularSaldoInicialDto,
     accountId: string,
   ): Promise<SaldoInicialContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     return this.transaccion(async (session) => {
       const saldoInicialId = new Types.ObjectId(id);
       const doc = await this.saldosIniciales
-        .findOne({ _id: saldoInicialId, coPropertyId })
+        .findOne({ _id: saldoInicialId, copropiedadId })
         .session(session)
         .exec();
       if (!doc) {
@@ -513,7 +513,7 @@ export class SaldosInicialesService {
           await this.saldosCartera
             .findOneAndUpdate(
               {
-                coPropertyId,
+                copropiedadId,
                 inmuebleId: doc.inmuebleId,
                 conceptoId: fila.conceptoId,
               },
@@ -540,7 +540,7 @@ export class SaldosInicialesService {
 
       await this.saldosIniciales
         .updateOne(
-          { _id: saldoInicialId, coPropertyId },
+          { _id: saldoInicialId, copropiedadId },
           {
             $set: {
               status: 'anulado',
@@ -555,11 +555,11 @@ export class SaldosInicialesService {
         .exec();
 
       const final = await this.saldosIniciales
-        .findOne({ _id: saldoInicialId, coPropertyId })
+        .findOne({ _id: saldoInicialId, copropiedadId })
         .session(session)
         .exec();
       const inmueble = await this.inmuebles
-        .findOne({ _id: doc.inmuebleId, coPropertyId })
+        .findOne({ _id: doc.inmuebleId, copropiedadId })
         .session(session)
         .exec();
       return toSaldoInicial(final!, inmueble?.codigo ?? '', 0);

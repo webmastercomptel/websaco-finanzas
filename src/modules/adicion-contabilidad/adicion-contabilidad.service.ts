@@ -157,9 +157,9 @@ export class AdicionContabilidadService {
   /** History of past generations — the "control" this feature exists to
    *  provide: what was already exported, and when. */
   async listar(): Promise<LoteContabilidadContract[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const docs = await this.lotes
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ number: -1 })
       .exec();
     return docs.map(toLoteContabilidad);
@@ -173,10 +173,10 @@ export class AdicionContabilidadService {
    * driving this whole feature: "para que no se vuelvan a adicionar").
    */
   async generar(accountId: string): Promise<RespuestaAdicionContabilidad> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const ultimoLote = await this.lotesFacturacion.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     if (!ultimoLote) {
       throw new BadRequestException(
@@ -187,7 +187,7 @@ export class AdicionContabilidadService {
     return this.transaccion(async (session) => {
       const asientos = await this.asientos
         .find({
-          coPropertyId,
+          copropiedadId,
           contabilidadLoteId: null,
           date: { $gte: ultimoLote.periodStart, $lte: ultimoLote.periodEnd },
         })
@@ -203,24 +203,24 @@ export class AdicionContabilidadService {
 
       const anchorMap = await this.buildAnchorMap(
         asientos,
-        coPropertyId,
+        copropiedadId,
         session,
       );
       const conceptoMap = await this.resolveConceptos(
         asientos,
-        coPropertyId,
+        copropiedadId,
         session,
       );
       const comprobantePorClave = await this.resolveComprobantes(
         asientos,
         anchorMap,
-        coPropertyId,
+        copropiedadId,
         session,
       );
 
       const consecutivo = await this.consecutivosLote
         .findOneAndUpdate(
-          { coPropertyId },
+          { copropiedadId },
           { $inc: { nextNumber: 1 } },
           { returnDocument: 'after', upsert: true, session },
         )
@@ -274,7 +274,7 @@ export class AdicionContabilidadService {
       const [loteCreado] = await this.lotes.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             number: numeroLote,
             periodStart: ultimoLote.periodStart,
             periodEnd: ultimoLote.periodEnd,
@@ -305,7 +305,7 @@ export class AdicionContabilidadService {
    *  the bare number/prefix, not inmueble metadata. */
   private async buildAnchorMap(
     asientos: AsientoContableDocument[],
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     session: ClientSession,
   ): Promise<Map<string, AnchorInfo>> {
     const map = new Map<string, AnchorInfo>();
@@ -336,7 +336,7 @@ export class AdicionContabilidadService {
       const ids = idsByType.get(tipo);
       if (!ids || ids.length === 0) continue;
       const docs = await model
-        .find({ _id: { $in: ids }, coPropertyId }, { prefix: 1, number: 1 })
+        .find({ _id: { $in: ids }, copropiedadId }, { prefix: 1, number: 1 })
         .session(session)
         .exec();
       for (const doc of docs) {
@@ -357,7 +357,7 @@ export class AdicionContabilidadService {
    */
   private async resolveConceptos(
     asientos: AsientoContableDocument[],
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     session: ClientSession,
   ): Promise<Map<string, string>> {
     const map = new Map<string, string>();
@@ -380,7 +380,7 @@ export class AdicionContabilidadService {
     const reciboIds = idsByType.get('RC');
     if (reciboIds && reciboIds.length > 0) {
       const recibos = await this.recibos
-        .find({ _id: { $in: reciboIds }, coPropertyId }, { notes: 1 })
+        .find({ _id: { $in: reciboIds }, copropiedadId }, { notes: 1 })
         .session(session)
         .exec();
       for (const r of recibos) agregarSiNoVacio(r._id, r.notes);
@@ -389,7 +389,7 @@ export class AdicionContabilidadService {
     const notaCreditoIds = idsByType.get('NC');
     if (notaCreditoIds && notaCreditoIds.length > 0) {
       const notasCredito = await this.notasCredito
-        .find({ _id: { $in: notaCreditoIds }, coPropertyId }, { notes: 1 })
+        .find({ _id: { $in: notaCreditoIds }, copropiedadId }, { notes: 1 })
         .session(session)
         .exec();
       for (const n of notasCredito) agregarSiNoVacio(n._id, n.notes);
@@ -398,7 +398,10 @@ export class AdicionContabilidadService {
     const notaDebitoIds = idsByType.get('ND');
     if (notaDebitoIds && notaDebitoIds.length > 0) {
       const notasDebito = await this.notasDebito
-        .find({ _id: { $in: notaDebitoIds }, coPropertyId }, { description: 1 })
+        .find(
+          { _id: { $in: notaDebitoIds }, copropiedadId },
+          { description: 1 },
+        )
         .session(session)
         .exec();
       for (const n of notasDebito) agregarSiNoVacio(n._id, n.description);
@@ -408,7 +411,7 @@ export class AdicionContabilidadService {
     if (notaContableIds && notaContableIds.length > 0) {
       const notasContables = await this.notasContables
         .find(
-          { _id: { $in: notaContableIds }, coPropertyId },
+          { _id: { $in: notaContableIds }, copropiedadId },
           { description: 1 },
         )
         .session(session)
@@ -423,7 +426,7 @@ export class AdicionContabilidadService {
     if (facturaIds && facturaIds.length > 0) {
       const facturas = await this.facturas
         .find(
-          { _id: { $in: facturaIds }, coPropertyId },
+          { _id: { $in: facturaIds }, copropiedadId },
           { periodStart: 1, periodEnd: 1 },
         )
         .session(session)
@@ -442,7 +445,7 @@ export class AdicionContabilidadService {
     if (notaAnticipoIds && notaAnticipoIds.length > 0) {
       const notasAnticipo = await this.notasAnticipo
         .find(
-          { _id: { $in: notaAnticipoIds }, coPropertyId },
+          { _id: { $in: notaAnticipoIds }, copropiedadId },
           { reciboOrigenId: 1 },
         )
         .session(session)
@@ -451,7 +454,7 @@ export class AdicionContabilidadService {
         ...new Set(notasAnticipo.map((n) => n.reciboOrigenId.toString())),
       ].map((id) => new Types.ObjectId(id));
       const recibos = await this.recibos
-        .find({ _id: { $in: reciboOrigenIds }, coPropertyId }, { number: 1 })
+        .find({ _id: { $in: reciboOrigenIds }, copropiedadId }, { number: 1 })
         .session(session)
         .exec();
       const numeroPorRecibo = new Map(
@@ -477,7 +480,7 @@ export class AdicionContabilidadService {
   private async resolveComprobantes(
     asientos: AsientoContableDocument[],
     anchorMap: Map<string, AnchorInfo>,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     session: ClientSession,
   ): Promise<Map<string, string | null>> {
     const map = new Map<string, string | null>();
@@ -496,7 +499,7 @@ export class AdicionContabilidadService {
       ...new Set([...claves].map((c) => c.split(':')[2] as CategoriaDocumento)),
     ];
     const consecutivos = await this.consecutivosDocumento
-      .find({ coPropertyId, category: { $in: categorias } })
+      .find({ copropiedadId, category: { $in: categorias } })
       .session(session)
       .exec();
 

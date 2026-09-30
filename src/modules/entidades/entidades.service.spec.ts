@@ -86,7 +86,7 @@ describe('EntidadesService.findAll', () => {
     );
 
     return service.findAll({}).then(() => {
-      expect(modelo.filtros[0]).not.toHaveProperty('coPropertyId');
+      expect(modelo.filtros[0]).not.toHaveProperty('copropiedadId');
     });
   });
 

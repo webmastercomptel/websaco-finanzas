@@ -65,7 +65,7 @@ export class NotaCredito {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -186,8 +186,12 @@ export const NotaCreditoSchema = SchemaFactory.createForClass(NotaCredito);
 
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as Recibo/Factura.
-NotaCreditoSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+NotaCreditoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
 
 // GET /notas-credito?inmuebleId=...&conAnticipoDisponible=true-shaped query,
 // same reasoning as Recibo's own index.
-NotaCreditoSchema.index({ coPropertyId: 1, inmuebleId: 1, unappliedAmount: 1 });
+NotaCreditoSchema.index({
+  copropiedadId: 1,
+  inmuebleId: 1,
+  unappliedAmount: 1,
+});

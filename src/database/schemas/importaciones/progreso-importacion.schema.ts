@@ -37,7 +37,7 @@ export class ProgresoImportacion {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: TIPOS_IMPORTACION })
   kind: TipoImportacion;
@@ -52,4 +52,7 @@ export class ProgresoImportacion {
 export const ProgresoImportacionSchema =
   SchemaFactory.createForClass(ProgresoImportacion);
 
-ProgresoImportacionSchema.index({ coPropertyId: 1, kind: 1 }, { unique: true });
+ProgresoImportacionSchema.index(
+  { copropiedadId: 1, kind: 1 },
+  { unique: true },
+);

@@ -32,7 +32,7 @@ const entriesFijas = [
 
 const asientoFixture = (over: Record<string, unknown>) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   loteId: null,
   facturaId: null,
   reciboId: null,

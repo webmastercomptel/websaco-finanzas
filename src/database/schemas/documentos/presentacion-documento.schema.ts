@@ -81,7 +81,7 @@ export class PresentacionDocumento {
   documentoId: Types.ObjectId;
 
   /** Set by `solicitarGeneracion`, computed server-side from
-   *  `(coPropertyId, tipoDocumento, documentoId)` — never accepted from a
+   *  `(copropiedadId, tipoDocumento, documentoId)` — never accepted from a
    *  caller, same tenancy-law reasoning as `TenantContextService`: a
    *  client-supplied storage path for something that becomes a permanent
    *  record must never be trusted. `null` only ever appears transiently on

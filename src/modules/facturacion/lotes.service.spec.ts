@@ -18,7 +18,7 @@ const CUENTA = new Types.ObjectId().toString();
 
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'lote-1' },
-  coPropertyId: COP,
+  copropiedadId: COP,
   number: 1,
   status: 'borrador',
   billingDate: new Date('2026-08-27'),
@@ -147,7 +147,7 @@ describe('LotesFacturacionService.crear', () => {
     });
 
     expect(lotes.escrituras[0]).toMatchObject({
-      coPropertyId: COP,
+      copropiedadId: COP,
       number: 7,
       status: 'borrador',
       lateInterestRate: 1.9,
@@ -682,7 +682,7 @@ describe('LotesFacturacionService.crearIndividual', () => {
     await service.crearIndividual(CUENTA, { inmuebleId: INMUEBLE });
 
     expect(lotes.escrituras[0]).toMatchObject({
-      coPropertyId: COP,
+      copropiedadId: COP,
       number: 9,
       status: 'borrador',
       inmuebleId: new Types.ObjectId(INMUEBLE),
@@ -1190,7 +1190,7 @@ describe('LotesFacturacionService.liquidar', () => {
   const unidad = (over: Record<string, unknown> = {}) => ({
     _id: { toString: () => 'inm-1' },
     codigo: '301',
-    coPropertyId: COP,
+    copropiedadId: COP,
     titularId: { toString: () => 'ter-1' },
     estado: 'active',
     ...over,
@@ -3093,7 +3093,7 @@ describe('LotesFacturacionService.cancelar', () => {
 
     await service.cancelar('lote-1');
 
-    expect(eliminados).toEqual([{ _id: 'lote-1', coPropertyId: COP }]);
+    expect(eliminados).toEqual([{ _id: 'lote-1', copropiedadId: COP }]);
   });
 
   it('también borra uno en liquidado — todavía no generó ninguna factura real', async () => {

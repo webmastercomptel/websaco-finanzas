@@ -218,10 +218,10 @@ export class ReiniciarCicloService {
   ) {}
 
   async reiniciar(): Promise<ResultadoReinicioCiclo> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // `_id` IS the tenant id here — findById is correct, not the trap.
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (
       !copropiedad ||
       !CODIGOS_COPROPIEDAD_PRUEBA.includes(copropiedad.code)
@@ -248,18 +248,18 @@ export class ReiniciarCicloService {
       saldosInicialesAnticipoEliminados,
       lotesSaldoInicialAnticipoEliminados,
     ] = await Promise.all([
-      this.aplicaciones.deleteMany({ coPropertyId }).exec(),
-      this.notasCredito.deleteMany({ coPropertyId }).exec(),
-      this.notasDebito.deleteMany({ coPropertyId }).exec(),
-      this.notasAnticipo.deleteMany({ coPropertyId }).exec(),
-      this.notasContables.deleteMany({ coPropertyId }).exec(),
-      this.recibos.deleteMany({ coPropertyId }).exec(),
-      this.loteRecibos.deleteMany({ coPropertyId }).exec(),
-      this.lotesContabilidad.deleteMany({ coPropertyId }).exec(),
-      this.saldosIniciales.deleteMany({ coPropertyId }).exec(),
-      this.lotesSaldoInicial.deleteMany({ coPropertyId }).exec(),
-      this.saldosInicialesAnticipo.deleteMany({ coPropertyId }).exec(),
-      this.lotesSaldoInicialAnticipo.deleteMany({ coPropertyId }).exec(),
+      this.aplicaciones.deleteMany({ copropiedadId }).exec(),
+      this.notasCredito.deleteMany({ copropiedadId }).exec(),
+      this.notasDebito.deleteMany({ copropiedadId }).exec(),
+      this.notasAnticipo.deleteMany({ copropiedadId }).exec(),
+      this.notasContables.deleteMany({ copropiedadId }).exec(),
+      this.recibos.deleteMany({ copropiedadId }).exec(),
+      this.loteRecibos.deleteMany({ copropiedadId }).exec(),
+      this.lotesContabilidad.deleteMany({ copropiedadId }).exec(),
+      this.saldosIniciales.deleteMany({ copropiedadId }).exec(),
+      this.lotesSaldoInicial.deleteMany({ copropiedadId }).exec(),
+      this.saldosInicialesAnticipo.deleteMany({ copropiedadId }).exec(),
+      this.lotesSaldoInicialAnticipo.deleteMany({ copropiedadId }).exec(),
     ]);
 
     const [
@@ -271,21 +271,21 @@ export class ReiniciarCicloService {
     ] = await Promise.all([
       // Every asiento, regardless of anchor (Factura/Recibo/NC/ND/NT/NA) —
       // every one of those anchors is wiped above too.
-      this.asientos.deleteMany({ coPropertyId }).exec(),
-      this.saldos.deleteMany({ coPropertyId }).exec(),
+      this.asientos.deleteMany({ copropiedadId }).exec(),
+      this.saldos.deleteMany({ copropiedadId }).exec(),
       // Unfiltered by tipoDocumento on purpose — its FV/ND/SI rows are ALL
       // orphaned by this same reset (their anchor documents are wiped
       // above/below), so all three go together.
-      this.carteraPorDocumento.deleteMany({ coPropertyId }).exec(),
-      this.saldosDocumentoOrigen.deleteMany({ coPropertyId }).exec(),
-      this.saldoTotalDocumento.deleteMany({ coPropertyId }).exec(),
+      this.carteraPorDocumento.deleteMany({ copropiedadId }).exec(),
+      this.saldosDocumentoOrigen.deleteMany({ copropiedadId }).exec(),
+      this.saldoTotalDocumento.deleteMany({ copropiedadId }).exec(),
     ]);
 
     const facturasEliminadas = await this.facturas
-      .deleteMany({ coPropertyId })
+      .deleteMany({ copropiedadId })
       .exec();
     const lotesEliminados = await this.lotes
-      .deleteMany({ coPropertyId })
+      .deleteMany({ copropiedadId })
       .exec();
 
     // 0, not 1: siguienteLote/siguienteDocumento increment BEFORE reading
@@ -293,37 +293,37 @@ export class ReiniciarCicloService {
     // number after reset. 0 is what a brand-new row starts at (missing
     // field + $inc on upsert), so the next call returns 1.
     await this.consecutivoLote
-      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     // Every code this coproperty has configured (RC, NC, ND, NA, ...), not
     // just one — every document type is wiped above, so every counter must
     // restart together.
     await this.consecutivoDocumento
-      .updateMany({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateMany({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     // LoteRecibos has its own consecutivo, separate from consecutivoDocumento
     // (its numbers are internal to the batch, never a document type code).
     await this.consecutivoLoteRecibos
-      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     // Same reasoning as consecutivoLoteRecibos above — "Adición a
     // Contabilidad" has its own independent batch sequence.
     await this.consecutivoLoteContabilidad
-      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     // Same reasoning again — Saldos Iniciales numbers off its own internal
     // ordinal (ConsecutivoSaldoInicial), never ConsecutivoDocumento.
     await this.consecutivoSaldoInicial
-      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     // Same reasoning again — Saldos Iniciales de Anticipo has its own
     // independent ordinal, separate from ConsecutivoSaldoInicial (cargos and
     // anticipos are two different document collections).
     await this.consecutivoSaldoInicialAnticipo
-      .updateOne({ coPropertyId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     const resolucionActiva = await this.resoluciones
-      .findOne({ coPropertyId, status: 'active' })
+      .findOne({ copropiedadId, status: 'active' })
       .exec();
     if (resolucionActiva) {
       await this.resoluciones

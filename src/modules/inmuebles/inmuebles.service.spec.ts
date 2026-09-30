@@ -93,7 +93,7 @@ describe('InmueblesService.findAll', () => {
     await service.findAll({});
 
     for (const filtro of modelo.filtros) {
-      expect(filtro.coPropertyId).toBe(COP);
+      expect(filtro.copropiedadId).toBe(COP);
     }
   });
 
@@ -195,7 +195,7 @@ describe('InmueblesService.findAll', () => {
       await service.findAll({ buscar: 'Ana Pérez' });
 
       expect(terceros.filtros[0]).toMatchObject({
-        coPropertyId: COP,
+        copropiedadId: COP,
         nombre: { $regex: 'Ana Pérez', $options: 'i' },
       });
       const or = modelo.filtros[0].$or as Array<{
@@ -299,7 +299,7 @@ describe('InmueblesService.findOne', () => {
 
     await service.findOne('inm-1');
 
-    expect(modelo.filtros[0]).toEqual({ _id: 'inm-1', coPropertyId: COP });
+    expect(modelo.filtros[0]).toEqual({ _id: 'inm-1', copropiedadId: COP });
   });
 
   it('responde "no existe" para un inmueble de otra copropiedad', async () => {

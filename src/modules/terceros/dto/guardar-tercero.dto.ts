@@ -18,7 +18,7 @@ import {
  * requires both, editing does not, and a subclass cannot relax a parent's
  * required field into an optional one.
  *
- * `coPropertyId` is absent from all of this by design and must never be
+ * `copropiedadId` is absent from all of this by design and must never be
  * added: the building comes from the request context, and accepting it in
  * the body would let a caller write into somebody else's tenant.
  */

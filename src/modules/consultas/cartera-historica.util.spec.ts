@@ -50,7 +50,7 @@ const id = () => new Types.ObjectId();
 
 const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   issueDate: new Date('2026-01-01'),
   dueDate: new Date('2026-02-01'),
@@ -63,7 +63,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 
 const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   issueDate: new Date('2026-01-15'),
   total: 50000,
@@ -77,7 +77,7 @@ const appDoc = (
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   documentId,
   amountApplied: 0,
   status: 'activa',

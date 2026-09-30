@@ -121,11 +121,11 @@ export class FacturasController {
     }
 
     const plantilla = await this.plantillas.findOne('FV');
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 

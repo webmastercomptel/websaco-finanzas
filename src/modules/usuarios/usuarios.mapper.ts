@@ -23,7 +23,7 @@ export const toAsignacionResumen = (
   doc: AsignacionDocument,
 ): AsignacionResumen => {
   const copropiedad =
-    doc.scope === 'copropiedad' ? nombreDe(doc.coPropertyId) : null;
+    doc.scope === 'copropiedad' ? nombreDe(doc.copropiedadId) : null;
   const entidad = doc.scope === 'entidad' ? nombreDe(doc.entidadId) : null;
 
   return {

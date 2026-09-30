@@ -32,7 +32,7 @@ export type PlantillaDocumentoDocument =
  * version to use, not just which `datos` — this versioning exists for that.
  *
  * PLATFORM-wide, not per coproperty — there is deliberately no
- * `coPropertyId` here, same axis as `EntidadAdministradora`: every
+ * `copropiedadId` here, same axis as `EntidadAdministradora`: every
  * coproperty this system serves shares the same six templates, so no
  * customer administrator (however senior) has any business editing one.
  * Gated by `PlatformAdminGuard` at the controller, not CASL/

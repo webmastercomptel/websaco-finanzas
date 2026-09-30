@@ -142,13 +142,13 @@ export class EstadoCuentaService {
    * Facturas, sorted most-recent-first.
    */
   async findPeriodos(inmuebleId: string): Promise<PeriodoFacturado[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const oid = new Types.ObjectId(inmuebleId);
 
     // Not status-filtered — see the main `findAll` fetch below for why an
     // anulada Factura still belongs in this inmueble's own history.
     const facturas = await this.facturas
-      .find({ coPropertyId, inmuebleId: oid })
+      .find({ copropiedadId, inmuebleId: oid })
       .sort({ periodStart: -1 })
       .exec();
 
@@ -174,14 +174,14 @@ export class EstadoCuentaService {
   async findAll(
     query: ConsultarEstadoCuentaDto,
   ): Promise<RespuestaEstadoCuenta> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.periodStart);
     const hasta = new Date(query.periodEnd);
 
     // Fetch inmueble for code + holderId
     const inmueble = await this.inmuebles
-      .findOne({ _id: inmuebleId, coPropertyId })
+      .findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     const inmuebleCodigo = inmueble?.codigo ?? '';
     const holderId = inmueble?.titularId ?? null;
@@ -190,13 +190,13 @@ export class EstadoCuentaService {
     let propietario: string | null = null;
     if (holderId) {
       const tercero = await this.terceros
-        .findOne({ _id: holderId, coPropertyId })
+        .findOne({ _id: holderId, copropiedadId })
         .exec();
       propietario = tercero?.nombre ?? null;
     }
 
     // Fetch copropiedad for contact info
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     const copropiedadTelefono = copropiedad?.phone ?? null;
     const copropiedadEmail = copropiedad?.email ?? null;
 
@@ -206,7 +206,7 @@ export class EstadoCuentaService {
     // instead (the fallback below) would be a worse answer than the truth.
     const facturaPeriodo = await this.facturas
       .findOne({
-        coPropertyId,
+        copropiedadId,
         inmuebleId,
         periodStart: desde,
         periodEnd: hasta,
@@ -237,21 +237,21 @@ export class EstadoCuentaService {
       notasContables,
       notasAnticipo,
     ] = await Promise.all([
-      this.facturas.find({ coPropertyId, inmuebleId }).exec(),
+      this.facturas.find({ copropiedadId, inmuebleId }).exec(),
       this.notasDebito
-        .find({ coPropertyId, inmuebleId, status: 'emitida' })
+        .find({ copropiedadId, inmuebleId, status: 'emitida' })
         .exec(),
       // Not status-filtered by `activo` — same reasoning as Facturas above:
       // an `anulado` Saldo Inicial is voided by reversing whatever balance
       // was still pending (never a full credit note), so excluding it here
       // would silently drop history that's still true (it WAS imported).
-      this.saldosIniciales.find({ coPropertyId, inmuebleId }).exec(),
-      this.recibos.find({ coPropertyId, inmuebleId }).exec(),
-      this.notasCredito.find({ coPropertyId, inmuebleId }).exec(),
+      this.saldosIniciales.find({ copropiedadId, inmuebleId }).exec(),
+      this.recibos.find({ copropiedadId, inmuebleId }).exec(),
+      this.notasCredito.find({ copropiedadId, inmuebleId }).exec(),
       this.notasContables
-        .find({ coPropertyId, inmuebleId, status: 'activo' })
+        .find({ copropiedadId, inmuebleId, status: 'activo' })
         .exec(),
-      this.notasAnticipo.find({ coPropertyId, inmuebleId }).exec(),
+      this.notasAnticipo.find({ copropiedadId, inmuebleId }).exec(),
     ]);
 
     // Step 2: fetch active applications for RC + NC + NA sources — omitting
@@ -266,7 +266,7 @@ export class EstadoCuentaService {
     const aplicaciones = sourceIds.length
       ? await this.aplicaciones
           .find({
-            coPropertyId,
+            copropiedadId,
             sourceId: { $in: sourceIds },
             status: 'activa',
           })
@@ -634,7 +634,7 @@ export class EstadoCuentaService {
         saldosIniciales: this.saldosIniciales,
         aplicaciones: this.aplicaciones,
       },
-      coPropertyId,
+      copropiedadId,
       hastaCorte,
       { inmuebleId },
     );

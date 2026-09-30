@@ -17,7 +17,7 @@ import {
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {
-  coPropertyId: string;
+  copropiedadId: string;
   codigo: string;
   nombre: string;
   permissions: string[];
@@ -70,7 +70,7 @@ export class AccesoService {
 
     const directas = asignaciones.filter((a) => a.scope === 'copropiedad');
     for (const a of directas) {
-      if (a.coPropertyId) acumular(a.coPropertyId.toString(), a.permissions);
+      if (a.copropiedadId) acumular(a.copropiedadId.toString(), a.permissions);
     }
 
     const porEntidad = asignaciones.filter((a) => a.scope === 'entidad');
@@ -136,13 +136,13 @@ export class AccesoService {
    */
   async accesoA(
     accountId: string,
-    coPropertyId: string,
+    copropiedadId: string,
     isPlatformAdmin = false,
   ): Promise<AccesoCopropiedad | null> {
-    if (!Types.ObjectId.isValid(coPropertyId)) return null;
+    if (!Types.ObjectId.isValid(copropiedadId)) return null;
 
     const permitidas = await this.copropiedadesDe(accountId, isPlatformAdmin);
-    return permitidas.find((c) => c.coPropertyId === coPropertyId) ?? null;
+    return permitidas.find((c) => c.copropiedadId === copropiedadId) ?? null;
   }
 
   /** Platform operators see every active building, with no assignment needed. */
@@ -155,7 +155,7 @@ export class AccesoService {
       .exec();
 
     return todas.map((c) => ({
-      coPropertyId: c._id.toString(),
+      copropiedadId: c._id.toString(),
       codigo: c.code,
       nombre: c.name,
       // Left empty deliberately: a platform admin is granted everything by the
@@ -198,7 +198,7 @@ export class AccesoService {
       .exec();
 
     return encontradas.map((c) => ({
-      coPropertyId: c._id.toString(),
+      copropiedadId: c._id.toString(),
       codigo: c.code,
       nombre: c.name,
       permissions: permisosDe(c._id.toString()),

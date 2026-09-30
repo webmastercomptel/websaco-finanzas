@@ -93,37 +93,37 @@ export class MovimientoContableService {
    * Coproperty-wide accounting journal for a date range — every
    * AsientoContable in the window, regardless of which inmueble or document
    * type anchors it. Unlike the per-inmueble browse this replaced,
-   * AsientoContable already carries `date` and `coPropertyId` directly, so no
+   * AsientoContable already carries `date` and `copropiedadId` directly, so no
    * document-id prefetch per type is needed to scope the query.
    */
   async findAll(params: {
     desde: string;
     hasta: string;
   }): Promise<RespuestaMovimientoContable> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const desde = new Date(params.desde);
     const hasta = new Date(params.hasta);
 
     const asientos = await this.asientos
-      .find({ coPropertyId, date: { $gte: desde, $lte: hasta } })
+      .find({ copropiedadId, date: { $gte: desde, $lte: hasta } })
       .sort({ date: 1 })
       .exec();
 
     if (asientos.length === 0) return { movimientos: [] };
 
-    const anchorMap = await this.buildAnchorMap(asientos, coPropertyId);
+    const anchorMap = await this.buildAnchorMap(asientos, copropiedadId);
 
     const inmuebleIds = [
       ...new Set([...anchorMap.values()].map((a) => a.inmuebleId.toString())),
     ].map((id) => new Types.ObjectId(id));
-    const metaMap = await this.resolveMetaBatch(inmuebleIds, coPropertyId);
+    const metaMap = await this.resolveMetaBatch(inmuebleIds, copropiedadId);
 
     const cuentaCodigos = [
       ...new Set(asientos.flatMap((a) => a.entries.map((e) => e.account))),
     ];
     const nombrePorCuenta = await this.resolveNombresCuenta(
       cuentaCodigos,
-      coPropertyId,
+      copropiedadId,
     );
 
     const movimientos = asientos.map((a) => {
@@ -148,13 +148,13 @@ export class MovimientoContableService {
    *  regardless of how many distinct inmuebles are involved. */
   private async resolveMetaBatch(
     inmuebleIds: Types.ObjectId[],
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Map<string, InmuebleMeta>> {
     const result = new Map<string, InmuebleMeta>();
     if (inmuebleIds.length === 0) return result;
 
     const inmuebles = await this.inmuebles
-      .find({ coPropertyId, _id: { $in: inmuebleIds } })
+      .find({ copropiedadId, _id: { $in: inmuebleIds } })
       .exec();
 
     const holderIds = inmuebles
@@ -166,7 +166,7 @@ export class MovimientoContableService {
         ...new Set(holderIds.map((id) => id.toString())),
       ].map((id) => new Types.ObjectId(id));
       const terceros = await this.terceros
-        .find({ coPropertyId, _id: { $in: uniqueHolderIds } })
+        .find({ copropiedadId, _id: { $in: uniqueHolderIds } })
         .exec();
       for (const t of terceros) {
         const nit = t.numeroIdentificacion
@@ -194,13 +194,13 @@ export class MovimientoContableService {
    *  the caller falls back to the code itself. */
   private async resolveNombresCuenta(
     codigos: string[],
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Map<string, string>> {
     const map = new Map<string, string>();
     if (codigos.length === 0) return map;
 
     const cuentas = await this.cuentasContables
-      .find({ coPropertyId, codigo: { $in: codigos } })
+      .find({ copropiedadId, codigo: { $in: codigos } })
       .exec();
     for (const c of cuentas) {
       map.set(c.codigo, c.nombre);
@@ -212,7 +212,7 @@ export class MovimientoContableService {
    *  referenced by this batch of asientos. */
   private async buildAnchorMap(
     asientos: AsientoContableDocument[],
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<Map<string, AnchorInfo>> {
     const map = new Map<string, AnchorInfo>();
 
@@ -258,7 +258,7 @@ export class MovimientoContableService {
       if (!ids || ids.length === 0) continue;
       const docs = await model
         .find(
-          { _id: { $in: ids }, coPropertyId },
+          { _id: { $in: ids }, copropiedadId },
           { fullNumber: 1, inmuebleId: 1 },
         )
         .exec();

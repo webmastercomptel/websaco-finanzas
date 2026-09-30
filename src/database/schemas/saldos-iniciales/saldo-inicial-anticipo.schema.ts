@@ -49,7 +49,7 @@ export class SaldoInicialAnticipo {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -138,7 +138,7 @@ export const SaldoInicialAnticipoSchema =
 // reasoning and same shape as `SaldoInicialSchema`'s own index.
 SaldoInicialAnticipoSchema.index(
   {
-    coPropertyId: 1,
+    copropiedadId: 1,
     inmuebleId: 1,
     tipoDocumentoOriginal: 1,
     numeroOriginal: 1,

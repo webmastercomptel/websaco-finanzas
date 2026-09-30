@@ -118,12 +118,12 @@ export class ConciliacionCarteraService {
    * for.
    */
   async findPeriodos(): Promise<PeriodoFacturado[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // Not status-filtered — see the "Facturación" row in findAll() for why
     // an anulada Factura still belongs in this report.
     const facturas = await this.facturas
-      .find({ coPropertyId })
+      .find({ copropiedadId })
       .sort({ periodStart: -1 })
       .exec();
 
@@ -145,7 +145,7 @@ export class ConciliacionCarteraService {
   async findAll(
     query: ConsultarConciliacionCarteraDto,
   ): Promise<RespuestaConciliacionCartera> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const desde = new Date(query.periodStart);
     const hasta = new Date(query.periodEnd);
     const antesDelPeriodo = new Date(desde.getTime() - 1);
@@ -161,7 +161,7 @@ export class ConciliacionCarteraService {
           saldosIniciales: this.saldosIniciales,
           aplicaciones: this.aplicaciones,
         },
-        coPropertyId,
+        copropiedadId,
         antesDelPeriodo,
       ),
       // Saldo de Cartera is NOT recomputed — it's read straight from the
@@ -173,7 +173,7 @@ export class ConciliacionCarteraService {
       // cache actually drifting from the documents that are supposed to
       // maintain it (see `SaldoCartera`'s own "reconcilable cache, never a
       // second source of truth" docblock).
-      this.saldosCartera.find({ coPropertyId }).exec(),
+      this.saldosCartera.find({ copropiedadId }).exec(),
     ]);
     const saldoAnterior = saldoAnteriorDocs.reduce(
       (sum, d) => sum + d.montoPendiente,
@@ -219,7 +219,7 @@ export class ConciliacionCarteraService {
     {
       const docs = await this.facturas
         .find({
-          coPropertyId,
+          copropiedadId,
           issueDate: { $gte: desde, $lte: hasta },
         })
         .sort({ number: 1 })
@@ -235,11 +235,11 @@ export class ConciliacionCarteraService {
     // (see `movimientoDeFuentes`'s own docblock).
     {
       const recibosEnPeriodo = await this.recibos
-        .find({ coPropertyId, receivedDate: { $gte: desde, $lte: hasta } })
+        .find({ copropiedadId, receivedDate: { $gte: desde, $lte: hasta } })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'RC',
         'activa',
         recibosEnPeriodo,
@@ -253,14 +253,14 @@ export class ConciliacionCarteraService {
     {
       const recibosAnulados = await this.recibos
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'anulado',
           voidedAt: { $gte: desde, $lte: hasta },
         })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'RC',
         'revertida',
         recibosAnulados,
@@ -275,13 +275,13 @@ export class ConciliacionCarteraService {
       const rango = { $gte: desde, $lte: hasta };
       const notasEnPeriodo = await this.notasCredito
         .find({
-          coPropertyId,
+          copropiedadId,
           $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
         })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'NC',
         'activa',
         notasEnPeriodo,
@@ -293,14 +293,14 @@ export class ConciliacionCarteraService {
     {
       const notasAnuladas = await this.notasCredito
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'anulado',
           voidedAt: { $gte: desde, $lte: hasta },
         })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'NC',
         'revertida',
         notasAnuladas,
@@ -312,7 +312,7 @@ export class ConciliacionCarteraService {
     {
       const docs = await this.notasDebito
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'emitida',
           issueDate: { $gte: desde, $lte: hasta },
         })
@@ -326,7 +326,7 @@ export class ConciliacionCarteraService {
     {
       const docs = await this.notasDebito
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'anulada',
           voidedAt: { $gte: desde, $lte: hasta },
         })
@@ -339,11 +339,11 @@ export class ConciliacionCarteraService {
     // Notas de Anticipo → crédito
     {
       const notasEnPeriodo = await this.notasAnticipo
-        .find({ coPropertyId, issueDate: { $gte: desde, $lte: hasta } })
+        .find({ copropiedadId, issueDate: { $gte: desde, $lte: hasta } })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'NA',
         'activa',
         notasEnPeriodo,
@@ -355,14 +355,14 @@ export class ConciliacionCarteraService {
     {
       const notasAnuladas = await this.notasAnticipo
         .find({
-          coPropertyId,
+          copropiedadId,
           status: 'anulado',
           voidedAt: { $gte: desde, $lte: hasta },
         })
         .sort({ number: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
-        coPropertyId,
+        copropiedadId,
         'NA',
         'revertida',
         notasAnuladas,
@@ -375,7 +375,7 @@ export class ConciliacionCarteraService {
     // mismo inmueble, nunca cambia lo que la copropiedad tiene en cartera).
     {
       const filtro: Record<string, unknown> = {
-        coPropertyId,
+        copropiedadId,
         status: 'activo',
         createdAt: { $gte: desde, $lte: hasta },
       };
@@ -391,7 +391,7 @@ export class ConciliacionCarteraService {
     const diferencia = saldoCarteraCalculado - saldoCarteraReal;
 
     const anticiposPendientes = await this.anticiposPendientesAlCorte(
-      coPropertyId,
+      copropiedadId,
       hasta,
     );
     const totalAnticiposPendientes = anticiposPendientes.reduce(
@@ -427,18 +427,18 @@ export class ConciliacionCarteraService {
    * schema docblock).
    */
   private async anticiposPendientesAlCorte(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     hasta: Date,
   ): Promise<AnticipoPendienteConciliacion[]> {
     const recibos = await this.recibos
-      .find({ coPropertyId, receivedDate: { $lte: hasta } })
+      .find({ copropiedadId, receivedDate: { $lte: hasta } })
       .sort({ number: 1 })
       .exec();
     if (recibos.length === 0) return [];
 
     const reciboIds = recibos.map((r) => r._id);
     const notasAnticipo = await this.notasAnticipo
-      .find({ coPropertyId, reciboOrigenId: { $in: reciboIds } })
+      .find({ copropiedadId, reciboOrigenId: { $in: reciboIds } })
       .exec();
     const reciboIdPorNotaAnticipoId = new Map(
       notasAnticipo.map((n) => [n._id.toString(), n.reciboOrigenId.toString()]),
@@ -446,7 +446,7 @@ export class ConciliacionCarteraService {
 
     const apps = await this.aplicaciones
       .find({
-        coPropertyId,
+        copropiedadId,
         $or: [
           { sourceType: 'RC', sourceId: { $in: reciboIds } },
           {
@@ -476,7 +476,7 @@ export class ConciliacionCarteraService {
     ];
     const inmueblesDoc = inmuebleIds.length
       ? await this.inmuebles
-          .find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -530,7 +530,7 @@ export class ConciliacionCarteraService {
    * widen the printed range.
    */
   private async movimientoDeFuentes(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     sourceType: SourceType,
     status: 'activa' | 'revertida',
     fuentes: FuenteAplicacion[],
@@ -544,7 +544,7 @@ export class ConciliacionCarteraService {
 
     const ids = fuentes.map((f) => f._id);
     const apps = await this.aplicaciones
-      .find({ coPropertyId, sourceType, status, sourceId: { $in: ids } })
+      .find({ copropiedadId, sourceType, status, sourceId: { $in: ids } })
       .exec();
     if (apps.length === 0) return { valor: 0, desdeDoc: null, hastaDoc: null };
 

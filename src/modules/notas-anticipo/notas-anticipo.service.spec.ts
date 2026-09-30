@@ -27,7 +27,7 @@ const lotesFacturacionFalso = (ultimoConsolidado: unknown = null) =>
 
 type ReciboFixture = {
   _id: Types.ObjectId;
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   inmuebleId: Types.ObjectId;
   terceroId: Types.ObjectId;
   fullNumber: string;
@@ -43,7 +43,7 @@ type ReciboFixture = {
 
 type FacturaFixture = {
   _id: Types.ObjectId;
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   inmuebleId: Types.ObjectId;
   status: string;
   outstandingBalance: number;
@@ -52,7 +52,7 @@ type FacturaFixture = {
 
 type NotaAnticipoFixture = {
   _id: Types.ObjectId;
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   inmuebleId: Types.ObjectId;
   terceroId: Types.ObjectId;
   reciboOrigenId: Types.ObjectId;
@@ -63,7 +63,7 @@ type NotaAnticipoFixture = {
 
 const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
   fullNumber: 'RC-1',
@@ -84,7 +84,7 @@ const saldoInicialAnticipoDoc = (
   over: Partial<SaldoInicialAnticipoFixture> = {},
 ): SaldoInicialAnticipoFixture => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
   fullNumber: 'RC 4152',
@@ -97,7 +97,7 @@ const saldoInicialAnticipoDoc = (
 
 const facturaDoc = (over: Partial<FacturaFixture> = {}): FacturaFixture => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: INMUEBLE,
   status: 'emitida',
   outstandingBalance: 200000,

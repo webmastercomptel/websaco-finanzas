@@ -203,22 +203,22 @@ export class CopropiedadesService {
 
   /**
    * Other active coproperties under the SAME entidad administradora as
-   * `coPropertyId`, for the "copiar configuración" picker — used both by the
+   * `copropiedadId`, for the "copiar configuración" picker — used both by the
    * platform-admin screen (any `:id`) and by `MiCopropiedadController` (the
-   * caller's own active coproperty). Empty when `coPropertyId` has no
+   * caller's own active coproperty). Empty when `copropiedadId` has no
    * managing entity on file: there is no "sibling" concept without one.
    */
   async listarHermanas(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<CopropiedadResumenContract[]> {
-    const propia = await this.copropiedades.findById(coPropertyId).exec();
+    const propia = await this.copropiedades.findById(copropiedadId).exec();
     if (!propia?.managingEntityId) return [];
 
     const hermanas = await this.copropiedades
       .find({
         managingEntityId: propia.managingEntityId,
         status: 'active',
-        _id: { $ne: coPropertyId },
+        _id: { $ne: copropiedadId },
       })
       .sort({ code: 1 })
       .exec();
@@ -246,7 +246,7 @@ export class CopropiedadesService {
     const asignaciones = await this.asignaciones
       .find({
         scope: 'copropiedad',
-        coPropertyId: { $in: coPropertyIds },
+        copropiedadId: { $in: coPropertyIds },
         status: 'active',
       })
       .exec();
@@ -264,7 +264,7 @@ export class CopropiedadesService {
 
     const nombresPorCopropiedad = new Map<string, string[]>();
     for (const asignacion of asignaciones) {
-      const cop = asignacion.coPropertyId!.toString();
+      const cop = asignacion.copropiedadId!.toString();
       const nombre = nombrePorCuenta.get(asignacion.accountId.toString());
       if (!nombre) continue;
       const lista = nombresPorCopropiedad.get(cop) ?? [];
@@ -340,7 +340,7 @@ export class CopropiedadesService {
    * documents still live in their own collection despite the shared category.
    */
   private async crearDocumentosSistema(
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
   ): Promise<void> {
     const documentos: {
       category: CategoriaDocumento;
@@ -388,7 +388,7 @@ export class CopropiedadesService {
 
     await this.consecutivos.insertMany(
       documentos.map((doc) => ({
-        coPropertyId,
+        copropiedadId,
         category: doc.category,
         code: doc.code,
         prefix: doc.code,
@@ -495,9 +495,9 @@ export class CopropiedadesService {
     // 1) Maestro de cuentas — copy any origen account whose code isn't
     // already in destino.
     const [cuentasOrigen, cuentasDestinoExistentes] = await Promise.all([
-      this.cuentasContables.find({ coPropertyId: origen._id }).exec(),
+      this.cuentasContables.find({ copropiedadId: origen._id }).exec(),
       this.cuentasContables
-        .find({ coPropertyId: destinoOid })
+        .find({ copropiedadId: destinoOid })
         .distinct('codigo')
         .exec(),
     ]);
@@ -508,7 +508,7 @@ export class CopropiedadesService {
     if (cuentasACopiar.length > 0) {
       await this.cuentasContables.insertMany(
         cuentasACopiar.map((c) => ({
-          coPropertyId: destinoOid,
+          copropiedadId: destinoOid,
           codigo: c.codigo,
           nombre: c.nombre,
           requiereTercero: c.requiereTercero,
@@ -527,7 +527,7 @@ export class CopropiedadesService {
     // Every account destino now has, by code — pre-existing plus what was
     // just copied — to remap a cargo's cuenta references below.
     const cuentasDestino = await this.cuentasContables
-      .find({ coPropertyId: destinoOid })
+      .find({ copropiedadId: destinoOid })
       .exec();
     const idDestinoPorCodigo = new Map(
       cuentasDestino.map((c) => [c.codigo, c._id.toString()]),
@@ -549,11 +549,11 @@ export class CopropiedadesService {
     // non-system 'administracion'/'intereses' kind) skips only that row.
     const [conceptosOrigen, nombresDestinoExistentes] = await Promise.all([
       this.conceptosCobro
-        .find({ coPropertyId: origen._id, sistema: { $ne: true } })
+        .find({ copropiedadId: origen._id, sistema: { $ne: true } })
         .sort({ orden: 1 })
         .exec(),
       this.conceptosCobro
-        .find({ coPropertyId: destinoOid })
+        .find({ copropiedadId: destinoOid })
         .distinct('nombre')
         .exec(),
     ]);

@@ -482,7 +482,7 @@ export interface EscrituraFilaAplicacionLote {
  * entirely for this path.
  */
 export function construirEscrituraFilaAplicacion(ctx: {
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   accountId: string;
   fila: { valorRecibido: number; fechaPago: Date };
   numero: NumeroAsignado;
@@ -548,7 +548,7 @@ export function construirEscrituraFilaAplicacion(ctx: {
     reciboId,
     recibo: {
       _id: reciboId,
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       inmuebleId: ctx.datosInmueble.inmueble._id,
       terceroId: ctx.datosInmueble.inmueble.holderId,
       prefix: ctx.numero.prefijo,
@@ -567,14 +567,14 @@ export function construirEscrituraFilaAplicacion(ctx: {
       otherIncomeAmount: 0,
     },
     saldoDocumentoOrigen: {
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       tipoDocumento: 'RC',
       documentoId: reciboId,
       montoOriginal: ctx.fila.valorRecibido,
       saldoDisponible: sobrante,
     },
     aplicacionesCartera: ctx.resultadoFifo.aplicaciones.map((a) => ({
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       sourceType: 'RC',
       sourceId: reciboId,
       documentType: a.tipo,
@@ -588,7 +588,7 @@ export function construirEscrituraFilaAplicacion(ctx: {
       appliedBy: ctx.accountId,
     })),
     asientoContable: {
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       loteId: null,
       facturaId: null,
       reciboId,
@@ -665,7 +665,7 @@ export function procesarFilasTandaAplicacionLote(
   filas: { fila: LoteRecibosFila; indice: number; numero: NumeroAsignado }[],
   datos: DatosBatchAplicacionLote,
   ctx: {
-    coPropertyId: Types.ObjectId;
+    copropiedadId: Types.ObjectId;
     accountId: string;
     medioPago: PaymentMethod;
     destinationAccount: string;
@@ -706,7 +706,7 @@ export function procesarFilasTandaAplicacionLote(
       datos.copropiedad?.usesMemorandumAccounts ?? false,
     );
     const escritura = construirEscrituraFilaAplicacion({
-      coPropertyId: ctx.coPropertyId,
+      copropiedadId: ctx.copropiedadId,
       accountId: ctx.accountId,
       fila,
       numero,

@@ -33,7 +33,7 @@ export class Tercero {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** Natural person or legal entity — decides which name fields apply. */
   @Prop({ required: true, enum: ['natural', 'juridica'], default: 'natural' })
@@ -198,7 +198,7 @@ export const TerceroSchema = SchemaFactory.createForClass(Tercero);
 // building often loads units before it has the owner's papers, and a global
 // unique index would let exactly one of those blanks exist.
 TerceroSchema.index(
-  { coPropertyId: 1, numeroIdentificacion: 1 },
+  { copropiedadId: 1, numeroIdentificacion: 1 },
   {
     unique: true,
     partialFilterExpression: { numeroIdentificacion: { $type: 'string' } },

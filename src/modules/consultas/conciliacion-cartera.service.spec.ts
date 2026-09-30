@@ -69,7 +69,7 @@ function coleccion(docs: Doc[]) {
 
 const facturaDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   number: 1,
   fullNumber: 'FV1',
@@ -82,7 +82,7 @@ const facturaDoc = (over: Doc = {}): Doc => ({
 
 const notaDebitoDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   number: 1,
   fullNumber: 'ND1',
@@ -95,7 +95,7 @@ const notaDebitoDoc = (over: Doc = {}): Doc => ({
 
 const notaContableDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   number: 1,
   fullNumber: 'NT1',
   monto: 20000,
@@ -106,7 +106,7 @@ const notaContableDoc = (over: Doc = {}): Doc => ({
 
 const reciboDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   number: 1,
   fullNumber: 'RC1',
@@ -119,7 +119,7 @@ const reciboDoc = (over: Doc = {}): Doc => ({
 
 const ncDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   number: 1,
   fullNumber: 'NC1',
   issueDate: new Date('2026-09-15'),
@@ -134,7 +134,7 @@ const appDoc = (
   over: Doc = {},
 ): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   sourceType,
   sourceId,
   documentType: 'FV' as const,
@@ -149,7 +149,7 @@ const appDoc = (
 
 const saldoCarteraDoc = (balance: number, over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   inmuebleId: id(),
   conceptoId: id(),
   balance,
@@ -158,7 +158,7 @@ const saldoCarteraDoc = (balance: number, over: Doc = {}): Doc => ({
 
 const notaAnticipoDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   reciboOrigenId: id(),
   number: 1,
   fullNumber: 'NA1',
@@ -170,7 +170,7 @@ const notaAnticipoDoc = (over: Doc = {}): Doc => ({
 
 const inmuebleDoc = (over: Doc = {}): Doc => ({
   _id: id(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   codigo: '301',
   ...over,
 });

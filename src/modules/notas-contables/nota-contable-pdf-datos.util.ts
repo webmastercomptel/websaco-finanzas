@@ -45,7 +45,7 @@ export interface ModelosDatosImpresionNotaContable {
 export async function construirDatosImpresionNotaContable(
   nota: NotaContableDocument,
   copropiedad: CopropiedadDocument,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaContable,
   // Resolved by the caller (`NotasContablesService.datosImpresion`, via
   // `TituloDocumentoService.resolverGenerico('NT', ...)`) — see
@@ -54,19 +54,19 @@ export async function construirDatosImpresionNotaContable(
 ): Promise<DatosReciboImpresion> {
   const [conceptoOrigen, conceptoDestino, inmueble] = await Promise.all([
     modelos.conceptos
-      .findOne({ _id: nota.conceptoOrigenId, coPropertyId })
+      .findOne({ _id: nota.conceptoOrigenId, copropiedadId })
       .populate('cuentaCreditoId', 'codigo')
       .exec(),
     modelos.conceptos
-      .findOne({ _id: nota.conceptoDestinoId, coPropertyId })
+      .findOne({ _id: nota.conceptoDestinoId, copropiedadId })
       .populate('cuentaCreditoId', 'codigo')
       .exec(),
-    modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
+    modelos.inmuebles.findOne({ _id: nota.inmuebleId, copropiedadId }).exec(),
   ]);
 
   const tercero = inmueble?.titularId
     ? await modelos.terceros
-        .findOne({ _id: inmueble.titularId, coPropertyId })
+        .findOne({ _id: inmueble.titularId, copropiedadId })
         .exec()
     : null;
 
@@ -78,7 +78,7 @@ export async function construirDatosImpresionNotaContable(
     CUENTA_SIN_ASIGNAR;
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, codigo: { $in: [codigoOrigen, codigoDestino] } })
+    .find({ copropiedadId, codigo: { $in: [codigoOrigen, codigoDestino] } })
     .exec();
   const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
 

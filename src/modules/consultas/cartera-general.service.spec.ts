@@ -43,7 +43,7 @@ describe('CarteraGeneralService', () => {
       // Factura vencida (dueDate before fecha)
       const f1 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmVencido,
         issueDate: new Date('2026-01-01'),
         dueDate: new Date('2026-06-01'),
@@ -54,7 +54,7 @@ describe('CarteraGeneralService', () => {
       // Factura pendiente (dueDate after fecha)
       const f2 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmPendiente,
         issueDate: new Date('2026-07-01'),
         dueDate: new Date('2099-01-01'),
@@ -103,7 +103,7 @@ describe('CarteraGeneralService', () => {
       monto: number,
     ) => ({
       _id: id(),
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId,
       issueDate: new Date('2025-01-01'),
       dueDate: new Date(dueDate),
@@ -180,7 +180,7 @@ describe('CarteraGeneralService', () => {
 
       const f1 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inm1,
         issueDate: new Date('2026-01-01'),
         dueDate: new Date('2026-06-01'),
@@ -191,7 +191,7 @@ describe('CarteraGeneralService', () => {
       // inm2: dueDate = Jun 15 → 16 days before Jul 1
       const f2 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inm2,
         issueDate: new Date('2026-01-01'),
         dueDate: new Date('2026-06-15'),
@@ -245,7 +245,7 @@ describe('CarteraGeneralService', () => {
 
       const f = {
         _id: facturaId,
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         issueDate: dosAtras,
         dueDate: dosAtras,
@@ -255,7 +255,7 @@ describe('CarteraGeneralService', () => {
       };
       const app = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         documentType: 'FV',
         documentId: facturaId,
         amountApplied: 200000,
@@ -307,7 +307,7 @@ describe('CarteraGeneralService', () => {
       const inmId = id();
       const f = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: inmId,
         issueDate: new Date('2026-06-30T00:00:00.000Z'),
         dueDate: new Date('2026-06-30T00:00:00.000Z'),
@@ -351,14 +351,14 @@ describe('CarteraGeneralService', () => {
       const conceptoId = id();
       const sc1 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: id(),
         conceptoId,
         balance: 80000,
       };
       const sc2 = {
         _id: id(),
-        coPropertyId: COP,
+        copropiedadId: COP,
         inmuebleId: id(),
         conceptoId,
         balance: 20000,
@@ -409,21 +409,21 @@ describe('CarteraGeneralService', () => {
       const saldos = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idMultas,
           balance: 10000,
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idAdmin,
           balance: 142000000,
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idIntereses,
           balance: 5000,
@@ -477,14 +477,14 @@ describe('CarteraGeneralService', () => {
       const saldos = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idBorrado,
           balance: 30000,
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idAdmin,
           balance: 70000,
@@ -575,14 +575,14 @@ describe('CarteraGeneralService', () => {
       const apps = [
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           amountApplied: 50000,
           status: 'revertida',
           appliedAt: new Date(now.getFullYear(), now.getMonth(), 10),
         },
         {
           _id: id(),
-          coPropertyId: COP,
+          copropiedadId: COP,
           amountApplied: 30000,
           status: 'activa',
           appliedAt: new Date(now.getFullYear(), now.getMonth(), 15),

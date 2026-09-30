@@ -30,7 +30,7 @@ export class ResolucionFacturacion {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** The authorisation number as the tax authority issued it. */
   @Prop({ required: true, trim: true })
@@ -88,6 +88,6 @@ export const ResolucionFacturacionSchema = SchemaFactory.createForClass(
 
 // Two active resolutions in one building would make the number a coin flip.
 ResolucionFacturacionSchema.index(
-  { coPropertyId: 1, status: 1 },
+  { copropiedadId: 1, status: 1 },
   { unique: true, partialFilterExpression: { status: 'active' } },
 );

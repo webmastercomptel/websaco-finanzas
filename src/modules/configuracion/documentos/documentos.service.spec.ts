@@ -22,7 +22,7 @@ const tenantQueDevuelve = () => ({ resolveCoPropertyId: () => COP }) as never;
 
 const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   category: 'IN',
   code: 'RC',
   prefix: 'RC',
@@ -35,7 +35,7 @@ const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
 
 const resolucionDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  coPropertyId: COP,
+  copropiedadId: COP,
   resolutionNumber: 'RES-001',
   prefix: 'CONJ-2026',
   rangeFrom: 1,
@@ -409,7 +409,7 @@ describe('DocumentosService.crearResolucion', () => {
 
   it('desactiva la resolución anterior ANTES de crear la nueva — nunca al revés', async () => {
     // Regresión del bug real: crear antes de desactivar viola el índice
-    // único parcial {coPropertyId, status:'active'} y lanza un error de
+    // único parcial {copropiedadId, status:'active'} y lanza un error de
     // clave duplicada en cada copropiedad que YA tiene una activa (el caso
     // normal). El orden de las llamadas es lo único que prueba que el fix
     // sigue en pie.

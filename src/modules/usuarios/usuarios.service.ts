@@ -140,7 +140,7 @@ export class UsuariosService {
       await this.asignaciones.create({
         accountId: cuenta._id,
         scope: dto.alcance,
-        coPropertyId:
+        copropiedadId:
           dto.alcance === 'copropiedad' && dto.copropiedadId
             ? new Types.ObjectId(dto.copropiedadId)
             : null,
@@ -247,7 +247,7 @@ export class UsuariosService {
       actual != null &&
       actual.scope === dto.alcance &&
       (dto.alcance === 'copropiedad'
-        ? actual.coPropertyId?.toString() === dto.copropiedadId
+        ? actual.copropiedadId?.toString() === dto.copropiedadId
         : actual.entidadId?.toString() === dto.entidadId);
 
     if (mismoObjetivo) {
@@ -266,7 +266,7 @@ export class UsuariosService {
     await this.asignaciones.create({
       accountId,
       scope: dto.alcance,
-      coPropertyId:
+      copropiedadId:
         dto.alcance === 'copropiedad' && dto.copropiedadId
           ? new Types.ObjectId(dto.copropiedadId)
           : null,
@@ -287,7 +287,7 @@ export class UsuariosService {
 
     const filas = await this.asignaciones
       .find({ accountId: { $in: accountIds }, status: 'active' })
-      .populate('coPropertyId', 'name')
+      .populate('copropiedadId', 'name')
       .populate('entidadId', 'name')
       .sort({ createdAt: -1 })
       .exec();

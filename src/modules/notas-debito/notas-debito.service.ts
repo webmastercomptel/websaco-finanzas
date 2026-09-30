@@ -167,7 +167,7 @@ export class NotasDebitoService {
    *  references itself. */
   private async conAuxiliares(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     copropiedad: {
       defaultCostCentre: string | null;
@@ -178,7 +178,7 @@ export class NotasDebitoService {
   ): Promise<ReturnType<typeof construirMovimientos>> {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
-      this.cuentasContables.find({ coPropertyId }).session(session).exec(),
+      this.cuentasContables.find({ copropiedadId }).session(session).exec(),
       this.inmuebles?.findById(inmuebleId).session(session).exec(),
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
@@ -225,13 +225,13 @@ export class NotasDebitoService {
     accountId: string,
     dto: CrearNotaDebitoDto,
   ): Promise<NotaDebitoContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleId = new Types.ObjectId(dto.inmuebleId);
     const conceptoId = new Types.ObjectId(dto.conceptoId);
 
     // A refusal costs no session — same placement as
     // RecibosService.crear()'s own periodo/lotes checks.
-    await this.lotes.exigirSinLoteAbierto(coPropertyId.toString());
+    await this.lotes.exigirSinLoteAbierto(copropiedadId.toString());
 
     // The charge's own date must fall within the last consolidated billing
     // run's period — same rule, same reasoning, same helper as
@@ -239,7 +239,7 @@ export class NotasDebitoService {
     // coproperty that has never consolidated a lote has no "current period"
     // yet, so nothing to validate against.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fechaCargo),
@@ -249,7 +249,7 @@ export class NotasDebitoService {
 
     // Validate concepto exists and belongs to this coproperty.
     const concepto = await this.conceptos
-      .findOne({ _id: conceptoId, coPropertyId })
+      .findOne({ _id: conceptoId, copropiedadId })
       .populate('cuentaCreditoId', 'codigo')
       .populate('cuentaDebitoId', 'codigo')
       .exec();
@@ -267,7 +267,7 @@ export class NotasDebitoService {
     // `dto.inmuebleId` actually belongs to this coproperty (the tenancy
     // law) before creating anything against it.
     const inmueble = await this.inmuebles
-      .findOne({ _id: inmuebleId, coPropertyId })
+      .findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     if (!inmueble) {
       throw new NotFoundException(
@@ -278,7 +278,7 @@ export class NotasDebitoService {
 
     const resultado = await this.transaccion(async (session) => {
       const numero = await this.numeracion.siguienteDocumento(
-        coPropertyId.toString(),
+        copropiedadId.toString(),
         dto.codigo,
         session,
       );
@@ -286,7 +286,7 @@ export class NotasDebitoService {
       const [creada] = await this.notasDebito.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             inmuebleId,
             terceroId,
             conceptoId,
@@ -314,17 +314,17 @@ export class NotasDebitoService {
       // CarteraPorDocumento row can freeze `saldoAnterior`/`saldoNuevo`, same
       // fields `LotesFacturacionService.consolidar()` seeds per Factura line.
       const saldoPrevio = await this.saldos
-        .findOne({ coPropertyId, inmuebleId, conceptoId })
+        .findOne({ copropiedadId, inmuebleId, conceptoId })
         .session(session)
         .exec();
       const saldoAnterior = saldoPrevio?.balance ?? 0;
 
       await this.saldos
         .findOneAndUpdate(
-          { coPropertyId, inmuebleId, conceptoId },
+          { copropiedadId, inmuebleId, conceptoId },
           {
             $inc: { balance: dto.total },
-            $setOnInsert: { coPropertyId, inmuebleId, conceptoId },
+            $setOnInsert: { copropiedadId, inmuebleId, conceptoId },
           },
           { session, upsert: true },
         )
@@ -335,7 +335,7 @@ export class NotasDebitoService {
       await this.saldoTotalDocumento.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             tipoDocumento: 'ND' as const,
             documentoId: creada._id,
             total: dto.total,
@@ -350,7 +350,7 @@ export class NotasDebitoService {
       await this.carteraPorDocumento.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             inmuebleId,
             tipoDocumento: 'ND' as const,
             documentoId: creada._id,
@@ -373,7 +373,7 @@ export class NotasDebitoService {
       // `construirMovimientos` itself).
       await this.postearAsientoCreacion(
         session,
-        coPropertyId,
+        copropiedadId,
         creada,
         codigoDeCuentaContable(concepto.cuentaDebitoId),
         codigoDeCuentaContable(concepto.cuentaCreditoId),
@@ -381,7 +381,7 @@ export class NotasDebitoService {
       );
 
       const final = await this.notasDebito
-        .findOne({ _id: creada._id, coPropertyId })
+        .findOne({ _id: creada._id, copropiedadId })
         .session(session)
         .exec();
       // Just seeded above, still full — no need to re-read SaldoTotalDocumento.
@@ -403,22 +403,22 @@ export class NotasDebitoService {
    * `construirDatosImpresionNotaDebito` UNCHANGED.
    */
   async datosImpresion(id: string): Promise<DatosReciboImpresion> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.findOneRaw(id);
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
     const tituloDocumento = await this.tituloDocumento!.resolverGenerico(
       'ND',
-      coPropertyId,
+      copropiedadId,
     );
     return construirDatosImpresionNotaDebito(
       nota,
       copropiedad,
-      coPropertyId,
+      copropiedadId,
       {
         inmuebles: this.inmuebles,
         terceros: this.terceros!,
@@ -437,15 +437,19 @@ export class NotasDebitoService {
   async findAll(
     query: ListarNotaDebitoDto,
   ): Promise<Paginado<NotaDebitoContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.status = query.estado;
     if (query.conSaldoPendiente) {
       // No longer a field on NotaDebito itself — resolve candidate ids from
       // `SaldoTotalDocumento` first (see that schema's own docblock).
       const conSaldo = await this.saldoTotalDocumento
-        .find({ coPropertyId, tipoDocumento: 'ND', saldoPendiente: { $gt: 0 } })
+        .find({
+          copropiedadId,
+          tipoDocumento: 'ND',
+          saldoPendiente: { $gt: 0 },
+        })
         .exec();
       filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
@@ -484,7 +488,7 @@ export class NotasDebitoService {
     ].map((idInmueble) => new Types.ObjectId(idInmueble));
     const inmuebles = inmuebleIds.length
       ? await this.inmuebles
-          .find({ coPropertyId, _id: { $in: inmuebleIds } })
+          .find({ copropiedadId, _id: { $in: inmuebleIds } })
           .exec()
       : [];
     const codigoPorInmueble = new Map(
@@ -510,9 +514,9 @@ export class NotasDebitoService {
    * against `AplicacionCartera`, assembled through `toNotaDebitoDetalle`.
    */
   async findOne(id: string): Promise<NotaDebitoDetalle> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasDebito
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota débito ${id}`);
@@ -521,7 +525,7 @@ export class NotasDebitoService {
       .findOne({ documentoId: nota._id })
       .exec();
     const aplicaciones = await this.aplicaciones
-      .find({ coPropertyId, documentType: 'ND', documentId: nota._id })
+      .find({ copropiedadId, documentType: 'ND', documentId: nota._id })
       .sort({ appliedAt: 1 })
       .exec();
 
@@ -541,17 +545,17 @@ export class NotasDebitoService {
       await Promise.all([
         idsPorTipo.RC.length
           ? this.recibos
-              .find({ coPropertyId, _id: { $in: idsPorTipo.RC } })
+              .find({ copropiedadId, _id: { $in: idsPorTipo.RC } })
               .exec()
           : [],
         idsPorTipo.NC.length
           ? this.notasCredito
-              .find({ coPropertyId, _id: { $in: idsPorTipo.NC } })
+              .find({ copropiedadId, _id: { $in: idsPorTipo.NC } })
               .exec()
           : [],
         idsPorTipo.NA.length
           ? this.notasAnticipo
-              .find({ coPropertyId, _id: { $in: idsPorTipo.NA } })
+              .find({ copropiedadId, _id: { $in: idsPorTipo.NA } })
               .exec()
           : [],
       ]);
@@ -590,9 +594,9 @@ export class NotasDebitoService {
    * Returns the raw Mongoose document — used by PDF generation.
    */
   async findOneRaw(id: string): Promise<NotaDebitoDocument> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const nota = await this.notasDebito
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!nota) {
       throw new NotFoundException(`No se encontró la nota débito ${id}`);
@@ -607,9 +611,9 @@ export class NotasDebitoService {
    * `CarteraPorConceptosService`'s identical live-resolve.
    */
   async resolverInmuebleCodigo(inmuebleId: Types.ObjectId): Promise<string> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmueble = await this.inmuebles
-      ?.findOne({ _id: inmuebleId, coPropertyId })
+      ?.findOne({ _id: inmuebleId, copropiedadId })
       .exec();
     return inmueble?.codigo ?? '';
   }
@@ -630,13 +634,13 @@ export class NotasDebitoService {
     dto: AnularNotaDebitoDto,
     accountId: string,
   ): Promise<NotaDebitoContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // The reversing asiento is dated by the user, never by the server clock
     // — same rule as `crear()`'s own `dto.fecha` check. A refusal costs no
     // session.
     const ultimoLote = await this.lotes.obtenerUltimoConsolidado(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
     );
     exigirPeriodoFacturacionActual(
       new Date(dto.fecha),
@@ -646,7 +650,7 @@ export class NotasDebitoService {
 
     return this.transaccion(async (session) => {
       const nota = await this.notasDebito
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       if (!nota) {
@@ -661,7 +665,7 @@ export class NotasDebitoService {
       // Step 1: Find all active applications where this ND is the target.
       const aplicacionesActivas = await this.aplicaciones
         .find({
-          coPropertyId,
+          copropiedadId,
           documentType: 'ND',
           documentId: nota._id,
           status: 'activa',
@@ -671,11 +675,11 @@ export class NotasDebitoService {
 
       // Step 2: For each, revert the application and restore the source.
       for (const aplicacion of aplicacionesActivas) {
-        await this.restaurarMontoFuente(session, coPropertyId, aplicacion);
+        await this.restaurarMontoFuente(session, copropiedadId, aplicacion);
 
         await this.aplicaciones
           .findOneAndUpdate(
-            { _id: aplicacion._id, coPropertyId },
+            { _id: aplicacion._id, copropiedadId },
             { $set: { status: 'revertida', revertedAt: new Date() } },
             { session },
           )
@@ -684,9 +688,9 @@ export class NotasDebitoService {
 
       // Step 3: Post ONE consolidated reversing journal entry.
       const [copropiedad, concepto] = await Promise.all([
-        this.copropiedades.findById(coPropertyId).session(session).exec(),
+        this.copropiedades.findById(copropiedadId).session(session).exec(),
         this.conceptos
-          .findOne({ _id: nota.conceptoId, coPropertyId })
+          .findOne({ _id: nota.conceptoId, copropiedadId })
           .populate('cuentaCreditoId', 'codigo')
           .session(session)
           .exec(),
@@ -717,7 +721,7 @@ export class NotasDebitoService {
       );
       entries = await this.conAuxiliares(
         session,
-        coPropertyId,
+        copropiedadId,
         nota.inmuebleId,
         copropiedad,
         entries,
@@ -726,7 +730,7 @@ export class NotasDebitoService {
       await this.asientos.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             loteId: null,
             facturaId: null,
             reciboId: null,
@@ -766,7 +770,7 @@ export class NotasDebitoService {
         await this.saldos
           .findOneAndUpdate(
             {
-              coPropertyId,
+              copropiedadId,
               inmuebleId: nota.inmuebleId,
               conceptoId: nota.conceptoId,
             },
@@ -801,7 +805,7 @@ export class NotasDebitoService {
       // Step 5: Update the Nota Débito's own status.
       await this.notasDebito
         .findOneAndUpdate(
-          { _id: id, coPropertyId },
+          { _id: id, copropiedadId },
           {
             $set: {
               status: 'anulada',
@@ -817,7 +821,7 @@ export class NotasDebitoService {
         .exec();
 
       const final = await this.notasDebito
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
       // Just forced to 0 above (Step 4).
@@ -842,7 +846,7 @@ export class NotasDebitoService {
    */
   private async restaurarMontoFuente(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     aplicacion: AplicacionCarteraDocument,
   ): Promise<void> {
     if (aplicacion.sourceType === 'RC') {
@@ -865,7 +869,7 @@ export class NotasDebitoService {
     } else if (aplicacion.sourceType === 'NA') {
       const notaAnticipo = await this.notasAnticipo
         .findOneAndUpdate(
-          { _id: aplicacion.sourceId, coPropertyId },
+          { _id: aplicacion.sourceId, copropiedadId },
           { $inc: { appliedAmount: -aplicacion.amountApplied } },
           { session },
         )
@@ -895,14 +899,14 @@ export class NotasDebitoService {
    */
   private async postearAsientoCreacion(
     session: ClientSession,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     nota: NotaDebitoDocument,
     cuentaDebito: string | null,
     cuentaIngreso: string | null,
     conceptoKind: 'administracion' | 'intereses' | 'otro',
   ): Promise<void> {
     const copropiedad = await this.copropiedades
-      .findById(coPropertyId)
+      .findById(copropiedadId)
       .session(session)
       .exec();
     const cuentaCartera = copropiedad?.receivablesAccount ?? CUENTA_SIN_ASIGNAR;
@@ -925,7 +929,7 @@ export class NotasDebitoService {
     );
     entries = await this.conAuxiliares(
       session,
-      coPropertyId,
+      copropiedadId,
       nota.inmuebleId,
       copropiedad,
       entries,
@@ -935,7 +939,7 @@ export class NotasDebitoService {
     await this.asientos.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           loteId: null,
           facturaId: null,
           reciboId: null,

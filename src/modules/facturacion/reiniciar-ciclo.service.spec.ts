@@ -162,7 +162,7 @@ const makeModelos = (over: {
 
 const makeService = (
   modelos: ReturnType<typeof makeModelos>,
-  coPropertyId: Types.ObjectId = COP,
+  copropiedadId: Types.ObjectId = COP,
 ) =>
   new ReiniciarCicloService(
     modelos.copropiedades as never,
@@ -192,7 +192,7 @@ const makeService = (
     modelos.saldosInicialesAnticipo as never,
     modelos.lotesSaldoInicialAnticipo as never,
     modelos.consecutivoSaldoInicialAnticipo as never,
-    tenantQueDevuelve(coPropertyId),
+    tenantQueDevuelve(copropiedadId),
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
@@ -219,7 +219,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
 
       await expect(service.reiniciar()).resolves.toBeDefined();
       expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
-        coPropertyId: COP,
+        copropiedadId: COP,
       });
     },
   );
@@ -266,31 +266,31 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.lotes.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.recibos.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.loteRecibos.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.notasCredito.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.notasDebito.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.notasAnticipo.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.notasContables.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.aplicaciones.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(resultado).toEqual({
       lotesEliminados: 2,
@@ -325,10 +325,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.lotesContabilidad.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.consecutivoLoteContabilidad.updateOne).toHaveBeenCalledWith(
-      { coPropertyId: COP },
+      { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
     expect(resultado.lotesContabilidadEliminados).toBe(3);
@@ -347,13 +347,13 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.saldosIniciales.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.lotesSaldoInicial.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.consecutivoSaldoInicial.updateOne).toHaveBeenCalledWith(
-      { coPropertyId: COP },
+      { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
     expect(resultado.saldosInicialesEliminados).toBe(5);
@@ -376,14 +376,14 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.saldosInicialesAnticipo.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.lotesSaldoInicialAnticipo.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(
       modelos.consecutivoSaldoInicialAnticipo.updateOne,
-    ).toHaveBeenCalledWith({ coPropertyId: COP }, { $set: { nextNumber: 0 } });
+    ).toHaveBeenCalledWith({ copropiedadId: COP }, { $set: { nextNumber: 0 } });
     expect(resultado.saldosInicialesAnticipoEliminados).toBe(3);
     expect(resultado.lotesSaldoInicialAnticipoEliminados).toBe(1);
   });
@@ -397,7 +397,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.saldoTotalDocumento.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(resultado.saldoTotalDocumentoEliminado).toBe(11);
   });
@@ -412,7 +412,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     // (facturaId: {$ne: null}) — ahora se borra todo, porque Recibos/Notas
     // (los otros anclajes posibles) también se borran en esta misma pasada.
     expect(modelos.asientos.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
   });
 
@@ -425,10 +425,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.carteraPorDocumento.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.saldosDocumentoOrigen.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(resultado.carteraPorDocumentoEliminada).toBe(9);
     expect(resultado.saldosDocumentoOrigenEliminados).toBe(4);
@@ -444,14 +444,14 @@ describe('ReiniciarCicloService.reiniciar', () => {
     // (`{ returnDocument: 'after' }`), así que dejar el consecutivo en 1 haría que el
     // próximo número emitido fuera 2, no 1.
     expect(modelos.consecutivoLote.updateOne).toHaveBeenCalledWith(
-      { coPropertyId: COP },
+      { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
     // updateMany sin filtro de category/code — todo código configurado
     // (RC, NC, ND, NA, ...) reinicia junto, porque todo tipo de documento
     // se borró en esta misma pasada.
     expect(modelos.consecutivoDocumento.updateMany).toHaveBeenCalledWith(
-      { coPropertyId: COP },
+      { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
   });
@@ -467,10 +467,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const resultado = await service.reiniciar();
 
     expect(modelos.loteRecibos.deleteMany).toHaveBeenCalledWith({
-      coPropertyId: COP,
+      copropiedadId: COP,
     });
     expect(modelos.consecutivoLoteRecibos.updateOne).toHaveBeenCalledWith(
-      { coPropertyId: COP },
+      { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
     expect(resultado.loteRecibosEliminados).toBe(1);

@@ -269,7 +269,7 @@ describe('ajustarSaldosCartera', () => {
     expect(llamadas[0][1]).toEqual([
       {
         $set: {
-          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
           balance: {
@@ -477,7 +477,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     expect(llamadas[0][1]).toEqual([
       {
         $set: {
-          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoA] },
           balance: {
@@ -490,7 +490,7 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     expect(llamadas[1][1]).toEqual([
       {
         $set: {
-          coPropertyId: { $ifNull: ['$coPropertyId', COP] },
+          copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
           balance: {

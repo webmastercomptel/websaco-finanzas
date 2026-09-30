@@ -50,8 +50,8 @@ class SondaController {
   constructor(private readonly tenant: TenantContextService) {}
 
   @Get()
-  leer(): { coPropertyId: string } {
-    return { coPropertyId: this.tenant.resolveCoPropertyId().toString() };
+  leer(): { copropiedadId: string } {
+    return { copropiedadId: this.tenant.resolveCoPropertyId().toString() };
   }
 }
 
@@ -83,7 +83,7 @@ describe('CLS entre guard y servicio', () => {
       .set('X-CoProperty-Id', COP)
       .expect(200);
 
-    expect(res.body).toEqual({ coPropertyId: COP });
+    expect(res.body).toEqual({ copropiedadId: COP });
   });
 
   it('sin header falla cerrado', async () => {

@@ -32,7 +32,7 @@ export class Inmueble {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   /** Identifier as residents use it: "301", "Torre A - 301", "Local 2". */
   @Prop({ required: true, trim: true })
@@ -139,4 +139,4 @@ export const InmuebleSchema = SchemaFactory.createForClass(Inmueble);
 // but must be unique inside one. A plain unique index on `codigo` would
 // reject the second building's 301; this compound one is what actually
 // models it.
-InmuebleSchema.index({ coPropertyId: 1, codigo: 1 }, { unique: true });
+InmuebleSchema.index({ copropiedadId: 1, codigo: 1 }, { unique: true });

@@ -108,7 +108,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
     expect(eventos.emitAsync).toHaveBeenCalledWith(
       LOTE_FACTURAS_PDF_CONFIRMADO,
       {
-        coPropertyId: COPROPERTY_ID.toString(),
+        copropiedadId: COPROPERTY_ID.toString(),
         loteId: LOTE_ID.toString(),
         objectPath,
         numerosFactura: ['FV-1', 'FV-2', 'FV-3'],

@@ -47,18 +47,18 @@ Two of three sale configurations involve zero integration with the building-mana
 Every query on tenant-owned data resolves the tenant from the request context, never the payload:
 
 ```ts
-const coPropertyId = this.tenant.resolveCoPropertyId();
-return this.model.find({ coPropertyId }).exec();
+const copropiedadId = this.tenant.resolveCoPropertyId();
+return this.model.find({ copropiedadId }).exec();
 ```
 
 - `TenantContextService.resolveCoPropertyId()` returns an **`ObjectId`**, not a string — a filter built from the string form matches nothing and silently returns an empty list, the worst failure mode (a 60-unit building reads as empty, and nobody suspects the query). Never hand-build from `activeCoPropertyIdOrNull()` (the string form, for callers that must branch on absence).
 - A client-supplied `?coPropertyId=` may only ever *confirm* the active tenant, never set it.
 - No fallback to "the first coproperty" when nothing is active — that's a cross-tenant leak wearing a helpful face. No active tenant → throw.
-- **`findById(x)` is the recurring real bug here** — it filters only by `_id`, correct only when `_id` IS the tenant id (`copropiedades.findById(coPropertyId)`). For any other tenant-owned lookup (`Inmueble`, `Tercero`, etc.), use `findOne({ _id: x, coPropertyId })`. This exact mistake has shipped and regressed multiple times in this codebase's own history (`consultas` module) — check for it specifically on any new "fetch by id I already have" lookup.
+- **`findById(x)` is the recurring real bug here** — it filters only by `_id`, correct only when `_id` IS the tenant id (`copropiedades.findById(copropiedadId)`). For any other tenant-owned lookup (`Inmueble`, `Tercero`, etc.), use `findOne({ _id: x, copropiedadId })`. This exact mistake has shipped and regressed multiple times in this codebase's own history (`consultas` module) — check for it specifically on any new "fetch by id I already have" lookup.
 
 `FirebaseAuthGuard` writes the tenant into CLS after checking the requested `X-CoProperty-Id` against the caller's live assignments via `AccesoService` — a header naming a coproperty they can't use is **rejected**, never silently ignored. Access resolves as a union (a per-building grant and a per-entity grant both reach the same place, merging where they overlap); an inactive assignment, company, or building removes access at any hop.
 
-**Choosing a coproperty:** the list is this system's own `(accountId, coPropertyId)` pairs — local, no join needed. The listing endpoint must not itself require an active tenant (that's a deadlock: you need the list to pick one). The guard revalidates the header against live assignments on every request — a remembered choice in the client is a request, never a grant. One assignment → auto-select. Zero → say so plainly, never render an empty picker.
+**Choosing a coproperty:** the list is this system's own `(accountId, copropiedadId)` pairs — local, no join needed. The listing endpoint must not itself require an active tenant (that's a deadlock: you need the list to pick one). The guard revalidates the header against live assignments on every request — a remembered choice in the client is a request, never a grant. One assignment → auto-select. Zero → say so plainly, never render an empty picker.
 
 ## The audit law
 
@@ -115,7 +115,7 @@ maintainer works.
 | Live outstanding balance | `saldoPendiente` | `saldoDisponible`, `outstandingBalance`, `balance` |
 | Frozen balance snapshot (pre/post) | `saldoAnterior` / `saldoNuevo` | `balanceBefore` / `balanceAfter` |
 | Rows in a batch | `filas` / `totalFilas` | `lines` |
-| Tenant reference (the tenancy-law field) | `copropiedadId` | `coPropertyId` — **not yet renamed as of batch 1**, see migration tracking; still `coPropertyId` in code until its own dedicated global batch lands |
+| Tenant reference (the tenancy-law field) | `copropiedadId` | `coPropertyId` — renamed globally in its own dedicated batch; only `resolveCoPropertyId()`/`activeCoPropertyIdOrNull()` (TS method names) and the `X-CoProperty-Id` HTTP header stay in English, both wire/API-level, not the schema field |
 | Electronic-invoicing identification (Tercero) | `tipoIdentificacionFe` / `numeroIdentificacionFe` / `digitoVerificacionFe` | `einvoiceIdentificationType` etc. |
 | Collections/arrears status (Inmueble) | `estadoCartera` | `collectionStatus` |
 

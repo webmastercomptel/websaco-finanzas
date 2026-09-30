@@ -18,7 +18,7 @@ describe('GeneracionDocumentoService.solicitar', () => {
   it('pide la plantilla del tipo, pasa su versión a la solicitud de generación, y arma la respuesta con los datos ya calculados del caller', async () => {
     const doc = {
       _id: new Types.ObjectId(),
-      coPropertyId: new Types.ObjectId(),
+      copropiedadId: new Types.ObjectId(),
     };
     const datos = { tituloDocumento: 'Recibo de Caja' };
     const plantillas = {
@@ -48,7 +48,7 @@ describe('GeneracionDocumentoService.solicitar', () => {
     expect(presentacionDocumento.solicitarGeneracion).toHaveBeenCalledWith(
       'RC',
       doc._id,
-      doc.coPropertyId,
+      doc.copropiedadId,
       3,
     );
     expect(respuesta).toEqual({

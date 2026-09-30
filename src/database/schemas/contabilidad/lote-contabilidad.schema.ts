@@ -22,7 +22,7 @@ export class LoteContabilidad {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
   number: number;
@@ -49,4 +49,4 @@ export class LoteContabilidad {
 export const LoteContabilidadSchema =
   SchemaFactory.createForClass(LoteContabilidad);
 
-LoteContabilidadSchema.index({ coPropertyId: 1, number: 1 }, { unique: true });
+LoteContabilidadSchema.index({ copropiedadId: 1, number: 1 }, { unique: true });

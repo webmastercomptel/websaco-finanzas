@@ -81,14 +81,14 @@ export class DocumentosService {
     items: DocumentoAdmin[];
     resolucion: ResolucionAdmin | null;
   }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const [consecutivos, resolucionActiva] = await Promise.all([
       this.consecutivos
-        .find({ coPropertyId })
+        .find({ copropiedadId })
         .sort({ category: 1, code: 1 })
         .exec(),
-      this.resoluciones.findOne({ coPropertyId, status: 'active' }).exec(),
+      this.resoluciones.findOne({ copropiedadId, status: 'active' }).exec(),
     ]);
 
     return {
@@ -110,9 +110,9 @@ export class DocumentosService {
     categoria: CategoriaDocumento,
     dto: CrearConsecutivoDto,
   ): Promise<DocumentoAdmin> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const yaExiste = await this.consecutivos
-      .exists({ coPropertyId, code: dto.codigo })
+      .exists({ copropiedadId, code: dto.codigo })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -121,7 +121,7 @@ export class DocumentosService {
     }
 
     const creado = await this.consecutivos.create({
-      coPropertyId,
+      copropiedadId,
       category: categoria,
       code: dto.codigo,
       prefix: dto.prefijo ?? dto.codigo,
@@ -147,9 +147,9 @@ export class DocumentosService {
     codigo: string,
     dto: ActualizarConsecutivoDto,
   ): Promise<DocumentoAdmin> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const current = await this.consecutivos
-      .findOne({ coPropertyId, code: codigo })
+      .findOne({ copropiedadId, code: codigo })
       .exec();
 
     if (!current) {
@@ -165,7 +165,7 @@ export class DocumentosService {
       const maxIssued = await this.getHighestIssuedNumber(
         current.category,
         current.code,
-        coPropertyId,
+        copropiedadId,
         current.prefix,
       );
 
@@ -204,7 +204,7 @@ export class DocumentosService {
    * atomically (spec §5).
    *
    * Order matters, and so does the transaction: `ResolucionFacturacionSchema`
-   * has a unique partial index on `{coPropertyId, status: 'active'}`
+   * has a unique partial index on `{copropiedadId, status: 'active'}`
    * (one active resolution per coproperty, ever). Creating the new row
    * BEFORE deactivating the old one — the bug an earlier draft of this
    * method had — throws a duplicate-key error on every coproperty that
@@ -217,7 +217,7 @@ export class DocumentosService {
    * active resolutions.
    */
   async crearResolucion(dto: CrearResolucionDto): Promise<ResolucionAdmin> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (dto.rangoHasta <= dto.rangoDesde) {
       throw new BadRequestException(
@@ -230,7 +230,7 @@ export class DocumentosService {
       let creada!: ResolucionFacturacionDocument;
       await session.withTransaction(async () => {
         const anterior = await this.resoluciones
-          .findOne({ coPropertyId, status: 'active' })
+          .findOne({ copropiedadId, status: 'active' })
           .session(session)
           .exec();
 
@@ -244,7 +244,7 @@ export class DocumentosService {
         const [nueva] = await this.resoluciones.create(
           [
             {
-              coPropertyId,
+              copropiedadId,
               resolutionNumber: dto.numeroResolucion,
               prefix: dto.prefijo,
               rangeFrom: dto.rangoDesde,
@@ -277,9 +277,9 @@ export class DocumentosService {
   async actualizarResolucionMetadata(
     dto: ActualizarResolucionMetadataDto,
   ): Promise<ResolucionAdmin> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const activa = await this.resoluciones
-      .findOne({ coPropertyId, status: 'active' })
+      .findOne({ copropiedadId, status: 'active' })
       .exec();
 
     if (!activa) {
@@ -334,7 +334,7 @@ export class DocumentosService {
   private async getHighestIssuedNumber(
     categoria: CategoriaDocumento,
     code: string,
-    coPropertyId: unknown,
+    copropiedadId: unknown,
     prefix: string,
   ): Promise<number> {
     const modelMap: Record<
@@ -359,7 +359,7 @@ export class DocumentosService {
     const docs = await model
       .find(
         {
-          coPropertyId,
+          copropiedadId,
           fullNumber: { $regex: `^${escapeRegex(matchPrefix)}` },
         },
         { fullNumber: 1 },

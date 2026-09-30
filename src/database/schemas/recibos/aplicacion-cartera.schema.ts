@@ -79,7 +79,7 @@ export class AplicacionCartera {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: SOURCE_TYPES })
   sourceType: SourceType;

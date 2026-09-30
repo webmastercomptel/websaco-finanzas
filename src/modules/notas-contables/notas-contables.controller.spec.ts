@@ -126,7 +126,7 @@ describe('NotasContablesController.solicitarGeneracion', () => {
   it('junta la nota y sus datos de impresión, y delega en GeneracionDocumentoService', async () => {
     const nota = {
       _id: new Types.ObjectId(),
-      coPropertyId: new Types.ObjectId(),
+      copropiedadId: new Types.ObjectId(),
     };
     const datos = { tituloDocumento: 'Nota Contable' };
     const notasContables = {

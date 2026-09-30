@@ -44,7 +44,7 @@ export class NotaAnticipo {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -121,8 +121,8 @@ export const NotaAnticipoSchema = SchemaFactory.createForClass(NotaAnticipo);
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as
 // Recibo/NotaDebito/Factura.
-NotaAnticipoSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+NotaAnticipoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
 
 // GET /notas-anticipo?reciboOrigenId=...-shaped query, and the Anticipos
 // screen's "does this Recibo already have Notas de Anticipo" lookup.
-NotaAnticipoSchema.index({ coPropertyId: 1, reciboOrigenId: 1 });
+NotaAnticipoSchema.index({ copropiedadId: 1, reciboOrigenId: 1 });

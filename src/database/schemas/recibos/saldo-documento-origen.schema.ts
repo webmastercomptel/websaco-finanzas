@@ -39,7 +39,7 @@ export class SaldoDocumentoOrigen {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: ORIGEN_TYPES })
   tipoDocumento: OrigenType;

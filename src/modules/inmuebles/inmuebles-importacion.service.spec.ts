@@ -13,7 +13,7 @@ const fila = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** `copropiedades.findById(coPropertyId).exec()` — the whole-file
+/** `copropiedades.findById(copropiedadId).exec()` — the whole-file
  *  `codigoCopropiedad` check reads `.code` from this before anything is
  *  wiped. Defaults to matching every `fila()` above so existing tests are
  *  unaffected; only the mismatch test overrides it. */
@@ -318,7 +318,7 @@ describe('InmueblesService.importar', () => {
     });
 
     expect(terceros.creados[0]).toMatchObject({
-      coPropertyId: COP,
+      copropiedadId: COP,
       nombre: 'Ana Pérez',
     });
     expect(inmuebles.escrituras[0]).toMatchObject({ titularId: 'ter-nuevo' });
@@ -480,7 +480,7 @@ describe('InmueblesService.importar', () => {
 
     await service.importar({ filas: [fila({ codigo: '301' })] });
 
-    expect(inmuebles.escrituras[0]).toMatchObject({ coPropertyId: COP });
+    expect(inmuebles.escrituras[0]).toMatchObject({ copropiedadId: COP });
   });
 
   it('guarda la dirección del titular tal cual viene en la fila', async () => {

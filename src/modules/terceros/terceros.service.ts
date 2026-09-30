@@ -36,8 +36,8 @@ export class TercerosService {
    * the tenancy law. Every other condition is added on top.
    */
   async findAll(query: ListarTercerosDto): Promise<Paginado<TerceroContract>> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    const filtro: Record<string, unknown> = { coPropertyId };
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
 
     if (query.estado !== 'todos') {
       filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
@@ -70,10 +70,10 @@ export class TercerosService {
    * and comparing after would still have read another building's row.
    */
   async findOne(id: string): Promise<TerceroContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const documento = await this.terceros
-      .findOne({ _id: id, coPropertyId })
+      .findOne({ _id: id, copropiedadId })
       .exec();
     if (!documento) {
       throw new NotFoundException(`No se encontró el tercero ${id}`);
@@ -89,12 +89,12 @@ export class TercerosService {
    * building.
    */
   async create(dto: CrearTerceroDto): Promise<TerceroContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (dto.numeroIdentificacion) {
       const yaExiste = await this.terceros
         .exists({
-          coPropertyId,
+          copropiedadId,
           numeroIdentificacion: dto.numeroIdentificacion,
         })
         .exec();
@@ -125,7 +125,7 @@ export class TercerosService {
     const creado = await this.terceros.create({
       ...this.aDocumento(dto),
       nombre: nombre,
-      coPropertyId,
+      copropiedadId,
     });
     return toTercero(creado);
   }
@@ -142,12 +142,12 @@ export class TercerosService {
     id: string,
     dto: ActualizarTerceroDto,
   ): Promise<TerceroContract> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (dto.numeroIdentificacion) {
       const chocaConOtro = await this.terceros
         .exists({
-          coPropertyId,
+          copropiedadId,
           numeroIdentificacion: dto.numeroIdentificacion,
           _id: { $ne: id },
         })
@@ -177,7 +177,7 @@ export class TercerosService {
 
     if (tocaNombre) {
       const actual = await this.terceros
-        .findOne({ _id: id, coPropertyId })
+        .findOne({ _id: id, copropiedadId })
         .exec();
       if (!actual) {
         throw new NotFoundException(`No se encontró el tercero ${id}`);
@@ -205,7 +205,7 @@ export class TercerosService {
 
     const actualizado = await this.terceros
       .findOneAndUpdate(
-        { _id: id, coPropertyId },
+        { _id: id, copropiedadId },
         { $set: doc },
         { returnDocument: 'after' },
       )

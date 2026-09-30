@@ -23,7 +23,7 @@ export class ConsecutivoSaldoInicialAnticipo {
     unique: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })
   nextNumber: number;

@@ -34,8 +34,8 @@ export class MiCopropiedadController {
   @Get()
   @CheckAbility({ action: 'read', subject: 'Configuracion' })
   findOne(): Promise<Copropiedad> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.copropiedades.findOne(coPropertyId.toString());
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.copropiedades.findOne(copropiedadId.toString());
   }
 
   /**
@@ -46,8 +46,8 @@ export class MiCopropiedadController {
   @Get('hermanas')
   @CheckAbility({ action: 'read', subject: 'Configuracion' })
   listarHermanas(): Promise<CopropiedadResumen[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.copropiedades.listarHermanas(coPropertyId);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.copropiedades.listarHermanas(copropiedadId);
   }
 
   /**
@@ -65,9 +65,9 @@ export class MiCopropiedadController {
     @Body() dto: CopiarConfiguracionDto,
     @CurrentUser() user: IRequestUser,
   ): Promise<Copropiedad> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.copropiedades.copiarConfiguracion(
-      coPropertyId.toString(),
+      copropiedadId.toString(),
       dto,
       { accountId: user.accountId!, nombre: user.nombre ?? user.email },
     );

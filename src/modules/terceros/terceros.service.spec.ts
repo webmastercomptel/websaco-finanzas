@@ -101,7 +101,7 @@ describe('TercerosService.findAll', () => {
     await service.findAll({});
 
     for (const filtro of modelo.filtros) {
-      expect(filtro.coPropertyId).toBe(COP);
+      expect(filtro.copropiedadId).toBe(COP);
     }
   });
 
@@ -173,7 +173,7 @@ describe('TercerosService.findOne', () => {
 
     await service.findOne('ter-1');
 
-    expect(modelo.filtros[0]).toEqual({ _id: 'ter-1', coPropertyId: COP });
+    expect(modelo.filtros[0]).toEqual({ _id: 'ter-1', copropiedadId: COP });
   });
 
   it('responde "no existe" para un tercero de otra copropiedad', async () => {
@@ -228,7 +228,7 @@ describe('TercerosService.create', () => {
     await service.create({ tipoPersona: 'juridica', nombre: 'Ferretería SAS' });
 
     expect(modelo.escrituras[0]).toMatchObject({
-      coPropertyId: COP,
+      copropiedadId: COP,
       tipoPersona: 'juridica',
       nombre: 'Ferretería SAS',
     });
@@ -354,7 +354,7 @@ describe('TercerosService.update', () => {
     await service.update('ter-1', { numeroIdentificacion: '123456' });
 
     expect(modelo.filtros[0]).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       numeroIdentificacion: '123456',
       _id: { $ne: 'ter-1' },
     });

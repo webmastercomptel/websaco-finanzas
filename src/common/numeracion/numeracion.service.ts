@@ -72,11 +72,11 @@ export class NumeracionService {
    * `resolucionId` is absent on that path (see NumeroAsignado), and the
    * created Factura's own `resolucionId` stays null.
    */
-  async siguienteFactura(coPropertyId: string): Promise<NumeroAsignado> {
+  async siguienteFactura(copropiedadId: string): Promise<NumeroAsignado> {
     const previa = await this.resoluciones
       .findOneAndUpdate(
         {
-          coPropertyId: new Types.ObjectId(coPropertyId),
+          copropiedadId: new Types.ObjectId(copropiedadId),
           status: 'active',
           // Field-to-field comparison needs $expr: the ceiling is another
           // column, not a literal.
@@ -99,7 +99,7 @@ export class NumeracionService {
     // "call the accountant, we ran out of numbers".
     const activa = await this.resoluciones
       .findOne({
-        coPropertyId: new Types.ObjectId(coPropertyId),
+        copropiedadId: new Types.ObjectId(copropiedadId),
         status: 'active',
       })
       .lean()
@@ -117,7 +117,7 @@ export class NumeracionService {
     // the same mechanism siguienteDocumento uses for RC/NC/ND/NT.
     const consecutivo = await this.consecutivos
       .findOneAndUpdate(
-        { coPropertyId: new Types.ObjectId(coPropertyId), category: 'FV' },
+        { copropiedadId: new Types.ObjectId(copropiedadId), category: 'FV' },
         { $inc: { nextNumber: 1 } },
         { returnDocument: 'after' },
       )
@@ -157,7 +157,7 @@ export class NumeracionService {
    * that doesn't need batching.
    */
   async reservarBloqueFacturas(
-    coPropertyId: string,
+    copropiedadId: string,
     cantidad: number,
   ): Promise<{ numeros: NumeroAsignado[] }> {
     if (cantidad <= 0) return { numeros: [] };
@@ -165,7 +165,7 @@ export class NumeracionService {
     const previa = await this.resoluciones
       .findOneAndUpdate(
         {
-          coPropertyId: new Types.ObjectId(coPropertyId),
+          copropiedadId: new Types.ObjectId(copropiedadId),
           status: 'active',
         },
         [
@@ -218,7 +218,7 @@ export class NumeracionService {
     }
 
     // `previa` is only null here when NO row matches
-    // `{coPropertyId, status:'active'}` at all — unlike siguienteFactura's
+    // `{copropiedadId, status:'active'}` at all — unlike siguienteFactura's
     // `$expr` ceiling, this filter has no range condition, so an already
     // fully exhausted (but still active) resolution DOES match above and
     // is handled by the `if (previa)` branch, returning `otorgados: 0`.
@@ -229,7 +229,7 @@ export class NumeracionService {
     // uses, just incrementing by the whole requested count in one shot.
     const consecutivo = await this.consecutivos
       .findOneAndUpdate(
-        { coPropertyId: new Types.ObjectId(coPropertyId), category: 'FV' },
+        { copropiedadId: new Types.ObjectId(copropiedadId), category: 'FV' },
         { $inc: { nextNumber: cantidad } },
         { returnDocument: 'before' },
       )
@@ -270,14 +270,14 @@ export class NumeracionService {
    * design but a Recibo's single-transaction shape does not need to.
    */
   async siguienteDocumento(
-    coPropertyId: string,
+    copropiedadId: string,
     code: string,
     session?: ClientSession,
   ): Promise<NumeroAsignado> {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
         {
-          coPropertyId: new Types.ObjectId(coPropertyId),
+          copropiedadId: new Types.ObjectId(copropiedadId),
           code,
         },
         { $inc: { nextNumber: 1 } },
@@ -307,7 +307,7 @@ export class NumeracionService {
    * reserve every number its whole run will need BEFORE opening any Mongo
    * transaction, instead of every row calling `siguienteDocumento` from
    * inside its own transaction — concurrent transactions all incrementing
-   * the SAME `(coPropertyId, code)` counter document would otherwise
+   * the SAME `(copropiedadId, code)` counter document would otherwise
    * write-conflict against each other and force the MongoDB driver to
    * retry each one's entire transaction callback from scratch.
    *
@@ -316,7 +316,7 @@ export class NumeracionService {
    * leaving `siguienteFactura` alone.
    */
   async reservarBloqueDocumentos(
-    coPropertyId: string,
+    copropiedadId: string,
     code: string,
     cantidad: number,
   ): Promise<{ numeros: NumeroAsignado[] }> {
@@ -324,7 +324,7 @@ export class NumeracionService {
 
     const previo = await this.consecutivos
       .findOneAndUpdate(
-        { coPropertyId: new Types.ObjectId(coPropertyId), code },
+        { copropiedadId: new Types.ObjectId(copropiedadId), code },
         { $inc: { nextNumber: cantidad } },
         // The pre-increment document: its nextNumber is the last number
         // already handed out, so the reserved range starts right after it.
@@ -352,10 +352,10 @@ export class NumeracionService {
    * Same atomicity as siguienteDocumento, simpler shape: a Lote carries no
    * prefix and no external range, just a running integer per building.
    */
-  async siguienteLote(coPropertyId: string): Promise<number> {
+  async siguienteLote(copropiedadId: string): Promise<number> {
     const actualizado = await this.consecutivosLote
       .findOneAndUpdate(
-        { coPropertyId: new Types.ObjectId(coPropertyId) },
+        { copropiedadId: new Types.ObjectId(copropiedadId) },
         { $inc: { nextNumber: 1 } },
         { returnDocument: 'after', upsert: true },
       )

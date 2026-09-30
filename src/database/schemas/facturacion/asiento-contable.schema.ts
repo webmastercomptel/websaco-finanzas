@@ -77,7 +77,7 @@ export const MovimientoSchema = SchemaFactory.createForClass(Movimiento);
  * application/void, produces.
  *
  * Two anchors, used mutually exclusively depending on origin — same pattern
- * as Asignacion's `scope`/`coPropertyId`/`entidadId` (see that schema):
+ * as Asignacion's `scope`/`copropiedadId`/`entidadId` (see that schema):
  *  - A facturación entry sets `loteId` + `facturaId`, `reciboId: null`.
  *  - A Recibo entry sets `reciboId`, `loteId: null`, `facturaId: null` — a
  *    FIFO application can post one entry that touches several Facturas, and
@@ -101,7 +101,7 @@ export class AsientoContable {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -213,7 +213,7 @@ AsientoContableSchema.index({ notaAnticipoId: 1 });
 
 // AdicionContabilidadService's own "not yet exported, in this period" scan.
 AsientoContableSchema.index({
-  coPropertyId: 1,
+  copropiedadId: 1,
   contabilidadLoteId: 1,
   date: 1,
 });

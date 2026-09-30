@@ -47,7 +47,7 @@ export class PresentacionDocumentoService {
   async solicitarGeneracion(
     tipoDocumento: TipoDocumentoPresentacion,
     documentoId: Types.ObjectId,
-    coPropertyId: Types.ObjectId,
+    copropiedadId: Types.ObjectId,
     plantillaVersion: number,
   ): Promise<{ objectPath: string; uploadUrl: string; expiresAt: Date }> {
     const existente = await this.model
@@ -60,7 +60,7 @@ export class PresentacionDocumentoService {
       );
     }
 
-    const objectPath = `documentos-generados/${coPropertyId.toString()}/${tipoDocumento}/${documentoId.toString()}.pdf`;
+    const objectPath = `documentos-generados/${copropiedadId.toString()}/${tipoDocumento}/${documentoId.toString()}.pdf`;
 
     await this.model
       .findOneAndUpdate(

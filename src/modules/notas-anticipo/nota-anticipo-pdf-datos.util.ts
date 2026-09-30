@@ -61,7 +61,7 @@ export async function construirDatosImpresionNotaAnticipo(
   nota: NotaAnticipoDocument,
   aplicaciones: AplicacionCarteraDocument[],
   copropiedad: CopropiedadDocument,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   modelos: ModelosDatosImpresionNotaAnticipo,
   // Resolved by the caller (`NotasAnticipoService.datosImpresion`, via
   // `TituloDocumentoService.resolverGenerico('NA', ...)`) — see
@@ -87,24 +87,28 @@ export async function construirDatosImpresionNotaAnticipo(
     tercero,
   ] = await Promise.all([
     facturaIds.length > 0
-      ? modelos.facturas.find({ _id: { $in: facturaIds }, coPropertyId }).exec()
+      ? modelos.facturas
+          .find({ _id: { $in: facturaIds }, copropiedadId })
+          .exec()
       : Promise.resolve([]),
     notaIds.length > 0
-      ? modelos.notasDebito.find({ _id: { $in: notaIds }, coPropertyId }).exec()
+      ? modelos.notasDebito
+          .find({ _id: { $in: notaIds }, copropiedadId })
+          .exec()
       : Promise.resolve([]),
     nota.origenTipo === 'SI'
       ? Promise.resolve(null)
       : modelos.recibos
-          .findOne({ _id: nota.reciboOrigenId, coPropertyId })
+          .findOne({ _id: nota.reciboOrigenId, copropiedadId })
           .exec(),
     nota.origenTipo === 'SI'
       ? (modelos.saldosInicialesAnticipo
-          ?.findOne({ _id: nota.reciboOrigenId, coPropertyId })
+          ?.findOne({ _id: nota.reciboOrigenId, copropiedadId })
           .exec() ?? Promise.resolve(null))
       : Promise.resolve(null),
-    modelos.inmuebles.findOne({ _id: nota.inmuebleId, coPropertyId }).exec(),
+    modelos.inmuebles.findOne({ _id: nota.inmuebleId, copropiedadId }).exec(),
     nota.terceroId
-      ? modelos.terceros.findOne({ _id: nota.terceroId, coPropertyId }).exec()
+      ? modelos.terceros.findOne({ _id: nota.terceroId, copropiedadId }).exec()
       : Promise.resolve(null),
   ]);
 
@@ -173,7 +177,7 @@ export async function construirDatosImpresionNotaAnticipo(
   }
 
   const cuentas = await modelos.cuentasContables
-    .find({ coPropertyId, codigo: { $in: [...codigosUsados] } })
+    .find({ copropiedadId, codigo: { $in: [...codigosUsados] } })
     .exec();
   const nombrePorCodigo = new Map(cuentas.map((c) => [c.codigo, c.nombre]));
   for (const linea of lineas) {

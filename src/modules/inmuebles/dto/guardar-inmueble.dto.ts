@@ -21,7 +21,7 @@ import {
  * required field into an optional one. Sharing the optional part and adding the
  * difference is the shape that actually types.
  *
- * `coPropertyId` is absent from all of this by design and must never be added:
+ * `copropiedadId` is absent from all of this by design and must never be added:
  * the building comes from the request context, and accepting it in the body
  * would let a caller write into somebody else's property.
  */

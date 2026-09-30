@@ -77,7 +77,7 @@ export async function decrementarSaldoFactura(
   facturas: Model<FacturaDocument>,
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   facturaId: Types.ObjectId,
   amount: number,
 ): Promise<ConSaldoPendiente<FacturaDocument>> {
@@ -103,7 +103,7 @@ export async function decrementarSaldoFactura(
   }
 
   const factura = await facturas
-    .findOne({ _id: facturaId, coPropertyId, status: 'emitida' })
+    .findOne({ _id: facturaId, copropiedadId, status: 'emitida' })
     .session(session)
     .exec();
   if (!factura) {
@@ -130,7 +130,7 @@ export async function decrementarSaldoNotaDebito(
   notasDebito: Model<NotaDebitoDocument>,
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   notaDebitoId: Types.ObjectId,
   amount: number,
 ): Promise<ConSaldoPendiente<NotaDebitoDocument>> {
@@ -154,7 +154,7 @@ export async function decrementarSaldoNotaDebito(
   }
 
   const notaDebito = await notasDebito
-    .findOne({ _id: notaDebitoId, coPropertyId, status: 'emitida' })
+    .findOne({ _id: notaDebitoId, copropiedadId, status: 'emitida' })
     .session(session)
     .exec();
   if (!notaDebito) {
@@ -180,7 +180,7 @@ export async function decrementarSaldoInicial(
   saldosIniciales: Model<SaldoInicialDocument>,
   saldoTotalDocumento: Model<SaldoTotalDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   saldoInicialId: Types.ObjectId,
   amount: number,
 ): Promise<ConSaldoPendiente<SaldoInicialDocument>> {
@@ -204,7 +204,7 @@ export async function decrementarSaldoInicial(
   }
 
   const saldoInicial = await saldosIniciales
-    .findOne({ _id: saldoInicialId, coPropertyId, status: 'activo' })
+    .findOne({ _id: saldoInicialId, copropiedadId, status: 'activo' })
     .session(session)
     .exec();
   if (!saldoInicial) {
@@ -273,7 +273,7 @@ export async function decrementarSaldoDocumentoOrigen<
   documentos: SessionFindOneModel<T>,
   saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   documentoId: Types.ObjectId,
   amount: number,
   estadoActivo: string,
@@ -304,7 +304,7 @@ export async function decrementarSaldoDocumentoOrigen<
   }
 
   const doc = await documentos
-    .findOne({ _id: documentoId, coPropertyId, status: estadoActivo })
+    .findOne({ _id: documentoId, copropiedadId, status: estadoActivo })
     .session(session)
     .exec();
   if (!doc) {
@@ -378,7 +378,7 @@ export async function restaurarSaldoDocumentoOrigen(
 async function ajustarCarteraPorDocumento(
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   inmuebleId: Types.ObjectId,
   tipoDocumento: DocumentType,
   documentoId: Types.ObjectId,
@@ -392,7 +392,7 @@ async function ajustarCarteraPorDocumento(
       [
         {
           $set: {
-            coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+            copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
             inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
             tipoDocumento: { $ifNull: ['$tipoDocumento', tipoDocumento] },
             documentoId: { $ifNull: ['$documentoId', documentoId] },
@@ -490,7 +490,7 @@ export async function ajustarSaldosCartera(
   saldos: Model<SaldoCarteraDocument>,
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   factura: {
     _id: Types.ObjectId;
     inmuebleId: Types.ObjectId;
@@ -511,11 +511,11 @@ export async function ajustarSaldosCartera(
   for (const { conceptoId, parte } of partes) {
     await saldos
       .findOneAndUpdate(
-        { coPropertyId, inmuebleId: factura.inmuebleId, conceptoId },
+        { copropiedadId, inmuebleId: factura.inmuebleId, conceptoId },
         [
           {
             $set: {
-              coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+              copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
               inmuebleId: { $ifNull: ['$inmuebleId', factura.inmuebleId] },
               conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
               balance: {
@@ -538,7 +538,7 @@ export async function ajustarSaldosCartera(
     await ajustarCarteraPorDocumento(
       carteraPorDocumento,
       session,
-      coPropertyId,
+      copropiedadId,
       factura.inmuebleId,
       tipoDocumento,
       factura._id,
@@ -646,7 +646,7 @@ export function validarDistribucionManual(
 export async function actualizarRemanentesLinea(
   facturas: Model<FacturaDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   facturaId: Types.ObjectId,
   cambios: { conceptoId: Types.ObjectId; nuevoValor: number }[],
 ): Promise<void> {
@@ -655,7 +655,7 @@ export async function actualizarRemanentesLinea(
       .updateOne(
         {
           _id: facturaId,
-          coPropertyId,
+          copropiedadId,
           'lines.conceptoId': cambio.conceptoId,
         },
         { $set: { 'lines.$.remainingAmount': cambio.nuevoValor } },
@@ -735,7 +735,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
   saldos: Model<SaldoCarteraDocument>,
   carteraPorDocumento: Model<CarteraPorDocumentoDocument>,
   session: ClientSession,
-  coPropertyId: Types.ObjectId,
+  copropiedadId: Types.ObjectId,
   inmuebleId: Types.ObjectId,
   distribucion: { conceptoId: Types.ObjectId; monto: number }[],
   montoAplicado: number,
@@ -753,14 +753,14 @@ export async function ajustarSaldosCarteraPorDistribucion(
     await saldos
       .findOneAndUpdate(
         {
-          coPropertyId,
+          copropiedadId,
           inmuebleId,
           conceptoId,
         },
         [
           {
             $set: {
-              coPropertyId: { $ifNull: ['$coPropertyId', coPropertyId] },
+              copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
               inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
               conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
               balance: {
@@ -784,7 +784,7 @@ export async function ajustarSaldosCarteraPorDistribucion(
       await ajustarCarteraPorDocumento(
         carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         inmuebleId,
         documento.tipoDocumento,
         documento.documentoId,
@@ -989,7 +989,7 @@ export interface ContextoAplicacion<
   saldoDocumentoOrigen: Model<SaldoDocumentoOrigenDocument>;
   recibos: SessionFindOneModel<TOrigen>;
   session: ClientSession;
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
   recibo: TOrigen;
   sourceType: 'RC' | 'NA';
   sourceId: Types.ObjectId;
@@ -1055,7 +1055,7 @@ export async function ejecutarAplicacionManual<
     saldoDocumentoOrigen,
     recibos,
     session,
-    coPropertyId,
+    copropiedadId,
     recibo,
     sourceType,
     sourceId,
@@ -1113,7 +1113,7 @@ export async function ejecutarAplicacionManual<
         notasDebito,
         saldoTotalDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         documentoId,
         solicitada.montoAplicado,
       );
@@ -1130,7 +1130,7 @@ export async function ejecutarAplicacionManual<
         saldos,
         carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         notaDebito.inmuebleId,
         [{ conceptoId: notaDebito.conceptoId, monto: notaDebito.total }],
         solicitada.montoAplicado,
@@ -1149,7 +1149,7 @@ export async function ejecutarAplicacionManual<
       const [creada] = await aplicaciones.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             sourceType,
             sourceId,
             documentType: 'ND',
@@ -1189,7 +1189,7 @@ export async function ejecutarAplicacionManual<
       // A Saldo Inicial has several conceptos, like a Factura — same
       // waterfall/distribucion choice, never the ND single-concepto path.
       const saldoInicialDoc = await saldosIniciales
-        .findOne({ _id: documentoId, coPropertyId, status: 'activo' })
+        .findOne({ _id: documentoId, copropiedadId, status: 'activo' })
         .session(session)
         .exec();
       if (!saldoInicialDoc) {
@@ -1233,7 +1233,7 @@ export async function ejecutarAplicacionManual<
         saldosIniciales,
         saldoTotalDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         documentoId,
         solicitada.montoAplicado,
       );
@@ -1251,7 +1251,7 @@ export async function ejecutarAplicacionManual<
             saldos,
             carteraPorDocumento,
             session,
-            coPropertyId,
+            copropiedadId,
             saldoInicial.inmuebleId,
             repartoElegidoSI.map((l) => ({
               conceptoId: new Types.ObjectId(l.conceptoId),
@@ -1265,7 +1265,7 @@ export async function ejecutarAplicacionManual<
             saldos,
             carteraPorDocumento,
             session,
-            coPropertyId,
+            copropiedadId,
             saldoInicialActual,
             solicitada.montoAplicado,
             -1,
@@ -1304,7 +1304,7 @@ export async function ejecutarAplicacionManual<
       const [creadaSI] = await aplicaciones.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             sourceType,
             sourceId,
             documentType: 'SI',
@@ -1341,7 +1341,7 @@ export async function ejecutarAplicacionManual<
     // it's merged in fresh from there, same pattern `decrementarSaldoFactura`
     // itself uses for its own return value.
     const facturaDoc = await facturas
-      .findOne({ _id: documentoId, coPropertyId, status: 'emitida' })
+      .findOne({ _id: documentoId, copropiedadId, status: 'emitida' })
       .session(session)
       .exec();
     if (!facturaDoc) {
@@ -1393,7 +1393,7 @@ export async function ejecutarAplicacionManual<
       facturas,
       saldoTotalDocumento,
       session,
-      coPropertyId,
+      copropiedadId,
       documentoId,
       montoAFactura,
     );
@@ -1411,7 +1411,7 @@ export async function ejecutarAplicacionManual<
           saldos,
           carteraPorDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           factura.inmuebleId,
           repartoElegido.map((l) => ({
             conceptoId: new Types.ObjectId(l.conceptoId),
@@ -1425,7 +1425,7 @@ export async function ejecutarAplicacionManual<
           saldos,
           carteraPorDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           factura,
           montoAFactura,
           -1,
@@ -1435,7 +1435,7 @@ export async function ejecutarAplicacionManual<
       await actualizarRemanentesLinea(
         facturas,
         session,
-        coPropertyId,
+        copropiedadId,
         factura._id,
         partes.map((parte) => ({
           conceptoId: parte.conceptoId,
@@ -1478,7 +1478,7 @@ export async function ejecutarAplicacionManual<
     const [creada] = await aplicaciones.create(
       [
         {
-          coPropertyId,
+          copropiedadId,
           sourceType,
           sourceId,
           documentType: 'FV',
@@ -1511,7 +1511,7 @@ export async function ejecutarAplicacionManual<
       recibos,
       saldoDocumentoOrigen,
       session,
-      coPropertyId,
+      copropiedadId,
       recibo._id,
       sumaCashAplicada,
       'activo',
@@ -1565,7 +1565,7 @@ export async function ejecutarAplicacionFifo<
     saldoDocumentoOrigen,
     recibos,
     session,
-    coPropertyId,
+    copropiedadId,
     recibo,
     sourceType,
     sourceId,
@@ -1584,17 +1584,17 @@ export async function ejecutarAplicacionFifo<
     saldoInicialesDelInmueble,
   ] = await Promise.all([
     facturas
-      .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
+      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
       .exec(),
     notasDebito
-      .find({ coPropertyId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
+      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
       .session(session)
       .exec(),
     saldosIniciales
       ? saldosIniciales
           .find({
-            coPropertyId,
+            copropiedadId,
             inmuebleId: recibo.inmuebleId,
             status: 'activo',
           })
@@ -1718,7 +1718,7 @@ export async function ejecutarAplicacionFifo<
           notasDebito,
           saldoTotalDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           candidato.doc._id,
           monto,
         );
@@ -1727,7 +1727,7 @@ export async function ejecutarAplicacionFifo<
           saldos,
           carteraPorDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           notaActualizada.inmuebleId,
           [
             {
@@ -1749,7 +1749,7 @@ export async function ejecutarAplicacionFifo<
         const [creada] = await aplicaciones.create(
           [
             {
-              coPropertyId,
+              copropiedadId,
               sourceType,
               sourceId,
               documentType: 'ND',
@@ -1796,7 +1796,7 @@ export async function ejecutarAplicacionFifo<
           saldosIniciales!,
           saldoTotalDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           candidato.doc._id,
           monto,
         );
@@ -1804,7 +1804,7 @@ export async function ejecutarAplicacionFifo<
           saldos,
           carteraPorDocumento,
           session,
-          coPropertyId,
+          copropiedadId,
           {
             _id: saldoInicialActualizado._id,
             inmuebleId: saldoInicialActualizado.inmuebleId,
@@ -1849,7 +1849,7 @@ export async function ejecutarAplicacionFifo<
         const [creadaSI] = await aplicaciones.create(
           [
             {
-              coPropertyId,
+              copropiedadId,
               sourceType,
               sourceId,
               documentType: 'SI',
@@ -1881,7 +1881,7 @@ export async function ejecutarAplicacionFifo<
         facturas,
         saldoTotalDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         candidato.doc._id,
         monto,
       );
@@ -1889,7 +1889,7 @@ export async function ejecutarAplicacionFifo<
         saldos,
         carteraPorDocumento,
         session,
-        coPropertyId,
+        copropiedadId,
         facturaActualizada,
         monto,
         -1,
@@ -1924,7 +1924,7 @@ export async function ejecutarAplicacionFifo<
       const [creada] = await aplicaciones.create(
         [
           {
-            coPropertyId,
+            copropiedadId,
             sourceType,
             sourceId,
             documentType: 'FV',
@@ -1966,7 +1966,7 @@ export async function ejecutarAplicacionFifo<
       recibos,
       saldoDocumentoOrigen,
       session,
-      coPropertyId,
+      copropiedadId,
       recibo._id,
       totalAplicado,
       'activo',

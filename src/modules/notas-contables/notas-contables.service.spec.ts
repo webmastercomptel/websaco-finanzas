@@ -468,10 +468,10 @@ describe('NotasContablesService.crear', () => {
     await service.crear('acc-1', dtoBase());
 
     expect(conceptos.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: CONCEPTO_ORIGEN, coPropertyId: COP }),
+      expect.objectContaining({ _id: CONCEPTO_ORIGEN, copropiedadId: COP }),
     );
     expect(conceptos.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: CONCEPTO_DESTINO, coPropertyId: COP }),
+      expect.objectContaining({ _id: CONCEPTO_DESTINO, copropiedadId: COP }),
     );
     const calls = (asientos.create as jest.Mock).mock.calls as unknown[][][];
     const creado = calls[0][0][0] as {
@@ -766,7 +766,7 @@ describe('NotasContablesService.findAll', () => {
       (notasContables as unknown as { filtroUsado: Record<string, unknown> })
         .filtroUsado,
     ).toEqual({
-      coPropertyId: COP,
+      copropiedadId: COP,
       inmuebleId: INMUEBLE.toString(),
       status: 'activo',
       $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],

@@ -65,7 +65,7 @@ export class LoteRecibos {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
   number: number;
@@ -119,7 +119,7 @@ export const LoteRecibosSchema = SchemaFactory.createForClass(LoteRecibos);
 // LoteFacturacion's own index: a second one open at once would make "which
 // lote am I cargando" ambiguous.
 LoteRecibosSchema.index(
-  { coPropertyId: 1 },
+  { copropiedadId: 1 },
   {
     unique: true,
     partialFilterExpression: { status: { $in: ['borrador', 'cargado'] } },

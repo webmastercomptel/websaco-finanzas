@@ -46,7 +46,7 @@ export class NotaContable {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -125,7 +125,7 @@ export class NotaContable {
 export const NotaContableSchema = SchemaFactory.createForClass(NotaContable);
 
 // Unique numbering per coproperty — same reasoning as Recibo/Factura.
-NotaContableSchema.index({ coPropertyId: 1, fullNumber: 1 }, { unique: true });
+NotaContableSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
 
 // GET /notas-contables?inmuebleId=...-shaped query.
-NotaContableSchema.index({ coPropertyId: 1, inmuebleId: 1 });
+NotaContableSchema.index({ copropiedadId: 1, inmuebleId: 1 });

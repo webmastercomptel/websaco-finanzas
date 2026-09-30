@@ -58,18 +58,18 @@ export class ValoresRecurrentesService {
   ) {}
 
   private async exigirInmueble(inmuebleId: string): Promise<{
-    coPropertyId: Types.ObjectId;
+    copropiedadId: Types.ObjectId;
     inmuebleOid: Types.ObjectId;
   }> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
     const inmuebleOid = new Types.ObjectId(inmuebleId);
     const existe = await this.inmuebles
-      .exists({ _id: inmuebleOid, coPropertyId })
+      .exists({ _id: inmuebleOid, copropiedadId })
       .exec();
     if (!existe) {
       throw new NotFoundException(`No se encontró el inmueble ${inmuebleId}`);
     }
-    return { coPropertyId, inmuebleOid };
+    return { copropiedadId, inmuebleOid };
   }
 
   /**
@@ -84,12 +84,13 @@ export class ValoresRecurrentesService {
    * deletes the row instead of persisting it.
    */
   async obtener(inmuebleId: string): Promise<ValorRecurrenteContract[]> {
-    const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
+    const { copropiedadId, inmuebleOid } =
+      await this.exigirInmueble(inmuebleId);
 
     const [conceptos, valores] = await Promise.all([
-      this.conceptos.find({ coPropertyId }).sort({ orden: 1 }).exec(),
+      this.conceptos.find({ copropiedadId }).sort({ orden: 1 }).exec(),
       this.valoresRecurrentes
-        .find({ coPropertyId, inmuebleId: inmuebleOid })
+        .find({ copropiedadId, inmuebleId: inmuebleOid })
         .exec(),
     ]);
 
@@ -116,14 +117,15 @@ export class ValoresRecurrentesService {
     inmuebleId: string,
     dto: GuardarValoresRecurrentesDto,
   ): Promise<ValorRecurrenteContract[]> {
-    const { coPropertyId, inmuebleOid } = await this.exigirInmueble(inmuebleId);
+    const { copropiedadId, inmuebleOid } =
+      await this.exigirInmueble(inmuebleId);
 
     // Refuses a flat amount against the `intereses` concepto — see the note
     // on `obtener` above. Checked against the DB, not trusted from a
     // `tipoConcepto` the client might send back, since this DTO carries no
     // such field at all.
     const interesConcepto = await this.conceptos
-      .findOne({ coPropertyId, tipo: 'intereses' })
+      .findOne({ copropiedadId, tipo: 'intereses' })
       .exec();
     if (interesConcepto) {
       const lineaIntereses = dto.valores.find(
@@ -143,7 +145,7 @@ export class ValoresRecurrentesService {
           await this.valoresRecurrentes
             .findOneAndUpdate(
               {
-                coPropertyId,
+                copropiedadId,
                 inmuebleId: inmuebleOid,
                 conceptoId: conceptoOid,
               },
@@ -154,7 +156,7 @@ export class ValoresRecurrentesService {
         } else {
           await this.valoresRecurrentes
             .deleteOne({
-              coPropertyId,
+              copropiedadId,
               inmuebleId: inmuebleOid,
               conceptoId: conceptoOid,
             })
@@ -173,14 +175,14 @@ export class ValoresRecurrentesService {
    * same reasoning as `obtener`: it is never a flat amount to export/import.
    */
   async obtenerTodos(): Promise<ValorRecurrenteMasivo[]> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const [unidades, valores] = await Promise.all([
       this.inmuebles
-        .find({ coPropertyId, estado: 'active' })
+        .find({ copropiedadId, estado: 'active' })
         .sort({ codigo: 1 })
         .exec(),
-      this.valoresRecurrentes.find({ coPropertyId }).exec(),
+      this.valoresRecurrentes.find({ copropiedadId }).exec(),
     ]);
 
     const valoresPorInmueble = new Map<string, Map<string, number>>();
@@ -221,14 +223,14 @@ export class ValoresRecurrentesService {
   async importarMasivo(
     dto: ImportarValoresRecurrentesMasivoDto,
   ): Promise<ResultadoImportacionValoresRecurrentes> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
+    const copropiedadId = this.tenant.resolveCoPropertyId();
 
     // `_id` IS the tenant id here — findById is correct, not the trap (see
     // backend/CLAUDE.md's own note on this exact mistake).
-    const copropiedad = await this.copropiedades.findById(coPropertyId).exec();
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (!copropiedad) {
       throw new NotFoundException(
-        `No se encontró la copropiedad ${coPropertyId.toString()}`,
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
       );
     }
 
@@ -239,7 +241,7 @@ export class ValoresRecurrentesService {
     // in flight — see ProgresoImportacionService's own note.
     const total = dto.filas.length;
     const intervalo = this.progreso.intervalo(total);
-    await this.progreso.iniciar(coPropertyId, 'valores-recurrentes', total);
+    await this.progreso.iniciar(copropiedadId, 'valores-recurrentes', total);
 
     try {
       for (const [indice, fila] of dto.filas.entries()) {
@@ -251,7 +253,7 @@ export class ValoresRecurrentesService {
           }
 
           const inmueble = await this.inmuebles
-            .findOne({ coPropertyId, codigo: fila.codigo })
+            .findOne({ copropiedadId, codigo: fila.codigo })
             .exec();
           if (!inmueble) {
             throw new Error(
@@ -274,7 +276,7 @@ export class ValoresRecurrentesService {
         const completadas = indice + 1;
         if (completadas % intervalo === 0 || completadas === total) {
           await this.progreso.actualizar(
-            coPropertyId,
+            copropiedadId,
             'valores-recurrentes',
             completadas,
             total,
@@ -282,7 +284,7 @@ export class ValoresRecurrentesService {
         }
       }
     } finally {
-      await this.progreso.finalizar(coPropertyId, 'valores-recurrentes');
+      await this.progreso.finalizar(copropiedadId, 'valores-recurrentes');
     }
 
     return { total: dto.filas.length, actualizados, errores };
@@ -291,7 +293,7 @@ export class ValoresRecurrentesService {
   /** Null while no bulk valores-recurrentes import is currently running for
    *  the active coproperty — see `ProgresoImportacionService.obtener`. */
   async obtenerProgresoImportacion(): Promise<ProgresoActual | null> {
-    const coPropertyId = this.tenant.resolveCoPropertyId();
-    return this.progreso.obtener(coPropertyId, 'valores-recurrentes');
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    return this.progreso.obtener(copropiedadId, 'valores-recurrentes');
   }
 }

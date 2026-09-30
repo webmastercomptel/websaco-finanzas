@@ -44,14 +44,14 @@ export class GeneracionDocumentoService {
    *  `datos` so the response is one round trip for the frontend. */
   async solicitar<TDatos>(
     tipoDocumento: TipoDocumentoPresentacion,
-    doc: { _id: Types.ObjectId; coPropertyId: Types.ObjectId },
+    doc: { _id: Types.ObjectId; copropiedadId: Types.ObjectId },
     datos: TDatos,
   ): Promise<SolicitudGeneracionDocumento<TDatos>> {
     const plantilla = await this.plantillas.findOne(tipoDocumento);
     const solicitud = await this.presentacionDocumento.solicitarGeneracion(
       tipoDocumento,
       doc._id,
-      doc.coPropertyId,
+      doc.copropiedadId,
       plantilla.version,
     );
     return {

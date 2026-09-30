@@ -46,7 +46,7 @@ export class CarteraPorDocumento {
     required: true,
     index: true,
   })
-  coPropertyId: Types.ObjectId;
+  copropiedadId: Types.ObjectId;
 
   @Prop({
     type: SchemaTypes.ObjectId,
@@ -108,7 +108,7 @@ CarteraPorDocumentoSchema.index(
 // The aggregate-by-inmueble read path (Cartera por Inmueble, Cartera
 // General) — same shape `SaldoCartera`'s own index serves.
 CarteraPorDocumentoSchema.index({
-  coPropertyId: 1,
+  copropiedadId: 1,
   inmuebleId: 1,
   conceptoId: 1,
 });
