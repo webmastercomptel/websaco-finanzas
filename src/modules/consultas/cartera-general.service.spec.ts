@@ -45,22 +45,20 @@ describe('CarteraGeneralService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmVencido,
-        issueDate: new Date('2026-01-01'),
-        dueDate: new Date('2026-06-01'),
+        fechaEmision: new Date('2026-01-01'),
+        fechaVencimiento: new Date('2026-06-01'),
         total: 300000,
-        outstandingBalance: 300000,
-        status: 'emitida',
+        estado: 'emitida',
       };
       // Factura pendiente (dueDate after fecha)
       const f2 = {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmPendiente,
-        issueDate: new Date('2026-07-01'),
-        dueDate: new Date('2099-01-01'),
+        fechaEmision: new Date('2026-07-01'),
+        fechaVencimiento: new Date('2099-01-01'),
         total: 100000,
-        outstandingBalance: 100000,
-        status: 'emitida',
+        estado: 'emitida',
       };
 
       const svc = servicio({
@@ -99,17 +97,16 @@ describe('CarteraGeneralService', () => {
   describe('analisisVencimientos y carteraPorEstado', () => {
     const factura = (
       inmuebleId: Types.ObjectId,
-      dueDate: string,
+      fechaVencimiento: string,
       monto: number,
     ) => ({
       _id: id(),
       copropiedadId: COP,
       inmuebleId,
-      issueDate: new Date('2025-01-01'),
-      dueDate: new Date(dueDate),
+      fechaEmision: new Date('2025-01-01'),
+      fechaVencimiento: new Date(fechaVencimiento),
       total: monto,
-      outstandingBalance: monto,
-      status: 'emitida',
+      estado: 'emitida',
     });
 
     it('reparte la cartera por rango de mora y por estado del inmueble, con su porcentaje', async () => {
@@ -182,22 +179,20 @@ describe('CarteraGeneralService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inm1,
-        issueDate: new Date('2026-01-01'),
-        dueDate: new Date('2026-06-01'),
+        fechaEmision: new Date('2026-01-01'),
+        fechaVencimiento: new Date('2026-06-01'),
         total: 100000,
-        outstandingBalance: 100000,
-        status: 'emitida',
+        estado: 'emitida',
       };
       // inm2: dueDate = Jun 15 → 16 days before Jul 1
       const f2 = {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inm2,
-        issueDate: new Date('2026-01-01'),
-        dueDate: new Date('2026-06-15'),
+        fechaEmision: new Date('2026-01-01'),
+        fechaVencimiento: new Date('2026-06-15'),
         total: 100000,
-        outstandingBalance: 100000,
-        status: 'emitida',
+        estado: 'emitida',
       };
 
       const svc = servicio({
@@ -247,23 +242,22 @@ describe('CarteraGeneralService', () => {
         _id: facturaId,
         copropiedadId: COP,
         inmuebleId: inmId,
-        issueDate: dosAtras,
-        dueDate: dosAtras,
+        fechaEmision: dosAtras,
+        fechaVencimiento: dosAtras,
         total: 500000,
-        outstandingBalance: 300000,
-        status: 'emitida',
+        estado: 'emitida',
       };
       const app = {
         _id: id(),
         copropiedadId: COP,
-        documentType: 'FV',
-        documentId: facturaId,
-        amountApplied: 200000,
-        status: 'activa',
-        revertedAt: null,
+        tipoDocumento: 'FV',
+        documentoId: facturaId,
+        montoAplicado: 200000,
+        estado: 'activa',
+        revertidoEn: null,
         // Applied earlier today — guaranteed <= "now" regardless of which
         // day of the month it is, but still after the previous month ended.
-        appliedAt: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+        aplicadoEn: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
       };
 
       const svc = servicio({
@@ -309,11 +303,10 @@ describe('CarteraGeneralService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        issueDate: new Date('2026-06-30T00:00:00.000Z'),
-        dueDate: new Date('2026-06-30T00:00:00.000Z'),
+        fechaEmision: new Date('2026-06-30T00:00:00.000Z'),
+        fechaVencimiento: new Date('2026-06-30T00:00:00.000Z'),
         total: 400000,
-        outstandingBalance: 400000,
-        status: 'emitida',
+        estado: 'emitida',
       };
 
       const svc = servicio({
@@ -354,14 +347,14 @@ describe('CarteraGeneralService', () => {
         copropiedadId: COP,
         inmuebleId: id(),
         conceptoId,
-        balance: 80000,
+        saldoPendiente: 80000,
       };
       const sc2 = {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: id(),
         conceptoId,
-        balance: 20000,
+        saldoPendiente: 20000,
       };
       const concepto = { _id: conceptoId, nombre: 'Administración' };
 
@@ -412,21 +405,21 @@ describe('CarteraGeneralService', () => {
           copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idMultas,
-          balance: 10000,
+          saldoPendiente: 10000,
         },
         {
           _id: id(),
           copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idAdmin,
-          balance: 142000000,
+          saldoPendiente: 142000000,
         },
         {
           _id: id(),
           copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idIntereses,
-          balance: 5000,
+          saldoPendiente: 5000,
         },
       ];
       // El catalogo, ya ordenado por orden (como lo devuelve Mongo con
@@ -480,14 +473,14 @@ describe('CarteraGeneralService', () => {
           copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idBorrado,
-          balance: 30000,
+          saldoPendiente: 30000,
         },
         {
           _id: id(),
           copropiedadId: COP,
           inmuebleId: id(),
           conceptoId: idAdmin,
-          balance: 70000,
+          saldoPendiente: 70000,
         },
       ];
       const conceptos = [
@@ -576,16 +569,16 @@ describe('CarteraGeneralService', () => {
         {
           _id: id(),
           copropiedadId: COP,
-          amountApplied: 50000,
-          status: 'revertida',
-          appliedAt: new Date(now.getFullYear(), now.getMonth(), 10),
+          montoAplicado: 50000,
+          estado: 'revertida',
+          aplicadoEn: new Date(now.getFullYear(), now.getMonth(), 10),
         },
         {
           _id: id(),
           copropiedadId: COP,
-          amountApplied: 30000,
-          status: 'activa',
-          appliedAt: new Date(now.getFullYear(), now.getMonth(), 15),
+          montoAplicado: 30000,
+          estado: 'activa',
+          aplicadoEn: new Date(now.getFullYear(), now.getMonth(), 15),
         },
       ];
 
@@ -607,7 +600,7 @@ describe('CarteraGeneralService', () => {
                 .fn()
                 .mockResolvedValue(
                   apps.filter(
-                    (a) => !filter.status || a.status === filter.status,
+                    (a) => !filter.estado || a.estado === filter.estado,
                   ),
                 ),
             })),
