@@ -12,38 +12,38 @@ const documento = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   loteId: { toString: () => 'lote-1' },
   inmuebleId: { toString: () => 'inm-1' },
-  unitCode: '301',
+  codigoInmueble: '301',
   terceroId: { toString: () => 'ter-1' },
-  holder: { name: 'Ana Pérez', identificationNumber: '123456' },
-  prefix: 'CONJ-2026',
-  number: 1041,
-  fullNumber: 'CONJ-2026-1041',
-  issueDate: new Date('2026-08-27'),
-  dueDate: new Date('2026-08-31'),
-  periodStart: new Date('2026-08-01'),
-  periodEnd: new Date('2026-08-31'),
-  lines: [
+  titular: { nombre: 'Ana Pérez', numeroIdentificacion: '123456' },
+  prefijo: 'CONJ-2026',
+  numero: 1041,
+  numeroCompleto: 'CONJ-2026-1041',
+  fechaEmision: new Date('2026-08-27'),
+  fechaVencimiento: new Date('2026-08-31'),
+  periodoDesde: new Date('2026-08-01'),
+  periodoHasta: new Date('2026-08-31'),
+  lineas: [
     {
       conceptoId: { toString: () => 'con-1' },
-      conceptName: 'Administración',
-      conceptKind: 'administracion',
-      accountingIncomeAccount: '413501',
-      source: 'recurrente',
-      baseAmount: 520000,
-      taxRate: 0,
-      taxAmount: 0,
-      totalAmount: 520000,
+      nombreConcepto: 'Administración',
+      tipoConcepto: 'administracion',
+      cuentaIngreso: '413501',
+      origen: 'recurrente',
+      valorBase: 520000,
+      tasaImpuesto: 0,
+      valorImpuesto: 0,
+      valorTotal: 520000,
     },
   ],
   subtotal: 520000,
-  totalTax: 0,
+  totalImpuestos: 0,
   total: 520000,
   // No longer a real field on the document (see `SaldoTotalDocumento`'s own
   // docblock) — kept on this fixture purely as the INPUT the test mocks
   // below (`modeloSaldoTotalDocumento`) read to build their own live rows,
   // never read by `FacturasService` itself anymore.
   outstandingBalance: 520000,
-  status: 'emitida',
+  estado: 'emitida',
   voidedByCreditNoteId: null,
   ...over,
 });
@@ -130,7 +130,7 @@ const modeloSaldoTotalDocumento = (
 const modeloCarteraPorDocumento = (
   filas: {
     _id: { toString(): string };
-    lines: { conceptoId: { toString(): string }; totalAmount: number }[];
+    lineas: { conceptoId: { toString(): string }; valorTotal: number }[];
   }[],
 ) => ({
   find: jest.fn((filtro: Filtro) => {
@@ -140,10 +140,10 @@ const modeloCarteraPorDocumento = (
     const filas_ = filas
       .filter((f) => ids.includes(f._id.toString()))
       .flatMap((f) =>
-        f.lines.map((linea) => ({
+        f.lineas.map((linea) => ({
           documentoId: f._id,
           conceptoId: linea.conceptoId,
-          saldoPendiente: linea.totalAmount,
+          saldoPendiente: linea.valorTotal,
         })),
       );
     return { exec: () => Promise.resolve(filas_) };
@@ -240,7 +240,7 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
       saldoPendiente: { $gt: 0 },
     });
     expect(facturas.filtros[0]).toMatchObject({
-      status: 'emitida',
+      estado: 'emitida',
       _id: { $in: [doc._id] },
     });
   });
@@ -251,27 +251,27 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
     await service.findAll({});
 
     expect(facturas.filtros[0]._id).toBeUndefined();
-    expect(facturas.filtros[0].status).toBeUndefined();
+    expect(facturas.filtros[0].estado).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — estado', () => {
-  it('filtra por status cuando se pasa estado', async () => {
+  it('filtra por estado cuando se pasa estado', async () => {
     const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ estado: 'anulada' });
 
-    expect(facturas.filtros[0].status).toBe('anulada');
+    expect(facturas.filtros[0].estado).toBe('anulada');
   });
 
-  it('estado explícito gana por sobre el status implícito de conSaldoPendiente', async () => {
+  it('estado explícito gana por sobre el estado implícito de conSaldoPendiente', async () => {
     const doc = documento();
     const { service, facturas } = construirServicio([doc]);
 
     await service.findAll({ estado: 'anulada', conSaldoPendiente: true });
 
     expect(facturas.filtros[0]).toMatchObject({
-      status: 'anulada',
+      estado: 'anulada',
       _id: { $in: [doc._id] },
     });
   });
@@ -281,12 +281,12 @@ describe('FacturasService.findAll — estado', () => {
 
     await service.findAll({});
 
-    expect(facturas.filtros[0].status).toBeUndefined();
+    expect(facturas.filtros[0].estado).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
-  it('filtra issueDate por rango cuando se pasan ambos extremos', async () => {
+  it('filtra fechaEmision por rango cuando se pasan ambos extremos', async () => {
     const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({
@@ -294,7 +294,7 @@ describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
       fechaHasta: '2026-08-31',
     });
 
-    expect(facturas.filtros[0].issueDate).toEqual({
+    expect(facturas.filtros[0].fechaEmision).toEqual({
       $gte: new Date('2026-08-01'),
       $lte: new Date('2026-08-31'),
     });
@@ -305,7 +305,7 @@ describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
 
     await service.findAll({ fechaDesde: '2026-08-01' });
 
-    expect(facturas.filtros[0].issueDate).toEqual({
+    expect(facturas.filtros[0].fechaEmision).toEqual({
       $gte: new Date('2026-08-01'),
     });
   });
@@ -315,17 +315,17 @@ describe('FacturasService.findAll — fechaDesde/fechaHasta', () => {
 
     await service.findAll({});
 
-    expect(facturas.filtros[0].issueDate).toBeUndefined();
+    expect(facturas.filtros[0].fechaEmision).toBeUndefined();
   });
 });
 
 describe('FacturasService.findAll — buscar', () => {
-  it('filtra por fullNumber con regex insensible a mayúsculas cuando se pasa buscar', async () => {
+  it('filtra por numeroCompleto con regex insensible a mayúsculas cuando se pasa buscar', async () => {
     const { service, facturas } = construirServicio([documento()]);
 
     await service.findAll({ buscar: '1041' });
 
-    expect(facturas.filtros[0].fullNumber).toEqual({
+    expect(facturas.filtros[0].numeroCompleto).toEqual({
       $regex: '1041',
       $options: 'i',
     });
@@ -336,7 +336,7 @@ describe('FacturasService.findAll — buscar', () => {
 
     await service.findAll({ buscar: 'CONJ-2026(1041)' });
 
-    expect((facturas.filtros[0].fullNumber as { $regex: string }).$regex).toBe(
+    expect((facturas.filtros[0].numeroCompleto as { $regex: string }).$regex).toBe(
       'CONJ-2026\\(1041\\)',
     );
   });
@@ -346,7 +346,7 @@ describe('FacturasService.findAll — buscar', () => {
 
     await service.findAll({});
 
-    expect(facturas.filtros[0].fullNumber).toBeUndefined();
+    expect(facturas.filtros[0].numeroCompleto).toBeUndefined();
   });
 });
 
@@ -367,7 +367,7 @@ describe('FacturasService.findAllRawPorLote', () => {
 
     const resultado = await service.findAllRawPorLote('lote-1');
 
-    expect(resultado[0]).toMatchObject({ fullNumber: 'CONJ-2026-1041' });
+    expect(resultado[0]).toMatchObject({ numeroCompleto: 'CONJ-2026-1041' });
   });
 });
 
@@ -377,7 +377,7 @@ describe('FacturasService.datosVisualesPdf', () => {
     recibos: {
       _id: Types.ObjectId;
       inmuebleId: Types.ObjectId;
-      status: 'activo' | 'anulado';
+      estado: 'activo' | 'anulado';
     }[];
     saldos: { documentoId: Types.ObjectId; saldoDisponible: number }[];
   }) => {
@@ -388,7 +388,7 @@ describe('FacturasService.datosVisualesPdf', () => {
       find: jest.fn((filtro: Filtro) => ({
         exec: () =>
           Promise.resolve(
-            config.recibos.filter((r) => r.status === filtro.status),
+            config.recibos.filter((r) => r.estado === filtro.estado),
           ),
       })),
     };
@@ -414,8 +414,8 @@ describe('FacturasService.datosVisualesPdf', () => {
     const { service } = construirServicioAnticipos({
       inmuebles: [{ _id: inmuebleId, referencia: 'REF-301' }],
       recibos: [
-        { _id: recibo1, inmuebleId, status: 'activo' },
-        { _id: recibo2, inmuebleId, status: 'activo' },
+        { _id: recibo1, inmuebleId, estado: 'activo' },
+        { _id: recibo2, inmuebleId, estado: 'activo' },
       ],
       saldos: [
         { documentoId: recibo1, saldoDisponible: 30000 },
@@ -484,29 +484,29 @@ const facturaParaPlantilla = (over: Record<string, unknown> = {}) => ({
   inmuebleId: new Types.ObjectId(),
   copropiedadId: COP,
   resolucionId: null,
-  prefix: 'CONJ-2026',
-  discountAmount: 0,
-  discountDeadline: null,
-  holder: {
-    name: 'Ana Pérez',
-    identificationType: 'CC',
-    identificationNumber: '123456',
-    identificationVerificationDigit: null,
-    address: null,
-    city: null,
+  prefijo: 'CONJ-2026',
+  montoDescuento: 0,
+  fechaLimiteDescuento: null,
+  titular: {
+    nombre: 'Ana Pérez',
+    tipoIdentificacion: 'CC',
+    numeroIdentificacion: '123456',
+    digitoVerificacion: null,
+    direccion: null,
+    ciudad: null,
     email: null,
   },
-  lines: [
+  lineas: [
     {
       conceptoId: { toString: () => 'con-1' },
-      conceptName: 'Administración',
-      conceptKind: 'administracion',
-      baseAmount: 520000,
-      taxRate: 0,
-      taxAmount: 0,
-      totalAmount: 520000,
-      balanceBefore: 0,
-      balanceAfter: 520000,
+      nombreConcepto: 'Administración',
+      tipoConcepto: 'administracion',
+      valorBase: 520000,
+      tasaImpuesto: 0,
+      valorImpuesto: 0,
+      valorTotal: 520000,
+      saldoAnterior: 0,
+      saldoNuevo: 520000,
     },
   ],
   ...over,
@@ -544,7 +544,7 @@ describe('FacturasService.datosPlantilla', () => {
     const resolucionId = new Types.ObjectId();
     const factura = facturaParaPlantilla({
       resolucionId,
-      prefix: 'CONJ-2026-1041',
+      prefijo: 'CONJ-2026-1041',
     });
 
     await service.datosPlantilla(factura as never, copropiedadBase() as never, {
@@ -662,17 +662,17 @@ describe('FacturasService.datosPlantilla', () => {
   it('ivaFilas y anticiposFilas solo aparecen cuando el total respectivo es mayor a 0', async () => {
     const { service } = construirServicioConTitulo();
     const facturaConIva = facturaParaPlantilla({
-      lines: [
+      lineas: [
         {
           conceptoId: { toString: () => 'con-1' },
-          conceptName: 'Administración',
-          conceptKind: 'administracion',
-          baseAmount: 500000,
-          taxRate: 19,
-          taxAmount: 95000,
-          totalAmount: 595000,
-          balanceBefore: 0,
-          balanceAfter: 595000,
+          nombreConcepto: 'Administración',
+          tipoConcepto: 'administracion',
+          valorBase: 500000,
+          tasaImpuesto: 19,
+          valorImpuesto: 95000,
+          valorTotal: 595000,
+          saldoAnterior: 0,
+          saldoNuevo: 595000,
         },
       ],
     });
@@ -720,8 +720,8 @@ describe('FacturasService.datosPlantilla', () => {
   it('descuentoFilas trae fechaLimiteDescuento y totalConDescuento solo cuando hay descuento', async () => {
     const { service } = construirServicioConTitulo();
     const conDescuento = facturaParaPlantilla({
-      discountAmount: 20000,
-      discountDeadline: new Date('2026-09-30'),
+      montoDescuento: 20000,
+      fechaLimiteDescuento: new Date('2026-09-30'),
     });
 
     const datos = await service.datosPlantilla(
@@ -790,15 +790,15 @@ describe('FacturasService.datosPlantilla', () => {
   it('titularEmailMostrado, titularTelefonoMostrado y titularIdentificacionMostrada caen a "—" cuando faltan', async () => {
     const { service } = construirServicioConTitulo();
     const factura = facturaParaPlantilla({
-      holder: {
-        name: 'Ana Pérez',
-        identificationType: null,
-        identificationNumber: null,
-        identificationVerificationDigit: null,
-        address: null,
-        city: null,
+      titular: {
+        nombre: 'Ana Pérez',
+        tipoIdentificacion: null,
+        numeroIdentificacion: null,
+        digitoVerificacion: null,
+        direccion: null,
+        ciudad: null,
         email: null,
-        phone: null,
+        telefono: null,
       },
     });
 
@@ -816,15 +816,15 @@ describe('FacturasService.datosPlantilla', () => {
   it('titularTelefonoMostrado copia el teléfono del titular cuando existe', async () => {
     const { service } = construirServicioConTitulo();
     const factura = facturaParaPlantilla({
-      holder: {
-        name: 'Ana Pérez',
-        identificationType: null,
-        identificationNumber: null,
-        identificationVerificationDigit: null,
-        address: null,
-        city: null,
+      titular: {
+        nombre: 'Ana Pérez',
+        tipoIdentificacion: null,
+        numeroIdentificacion: null,
+        digitoVerificacion: null,
+        direccion: null,
+        ciudad: null,
         email: null,
-        phone: '3108458405',
+        telefono: '3108458405',
       },
     });
 
@@ -882,8 +882,8 @@ describe('FacturasService.datosPlantilla', () => {
   it('tieneDescuentoProntoPago es true exactamente cuando totalConDescuento no es null', async () => {
     const { service } = construirServicioConTitulo();
     const facturaConDescuento = facturaParaPlantilla({
-      discountAmount: 20000,
-      discountDeadline: new Date('2026-09-30'),
+      montoDescuento: 20000,
+      fechaLimiteDescuento: new Date('2026-09-30'),
     });
 
     const datos = await service.datosPlantilla(
@@ -939,33 +939,33 @@ describe('FacturasService.datosPlantilla', () => {
 
 describe('FacturasService.datosPlantillaPreliminar', () => {
   const loteBase = (over: Record<string, unknown> = {}) => ({
-    earlyPaymentDiscount: 0,
-    earlyPaymentDiscountFixedValue: 0,
-    discountDeadline: new Date('2026-09-30'),
+    descuentoProntoPago: 0,
+    valorFijoDescuentoProntoPago: 0,
+    fechaLimiteDescuento: new Date('2026-09-30'),
     ...over,
   });
 
   const preliminarBase = (over: Record<string, unknown> = {}) => ({
-    holder: {
-      name: 'Carlos Ruiz',
-      identificationType: 'CC',
-      identificationNumber: '987654',
-      identificationVerificationDigit: null,
-      address: null,
-      city: null,
+    titular: {
+      nombre: 'Carlos Ruiz',
+      tipoIdentificacion: 'CC',
+      numeroIdentificacion: '987654',
+      digitoVerificacion: null,
+      direccion: null,
+      ciudad: null,
       email: null,
     },
-    lines: [
+    lineas: [
       {
         conceptoId: { toString: () => 'con-1' },
-        conceptName: 'Administración',
-        conceptKind: 'administracion',
-        baseAmount: 500000,
-        taxRate: 0,
-        taxAmount: 0,
-        totalAmount: 500000,
-        balanceBefore: 0,
-        balanceAfter: 500000,
+        nombreConcepto: 'Administración',
+        tipoConcepto: 'administracion',
+        valorBase: 500000,
+        tasaImpuesto: 0,
+        valorImpuesto: 0,
+        valorTotal: 500000,
+        saldoAnterior: 0,
+        saldoNuevo: 500000,
       },
     ],
     ...over,
