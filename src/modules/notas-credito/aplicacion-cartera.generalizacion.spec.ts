@@ -38,24 +38,24 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
     copropiedadId: copropiedad,
     sourceType: 'RC',
     sourceId: recibo,
-    documentType: 'FV',
-    documentId: facturaCompartida,
-    amountApplied: 120000,
-    appliedAt: new Date('2026-08-27'),
-    sourceDate: new Date('2026-08-27'),
-    appliedBy: cuenta,
+    tipoDocumento: 'FV',
+    documentoId: facturaCompartida,
+    montoAplicado: 120000,
+    aplicadoEn: new Date('2026-08-27'),
+    fechaOrigen: new Date('2026-08-27'),
+    aplicadoPor: cuenta,
   });
 
   const filaDeNotaCredito = new AplicacionModel({
     copropiedadId: copropiedad,
     sourceType: 'NC',
     sourceId: notaCredito,
-    documentType: 'FV',
-    documentId: facturaCompartida,
-    amountApplied: 80000,
-    appliedAt: new Date('2026-08-30'),
-    sourceDate: new Date('2026-08-30'),
-    appliedBy: cuenta,
+    tipoDocumento: 'FV',
+    documentoId: facturaCompartida,
+    montoAplicado: 80000,
+    aplicadoEn: new Date('2026-08-30'),
+    fechaOrigen: new Date('2026-08-30'),
+    aplicadoPor: cuenta,
   });
 
   const coleccion = [filaDeRecibo, filaDeNotaCredito];
@@ -79,10 +79,10 @@ describe('AplicacionCartera — generalización RC/NC lado a lado (design §9)',
     expect(soloNotaCredito).toEqual([filaDeNotaCredito]);
   });
 
-  it('el índice {documentType, documentId} devuelve AMBAS filas juntas — la consulta que habilita la futura pantalla de Confirmación y Cruce', () => {
+  it('el índice {tipoDocumento, documentoId} devuelve AMBAS filas juntas — la consulta que habilita la futura pantalla de Confirmación y Cruce', () => {
     const contraLaMismaFactura = filtrar(coleccion, {
-      documentType: 'FV',
-      documentId: facturaCompartida,
+      tipoDocumento: 'FV',
+      documentoId: facturaCompartida,
     });
 
     expect(contraLaMismaFactura).toHaveLength(2);
