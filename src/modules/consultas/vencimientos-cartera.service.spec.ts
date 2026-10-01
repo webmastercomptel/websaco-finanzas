@@ -8,11 +8,11 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'FV-001',
-  issueDate: new Date('2026-08-01'),
-  dueDate: new Date('2026-08-31'),
+  numeroCompleto: 'FV-001',
+  fechaEmision: new Date('2026-08-01'),
+  fechaVencimiento: new Date('2026-08-31'),
   total: 200000,
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -20,11 +20,11 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'ND-001',
-  issueDate: new Date('2026-07-15'),
+  numeroCompleto: 'ND-001',
+  fechaEmision: new Date('2026-07-15'),
   total: 50000,
   conceptoId: new Types.ObjectId(),
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -157,7 +157,7 @@ describe('VencimientosCarteraService', () => {
     const inmId = id();
     const f = facturaDoc({
       inmuebleId: inmId,
-      dueDate: new Date('2026-08-01'),
+      fechaVencimiento: new Date('2026-08-01'),
       total: 200000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -190,7 +190,7 @@ describe('VencimientosCarteraService', () => {
     const inmId = id();
     const f = facturaDoc({
       inmuebleId: inmId,
-      dueDate: new Date('2026-08-01'),
+      fechaVencimiento: new Date('2026-08-01'),
       total: 200000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -223,17 +223,17 @@ describe('VencimientosCarteraService', () => {
     const f = facturaDoc({
       _id: fId,
       inmuebleId: inmId,
-      dueDate: new Date('2026-08-01'),
+      fechaVencimiento: new Date('2026-08-01'),
       total: 200000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const appEstaNoche = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 200000,
-      status: 'activa',
-      appliedAt: new Date('2026-09-07T01:00:00.000Z'), // 8pm Colombia, Sep 6
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 200000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-09-07T01:00:00.000Z'), // 8pm Colombia, Sep 6
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -263,7 +263,7 @@ describe('VencimientosCarteraService', () => {
     futureDate.setDate(futureDate.getDate() + 30);
     const f = facturaDoc({
       inmuebleId: inmId,
-      dueDate: futureDate,
+      fechaVencimiento: futureDate,
       total: 100000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '101' });
@@ -301,9 +301,13 @@ describe('VencimientosCarteraService', () => {
 
     for (const [diasVencido, rangoEsperado] of casos) {
       const inmId = id();
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() - diasVencido);
-      const f = facturaDoc({ inmuebleId: inmId, dueDate, total: 100000 });
+      const fechaVencimiento = new Date();
+      fechaVencimiento.setDate(fechaVencimiento.getDate() - diasVencido);
+      const f = facturaDoc({
+        inmuebleId: inmId,
+        fechaVencimiento,
+        total: 100000,
+      });
       const inm = inmuebleDoc({ _id: inmId, codigo: '901' });
 
       const svc = servicio({
@@ -327,7 +331,7 @@ describe('VencimientosCarteraService', () => {
     const inmId = id();
     const nd = ndDoc({
       inmuebleId: inmId,
-      issueDate: new Date('2026-07-01'),
+      fechaEmision: new Date('2026-07-01'),
       total: 50000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -346,7 +350,7 @@ describe('VencimientosCarteraService', () => {
     const result = await svc.findAll({ fecha: '2026-09-06' });
 
     expect(result.filas[0]).toMatchObject({ tipo: 'ND', saldo: 50000 });
-    expect(result.filas[0].vence).toBe(nd.issueDate.toISOString());
+    expect(result.filas[0].vence).toBe(nd.fechaEmision.toISOString());
   });
 
   it('una aplicacion activa reduce el saldo pendiente del documento', async () => {
@@ -356,11 +360,11 @@ describe('VencimientosCarteraService', () => {
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 80000,
-      status: 'activa',
-      appliedAt: new Date('2026-08-10'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 80000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-08-10'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -389,11 +393,11 @@ describe('VencimientosCarteraService', () => {
     const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date('2026-08-10'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-08-10'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
