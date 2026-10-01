@@ -22,19 +22,21 @@ const resolucionesCon = (fila: Record<string, unknown> | null) => {
     findOneAndUpdate: jest.fn((filtro: Filtro, _update?: Filtro) => ({
       exec: () => {
         if (!estado) return Promise.resolve(null);
-        if (filtro.status === 'active' && estado.status !== 'active') {
+        if (filtro.estado === 'active' && estado.estado !== 'active') {
           return Promise.resolve(null);
         }
-        // The $expr ceiling: nextNumber must still be inside the range.
-        if ((estado.nextNumber as number) > (estado.rangeTo as number)) {
+        // The $expr ceiling: siguienteNumero must still be inside the range.
+        if (
+          (estado.siguienteNumero as number) > (estado.rangoHasta as number)
+        ) {
           return Promise.resolve(null);
         }
         const previa = { ...estado };
-        estado.nextNumber = (estado.nextNumber as number) + 1;
+        estado.siguienteNumero = (estado.siguienteNumero as number) + 1;
         return Promise.resolve(previa);
       },
     })),
-    // Honours the status filter, like the real collection: the service asks
+    // Honours the estado filter, like the real collection: the service asks
     // specifically for an ACTIVE resolution when working out which of the two
     // failures happened, and a stub that ignores that would report "exhausted"
     // for a building whose resolution is merely switched off.
@@ -42,7 +44,7 @@ const resolucionesCon = (fila: Record<string, unknown> | null) => {
       lean: () => ({
         exec: () =>
           Promise.resolve(
-            estado && filtro.status === 'active' && estado.status !== 'active'
+            estado && filtro.estado === 'active' && estado.estado !== 'active'
               ? null
               : estado,
           ),
@@ -62,7 +64,7 @@ const consecutivosCon = (fila: Record<string, unknown> | null) => {
           // null when the row doesn't exist — the service turns that into
           // NotFoundException.
           if (!estado) return Promise.resolve(null);
-          estado.nextNumber = (estado.nextNumber as number) + 1;
+          estado.siguienteNumero = (estado.siguienteNumero as number) + 1;
           return Promise.resolve({ ...estado });
         },
       }),
@@ -77,12 +79,12 @@ const consecutivosLoteCon = (fila: Record<string, unknown> | null) => {
     findOneAndUpdate: jest.fn(() => ({
       exec: () => {
         if (!estado) {
-          // On upsert, $inc creates nextNumber at 1, returnDocument: 'after' returns post-image
-          estado = { nextNumber: 1 };
+          // On upsert, $inc creates siguienteNumero at 1, returnDocument: 'after' returns post-image
+          estado = { siguienteNumero: 1 };
           return Promise.resolve(estado);
         }
         // On normal update, increment first, then return post-image
-        estado.nextNumber = (estado.nextNumber as number) + 1;
+        estado.siguienteNumero = (estado.siguienteNumero as number) + 1;
         return Promise.resolve({ ...estado });
       },
     })),
@@ -102,18 +104,18 @@ const servicio = (
 
 const resolucionActiva = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
-  resolutionNumber: '18764000001',
-  prefix: 'CONJ-2026',
-  rangeFrom: 1,
-  rangeTo: 5000,
-  nextNumber: 1,
-  status: 'active',
+  numeroResolucion: '18764000001',
+  prefijo: 'CONJ-2026',
+  rangoDesde: 1,
+  rangoHasta: 5000,
+  siguienteNumero: 1,
+  estado: 'active',
   ...over,
 });
 
 describe('NumeracionService.siguienteFactura', () => {
   it('entrega el número con su prefijo y el id de la resolución', async () => {
-    const resolucion = resolucionActiva({ nextNumber: 1041 });
+    const resolucion = resolucionActiva({ siguienteNumero: 1041 });
     const service = servicio(resolucion);
 
     await expect(service.siguienteFactura(COP)).resolves.toEqual({
@@ -126,7 +128,7 @@ describe('NumeracionService.siguienteFactura', () => {
 
   it('avanza uno por documento y nunca repite', async () => {
     // El corazón del asunto: dos facturas no pueden llevar el mismo número.
-    const service = servicio(resolucionActiva({ nextNumber: 1 }));
+    const service = servicio(resolucionActiva({ siguienteNumero: 1 }));
 
     const emitidos = [
       await service.siguienteFactura(COP),
@@ -139,7 +141,7 @@ describe('NumeracionService.siguienteFactura', () => {
   });
 
   it('entrega el último número del rango', async () => {
-    const service = servicio(resolucionActiva({ nextNumber: 5000 }));
+    const service = servicio(resolucionActiva({ siguienteNumero: 5000 }));
 
     await expect(service.siguienteFactura(COP)).resolves.toMatchObject({
       numero: 5000,
@@ -147,7 +149,7 @@ describe('NumeracionService.siguienteFactura', () => {
   });
 
   it('se niega cuando el rango se agotó, diciendo hasta dónde llegaba', async () => {
-    const service = servicio(resolucionActiva({ nextNumber: 5001 }));
+    const service = servicio(resolucionActiva({ siguienteNumero: 5001 }));
 
     await expect(service.siguienteFactura(COP)).rejects.toBeInstanceOf(
       ConflictException,
@@ -166,7 +168,7 @@ describe('NumeracionService.siguienteFactura', () => {
   });
 
   it('ignora una resolución inactiva', async () => {
-    const service = servicio(resolucionActiva({ status: 'inactive' }));
+    const service = servicio(resolucionActiva({ estado: 'inactive' }));
 
     await expect(service.siguienteFactura(COP)).rejects.toBeInstanceOf(
       NotFoundException,
@@ -174,7 +176,9 @@ describe('NumeracionService.siguienteFactura', () => {
   });
 
   it('funciona sin prefijo', async () => {
-    const service = servicio(resolucionActiva({ prefix: '', nextNumber: 7 }));
+    const service = servicio(
+      resolucionActiva({ prefijo: '', siguienteNumero: 7 }),
+    );
 
     await expect(service.siguienteFactura(COP)).resolves.toMatchObject({
       completo: '7',
@@ -195,13 +199,13 @@ describe('NumeracionService.siguienteFactura', () => {
 
     expect(resoluciones.findOneAndUpdate).toHaveBeenCalledTimes(1);
     const [, actualizacion] = resoluciones.findOneAndUpdate.mock.calls[0];
-    expect(actualizacion).toEqual({ $inc: { nextNumber: 1 } });
+    expect(actualizacion).toEqual({ $inc: { siguienteNumero: 1 } });
   });
 
   it('usa el consecutivo simple de categoría FV cuando no hay resolución activa', async () => {
     // DIAN no es obligatorio para todos los clientes — sin resolución, factura
     // igual puede emitirse con el consecutivo simple, sin resolucionId.
-    const service = servicio(null, { prefix: 'FV-A', nextNumber: 10 });
+    const service = servicio(null, { prefijo: 'FV-A', siguienteNumero: 10 });
 
     // { returnDocument: 'after' }, como en siguienteDocumento: la fila post-incremento es
     // la que se usa — el mock simula el mismo comportamiento.
@@ -213,7 +217,7 @@ describe('NumeracionService.siguienteFactura', () => {
   });
 
   it('busca el consecutivo de respaldo por categoría FV', async () => {
-    const consecutivos = consecutivosCon({ prefix: 'FV', nextNumber: 1 });
+    const consecutivos = consecutivosCon({ prefijo: 'FV', siguienteNumero: 1 });
     const service = new NumeracionService(
       resolucionesCon(null) as never,
       consecutivos as never,
@@ -223,7 +227,7 @@ describe('NumeracionService.siguienteFactura', () => {
     await service.siguienteFactura(COP);
 
     const [filtro] = consecutivos.findOneAndUpdate.mock.calls[0];
-    expect(filtro).toMatchObject({ category: 'FV' });
+    expect(filtro).toMatchObject({ categoria: 'FV' });
   });
 
   it('rechaza cuando no hay resolución activa ni consecutivo FV configurado', async () => {
@@ -245,7 +249,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
   // building the `numeros` array) against a controlled "before" state.
 
   it('otorga exactamente lo pedido cuando hay rango de sobra', async () => {
-    const resolucion = resolucionActiva({ nextNumber: 1041 });
+    const resolucion = resolucionActiva({ siguienteNumero: 1041 });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(resolucion),
@@ -286,16 +290,19 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
     // documento y nunca repite" — here simulated across two calls of the
     // SAME requested amount (2), so the mock's own clamp math only needs to
     // stay correct for that one fixed cantidad.
-    let estado = resolucionActiva({ nextNumber: 1 });
+    let estado = resolucionActiva({ siguienteNumero: 1 });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => {
           const previa = { ...estado };
           const otorgados = Math.max(
             0,
-            Math.min(2, estado.rangeTo - estado.nextNumber + 1),
+            Math.min(2, estado.rangoHasta - estado.siguienteNumero + 1),
           );
-          estado = { ...estado, nextNumber: estado.nextNumber + otorgados };
+          estado = {
+            ...estado,
+            siguienteNumero: estado.siguienteNumero + otorgados,
+          };
           return Promise.resolve(previa);
         },
       })),
@@ -314,7 +321,10 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
   });
 
   it('entrega hasta el último número disponible, otorgando menos que lo pedido', async () => {
-    const resolucion = resolucionActiva({ nextNumber: 4998, rangeTo: 5000 });
+    const resolucion = resolucionActiva({
+      siguienteNumero: 4998,
+      rangoHasta: 5000,
+    });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(resolucion),
@@ -351,13 +361,19 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
   });
 
   it('otorga cero cuando la resolución existe pero ya está agotada, sin caer al consecutivo FV', async () => {
-    const resolucion = resolucionActiva({ nextNumber: 5001, rangeTo: 5000 });
+    const resolucion = resolucionActiva({
+      siguienteNumero: 5001,
+      rangoHasta: 5000,
+    });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(resolucion),
       })),
     };
-    const consecutivos = consecutivosCon({ prefix: 'FV', nextNumber: 1 });
+    const consecutivos = consecutivosCon({
+      prefijo: 'FV',
+      siguienteNumero: 1,
+    });
     const service = new NumeracionService(
       resoluciones as never,
       consecutivos as never,
@@ -379,7 +395,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       // on below) so jest infers a two-element call tuple — see the same
       // note on resolucionesCon above.
       findOneAndUpdate: jest.fn((_filtro?: Filtro, _update?: Filtro) => ({
-        exec: () => Promise.resolve({ prefix: 'FV', nextNumber: 10 }),
+        exec: () => Promise.resolve({ prefijo: 'FV', siguienteNumero: 10 }),
       })),
     };
     const service = new NumeracionService(
@@ -396,19 +412,19 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       ],
     });
     const [, actualizacion] = consecutivos.findOneAndUpdate.mock.calls[0];
-    expect(actualizacion).toEqual({ $inc: { nextNumber: 3 } });
+    expect(actualizacion).toEqual({ $inc: { siguienteNumero: 3 } });
   });
 
   it('ignora una resolución inactiva y usa el consecutivo FV', async () => {
-    // The filter is `{ status: 'active' }` with no separate disambiguation
+    // The filter is `{ estado: 'active' }` with no separate disambiguation
     // step (unlike siguienteFactura) — an inactive resolution simply never
     // matches, identical to no resolution existing at all.
     const resoluciones = resolucionesCon(
-      resolucionActiva({ status: 'inactive' }),
+      resolucionActiva({ estado: 'inactive' }),
     );
     const consecutivos = {
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve({ prefix: 'FV', nextNumber: 0 }),
+        exec: () => Promise.resolve({ prefijo: 'FV', siguienteNumero: 0 }),
       })),
     };
     const service = new NumeracionService(
@@ -423,7 +439,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
   });
 
   it('funciona sin prefijo', async () => {
-    const resolucion = resolucionActiva({ prefix: '', nextNumber: 7 });
+    const resolucion = resolucionActiva({ prefijo: '', siguienteNumero: 7 });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(resolucion),
@@ -443,7 +459,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
   });
 
   it('reserva en una sola operación de base de datos, sin importar cuántos números pida', async () => {
-    const resolucion = resolucionActiva({ nextNumber: 1 });
+    const resolucion = resolucionActiva({ siguienteNumero: 1 });
     const resoluciones = {
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(resolucion),
@@ -497,7 +513,7 @@ describe('NumeracionService.siguienteDocumento', () => {
   });
 
   it('continúa desde el contador existente', async () => {
-    const service = servicio(null, { prefix: 'RC', nextNumber: 84 });
+    const service = servicio(null, { prefijo: 'RC', siguienteNumero: 84 });
 
     await expect(service.siguienteDocumento(COP, 'RC')).resolves.toMatchObject({
       numero: 85,
@@ -505,7 +521,10 @@ describe('NumeracionService.siguienteDocumento', () => {
   });
 
   it('no aplica techo de rango: los internos no tienen resolución', async () => {
-    const service = servicio(null, { prefix: 'NC', nextNumber: 999999 });
+    const service = servicio(null, {
+      prefijo: 'NC',
+      siguienteNumero: 999999,
+    });
 
     await expect(service.siguienteDocumento(COP, 'NC')).resolves.toMatchObject({
       numero: 1000000,
@@ -513,7 +532,7 @@ describe('NumeracionService.siguienteDocumento', () => {
   });
 
   it('avanza uno por documento y nunca repite, arrancando desde un contador existente', async () => {
-    const service = servicio(null, { prefix: 'RC', nextNumber: 0 });
+    const service = servicio(null, { prefijo: 'RC', siguienteNumero: 0 });
 
     const numeros = [
       await service.siguienteDocumento(COP, 'RC'),
@@ -534,13 +553,13 @@ describe('NumeracionService.siguienteLote', () => {
   });
 
   it('continúa desde el contador existente', async () => {
-    const service = servicio(null, null, { nextNumber: 14 });
+    const service = servicio(null, null, { siguienteNumero: 14 });
 
     await expect(service.siguienteLote(COP)).resolves.toBe(15);
   });
 
   it('avanza uno por lote y nunca repite', async () => {
-    const service = servicio(null, null, { nextNumber: 0 });
+    const service = servicio(null, null, { siguienteNumero: 0 });
 
     const numeros = [
       await service.siguienteLote(COP),
@@ -554,7 +573,7 @@ describe('NumeracionService.siguienteLote', () => {
 
 describe('NumeracionService.siguienteDocumento — dentro de una transacción', () => {
   it('reenvía la sesión al findOneAndUpdate, para que un rollback deshaga también el número', async () => {
-    const consecutivos = consecutivosCon({ prefix: 'RC', nextNumber: 5 });
+    const consecutivos = consecutivosCon({ prefijo: 'RC', siguienteNumero: 5 });
     const service = new NumeracionService(
       resolucionesCon(null) as never,
       consecutivos as never,
@@ -569,7 +588,7 @@ describe('NumeracionService.siguienteDocumento — dentro de una transacción', 
   });
 
   it('sigue funcionando sin sesión (todo llamador existente)', async () => {
-    const service = servicio(null, { prefix: 'RC', nextNumber: 5 });
+    const service = servicio(null, { prefijo: 'RC', siguienteNumero: 5 });
 
     await expect(service.siguienteDocumento(COP, 'RC')).resolves.toMatchObject({
       numero: 6,
@@ -579,23 +598,23 @@ describe('NumeracionService.siguienteDocumento — dentro de una transacción', 
 
 describe('NumeracionService.reservarBloqueDocumentos', () => {
   /** Unlike `consecutivosCon` (fixed +1, used by `siguienteDocumento`'s own
-   *  tests), this respects the actual `$inc.nextNumber` amount the update
-   *  document carries — the whole point of this method is incrementing by
-   *  `cantidad` in one atomic step, not by 1 repeatedly. */
+   *  tests), this respects the actual `$inc.siguienteNumero` amount the
+   *  update document carries — the whole point of this method is
+   *  incrementing by `cantidad` in one atomic step, not by 1 repeatedly. */
   const consecutivosBloqueCon = (fila: Record<string, unknown> | null) => {
     const estado = fila ? { ...fila } : null;
     return {
       findOneAndUpdate: jest.fn(
         (
           _filtro: unknown,
-          update: { $inc: { nextNumber: number } },
+          update: { $inc: { siguienteNumero: number } },
           _opciones?: unknown,
         ) => ({
           exec: () => {
             if (!estado) return Promise.resolve(null);
             const previo = { ...estado };
-            estado.nextNumber =
-              (estado.nextNumber as number) + update.$inc.nextNumber;
+            estado.siguienteNumero =
+              (estado.siguienteNumero as number) + update.$inc.siguienteNumero;
             return Promise.resolve(previo);
           },
         }),
@@ -617,8 +636,8 @@ describe('NumeracionService.reservarBloqueDocumentos', () => {
 
   it('reserva `cantidad` números consecutivos en UNA sola operación, arrancando después del contador existente', async () => {
     const consecutivos = consecutivosBloqueCon({
-      prefix: 'RC',
-      nextNumber: 10,
+      prefijo: 'RC',
+      siguienteNumero: 10,
     });
     const service = new NumeracionService(
       resolucionesCon(null) as never,
@@ -634,8 +653,8 @@ describe('NumeracionService.reservarBloqueDocumentos', () => {
 
   it('cantidad 0 no toca la base y devuelve un array vacío', async () => {
     const consecutivos = consecutivosBloqueCon({
-      prefix: 'RC',
-      nextNumber: 10,
+      prefijo: 'RC',
+      siguienteNumero: 10,
     });
     const service = new NumeracionService(
       resolucionesCon(null) as never,
@@ -650,7 +669,10 @@ describe('NumeracionService.reservarBloqueDocumentos', () => {
   });
 
   it('llamadas consecutivas nunca repiten un número', async () => {
-    const consecutivos = consecutivosBloqueCon({ prefix: 'RC', nextNumber: 0 });
+    const consecutivos = consecutivosBloqueCon({
+      prefijo: 'RC',
+      siguienteNumero: 0,
+    });
     const service = new NumeracionService(
       resolucionesCon(null) as never,
       consecutivos as never,
