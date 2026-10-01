@@ -523,23 +523,23 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     expect(entries).toEqual([
       {
-        account: '111005',
-        type: 'debito',
-        amount: 500000,
-        description: expect.any(String) as string,
+        cuenta: '111005',
+        tipo: 'debito',
+        monto: 500000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '210505',
-        type: 'credito',
-        amount: 500000,
-        description: expect.any(String) as string,
+        cuenta: '210505',
+        tipo: 'credito',
+        monto: 500000,
+        descripcion: expect.any(String) as string,
       },
     ]);
   });
@@ -600,14 +600,14 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
       flujoCaja?: string | null;
       tercero?: string | null;
     }>;
-    const anticipo = entries.find((e) => e.account === '210505');
+    const anticipo = entries.find((e) => e.cuenta === '210505');
     expect(anticipo?.flujoCaja).toBe('FC-OPER');
-    const banco = entries.find((e) => e.account === '111005');
+    const banco = entries.find((e) => e.cuenta === '111005');
     expect(banco?.tercero ?? null).toBeNull();
   });
 
@@ -975,36 +975,36 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     // Débito por el RECIBIDO completo (500000), no solo lo aplicado —
     // el bug que este plan corrige. Crédito partido: cartera por lo
     // aplicado, anticipos por el resto.
     expect(entries).toEqual([
       {
-        account: '111005',
-        type: 'debito',
-        amount: 500000,
-        description: expect.any(String) as string,
+        cuenta: '111005',
+        tipo: 'debito',
+        monto: 500000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '130501',
-        type: 'credito',
-        amount: 200000,
-        description: expect.any(String) as string,
+        cuenta: '130501',
+        tipo: 'credito',
+        monto: 200000,
+        descripcion: expect.any(String) as string,
         // La fixture de `facturaDoc()` no trae `.numero` — el fallback de
         // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
       },
       {
-        account: '210505',
-        type: 'credito',
-        amount: 300000,
-        description: expect.any(String) as string,
+        cuenta: '210505',
+        tipo: 'credito',
+        monto: 300000,
+        descripcion: expect.any(String) as string,
       },
     ]);
   });
@@ -1075,31 +1075,31 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
-    const creditos = entries.filter((m) => m.type === 'credito');
+    const creditos = entries.filter((m) => m.tipo === 'credito');
     // La cuenta propia del concepto de mora (130599), NO la cuenta plana de
     // cartera de la copropiedad (130501) — esta última solo aparece por
     // anticipos.
     expect(creditos).toEqual([
       {
-        account: '130599',
-        type: 'credito',
-        amount: 200000,
-        description: expect.any(String) as string,
+        cuenta: '130599',
+        tipo: 'credito',
+        monto: 200000,
+        descripcion: expect.any(String) as string,
         // La fixture de `facturaDoc()` no trae `.numero` — el fallback de
         // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
       },
       {
-        account: '210505',
-        type: 'credito',
-        amount: 300000,
-        description: expect.any(String) as string,
+        cuenta: '210505',
+        tipo: 'credito',
+        monto: 300000,
+        descripcion: expect.any(String) as string,
       },
     ]);
   });
@@ -1113,13 +1113,13 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       lineas: [
         {
           conceptoId: conceptoAdmin,
-          conceptKind: 'administracion',
+          tipoConcepto: 'administracion',
           valorTotal: 200000,
           cuentaCartera: '130501',
         },
         {
           conceptoId: conceptoMora,
-          conceptKind: 'intereses',
+          tipoConcepto: 'intereses',
           valorTotal: 40000,
           cuentaCartera: '130599',
           cuentaIngreso: '413505',
@@ -1183,25 +1183,25 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     // 240.000 se aplicaron en total, pero solo 40.000 tocaron el cargo de
     // mora — el par de cuentas de orden debe reflejar 40.000, no 240.000.
-    expect(entries.find((m) => m.account === '831505')?.amount).toBe(40000);
-    expect(entries.find((m) => m.account === '831510')?.amount).toBe(40000);
+    expect(entries.find((m) => m.cuenta === '831505')?.monto).toBe(40000);
+    expect(entries.find((m) => m.cuenta === '831510')?.monto).toBe(40000);
     // La mora nunca se debitó a su `cuentaCartera` (130599)
     // al facturar — cuentas de orden ocupó ese lugar (par memo arriba). Al
     // recaudarla, el crédito real de ingreso debe ir a la cuenta CRÉDITO de
     // Cargos (`cuentaIngreso`, 413505), nunca a la cuenta
     // db/cartera (130599) — ese es justamente el bug que esta prueba cubre.
     expect(
-      entries.find((m) => m.account === '413505' && m.type === 'credito')
-        ?.amount,
+      entries.find((m) => m.cuenta === '413505' && m.tipo === 'credito')
+        ?.monto,
     ).toBe(40000);
-    expect(entries.some((m) => m.account === '130599')).toBe(false);
+    expect(entries.some((m) => m.cuenta === '130599')).toBe(false);
   });
 
   it('con cuentas de orden habilitadas, no agrega el par memo cuando nada se aplicó a mora', async () => {
@@ -1211,7 +1211,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       lineas: [
         {
           conceptoId: new Types.ObjectId(),
-          conceptKind: 'administracion',
+          tipoConcepto: 'administracion',
           valorTotal: 200000,
           cuentaCartera: '130501',
         },
@@ -1273,9 +1273,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{ account: string }>;
-    expect(entries.some((m) => m.account === '831505')).toBe(false);
-    expect(entries.some((m) => m.account === '831510')).toBe(false);
+    const entries = fila[0].movimientos as Array<{ cuenta: string }>;
+    expect(entries.some((m) => m.cuenta === '831505')).toBe(false);
+    expect(entries.some((m) => m.cuenta === '831510')).toBe(false);
   });
 
   it('rechaza — todo o nada — cuando la suma solicitada supera el monto recibido', async () => {
@@ -1616,29 +1616,29 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     expect(entries).toEqual([
       {
-        account: '111005',
-        type: 'debito',
-        amount: 360000,
-        description: expect.any(String) as string,
+        cuenta: '111005',
+        tipo: 'debito',
+        monto: 360000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '540501',
-        type: 'debito',
-        amount: 40000,
-        description: expect.any(String) as string,
+        cuenta: '540501',
+        tipo: 'debito',
+        monto: 40000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '130501',
-        type: 'credito',
-        amount: 400000,
-        description: expect.any(String) as string,
+        cuenta: '130501',
+        tipo: 'credito',
+        monto: 400000,
+        descripcion: expect.any(String) as string,
         tipoDocumento: 'FV',
         numeroDocumento: 173,
       },
@@ -1756,24 +1756,24 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
-      description: string;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
+      descripcion: string;
     }>;
-    const descuento = entries.find((m) => m.account === '540501');
-    expect(descuento).toMatchObject({ type: 'debito', amount: 1000 });
+    const descuento = entries.find((m) => m.cuenta === '540501');
+    expect(descuento).toMatchObject({ tipo: 'debito', monto: 1000 });
     // No debe afirmar "pronto pago" — el faltante no tiene nada que ver con
     // ese descuento automático.
-    expect(descuento?.description).not.toMatch(/pronto pago/i);
+    expect(descuento?.descripcion).not.toMatch(/pronto pago/i);
 
-    const creditoCartera = entries.find((m) => m.type === 'credito');
-    expect(creditoCartera).toMatchObject({ amount: 849000 });
+    const creditoCartera = entries.find((m) => m.tipo === 'credito');
+    expect(creditoCartera).toMatchObject({ monto: 849000 });
 
     // No hay renglón de anticipo — la copropiedad ('210505') solo aparece
     // como crédito cuando `montoSinAplicar > 0`.
-    expect(entries.some((m) => m.account === '210505')).toBe(false);
+    expect(entries.some((m) => m.cuenta === '210505')).toBe(false);
   });
 });
 
@@ -1876,18 +1876,18 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
-      description: string;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
+      descripcion: string;
     }>;
-    const otrosIngresos = entries.find((m) => m.account === '429505');
-    expect(otrosIngresos).toMatchObject({ type: 'credito', amount: 300000 });
-    expect(otrosIngresos?.description).toMatch(/otros ingresos/i);
+    const otrosIngresos = entries.find((m) => m.cuenta === '429505');
+    expect(otrosIngresos).toMatchObject({ tipo: 'credito', monto: 300000 });
+    expect(otrosIngresos?.descripcion).toMatch(/otros ingresos/i);
     // Ningún renglón a Anticipos (210505) — el sobrante fue todo a Otros
     // Ingresos, no se partió.
-    expect(entries.some((m) => m.account === '210505')).toBe(false);
+    expect(entries.some((m) => m.cuenta === '210505')).toBe(false);
   });
 
   it("con destinoSobrante: 'anticipo', el comportamiento es idéntico al de siempre", async () => {
@@ -1913,14 +1913,14 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
-    expect(entries.find((m) => m.account === '210505')).toMatchObject({
-      type: 'credito',
-      amount: 300000,
+    expect(entries.find((m) => m.cuenta === '210505')).toMatchObject({
+      tipo: 'credito',
+      monto: 300000,
     });
   });
 });
@@ -1964,7 +1964,7 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
         {
           conceptoId: conceptoIntereses,
           valorTotal: 200000,
-          conceptKind: 'intereses',
+          tipoConcepto: 'intereses',
           cuentaCartera: '130599',
         },
       ],
@@ -2008,18 +2008,18 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     expect(
       entries.some(
         (e) =>
-          e.account === '130599' && e.type === 'credito' && e.amount === 150000,
+          e.cuenta === '130599' && e.tipo === 'credito' && e.monto === 150000,
       ),
     ).toBe(true);
-    expect(entries.some((e) => e.account === '130501')).toBe(false);
+    expect(entries.some((e) => e.cuenta === '130501')).toBe(false);
 
     // El saldo pendiente de esta línea queda registrado para la próxima vez
     // (200000 - 150000 = 50000) — Administración queda sin tocar.
@@ -2120,7 +2120,7 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
         {
           conceptoId: conceptoIntereses,
           valorTotal: 200000,
-          conceptKind: 'intereses',
+          tipoConcepto: 'intereses',
           cuentaCartera: '130599',
         },
       ],
@@ -2201,14 +2201,14 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
   it('aplica en orden de vencimiento más antiguo primero, y se detiene al agotar el monto', async () => {
     const vieja = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-06-30'),
+      fechaVencimiento: new Date('2026-06-30'),
       saldoPendiente: 200000,
       total: 200000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const nueva = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-07-31'),
+      fechaVencimiento: new Date('2026-07-31'),
       saldoPendiente: 200000,
       total: 200000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
@@ -2298,7 +2298,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // al FIFO en absoluto.
     const facturaVieja = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-07-31'),
+      fechaVencimiento: new Date('2026-07-31'),
       saldoPendiente: 100000,
       total: 100000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
@@ -2398,7 +2398,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     });
 
     // La Nota Débito (fechaEmision 2026-06-01) es más vieja que la Factura
-    // (dueDate 2026-07-31) — tiene que pagarse primero, agotando el monto,
+    // (fechaVencimiento 2026-07-31) — tiene que pagarse primero, agotando el monto,
     // sin tocar la Factura.
     const idsLlamados = saldoTotalDocumento.findOneAndUpdate.mock.calls.map(
       ([filtro]) => String((filtro as { documentoId: unknown }).documentoId),
@@ -2417,11 +2417,11 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
   it('salta un documento inválido y lo reporta en errores, sin abortar el resto (best-effort)', async () => {
     const invalida = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-06-01'),
+      fechaVencimiento: new Date('2026-06-01'),
     });
     const valida = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-07-01'),
+      fechaVencimiento: new Date('2026-07-01'),
       saldoPendiente: 100000,
       total: 100000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
@@ -2511,7 +2511,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // desaparecida de la factura sin rastro.
     const factura = facturaDoc({
       _id: new Types.ObjectId(),
-      dueDate: new Date('2026-06-30'),
+      fechaVencimiento: new Date('2026-06-30'),
       saldoPendiente: 100000,
       total: 100000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
@@ -2587,7 +2587,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const factura = facturaDoc({
       _id: new Types.ObjectId(),
       numero: 340,
-      dueDate: new Date('2026-06-30'),
+      fechaVencimiento: new Date('2026-06-30'),
       saldoPendiente: 200000,
       total: 200000,
       lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
@@ -2809,29 +2809,29 @@ describe('RecibosService.anular', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     expect(entries).toEqual([
       {
-        account: '130501',
-        type: 'debito',
-        amount: 200000,
-        description: expect.any(String) as string,
+        cuenta: '130501',
+        tipo: 'debito',
+        monto: 200000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '210505',
-        type: 'debito',
-        amount: 100000,
-        description: expect.any(String) as string,
+        cuenta: '210505',
+        tipo: 'debito',
+        monto: 100000,
+        descripcion: expect.any(String) as string,
       },
       {
-        account: '111005',
-        type: 'credito',
-        amount: 300000,
-        description: expect.any(String) as string,
+        cuenta: '111005',
+        tipo: 'credito',
+        monto: 300000,
+        descripcion: expect.any(String) as string,
       },
     ]);
   });
@@ -2996,17 +2996,17 @@ describe('RecibosService.anular', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
-    const debitos = entries.filter((m) => m.type === 'debito');
+    const debitos = entries.filter((m) => m.tipo === 'debito');
     // Debita de vuelta la cuenta propia del concepto de mora (130599) por lo
     // que esta aplicación había acreditado — NO la cuenta plana de cartera
     // de la copropiedad (130501).
-    expect(debitos.find((d) => d.account === '130599')?.amount).toBe(200000);
-    expect(debitos.some((d) => d.account === '130501')).toBe(false);
+    expect(debitos.find((d) => d.cuenta === '130599')?.monto).toBe(200000);
+    expect(debitos.some((d) => d.cuenta === '130501')).toBe(false);
   });
 
   it('con cuentas de orden habilitadas, revierte el par memo SOLO por lo que era mora', async () => {
@@ -3027,7 +3027,7 @@ describe('RecibosService.anular', () => {
       lineas: [
         {
           conceptoId: conceptoMora,
-          conceptKind: 'intereses',
+          tipoConcepto: 'intereses',
           valorTotal: 500000,
           cuentaCartera: '130599',
         },
@@ -3095,10 +3095,10 @@ describe('RecibosService.anular', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     // 300.000 es el montoRecibido total del recibo, pero solo 200.000
     // fueron mora — el par memo revertido debe ser 200.000, no 300.000.
@@ -3106,12 +3106,12 @@ describe('RecibosService.anular', () => {
     // (831510 débito / 831505 crédito) — anular() vuelve a los lados
     // planos de facturación para cerrar ese par en cero.
     expect(
-      entries.find((m) => m.account === '831505' && m.type === 'debito')
-        ?.amount,
+      entries.find((m) => m.cuenta === '831505' && m.tipo === 'debito')
+        ?.monto,
     ).toBe(200000);
     expect(
-      entries.find((m) => m.account === '831510' && m.type === 'credito')
-        ?.amount,
+      entries.find((m) => m.cuenta === '831510' && m.tipo === 'credito')
+        ?.monto,
     ).toBe(200000);
   });
 
@@ -3144,7 +3144,7 @@ describe('RecibosService.anular', () => {
         {
           conceptoId: conceptoIntereses,
           valorTotal: 200000,
-          conceptKind: 'intereses',
+          tipoConcepto: 'intereses',
           cuentaCartera: '130599',
         },
       ],
@@ -3197,14 +3197,14 @@ describe('RecibosService.anular', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
-    const debitos = entries.filter((m) => m.type === 'debito');
-    expect(debitos.find((d) => d.account === '130599')?.amount).toBe(150000);
-    expect(debitos.some((d) => d.account === '130501')).toBe(false);
+    const debitos = entries.filter((m) => m.tipo === 'debito');
+    expect(debitos.find((d) => d.cuenta === '130599')?.monto).toBe(150000);
+    expect(debitos.some((d) => d.cuenta === '130501')).toBe(false);
 
     // El saldo pendiente de Intereses vuelve a subir por lo revertido
     // (200000 - 150000 + 150000 = 200000, otra vez completo).
@@ -3400,33 +3400,33 @@ describe('RecibosService.anular', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
-      description: string;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
+      descripcion: string;
     }>;
     // El debito de cartera es SOLO los 200000 reales, no 500000 — el bug
     // este test evita: `recibo.montoAplicado` (500000, desde
     // SaldoDocumentoOrigen) incluye los Otros Ingresos, así que hay que
     // restarlos antes de reconstruir el lado de cartera.
     expect(
-      entries.find((m) => m.account === '130501' && m.type === 'debito')
-        ?.amount,
+      entries.find((m) => m.cuenta === '130501' && m.tipo === 'debito')
+        ?.monto,
     ).toBe(200000);
     // Los 300000 de Otros Ingresos se revierten a SU cuenta, no a
     // cuentaAnticipos (210505) — no hubo ningún renglón ahí.
     const otrosIngresos = entries.find(
-      (m) => m.account === '429505' && m.type === 'debito',
+      (m) => m.cuenta === '429505' && m.tipo === 'debito',
     );
-    expect(otrosIngresos?.amount).toBe(300000);
-    expect(otrosIngresos?.description).toMatch(/otros ingresos/i);
-    expect(entries.some((m) => m.account === '210505')).toBe(false);
+    expect(otrosIngresos?.monto).toBe(300000);
+    expect(otrosIngresos?.descripcion).toMatch(/otros ingresos/i);
+    expect(entries.some((m) => m.cuenta === '210505')).toBe(false);
     // El crédito de vuelta a la cuenta destino sigue siendo el
     // montoRecibido completo (500000) — la partida sigue cuadrando.
     expect(
-      entries.find((m) => m.account === '111005' && m.type === 'credito')
-        ?.amount,
+      entries.find((m) => m.cuenta === '111005' && m.tipo === 'credito')
+        ?.monto,
     ).toBe(500000);
   });
 });
@@ -3845,7 +3845,7 @@ describe('RecibosService — ciclo de vida completo', () => {
   const CARTERA = '130501';
   const ANTICIPOS = '210505';
 
-  type MovimientoPlano = { account: string; type: string; amount: number };
+  type MovimientoPlano = { cuenta: string; tipo: string; monto: number };
 
   /**
    * Modelos con ESTADO COMPARTIDO, no stubs de una sola respuesta: `crear` →
@@ -3858,7 +3858,7 @@ describe('RecibosService — ciclo de vida completo', () => {
     let recibo: Record<string, unknown> = {};
     const porId = new Map(facturas.map((f) => [String(f._id), f]));
     const aplicacionesStore: Record<string, unknown>[] = [];
-    const asientosStore: { entries: MovimientoPlano[] }[] = [];
+    const asientosStore: { movimientos: MovimientoPlano[] }[] = [];
 
     const recibos = {
       create: jest.fn((filas: Record<string, unknown>[]) => {
@@ -3980,7 +3980,7 @@ describe('RecibosService — ciclo de vida completo', () => {
     };
 
     const asientos = {
-      create: jest.fn((filas: { entries: MovimientoPlano[] }[]) => {
+      create: jest.fn((filas: { movimientos: MovimientoPlano[] }[]) => {
         asientosStore.push(...filas);
         return Promise.resolve(filas);
       }),
@@ -4079,11 +4079,11 @@ describe('RecibosService — ciclo de vida completo', () => {
     const netoPorCuenta = () => {
       const neto = new Map<string, number>();
       for (const asiento of asientosStore) {
-        for (const movimiento of asiento.entries) {
-          const signo = movimiento.type === 'debito' ? 1 : -1;
+        for (const movimiento of asiento.movimientos) {
+          const signo = movimiento.tipo === 'debito' ? 1 : -1;
           neto.set(
-            movimiento.account,
-            (neto.get(movimiento.account) ?? 0) + signo * movimiento.amount,
+            movimiento.cuenta,
+            (neto.get(movimiento.cuenta) ?? 0) + signo * movimiento.monto,
           );
         }
       }
@@ -4160,12 +4160,12 @@ describe('RecibosService — ciclo de vida completo', () => {
 
     // Y cada asiento, por separado, cuadra débitos contra créditos.
     for (const asiento of asientosStore) {
-      const debitos = asiento.entries
-        .filter((m) => m.type === 'debito')
-        .reduce((acc, m) => acc + m.amount, 0);
-      const creditos = asiento.entries
-        .filter((m) => m.type === 'credito')
-        .reduce((acc, m) => acc + m.amount, 0);
+      const debitos = asiento.movimientos
+        .filter((m) => m.tipo === 'debito')
+        .reduce((acc, m) => acc + m.monto, 0);
+      const creditos = asiento.movimientos
+        .filter((m) => m.tipo === 'credito')
+        .reduce((acc, m) => acc + m.monto, 0);
       expect(debitos).toBe(creditos);
     }
   });
@@ -4323,7 +4323,7 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
     _id: FACTURA_ABIERTA_ID,
     inmuebleId: INMUEBLE_ID,
     fechaEmision: new Date('2026-05-01'),
-    dueDate: new Date('2026-05-10'),
+    fechaVencimiento: new Date('2026-05-10'),
     ...over,
   });
 
@@ -4333,7 +4333,7 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
         facturaDoc(),
         facturaDoc({
           _id: FACTURA_CERRADA_ID,
-          dueDate: new Date('2026-05-15'),
+          fechaVencimiento: new Date('2026-05-15'),
         }),
       ],
       saldosTotales: [
