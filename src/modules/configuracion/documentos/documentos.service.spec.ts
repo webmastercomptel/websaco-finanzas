@@ -23,30 +23,30 @@ const tenantQueDevuelve = () => ({ resolveCoPropertyId: () => COP }) as never;
 const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   copropiedadId: COP,
-  category: 'IN',
-  code: 'RC',
-  prefix: 'RC',
-  nextNumber: 10,
-  displayName: 'Recibo de Caja',
-  accountingVoucherCode: '02',
-  electronicNumber: null,
+  categoria: 'IN',
+  codigo: 'RC',
+  prefijo: 'RC',
+  siguienteNumero: 10,
+  nombreDocumento: 'Recibo de Caja',
+  comprobanteContable: '02',
+  numeroElectronico: null,
   ...over,
 });
 
 const resolucionDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   copropiedadId: COP,
-  resolutionNumber: 'RES-001',
-  prefix: 'CONJ-2026',
-  rangeFrom: 1,
-  rangeTo: 1000,
-  nextNumber: 5,
-  validFrom: new Date('2026-01-01'),
-  validUntil: null,
-  status: 'active',
-  displayName: 'Cobro Expensas Comunes',
-  accountingVoucherCode: '01',
-  electronicNumber: null,
+  numeroResolucion: 'RES-001',
+  prefijo: 'CONJ-2026',
+  rangoDesde: 1,
+  rangoHasta: 1000,
+  siguienteNumero: 5,
+  vigenciaDesde: new Date('2026-01-01'),
+  vigenciaHasta: null,
+  estado: 'active',
+  nombreDocumento: 'Cobro Expensas Comunes',
+  comprobanteContable: '01',
+  numeroElectronico: null,
   ...over,
 });
 
@@ -110,7 +110,7 @@ const modeloResoluciones = (activa: Record<string, unknown> | null) => {
 
 /** A per-document-type model exposing `find(...).lean().exec()`, the shape
  *  `getHighestIssuedNumber` uses. */
-const modeloDocumentos = (docs: { fullNumber: string }[]) => ({
+const modeloDocumentos = (docs: { numeroCompleto: string }[]) => ({
   find: jest.fn(() => ({
     lean: () => ({ exec: () => Promise.resolve(docs) }),
   })),
@@ -171,8 +171,8 @@ describe('DocumentosService.crearConsecutivo', () => {
     const resultado = await service.crearConsecutivo('FV', { codigo: 'FV' });
 
     expect(consecutivos.creadas[0]).toMatchObject({
-      category: 'FV',
-      code: 'FV',
+      categoria: 'FV',
+      codigo: 'FV',
     });
     expect(resultado.categoria).toBe('FV');
   });
@@ -194,12 +194,12 @@ describe('DocumentosService.crearConsecutivo', () => {
     const resultado = await service.crearConsecutivo('NC', { codigo: 'NC' });
 
     expect(consecutivos.creadas[0]).toMatchObject({
-      category: 'NC',
-      code: 'NC',
-      prefix: 'NC',
-      nextNumber: 0,
-      displayName: null,
-      accountingVoucherCode: null,
+      categoria: 'NC',
+      codigo: 'NC',
+      prefijo: 'NC',
+      siguienteNumero: 0,
+      nombreDocumento: null,
+      comprobanteContable: null,
     });
     expect(resultado.categoria).toBe('NC');
     expect(resultado.codigo).toBe('NC');
@@ -215,8 +215,8 @@ describe('DocumentosService.crearConsecutivo', () => {
     });
 
     expect(consecutivos.creadas[0]).toMatchObject({
-      category: 'IN',
-      code: 'CI',
+      categoria: 'IN',
+      codigo: 'CI',
     });
   });
 
@@ -233,17 +233,17 @@ describe('DocumentosService.crearConsecutivo', () => {
     });
 
     expect(consecutivos.creadas[0]).toMatchObject({
-      category: 'ND',
-      code: 'ND',
-      prefix: 'ND-2026',
-      nextNumber: 500,
-      displayName: 'Nota Débito',
-      accountingVoucherCode: '05',
+      categoria: 'ND',
+      codigo: 'ND',
+      prefijo: 'ND-2026',
+      siguienteNumero: 500,
+      nombreDocumento: 'Nota Débito',
+      comprobanteContable: '05',
     });
   });
 });
 
-describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () => {
+describe('DocumentosService.updateConsecutivo — guardrail de siguienteNumero', () => {
   it('responde "no existe" cuando el tipo de documento no tiene fila', async () => {
     const service = construir({ consecutivos: modeloConsecutivos([]) });
 
@@ -252,16 +252,18 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('permite bajar nextNumber cuando el nuevo valor está por encima de lo ya emitido', async () => {
+  it('permite bajar siguienteNumero cuando el nuevo valor está por encima de lo ya emitido', async () => {
     // Emitidos: RC-1 .. RC-3. Bajar el contador a 5 es seguro (nada por
     // encima de 3 se pisaría).
     const recibos = modeloDocumentos([
-      { fullNumber: 'RC-1' },
-      { fullNumber: 'RC-2' },
-      { fullNumber: 'RC-3' },
+      { numeroCompleto: 'RC-1' },
+      { numeroCompleto: 'RC-2' },
+      { numeroCompleto: 'RC-3' },
     ]);
     const service = construir({
-      consecutivos: modeloConsecutivos([consecutivoDoc({ nextNumber: 10 })]),
+      consecutivos: modeloConsecutivos([
+        consecutivoDoc({ siguienteNumero: 10 }),
+      ]),
       recibos,
     });
 
@@ -272,15 +274,17 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
     expect(resultado.numero).toBe(5);
   });
 
-  it('rechaza bajar nextNumber a un valor ya emitido bajo el mismo prefijo', async () => {
+  it('rechaza bajar siguienteNumero a un valor ya emitido bajo el mismo prefijo', async () => {
     // RC-7 ya existe — bajar el contador a 5 lo dejaría apuntando a un
     // número que un documento real ya lleva impreso.
     const recibos = modeloDocumentos([
-      { fullNumber: 'RC-3' },
-      { fullNumber: 'RC-7' },
+      { numeroCompleto: 'RC-3' },
+      { numeroCompleto: 'RC-7' },
     ]);
     const service = construir({
-      consecutivos: modeloConsecutivos([consecutivoDoc({ nextNumber: 10 })]),
+      consecutivos: modeloConsecutivos([
+        consecutivoDoc({ siguienteNumero: 10 }),
+      ]),
       recibos,
     });
 
@@ -289,12 +293,14 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('rechaza bajar nextNumber exactamente al último número emitido', async () => {
-    // El límite es estricto: nextNumber === maxIssued volvería a emitir el
-    // mismo número, no solo uno menor.
-    const recibos = modeloDocumentos([{ fullNumber: 'RC-7' }]);
+  it('rechaza bajar siguienteNumero exactamente al último número emitido', async () => {
+    // El límite es estricto: siguienteNumero === maxIssued volvería a emitir
+    // el mismo número, no solo uno menor.
+    const recibos = modeloDocumentos([{ numeroCompleto: 'RC-7' }]);
     const service = construir({
-      consecutivos: modeloConsecutivos([consecutivoDoc({ nextNumber: 10 })]),
+      consecutivos: modeloConsecutivos([
+        consecutivoDoc({ siguienteNumero: 10 }),
+      ]),
       recibos,
     });
 
@@ -304,9 +310,9 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
   });
 
   it('cambiar de prefijo no dispara el guardrail — el prefijo nuevo no tiene nada emitido', async () => {
-    const recibos = modeloDocumentos([{ fullNumber: 'RC-99' }]);
+    const recibos = modeloDocumentos([{ numeroCompleto: 'RC-99' }]);
     const consecutivosFind = modeloConsecutivos([
-      consecutivoDoc({ prefix: 'RC', nextNumber: 100 }),
+      consecutivoDoc({ prefijo: 'RC', siguienteNumero: 100 }),
     ]);
     const service = construir({ consecutivos: consecutivosFind, recibos });
 
@@ -321,7 +327,7 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
 
   it('solo escribe los campos enviados (nombre/comprobante) sin tocar la numeración', async () => {
     const consecutivos = modeloConsecutivos([
-      consecutivoDoc({ prefix: 'RC', nextNumber: 10 }),
+      consecutivoDoc({ prefijo: 'RC', siguienteNumero: 10 }),
     ]);
     const service = construir({ consecutivos });
 
@@ -335,8 +341,8 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
       { $set: Record<string, unknown> },
     ];
     expect(update.$set).toEqual({
-      displayName: 'Recibo de Caja General',
-      accountingVoucherCode: '09',
+      nombreDocumento: 'Recibo de Caja General',
+      comprobanteContable: '09',
     });
   });
 
@@ -345,14 +351,14 @@ describe('DocumentosService.updateConsecutivo — guardrail de nextNumber', () =
     // debe rechazarse. Si el guardrail mirara `notas_contables` (la
     // colección genérica de la categoría NT) en vez de `notas_anticipo`,
     // nunca vería este documento y dejaría pasar el pisado.
-    const notasAnticipo = modeloDocumentos([{ fullNumber: 'NA-5' }]);
+    const notasAnticipo = modeloDocumentos([{ numeroCompleto: 'NA-5' }]);
     const notasContablesVacia = modeloDocumentos([]);
     const consecutivos = modeloConsecutivos([
       consecutivoDoc({
-        category: 'NT',
-        code: 'NA',
-        prefix: 'NA',
-        nextNumber: 10,
+        categoria: 'NT',
+        codigo: 'NA',
+        prefijo: 'NA',
+        siguienteNumero: 10,
       }),
     ]);
     const service = new DocumentosService(
@@ -409,7 +415,7 @@ describe('DocumentosService.crearResolucion', () => {
 
   it('desactiva la resolución anterior ANTES de crear la nueva — nunca al revés', async () => {
     // Regresión del bug real: crear antes de desactivar viola el índice
-    // único parcial {copropiedadId, status:'active'} y lanza un error de
+    // único parcial {copropiedadId, estado:'active'} y lanza un error de
     // clave duplicada en cada copropiedad que YA tiene una activa (el caso
     // normal). El orden de las llamadas es lo único que prueba que el fix
     // sigue en pie.
@@ -447,7 +453,7 @@ describe('DocumentosService.crearResolucion', () => {
     expect(llamadas).toEqual(['updateOne', 'create']);
     expect(resoluciones.updateOne).toHaveBeenCalledWith(
       { _id: anterior._id },
-      { $set: { status: 'inactive' } },
+      { $set: { estado: 'inactive' } },
     );
   });
 });
@@ -473,6 +479,6 @@ describe('DocumentosService.actualizarResolucionMetadata', () => {
       unknown,
       { $set: Record<string, unknown> },
     ];
-    expect(update.$set).toEqual({ accountingVoucherCode: '03' });
+    expect(update.$set).toEqual({ comprobanteContable: '03' });
   });
 });
