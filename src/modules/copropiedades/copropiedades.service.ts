@@ -328,12 +328,12 @@ export class CopropiedadesService {
    * can issue anything — same reasoning as the three system cargos right
    * above: without them, the first invoice/receipt/nota an operator tries to
    * issue fails on "tipo de documento no configurado" instead of just
-   * working. `nextNumber: 0` on every row — see the schema's own note: it is
-   * the LAST number issued, so 0 means "none yet" and the first document
-   * gets 1, never 0.
+   * working. `siguienteNumero: 0` on every row — see the schema's own note:
+   * it is the LAST number issued, so 0 means "none yet" and the first
+   * document gets 1, never 0.
    *
    * NA (Nota de Anticipo) is filed under category NT, same as NT itself —
-   * see the schema comment on `ConsecutivoDocumento.category` and
+   * see the schema comment on `ConsecutivoDocumento.categoria` and
    * `DocumentosService.getHighestIssuedNumber`'s note on why NA's real
    * documents still live in their own collection despite the shared category.
    */
@@ -341,58 +341,58 @@ export class CopropiedadesService {
     copropiedadId: Types.ObjectId,
   ): Promise<void> {
     const documentos: {
-      category: CategoriaDocumento;
-      code: string;
-      displayName: string;
-      accountingVoucherCode: string | null;
+      categoria: CategoriaDocumento;
+      codigo: string;
+      nombreDocumento: string;
+      comprobanteContable: string | null;
     }[] = [
       {
-        category: 'FV',
-        code: 'FV',
-        displayName: 'Cobro Expensas Comunes',
-        accountingVoucherCode: '01',
+        categoria: 'FV',
+        codigo: 'FV',
+        nombreDocumento: 'Cobro Expensas Comunes',
+        comprobanteContable: '01',
       },
       {
-        category: 'IN',
-        code: 'RC',
-        displayName: 'Recibo de Caja',
-        accountingVoucherCode: null,
+        categoria: 'IN',
+        codigo: 'RC',
+        nombreDocumento: 'Recibo de Caja',
+        comprobanteContable: null,
       },
       {
-        category: 'NC',
-        code: 'NC',
-        displayName: 'Nota Credito',
-        accountingVoucherCode: null,
+        categoria: 'NC',
+        codigo: 'NC',
+        nombreDocumento: 'Nota Credito',
+        comprobanteContable: null,
       },
       {
-        category: 'ND',
-        code: 'ND',
-        displayName: 'Nota Debito',
-        accountingVoucherCode: null,
+        categoria: 'ND',
+        codigo: 'ND',
+        nombreDocumento: 'Nota Debito',
+        comprobanteContable: null,
       },
       {
-        category: 'NT',
-        code: 'NA',
-        displayName: 'Nota de Anticipo',
-        accountingVoucherCode: null,
+        categoria: 'NT',
+        codigo: 'NA',
+        nombreDocumento: 'Nota de Anticipo',
+        comprobanteContable: null,
       },
       {
-        category: 'NT',
-        code: 'NT',
-        displayName: 'Nota Contable',
-        accountingVoucherCode: null,
+        categoria: 'NT',
+        codigo: 'NT',
+        nombreDocumento: 'Nota Contable',
+        comprobanteContable: null,
       },
     ];
 
     await this.consecutivos.insertMany(
       documentos.map((doc) => ({
         copropiedadId,
-        category: doc.category,
-        code: doc.code,
-        prefix: doc.code,
-        displayName: doc.displayName,
-        accountingVoucherCode: doc.accountingVoucherCode,
-        nextNumber: 0,
+        categoria: doc.categoria,
+        codigo: doc.codigo,
+        prefijo: doc.codigo,
+        nombreDocumento: doc.nombreDocumento,
+        comprobanteContable: doc.comprobanteContable,
+        siguienteNumero: 0,
       })),
     );
   }

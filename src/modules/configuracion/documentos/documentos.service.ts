@@ -86,9 +86,9 @@ export class DocumentosService {
     const [consecutivos, resolucionActiva] = await Promise.all([
       this.consecutivos
         .find({ copropiedadId })
-        .sort({ category: 1, code: 1 })
+        .sort({ categoria: 1, codigo: 1 })
         .exec(),
-      this.resoluciones.findOne({ copropiedadId, status: 'active' }).exec(),
+      this.resoluciones.findOne({ copropiedadId, estado: 'active' }).exec(),
     ]);
 
     return {
@@ -112,7 +112,7 @@ export class DocumentosService {
   ): Promise<DocumentoAdmin> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const yaExiste = await this.consecutivos
-      .exists({ copropiedadId, code: dto.codigo })
+      .exists({ copropiedadId, codigo: dto.codigo })
       .exec();
     if (yaExiste) {
       throw new ConflictException(
@@ -122,16 +122,16 @@ export class DocumentosService {
 
     const creado = await this.consecutivos.create({
       copropiedadId,
-      category: categoria,
-      code: dto.codigo,
-      prefix: dto.prefijo ?? dto.codigo,
-      // 0, not 1: `nextNumber` holds the last number ISSUED, and
+      categoria,
+      codigo: dto.codigo,
+      prefijo: dto.prefijo ?? dto.codigo,
+      // 0, not 1: `siguienteNumero` holds the last number ISSUED, and
       // NumeracionService.siguienteDocumento increments before handing one
       // out — a fresh row starting at 1 would skip straight to 2 on its
-      // first real document. See the schema's own note on `nextNumber`.
-      nextNumber: dto.numeroInicial ?? 0,
-      displayName: dto.nombreDocumento ?? null,
-      accountingVoucherCode: dto.comprobanteContable ?? null,
+      // first real document. See the schema's own note on `siguienteNumero`.
+      siguienteNumero: dto.numeroInicial ?? 0,
+      nombreDocumento: dto.nombreDocumento ?? null,
+      comprobanteContable: dto.comprobanteContable ?? null,
     });
 
     return toDocumentoAdmin(creado);
@@ -139,9 +139,9 @@ export class DocumentosService {
 
   /**
    * Updates a ConsecutivoDocumento row, looked up by its code — a category
-   * no longer identifies a single row. The nextNumber guardrail (spec §5):
-   * reject if the new value would be at or below an already-issued number
-   * under the SAME prefix.
+   * no longer identifies a single row. The siguienteNumero guardrail (spec
+   * §5): reject if the new value would be at or below an already-issued
+   * number under the SAME prefix.
    */
   async updateConsecutivo(
     codigo: string,
@@ -149,7 +149,7 @@ export class DocumentosService {
   ): Promise<DocumentoAdmin> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const current = await this.consecutivos
-      .findOne({ copropiedadId, code: codigo })
+      .findOne({ copropiedadId, codigo })
       .exec();
 
     if (!current) {
@@ -158,35 +158,38 @@ export class DocumentosService {
       );
     }
 
-    const newPrefix = dto.prefijo ?? current.prefix;
-    const newNextNumber = dto.numeroSiguiente ?? current.nextNumber;
+    const newPrefix = dto.prefijo ?? current.prefijo;
+    const newNextNumber = dto.numeroSiguiente ?? current.siguienteNumero;
 
-    if (newPrefix === current.prefix && newNextNumber < current.nextNumber) {
+    if (
+      newPrefix === current.prefijo &&
+      newNextNumber < current.siguienteNumero
+    ) {
       const maxIssued = await this.getHighestIssuedNumber(
-        current.category,
-        current.code,
+        current.categoria,
+        current.codigo,
         copropiedadId,
-        current.prefix,
+        current.prefijo,
       );
 
       if (newNextNumber <= maxIssued) {
         throw new ConflictException(
-          `El número ${newNextNumber} ya fue emitido bajo el prefijo ${current.prefix}. ` +
+          `El número ${newNextNumber} ya fue emitido bajo el prefijo ${current.prefijo}. ` +
             `El mínimo permitido es ${maxIssued + 1}.`,
         );
       }
     }
 
     const update: Record<string, unknown> = {};
-    if (dto.prefijo !== undefined) update.prefix = dto.prefijo;
+    if (dto.prefijo !== undefined) update.prefijo = dto.prefijo;
     if (dto.numeroSiguiente !== undefined)
-      update.nextNumber = dto.numeroSiguiente;
+      update.siguienteNumero = dto.numeroSiguiente;
     if (dto.nombreDocumento !== undefined)
-      update.displayName = dto.nombreDocumento;
+      update.nombreDocumento = dto.nombreDocumento;
     if (dto.comprobanteContable !== undefined)
-      update.accountingVoucherCode = dto.comprobanteContable;
+      update.comprobanteContable = dto.comprobanteContable;
     if (dto.numeroElectronico !== undefined)
-      update.electronicNumber = dto.numeroElectronico;
+      update.numeroElectronico = dto.numeroElectronico;
 
     const updated = await this.consecutivos
       .findOneAndUpdate(
@@ -204,7 +207,7 @@ export class DocumentosService {
    * atomically (spec §5).
    *
    * Order matters, and so does the transaction: `ResolucionFacturacionSchema`
-   * has a unique partial index on `{copropiedadId, status: 'active'}`
+   * has a unique partial index on `{copropiedadId, estado: 'active'}`
    * (one active resolution per coproperty, ever). Creating the new row
    * BEFORE deactivating the old one — the bug an earlier draft of this
    * method had — throws a duplicate-key error on every coproperty that
@@ -230,13 +233,13 @@ export class DocumentosService {
       let creada!: ResolucionFacturacionDocument;
       await session.withTransaction(async () => {
         const anterior = await this.resoluciones
-          .findOne({ copropiedadId, status: 'active' })
+          .findOne({ copropiedadId, estado: 'active' })
           .session(session)
           .exec();
 
         if (anterior) {
           await this.resoluciones
-            .updateOne({ _id: anterior._id }, { $set: { status: 'inactive' } })
+            .updateOne({ _id: anterior._id }, { $set: { estado: 'inactive' } })
             .session(session)
             .exec();
         }
@@ -245,19 +248,19 @@ export class DocumentosService {
           [
             {
               copropiedadId,
-              resolutionNumber: dto.numeroResolucion,
-              prefix: dto.prefijo,
-              rangeFrom: dto.rangoDesde,
-              rangeTo: dto.rangoHasta,
-              nextNumber: dto.rangoDesde,
-              validFrom: new Date(dto.vigenciaDesde),
-              validUntil: dto.vigenciaHasta
+              numeroResolucion: dto.numeroResolucion,
+              prefijo: dto.prefijo,
+              rangoDesde: dto.rangoDesde,
+              rangoHasta: dto.rangoHasta,
+              siguienteNumero: dto.rangoDesde,
+              vigenciaDesde: new Date(dto.vigenciaDesde),
+              vigenciaHasta: dto.vigenciaHasta
                 ? new Date(dto.vigenciaHasta)
                 : null,
-              status: 'active',
-              displayName: dto.nombreDocumento ?? null,
-              accountingVoucherCode: dto.comprobanteContable ?? null,
-              electronicNumber: dto.numeroElectronico ?? null,
+              estado: 'active',
+              nombreDocumento: dto.nombreDocumento ?? null,
+              comprobanteContable: dto.comprobanteContable ?? null,
+              numeroElectronico: dto.numeroElectronico ?? null,
             },
           ],
           { session },
@@ -272,14 +275,14 @@ export class DocumentosService {
 
   /**
    * Metadata-only patch on the active resolution. Never touches
-   * prefix/rangeFrom/rangeTo/nextNumber/status.
+   * prefijo/rangoDesde/rangoHasta/siguienteNumero/estado.
    */
   async actualizarResolucionMetadata(
     dto: ActualizarResolucionMetadataDto,
   ): Promise<ResolucionAdmin> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const activa = await this.resoluciones
-      .findOne({ copropiedadId, status: 'active' })
+      .findOne({ copropiedadId, estado: 'active' })
       .exec();
 
     if (!activa) {
@@ -290,11 +293,11 @@ export class DocumentosService {
 
     const update: Record<string, unknown> = {};
     if (dto.nombreDocumento !== undefined)
-      update.displayName = dto.nombreDocumento;
+      update.nombreDocumento = dto.nombreDocumento;
     if (dto.comprobanteContable !== undefined)
-      update.accountingVoucherCode = dto.comprobanteContable;
+      update.comprobanteContable = dto.comprobanteContable;
     if (dto.numeroElectronico !== undefined)
-      update.electronicNumber = dto.numeroElectronico;
+      update.numeroElectronico = dto.numeroElectronico;
 
     const updated = await this.resoluciones
       .findByIdAndUpdate(
@@ -318,9 +321,7 @@ export class DocumentosService {
    * backend). `numeroCompleto` is the real persisted field
    * (`NumeracionService`'s `componer()`: `"${prefix}-${numero}"`, or bare
    * `numero` when the prefix is empty) on the six financial-document
-   * schemas below — unlike `ConsecutivoDocumento`/`ResolucionFacturacion`
-   * (numeracion/, still English, out of scope here), which keep `prefix`/
-   * `nextNumber` as-is.
+   * schemas below.
    *
    * `categoria` alone is not always enough to pick the right collection:
    * "NA" (Nota de Anticipo) is configured under category NT ("Nota

@@ -130,7 +130,7 @@ export class ConsecutivosService {
     const hasta = new Date(query.hasta);
 
     const consecutivo = await this.consecutivos
-      .findOne({ copropiedadId, code: query.codigo })
+      .findOne({ copropiedadId, codigo: query.codigo })
       .exec();
     if (!consecutivo) {
       throw new NotFoundException(
@@ -139,12 +139,12 @@ export class ConsecutivosService {
     }
 
     let filasInternas: FilaInterna[];
-    switch (consecutivo.category) {
+    switch (consecutivo.categoria) {
       case 'IN':
         filasInternas = await this.filasRecibos(
           copropiedadId,
-          consecutivo.code,
-          consecutivo.prefix,
+          consecutivo.codigo,
+          consecutivo.prefijo,
           desde,
           hasta,
         );
@@ -152,8 +152,8 @@ export class ConsecutivosService {
       case 'NC':
         filasInternas = await this.filasNotasCredito(
           copropiedadId,
-          consecutivo.code,
-          consecutivo.prefix,
+          consecutivo.codigo,
+          consecutivo.prefijo,
           desde,
           hasta,
         );
@@ -161,8 +161,8 @@ export class ConsecutivosService {
       case 'ND':
         filasInternas = await this.filasNotasDebito(
           copropiedadId,
-          consecutivo.code,
-          consecutivo.prefix,
+          consecutivo.codigo,
+          consecutivo.prefijo,
           desde,
           hasta,
         );
@@ -171,15 +171,15 @@ export class ConsecutivosService {
         filasInternas = [
           ...(await this.filasNotasContables(
             copropiedadId,
-            consecutivo.code,
-            consecutivo.prefix,
+            consecutivo.codigo,
+            consecutivo.prefijo,
             desde,
             hasta,
           )),
           ...(await this.filasNotasAnticipo(
             copropiedadId,
-            consecutivo.code,
-            consecutivo.prefix,
+            consecutivo.codigo,
+            consecutivo.prefijo,
             desde,
             hasta,
           )),
@@ -188,8 +188,8 @@ export class ConsecutivosService {
       case 'FV':
         filasInternas = await this.filasFacturas(
           copropiedadId,
-          consecutivo.code,
-          consecutivo.prefix,
+          consecutivo.codigo,
+          consecutivo.prefijo,
           desde,
           hasta,
         );

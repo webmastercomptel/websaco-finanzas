@@ -7,11 +7,11 @@ const id = () => new Types.ObjectId();
 const consecutivoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  category: 'IN',
-  code: 'RC',
-  prefix: 'RC',
-  displayName: 'Recibo de Caja',
-  nextNumber: 10,
+  categoria: 'IN',
+  codigo: 'RC',
+  prefijo: 'RC',
+  nombreDocumento: 'Recibo de Caja',
+  siguienteNumero: 10,
   ...over,
 });
 
@@ -184,7 +184,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'ND', code: 'ND', prefix: 'ND' }),
+          consecutivoDoc({ categoria: 'ND', codigo: 'ND', prefijo: 'ND' }),
         ),
         notasDebito: find([nd]),
         inmuebles: find([inm]),
@@ -230,7 +230,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'NC', code: 'NC', prefix: 'NC' }),
+          consecutivoDoc({ categoria: 'NC', codigo: 'NC', prefijo: 'NC' }),
         ),
         notasCredito: find([nc]),
         inmuebles: find([inm]),
@@ -266,7 +266,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'NC', code: 'NC', prefix: 'NC' }),
+          consecutivoDoc({ categoria: 'NC', codigo: 'NC', prefijo: 'NC' }),
         ),
         notasCredito: find([nc]),
         inmuebles: find([inm]),
@@ -303,7 +303,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'NT', code: 'NT', prefix: 'NT' }),
+          consecutivoDoc({ categoria: 'NT', codigo: 'NT', prefijo: 'NT' }),
         ),
         notasContables: find([nt]),
         inmuebles: find([inm]),
@@ -353,7 +353,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'NT', code: 'NA', prefix: 'NA' }),
+          consecutivoDoc({ categoria: 'NT', codigo: 'NA', prefijo: 'NA' }),
         ),
         notasContables: find([]),
         notasAnticipo: find([na]),
@@ -398,7 +398,7 @@ describe('ConsecutivosService', () => {
 
       const svc = servicio({
         consecutivos: findOneStub(
-          consecutivoDoc({ category: 'FV', code: 'FV', prefix: 'FV' }),
+          consecutivoDoc({ categoria: 'FV', codigo: 'FV', prefijo: 'FV' }),
         ),
         facturas: find([f]),
         inmuebles: find([inm]),
@@ -447,7 +447,7 @@ describe('ConsecutivosService', () => {
 
     const svc = servicio({
       consecutivos: findOneStub(
-        consecutivoDoc({ category: 'ND', code: 'ND', prefix: 'ND' }),
+        consecutivoDoc({ categoria: 'ND', codigo: 'ND', prefijo: 'ND' }),
       ),
       notasDebito: find([nd1, nd2]),
       inmuebles: find([inm]),

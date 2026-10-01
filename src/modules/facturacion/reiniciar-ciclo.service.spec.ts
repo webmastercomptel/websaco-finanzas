@@ -447,12 +447,12 @@ describe('ReiniciarCicloService.reiniciar', () => {
       { copropiedadId: COP },
       { $set: { nextNumber: 0 } },
     );
-    // updateMany sin filtro de category/code — todo código configurado
+    // updateMany sin filtro de categoria/codigo — todo código configurado
     // (RC, NC, ND, NA, ...) reinicia junto, porque todo tipo de documento
     // se borró en esta misma pasada.
     expect(modelos.consecutivoDocumento.updateMany).toHaveBeenCalledWith(
       { copropiedadId: COP },
-      { $set: { nextNumber: 0 } },
+      { $set: { siguienteNumero: 0 } },
     );
   });
 
@@ -476,9 +476,9 @@ describe('ReiniciarCicloService.reiniciar', () => {
     expect(resultado.loteRecibosEliminados).toBe(1);
   });
 
-  it('si hay una resolución DIAN activa, reinicia su nextNumber al rangeFrom', async () => {
+  it('si hay una resolución DIAN activa, reinicia su siguienteNumero al rangoDesde', async () => {
     const modelos = makeModelos({
-      resolucionActiva: { _id: 'res-1', rangeFrom: 1000 },
+      resolucionActiva: { _id: 'res-1', rangoDesde: 1000 },
     });
     const service = makeService(modelos);
 
@@ -486,7 +486,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
 
     expect(modelos.resoluciones.updateOne).toHaveBeenCalledWith(
       { _id: 'res-1' },
-      { $set: { nextNumber: 1000 } },
+      { $set: { siguienteNumero: 1000 } },
     );
   });
 

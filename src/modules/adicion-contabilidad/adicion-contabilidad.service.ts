@@ -66,7 +66,7 @@ import type {
  *  the same codes `movimiento-contable.util.ts`'s `deriveTipoDocumento`
  *  already uses internally, EXCEPT Factura: that report calls it 'FC', but
  *  this export uses 'FV' — the code actually configured everywhere else in
- *  this app (ConsecutivoDocumento.category, Movimiento.tipoDocumento cross-
+ *  this app (ConsecutivoDocumento.categoria, Movimiento.tipoDocumento cross-
  *  reference) for a sales invoice. */
 type TipoDocumentoExport = 'FV' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
 
@@ -482,7 +482,7 @@ export class AdicionContabilidadService {
     return map;
   }
 
-  /** Batch-resolves "comprobante" (`ConsecutivoDocumento.accountingVoucherCode`)
+  /** Batch-resolves "comprobante" (`ConsecutivoDocumento.comprobanteContable`)
    *  per (tipoDocumento, prefix) pair actually present in this batch — a
    *  document itself only remembers its `prefix`, never which specific
    *  código it was numbered under, so this matches back to the
@@ -510,16 +510,16 @@ export class AdicionContabilidadService {
       ...new Set([...claves].map((c) => c.split(':')[2] as CategoriaDocumento)),
     ];
     const consecutivos = await this.consecutivosDocumento
-      .find({ copropiedadId, category: { $in: categorias } })
+      .find({ copropiedadId, categoria: { $in: categorias } })
       .session(session)
       .exec();
 
     for (const clave of claves) {
       const [tipo, prefix, categoria] = clave.split(':');
       const consecutivo = consecutivos.find(
-        (c) => c.category === categoria && c.prefix === prefix,
+        (c) => c.categoria === categoria && c.prefijo === prefix,
       );
-      map.set(`${tipo}:${prefix}`, consecutivo?.accountingVoucherCode ?? null);
+      map.set(`${tipo}:${prefix}`, consecutivo?.comprobanteContable ?? null);
     }
     return map;
   }

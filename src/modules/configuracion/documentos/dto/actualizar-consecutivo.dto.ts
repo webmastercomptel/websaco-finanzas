@@ -8,7 +8,7 @@ export class ActualizarConsecutivoDto {
   prefijo?: string;
 
   /** The last number issued under this code — 0 is valid (none issued
-   *  yet). See the schema's note on `ConsecutivoDocumento.nextNumber`. */
+   *  yet). See the schema's note on `ConsecutivoDocumento.siguienteNumero`. */
   @IsOptional()
   @IsInt()
   @Min(0)

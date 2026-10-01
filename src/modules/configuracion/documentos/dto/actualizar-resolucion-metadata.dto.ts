@@ -3,8 +3,8 @@ import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 /**
  * Metadata-only patch for the active ResolucionFacturacion.
- * Never touches prefix/rangeFrom/rangeTo/nextNumber/status — those fields
- * are immutable on an active resolution (spec §5).
+ * Never touches prefijo/rangoDesde/rangoHasta/siguienteNumero/estado — those
+ * fields are immutable on an active resolution (spec §5).
  */
 export class ActualizarResolucionMetadataDto {
   @IsOptional()

@@ -77,20 +77,20 @@ export class NumeracionService {
       .findOneAndUpdate(
         {
           copropiedadId: new Types.ObjectId(copropiedadId),
-          status: 'active',
+          estado: 'active',
           // Field-to-field comparison needs $expr: the ceiling is another
           // column, not a literal.
-          $expr: { $lte: ['$nextNumber', '$rangeTo'] },
+          $expr: { $lte: ['$siguienteNumero', '$rangoHasta'] },
         },
-        { $inc: { nextNumber: 1 } },
-        // The pre-increment document: its nextNumber is the one to use.
+        { $inc: { siguienteNumero: 1 } },
+        // The pre-increment document: its siguienteNumero is the one to use.
         { returnDocument: 'before' },
       )
       .exec();
 
     if (previa)
       return {
-        ...componer(previa.prefix, previa.nextNumber),
+        ...componer(previa.prefijo, previa.siguienteNumero),
         resolucionId: previa._id,
       };
 
@@ -100,15 +100,15 @@ export class NumeracionService {
     const activa = await this.resoluciones
       .findOne({
         copropiedadId: new Types.ObjectId(copropiedadId),
-        status: 'active',
+        estado: 'active',
       })
       .lean()
       .exec();
 
     if (activa) {
       throw new ConflictException(
-        `Se agotó el rango de la resolución ${activa.resolutionNumber} ` +
-          `(hasta ${activa.rangeTo}). Hay que cargar una resolución nueva.`,
+        `Se agotó el rango de la resolución ${activa.numeroResolucion} ` +
+          `(hasta ${activa.rangoHasta}). Hay que cargar una resolución nueva.`,
       );
     }
 
@@ -117,8 +117,8 @@ export class NumeracionService {
     // the same mechanism siguienteDocumento uses for RC/NC/ND/NT.
     const consecutivo = await this.consecutivos
       .findOneAndUpdate(
-        { copropiedadId: new Types.ObjectId(copropiedadId), category: 'FV' },
-        { $inc: { nextNumber: 1 } },
+        { copropiedadId: new Types.ObjectId(copropiedadId), categoria: 'FV' },
+        { $inc: { siguienteNumero: 1 } },
         { returnDocument: 'after' },
       )
       .exec();
@@ -131,7 +131,7 @@ export class NumeracionService {
       );
     }
 
-    return componer(consecutivo.prefix, consecutivo.nextNumber);
+    return componer(consecutivo.prefijo, consecutivo.siguienteNumero);
   }
 
   /**
@@ -166,7 +166,7 @@ export class NumeracionService {
       .findOneAndUpdate(
         {
           copropiedadId: new Types.ObjectId(copropiedadId),
-          status: 'active',
+          estado: 'active',
         },
         [
           {
@@ -178,7 +178,10 @@ export class NumeracionService {
                     $min: [
                       cantidad,
                       {
-                        $subtract: [{ $add: ['$rangeTo', 1] }, '$nextNumber'],
+                        $subtract: [
+                          { $add: ['$rangoHasta', 1] },
+                          '$siguienteNumero',
+                        ],
                       },
                     ],
                   },
@@ -186,12 +189,16 @@ export class NumeracionService {
               },
             },
           },
-          { $set: { nextNumber: { $add: ['$nextNumber', '$_otorgados'] } } },
+          {
+            $set: {
+              siguienteNumero: { $add: ['$siguienteNumero', '$_otorgados'] },
+            },
+          },
           { $unset: '_otorgados' },
         ],
         {
-          // The pre-update document: nextNumber/rangeTo from before the
-          // clamped increment, so the exact same clamp the pipeline just
+          // The pre-update document: siguienteNumero/rangoHasta from before
+          // the clamped increment, so the exact same clamp the pipeline just
           // applied server-side can be reproduced here to know how many —
           // and which — numbers were actually granted.
           returnDocument: 'before',
@@ -207,18 +214,18 @@ export class NumeracionService {
     if (previa) {
       const otorgados = Math.max(
         0,
-        Math.min(cantidad, previa.rangeTo - previa.nextNumber + 1),
+        Math.min(cantidad, previa.rangoHasta - previa.siguienteNumero + 1),
       );
       return {
         numeros: Array.from({ length: otorgados }, (_, i) => ({
-          ...componer(previa.prefix, previa.nextNumber + i),
+          ...componer(previa.prefijo, previa.siguienteNumero + i),
           resolucionId: previa._id,
         })),
       };
     }
 
     // `previa` is only null here when NO row matches
-    // `{copropiedadId, status:'active'}` at all — unlike siguienteFactura's
+    // `{copropiedadId, estado:'active'}` at all — unlike siguienteFactura's
     // `$expr` ceiling, this filter has no range condition, so an already
     // fully exhausted (but still active) resolution DOES match above and
     // is handled by the `if (previa)` branch, returning `otorgados: 0`.
@@ -229,8 +236,8 @@ export class NumeracionService {
     // uses, just incrementing by the whole requested count in one shot.
     const consecutivo = await this.consecutivos
       .findOneAndUpdate(
-        { copropiedadId: new Types.ObjectId(copropiedadId), category: 'FV' },
-        { $inc: { nextNumber: cantidad } },
+        { copropiedadId: new Types.ObjectId(copropiedadId), categoria: 'FV' },
+        { $inc: { siguienteNumero: cantidad } },
         { returnDocument: 'before' },
       )
       .exec();
@@ -245,7 +252,7 @@ export class NumeracionService {
 
     return {
       numeros: Array.from({ length: cantidad }, (_, i) =>
-        componer(consecutivo.prefix, consecutivo.nextNumber + 1 + i),
+        componer(consecutivo.prefijo, consecutivo.siguienteNumero + 1 + i),
       ),
     };
   }
@@ -278,10 +285,10 @@ export class NumeracionService {
       .findOneAndUpdate(
         {
           copropiedadId: new Types.ObjectId(copropiedadId),
-          code,
+          codigo: code,
         },
-        { $inc: { nextNumber: 1 } },
-        // The post-increment document: its nextNumber is the one to use.
+        { $inc: { siguienteNumero: 1 } },
+        // The post-increment document: its siguienteNumero is the one to use.
         { returnDocument: 'after', session },
       )
       .exec();
@@ -293,7 +300,7 @@ export class NumeracionService {
       );
     }
 
-    return componer(actualizado.prefix, actualizado.nextNumber);
+    return componer(actualizado.prefijo, actualizado.siguienteNumero);
   }
 
   /**
@@ -324,9 +331,9 @@ export class NumeracionService {
 
     const previo = await this.consecutivos
       .findOneAndUpdate(
-        { copropiedadId: new Types.ObjectId(copropiedadId), code },
-        { $inc: { nextNumber: cantidad } },
-        // The pre-increment document: its nextNumber is the last number
+        { copropiedadId: new Types.ObjectId(copropiedadId), codigo: code },
+        { $inc: { siguienteNumero: cantidad } },
+        // The pre-increment document: its siguienteNumero is the last number
         // already handed out, so the reserved range starts right after it.
         { returnDocument: 'before' },
       )
@@ -341,7 +348,7 @@ export class NumeracionService {
 
     return {
       numeros: Array.from({ length: cantidad }, (_, i) =>
-        componer(previo.prefix, previo.nextNumber + i + 1),
+        componer(previo.prefijo, previo.siguienteNumero + i + 1),
       ),
     };
   }

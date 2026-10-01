@@ -30,7 +30,7 @@ const TITULOS_POR_DEFECTO: Record<CodigoDocumentoGenerico, string> = {
 };
 
 /** Fallback title for a Factura when neither the frozen resolución nor the
- *  `'FV'` `ConsecutivoDocumento` row carries a `displayName` — matches the
+ *  `'FV'` `ConsecutivoDocumento` row carries a `nombreDocumento` — matches the
  *  Factura PDF template's own long-standing default. */
 const TITULO_FACTURA_POR_DEFECTO = 'Cobro Expensas Comunes';
 
@@ -51,7 +51,7 @@ export interface ResolucionPlantillaFactura {
 
 /**
  * Resolves the printed document title from "Tabla de Documentos"
- * (`ConsecutivoDocumento.displayName`) — currently DEAD DATA: a coproperty
+ * (`ConsecutivoDocumento.nombreDocumento`) — currently DEAD DATA: a coproperty
  * admin can rename "Recibo de Caja" there today and nothing on the printed
  * PDF changes, because no `*-pdf-datos.util.ts` ever read it (each hardcodes
  * its own Spanish literal). This service is what wires that configuration
@@ -77,9 +77,9 @@ export class TituloDocumentoService {
     copropiedadId: Types.ObjectId,
   ): Promise<string> {
     const fila = await this.consecutivos
-      .findOne({ copropiedadId, code: tipoDocumento })
+      .findOne({ copropiedadId, codigo: tipoDocumento })
       .exec();
-    return fila?.displayName ?? TITULOS_POR_DEFECTO[tipoDocumento];
+    return fila?.nombreDocumento ?? TITULOS_POR_DEFECTO[tipoDocumento];
   }
 
   /**
@@ -112,16 +112,16 @@ export class TituloDocumentoService {
         const tituloPorDefecto =
           await this.tituloFacturaPorDefecto(copropiedadId);
         return {
-          titulo: resolucion.displayName ?? tituloPorDefecto,
+          titulo: resolucion.nombreDocumento ?? tituloPorDefecto,
           resolucion: {
-            numero: resolucion.resolutionNumber,
-            nombreVisible: resolucion.displayName,
+            numero: resolucion.numeroResolucion,
+            nombreVisible: resolucion.nombreDocumento,
             prefijo: facturaPrefix,
-            rangoDesde: resolucion.rangeFrom,
-            rangoHasta: resolucion.rangeTo,
-            vigenteDesde: resolucion.validFrom.toISOString(),
-            vigenteHasta: resolucion.validUntil
-              ? resolucion.validUntil.toISOString()
+            rangoDesde: resolucion.rangoDesde,
+            rangoHasta: resolucion.rangoHasta,
+            vigenteDesde: resolucion.vigenciaDesde.toISOString(),
+            vigenteHasta: resolucion.vigenciaHasta
+              ? resolucion.vigenciaHasta.toISOString()
               : null,
           },
         };
@@ -143,8 +143,8 @@ export class TituloDocumentoService {
     copropiedadId: Types.ObjectId,
   ): Promise<string> {
     const fila = await this.consecutivos
-      .findOne({ copropiedadId, code: 'FV' })
+      .findOne({ copropiedadId, codigo: 'FV' })
       .exec();
-    return fila?.displayName ?? TITULO_FACTURA_POR_DEFECTO;
+    return fila?.nombreDocumento ?? TITULO_FACTURA_POR_DEFECTO;
   }
 }

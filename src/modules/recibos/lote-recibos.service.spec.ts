@@ -34,15 +34,15 @@ const inmuebleDoc = (over: Record<string, unknown> = {}) => ({
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   copropiedadId: COP,
-  number: 1,
-  status: 'cargado',
+  numero: 1,
+  estado: 'cargado',
   creadoEn: new Date('2026-06-10T14:30:00.000Z'),
   codigo: 'RC',
   medioPago: 'transferencia',
   cuentaDestino: '111005',
   totalDigitado: 0,
   filas: [] as Record<string, unknown>[],
-  generatedBy: CUENTA,
+  generadoPor: CUENTA,
   markModified: jest.fn(),
   save: jest.fn(function (this: Record<string, unknown>) {
     return Promise.resolve(this);
@@ -85,7 +85,7 @@ const construirServicioBasico = (opciones: {
 
   const consecutivos = {
     findOneAndUpdate: jest.fn(() => ({
-      exec: () => Promise.resolve({ nextNumber: 1 }),
+      exec: () => Promise.resolve({ siguienteNumero: 1 }),
     })),
   };
 
@@ -249,7 +249,7 @@ describe('LoteRecibosService.cargarArchivo', () => {
   });
 
   it('rechaza cargar un archivo sobre un lote ya aplicado', async () => {
-    const lote = loteDoc({ status: 'aplicado' });
+    const lote = loteDoc({ estado: 'aplicado' });
     const { service } = construirServicioBasico({ lote });
 
     await expect(
@@ -282,8 +282,8 @@ const filaBase = (over: Record<string, unknown> = {}) => ({
 
 const construirLoteDoc = (filas: ReturnType<typeof filaBase>[]) => ({
   _id: new Types.ObjectId(),
-  number: 1,
-  status: 'cargado',
+  numero: 1,
+  estado: 'cargado',
   creadoEn: new Date('2026-06-01'),
   codigo: 'IN',
   medioPago: 'transferencia',
@@ -437,7 +437,7 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
     expect(
       recibosService.escribirEscriturasTandaAplicacionLote,
     ).toHaveBeenCalledTimes(1);
-    expect(lote.status).toBe('aplicado');
+    expect(lote.estado).toBe('aplicado');
     expect(filas[0].reciboId).not.toBeNull();
   });
 
@@ -488,7 +488,7 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
     expect(filas[0].reciboId).toBeNull();
     expect(filas[1].reciboId).toBeNull();
     expect(errores[1].mensaje).toMatch(/Revertida junto con la fila 1/);
-    expect(lote.status).toBe('cargado');
+    expect(lote.estado).toBe('cargado');
   });
 
   it('una falla de escritura genuina (bulkWrite) dentro de la transacción marca TODA la tanda con el mismo mensaje', async () => {
@@ -510,7 +510,7 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
     expect(errores).toHaveLength(2);
     expect(errores[0].mensaje).toBe('conexión perdida');
     expect(errores[1].mensaje).toBe('conexión perdida');
-    expect(lote.status).toBe('cargado');
+    expect(lote.estado).toBe('cargado');
   });
 
   it('una fila ya aplicada (reciboId presente) no se reprocesa, y sin filas pendientes no se abre ninguna sesión', async () => {
@@ -525,7 +525,7 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
       recibosService.escribirEscriturasTandaAplicacionLote,
     ).not.toHaveBeenCalled();
     expect(connection.startSession).not.toHaveBeenCalled();
-    expect(lote.status).toBe('aplicado');
+    expect(lote.estado).toBe('aplicado');
   });
 
   it('rechaza cuando la suma de las filas no coincide con el total digitado', async () => {
@@ -579,7 +579,7 @@ describe('LoteRecibosService.ejecutarAplicacion', () => {
 
     expect(errores).toHaveLength(0);
     expect(filas[0].error).toBeNull();
-    expect(lote.status).toBe('aplicado');
+    expect(lote.estado).toBe('aplicado');
   });
 
   it('cada tanda abre y cierra su propia sesión (una sesión por tanda, no una global para todo el lote)', async () => {

@@ -23,7 +23,8 @@ export class CrearConsecutivoDto {
 
   /** Last number already issued under this code before this row existed —
    *  0 (the default applied when omitted) means none yet, so the next
-   *  document issued gets number 1. See the schema's note on `nextNumber`. */
+   *  document issued gets number 1. See the schema's note on
+   *  `siguienteNumero`. */
   @IsOptional()
   @IsInt()
   @Min(0)

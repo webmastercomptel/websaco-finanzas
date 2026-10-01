@@ -6,24 +6,24 @@ const COP = new Types.ObjectId();
 type Filtro = Record<string, unknown>;
 
 const modeloConsecutivos = (
-  filas: { code: string; displayName: string | null }[],
+  filas: { codigo: string; nombreDocumento: string | null }[],
 ) => ({
   findOne: jest.fn((filtro: Filtro) => ({
     exec: () =>
-      Promise.resolve(filas.find((f) => f.code === filtro.code) ?? null),
+      Promise.resolve(filas.find((f) => f.codigo === filtro.codigo) ?? null),
   })),
 });
 
 const modeloResoluciones = (
   filas: {
     _id: Types.ObjectId;
-    displayName: string | null;
-    resolutionNumber: string;
-    prefix: string;
-    rangeFrom: number;
-    rangeTo: number;
-    validFrom: Date;
-    validUntil: Date | null;
+    nombreDocumento: string | null;
+    numeroResolucion: string;
+    prefijo: string;
+    rangoDesde: number;
+    rangoHasta: number;
+    vigenciaDesde: Date;
+    vigenciaHasta: Date | null;
   }[],
 ) => ({
   findById: jest.fn((id: Types.ObjectId) => ({
@@ -32,10 +32,10 @@ const modeloResoluciones = (
 });
 
 describe('TituloDocumentoService.resolverGenerico', () => {
-  it('devuelve displayName cuando el ConsecutivoDocumento lo tiene configurado', async () => {
+  it('devuelve nombreDocumento cuando el ConsecutivoDocumento lo tiene configurado', async () => {
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { code: 'RC', displayName: 'Comprobante de Ingreso' },
+        { codigo: 'RC', nombreDocumento: 'Comprobante de Ingreso' },
       ]) as never,
       modeloResoluciones([]) as never,
     );
@@ -45,7 +45,7 @@ describe('TituloDocumentoService.resolverGenerico', () => {
     expect(titulo).toBe('Comprobante de Ingreso');
   });
 
-  it('cae al literal por defecto de cada tipo cuando no hay fila o displayName es null', async () => {
+  it('cae al literal por defecto de cada tipo cuando no hay fila o nombreDocumento es null', async () => {
     const service = new TituloDocumentoService(
       modeloConsecutivos([]) as never,
       modeloResoluciones([]) as never,
@@ -60,10 +60,10 @@ describe('TituloDocumentoService.resolverGenerico', () => {
 });
 
 describe('TituloDocumentoService.resolverFactura', () => {
-  it('sin resolucionId, usa el displayName del ConsecutivoDocumento FV y no arma resolución', async () => {
+  it('sin resolucionId, usa el nombreDocumento del ConsecutivoDocumento FV y no arma resolución', async () => {
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { code: 'FV', displayName: 'Factura de Venta' },
+        { codigo: 'FV', nombreDocumento: 'Factura de Venta' },
       ]) as never,
       modeloResoluciones([]) as never,
     );
@@ -78,7 +78,7 @@ describe('TituloDocumentoService.resolverFactura', () => {
     expect(resolucion).toBeNull();
   });
 
-  it('sin resolucionId ni displayName configurado, cae a "Cobro Expensas Comunes"', async () => {
+  it('sin resolucionId ni nombreDocumento configurado, cae a "Cobro Expensas Comunes"', async () => {
     const service = new TituloDocumentoService(
       modeloConsecutivos([]) as never,
       modeloResoluciones([]) as never,
@@ -99,18 +99,18 @@ describe('TituloDocumentoService.resolverFactura', () => {
     const resoluciones = modeloResoluciones([
       {
         _id: resolucionVieja,
-        displayName: 'Cobro Antiguo',
-        resolutionNumber: 'RES-2024-001',
-        prefix: 'OLD-2024',
-        rangeFrom: 1,
-        rangeTo: 1000,
-        validFrom: new Date('2024-01-01'),
-        validUntil: new Date('2024-12-31'),
+        nombreDocumento: 'Cobro Antiguo',
+        numeroResolucion: 'RES-2024-001',
+        prefijo: 'OLD-2024',
+        rangoDesde: 1,
+        rangoHasta: 1000,
+        vigenciaDesde: new Date('2024-01-01'),
+        vigenciaHasta: new Date('2024-12-31'),
       },
     ]);
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { code: 'FV', displayName: 'Cobro Actual (la resolución de hoy)' },
+        { codigo: 'FV', nombreDocumento: 'Cobro Actual (la resolución de hoy)' },
       ]) as never,
       resoluciones as never,
     );
@@ -123,7 +123,7 @@ describe('TituloDocumentoService.resolverFactura', () => {
 
     expect(resoluciones.findById).toHaveBeenCalledWith(resolucionVieja);
     // El título viene de LA RESOLUCIÓN CONGELADA, nunca del consecutivo FV
-    // "actual" — aunque este último tenga su propio displayName.
+    // "actual" — aunque este último tenga su propio nombreDocumento.
     expect(titulo).toBe('Cobro Antiguo');
     expect(resolucion).toEqual({
       numero: 'RES-2024-001',
@@ -137,22 +137,22 @@ describe('TituloDocumentoService.resolverFactura', () => {
     });
   });
 
-  it('la resolución congelada sin displayName propio cae al displayName del consecutivo FV, nunca al literal duro directamente', async () => {
+  it('la resolución congelada sin nombreDocumento propio cae al nombreDocumento del consecutivo FV, nunca al literal duro directamente', async () => {
     const resolucionId = new Types.ObjectId();
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { code: 'FV', displayName: 'Cobro Expensas (config)' },
+        { codigo: 'FV', nombreDocumento: 'Cobro Expensas (config)' },
       ]) as never,
       modeloResoluciones([
         {
           _id: resolucionId,
-          displayName: null,
-          resolutionNumber: 'RES-2026-002',
-          prefix: 'CONJ-2026',
-          rangeFrom: 1,
-          rangeTo: 5000,
-          validFrom: new Date('2026-01-01'),
-          validUntil: null,
+          nombreDocumento: null,
+          numeroResolucion: 'RES-2026-002',
+          prefijo: 'CONJ-2026',
+          rangoDesde: 1,
+          rangoHasta: 5000,
+          vigenciaDesde: new Date('2026-01-01'),
+          vigenciaHasta: null,
         },
       ]) as never,
     );
@@ -171,7 +171,7 @@ describe('TituloDocumentoService.resolverFactura', () => {
   it('con resolucionId que ya no existe (nunca esperado, pero no debe romper), cae al camino sin resolución', async () => {
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { code: 'FV', displayName: 'Cobro Expensas' },
+        { codigo: 'FV', nombreDocumento: 'Cobro Expensas' },
       ]) as never,
       modeloResoluciones([]) as never,
     );

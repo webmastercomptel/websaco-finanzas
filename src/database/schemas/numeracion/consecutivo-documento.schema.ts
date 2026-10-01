@@ -18,9 +18,9 @@ export type CategoriaDocumento = (typeof CATEGORIAS_DOCUMENTO)[number];
 /**
  * The running number for one document TYPE within one coproperty.
  *
- * A type is not the same thing as a category. `category` is the fixed
+ * A type is not the same thing as a category. `categoria` is the fixed
  * accounting behavior (IN = affects cash/bank, credits cartera; NC/ND/NT
- * likewise) — closed, never client-defined. `code` is what the coproperty
+ * likewise) — closed, never client-defined. `codigo` is what the coproperty
  * actually calls the printed document ("RC" for Recibo de Caja, but another
  * building might run "RT" for Recibo de Transacciones Bancarias and "CI" for
  * Comprobante de Ingreso side by side, all three still category `IN`). One
@@ -28,7 +28,7 @@ export type CategoriaDocumento = (typeof CATEGORIAS_DOCUMENTO)[number];
  * here caps it at one.
  *
  * Covers everything except sales invoices, whose numbers come from a tax
- * authorisation instead (see ResolucionFacturacion) — `category` is never
+ * authorisation instead (see ResolucionFacturacion) — `categoria` is never
  * `FV` in a real row, only in the shared enum.
  *
  * A counter row rather than "count the documents and add one": counting races
@@ -49,39 +49,39 @@ export class ConsecutivoDocumento {
   // literals, which @nestjs/mongoose cannot infer, and it fails at schema load
   // rather than at compile time.
   @Prop({ type: String, required: true, enum: CATEGORIAS_DOCUMENTO })
-  category: CategoriaDocumento;
+  categoria: CategoriaDocumento;
 
   /** The client-facing type code, e.g. "RC", "RT", "CI". Unique per building,
    *  across every category — this is the key NumeracionService looks up by. */
   @Prop({ required: true, trim: true })
-  code: string;
+  codigo: string;
 
   @Prop({ required: true, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   /** Human-readable document name, e.g. "Recibo de Caja". */
   @Prop({ type: String, default: null, trim: true })
-  displayName: string | null;
+  nombreDocumento: string | null;
 
   /** Free-text accounting voucher code, e.g. "02". */
   @Prop({ type: String, default: null, trim: true })
-  accountingVoucherCode: string | null;
+  comprobanteContable: string | null;
 
   /** Reserved for future mandatory DIAN electronic invoicing consecutive. */
   @Prop({ type: Number, default: null })
-  electronicNumber: number | null;
+  numeroElectronico: number | null;
 
   /**
    * The last number actually issued under this code — 0 while none has been.
    * Moves forward only. `NumeracionService.siguienteDocumento` (and the
    * plain-consecutivo FV fallback in `siguienteFactura`/
    * `reservarBloqueFacturas`) increments this before handing a number out,
-   * so the next document issued is always `nextNumber + 1` — a fresh row at
-   * 0 hands out 1 first, never 0. Named `nextNumber` for historical reasons;
-   * the API contract and UI call it "Último" (see `DocumentoAdmin.numero`).
+   * so the next document issued is always `siguienteNumero + 1` — a fresh
+   * row at 0 hands out 1 first, never 0. The API contract and UI call it
+   * "Último" (see `DocumentoAdmin.numero`).
    */
   @Prop({ required: true, default: 0 })
-  nextNumber: number;
+  siguienteNumero: number;
 }
 
 export const ConsecutivoDocumentoSchema =
@@ -91,6 +91,6 @@ export const ConsecutivoDocumentoSchema =
 // independent of category. A second row for the same code would silently
 // split its sequence in two, and both halves would look correct on their own.
 ConsecutivoDocumentoSchema.index(
-  { copropiedadId: 1, code: 1 },
+  { copropiedadId: 1, codigo: 1 },
   { unique: true },
 );

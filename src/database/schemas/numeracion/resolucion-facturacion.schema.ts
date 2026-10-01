@@ -34,44 +34,44 @@ export class ResolucionFacturacion {
 
   /** The authorisation number as the tax authority issued it. */
   @Prop({ required: true, trim: true })
-  resolutionNumber: string;
+  numeroResolucion: string;
 
   /** Printed before the number, e.g. "CONJ-2026". May be empty. */
   @Prop({ required: true, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   /** Human-readable document name, e.g. "Cobro Expensas Comunes". */
   @Prop({ type: String, default: null, trim: true })
-  displayName: string | null;
+  nombreDocumento: string | null;
 
   /** Free-text accounting voucher code, e.g. "02". */
   @Prop({ type: String, default: null, trim: true })
-  accountingVoucherCode: string | null;
+  comprobanteContable: string | null;
 
   /** Reserved for future mandatory DIAN electronic invoicing consecutive. */
   @Prop({ type: Number, default: null })
-  electronicNumber: number | null;
+  numeroElectronico: number | null;
 
   @Prop({ required: true })
-  rangeFrom: number;
+  rangoDesde: number;
 
   @Prop({ required: true })
-  rangeTo: number;
+  rangoHasta: number;
 
   /**
-   * The next number to hand out. Starts at `rangeFrom` and only ever moves
+   * The next number to hand out. Starts at `rangoDesde` and only ever moves
    * forward, one document at a time — see NumeracionService for why it is
    * incremented by the database and never computed from a count.
    */
   @Prop({ required: true })
-  nextNumber: number;
+  siguienteNumero: number;
 
   @Prop({ required: true })
-  validFrom: Date;
+  vigenciaDesde: Date;
 
   /** Null where the authorisation carries no expiry. */
   @Prop({ type: Date, default: null })
-  validUntil: Date | null;
+  vigenciaHasta: Date | null;
 
   /**
    * Only one resolution per coproperty may be active at a time — the one new
@@ -79,7 +79,7 @@ export class ResolucionFacturacion {
    * on documents that must remain explicable years later.
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
-  status: 'active' | 'inactive';
+  estado: 'active' | 'inactive';
 }
 
 export const ResolucionFacturacionSchema = SchemaFactory.createForClass(
@@ -88,6 +88,6 @@ export const ResolucionFacturacionSchema = SchemaFactory.createForClass(
 
 // Two active resolutions in one building would make the number a coin flip.
 ResolucionFacturacionSchema.index(
-  { copropiedadId: 1, status: 1 },
-  { unique: true, partialFilterExpression: { status: 'active' } },
+  { copropiedadId: 1, estado: 1 },
+  { unique: true, partialFilterExpression: { estado: 'active' } },
 );

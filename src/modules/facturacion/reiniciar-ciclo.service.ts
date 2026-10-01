@@ -299,7 +299,7 @@ export class ReiniciarCicloService {
     // just one — every document type is wiped above, so every counter must
     // restart together.
     await this.consecutivoDocumento
-      .updateMany({ copropiedadId }, { $set: { nextNumber: 0 } })
+      .updateMany({ copropiedadId }, { $set: { siguienteNumero: 0 } })
       .exec();
     // LoteRecibos has its own consecutivo, separate from consecutivoDocumento
     // (its numbers are internal to the batch, never a document type code).
@@ -323,13 +323,13 @@ export class ReiniciarCicloService {
       .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
       .exec();
     const resolucionActiva = await this.resoluciones
-      .findOne({ copropiedadId, status: 'active' })
+      .findOne({ copropiedadId, estado: 'active' })
       .exec();
     if (resolucionActiva) {
       await this.resoluciones
         .updateOne(
           { _id: resolucionActiva._id },
-          { $set: { nextNumber: resolucionActiva.rangeFrom } },
+          { $set: { siguienteNumero: resolucionActiva.rangoDesde } },
         )
         .exec();
     }
