@@ -6,7 +6,7 @@ import { Copropiedad } from '../copropiedades/copropiedad.schema';
 export type ProgresoImportacionDocument = HydratedDocument<ProgresoImportacion>;
 
 /** The bulk imports this can track progress for — one row per (coproperty,
- *  kind) pair, so two different imports never overwrite each other's
+ *  tipo) pair, so two different imports never overwrite each other's
  *  progress. Closed set, same reasoning as `CATEGORIAS_DOCUMENTO`: adding a
  *  third bulk import means adding a value here, not inventing a new shape. */
 export const TIPOS_IMPORTACION = [
@@ -40,10 +40,10 @@ export class ProgresoImportacion {
   copropiedadId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: TIPOS_IMPORTACION })
-  kind: TipoImportacion;
+  tipo: TipoImportacion;
 
   @Prop({ required: true, default: 0 })
-  current: number;
+  actual: number;
 
   @Prop({ required: true, default: 0 })
   total: number;
@@ -53,6 +53,6 @@ export const ProgresoImportacionSchema =
   SchemaFactory.createForClass(ProgresoImportacion);
 
 ProgresoImportacionSchema.index(
-  { copropiedadId: 1, kind: 1 },
+  { copropiedadId: 1, tipo: 1 },
   { unique: true },
 );

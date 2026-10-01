@@ -43,7 +43,7 @@ describe('ProgresoImportacionService', () => {
     expect(modelo.updateOne).not.toHaveBeenCalled();
   });
 
-  it('iniciar() con filas hace upsert de current:0', async () => {
+  it('iniciar() con filas hace upsert de actual:0', async () => {
     const modelo = modeloCon();
     const service = new ProgresoImportacionService(modelo as never);
 
@@ -51,9 +51,9 @@ describe('ProgresoImportacionService', () => {
 
     expect(modelo.filtros[0]).toEqual({
       copropiedadId: COP,
-      kind: 'inmuebles',
+      tipo: 'inmuebles',
     });
-    expect(modelo.escrituras[0]).toEqual({ $set: { current: 0, total: 10 } });
+    expect(modelo.escrituras[0]).toEqual({ $set: { actual: 0, total: 10 } });
   });
 
   it('actualizar() hace upsert del progreso actual', async () => {
@@ -62,7 +62,7 @@ describe('ProgresoImportacionService', () => {
 
     await service.actualizar(COP, 'valores-recurrentes', 3, 10);
 
-    expect(modelo.escrituras[0]).toEqual({ $set: { current: 3, total: 10 } });
+    expect(modelo.escrituras[0]).toEqual({ $set: { actual: 3, total: 10 } });
   });
 
   it('finalizar() borra la fila — su ausencia ES "nada en curso"', async () => {
@@ -73,7 +73,7 @@ describe('ProgresoImportacionService', () => {
 
     expect(modelo.deleteOne).toHaveBeenCalledWith({
       copropiedadId: COP,
-      kind: 'inmuebles',
+      tipo: 'inmuebles',
     });
   });
 
@@ -84,8 +84,8 @@ describe('ProgresoImportacionService', () => {
     await expect(service.obtener(COP, 'inmuebles')).resolves.toBeNull();
   });
 
-  it('obtener() mapea current/total a actual/total', async () => {
-    const modelo = modeloCon({ current: 4, total: 9 });
+  it('obtener() mapea actual/total a actual/total', async () => {
+    const modelo = modeloCon({ actual: 4, total: 9 });
     const service = new ProgresoImportacionService(modelo as never);
 
     await expect(service.obtener(COP, 'inmuebles')).resolves.toEqual({

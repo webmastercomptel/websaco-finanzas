@@ -19,7 +19,7 @@ export interface ProgresoActual {
  * while it runs — see the schema's own note for why this exists and why it
  * is throttled rather than written per row. One instance is shared by every
  * import that wants this (today: `InmueblesService.importar`,
- * `ValoresRecurrentesService.importarMasivo`), keyed by `kind` so two
+ * `ValoresRecurrentesService.importarMasivo`), keyed by `tipo` so two
  * different imports for the same coproperty never clobber each other.
  */
 @Injectable()
@@ -43,14 +43,14 @@ export class ProgresoImportacionService {
    *  anything — nothing to poll for a file with no rows. */
   async iniciar(
     copropiedadId: Types.ObjectId,
-    kind: TipoImportacion,
+    tipo: TipoImportacion,
     total: number,
   ): Promise<void> {
     if (total === 0) return;
     await this.progresos
       .updateOne(
-        { copropiedadId, kind },
-        { $set: { current: 0, total } },
+        { copropiedadId, tipo },
+        { $set: { actual: 0, total } },
         { upsert: true },
       )
       .exec();
@@ -61,14 +61,14 @@ export class ProgresoImportacionService {
    *  row. */
   async actualizar(
     copropiedadId: Types.ObjectId,
-    kind: TipoImportacion,
-    current: number,
+    tipo: TipoImportacion,
+    actual: number,
     total: number,
   ): Promise<void> {
     await this.progresos
       .updateOne(
-        { copropiedadId, kind },
-        { $set: { current, total } },
+        { copropiedadId, tipo },
+        { $set: { actual, total } },
         { upsert: true },
       )
       .exec();
@@ -78,18 +78,18 @@ export class ProgresoImportacionService {
    *  "nothing in progress" (see `obtener`), never a row left at 100%. */
   async finalizar(
     copropiedadId: Types.ObjectId,
-    kind: TipoImportacion,
+    tipo: TipoImportacion,
   ): Promise<void> {
-    await this.progresos.deleteOne({ copropiedadId, kind }).exec();
+    await this.progresos.deleteOne({ copropiedadId, tipo }).exec();
   }
 
-  /** Null means no import of this kind is currently running for this
+  /** Null means no import of this tipo is currently running for this
    *  coproperty — the frontend's cue to stop polling. */
   async obtener(
     copropiedadId: Types.ObjectId,
-    kind: TipoImportacion,
+    tipo: TipoImportacion,
   ): Promise<ProgresoActual | null> {
-    const doc = await this.progresos.findOne({ copropiedadId, kind }).exec();
-    return doc ? { actual: doc.current, total: doc.total } : null;
+    const doc = await this.progresos.findOne({ copropiedadId, tipo }).exec();
+    return doc ? { actual: doc.actual, total: doc.total } : null;
   }
 }
