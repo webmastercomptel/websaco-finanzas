@@ -10,10 +10,10 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  fullNumber: 'FV-001',
-  issueDate: new Date('2026-08-01'),
+  numeroCompleto: 'FV-001',
+  fechaEmision: new Date('2026-08-01'),
   total: 200000,
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -21,7 +21,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  fullNumber: 'RC-001',
+  numeroCompleto: 'RC-001',
   ...over,
 });
 
@@ -29,11 +29,11 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  fullNumber: 'ND-001',
-  issueDate: new Date('2026-08-15'),
+  numeroCompleto: 'ND-001',
+  fechaEmision: new Date('2026-08-15'),
   total: 50000,
-  description: 'Cargo por mora',
-  status: 'emitida',
+  descripcion: 'Cargo por mora',
+  estado: 'emitida',
   ...over,
 });
 
@@ -41,10 +41,10 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  fullNumber: 'NT-001',
+  numeroCompleto: 'NT-001',
   monto: 30000,
-  description: 'Reclasificación de intereses',
-  status: 'activo',
+  descripcion: 'Reclasificación de intereses',
+  estado: 'activo',
   createdAt: new Date('2026-08-20'),
   ...over,
 });
@@ -53,24 +53,24 @@ const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  fullNumber: 'NA-001',
+  numeroCompleto: 'NA-001',
   ...over,
 });
 
 const aplicacionDoc = (
   sourceId: Types.ObjectId,
-  documentId: Types.ObjectId,
+  documentoId: Types.ObjectId,
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
   copropiedadId: COP,
   sourceType: 'RC',
   sourceId,
-  documentType: 'FV',
-  documentId,
-  amountApplied: 100000,
-  appliedAt: new Date('2026-08-10'),
-  status: 'activa',
+  tipoDocumento: 'FV',
+  documentoId,
+  montoAplicado: 100000,
+  aplicadoEn: new Date('2026-08-10'),
+  estado: 'activa',
   ...over,
 });
 
@@ -139,7 +139,7 @@ describe('AuxiliarCarteraService', () => {
     });
 
     it('una Factura anulada TAMBIÉN produce su fila Débito — es un kardex histórico, nunca se filtra por status', async () => {
-      const f = facturaDoc({ status: 'anulada' });
+      const f = facturaDoc({ estado: 'anulada' });
       const svc = servicio({
         facturas: {
           find: jest.fn().mockReturnThis(),
@@ -186,13 +186,13 @@ describe('AuxiliarCarteraService', () => {
 
     it('un Recibo aplicando a 3 facturas produce 3 filas Crédito separadas', async () => {
       const rec = reciboDoc();
-      const f1 = facturaDoc({ fullNumber: 'FV-001' });
-      const f2 = facturaDoc({ fullNumber: 'FV-002' });
-      const f3 = facturaDoc({ fullNumber: 'FV-003' });
+      const f1 = facturaDoc({ numeroCompleto: 'FV-001' });
+      const f2 = facturaDoc({ numeroCompleto: 'FV-002' });
+      const f3 = facturaDoc({ numeroCompleto: 'FV-003' });
       const apps = [
-        aplicacionDoc(rec._id, f1._id, { amountApplied: 50000 }),
-        aplicacionDoc(rec._id, f2._id, { amountApplied: 30000 }),
-        aplicacionDoc(rec._id, f3._id, { amountApplied: 20000 }),
+        aplicacionDoc(rec._id, f1._id, { montoAplicado: 50000 }),
+        aplicacionDoc(rec._id, f2._id, { montoAplicado: 30000 }),
+        aplicacionDoc(rec._id, f3._id, { montoAplicado: 20000 }),
       ];
 
       const svc = servicio({
@@ -231,10 +231,10 @@ describe('AuxiliarCarteraService', () => {
       // fecha de HOY en el Auxiliar de Cartera — porque el cruce corre en
       // el instante real (`appliedAt`), nunca en la fecha que el usuario
       // declaró para el pago.
-      const rec = reciboDoc({ receivedDate: new Date('2026-06-02') });
+      const rec = reciboDoc({ fechaRecibo: new Date('2026-06-02') });
       const f = facturaDoc();
       const app = aplicacionDoc(rec._id, f._id, {
-        appliedAt: new Date('2026-09-09'),
+        aplicadoEn: new Date('2026-09-09'),
       });
 
       const svc = servicio({
@@ -268,7 +268,7 @@ describe('AuxiliarCarteraService', () => {
       const f = facturaDoc();
       const app = aplicacionDoc(na._id, f._id, {
         sourceType: 'NA',
-        amountApplied: 75000,
+        montoAplicado: 75000,
       });
 
       const svc = servicio({
@@ -329,7 +329,7 @@ describe('AuxiliarCarteraService', () => {
 
     it('una Nota Contable usa su propia issueDate, NUNCA createdAt — bug real reportado: una nota fechada en junio aparecía en septiembre', async () => {
       const nt = ntDoc({
-        issueDate: new Date('2026-06-10'),
+        fecha: new Date('2026-06-10'),
         createdAt: new Date('2026-09-14'),
       });
       const svc = servicio({
@@ -354,7 +354,7 @@ describe('AuxiliarCarteraService', () => {
   describe('saldoInicial', () => {
     it('suma movimientos anteriores a `desde`', async () => {
       const f = facturaDoc({
-        issueDate: new Date('2026-06-01'),
+        fechaEmision: new Date('2026-06-01'),
         total: 100000,
       });
       const svc = servicio({
