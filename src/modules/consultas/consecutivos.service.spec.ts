@@ -89,10 +89,10 @@ describe('ConsecutivosService', () => {
         _id: reciboId,
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 5,
-        fullNumber: 'RC-5',
-        receivedAmount: 100000,
-        receivedDate: new Date('2026-01-15'),
+        numero: 5,
+        numeroCompleto: 'RC-5',
+        montoRecibido: 100000,
+        fechaRecibo: new Date('2026-01-15'),
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
       const concepto = conceptoDoc({
@@ -103,9 +103,9 @@ describe('ConsecutivosService', () => {
         _id: id(),
         sourceType: 'RC',
         sourceId: reciboId,
-        status: 'activa',
+        estado: 'activa',
         detalleConceptos: [
-          { conceptoId, conceptName: 'Administracion', monto: 100000 },
+          { conceptoId, nombreConcepto: 'Administracion', monto: 100000 },
         ],
       };
 
@@ -141,10 +141,10 @@ describe('ConsecutivosService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 6,
-        fullNumber: 'RC-6',
-        receivedAmount: 50000,
-        receivedDate: new Date('2026-01-20'),
+        numero: 6,
+        numeroCompleto: 'RC-6',
+        montoRecibido: 50000,
+        fechaRecibo: new Date('2026-01-20'),
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
 
@@ -173,11 +173,11 @@ describe('ConsecutivosService', () => {
         copropiedadId: COP,
         inmuebleId: inmId,
         conceptoId,
-        number: 3,
-        fullNumber: 'ND-3',
-        issueDate: new Date('2026-01-10'),
+        numero: 3,
+        numeroCompleto: 'ND-3',
+        fechaEmision: new Date('2026-01-10'),
         total: 20000,
-        status: 'emitida',
+        estado: 'emitida',
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '302' });
       const concepto = conceptoDoc({ _id: conceptoId, nombre: 'Multas' });
@@ -216,14 +216,14 @@ describe('ConsecutivosService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 2,
-        fullNumber: 'NC-2',
-        issueDate: new Date('2026-01-12'),
-        totalAmount: 30000,
-        status: 'activo',
-        distribution: [
-          { conceptoId: conceptoAdmin, amount: 20000 },
-          { conceptoId: conceptoMultas, amount: 10000 },
+        numero: 2,
+        numeroCompleto: 'NC-2',
+        fecha: new Date('2026-01-12'),
+        montoTotal: 30000,
+        estado: 'activo',
+        distribucion: [
+          { conceptoId: conceptoAdmin, monto: 20000 },
+          { conceptoId: conceptoMultas, monto: 10000 },
         ],
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '303' });
@@ -254,13 +254,13 @@ describe('ConsecutivosService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 1,
-        fullNumber: 'NC-1',
-        issueDate: null,
+        numero: 1,
+        numeroCompleto: 'NC-1',
+        fecha: null,
         createdAt: new Date('2026-03-01'),
-        totalAmount: 10000,
-        status: 'activo',
-        distribution: [],
+        montoTotal: 10000,
+        estado: 'activo',
+        distribucion: [],
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '303' });
 
@@ -291,13 +291,13 @@ describe('ConsecutivosService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 4,
-        fullNumber: 'NT-4',
-        issueDate: new Date('2026-01-18'),
+        numero: 4,
+        numeroCompleto: 'NT-4',
+        fecha: new Date('2026-01-18'),
         conceptoOrigenId: conceptoOrigen,
         conceptoDestinoId: conceptoDestino,
         monto: 15000,
-        status: 'activo',
+        estado: 'activo',
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '304' });
 
@@ -330,19 +330,19 @@ describe('ConsecutivosService', () => {
         _id: notaId,
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 1,
-        fullNumber: 'NA-1',
-        issueDate: new Date('2026-08-01'),
-        appliedAmount: 40000,
-        status: 'activo',
+        numero: 1,
+        numeroCompleto: 'NA-1',
+        fechaEmision: new Date('2026-08-01'),
+        montoAplicado: 40000,
+        estado: 'activo',
       };
       const app = {
         _id: id(),
         sourceType: 'NA',
         sourceId: notaId,
-        status: 'activa',
+        estado: 'activa',
         detalleConceptos: [
-          { conceptoId, conceptName: 'Administracion', monto: 40000 },
+          { conceptoId, nombreConcepto: 'Administracion', monto: 40000 },
         ],
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '307' });
@@ -387,12 +387,12 @@ describe('ConsecutivosService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: inmId,
-        number: 100,
-        fullNumber: 'FV-100',
-        issueDate: new Date('2026-01-05'),
+        numero: 100,
+        numeroCompleto: 'FV-100',
+        fechaEmision: new Date('2026-01-05'),
         total: 50000,
-        status: 'emitida',
-        lines: [{ conceptoId, totalAmount: 50000 }],
+        estado: 'emitida',
+        lineas: [{ conceptoId, valorTotal: 50000 }],
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '305' });
 
@@ -426,22 +426,22 @@ describe('ConsecutivosService', () => {
       copropiedadId: COP,
       inmuebleId: inmId,
       conceptoId: id(),
-      number: 9,
-      fullNumber: 'ND-9',
-      issueDate: new Date('2026-01-10'),
+      numero: 9,
+      numeroCompleto: 'ND-9',
+      fechaEmision: new Date('2026-01-10'),
       total: 1000,
-      status: 'emitida',
+      estado: 'emitida',
     };
     const nd2 = {
       _id: id(),
       copropiedadId: COP,
       inmuebleId: inmId,
       conceptoId: id(),
-      number: 2,
-      fullNumber: 'ND-2',
-      issueDate: new Date('2026-01-05'),
+      numero: 2,
+      numeroCompleto: 'ND-2',
+      fechaEmision: new Date('2026-01-05'),
       total: 1000,
-      status: 'emitida',
+      estado: 'emitida',
     };
     const inm = inmuebleDoc({ _id: inmId, codigo: '306' });
 
