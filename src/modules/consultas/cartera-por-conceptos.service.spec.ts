@@ -8,13 +8,13 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'FV-001',
-  number: 1,
-  issueDate: new Date('2026-08-01'),
-  dueDate: new Date('2026-08-31'),
+  numeroCompleto: 'FV-001',
+  numero: 1,
+  fechaEmision: new Date('2026-08-01'),
+  fechaVencimiento: new Date('2026-08-31'),
   total: 200000,
-  lines: [],
-  status: 'emitida',
+  lineas: [],
+  estado: 'emitida',
   ...over,
 });
 
@@ -22,12 +22,12 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'ND-001',
-  number: 1,
-  issueDate: new Date('2026-07-15'),
+  numeroCompleto: 'ND-001',
+  numero: 1,
+  fechaEmision: new Date('2026-07-15'),
   total: 50000,
   conceptoId: id(),
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -129,8 +129,8 @@ describe('CarteraPorConceptosService', () => {
         documentoId: fId.toString(),
         tipo: 'FV',
         numeroCompleto: 'FV-001',
-        fecha: f.issueDate.toISOString(),
-        vence: f.dueDate.toISOString(),
+        fecha: f.fechaEmision.toISOString(),
+        vence: f.fechaVencimiento.toISOString(),
         saldo: 200000,
         cargosPorConcepto: {},
       },
@@ -238,16 +238,16 @@ describe('CarteraPorConceptosService', () => {
       _id: fId,
       inmuebleId: inmId,
       number: 7,
-      fullNumber: 'FV-0007',
-      issueDate: new Date('2026-08-01'),
+      numeroCompleto: 'FV-0007',
+      fechaEmision: new Date('2026-08-01'),
       total: 100000,
     });
     const nd = ndDoc({
       _id: ndId,
       inmuebleId: inmId,
       number: 3,
-      fullNumber: 'ND-0003',
-      issueDate: new Date('2026-07-15'),
+      numeroCompleto: 'ND-0003',
+      fechaEmision: new Date('2026-07-15'),
       total: 20000,
     });
 
@@ -280,16 +280,16 @@ describe('CarteraPorConceptosService', () => {
       _id: fId,
       inmuebleId: inmId,
       number: 337,
-      fullNumber: 'FV-337',
-      issueDate: new Date('2026-06-01'),
+      numeroCompleto: 'FV-337',
+      fechaEmision: new Date('2026-06-01'),
       total: 100000,
     });
     const nd = ndDoc({
       _id: ndId,
       inmuebleId: inmId,
       number: 5,
-      fullNumber: 'ND-5',
-      issueDate: new Date('2026-08-21'),
+      numeroCompleto: 'ND-5',
+      fechaEmision: new Date('2026-08-21'),
       total: 20000,
     });
 
@@ -382,7 +382,7 @@ describe('CarteraPorConceptosService', () => {
     const inmId = id();
     const fAntes = facturaDoc({
       inmuebleId: inmId,
-      issueDate: new Date('2026-07-01'),
+      fechaEmision: new Date('2026-07-01'),
       total: 100000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -406,7 +406,7 @@ describe('CarteraPorConceptosService', () => {
     // see `limiteEmisionParaCorte`'s own docblock).
     expect(facturasFind).toHaveBeenCalledWith(
       expect.objectContaining({
-        issueDate: { $lte: new Date('2026-08-01T23:59:59.999Z') },
+        fechaEmision: { $lte: new Date('2026-08-01T23:59:59.999Z') },
       }),
     );
   });
@@ -418,10 +418,10 @@ describe('CarteraPorConceptosService', () => {
     const f = facturaDoc({
       inmuebleId: inmId,
       total: 150000,
-      issueDate: new Date('2026-06-01'),
-      lines: [
-        { conceptoId: conceptoAdmin, totalAmount: 100000 },
-        { conceptoId: conceptoMultas, totalAmount: 50000 },
+      fechaEmision: new Date('2026-06-01'),
+      lineas: [
+        { conceptoId: conceptoAdmin, valorTotal: 100000 },
+        { conceptoId: conceptoMultas, valorTotal: 50000 },
       ],
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -451,16 +451,16 @@ describe('CarteraPorConceptosService', () => {
       _id: fId,
       inmuebleId: inmId,
       total: 100000,
-      issueDate: new Date('2026-06-01'),
+      fechaEmision: new Date('2026-06-01'),
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date('2026-07-01'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-07-01'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
