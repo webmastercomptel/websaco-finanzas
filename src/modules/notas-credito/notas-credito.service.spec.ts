@@ -389,6 +389,12 @@ const construirServicio = (opts: {
   copropiedades?: { findById: jest.Mock };
   cuentasContables?: Record<string, unknown>[];
   inmueble?: Record<string, unknown> | null;
+  /** The coproperty `conAuxiliares`'s own tenant-scoped `inmuebles.findOne`
+   *  lookup must match to return `inmueble` — defaults to `COP` (the active
+   *  tenant). A cross-tenant regression test passes a DIFFERENT id here to
+   *  prove the lookup returns null instead of leaking another tenant's
+   *  inmueble. */
+  inmuebleCopropiedadId?: Types.ObjectId;
   /** Same default as `lotesFacturacionFalso()`'s own: `null` means "never
    *  consolidated", so `crear()`'s period-match check on `dto.fecha` is a
    *  no-op — mirrors `recibos.service.spec.ts`'s identical override. */
@@ -421,17 +427,28 @@ const construirServicio = (opts: {
       session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
     })),
   };
+  // `findOne` backs BOTH `conAuxiliares`'s `.session(session).exec()` call
+  // (inside the transaction — tenancy-law fix: was a bare `findById`) and
+  // `resolverInmuebleCodigo`'s bare `.exec()` call — `.session()` returns
+  // the same chainable object either way, same trick
+  // `saldoTotalDocumento.findOne` already uses in this file. Filter-aware on
+  // `copropiedadId` — proves the lookup is tenant-scoped, not just `_id`.
   const inmuebles = opts.cuentasContables && {
-    findById: jest.fn(() => ({
-      session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-      }),
-    })),
-    // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
-    // `findById` above (called outside any transaction).
-    findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-    })),
+    findOne: jest.fn(
+      (filtro: { _id: Types.ObjectId; copropiedadId: Types.ObjectId }) => {
+        const coincide = filtro.copropiedadId.equals(
+          opts.inmuebleCopropiedadId ?? COP,
+        );
+        const cadena = {
+          session: () => cadena,
+          exec: () =>
+            Promise.resolve(
+              coincide ? (opts.inmueble ?? { codigo: '1304' }) : null,
+            ),
+        };
+        return cadena;
+      },
+    ),
   };
 
   const service = new NotasCreditoService(
@@ -587,6 +604,56 @@ describe('NotasCreditoService.crear', () => {
     const devoluciones = entries.find((e) => e.cuenta === '413595');
     expect(devoluciones?.tercero).toBe('1304');
     expect(devoluciones?.centroCosto).toBe('CC-01');
+  });
+
+  it('tenancy law: un inmueble con el mismo _id pero de OTRA coproperty nunca enriquece el asiento — conAuxiliares usa findOne({ _id, copropiedadId }), no findById', async () => {
+    const notaCreada = notaCreditoCreada();
+    const OTRA_COP = new Types.ObjectId();
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                centroCostoDefecto: 'CC-01',
+                flujoCajaCodigo: 'FC-OPER',
+              }),
+          }),
+        })),
+      },
+      cuentasContables: [
+        {
+          codigo: '413595',
+          requiereTercero: true,
+          centroUtilidad: true,
+          centroDestino: false,
+          flujoCaja: false,
+        },
+      ],
+      // This inmueble fixture exists, but under a DIFFERENT coproperty than
+      // the active tenant (COP) — same `_id` would be matched by a bare
+      // `findById`, which is exactly the cross-tenant leak this guards.
+      inmueble: { codigo: '1304' },
+      inmuebleCopropiedadId: OTRA_COP,
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tercero?: string | null;
+    }>;
+    const devoluciones = entries.find((e) => e.cuenta === '413595');
+    // Falls back to null — same outcome as "inmueble doesn't exist", never
+    // leaks the other tenant's `código`.
+    expect(devoluciones?.tercero).toBeNull();
   });
 
   it('NO mueve cuentasOrden cuando la nota nunca toca un concepto de intereses', async () => {

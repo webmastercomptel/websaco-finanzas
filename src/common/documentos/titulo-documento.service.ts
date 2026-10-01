@@ -107,7 +107,9 @@ export class TituloDocumentoService {
     resolucion: ResolucionPlantillaFactura | null;
   }> {
     if (resolucionId) {
-      const resolucion = await this.resoluciones.findById(resolucionId).exec();
+      const resolucion = await this.resoluciones
+        .findOne({ _id: resolucionId, copropiedadId })
+        .exec();
       if (resolucion) {
         const tituloPorDefecto =
           await this.tituloFacturaPorDefecto(copropiedadId);

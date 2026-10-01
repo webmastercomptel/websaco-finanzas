@@ -17,6 +17,7 @@ const modeloConsecutivos = (
 const modeloResoluciones = (
   filas: {
     _id: Types.ObjectId;
+    copropiedadId: Types.ObjectId;
     nombreDocumento: string | null;
     numeroResolucion: string;
     prefijo: string;
@@ -26,9 +27,21 @@ const modeloResoluciones = (
     vigenciaHasta: Date | null;
   }[],
 ) => ({
-  findById: jest.fn((id: Types.ObjectId) => ({
-    exec: () => Promise.resolve(filas.find((f) => f._id.equals(id)) ?? null),
-  })),
+  // Tenant-scoped on purpose — see "The tenancy law" in backend/CLAUDE.md.
+  // A bare `findById` would return a `ResolucionFacturacion` belonging to a
+  // DIFFERENT coproperty when `resolucionId` is stale/forged/cross-tenant.
+  findOne: jest.fn(
+    (filtro: { _id: Types.ObjectId; copropiedadId: Types.ObjectId }) => ({
+      exec: () =>
+        Promise.resolve(
+          filas.find(
+            (f) =>
+              f._id.equals(filtro._id) &&
+              f.copropiedadId.equals(filtro.copropiedadId),
+          ) ?? null,
+        ),
+    }),
+  ),
 });
 
 describe('TituloDocumentoService.resolverGenerico', () => {
@@ -99,6 +112,7 @@ describe('TituloDocumentoService.resolverFactura', () => {
     const resoluciones = modeloResoluciones([
       {
         _id: resolucionVieja,
+        copropiedadId: COP,
         nombreDocumento: 'Cobro Antiguo',
         numeroResolucion: 'RES-2024-001',
         prefijo: 'OLD-2024',
@@ -124,7 +138,10 @@ describe('TituloDocumentoService.resolverFactura', () => {
       'CONJ-2026-1041',
     );
 
-    expect(resoluciones.findById).toHaveBeenCalledWith(resolucionVieja);
+    expect(resoluciones.findOne).toHaveBeenCalledWith({
+      _id: resolucionVieja,
+      copropiedadId: COP,
+    });
     // El título viene de LA RESOLUCIÓN CONGELADA, nunca del consecutivo FV
     // "actual" — aunque este último tenga su propio nombreDocumento.
     expect(titulo).toBe('Cobro Antiguo');
@@ -149,6 +166,7 @@ describe('TituloDocumentoService.resolverFactura', () => {
       modeloResoluciones([
         {
           _id: resolucionId,
+          copropiedadId: COP,
           nombreDocumento: null,
           numeroResolucion: 'RES-2026-002',
           prefijo: 'CONJ-2026',
@@ -185,6 +203,44 @@ describe('TituloDocumentoService.resolverFactura', () => {
       'CONJ-2026',
     );
 
+    expect(titulo).toBe('Cobro Expensas');
+    expect(resolucion).toBeNull();
+  });
+
+  it('una resolución que existe pero pertenece a OTRA coproperty no se devuelve — tenancy law: cae al camino sin resolución, igual que "no existe", nunca filtra de qué tenant es', async () => {
+    const OTRA_COP = new Types.ObjectId();
+    const resolucionDeOtroTenant = new Types.ObjectId();
+    const resoluciones = modeloResoluciones([
+      {
+        _id: resolucionDeOtroTenant,
+        copropiedadId: OTRA_COP,
+        nombreDocumento: 'Resolución de otra coproperty',
+        numeroResolucion: 'RES-2026-999',
+        prefijo: 'OTRA-2026',
+        rangoDesde: 1,
+        rangoHasta: 100,
+        vigenciaDesde: new Date('2026-01-01'),
+        vigenciaHasta: null,
+      },
+    ]);
+    const service = new TituloDocumentoService(
+      modeloConsecutivos([
+        { codigo: 'FV', nombreDocumento: 'Cobro Expensas' },
+      ]) as never,
+      resoluciones as never,
+    );
+
+    const { titulo, resolucion } = await service.resolverFactura(
+      COP,
+      resolucionDeOtroTenant,
+      'CONJ-2026',
+    );
+
+    expect(resoluciones.findOne).toHaveBeenCalledWith({
+      _id: resolucionDeOtroTenant,
+      copropiedadId: COP,
+    });
+    // Same outcome as "no existe" — never leaks the other tenant's title.
     expect(titulo).toBe('Cobro Expensas');
     expect(resolucion).toBeNull();
   });

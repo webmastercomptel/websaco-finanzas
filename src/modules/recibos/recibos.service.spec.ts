@@ -339,6 +339,12 @@ const construirServicio = (opts: {
   copropiedades?: { findById: jest.Mock };
   cuentasContables?: Record<string, unknown>[];
   inmueble?: Record<string, unknown> | null;
+  /** The coproperty `conAuxiliares`'s own tenant-scoped `inmuebles.findOne`
+   *  lookup must match to return `inmueble`. Unset means "match any filter"
+   *  (every existing test); a cross-tenant regression test sets this to a
+   *  DIFFERENT id than the active tenant (`COP`) to prove the lookup
+   *  returns null instead of leaking another tenant's inmueble. */
+  inmuebleCopropiedadId?: Types.ObjectId;
   /** Default: sin lote consolidado — nada que validar contra el período de
    *  facturación. Los tests de "candado de periodo de facturación" pasan
    *  su propio lote consolidado. */
@@ -372,17 +378,28 @@ const construirServicio = (opts: {
       session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
     })),
   };
+  // `findOne` backs BOTH `conAuxiliares`'s `.session(session).exec()` call
+  // (inside the transaction — tenancy-law fix: was a bare `findById`) and
+  // `resolverInmuebleCodigo`'s bare `.exec()` call — `.session()` returns
+  // the same chainable object either way. Filter-aware on `copropiedadId`
+  // when `opts.inmuebleCopropiedadId` is set, to prove the lookup is
+  // tenant-scoped, not just `_id`.
   const inmuebles = opts.cuentasContables && {
-    findById: jest.fn(() => ({
-      session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-      }),
-    })),
-    // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
-    // `findById` above (called outside any transaction).
-    findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-    })),
+    findOne: jest.fn(
+      (filtro: { _id: unknown; copropiedadId: Types.ObjectId }) => {
+        const coincide = opts.inmuebleCopropiedadId
+          ? filtro.copropiedadId.equals(opts.inmuebleCopropiedadId)
+          : true;
+        const cadena = {
+          session: () => cadena,
+          exec: () =>
+            Promise.resolve(
+              coincide ? (opts.inmueble ?? { codigo: '1304' }) : null,
+            ),
+        };
+        return cadena;
+      },
+    ),
   };
 
   const service = new RecibosService(
@@ -2833,6 +2850,131 @@ describe('RecibosService.anular', () => {
         descripcion: expect.any(String) as string,
       },
     ]);
+  });
+
+  it('tenancy law: conAuxiliares usa findOne({ _id, copropiedadId }), nunca findById — el inmueble congelado en el recibo, si perteneciera a OTRA coproperty, no enriquece el asiento de reversa', async () => {
+    // `recibo.inmuebleId` llega a `conAuxiliares` directo desde el documento
+    // ya persistido — no hay un chequeo de tenencia adicional en esta misma
+    // llamada. Un Inmueble con el mismo `_id` existe, pero bajo OTRA
+    // coproperty: antes del fix (`findById` ciego) se habría devuelto igual;
+    // `findOne({ _id, copropiedadId })` debe devolver null y el asiento de
+    // reversa no debe llevar su código.
+    const OTRA_COP = new Types.ObjectId();
+    const facturaId = new Types.ObjectId();
+    const recibo = reciboActivo();
+    const aplicacionActiva = {
+      _id: new Types.ObjectId(),
+      documentoId: facturaId,
+      montoAplicado: 200000,
+      estado: 'activa',
+      detalleConceptos: [],
+    };
+    const facturaFrozen = {
+      _id: facturaId,
+      inmuebleId: INMUEBLE,
+      total: 500000,
+      lineas: [],
+    };
+    const facturas = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve({ ...facturaFrozen }) }),
+      })),
+    };
+    const saldoTotalDocumento = modeloSaldoTotalDocumento([
+      { _id: facturaId, saldoPendiente: 300000 },
+    ]);
+    const recibos = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(recibo) }),
+      })),
+      findOneAndUpdate: jest.fn(
+        (_filtro: unknown, update: { $set?: Record<string, unknown> }) => ({
+          exec: () => {
+            if (update?.$set) Object.assign(recibo, update.$set);
+            return Promise.resolve(null);
+          },
+        }),
+      ),
+    };
+    const aplicaciones = modeloAplicacionesActivas([aplicacionActiva]);
+    const asientos = modeloAsientos();
+    const session = sesionFalsa();
+    const cuentasContables = {
+      find: jest.fn(() => ({
+        session: () => ({
+          exec: () =>
+            Promise.resolve([
+              {
+                codigo: '210505',
+                requiereTercero: true,
+                centroUtilidad: false,
+                centroDestino: false,
+                flujoCaja: false,
+              },
+            ]),
+        }),
+      })),
+    };
+    // Filter-aware: the fixture only "exists" under `OTRA_COP`, a
+    // coproperty DIFFERENT from the active tenant (`COP`) — a tenant-scoped
+    // `findOne` must therefore return null.
+    const inmuebles = {
+      findOne: jest.fn(
+        (filtro: { _id: unknown; copropiedadId: Types.ObjectId }) => {
+          const coincide = filtro.copropiedadId.equals(OTRA_COP);
+          const cadena = {
+            session: () => cadena,
+            exec: () =>
+              Promise.resolve(
+                coincide ? { _id: INMUEBLE, codigo: '1304' } : null,
+              ),
+          };
+          return cadena;
+        },
+      ),
+    };
+
+    const service = new RecibosService(
+      recibos as never,
+      aplicaciones as never,
+      facturas as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      saldoTotalDocumento as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('RC-1'),
+      conexionCon(session),
+      periodoAbierto(),
+      modeloNotasDebito() as never,
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([recibo]) as never,
+      cuentasContables as never,
+      inmuebles as never,
+    );
+
+    await service.anular(
+      recibo._id.toString(),
+      {
+        motivo: 'duplicado',
+        detalle: 'Se cargó el mismo comprobante dos veces por error del cajero',
+        fecha: '2026-09-01',
+      },
+      CUENTA.toString(),
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tercero?: string | null;
+    }>;
+    const anticipos = entries.find((e) => e.cuenta === '210505');
+    // Falls back to null — same outcome as "inmueble doesn't exist", never
+    // leaks the other tenant's `código`.
+    expect(anticipos?.tercero).toBeNull();
   });
 
   it('revierte una aplicación contra Nota Débito: restaura SaldoTotalDocumento y SaldoCartera, no solo el asiento', async () => {

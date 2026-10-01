@@ -243,7 +243,10 @@ export class NotasCreditoService {
     if (!this.cuentasContables) return entries;
     const [cuentas, inmueble] = await Promise.all([
       this.cuentasContables.find({ copropiedadId }).session(session).exec(),
-      this.inmuebles?.findById(inmuebleId).session(session).exec(),
+      this.inmuebles
+        ?.findOne({ _id: inmuebleId, copropiedadId })
+        .session(session)
+        .exec(),
     ]);
     const marcas = new Map<string, MarcasCuentaContable>(
       cuentas.map((c) => [

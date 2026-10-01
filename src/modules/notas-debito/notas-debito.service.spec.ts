@@ -433,16 +433,24 @@ describe('NotasDebitoService', () => {
             ),
           })),
         },
+        // Single `findOne` backs BOTH `crear()`'s pre-transaction tenancy
+        // check (bare `.exec()`) and `conAuxiliares`'s own lookup inside the
+        // transaction (`.session(session).exec()`) — `.session()` returns
+        // the same chainable object either way. Was split `findById`
+        // (conAuxiliares) / `findOne` (titular) before the tenancy-law fix.
         inmuebles: {
-          findById: jest.fn(() => ({
-            session: jest.fn().mockReturnThis(),
-            exec: jest.fn(() => Promise.resolve({ codigo: '1304' })),
-          })),
-          findOne: jest.fn(() => ({
-            exec: jest.fn(() =>
-              Promise.resolve({ _id: INMUEBLE, titularId: null }),
-            ),
-          })),
+          findOne: jest.fn(() => {
+            const cadena = {
+              session: () => cadena,
+              exec: () =>
+                Promise.resolve({
+                  _id: INMUEBLE,
+                  codigo: '1304',
+                  titularId: null,
+                }),
+            };
+            return cadena;
+          }),
         },
       });
 
@@ -673,6 +681,91 @@ describe('NotasDebitoService', () => {
       );
 
       expect(resultado.estado).toBe('anulada');
+    });
+
+    it('tenancy law: conAuxiliares usa findOne({ _id, copropiedadId }), nunca findById — el inmueble congelado en la nota, si perteneciera a OTRA coproperty, no enriquece el asiento de reversa', async () => {
+      // `nota.inmuebleId` llega a `conAuxiliares` directo desde el documento
+      // ya persistido — a diferencia de `crear()`, acá no hay un chequeo de
+      // tenencia previo en la MISMA llamada que ya haya descartado un
+      // `inmuebleId` ajeno. Este test simula justo ese caso: un Inmueble con
+      // el mismo `_id` existe, pero bajo OTRA coproperty — antes del fix
+      // (`findById` ciego) lo habría devuelto igual; `findOne({ _id,
+      // copropiedadId })` debe devolver null y el asiento no debe llevar el
+      // código de ese tenant ajeno.
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        copropiedades: {
+          findById: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                cuentaContableCartera: '1305',
+                cuentaNotasDebito: '4105',
+                centroCostoDefecto: 'CC-01',
+                flujoCajaCodigo: 'FC-OPER',
+              }),
+            ),
+          })),
+        },
+        cuentasContables: {
+          find: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve([
+                {
+                  codigo: '4105',
+                  requiereTercero: false,
+                  centroUtilidad: false,
+                  centroDestino: false,
+                  flujoCaja: true,
+                },
+              ]),
+            ),
+          })),
+        },
+        inmuebles: {
+          // Filter-aware: the fixture only "exists" under `OTRA_COP`, a
+          // coproperty DIFFERENT from the active tenant (`COP`) — a
+          // tenant-scoped `findOne` must therefore return null.
+          findOne: jest.fn(
+            (filtro: { _id: unknown; copropiedadId: Types.ObjectId }) => {
+              const OTRA_COP = new Types.ObjectId();
+              const coincide = filtro.copropiedadId.equals(OTRA_COP);
+              const cadena = {
+                session: () => cadena,
+                exec: () =>
+                  Promise.resolve(
+                    coincide
+                      ? { _id: INMUEBLE, codigo: '1304', titularId: null }
+                      : null,
+                  ),
+              };
+              return cadena;
+            },
+          ),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ movimientos: Array<{ cuenta: string; tercero?: string | null }> }[]],
+      ];
+      const credito = documentos[0].movimientos.find(
+        (e) => e.cuenta === '4105',
+      );
+      // Falls back to null — same outcome as "inmueble doesn't exist",
+      // never leaks the other tenant's `código`.
+      expect(credito?.tercero).toBeNull();
     });
 
     it('al anular, reversa la cuenta de INGRESO del concepto, no la cuenta compartida de la copropiedad (bug real reportado, 2026-09-21)', async () => {

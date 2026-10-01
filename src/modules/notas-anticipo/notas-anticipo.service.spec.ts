@@ -122,6 +122,17 @@ const construirServicio = (
     facturas?: FacturaFixture[];
     notaAnticipo?: NotaAnticipoFixture;
     ultimoLoteConsolidado?: unknown;
+    /** `CuentaContable` fixtures — only set by the tenancy-law regression
+     *  test below (every other test here leaves `conAuxiliares` short-
+     *  circuited, same as every other test in this file always has). */
+    cuentasContables?: Record<string, unknown>[];
+    inmueble?: Record<string, unknown> | null;
+    /** The coproperty `conAuxiliares`'s own tenant-scoped `inmuebles.findOne`
+     *  lookup must match to return `inmueble`. Unset means "match any
+     *  filter"; the cross-tenant test sets this to a DIFFERENT id than the
+     *  active tenant (`COP`) to prove the lookup returns null instead of
+     *  leaking another tenant's inmueble. */
+    inmuebleCopropiedadId?: Types.ObjectId;
   } = {},
 ) => {
   const session = sesionFalsa();
@@ -407,6 +418,36 @@ const construirServicio = (
       Promise.resolve({ prefijo: 'NA', numero: 1, completo: 'NA-1' }),
     ),
   };
+  const cuentasContables = opciones.cuentasContables && {
+    find: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve(opciones.cuentasContables),
+      }),
+    })),
+  };
+  // `findOne` backs BOTH `conAuxiliares`'s `.session(session).exec()` call
+  // (inside the transaction — tenancy-law fix: was a bare `findById`) and
+  // `resolverInmuebleCodigo`'s bare `.exec()` call — `.session()` returns
+  // the same chainable object either way. Filter-aware on `copropiedadId`
+  // when `opciones.inmuebleCopropiedadId` is set, to prove the lookup is
+  // tenant-scoped, not just `_id`.
+  const inmuebles = opciones.cuentasContables && {
+    findOne: jest.fn(
+      (filtro: { _id: unknown; copropiedadId: Types.ObjectId }) => {
+        const coincide = opciones.inmuebleCopropiedadId
+          ? filtro.copropiedadId.equals(opciones.inmuebleCopropiedadId)
+          : true;
+        const cadena = {
+          session: () => cadena,
+          exec: () =>
+            Promise.resolve(
+              coincide ? (opciones.inmueble ?? { codigo: '1304' }) : null,
+            ),
+        };
+        return cadena;
+      },
+    ),
+  };
 
   const service = new NotasAnticipoService(
     notasAnticipo as never,
@@ -424,8 +465,8 @@ const construirServicio = (
     conexionCon(session),
     lotesFacturacionFalso(opciones.ultimoLoteConsolidado ?? null),
     saldoDocumentoOrigen as never,
-    undefined,
-    undefined,
+    cuentasContables as never,
+    inmuebles as never,
     undefined,
     saldosInicialesAnticipo as never,
   );
@@ -807,5 +848,63 @@ describe('NotasAnticipoService.anular', () => {
         CUENTA.toString(),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('tenancy law: conAuxiliares usa findOne({ _id, copropiedadId }), nunca findById — el inmueble congelado en la nota, si perteneciera a OTRA coproperty, no enriquece el asiento de reversa', async () => {
+    // `nota.inmuebleId` (heredado del Recibo de origen) llega a
+    // `conAuxiliares` directo desde el documento ya persistido — no hay un
+    // chequeo de tenencia adicional en esta misma llamada. Un Inmueble con
+    // el mismo `_id` existe, pero bajo OTRA coproperty: antes del fix
+    // (`findById` ciego) se habría devuelto igual; `findOne({ _id,
+    // copropiedadId })` debe devolver null y el asiento de reversa no debe
+    // llevar su código.
+    const OTRA_COP = new Types.ObjectId();
+    const { service, recibo, facturasState, asientosStore } = construirServicio(
+      {
+        cuentasContables: [
+          {
+            codigo: '210505',
+            requiereTercero: true,
+            centroUtilidad: false,
+            centroDestino: false,
+            flujoCaja: false,
+          },
+        ],
+        inmueble: { codigo: '1304' },
+        inmuebleCopropiedadId: OTRA_COP,
+      },
+    );
+
+    const creada = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
+      aplicaciones: [
+        {
+          tipoDocumento: 'FV',
+          documentoId: facturasState[0]._id.toString(),
+          montoAplicado: 150000,
+        },
+      ],
+    });
+
+    await service.anular(
+      creada.id,
+      {
+        motivo: 'error_digitacion',
+        detalle: 'Se aplicó contra la factura equivocada por error',
+        fecha: '2026-09-05',
+      },
+      CUENTA.toString(),
+    );
+
+    expect(asientosStore).toHaveLength(2);
+    const reversa = asientosStore[1] as {
+      movimientos: Array<{ cuenta: string; tercero?: string | null }>;
+    };
+    const anticipos = reversa.movimientos.find((e) => e.cuenta === '210505');
+    // Falls back to null — same outcome as "inmueble doesn't exist", never
+    // leaks the other tenant's `código`.
+    expect(anticipos?.tercero).toBeNull();
   });
 });

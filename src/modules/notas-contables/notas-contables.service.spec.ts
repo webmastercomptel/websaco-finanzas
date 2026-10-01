@@ -119,6 +119,12 @@ const construirServicio = (opts: {
   copropiedades?: { findById: jest.Mock };
   cuentasContables?: Record<string, unknown>[];
   inmueble?: Record<string, unknown> | null;
+  /** The coproperty `conAuxiliares`'s own tenant-scoped `inmuebles.findOne`
+   *  lookup must match to return `inmueble`. Unset means "match any filter"
+   *  (every existing test); a cross-tenant regression test sets this to a
+   *  DIFFERENT id than the active tenant (`COP`) to prove the lookup
+   *  returns null instead of leaking another tenant's inmueble. */
+  inmuebleCopropiedadId?: Types.ObjectId;
 }) => {
   const session = sesionFalsa();
   const notasContables = modeloNotasContables(opts.notaCreada);
@@ -131,17 +137,28 @@ const construirServicio = (opts: {
       session: () => ({ exec: () => Promise.resolve(opts.cuentasContables) }),
     })),
   };
+  // `findOne` backs BOTH `conAuxiliares`'s `.session(session).exec()` call
+  // (inside the transaction — tenancy-law fix: was a bare `findById`) and
+  // `resolverInmuebleCodigo`'s bare `.exec()` call — `.session()` returns
+  // the same chainable object either way. Filter-aware on `copropiedadId`
+  // when `opts.inmuebleCopropiedadId` is set, to prove the lookup is
+  // tenant-scoped, not just `_id`.
   const inmuebles = opts.cuentasContables && {
-    findById: jest.fn(() => ({
-      session: () => ({
-        exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-      }),
-    })),
-    // `resolverInmuebleCodigo`'s own lookup — no `.session()` chain, unlike
-    // `findById` above (called outside any transaction).
-    findOne: jest.fn(() => ({
-      exec: () => Promise.resolve(opts.inmueble ?? { codigo: '1304' }),
-    })),
+    findOne: jest.fn(
+      (filtro: { _id: unknown; copropiedadId: Types.ObjectId }) => {
+        const coincide = opts.inmuebleCopropiedadId
+          ? filtro.copropiedadId.equals(opts.inmuebleCopropiedadId)
+          : true;
+        const cadena = {
+          session: () => cadena,
+          exec: () =>
+            Promise.resolve(
+              coincide ? (opts.inmueble ?? { codigo: '1304' }) : null,
+            ),
+        };
+        return cadena;
+      },
+    ),
   };
 
   // Mock the origin concepto's per-document balance for the balance check
@@ -722,6 +739,57 @@ describe('NotasContablesService.anular', () => {
     const credito = creado.movimientos.find((m) => m.tipo === 'credito');
     expect(debito!.cuenta).toBe('413501');
     expect(credito!.cuenta).toBe('413502');
+  });
+
+  it('tenancy law: conAuxiliares usa findOne({ _id, copropiedadId }), nunca findById — el inmueble congelado en la nota, si perteneciera a OTRA coproperty, no enriquece el asiento espejo', async () => {
+    // `nota.inmuebleId` llega a `postearAsiento`/`conAuxiliares` directo
+    // desde el documento ya persistido — no hay un chequeo de tenencia
+    // adicional en esta misma llamada. Un Inmueble con el mismo `_id`
+    // existe, pero bajo OTRA coproperty: antes del fix (`findById` ciego)
+    // se habría devuelto igual; `findOne({ _id, copropiedadId })` debe
+    // devolver null y el asiento no debe llevar su código.
+    const notaCreada = notaContableCreada();
+    const OTRA_COP = new Types.ObjectId();
+    const { service, asientos } = construirServicio({
+      notaCreada,
+      copropiedades: modeloCopropiedad({
+        centroCostoDefecto: 'CC-01',
+        flujoCajaCodigo: 'FC-OPER',
+      }),
+      cuentasContables: [
+        {
+          codigo: '413501',
+          requiereTercero: true,
+          centroUtilidad: false,
+          centroDestino: false,
+          flujoCaja: false,
+        },
+      ],
+      inmueble: { codigo: '1304' },
+      inmuebleCopropiedadId: OTRA_COP,
+    });
+
+    await service.anular(
+      notaCreada._id.toString(),
+      {
+        motivo: 'otro',
+        detalle: 'Anulación de prueba con detalle largo',
+        fecha: '2026-08-20',
+      },
+      'acc-1',
+    );
+
+    const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
+      tercero?: string | null;
+    }>;
+    const destino = entries.find((e) => e.cuenta === '413501');
+    // Falls back to null — same outcome as "inmueble doesn't exist", never
+    // leaks the other tenant's `código`.
+    expect(destino?.tercero).toBeNull();
   });
 });
 
