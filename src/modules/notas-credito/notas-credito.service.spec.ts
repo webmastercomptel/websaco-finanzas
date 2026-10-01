@@ -52,7 +52,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   terceroId: TERCERO,
   estado: 'emitida',
   numeroCompleto: 'FV-1',
-  outstandingBalance: 200000,
+  saldoPendiente: 200000,
   total: 200000,
   lineas: [{ conceptoId: CONCEPTO, valorTotal: 200000 }],
   ...over,
@@ -72,7 +72,7 @@ const modeloFacturas = (factura: Record<string, unknown>) => ({
 
 /** Combined `SaldoTotalDocumento` mock, backed by whichever Factura fixtures
  *  the caller passes — same shared-mutable-state trick `modeloFacturas` used
- *  to run directly on `outstandingBalance`, just relocated off the (now
+ *  to run directly on `saldoPendiente`, just relocated off the (now
  *  immutable) Factura onto this collection instead. Mirrors
  *  `recibos.service.spec.ts`'s own helper of the same name. */
 const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
@@ -88,17 +88,17 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
         if (!doc) return Promise.resolve(null);
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((doc.outstandingBalance as number) < monto) {
+          if ((doc.saldoPendiente as number) < monto) {
             return Promise.resolve(null);
           }
-          doc.outstandingBalance = (doc.outstandingBalance as number) - monto;
+          doc.saldoPendiente = (doc.saldoPendiente as number) - monto;
         } else if (update.$inc) {
-          doc.outstandingBalance =
-            (doc.outstandingBalance as number) + update.$inc.saldoPendiente;
+          doc.saldoPendiente =
+            (doc.saldoPendiente as number) + update.$inc.saldoPendiente;
         }
         return Promise.resolve({
           documentoId: doc._id,
-          saldoPendiente: doc.outstandingBalance,
+          saldoPendiente: doc.saldoPendiente,
         });
       },
     }),
@@ -111,7 +111,7 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
         );
         return Promise.resolve(
           doc
-            ? { documentoId: doc._id, saldoPendiente: doc.outstandingBalance }
+            ? { documentoId: doc._id, saldoPendiente: doc.saldoPendiente }
             : null,
         );
       },
@@ -126,11 +126,11 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
             .filter(
               (d) =>
                 ids.includes(String(d._id)) &&
-                (d.outstandingBalance as number) > 0,
+                (d.saldoPendiente as number) > 0,
             )
             .map((d) => ({
               documentoId: d._id,
-              saldoPendiente: d.outstandingBalance,
+              saldoPendiente: d.saldoPendiente,
             })),
         );
       },
@@ -157,18 +157,18 @@ const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
       exec: () => {
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((factura.outstandingBalance as number) < monto) {
+          if ((factura.saldoPendiente as number) < monto) {
             return Promise.resolve(null);
           }
-          factura.outstandingBalance =
-            (factura.outstandingBalance as number) - monto;
+          factura.saldoPendiente =
+            (factura.saldoPendiente as number) - monto;
         } else if (update.$inc) {
-          factura.outstandingBalance =
-            (factura.outstandingBalance as number) + update.$inc.saldoPendiente;
+          factura.saldoPendiente =
+            (factura.saldoPendiente as number) + update.$inc.saldoPendiente;
         }
         return Promise.resolve({
           documentoId: factura._id,
-          saldoPendiente: factura.outstandingBalance,
+          saldoPendiente: factura.saldoPendiente,
         });
       },
     }),
@@ -178,7 +178,7 @@ const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
       exec: () =>
         Promise.resolve({
           documentoId: factura._id,
-          saldoPendiente: factura.outstandingBalance,
+          saldoPendiente: factura.saldoPendiente,
         }),
     }),
   })),
@@ -188,7 +188,7 @@ const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
         Promise.resolve([
           {
             documentoId: factura._id,
-            saldoPendiente: factura.outstandingBalance,
+            saldoPendiente: factura.saldoPendiente,
           },
         ]),
     }),
@@ -524,7 +524,7 @@ describe('NotasCreditoService.crear', () => {
     expect(filas[0]).toMatchObject({
       sourceType: 'NC',
       tipoDocumento: 'FV',
-      amountApplied: 200000,
+      montoAplicado: 200000,
     });
     // Persisted for printing (Nota Crédito's own PDF, styled after Recibo's
     // — needs the same per-concepto breakdown a Recibo application already
@@ -581,7 +581,7 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
+    const entries = fila[0].movimientos as Array<{
       cuenta: string;
       tercero?: string | null;
       centroCosto?: string | null;
@@ -631,7 +631,7 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{ cuenta: string }>;
+    const entries = fila[0].movimientos as Array<{ cuenta: string }>;
     expect(entries.some((e) => e.cuenta === '831505')).toBe(false);
     expect(entries.some((e) => e.cuenta === '831510')).toBe(false);
   });
@@ -639,7 +639,7 @@ describe('NotasCreditoService.crear', () => {
   it('mueve cuentasOrden SOLO por la porción de la nota aplicada contra un concepto de intereses', async () => {
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
       lineas: [
         {
@@ -689,7 +689,7 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
+    const entries = fila[0].movimientos as Array<{
       cuenta: string;
       monto: number;
     }>;
@@ -704,7 +704,7 @@ describe('NotasCreditoService.crear', () => {
   it('no debita/acredita las cuentas reales de un concepto de intereses cuando la aplicación es completa — solo cuentasOrden', async () => {
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
       lineas: [
         {
@@ -758,7 +758,7 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
+    const entries = fila[0].movimientos as Array<{
       cuenta: string;
       monto: number;
     }>;
@@ -799,14 +799,14 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
+    const entries = fila[0].movimientos as Array<{
       cuenta: string;
-      type: string;
+      tipo: string;
       monto: number;
       tipoDocumento: string | null;
       numeroDocumento: number | null;
     }>;
-    const creditos = entries.filter((m) => m.type === 'credito');
+    const creditos = entries.filter((m) => m.tipo === 'credito');
     // La cuenta propia del concepto (130599), NO la cuenta plana de cartera
     // de la copropiedad (130501) — aplicación total, sin anticipo. El
     // documento cruce (FV-42, la factura ancla) viaja con la línea, igual
@@ -814,7 +814,7 @@ describe('NotasCreditoService.crear', () => {
     expect(creditos).toEqual([
       {
         cuenta: '130599',
-        type: 'credito',
+        tipo: 'credito',
         monto: 200000,
         descripcion: expect.any(String) as string,
         tipoDocumento: 'FV',
@@ -825,7 +825,7 @@ describe('NotasCreditoService.crear', () => {
 
   it('cuando montoTotal excede el saldo de la factura ancla, aplica lo que cabe y el resto queda como anticipo', async () => {
     const factura = facturaDoc({
-      outstandingBalance: 120000,
+      saldoPendiente: 120000,
       total: 300000,
       lineas: [{ conceptoId: CONCEPTO, valorTotal: 300000 }],
     });
@@ -848,11 +848,11 @@ describe('NotasCreditoService.crear', () => {
     );
 
     const [[filas]] = aplicaciones.create.mock.calls;
-    expect(filas[0].amountApplied).toBe(120000);
+    expect(filas[0].montoAplicado).toBe(120000);
   });
 
   it('no aplica nada, y no crea AplicacionCartera, cuando la factura ancla ya tiene saldo cero', async () => {
-    const factura = facturaDoc({ outstandingBalance: 0 });
+    const factura = facturaDoc({ saldoPendiente: 0 });
     const notaCreada = notaCreditoCreada();
     const { service, aplicaciones } = construirServicio({
       notaCreada,
@@ -996,7 +996,7 @@ describe('NotasCreditoService.crear', () => {
     // lugar de `ajustarSaldosCarteraPorDistribucion`, este test detectaría
     // la regresión.
     const factura = facturaDoc({
-      outstandingBalance: 400000,
+      saldoPendiente: 400000,
       total: 600000,
       lineas: [
         { conceptoId: conceptoP, valorTotal: 300000 },
@@ -1043,9 +1043,9 @@ describe('NotasCreditoService.crear', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
       ];
-      return pipeline[0].$set.balance.$max[1].$add[1];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
 
     expect(extraerMonto(conceptoP)).toBe(-250000);
@@ -1062,12 +1062,12 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as [
-      { notaCreditoId: unknown; entries: Record<string, unknown>[] },
+      { notaCreditoId: unknown; movimientos: Record<string, unknown>[] },
     ];
     expect(entrada.notaCreditoId).toEqual(notaCreada._id);
-    expect(entrada.entries[0]).toMatchObject({
+    expect(entrada.movimientos[0]).toMatchObject({
       cuenta: '413595',
-      type: 'debito',
+      tipo: 'debito',
     });
   });
 
@@ -1075,7 +1075,7 @@ describe('NotasCreditoService.crear', () => {
     // Bug real reportado: una nota creada "hoy" con una fecha declarada de
     // otro día del mismo período de facturación quedaba con el asiento
     // fechado "hoy" (el instante del servidor) en vez de la fecha que el
-    // usuario eligió — Consulta de Movimientos filtra por AsientoContable.date,
+    // usuario eligió — Consulta de Movimientos filtra por AsientoContable.fecha,
     // así que la nota no aparecía al buscar por su propio período.
     const notaCreada = notaCreditoCreada({ fecha: new Date('2026-01-05') });
     const { service, asientos } = construirServicio({ notaCreada });
@@ -1085,8 +1085,8 @@ describe('NotasCreditoService.crear', () => {
     const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const [entrada] = creado as unknown as [{ date: Date }];
-    expect(entrada.date).toEqual(new Date('2026-01-05'));
+    const [entrada] = creado as unknown as [{ fecha: Date }];
+    expect(entrada.fecha).toEqual(new Date('2026-01-05'));
   });
 
   it('debita la cuenta de ingreso PROPIA de cada concepto (cuentaIngreso de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
@@ -1099,7 +1099,7 @@ describe('NotasCreditoService.crear', () => {
     const conceptoAdmin = new Types.ObjectId();
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
-      outstandingBalance: 130000,
+      saldoPendiente: 130000,
       total: 130000,
       lineas: [
         {
@@ -1134,9 +1134,9 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as unknown as [
-      { entries: Record<string, unknown>[] },
+      { movimientos: Record<string, unknown>[] },
     ];
-    const debitos = entrada.entries.filter((e) => e.type === 'debito');
+    const debitos = entrada.movimientos.filter((e) => e.tipo === 'debito');
     expect(debitos).toEqual([
       expect.objectContaining({ cuenta: '413501', monto: 100000 }),
       expect.objectContaining({ cuenta: '413502', monto: 30000 }),
@@ -1155,7 +1155,7 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     numeroCompleto: 'ND-1',
     numero: 1,
     total: 150000,
-    outstandingBalance: 150000,
+    saldoPendiente: 150000,
     descripcion: 'Multa por parqueo',
     ...over,
   });
@@ -1356,8 +1356,8 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
     const { service, notasCredito, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -1373,8 +1373,8 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
     const { service, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -1400,8 +1400,8 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
     const { service, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -1411,16 +1411,16 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
     expect(asientos.create).toHaveBeenCalledTimes(1);
   });
 
-  it('rechaza una fecha del mismo mes calendario pero fuera del rango real del período (periodEnd, no fin de mes)', async () => {
+  it('rechaza una fecha del mismo mes calendario pero fuera del rango real del período (periodoHasta, no fin de mes)', async () => {
     // El período de un lote no siempre coincide con el mes calendario
     // entero — esta validación compara contra el rango real
-    // (`periodStart`/`periodEnd`), no contra "mismo mes/año", así que una
-    // nota posterior a `periodEnd` se rechaza aunque siga siendo el mismo mes.
+    // (`periodoDesde`/`periodoHasta`), no contra "mismo mes/año", así que una
+    // nota posterior a `periodoHasta` se rechaza aunque siga siendo el mismo mes.
     const { service, notasCredito, asientos } = construirServicio({
       notaCreada: notaCreditoCreada(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-15'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-15'),
       },
     });
 
@@ -1478,7 +1478,7 @@ describe('NotasCreditoService.aplicar', () => {
       ),
     };
     const otraFactura = facturaDoc({
-      outstandingBalance: 80000,
+      saldoPendiente: 80000,
       inmuebleId: INMUEBLE,
     });
     const facturas = modeloFacturas(otraFactura);
@@ -1559,7 +1559,7 @@ describe('NotasCreditoService.aplicar', () => {
     const conceptoR = new Types.ObjectId();
     const conceptoS = new Types.ObjectId();
     const otraFactura = facturaDoc({
-      outstandingBalance: 80000,
+      saldoPendiente: 80000,
       inmuebleId: INMUEBLE,
       total: 80000,
       lineas: [
@@ -1616,9 +1616,9 @@ describe('NotasCreditoService.aplicar', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
       ];
-      return pipeline[0].$set.balance.$max[1].$add[1];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
 
     // 75%/25% de 80000 según las líneas de la OTRA factura.
@@ -1730,7 +1730,7 @@ describe('NotasCreditoService.aplicar', () => {
 });
 
 describe('NotasCreditoService.anular', () => {
-  it('revierte cada AplicacionCartera activa (sourceType NC) y restaura el outstandingBalance de cada factura afectada', async () => {
+  it('revierte cada AplicacionCartera activa (sourceType NC) y restaura el saldoPendiente de cada factura afectada', async () => {
     const facturaId = new Types.ObjectId();
     const nota = notaActivaDoc({
       montoAplicado: 120000,
@@ -1741,7 +1741,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaId,
       tipoDocumento: 'FV',
-      amountApplied: 120000,
+      montoAplicado: 120000,
       estado: 'activa',
     };
     const facturaFrozen = {
@@ -1768,7 +1768,7 @@ describe('NotasCreditoService.anular', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 80000 },
+      { _id: facturaId, saldoPendiente: 80000 },
     ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -1846,7 +1846,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaId,
       tipoDocumento: 'FV',
-      amountApplied: 130000,
+      montoAplicado: 130000,
       estado: 'activa',
     };
     const facturaAncla = {
@@ -1874,7 +1874,7 @@ describe('NotasCreditoService.anular', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 0 },
+      { _id: facturaId, saldoPendiente: 0 },
     ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -1928,9 +1928,9 @@ describe('NotasCreditoService.anular', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as unknown as [
-      { entries: Record<string, unknown>[] },
+      { movimientos: Record<string, unknown>[] },
     ];
-    const creditos = entrada.entries.filter((e) => e.type === 'credito');
+    const creditos = entrada.movimientos.filter((e) => e.tipo === 'credito');
     expect(creditos).toEqual([
       expect.objectContaining({ cuenta: '413501', monto: 100000 }),
       expect.objectContaining({ cuenta: '413502', monto: 30000 }),
@@ -1959,7 +1959,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaId,
       tipoDocumento: 'FV',
-      amountApplied: 130000,
+      montoAplicado: 130000,
       estado: 'activa',
       detalleConceptos: [
         {
@@ -2001,7 +2001,7 @@ describe('NotasCreditoService.anular', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 0 },
+      { _id: facturaId, saldoPendiente: 0 },
     ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -2069,9 +2069,9 @@ describe('NotasCreditoService.anular', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as unknown as [
-      { entries: { cuenta: string; monto: number }[] },
+      { movimientos: { cuenta: string; monto: number }[] },
     ];
-    const memo = entrada.entries.find(
+    const memo = entrada.movimientos.find(
       (e) => e.cuenta === '831505' || e.cuenta === '831510',
     );
     expect(memo?.monto).toBe(30000);
@@ -2092,7 +2092,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaId,
       tipoDocumento: 'FV',
-      amountApplied: 120000,
+      montoAplicado: 120000,
       estado: 'activa',
     };
 
@@ -2181,7 +2181,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaAncla,
       tipoDocumento: 'FV',
-      amountApplied: 200000,
+      montoAplicado: 200000,
       estado: 'activa',
     };
     // La NO ancla: creada más tarde vía aplicar() contra OTRA factura, sin
@@ -2190,7 +2190,7 @@ describe('NotasCreditoService.anular', () => {
       _id: new Types.ObjectId(),
       documentoId: facturaOtra,
       tipoDocumento: 'FV',
-      amountApplied: 80000,
+      montoAplicado: 80000,
       estado: 'activa',
     };
 
@@ -2234,8 +2234,8 @@ describe('NotasCreditoService.anular', () => {
     // anchor (`facturaAncla`) reverses via distribution math instead, so its
     // own pre-restore value here is never read.
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaAncla, outstandingBalance: 0 },
-      { _id: facturaOtra, outstandingBalance: 0 },
+      { _id: facturaAncla, saldoPendiente: 0 },
+      { _id: facturaOtra, saldoPendiente: 0 },
     ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -2300,9 +2300,9 @@ describe('NotasCreditoService.anular', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
       ];
-      return pipeline[0].$set.balance.$max[1].$add[1];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
 
     // La ANCLA reversa por DISTRIBUCIÓN: una llamada por cada línea de
@@ -2314,7 +2314,7 @@ describe('NotasCreditoService.anular', () => {
     expect(extraerMonto(conceptoY)).toBe(50000);
 
     // La NO-ANCLA reversa por el split PROPORCIONAL de SU PROPIA factura —
-    // una sola línea (conceptoZ), por el amountApplied completo (80000) —
+    // una sola línea (conceptoZ), por el montoAplicado completo (80000) —
     // ajustarSaldosCartera sin cambios.
     expect(extraerMonto(conceptoZ)).toBe(80000);
   });
@@ -2377,9 +2377,9 @@ describe('NotasCreditoService.anular', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as unknown as [
-      { entries: Record<string, unknown>[] },
+      { movimientos: Record<string, unknown>[] },
     ];
-    expect(entrada.entries.find((m) => m.type === 'credito')).toMatchObject({
+    expect(entrada.movimientos.find((m) => m.tipo === 'credito')).toMatchObject({
       cuenta: '413595',
       monto: 200000,
     });
@@ -2441,7 +2441,7 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
       inmuebleId: INMUEBLE,
       conceptoId: CONCEPTO,
       total: 150000,
-      outstandingBalance: 0,
+      saldoPendiente: 0,
       descripcion: 'Multa por parqueo',
       numero: 1,
       numeroCompleto: 'ND-1',
@@ -2450,7 +2450,7 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
       _id: new Types.ObjectId(),
       documentoId: notaDebitoId,
       tipoDocumento: 'ND',
-      amountApplied: 150000,
+      montoAplicado: 150000,
       estado: 'activa',
     };
     const facturas = {
@@ -2487,7 +2487,7 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: notaDebitoId, outstandingBalance: 0 },
+      { _id: notaDebitoId, saldoPendiente: 0 },
     ]);
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -2709,7 +2709,7 @@ describe('NotasCreditoService.findOne', () => {
       sourceId: nota._id,
       tipoDocumento: 'FV',
       documentoId: facturaOtra,
-      amountApplied: 50000,
+      montoAplicado: 50000,
       estado: 'activa',
       appliedAt: new Date('2026-08-30'),
     };
