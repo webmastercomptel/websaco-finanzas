@@ -16,13 +16,12 @@ const notaBase = (over: Record<string, unknown> = {}): NotaCreditoDocument =>
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     facturaId: FACTURA,
-    fullNumber: 'NC-0002',
-    issueDate: new Date('2026-06-10'),
-    reason: 'ajuste_precio',
-    notes: null,
-    totalAmount: 100000,
-    unappliedAmount: 0,
-    distribution: [{ conceptoId: CONCEPTO, amount: 100000 }],
+    numeroCompleto: 'NC-0002',
+    fecha: new Date('2026-06-10'),
+    motivo: 'ajuste_precio',
+    observaciones: null,
+    montoTotal: 100000,
+    distribucion: [{ conceptoId: CONCEPTO, monto: 100000 }],
     ...over,
   }) as unknown as NotaCreditoDocument;
 
@@ -44,9 +43,9 @@ const aplicacionFV = (
   over: Record<string, unknown> = {},
 ): AplicacionCarteraDocument =>
   ({
-    documentType: 'FV',
-    documentId: FACTURA,
-    amountApplied: 100000,
+    tipoDocumento: 'FV',
+    documentoId: FACTURA,
+    montoAplicado: 100000,
     detalleConceptos: [],
     ...over,
   }) as unknown as AplicacionCarteraDocument;
@@ -112,7 +111,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
   it('usa la etiqueta del motivo cuando la nota no tiene notes', async () => {
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ notes: null, reason: 'descuento' }),
+      notaBase({ observaciones: null, motivo: 'descuento' }),
       0,
       [],
       copropiedadBase(),
@@ -126,7 +125,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
   it('usa notes cuando la nota sí las tiene, en vez del motivo', async () => {
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ notes: 'Cancela factura 685' }),
+      notaBase({ observaciones: 'Cancela factura 685' }),
       0,
       [],
       copropiedadBase(),
@@ -146,11 +145,11 @@ describe('construirDatosImpresionNotaCredito', () => {
         Promise.resolve([
           {
             _id: FACTURA,
-            number: 685,
-            lines: [
+            numero: 685,
+            lineas: [
               {
                 conceptoId: conceptoAdmin,
-                accountingReceivableAccount: '13050501',
+                cuentaCartera: '13050501',
               },
             ],
           },
@@ -168,7 +167,7 @@ describe('construirDatosImpresionNotaCredito', () => {
       detalleConceptos: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administracion',
+          nombreConcepto: 'Administracion',
           monto: 100000,
         },
       ],
@@ -206,7 +205,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicación anterior a ese campo)', async () => {
     const aplicacion = aplicacionFV({
-      amountApplied: 100000,
+      montoAplicado: 100000,
       detalleConceptos: [],
     });
     const datos = await construirDatosImpresionNotaCredito(
@@ -227,9 +226,9 @@ describe('construirDatosImpresionNotaCredito', () => {
   });
 
   it('agrega una línea de anticipo cuando la nota dejó valor sin aplicar', async () => {
-    const aplicacion = aplicacionFV({ amountApplied: 60000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 60000 });
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ totalAmount: 100000, unappliedAmount: 40000 }),
+      notaBase({ montoTotal: 100000 }),
       40000,
       [aplicacion],
       copropiedadBase(),
@@ -243,9 +242,9 @@ describe('construirDatosImpresionNotaCredito', () => {
   });
 
   it('no agrega línea de anticipo cuando la nota se aplicó por completo', async () => {
-    const aplicacion = aplicacionFV({ amountApplied: 100000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 100000 });
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ totalAmount: 100000, unappliedAmount: 0 }),
+      notaBase({ montoTotal: 100000 }),
       0,
       [aplicacion],
       copropiedadBase(),
@@ -259,7 +258,7 @@ describe('construirDatosImpresionNotaCredito', () => {
 
   it('cae a cuentaDevoluciones cuando el concepto no tiene accountingIncomeAccount configurado (nunca una cuenta de banco)', async () => {
     const datos = await construirDatosImpresionNotaCredito(
-      notaBase({ totalAmount: 100000 }),
+      notaBase({ montoTotal: 100000 }),
       0,
       [],
       copropiedadBase({ cuentaDevoluciones: '413595' }),
@@ -284,10 +283,10 @@ describe('construirDatosImpresionNotaCredito', () => {
         Promise.resolve([
           {
             _id: FACTURA,
-            number: 685,
-            lines: [
-              { conceptoId: conceptoAdmin, accountingIncomeAccount: '413501' },
-              { conceptoId: conceptoMora, accountingIncomeAccount: '413502' },
+            numero: 685,
+            lineas: [
+              { conceptoId: conceptoAdmin, cuentaIngreso: '413501' },
+              { conceptoId: conceptoMora, cuentaIngreso: '413502' },
             ],
           },
         ]),
@@ -295,10 +294,10 @@ describe('construirDatosImpresionNotaCredito', () => {
 
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({
-        totalAmount: 130000,
-        distribution: [
-          { conceptoId: conceptoAdmin, amount: 100000 },
-          { conceptoId: conceptoMora, amount: 30000 },
+        montoTotal: 130000,
+        distribucion: [
+          { conceptoId: conceptoAdmin, monto: 100000 },
+          { conceptoId: conceptoMora, monto: 30000 },
         ],
       }),
       0,
@@ -319,7 +318,7 @@ describe('construirDatosImpresionNotaCredito', () => {
   it('cae a createdAt cuando issueDate es null (nota creada antes de este campo)', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({
-        issueDate: null,
+        fecha: null,
         createdAt: new Date('2026-05-01'),
       }),
       0,
