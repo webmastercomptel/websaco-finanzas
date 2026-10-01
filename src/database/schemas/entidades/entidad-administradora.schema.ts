@@ -1,6 +1,7 @@
 // src/database/schemas/entidades/entidad-administradora.schema.ts
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import { comoNombrePropio } from '../../../common/utils/nombre-propio';
 
 export type EntidadAdministradoraDocument =
   HydratedDocument<EntidadAdministradora>;
@@ -27,7 +28,7 @@ export class EntidadAdministradora {
   @Prop({ required: true, unique: true, trim: true })
   codigo: string;
 
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, set: comoNombrePropio })
   nombre: string;
 
   @Prop({ type: String, default: null, trim: true })

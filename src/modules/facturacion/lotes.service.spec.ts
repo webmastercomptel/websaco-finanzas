@@ -68,6 +68,19 @@ const lotesModeloCon = (
   };
 };
 
+/** `ValorRecurrente` model whose `find()` returns `valores` — what
+ *  `agregarNovedadLinea`/`cargarNovedades` read to reject a manual charge
+ *  that duplicates a recurrente concepto. */
+const recurrentesCon = (
+  valores: {
+    inmuebleId: Types.ObjectId;
+    conceptoId: Types.ObjectId;
+    monto: number;
+  }[],
+) => ({
+  find: jest.fn(() => ({ exec: () => Promise.resolve(valores) })),
+});
+
 const numeracionCon = (numero = 1): NumeracionService =>
   ({
     siguienteLote: jest.fn().mockResolvedValue(numero),
@@ -722,7 +735,7 @@ describe('LotesFacturacionService.agregarNovedadLinea', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptosModelo as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmueblesModelo as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -759,6 +772,110 @@ describe('LotesFacturacionService.agregarNovedadLinea', () => {
     });
 
     expect(lotesModelo.findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  describe('cargo duplicado del mismo concepto', () => {
+    const INMUEBLE = new Types.ObjectId();
+    const MULTAS = new Types.ObjectId();
+
+    const servicio = (
+      lote: Record<string, unknown>,
+      recurrentes: Parameters<typeof recurrentesCon>[0],
+    ) => {
+      const lotesModelo = {
+        findOne: jest.fn(() => ({
+          exec: () => Promise.resolve(loteDoc(lote)),
+        })),
+        findOneAndUpdate: jest.fn(() => ({
+          exec: () => Promise.resolve(loteDoc(lote)),
+        })),
+      };
+      const service = new LotesFacturacionService(
+        lotesModelo as never,
+        {} as never, // facturas
+        {} as never, // saldos
+        {} as never, // carteraPorDocumento
+        {} as never, // saldoTotalDocumento
+        {} as never, // asientos
+        {
+          findOne: jest.fn(() => ({
+            exec: () =>
+              Promise.resolve({ _id: MULTAS, nombre: 'Multas', tipo: 'otro' }),
+          })),
+        } as never,
+        recurrentesCon(recurrentes) as never,
+        {
+          findOne: jest.fn(() => ({
+            exec: () => Promise.resolve({ _id: INMUEBLE, codigo: '11002' }),
+          })),
+        } as never,
+        {} as never, // terceros
+        {} as never, // copropiedades
+        tenantQueDevuelve(COP),
+        {} as never, // periodo
+        numeracionCon(),
+        {} as never, // connection
+      );
+      return { service, lotesModelo };
+    };
+
+    const agregarMultas = (service: LotesFacturacionService) =>
+      service.agregarNovedadLinea('lote-1', {
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: MULTAS.toString(),
+        amount: 100000,
+      });
+
+    it('rechaza agregar un cargo manual de un concepto que el inmueble ya tiene como recurrente — obliga a editarlo', async () => {
+      const { service, lotesModelo } = servicio({}, [
+        { inmuebleId: INMUEBLE, conceptoId: MULTAS, monto: 50000 },
+      ]);
+
+      await expect(agregarMultas(service)).rejects.toThrow(
+        'El inmueble 11002 ya tiene un cargo de "Multas" en este lote (cargo recurrente). Edite ese cargo en lugar de agregar uno nuevo.',
+      );
+      expect(lotesModelo.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un segundo cargo manual del mismo concepto para el mismo inmueble', async () => {
+      const { service } = servicio(
+        {
+          novedades: [
+            {
+              inmuebleId: INMUEBLE,
+              conceptoId: MULTAS,
+              monto: 30000,
+              sobrescribe: null,
+            },
+          ],
+        },
+        [],
+      );
+
+      await expect(agregarMultas(service)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('permite el cargo cuando el recurrente fue sobrescrito en 0 (esa línea no se factura)', async () => {
+      const { service, lotesModelo } = servicio(
+        {
+          novedades: [
+            {
+              inmuebleId: INMUEBLE,
+              conceptoId: MULTAS,
+              monto: 0,
+              sobrescribe: 'recurrente',
+            },
+          ],
+        },
+        [{ inmuebleId: INMUEBLE, conceptoId: MULTAS, monto: 50000 }],
+      );
+
+      await agregarMultas(service);
+
+      expect(lotesModelo.findOneAndUpdate).toHaveBeenCalled();
+    });
   });
 });
 
@@ -803,7 +920,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmuebles as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -862,7 +979,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmuebles as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -897,6 +1014,60 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     ]);
   });
 
+  it('reporta como error la fila cuyo concepto el inmueble ya tiene como recurrente, y la segunda fila repetida del mismo archivo', async () => {
+    const INMUEBLE = new Types.ObjectId();
+    const MULTAS = new Types.ObjectId();
+    const PARQUEADERO = new Types.ObjectId();
+    const lotes = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(loteDoc()) })),
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(loteDoc()),
+      })),
+    };
+    const service = new LotesFacturacionService(
+      lotes as never,
+      {} as never, // facturas
+      {} as never, // saldos
+      {} as never, // carteraPorDocumento
+      {} as never, // saldoTotalDocumento
+      {} as never, // asientos
+      {
+        findOne: jest.fn(({ nombre }: Filtro) => ({
+          exec: () =>
+            Promise.resolve(
+              nombre === 'Multas'
+                ? { _id: MULTAS, nombre: 'Multas' }
+                : { _id: PARQUEADERO, nombre: 'Parqueadero' },
+            ),
+        })),
+      } as never,
+      recurrentesCon([
+        { inmuebleId: INMUEBLE, conceptoId: MULTAS, monto: 50000 },
+      ]) as never,
+      {
+        findOne: jest.fn(() => ({
+          exec: () => Promise.resolve({ _id: INMUEBLE, codigo: '11002' }),
+        })),
+      } as never,
+      {} as never, // terceros
+      {} as never, // copropiedades
+      tenantQueDevuelve(COP),
+      {} as never, // periodo
+      numeracionCon(),
+      {} as never, // connection
+    );
+
+    const resultado = await service.cargarNovedades('lote-1', [
+      { inmuebleCodigo: '11002', nombreConcepto: 'Multas', monto: 100000 },
+      { inmuebleCodigo: '11002', nombreConcepto: 'Parqueadero', monto: 40000 },
+      { inmuebleCodigo: '11002', nombreConcepto: 'Parqueadero', monto: 40000 },
+    ]);
+
+    expect(resultado.cargadas).toBe(1);
+    expect(resultado.errores.map((e) => e.fila)).toEqual([1, 3]);
+    expect(resultado.errores[0].mensaje).toContain('cargo recurrente');
+  });
+
   it('rechaza con NotFoundException si el lote no existe o pertenece a otra copropiedad', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
@@ -925,7 +1096,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmuebles as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -969,7 +1140,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       conceptos as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmuebles as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -1021,7 +1192,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
       {} as never, // saldoTotalDocumento
       {} as never, // asientos
       { findOne: conceptosFindOne } as never,
-      {} as never, // valoresRecurrentes
+      recurrentesCon([]) as never, // valoresRecurrentes
       inmuebles as never,
       {} as never, // terceros
       {} as never, // copropiedades
@@ -1214,6 +1385,7 @@ describe('LotesFacturacionService.liquidar', () => {
     nombre: 'Administración',
     tipo: 'administracion',
     tasaImpuesto: 0,
+    liquidaMora: true,
     cuentaCreditoId: { codigo: '413501' },
     ...over,
   });
@@ -1519,14 +1691,29 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(actualizacion.$set.previsualizacion).toEqual([]);
   });
 
-  it('calcula el interés como % del saldo ANTERIOR de Administración, ignorando el saldo de otros conceptos', async () => {
+  it('calcula el interés como % del saldo ANTERIOR de todos los cargos con "liquida mora" prendido, ignorando los que lo tienen apagado y el propio concepto de intereses', async () => {
     const m = construirModelos({
       conceptos: [
-        concepto(), // con-1, tipo: 'administracion'
+        concepto(), // con-1, Administración, liquidaMora: true
+        concepto({
+          _id: { toString: () => 'con-pintura' },
+          nombre: 'Pintura',
+          tipo: 'otro',
+          liquidaMora: true,
+        }),
+        concepto({
+          _id: { toString: () => 'con-multas' },
+          nombre: 'Multas',
+          tipo: 'otro',
+          liquidaMora: false,
+        }),
         concepto({
           _id: { toString: () => 'con-intereses' },
           nombre: 'Interés por mora',
           tipo: 'intereses',
+          // Prendido a propósito: igual NO debe entrar a la base
+          // (no se cobra interés sobre interés).
+          liquidaMora: true,
           cuentaCreditoId: { codigo: '413595' },
         }),
       ],
@@ -1534,21 +1721,27 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1', // Administración
-          saldoPendiente: 3000000,
+          saldoPendiente: 2000000,
         },
-        // Saldo de OTRO concepto (p.ej. Multas) — NO debe sumarse a la base
-        // de la mora, por grande que sea. Si el fix regresara al viejo
-        // "saldo total", este número (1,000,000) haría que la mora
-        // calculada fuera 76,000 en vez de 57,000.
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'con-pintura',
+          saldoPendiente: 1000000,
+        },
+        // Multas tiene la casilla apagada — no suma, por grande que sea.
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-multas',
           saldoPendiente: 1000000,
         },
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'con-intereses',
+          saldoPendiente: 500000,
+        },
       ],
-      // topeInteresMora ahora es el MÍNIMO de saldo para cobrar mora, no un
-      // tope — 3,000,000 (solo Administración) supera el mínimo de 50,000,
-      // así que se calcula completo: 1.9% de 3,000,000 = 57,000, sin topar.
+      // Base = 2,000,000 (Administración) + 1,000,000 (Pintura) = 3,000,000,
+      // supera el mínimo de 50,000: 1.9% de 3,000,000 = 57,000.
       lote: { interesMora: 1.9, topeInteresMora: 50000 },
     });
     const service = new LotesFacturacionService(

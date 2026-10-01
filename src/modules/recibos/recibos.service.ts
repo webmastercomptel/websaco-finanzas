@@ -1000,10 +1000,10 @@ export class RecibosService {
                   copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
                   inmuebleId: { $ifNull: ['$inmuebleId', d.inmuebleId] },
                   conceptoId: { $ifNull: ['$conceptoId', d.conceptoId] },
-                  balance: {
+                  saldoPendiente: {
                     $max: [
                       0,
-                      { $add: [{ $ifNull: ['$balance', 0] }, d.delta] },
+                      { $add: [{ $ifNull: ['$saldoPendiente', 0] }, d.delta] },
                     ],
                   },
                 },

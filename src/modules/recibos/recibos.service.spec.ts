@@ -4685,4 +4685,28 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
     expect(modelos.saldoTotalDocumento.bulkWrite).not.toHaveBeenCalled();
     expect(modelos.aplicaciones.insertMany).not.toHaveBeenCalled();
   });
+
+  it('descuenta SaldoCartera sobre el campo saldoPendiente (no sobre un campo "balance" heredado)', async () => {
+    const modelos = construirModelosMock();
+    const service = construirServicio(modelos);
+    const inmuebleId = new Types.ObjectId();
+    const conceptoId = new Types.ObjectId();
+    const escritura: EscrituraFilaAplicacionLote = {
+      ...escrituraDe(new Types.ObjectId(), -50000),
+      saldoCarteraDeltas: [{ inmuebleId, conceptoId, delta: -50000 }],
+    };
+
+    await service.escribirEscriturasTandaAplicacionLote(SESSION, COP, [
+      escritura,
+    ]);
+
+    const [operaciones] = modelos.saldos.bulkWrite.mock.calls[0] as [
+      { updateOne: { update: { $set: Record<string, unknown> }[] } }[],
+    ];
+    const set = operaciones[0].updateOne.update[0].$set;
+    expect(set).not.toHaveProperty('balance');
+    expect(set.saldoPendiente).toEqual({
+      $max: [0, { $add: [{ $ifNull: ['$saldoPendiente', 0] }, -50000] }],
+    });
+  });
 });

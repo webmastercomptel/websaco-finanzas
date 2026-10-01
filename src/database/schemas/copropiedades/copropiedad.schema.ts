@@ -2,6 +2,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { EntidadAdministradora } from '../entidades/entidad-administradora.schema';
+import { comoNombrePropio } from '../../../common/utils/nombre-propio';
 
 export type CopropiedadDocument = HydratedDocument<Copropiedad>;
 
@@ -22,7 +23,7 @@ export class Copropiedad {
   @Prop({ required: true, unique: true, trim: true })
   codigo: string;
 
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, set: comoNombrePropio })
   nombre: string;
 
   /**

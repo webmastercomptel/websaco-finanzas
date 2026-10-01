@@ -2,6 +2,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
+import { comoNombrePropio } from '../../../common/utils/nombre-propio';
 
 export type ConsecutivoDocumentoDocument =
   HydratedDocument<ConsecutivoDocumento>;
@@ -60,7 +61,7 @@ export class ConsecutivoDocumento {
   prefijo: string;
 
   /** Human-readable document name, e.g. "Recibo de Caja". */
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   nombreDocumento: string | null;
 
   /** Free-text accounting voucher code, e.g. "02". */

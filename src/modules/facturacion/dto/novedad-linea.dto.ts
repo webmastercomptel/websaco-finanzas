@@ -7,7 +7,14 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
+
+/** A charge line can never be negative — a negative line would seed a
+ *  negative `CarteraPorDocumento.saldoPendiente` at consolidación. Money in
+ *  the unit's favour is an anticipo, never a negative cargo. */
+const MENSAJE_MONTO_NEGATIVO =
+  'El monto de un cargo no puede ser negativo; un saldo a favor se registra como anticipo';
 
 export class AgregarNovedadLineaDto {
   @IsMongoId()
@@ -19,6 +26,7 @@ export class AgregarNovedadLineaDto {
   @Type(() => Number)
   @IsNumber()
   @IsInt()
+  @Min(0, { message: MENSAJE_MONTO_NEGATIVO })
   amount: number;
 
   @IsOptional()
@@ -42,6 +50,7 @@ export class EditarNovedadLineaDto {
   @Type(() => Number)
   @IsNumber()
   @IsInt()
+  @Min(0, { message: MENSAJE_MONTO_NEGATIVO })
   amount: number;
 
   @IsOptional()

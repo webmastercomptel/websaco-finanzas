@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -25,6 +26,11 @@ export class NovedadFilaDto {
   @Type(() => Number)
   @IsNumber()
   @IsInt()
+  // Never negative — see `MENSAJE_MONTO_NEGATIVO` in `novedad-linea.dto.ts`.
+  @Min(0, {
+    message:
+      'El monto de un cargo no puede ser negativo; un saldo a favor se registra como anticipo',
+  })
   monto: number;
 
   @IsOptional()

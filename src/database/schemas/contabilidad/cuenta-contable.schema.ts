@@ -2,6 +2,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
+import { comoNombrePropio } from '../../../common/utils/nombre-propio';
 
 export type CuentaContableDocument = HydratedDocument<CuentaContable>;
 
@@ -29,7 +30,7 @@ export class CuentaContable {
   codigo: string;
 
   /** e.g. "Caja General" */
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, set: comoNombrePropio })
   nombre: string;
 
   /** "Tercero" column — whether this account requires a Tercero reference. */
