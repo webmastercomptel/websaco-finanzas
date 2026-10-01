@@ -48,7 +48,7 @@ export class PresentacionDocumentoService {
     tipoDocumento: TipoDocumentoPresentacion,
     documentoId: Types.ObjectId,
     copropiedadId: Types.ObjectId,
-    plantillaVersion: number,
+    versionPlantilla: number,
   ): Promise<{ objectPath: string; uploadUrl: string; expiresAt: Date }> {
     const existente = await this.model
       .findOne({ tipoDocumento, documentoId })
@@ -65,7 +65,7 @@ export class PresentacionDocumentoService {
     await this.model
       .findOneAndUpdate(
         { tipoDocumento, documentoId },
-        { $set: { objectPath, plantillaVersion } },
+        { $set: { objectPath, versionPlantilla } },
         { upsert: true },
       )
       .exec();
@@ -138,7 +138,7 @@ export class PresentacionDocumentoService {
   ): Promise<{
     objectPath: string;
     generatedAt: Date;
-    plantillaVersion: number | null;
+    versionPlantilla: number | null;
   } | null> {
     const fila = await this.model
       .findOne({ tipoDocumento, documentoId })
@@ -147,7 +147,7 @@ export class PresentacionDocumentoService {
     return {
       objectPath: fila.objectPath,
       generatedAt: fila.generatedAt,
-      plantillaVersion: fila.plantillaVersion,
+      versionPlantilla: fila.versionPlantilla,
     };
   }
 

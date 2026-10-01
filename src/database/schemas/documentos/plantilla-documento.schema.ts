@@ -57,7 +57,7 @@ export class PlantillaDocumento {
    *  `upsert()` always INSERTS a new row with `version = latest + 1`
    *  instead of overwriting in place, so an already-issued Factura can pin
    *  the exact version its own printout used (`PresentacionDocumento
-   *  .plantillaVersion`) and reproduce it forever, even after the template
+   *  .versionPlantilla`) and reproduce it forever, even after the template
    *  is edited again. `findOne` resolves the highest version (current),
    *  `findVersion` a specific pinned one. */
   @Prop({ type: Number, required: true })

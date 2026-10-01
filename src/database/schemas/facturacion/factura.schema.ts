@@ -201,7 +201,7 @@ export class Factura {
    * a unit with an unusually long charge table onto a second page, which
    * would silently shift every later invoice's real page off by however
    * many extra pages got inserted before it). `FacturasController
-   * .obtenerDocumentoPdf` falls back to the live, `plantillaVersion`-pinned
+   * .obtenerDocumentoPdf` falls back to the live, `versionPlantilla`-pinned
    * render (`obtenerDocumento`) whenever this or `printSnapshot` is `null`.
    */
   @Prop({ type: Number, default: null })

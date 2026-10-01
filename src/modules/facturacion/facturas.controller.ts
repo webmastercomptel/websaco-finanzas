@@ -99,19 +99,19 @@ export class FacturasController {
     if (factura.printSnapshot) {
       // Pinned to the version that was actually live when this invoice's
       // lote was generated (`presentacion_documento`'s own
-      // `plantillaVersion`, set once at `solicitarGeneracion` time) — never
+      // `versionPlantilla`, set once at `solicitarGeneracion` time) — never
       // "whatever the template looks like today". Falls back to the
       // CURRENT template only for a row written before this field existed
-      // (`plantillaVersion` still `null`), same graceful-degradation the
+      // (`versionPlantilla` still `null`), same graceful-degradation the
       // rest of this codebase already uses for pre-feature data.
       const presentacionLote = await this.presentacionDocumento.buscar(
         'FV',
         factura.loteId,
       );
-      const plantilla = presentacionLote?.plantillaVersion
+      const plantilla = presentacionLote?.versionPlantilla
         ? await this.plantillas.findVersion(
             'FV',
-            presentacionLote.plantillaVersion,
+            presentacionLote.versionPlantilla,
           )
         : await this.plantillas.findOne('FV');
       return {

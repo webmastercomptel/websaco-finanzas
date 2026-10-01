@@ -69,7 +69,7 @@ export class PlantillaDocumentoService {
   }
 
   /** One SPECIFIC, historical version of a type's template — what a live
-   *  Factura re-render pins to (`PresentacionDocumento.plantillaVersion`),
+   *  Factura re-render pins to (`PresentacionDocumento.versionPlantilla`),
    *  so it reproduces the exact layout that was live when it was actually
    *  generated, not whatever's current. Throws rather than silently
    *  falling back to `findOne` — a caller asking for a specific version has

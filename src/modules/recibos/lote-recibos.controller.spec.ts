@@ -136,7 +136,7 @@ describe('LoteRecibosController.urlLecturaRecibos', () => {
     presentacionDocumento.buscar.mockResolvedValue({
       objectPath: 'x',
       generatedAt: new Date(),
-      plantillaVersion: 1,
+      versionPlantilla: 1,
     });
 
     await controller.urlLecturaRecibos(LOTE_ID.toString());

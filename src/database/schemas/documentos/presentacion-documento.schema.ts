@@ -104,7 +104,7 @@ export class PresentacionDocumento {
    *  that was actually used, instead of whatever the template looks like
    *  today. `null` only for a row written before this field existed. */
   @Prop({ type: Number, default: null })
-  plantillaVersion: number | null;
+  versionPlantilla: number | null;
 }
 
 export const PresentacionDocumentoSchema = SchemaFactory.createForClass(

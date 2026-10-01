@@ -414,7 +414,7 @@ export class LotesController {
       // `paginaEnLote` trustworthy for every invoice in this lote — `null`
       // for all of them otherwise, which routes every one of them through
       // the safe live-render fallback (`FacturasController.obtenerDocumento`,
-      // now itself pinned to this lote's own `plantillaVersion` — see that
+      // now itself pinned to this lote's own `versionPlantilla` — see that
       // route's own docblock) instead of ever risking the fast path.
       const bytesCombinado = await this.storage.descargarBytes(
         resultado.objectPath,
