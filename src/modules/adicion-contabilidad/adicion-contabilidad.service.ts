@@ -189,9 +189,12 @@ export class AdicionContabilidadService {
         .find({
           copropiedadId,
           contabilidadLoteId: null,
-          date: { $gte: ultimoLote.periodStart, $lte: ultimoLote.periodEnd },
+          fecha: {
+            $gte: ultimoLote.periodoDesde,
+            $lte: ultimoLote.periodoHasta,
+          },
         })
-        .sort({ date: 1, _id: 1 })
+        .sort({ fecha: 1, _id: 1 })
         .session(session)
         .exec();
 
@@ -240,12 +243,14 @@ export class AdicionContabilidadService {
         // back to that internal wording only when the source document left
         // its own concepto empty (RC/NC/ND's optional field).
         const detalle =
-          conceptoMap.get(anchorIdStr) ?? asiento.entries[0]?.description ?? '';
+          conceptoMap.get(anchorIdStr) ??
+          asiento.movimientos[0]?.descripcion ??
+          '';
 
         filasMovmes.push({
           tipoDocumento,
           numero: anchor?.number ?? 0,
-          fecha: asiento.date,
+          fecha: asiento.fecha,
           numeroLote,
           detalle,
         });
@@ -254,17 +259,17 @@ export class AdicionContabilidadService {
           comprobantePorClave.get(`${tipoDocumento}:${anchor?.prefix ?? ''}`) ??
           null;
 
-        for (const entry of asiento.entries) {
+        for (const entry of asiento.movimientos) {
           filasMovmesdo.push({
             tipoDocumento,
             numero: anchor?.number ?? 0,
-            cuenta: entry.account,
+            cuenta: entry.cuenta,
             centroCosto: entry.centroCosto ?? null,
             tercero: entry.tercero ?? null,
             detalle,
             baseGravable: entry.baseGravable ?? null,
-            valorDebito: entry.type === 'debito' ? entry.amount : null,
-            valorCredito: entry.type === 'credito' ? entry.amount : null,
+            valorDebito: entry.tipo === 'debito' ? entry.monto : null,
+            valorCredito: entry.tipo === 'credito' ? entry.monto : null,
             comprobante,
             numeroDocCruce: entry.numeroDocumento ?? null,
           });
@@ -276,8 +281,8 @@ export class AdicionContabilidadService {
           {
             copropiedadId,
             number: numeroLote,
-            periodStart: ultimoLote.periodStart,
-            periodEnd: ultimoLote.periodEnd,
+            periodStart: ultimoLote.periodoDesde,
+            periodEnd: ultimoLote.periodoHasta,
             totalAsientos: asientos.length,
             generatedBy: accountId,
           },
@@ -321,7 +326,7 @@ export class AdicionContabilidadService {
     const fetchers: Array<
       [
         TipoDocumentoExport,
-        Model<{ _id: Types.ObjectId; prefix: string; number: number }>,
+        Model<{ _id: Types.ObjectId; prefijo: string; numero: number }>,
       ]
     > = [
       ['FV', this.facturas as never],
@@ -336,11 +341,14 @@ export class AdicionContabilidadService {
       const ids = idsByType.get(tipo);
       if (!ids || ids.length === 0) continue;
       const docs = await model
-        .find({ _id: { $in: ids }, copropiedadId }, { prefix: 1, number: 1 })
+        .find({ _id: { $in: ids }, copropiedadId }, { prefijo: 1, numero: 1 })
         .session(session)
         .exec();
       for (const doc of docs) {
-        map.set(doc._id.toString(), { prefix: doc.prefix, number: doc.number });
+        map.set(doc._id.toString(), {
+          prefix: doc.prefijo,
+          number: doc.numero,
+        });
       }
     }
 
@@ -380,19 +388,22 @@ export class AdicionContabilidadService {
     const reciboIds = idsByType.get('RC');
     if (reciboIds && reciboIds.length > 0) {
       const recibos = await this.recibos
-        .find({ _id: { $in: reciboIds }, copropiedadId }, { notes: 1 })
+        .find({ _id: { $in: reciboIds }, copropiedadId }, { observaciones: 1 })
         .session(session)
         .exec();
-      for (const r of recibos) agregarSiNoVacio(r._id, r.notes);
+      for (const r of recibos) agregarSiNoVacio(r._id, r.observaciones);
     }
 
     const notaCreditoIds = idsByType.get('NC');
     if (notaCreditoIds && notaCreditoIds.length > 0) {
       const notasCredito = await this.notasCredito
-        .find({ _id: { $in: notaCreditoIds }, copropiedadId }, { notes: 1 })
+        .find(
+          { _id: { $in: notaCreditoIds }, copropiedadId },
+          { observaciones: 1 },
+        )
         .session(session)
         .exec();
-      for (const n of notasCredito) agregarSiNoVacio(n._id, n.notes);
+      for (const n of notasCredito) agregarSiNoVacio(n._id, n.observaciones);
     }
 
     const notaDebitoIds = idsByType.get('ND');
@@ -400,11 +411,11 @@ export class AdicionContabilidadService {
       const notasDebito = await this.notasDebito
         .find(
           { _id: { $in: notaDebitoIds }, copropiedadId },
-          { description: 1 },
+          { descripcion: 1 },
         )
         .session(session)
         .exec();
-      for (const n of notasDebito) agregarSiNoVacio(n._id, n.description);
+      for (const n of notasDebito) agregarSiNoVacio(n._id, n.descripcion);
     }
 
     const notaContableIds = idsByType.get('NT');
@@ -412,11 +423,11 @@ export class AdicionContabilidadService {
       const notasContables = await this.notasContables
         .find(
           { _id: { $in: notaContableIds }, copropiedadId },
-          { description: 1 },
+          { descripcion: 1 },
         )
         .session(session)
         .exec();
-      for (const n of notasContables) agregarSiNoVacio(n._id, n.description);
+      for (const n of notasContables) agregarSiNoVacio(n._id, n.descripcion);
     }
 
     // FV: no free-text field on the invoice itself — the period it bills,
@@ -427,14 +438,14 @@ export class AdicionContabilidadService {
       const facturas = await this.facturas
         .find(
           { _id: { $in: facturaIds }, copropiedadId },
-          { periodStart: 1, periodEnd: 1 },
+          { periodoDesde: 1, periodoHasta: 1 },
         )
         .session(session)
         .exec();
       for (const f of facturas) {
         map.set(
           f._id.toString(),
-          `Cargo del Periodo ${fechaDdMmAaaa(f.periodStart)} - ${fechaDdMmAaaa(f.periodEnd)}`,
+          `Cargo del Periodo ${fechaDdMmAaaa(f.periodoDesde)} - ${fechaDdMmAaaa(f.periodoHasta)}`,
         );
       }
     }
@@ -454,11 +465,11 @@ export class AdicionContabilidadService {
         ...new Set(notasAnticipo.map((n) => n.reciboOrigenId.toString())),
       ].map((id) => new Types.ObjectId(id));
       const recibos = await this.recibos
-        .find({ _id: { $in: reciboOrigenIds }, copropiedadId }, { number: 1 })
+        .find({ _id: { $in: reciboOrigenIds }, copropiedadId }, { numero: 1 })
         .session(session)
         .exec();
       const numeroPorRecibo = new Map(
-        recibos.map((r) => [r._id.toString(), r.number]),
+        recibos.map((r) => [r._id.toString(), r.numero]),
       );
       for (const n of notasAnticipo) {
         const numero = numeroPorRecibo.get(n.reciboOrigenId.toString());

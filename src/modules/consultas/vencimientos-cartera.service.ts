@@ -115,13 +115,21 @@ export class VencimientosCarteraService {
 
     const [facturas, notasDebito, saldosIniciales] = await Promise.all([
       this.facturas
-        .find({ copropiedadId, status: 'emitida', issueDate: { $lte: fecha } })
+        .find({
+          copropiedadId,
+          estado: 'emitida',
+          fechaEmision: { $lte: fecha },
+        })
         .exec(),
       this.notasDebito
-        .find({ copropiedadId, status: 'emitida', issueDate: { $lte: fecha } })
+        .find({
+          copropiedadId,
+          estado: 'emitida',
+          fechaEmision: { $lte: fecha },
+        })
         .exec(),
       this.saldosIniciales
-        .find({ copropiedadId, status: 'activo', fecha: { $lte: fecha } })
+        .find({ copropiedadId, estado: 'activo', fecha: { $lte: fecha } })
         .exec(),
     ]);
 
@@ -132,13 +140,13 @@ export class VencimientosCarteraService {
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
-          .find({ copropiedadId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentoId: { $in: docIds } })
           .exec()
       : [];
 
     const appsByDoc = new Map<string, typeof aplicaciones>();
     for (const app of aplicaciones) {
-      const key = app.documentId.toString();
+      const key = app.documentoId.toString();
       const list = appsByDoc.get(key) ?? [];
       list.push(app);
       appsByDoc.set(key, list);
@@ -162,16 +170,16 @@ export class VencimientosCarteraService {
       const apps = appsByDoc.get(f._id.toString()) ?? [];
       const aplicadoActivo = apps
         .filter((a) => activeAsOf(a, fechaCorte))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
+        .reduce((sum, a) => sum + a.montoAplicado, 0);
       const saldo = Math.max(0, f.total - aplicadoActivo);
       if (saldo <= 0) continue;
 
       filasRaw.push({
         inmuebleId: f.inmuebleId,
         tipo: 'FV',
-        numeroCompleto: f.fullNumber,
-        fecha: f.issueDate,
-        vence: f.dueDate,
+        numeroCompleto: f.numeroCompleto,
+        fecha: f.fechaEmision,
+        vence: f.fechaVencimiento,
         saldo,
       });
     }
@@ -180,7 +188,7 @@ export class VencimientosCarteraService {
       const apps = appsByDoc.get(nd._id.toString()) ?? [];
       const aplicadoActivo = apps
         .filter((a) => activeAsOf(a, fechaCorte))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
+        .reduce((sum, a) => sum + a.montoAplicado, 0);
       const saldo = Math.max(0, nd.total - aplicadoActivo);
       if (saldo <= 0) continue;
 
@@ -189,9 +197,9 @@ export class VencimientosCarteraService {
       filasRaw.push({
         inmuebleId: nd.inmuebleId,
         tipo: 'ND',
-        numeroCompleto: nd.fullNumber,
-        fecha: nd.issueDate,
-        vence: nd.issueDate,
+        numeroCompleto: nd.numeroCompleto,
+        fecha: nd.fechaEmision,
+        vence: nd.fechaEmision,
         saldo,
       });
     }
@@ -200,7 +208,7 @@ export class VencimientosCarteraService {
       const apps = appsByDoc.get(si._id.toString()) ?? [];
       const aplicadoActivo = apps
         .filter((a) => activeAsOf(a, fechaCorte))
-        .reduce((sum, a) => sum + a.amountApplied, 0);
+        .reduce((sum, a) => sum + a.montoAplicado, 0);
       const saldo = Math.max(0, si.monto - aplicadoActivo);
       if (saldo <= 0) continue;
 

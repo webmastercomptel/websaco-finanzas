@@ -63,15 +63,15 @@ export class ConsultaFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    if (lote.status !== 'consolidado') {
+    if (lote.estado !== 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} aún no está consolidado; la consulta de facturación solo está disponible para lotes consolidados`,
       );
     }
 
     const facturas = await this.facturas
-      .find({ copropiedadId, loteId, status: 'emitida' })
-      .sort({ unitCode: 1 })
+      .find({ copropiedadId, loteId, estado: 'emitida' })
+      .sort({ codigoInmueble: 1 })
       .exec();
 
     // Live balance per Factura — same `SaldoTotalDocumento`-sourced figure
@@ -93,10 +93,10 @@ export class ConsultaFacturacionService {
     const conceptoIds = new Set<string>();
     const nombrePorId = new Map<string, string>();
     for (const f of facturas) {
-      for (const l of f.lines) {
+      for (const l of f.lineas) {
         const key = l.conceptoId.toString();
         conceptoIds.add(key);
-        if (!nombrePorId.has(key)) nombrePorId.set(key, l.conceptName);
+        if (!nombrePorId.has(key)) nombrePorId.set(key, l.nombreConcepto);
       }
     }
 
@@ -120,41 +120,41 @@ export class ConsultaFacturacionService {
     const filas: FilaConsultaFacturacion[] = facturas.map((f) => {
       const valoresPorConcepto: Record<string, number> = {};
       const valoresIvaPorConcepto: Record<string, number> = {};
-      for (const l of f.lines) {
+      for (const l of f.lineas) {
         const key = l.conceptoId.toString();
         // A concept can appear on more than one line of the same invoice
         // (e.g. two novedades against the same concept) — sum, don't overwrite.
-        valoresPorConcepto[key] = (valoresPorConcepto[key] ?? 0) + l.baseAmount;
+        valoresPorConcepto[key] = (valoresPorConcepto[key] ?? 0) + l.valorBase;
         totalPorConcepto.set(
           key,
-          (totalPorConcepto.get(key) ?? 0) + l.baseAmount,
+          (totalPorConcepto.get(key) ?? 0) + l.valorBase,
         );
-        if (l.taxAmount > 0) {
+        if (l.valorImpuesto > 0) {
           valoresIvaPorConcepto[key] =
-            (valoresIvaPorConcepto[key] ?? 0) + l.taxAmount;
+            (valoresIvaPorConcepto[key] ?? 0) + l.valorImpuesto;
           totalIvaPorConcepto.set(
             key,
-            (totalIvaPorConcepto.get(key) ?? 0) + l.taxAmount,
+            (totalIvaPorConcepto.get(key) ?? 0) + l.valorImpuesto,
           );
         }
       }
       return {
         id: f._id.toString(),
         inmuebleId: f.inmuebleId.toString(),
-        inmuebleCodigo: f.unitCode,
+        inmuebleCodigo: f.codigoInmueble,
         tipoDocumento: 'FV' as const,
-        prefijo: f.prefix,
-        numero: f.number,
-        numeroCompleto: f.fullNumber,
-        fechaFactura: f.issueDate.toISOString(),
-        fechaVence: f.dueDate.toISOString(),
-        titular: titularDe(f.holder),
+        prefijo: f.prefijo,
+        numero: f.numero,
+        numeroCompleto: f.numeroCompleto,
+        fechaFactura: f.fechaEmision.toISOString(),
+        fechaVence: f.fechaVencimiento.toISOString(),
+        titular: titularDe(f.titular),
         valoresPorConcepto,
         valoresIvaPorConcepto,
         subtotal: f.subtotal,
-        totalImpuestos: f.totalTax,
+        totalImpuestos: f.totalImpuestos,
         saldoPendiente: saldoPorDocumento.get(f._id.toString()) ?? 0,
-        estado: f.status,
+        estado: f.estado,
         total: f.total,
       };
     });
@@ -166,14 +166,17 @@ export class ConsultaFacturacionService {
       montoIva: totalIvaPorConcepto.get(id) ?? 0,
     }));
     const subtotal = facturas.reduce((acc, f) => acc + f.subtotal, 0);
-    const totalImpuestos = facturas.reduce((acc, f) => acc + f.totalTax, 0);
+    const totalImpuestos = facturas.reduce(
+      (acc, f) => acc + f.totalImpuestos,
+      0,
+    );
 
     return {
       loteId: lote._id.toString(),
-      loteNumero: lote.number,
-      loteEstado: lote.status,
-      fechaFacturacion: lote.billingDate.toISOString(),
-      fechaVencimiento: lote.dueDate.toISOString(),
+      loteNumero: lote.numero,
+      loteEstado: lote.estado,
+      fechaFacturacion: lote.fechaFacturacion.toISOString(),
+      fechaVencimiento: lote.fechaVencimiento.toISOString(),
       totalesPorConcepto,
       subtotal,
       totalImpuestos,

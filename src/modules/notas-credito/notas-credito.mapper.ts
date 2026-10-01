@@ -43,9 +43,9 @@ export const idAnclaDe = (doc: {
  * be ignored in some places and honored in others.
  */
 export const fechaNotaCredito = (doc: {
-  issueDate: Date | null;
+  fecha: Date | null;
   createdAt?: Date;
-}): Date => doc.issueDate ?? (doc as unknown as { createdAt: Date }).createdAt;
+}): Date => doc.fecha ?? (doc as unknown as { createdAt: Date }).createdAt;
 
 /**
  * Maps a credit note document to the Spanish API contract. Persistence is
@@ -87,23 +87,23 @@ export const toNotaCredito = (
   tipoDocumentoAncla: tipoAnclaDe(doc),
   documentoAnclaId: idAnclaDe(doc).toString(),
   numeroDocumentoAncla,
-  prefijo: doc.prefix,
-  numero: doc.number,
-  numeroCompleto: doc.fullNumber,
+  prefijo: doc.prefijo,
+  numero: doc.numero,
+  numeroCompleto: doc.numeroCompleto,
   fecha: fechaNotaCredito(doc).toISOString(),
-  motivo: doc.reason,
-  montoTotal: doc.totalAmount,
-  distribucion: doc.distribution.map((linea) => ({
+  motivo: doc.motivo,
+  montoTotal: doc.montoTotal,
+  distribucion: doc.distribucion.map((linea) => ({
     conceptoId: linea.conceptoId.toString(),
-    monto: linea.amount,
+    monto: linea.monto,
   })),
   montoAplicado,
   montoSinAplicar,
-  observaciones: doc.notes,
-  estado: doc.status,
-  motivoAnulacion: doc.voidedReason,
-  detalleAnulacion: doc.voidedDetail,
-  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  observaciones: doc.observaciones,
+  estado: doc.estado,
+  motivoAnulacion: doc.motivoAnulacion,
+  detalleAnulacion: doc.detalleAnulacion,
+  fechaAnulacion: doc.fechaAnulacion ? doc.fechaAnulacion.toISOString() : null,
   objectPath: presentacion?.objectPath ?? null,
   generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });
@@ -149,7 +149,7 @@ export const toNotaCreditoDetalle = (
   aplicaciones: aplicaciones.map((a) =>
     toAplicacionCartera(
       a,
-      numerosPorDocumento.get(a.documentId.toString()) ?? null,
+      numerosPorDocumento.get(a.documentoId.toString()) ?? null,
       fechaNotaCredito(doc),
     ),
   ),

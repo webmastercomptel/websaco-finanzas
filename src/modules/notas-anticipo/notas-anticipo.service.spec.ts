@@ -30,8 +30,8 @@ type ReciboFixture = {
   copropiedadId: Types.ObjectId;
   inmuebleId: Types.ObjectId;
   terceroId: Types.ObjectId;
-  fullNumber: string;
-  status: string;
+  numeroCompleto: string;
+  estado: string;
   // No longer live fields on the Recibo document itself — kept on this
   // fixture purely as the shared backing state the `saldoDocumentoOrigen`
   // mock below reads/mutates (test convenience, mirrors `facturasState`'s
@@ -45,7 +45,7 @@ type FacturaFixture = {
   _id: Types.ObjectId;
   copropiedadId: Types.ObjectId;
   inmuebleId: Types.ObjectId;
-  status: string;
+  estado: string;
   outstandingBalance: number;
   total: number;
 } & Record<string, unknown>;
@@ -56,9 +56,9 @@ type NotaAnticipoFixture = {
   inmuebleId: Types.ObjectId;
   terceroId: Types.ObjectId;
   reciboOrigenId: Types.ObjectId;
-  fullNumber: string;
-  status: string;
-  appliedAmount: number;
+  numeroCompleto: string;
+  estado: string;
+  montoAplicado: number;
 } & Record<string, unknown>;
 
 const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
@@ -66,8 +66,8 @@ const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
-  fullNumber: 'RC-1',
-  status: 'activo',
+  numeroCompleto: 'RC-1',
+  estado: 'activo',
   unappliedAmount: 300000,
   appliedAmount: 200000,
   montoOriginal: 500000,
@@ -75,7 +75,7 @@ const reciboDoc = (over: Partial<ReciboFixture> = {}): ReciboFixture => ({
 });
 
 // Same shape as `ReciboFixture` on purpose — `SaldoInicialAnticipo` freezes
-// `fullNumber`/`receivedDate` under the exact names `cruce.util.ts`'s
+// `numeroCompleto`/`fechaRecibo` under the exact names `cruce.util.ts`'s
 // `OrigenAplicacion` reads, precisely so it can stand in for a Recibo here
 // with no adapter, same as in production.
 type SaldoInicialAnticipoFixture = ReciboFixture;
@@ -87,8 +87,8 @@ const saldoInicialAnticipoDoc = (
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
-  fullNumber: 'RC 4152',
-  status: 'activo',
+  numeroCompleto: 'RC 4152',
+  estado: 'activo',
   unappliedAmount: 300000,
   appliedAmount: 0,
   montoOriginal: 300000,
@@ -99,13 +99,13 @@ const facturaDoc = (over: Partial<FacturaFixture> = {}): FacturaFixture => ({
   _id: new Types.ObjectId(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  status: 'emitida',
+  estado: 'emitida',
   outstandingBalance: 200000,
   total: 200000,
-  dueDate: new Date('2026-06-30'),
-  lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
-  discountAmount: 0,
-  discountDeadline: null,
+  fechaVencimiento: new Date('2026-06-30'),
+  lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
+  montoDescuento: 0,
+  fechaLimiteDescuento: null,
   ...over,
 });
 
@@ -185,7 +185,7 @@ const construirServicio = (
       session: jest.fn().mockReturnThis(),
       exec: () =>
         Promise.resolve(
-          aplicacionesCreadas.filter((a) => a.status === 'activa'),
+          aplicacionesCreadas.filter((a) => a.estado === 'activa'),
         ),
     })),
     findOneAndUpdate: jest.fn(
@@ -384,9 +384,9 @@ const construirServicio = (
   const carteraPorDocumento = {
     findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   };
-  const asientosStore: { entries: unknown[] }[] = [];
+  const asientosStore: { movimientos: unknown[] }[] = [];
   const asientos = {
-    create: jest.fn((filas: { entries: unknown[] }[]) => {
+    create: jest.fn((filas: { movimientos: unknown[] }[]) => {
       asientosStore.push(...filas);
       return Promise.resolve(filas);
     }),
@@ -521,8 +521,8 @@ describe('NotasAnticipoService.crear', () => {
   it('rechaza una fecha de emisión fuera del período del último lote consolidado', async () => {
     const { service } = construirServicio({
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -539,8 +539,8 @@ describe('NotasAnticipoService.crear', () => {
   it('deja pasar una fecha de emisión dentro del período del último lote consolidado', async () => {
     const { service } = construirServicio({
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -571,21 +571,21 @@ describe('NotasAnticipoService.crear', () => {
     expect(facturasState[0].outstandingBalance).toBe(0);
 
     expect(asientosStore).toHaveLength(1);
-    const entries = asientosStore[0].entries as Array<{
-      account: string;
-      type: string;
-      amount: number;
+    const movimientos = asientosStore[0].movimientos as Array<{
+      cuenta: string;
+      tipo: string;
+      monto: number;
     }>;
     // Un débito a anticipos por el TOTAL aplicado, un solo registro.
-    const debitos = entries.filter((m) => m.type === 'debito');
+    const debitos = movimientos.filter((m) => m.tipo === 'debito');
     expect(debitos).toHaveLength(1);
-    expect(debitos[0]).toMatchObject({ account: '210505', amount: 200000 });
+    expect(debitos[0]).toMatchObject({ cuenta: '210505', monto: 200000 });
     // Crédito directo a la cuenta de cartera de la factura.
-    const creditos = entries.filter((m) => m.type === 'credito');
-    expect(creditos.some((c) => c.amount === 200000)).toBe(true);
+    const creditos = movimientos.filter((m) => m.tipo === 'credito');
+    expect(creditos.some((c) => c.monto === 200000)).toBe(true);
   });
 
-  it('usa fechaEmision (no el instante real del servidor) como issueDate y como fecha del asiento', async () => {
+  it('usa fechaEmision (no el instante real del servidor) como fechaEmision y como fecha del asiento', async () => {
     const { service, recibo, asientosStore, notasAnticipo } =
       construirServicio();
 
@@ -598,10 +598,10 @@ describe('NotasAnticipoService.crear', () => {
 
     expect(resultado.fechaEmision).toBe('2026-10-01T00:00:00.000Z');
     const [filas] = notasAnticipo.create.mock.calls[0] as unknown as [
-      { issueDate: Date }[],
+      { fechaEmision: Date }[],
     ];
-    expect(filas[0].issueDate).toEqual(new Date('2026-10-01'));
-    expect(asientosStore[0]).toMatchObject({ date: new Date('2026-10-01') });
+    expect(filas[0].fechaEmision).toEqual(new Date('2026-10-01'));
+    expect(asientosStore[0]).toMatchObject({ fecha: new Date('2026-10-01') });
   });
 
   it('aplica manualmente contra un documento específico', async () => {
@@ -632,9 +632,9 @@ describe('NotasAnticipoService.crear', () => {
     const factura = facturaDoc({
       total: 300000,
       outstandingBalance: 300000,
-      lines: [
-        { conceptoId: conceptoAdmin, totalAmount: 200000 },
-        { conceptoId: conceptoIntereses, totalAmount: 100000 },
+      lineas: [
+        { conceptoId: conceptoAdmin, valorTotal: 200000 },
+        { conceptoId: conceptoIntereses, valorTotal: 100000 },
       ],
     });
     const { service, recibo } = construirServicio({
@@ -693,10 +693,10 @@ describe('NotasAnticipoService.crear (origenTipo: SI — Saldo Inicial de Antici
 
     expect(asientosStore).toHaveLength(1);
     const debitos = (
-      asientosStore[0].entries as Array<{ type: string; amount: number }>
-    ).filter((m) => m.type === 'debito');
+      asientosStore[0].movimientos as Array<{ tipo: string; monto: number }>
+    ).filter((m) => m.tipo === 'debito');
     expect(debitos).toHaveLength(1);
-    expect(debitos[0].amount).toBe(200000);
+    expect(debitos[0].monto).toBe(200000);
   });
 
   it('lanza NotFoundException si el saldo inicial de anticipo no existe o no está activo', async () => {

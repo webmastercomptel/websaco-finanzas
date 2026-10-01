@@ -90,9 +90,9 @@ interface EventoCrudo {
  *
  * Factura is the one exception to "the actor lives directly on the
  * document": it has no per-Factura creator field, only its
- * `LoteFacturacion.generatedBy` — a Factura is only ever created
+ * `LoteFacturacion.generadoPor` — a Factura is only ever created
  * already-numbered, at the moment its lote is consolidated. `Factura.
- * voidedBy`/`voidedAt` DO live directly on the Factura itself, same as
+ * anuladoPor`/`fechaAnulacion` DO live directly on the Factura itself, same as
  * every other type.
  *
  * Same "merge several small per-type queries, sort, slice" shape already
@@ -160,7 +160,7 @@ export class PistaAuditoriaService {
       : [];
     const loteGeneratedByMap = new Map<string, Types.ObjectId>();
     for (const lote of lotes) {
-      loteGeneratedByMap.set(lote._id.toString(), lote.generatedBy);
+      loteGeneratedByMap.set(lote._id.toString(), lote.generadoPor);
     }
 
     const crudos: EventoCrudo[] = [];
@@ -172,18 +172,18 @@ export class PistaAuditoriaService {
         accion: 'crear',
         actorId: creador,
         tipoDocumento: 'Factura',
-        numeroCompleto: f.fullNumber,
+        numeroCompleto: f.numeroCompleto,
         inmuebleId: f.inmuebleId,
         valor: f.total,
         href: `/facturas/${f._id.toString()}`,
       });
-      if (f.voidedAt && f.voidedBy) {
+      if (f.fechaAnulacion && f.anuladoPor) {
         crudos.push({
-          fecha: f.voidedAt,
+          fecha: f.fechaAnulacion,
           accion: 'anular',
-          actorId: f.voidedBy,
+          actorId: f.anuladoPor,
           tipoDocumento: 'Factura',
-          numeroCompleto: f.fullNumber,
+          numeroCompleto: f.numeroCompleto,
           inmuebleId: f.inmuebleId,
           valor: f.total,
           href: `/facturas/${f._id.toString()}`,
@@ -195,22 +195,22 @@ export class PistaAuditoriaService {
       crudos.push({
         fecha: createdAtDe(r),
         accion: 'crear',
-        actorId: r.generatedBy,
+        actorId: r.generadoPor,
         tipoDocumento: 'Recibo',
-        numeroCompleto: r.fullNumber,
+        numeroCompleto: r.numeroCompleto,
         inmuebleId: r.inmuebleId,
-        valor: r.receivedAmount,
+        valor: r.montoRecibido,
         href: `/recibos/${r._id.toString()}`,
       });
-      if (r.voidedAt && r.voidedBy) {
+      if (r.fechaAnulacion && r.anuladoPor) {
         crudos.push({
-          fecha: r.voidedAt,
+          fecha: r.fechaAnulacion,
           accion: 'anular',
-          actorId: r.voidedBy,
+          actorId: r.anuladoPor,
           tipoDocumento: 'Recibo',
-          numeroCompleto: r.fullNumber,
+          numeroCompleto: r.numeroCompleto,
           inmuebleId: r.inmuebleId,
-          valor: r.receivedAmount,
+          valor: r.montoRecibido,
           href: `/recibos/${r._id.toString()}`,
         });
       }
@@ -220,22 +220,22 @@ export class PistaAuditoriaService {
       crudos.push({
         fecha: createdAtDe(nc),
         accion: 'crear',
-        actorId: nc.generatedBy,
+        actorId: nc.generadoPor,
         tipoDocumento: 'Nota Crédito',
-        numeroCompleto: nc.fullNumber,
+        numeroCompleto: nc.numeroCompleto,
         inmuebleId: nc.inmuebleId,
-        valor: nc.totalAmount,
+        valor: nc.montoTotal,
         href: `/notas-credito/${nc._id.toString()}`,
       });
-      if (nc.voidedAt && nc.voidedBy) {
+      if (nc.fechaAnulacion && nc.anuladoPor) {
         crudos.push({
-          fecha: nc.voidedAt,
+          fecha: nc.fechaAnulacion,
           accion: 'anular',
-          actorId: nc.voidedBy,
+          actorId: nc.anuladoPor,
           tipoDocumento: 'Nota Crédito',
-          numeroCompleto: nc.fullNumber,
+          numeroCompleto: nc.numeroCompleto,
           inmuebleId: nc.inmuebleId,
-          valor: nc.totalAmount,
+          valor: nc.montoTotal,
           href: `/notas-credito/${nc._id.toString()}`,
         });
       }
@@ -245,20 +245,20 @@ export class PistaAuditoriaService {
       crudos.push({
         fecha: createdAtDe(nd),
         accion: 'crear',
-        actorId: nd.generatedBy,
+        actorId: nd.generadoPor,
         tipoDocumento: 'Nota Débito',
-        numeroCompleto: nd.fullNumber,
+        numeroCompleto: nd.numeroCompleto,
         inmuebleId: nd.inmuebleId,
         valor: nd.total,
         href: `/notas-debito/${nd._id.toString()}`,
       });
-      if (nd.voidedAt && nd.voidedBy) {
+      if (nd.fechaAnulacion && nd.anuladoPor) {
         crudos.push({
-          fecha: nd.voidedAt,
+          fecha: nd.fechaAnulacion,
           accion: 'anular',
-          actorId: nd.voidedBy,
+          actorId: nd.anuladoPor,
           tipoDocumento: 'Nota Débito',
-          numeroCompleto: nd.fullNumber,
+          numeroCompleto: nd.numeroCompleto,
           inmuebleId: nd.inmuebleId,
           valor: nd.total,
           href: `/notas-debito/${nd._id.toString()}`,
@@ -270,20 +270,20 @@ export class PistaAuditoriaService {
       crudos.push({
         fecha: createdAtDe(nt),
         accion: 'crear',
-        actorId: nt.generatedBy,
+        actorId: nt.generadoPor,
         tipoDocumento: 'Nota Contable',
-        numeroCompleto: nt.fullNumber,
+        numeroCompleto: nt.numeroCompleto,
         inmuebleId: nt.inmuebleId,
         valor: nt.monto,
         href: `/notas-contables/${nt._id.toString()}`,
       });
-      if (nt.voidedAt && nt.voidedBy) {
+      if (nt.fechaAnulacion && nt.anuladoPor) {
         crudos.push({
-          fecha: nt.voidedAt,
+          fecha: nt.fechaAnulacion,
           accion: 'anular',
-          actorId: nt.voidedBy,
+          actorId: nt.anuladoPor,
           tipoDocumento: 'Nota Contable',
-          numeroCompleto: nt.fullNumber,
+          numeroCompleto: nt.numeroCompleto,
           inmuebleId: nt.inmuebleId,
           valor: nt.monto,
           href: `/notas-contables/${nt._id.toString()}`,
@@ -295,22 +295,22 @@ export class PistaAuditoriaService {
       crudos.push({
         fecha: createdAtDe(na),
         accion: 'crear',
-        actorId: na.generatedBy,
+        actorId: na.generadoPor,
         tipoDocumento: 'Nota de Anticipo',
-        numeroCompleto: na.fullNumber,
+        numeroCompleto: na.numeroCompleto,
         inmuebleId: na.inmuebleId,
-        valor: na.appliedAmount,
+        valor: na.montoAplicado,
         href: `/notas-anticipo/${na._id.toString()}`,
       });
-      if (na.voidedAt && na.voidedBy) {
+      if (na.fechaAnulacion && na.anuladoPor) {
         crudos.push({
-          fecha: na.voidedAt,
+          fecha: na.fechaAnulacion,
           accion: 'anular',
-          actorId: na.voidedBy,
+          actorId: na.anuladoPor,
           tipoDocumento: 'Nota de Anticipo',
-          numeroCompleto: na.fullNumber,
+          numeroCompleto: na.numeroCompleto,
           inmuebleId: na.inmuebleId,
-          valor: na.appliedAmount,
+          valor: na.montoAplicado,
           href: `/notas-anticipo/${na._id.toString()}`,
         });
       }

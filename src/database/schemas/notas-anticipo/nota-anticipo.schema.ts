@@ -28,7 +28,7 @@ export type VoidReasonNotaAnticipo =
  * same reasoning as `NotaDebito.terceroId`: frozen at the moment that
  * matters, never re-derived later.
  *
- * `appliedAmount` is the total this ONE document applied — the single
+ * `montoAplicado` is the total this ONE document applied — the single
  * `cuentaAnticipos` debit line the accounting entry posts (see
  * `construirMovimientosAplicacionAnticipo`'s own docblock on why the debit
  * side is always one line even when the credit side is split cargo por
@@ -72,7 +72,7 @@ export class NotaAnticipo {
 
   /** The origin document's own `_id` — a `Recibo` when `origenTipo` is
    *  `'RC'`, a `SaldoInicialAnticipo` when `'SI'`. Both freeze a
-   *  `fullNumber`/`receivedDate` under those exact names, so
+   *  `numeroCompleto`/`fechaRecibo` under those exact names, so
    *  `cruce.util.ts`'s `OrigenAplicacion` shape reads either one with no
    *  branching — see that file's own docblock. */
   @Prop({
@@ -83,37 +83,37 @@ export class NotaAnticipo {
   reciboOrigenId: Types.ObjectId;
 
   @Prop({ type: String, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   @Prop({ type: Number, default: 0 })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   @Prop({ required: true })
-  issueDate: Date;
+  fechaEmision: Date;
 
   @Prop({ required: true })
-  appliedAmount: number;
+  montoAplicado: number;
 
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
-  status: 'activo' | 'anulado';
+  estado: 'activo' | 'anulado';
 
   @Prop({ type: String, enum: VOID_REASONS_NOTA_ANTICIPO, default: null })
-  voidedReason: VoidReasonNotaAnticipo | null;
+  motivoAnulacion: VoidReasonNotaAnticipo | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 }
 
 export const NotaAnticipoSchema = SchemaFactory.createForClass(NotaAnticipo);
@@ -121,7 +121,10 @@ export const NotaAnticipoSchema = SchemaFactory.createForClass(NotaAnticipo);
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as
 // Recibo/NotaDebito/Factura.
-NotaAnticipoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
+NotaAnticipoSchema.index(
+  { copropiedadId: 1, numeroCompleto: 1 },
+  { unique: true },
+);
 
 // GET /notas-anticipo?reciboOrigenId=...-shaped query, and the Anticipos
 // screen's "does this Recibo already have Notas de Anticipo" lookup.

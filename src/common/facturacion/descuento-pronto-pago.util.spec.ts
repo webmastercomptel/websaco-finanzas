@@ -5,9 +5,9 @@ import {
 
 describe('calcularDescuentoProntoPago', () => {
   const lineaAdministracion: LineaParaDescuento = {
-    conceptKind: 'administracion',
-    baseAmount: 200000,
-    totalAmount: 200000,
+    tipoConcepto: 'administracion',
+    valorBase: 200000,
+    valorTotal: 200000,
   };
   const deadline = new Date('2026-08-10');
 
@@ -19,9 +19,9 @@ describe('calcularDescuentoProntoPago', () => {
 
   it('no ofrece descuento cuando el ciclo tiene mora y descuentoAplicaConMora es false', () => {
     const lineaMora: LineaParaDescuento = {
-      conceptKind: 'intereses',
-      baseAmount: 5000,
-      totalAmount: 5000,
+      tipoConcepto: 'intereses',
+      valorBase: 5000,
+      valorTotal: 5000,
     };
     expect(
       calcularDescuentoProntoPago(
@@ -36,9 +36,9 @@ describe('calcularDescuentoProntoPago', () => {
 
   it('SÍ ofrece descuento con mora cuando descuentoAplicaConMora es true', () => {
     const lineaMora: LineaParaDescuento = {
-      conceptKind: 'intereses',
-      baseAmount: 5000,
-      totalAmount: 5000,
+      tipoConcepto: 'intereses',
+      valorBase: 5000,
+      valorTotal: 5000,
     };
     expect(
       calcularDescuentoProntoPago(
@@ -53,9 +53,9 @@ describe('calcularDescuentoProntoPago', () => {
 
   it('no ofrece descuento cuando no hay línea de Administración', () => {
     const lineaOtro: LineaParaDescuento = {
-      conceptKind: 'otro',
-      baseAmount: 200000,
-      totalAmount: 200000,
+      tipoConcepto: 'otro',
+      valorBase: 200000,
+      valorTotal: 200000,
     };
     expect(
       calcularDescuentoProntoPago([lineaOtro], 5, 0, deadline, false),

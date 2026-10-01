@@ -287,7 +287,7 @@ export class NotasAnticipoService {
           );
         }
         const origenDoc = await this.saldosInicialesAnticipo
-          .findOne({ _id: dto.reciboOrigenId, copropiedadId, status: 'activo' })
+          .findOne({ _id: dto.reciboOrigenId, copropiedadId, estado: 'activo' })
           .session(session)
           .exec();
         if (!origenDoc) {
@@ -308,7 +308,7 @@ export class NotasAnticipoService {
       }
 
       const origenDoc = await this.recibos
-        .findOne({ _id: dto.reciboOrigenId, copropiedadId, status: 'activo' })
+        .findOne({ _id: dto.reciboOrigenId, copropiedadId, estado: 'activo' })
         .session(session)
         .exec();
       if (!origenDoc) {
@@ -369,7 +369,7 @@ export class NotasAnticipoService {
     });
     if (origen.unappliedAmount <= 0) {
       throw new ConflictException(
-        `El documento ${origen.fullNumber} no tiene anticipo pendiente por aplicar`,
+        `El documento ${origen.numeroCompleto} no tiene anticipo pendiente por aplicar`,
       );
     }
 
@@ -387,13 +387,13 @@ export class NotasAnticipoService {
           terceroId: origen.terceroId,
           origenTipo,
           reciboOrigenId: origen._id,
-          prefix: numero.prefijo,
-          number: numero.numero,
-          fullNumber: numero.completo,
-          issueDate: fechaEmision,
-          appliedAmount: 0,
-          status: 'activo',
-          generatedBy: accountId,
+          prefijo: numero.prefijo,
+          numero: numero.numero,
+          numeroCompleto: numero.completo,
+          fechaEmision: fechaEmision,
+          montoAplicado: 0,
+          estado: 'activo',
+          generadoPor: accountId,
         },
       ],
       { session },
@@ -437,7 +437,7 @@ export class NotasAnticipoService {
           );
           return {
             totalAplicado: resultado.creadas.reduce(
-              (acc, a) => acc + a.amountApplied,
+              (acc, a) => acc + a.montoAplicado,
               0,
             ),
             desglose: resultado.desglose,
@@ -451,7 +451,7 @@ export class NotasAnticipoService {
           );
           return {
             totalAplicado: resultado.aplicadas.reduce(
-              (acc, a) => acc + a.amountApplied,
+              (acc, a) => acc + a.montoAplicado,
               0,
             ),
             desglose: resultado.desglose,
@@ -464,14 +464,14 @@ export class NotasAnticipoService {
     // ledger with no effect.
     if (totalAplicado === 0) {
       throw new ConflictException(
-        `No hay cartera abierta contra la cual aplicar el anticipo del documento ${origen.fullNumber}`,
+        `No hay cartera abierta contra la cual aplicar el anticipo del documento ${origen.numeroCompleto}`,
       );
     }
 
     await this.notasAnticipo
       .findOneAndUpdate(
         { _id: creada._id, copropiedadId },
-        { $set: { appliedAmount: totalAplicado } },
+        { $set: { montoAplicado: totalAplicado } },
         { session },
       )
       .exec();
@@ -544,7 +544,7 @@ export class NotasAnticipoService {
     if (query.reciboOrigenId) filtro.reciboOrigenId = query.reciboOrigenId;
     if (query.origenTipo) filtro.origenTipo = query.origenTipo;
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.estado) filtro.status = query.estado;
+    if (query.estado) filtro.estado = query.estado;
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
@@ -599,18 +599,18 @@ export class NotasAnticipoService {
     }
     const aplicaciones = await this.aplicaciones
       .find({ copropiedadId, sourceType: 'NA', sourceId: nota._id })
-      .sort({ appliedAt: 1 })
+      .sort({ aplicadoEn: 1 })
       .exec();
 
     const facturaIds = aplicaciones
-      .filter((a) => a.documentType === 'FV')
-      .map((a) => a.documentId);
+      .filter((a) => a.tipoDocumento === 'FV')
+      .map((a) => a.documentoId);
     const notaDebitoIds = aplicaciones
-      .filter((a) => a.documentType === 'ND')
-      .map((a) => a.documentId);
+      .filter((a) => a.tipoDocumento === 'ND')
+      .map((a) => a.documentoId);
     const saldoInicialIds = aplicaciones
-      .filter((a) => a.documentType === 'SI')
-      .map((a) => a.documentId);
+      .filter((a) => a.tipoDocumento === 'SI')
+      .map((a) => a.documentoId);
     const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
       [
         facturaIds.length
@@ -632,9 +632,9 @@ export class NotasAnticipoService {
     );
     const numerosPorDocumento = new Map<string, string>();
     for (const f of facturasDoc)
-      numerosPorDocumento.set(f._id.toString(), f.fullNumber);
+      numerosPorDocumento.set(f._id.toString(), f.numeroCompleto);
     for (const nd of notasDebitoDoc)
-      numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
+      numerosPorDocumento.set(nd._id.toString(), nd.numeroCompleto);
     for (const si of saldosInicialesDoc ?? [])
       numerosPorDocumento.set(si._id.toString(), si.numeroOriginal);
 
@@ -686,9 +686,9 @@ export class NotasAnticipoService {
       if (!nota) {
         throw new NotFoundException(`No se encontró la nota de anticipo ${id}`);
       }
-      if (nota.status === 'anulado') {
+      if (nota.estado === 'anulado') {
         throw new ConflictException(
-          `La nota de anticipo ${nota.fullNumber} ya está anulada`,
+          `La nota de anticipo ${nota.numeroCompleto} ya está anulada`,
         );
       }
 
@@ -697,7 +697,7 @@ export class NotasAnticipoService {
           copropiedadId,
           sourceType: 'NA',
           sourceId: nota._id,
-          status: 'activa',
+          estado: 'activa',
         })
         .session(session)
         .exec();
@@ -714,35 +714,35 @@ export class NotasAnticipoService {
       let montoAplicadoMora = 0;
 
       for (const aplicacion of aplicacionesActivas) {
-        if (aplicacion.documentType === 'ND') {
+        if (aplicacion.tipoDocumento === 'ND') {
           await restaurarSaldoTotalDocumento(
             this.saldoTotalDocumento,
             session,
-            aplicacion.documentId,
-            aplicacion.amountApplied,
+            aplicacion.documentoId,
+            aplicacion.montoAplicado,
           );
           const notaDebitoDoc = await this.notasDebito
-            .findOne({ _id: aplicacion.documentId, copropiedadId })
+            .findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           desglose.push({
             cuenta: null,
-            monto: aplicacion.amountApplied,
+            monto: aplicacion.montoAplicado,
             tipoDocumento: 'ND',
-            numeroDocumento: notaDebitoDoc?.number ?? 0,
+            numeroDocumento: notaDebitoDoc?.numero ?? 0,
           });
-        } else if (aplicacion.documentType === 'SI') {
+        } else if (aplicacion.tipoDocumento === 'SI') {
           // Replays the EXACT recorded split (`detalleConceptos`), same
           // reasoning as `RecibosService.anular()`'s own identical SI
           // branch — never a fresh waterfall.
           await restaurarSaldoTotalDocumento(
             this.saldoTotalDocumento,
             session,
-            aplicacion.documentId,
-            aplicacion.amountApplied,
+            aplicacion.documentoId,
+            aplicacion.montoAplicado,
           );
           const saldoInicialDoc = await this.saldosIniciales
-            ?.findOne({ _id: aplicacion.documentId, copropiedadId })
+            ?.findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (saldoInicialDoc) {
@@ -756,7 +756,7 @@ export class NotasAnticipoService {
                 conceptoId: d.conceptoId,
                 monto: d.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
               { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
             );
@@ -775,14 +775,14 @@ export class NotasAnticipoService {
                   numeroDocumento: saldoInicialDoc.numero,
                 });
               }
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMora += parte.parte;
               }
             }
           }
         } else {
           const facturaDoc = await this.facturas
-            .findOne({ _id: aplicacion.documentId, copropiedadId })
+            .findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
 
@@ -797,7 +797,7 @@ export class NotasAnticipoService {
               .session(session)
               .exec();
             const factura = Object.assign(facturaDoc, {
-              outstandingBalance: saldoPrevio?.saldoPendiente ?? 0,
+              saldoPendiente: saldoPrevio?.saldoPendiente ?? 0,
             });
             // Replays the EXACT split this application recorded
             // (`detalleConceptos`) instead of re-deriving one via the
@@ -808,7 +808,7 @@ export class NotasAnticipoService {
               this.saldoTotalDocumento,
               session,
               factura._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const partes = await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
@@ -820,7 +820,7 @@ export class NotasAnticipoService {
                 conceptoId: d.conceptoId,
                 monto: d.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
               { tipoDocumento: 'FV', documentoId: factura._id },
             );
@@ -837,7 +837,7 @@ export class NotasAnticipoService {
               })),
             );
             for (const parte of partes) {
-              const linea = factura.lines.find((l) =>
+              const linea = factura.lineas.find((l) =>
                 l.conceptoId.equals(parte.conceptoId),
               );
               if (parte.parte !== 0) {
@@ -848,17 +848,17 @@ export class NotasAnticipoService {
                   ),
                   monto: parte.parte,
                   tipoDocumento: 'FV',
-                  numeroDocumento: factura.number,
+                  numeroDocumento: factura.numero,
                 });
               }
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMora += parte.parte;
               }
             }
           } else {
             desglose.push({
               cuenta: null,
-              monto: aplicacion.amountApplied,
+              monto: aplicacion.montoAplicado,
               tipoDocumento: 'FV',
               numeroDocumento: 0,
             });
@@ -868,7 +868,7 @@ export class NotasAnticipoService {
         await this.aplicaciones
           .findOneAndUpdate(
             { _id: aplicacion._id, copropiedadId },
-            { $set: { status: 'revertida', revertedAt: new Date() } },
+            { $set: { estado: 'revertida', revertidoEn: new Date() } },
             { session },
           )
           .exec();
@@ -881,7 +881,7 @@ export class NotasAnticipoService {
         this.saldoDocumentoOrigen,
         session,
         nota.reciboOrigenId,
-        nota.appliedAmount,
+        nota.montoAplicado,
       );
 
       // `copropiedad` was already fetched above, for the desglose loop's
@@ -891,7 +891,7 @@ export class NotasAnticipoService {
       const cuentaAnticipos =
         copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
       const desgloseCartera = desglose.map((d) => ({
-        account: d.cuenta ?? cuentaCartera,
+        cuenta: d.cuenta ?? cuentaCartera,
         monto: d.monto,
         tipoDocumento: d.tipoDocumento,
         numeroDocumento: d.numeroDocumento,
@@ -899,7 +899,7 @@ export class NotasAnticipoService {
       let entries = construirContraAsientoAplicacionAnticipo(
         cuentaAnticipos,
         cuentaCartera,
-        nota.appliedAmount,
+        nota.montoAplicado,
         'NA',
         desgloseCartera,
         cuentasOrdenDe(copropiedad),
@@ -925,10 +925,11 @@ export class NotasAnticipoService {
             notaAnticipoId: nota._id,
             // The date the user declared for THIS anulación (validated
             // above, before the transaction opened) — never `new Date()`.
-            // `voidedAt` stays the real audit instant, a separate field on
-            // purpose (same split every other module's anulación now uses).
-            date: new Date(dto.fecha),
-            entries,
+            // `fechaAnulacion` stays the real audit instant, a separate field
+            // on purpose (same split every other module's anulación now
+            // uses).
+            fecha: new Date(dto.fecha),
+            movimientos: entries,
           },
         ],
         { session },
@@ -939,11 +940,11 @@ export class NotasAnticipoService {
           { _id: id, copropiedadId },
           {
             $set: {
-              status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
+              estado: 'anulado',
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
             },
           },
           { session },
@@ -985,7 +986,7 @@ export class NotasAnticipoService {
       copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
-      account: d.cuenta ?? cuentaCartera,
+      cuenta: d.cuenta ?? cuentaCartera,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
@@ -1018,8 +1019,8 @@ export class NotasAnticipoService {
           notaDebitoId: null,
           notaContableId: null,
           notaAnticipoId: nota._id,
-          date: fechaEmision,
-          entries,
+          fecha: fechaEmision,
+          movimientos: entries,
         },
       ],
       { session },
@@ -1062,8 +1063,8 @@ export class NotasAnticipoService {
   async findAplicaciones(id: string): Promise<AplicacionCarteraDocument[]> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.aplicaciones
-      .find({ copropiedadId, sourceType: 'NA', sourceId: id, status: 'activa' })
-      .sort({ appliedAt: 1 })
+      .find({ copropiedadId, sourceType: 'NA', sourceId: id, estado: 'activa' })
+      .sort({ aplicadoEn: 1 })
       .exec();
   }
 }

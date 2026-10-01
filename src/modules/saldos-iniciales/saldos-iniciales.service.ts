@@ -364,7 +364,7 @@ export class SaldosInicialesService {
                 })
                 .session(session)
                 .exec();
-              const saldoAnterior = saldoAnteriorRow?.balance ?? 0;
+              const saldoAnterior = saldoAnteriorRow?.saldoPendiente ?? 0;
 
               await this.carteraPorDocumento.create(
                 [
@@ -390,7 +390,7 @@ export class SaldosInicialesService {
                     inmuebleId: inmueble._id,
                     conceptoId: linea.conceptoId,
                   },
-                  { $inc: { balance: linea.montoOriginal } },
+                  { $inc: { saldoPendiente: linea.montoOriginal } },
                   { upsert: true, session },
                 )
                 .exec();
@@ -517,7 +517,7 @@ export class SaldosInicialesService {
                 inmuebleId: doc.inmuebleId,
                 conceptoId: fila.conceptoId,
               },
-              { $inc: { balance: -fila.saldoPendiente } },
+              { $inc: { saldoPendiente: -fila.saldoPendiente } },
               { session },
             )
             .exec();

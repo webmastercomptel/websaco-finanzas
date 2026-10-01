@@ -27,7 +27,7 @@ export class ConsecutivoLote {
   /** The last number handed out (post-increment value, via {returnDocument: 'after'}).
    *  Moves forward only. */
   @Prop({ required: true, default: 1 })
-  nextNumber: number;
+  siguienteNumero: number;
 }
 
 export const ConsecutivoLoteSchema =

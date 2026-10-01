@@ -9,9 +9,9 @@ import type { NotaContableDocument } from '../../database/schemas/notas-contable
  * read `createdAt` directly — same pattern as `fechaNotaCredito`.
  */
 export const fechaNotaContable = (doc: {
-  issueDate: Date | null;
+  fecha: Date | null;
   createdAt?: Date;
-}): Date => doc.issueDate ?? (doc as unknown as { createdAt: Date }).createdAt;
+}): Date => doc.fecha ?? (doc as unknown as { createdAt: Date }).createdAt;
 
 /**
  * Maps a nota contable document to the Spanish API contract. Persistence is
@@ -47,14 +47,14 @@ export const toNotaContable = (
   conceptoDestinoId: doc.conceptoDestinoId.toString(),
   fecha: fechaNotaContable(doc).toISOString(),
   monto: doc.monto,
-  descripcion: doc.description,
-  prefijo: doc.prefix,
-  numero: doc.number,
-  numeroCompleto: doc.fullNumber,
-  estado: doc.status,
-  motivoAnulacion: doc.voidedReason,
-  detalleAnulacion: doc.voidedDetail,
-  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  descripcion: doc.descripcion,
+  prefijo: doc.prefijo,
+  numero: doc.numero,
+  numeroCompleto: doc.numeroCompleto,
+  estado: doc.estado,
+  motivoAnulacion: doc.motivoAnulacion,
+  detalleAnulacion: doc.detalleAnulacion,
+  fechaAnulacion: doc.fechaAnulacion ? doc.fechaAnulacion.toISOString() : null,
   objectPath: presentacion?.objectPath ?? null,
   generatedAt: presentacion ? presentacion.generatedAt.toISOString() : null,
 });

@@ -73,11 +73,11 @@ export async function construirDatosImpresionRecibo(
     copropiedad.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
 
   const facturaIds = aplicaciones
-    .filter((a) => a.documentType === 'FV')
-    .map((a) => a.documentId);
+    .filter((a) => a.tipoDocumento === 'FV')
+    .map((a) => a.documentoId);
   const notaIds = aplicaciones
-    .filter((a) => a.documentType === 'ND')
-    .map((a) => a.documentId);
+    .filter((a) => a.tipoDocumento === 'ND')
+    .map((a) => a.documentoId);
 
   const [facturas, notas, inmueble, tercero] = await Promise.all([
     facturaIds.length > 0
@@ -98,7 +98,7 @@ export async function construirDatosImpresionRecibo(
   const notaPorId = new Map(notas.map((n) => [n._id.toString(), n]));
 
   const lineas: LineaAsientoImpresion[] = [];
-  const codigosUsados = new Set<string>([recibo.destinationAccount]);
+  const codigosUsados = new Set<string>([recibo.cuentaDestino]);
 
   for (const aplicacion of aplicaciones) {
     // Empty on applications predating `detalleConceptos` — one generic row
@@ -110,38 +110,37 @@ export async function construirDatosImpresionRecibo(
         : [
             {
               conceptoId: null,
-              conceptName: 'Aplicación',
-              monto: aplicacion.amountApplied,
+              nombreConcepto: 'Aplicación',
+              monto: aplicacion.montoAplicado,
             },
           ];
 
-    if (aplicacion.documentType === 'FV') {
-      const factura = facturaPorId.get(aplicacion.documentId.toString());
+    if (aplicacion.tipoDocumento === 'FV') {
+      const factura = facturaPorId.get(aplicacion.documentoId.toString());
       for (const detalle of detalles) {
         const lineaFactura = detalle.conceptoId
-          ? factura?.lines.find((l) => l.conceptoId.equals(detalle.conceptoId))
+          ? factura?.lineas.find((l) => l.conceptoId.equals(detalle.conceptoId))
           : undefined;
-        const codigo =
-          lineaFactura?.accountingReceivableAccount ?? cuentaCartera;
+        const codigo = lineaFactura?.cuentaCartera ?? cuentaCartera;
         codigosUsados.add(codigo);
         lineas.push({
           cuentaCodigo: codigo,
           cuentaNombre: '',
           tipoDocumento: 'FV',
-          numeroDocumento: factura?.number ?? null,
+          numeroDocumento: factura?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
       }
     } else {
-      const nota = notaPorId.get(aplicacion.documentId.toString());
+      const nota = notaPorId.get(aplicacion.documentoId.toString());
       codigosUsados.add(cuentaCartera);
       for (const detalle of detalles) {
         lineas.push({
           cuentaCodigo: cuentaCartera,
           cuentaNombre: '',
           tipoDocumento: 'ND',
-          numeroDocumento: nota?.number ?? null,
+          numeroDocumento: nota?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
@@ -156,23 +155,23 @@ export async function construirDatosImpresionRecibo(
   // is real CASH only, so the discount portion must come back out here too,
   // or it silently understates the anticipo by exactly the discount amount.
   const totalAplicado = aplicaciones.reduce(
-    (acc, a) => acc + a.amountApplied,
+    (acc, a) => acc + a.montoAplicado,
     0,
   );
   const totalDescuento = aplicaciones.reduce(
-    (acc, a) => acc + (a.discountApplied ?? 0),
+    (acc, a) => acc + (a.montoDescuento ?? 0),
     0,
   );
-  const anticipo = recibo.receivedAmount - (totalAplicado - totalDescuento);
+  const anticipo = recibo.montoRecibido - (totalAplicado - totalDescuento);
   if (anticipo > 0) {
     // A Recibo never splits its leftover between the two — `destinoSobrante`
     // is one choice for the whole surplus (see `RecibosService.crear`'s own
-    // `enviarAOtrosIngresos`) — so `otherIncomeAmount > 0` alone decides
+    // `enviarAOtrosIngresos`) — so `montoOtrosIngresos > 0` alone decides
     // which account this ONE line credits. Same account this Recibo's own
     // creation asiento actually posted to (`postearAsientoRecibo`), never
     // unconditionally Anticipos as before.
     const cuentaLeftover =
-      recibo.otherIncomeAmount > 0 ? cuentaOtrosIngresos : cuentaAnticipos;
+      recibo.montoOtrosIngresos > 0 ? cuentaOtrosIngresos : cuentaAnticipos;
     codigosUsados.add(cuentaLeftover);
     lineas.push({
       cuentaCodigo: cuentaLeftover,
@@ -202,11 +201,11 @@ export async function construirDatosImpresionRecibo(
   }
 
   lineas.push({
-    cuentaCodigo: recibo.destinationAccount,
+    cuentaCodigo: recibo.cuentaDestino,
     cuentaNombre: '',
     tipoDocumento: null,
     numeroDocumento: null,
-    debito: recibo.receivedAmount,
+    debito: recibo.montoRecibido,
     credito: 0,
   });
 
@@ -221,12 +220,12 @@ export async function construirDatosImpresionRecibo(
 
   return {
     tituloDocumento,
-    numeroCompleto: recibo.fullNumber,
-    fecha: recibo.receivedDate,
+    numeroCompleto: recibo.numeroCompleto,
+    fecha: recibo.fechaRecibo,
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
-    concepto: recibo.notes ?? 'Pago recibido',
-    monto: recibo.receivedAmount,
+    concepto: recibo.observaciones ?? 'Pago recibido',
+    monto: recibo.montoRecibido,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),

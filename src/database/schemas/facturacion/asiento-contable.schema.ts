@@ -16,21 +16,21 @@ export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 @Schema({ _id: false })
 export class Movimiento {
   @Prop({ required: true, trim: true })
-  account: string;
+  cuenta: string;
 
   @Prop({ required: true, enum: ['debito', 'credito'] })
-  type: 'debito' | 'credito';
+  tipo: 'debito' | 'credito';
 
   @Prop({ required: true })
-  amount: number;
+  monto: number;
 
   @Prop({ required: true, trim: true })
-  description: string;
+  descripcion: string;
 
   /** The inmueble's own unit code — set only when this line's account has
    *  `requiereTercero` on the chart of accounts. See
    *  `enriquecerMovimientosConAuxiliares` (asiento.builder.ts). Optional in
-   *  TS (unlike `account`/`type`/`amount`/`description` above) because every
+   *  TS (unlike `cuenta`/`tipo`/`monto`/`descripcion` above) because every
    *  builder in `asiento.builder.ts` constructs a `Movimiento` BEFORE this
    *  enrichment step runs — Mongoose still applies `default: null` for any
    *  document that omits it. */
@@ -49,7 +49,7 @@ export class Movimiento {
 
   /** The taxable base a TAX line was computed from — set only on the
    *  tax-credit line `construirMovimientos` splits out when a Cargo's
-   *  `taxAmount > 0`; null on every other line. */
+   *  `valorImpuesto > 0`; null on every other line. */
   @Prop({ type: Number, default: null })
   baseGravable?: number | null;
 
@@ -129,10 +129,10 @@ export class AsientoContable {
   notaAnticipoId: Types.ObjectId | null;
 
   @Prop({ required: true })
-  date: Date;
+  fecha: Date;
 
   @Prop({ type: [MovimientoSchema], required: true })
-  entries: Movimiento[];
+  movimientos: Movimiento[];
 
   /** Which "Adición a Contabilidad" export (MOVMES.csv/MOVMESDO.csv)
    *  already carried this entry — null means "not exported yet". Stamped
@@ -215,5 +215,5 @@ AsientoContableSchema.index({ notaAnticipoId: 1 });
 AsientoContableSchema.index({
   copropiedadId: 1,
   contabilidadLoteId: 1,
-  date: 1,
+  fecha: 1,
 });

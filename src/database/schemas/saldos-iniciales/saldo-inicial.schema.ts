@@ -32,27 +32,26 @@ export class SaldoInicialLinea {
   @Prop({ required: true, trim: true })
   nombreConcepto: string;
 
-  // `accountingReceivableAccount`/`accountingIncomeAccount`/`conceptKind`
-  // below are deliberately NOT renamed, unlike every other field on this
-  // document: `cuentaCarteraDeLinea` (cruce.util.ts) is ONE shared function,
-  // called with either a `FacturaLinea` or a `SaldoInicialLinea` object, that
-  // reads these exact property names off whichever it's given — a
-  // structurally-typed, duck-typed contract (`LineaParaDesglose`), same
-  // reasoning as `SaldoInicialAnticipo.fullNumber`/`receivedDate`. Every
-  // property on that interface is optional, so renaming these would NOT
+  // `cuentaCartera`/`cuentaIngreso`/`tipoConcepto` below now match
+  // `FacturaLinea`'s own field names, migrated in the same batch: both are
+  // read by `cuentaCarteraDeLinea` (cruce.util.ts), ONE shared function
+  // called with either a `FacturaLinea` or a `SaldoInicialLinea` object, off
+  // a structurally-typed, duck-typed contract (`LineaParaDesglose`), same
+  // reasoning as `SaldoInicialAnticipo.numeroCompleto`/`fechaRecibo`. Every
+  // property on that interface is optional, so a mismatch here would NOT
   // fail typecheck — it would silently make `cuentaCarteraDeLinea` return
   // `null` for every Saldo Inicial line instead, a real accounting bug with
-  // no compiler signal. `FacturaLinea` (facturacion/, out of scope this
-  // batch) still names its own fields this way.
+  // no compiler signal, which is exactly why both sides were renamed
+  // together in this pass.
 
   /** This concept's DEBIT account, frozen the same way `FacturaLinea`'s own
-   *  `accountingReceivableAccount` is — null falls back to the coproperty's
-   *  shared `cuentaContableCartera` at posting time, the same way a Factura
-   *  line does (see `construirMovimientos`, asiento.builder.ts). Only ever
-   *  read once a real Recibo/Nota Crédito collects part of this balance —
-   *  the import itself never posts to accounting. */
+   *  `cuentaCartera` is — null falls back to the coproperty's shared
+   *  `cuentaContableCartera` at posting time, the same way a Factura line
+   *  does (see `construirMovimientos`, asiento.builder.ts). Only ever read
+   *  once a real Recibo/Nota Crédito collects part of this balance — the
+   *  import itself never posts to accounting. */
   @Prop({ type: String, default: null, trim: true })
-  accountingReceivableAccount: string | null;
+  cuentaCartera: string | null;
 
   /** This concept's CREDIT/income account, frozen the same way. Unlike a
    *  Factura, nothing here was ever posted as income IN THIS SYSTEM (the
@@ -63,17 +62,17 @@ export class SaldoInicialLinea {
    *  same as any Factura/Nota Débito line with no income account
    *  configured — never a dedicated "reverse income" debit. */
   @Prop({ type: String, default: null, trim: true })
-  accountingIncomeAccount: string | null;
+  cuentaIngreso: string | null;
 
   /** `ConceptoCobro.tipo` at import time — only inspected for `'intereses'`
    *  (`NotasCreditoService.crear()`'s own mora-tracking), same reasoning as
-   *  `FacturaLinea.conceptKind`. */
+   *  `FacturaLinea.tipoConcepto`. */
   @Prop({
     required: true,
     enum: ['administracion', 'intereses', 'otro'],
     default: 'otro',
   })
-  conceptKind: 'administracion' | 'intereses' | 'otro';
+  tipoConcepto: 'administracion' | 'intereses' | 'otro';
 
   @Prop({ required: true })
   montoOriginal: number;

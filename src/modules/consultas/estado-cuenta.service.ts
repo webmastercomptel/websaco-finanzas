@@ -149,19 +149,19 @@ export class EstadoCuentaService {
     // anulada Factura still belongs in this inmueble's own history.
     const facturas = await this.facturas
       .find({ copropiedadId, inmuebleId: oid })
-      .sort({ periodStart: -1 })
+      .sort({ periodoDesde: -1 })
       .exec();
 
-    // Deduplicate by (periodStart, periodEnd) — at most one per lote run
+    // Deduplicate by (periodoDesde, periodoHasta) — at most one per lote run
     const seen = new Set<string>();
     const result: PeriodoFacturado[] = [];
     for (const f of facturas) {
-      const key = `${f.periodStart.toISOString()}|${f.periodEnd.toISOString()}`;
+      const key = `${f.periodoDesde.toISOString()}|${f.periodoHasta.toISOString()}`;
       if (!seen.has(key)) {
         seen.add(key);
         result.push({
-          periodStart: f.periodStart.toISOString(),
-          periodEnd: f.periodEnd.toISOString(),
+          periodStart: f.periodoDesde.toISOString(),
+          periodEnd: f.periodoHasta.toISOString(),
         });
       }
     }
@@ -208,13 +208,13 @@ export class EstadoCuentaService {
       .findOne({
         copropiedadId,
         inmuebleId,
-        periodStart: desde,
-        periodEnd: hasta,
+        periodoDesde: desde,
+        periodoHasta: hasta,
       })
       .exec();
 
     const fechaEmision =
-      facturaPeriodo?.issueDate?.toISOString() ?? desde.toISOString();
+      facturaPeriodo?.fechaEmision?.toISOString() ?? desde.toISOString();
 
     // Step 1: fetch all documents for this inmueble (no date filter — see spec §5)
     //
@@ -239,7 +239,7 @@ export class EstadoCuentaService {
     ] = await Promise.all([
       this.facturas.find({ copropiedadId, inmuebleId }).exec(),
       this.notasDebito
-        .find({ copropiedadId, inmuebleId, status: 'emitida' })
+        .find({ copropiedadId, inmuebleId, estado: 'emitida' })
         .exec(),
       // Not status-filtered by `activo` — same reasoning as Facturas above:
       // an `anulado` Saldo Inicial is voided by reversing whatever balance
@@ -249,7 +249,7 @@ export class EstadoCuentaService {
       this.recibos.find({ copropiedadId, inmuebleId }).exec(),
       this.notasCredito.find({ copropiedadId, inmuebleId }).exec(),
       this.notasContables
-        .find({ copropiedadId, inmuebleId, status: 'activo' })
+        .find({ copropiedadId, inmuebleId, estado: 'activo' })
         .exec(),
       this.notasAnticipo.find({ copropiedadId, inmuebleId }).exec(),
     ]);
@@ -268,37 +268,37 @@ export class EstadoCuentaService {
           .find({
             copropiedadId,
             sourceId: { $in: sourceIds },
-            status: 'activa',
+            estado: 'activa',
           })
           .exec()
       : [];
 
     // Recibos activos — reused both for the period-scoped "Recibo" rows in
     // Detalle de Movimientos / `pagosDelMes` (Step 7) and for Anticipos
-    // Pendientes (Step 8b), same "active" definition as `Recibo.status`.
-    const recibosActivos = recibos.filter((r) => r.status === 'activo');
+    // Pendientes (Step 8b), same "active" definition as `Recibo.estado`.
+    const recibosActivos = recibos.filter((r) => r.estado === 'activo');
 
     // Step 3: build lookup maps. Each carries the source document's own
-    // business date — never `AplicacionCartera.appliedAt`, which is always
+    // business date — never `AplicacionCartera.aplicadoEn`, which is always
     // `new Date()` at cruce time (needed for the accounting entry, which
     // posts at the real instant) and can land in a different period than
     // the date the user actually declared for the payment.
     const reciboMap = new Map(
       recibos.map((r) => [
         r._id.toString(),
-        { fullNumber: r.fullNumber, fecha: r.receivedDate },
+        { fullNumber: r.numeroCompleto, fecha: r.fechaRecibo },
       ]),
     );
     const ncMap = new Map(
       notasCredito.map((nc) => [
         nc._id.toString(),
-        { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
+        { fullNumber: nc.numeroCompleto, fecha: fechaNotaCredito(nc) },
       ]),
     );
     const naMap = new Map(
       notasAnticipo.map((na) => [
         na._id.toString(),
-        { fullNumber: na.fullNumber, fecha: na.issueDate },
+        { fullNumber: na.numeroCompleto, fecha: na.fechaEmision },
       ]),
     );
 
@@ -308,9 +308,9 @@ export class EstadoCuentaService {
     // Facturas → débito
     for (const f of facturas) {
       rows.push({
-        fecha: f.issueDate,
+        fecha: f.fechaEmision,
         tipo: 'FC',
-        numeroCompleto: f.fullNumber,
+        numeroCompleto: f.numeroCompleto,
         concepto: ETIQUETA_DOCUMENTO.FC,
         cargo: f.total,
         abono: null,
@@ -321,9 +321,9 @@ export class EstadoCuentaService {
     // Notas Débito → débito
     for (const nd of notasDebito) {
       rows.push({
-        fecha: nd.issueDate,
+        fecha: nd.fechaEmision,
         tipo: 'ND',
-        numeroCompleto: nd.fullNumber,
+        numeroCompleto: nd.numeroCompleto,
         concepto: ETIQUETA_DOCUMENTO.ND,
         cargo: nd.total,
         abono: null,
@@ -357,7 +357,7 @@ export class EstadoCuentaService {
             ? naMap.get(app.sourceId.toString())
             : ncMap.get(app.sourceId.toString());
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
-      const fecha = origen?.fecha ?? app.appliedAt;
+      const fecha = origen?.fecha ?? app.aplicadoEn;
       const etiqueta = ETIQUETA_DOCUMENTO[sourceType];
 
       // `amountApplied` on an RC/NA application is cash PLUS whatever
@@ -376,9 +376,9 @@ export class EstadoCuentaService {
       // discount too — never just RC.
       const montoDescuento =
         sourceType === 'RC' || sourceType === 'NA'
-          ? (app.discountApplied ?? 0)
+          ? (app.montoDescuento ?? 0)
           : 0;
-      const montoCash = app.amountApplied - montoDescuento;
+      const montoCash = app.montoAplicado - montoDescuento;
 
       if (montoCash > 0) {
         rows.push({
@@ -415,7 +415,7 @@ export class EstadoCuentaService {
       rows.push({
         fecha,
         tipo: 'NT',
-        numeroCompleto: nc.fullNumber,
+        numeroCompleto: nc.numeroCompleto,
         concepto: ETIQUETA_DOCUMENTO.NT,
         cargo: nc.monto,
         abono: null,
@@ -424,7 +424,7 @@ export class EstadoCuentaService {
       rows.push({
         fecha,
         tipo: 'NT',
-        numeroCompleto: nc.fullNumber,
+        numeroCompleto: nc.numeroCompleto,
         concepto: ETIQUETA_DOCUMENTO.NT,
         cargo: null,
         abono: nc.monto,
@@ -456,28 +456,28 @@ export class EstadoCuentaService {
           : app.sourceType === 'NA'
             ? naMap.get(app.sourceId.toString())
             : ncMap.get(app.sourceId.toString());
-      if ((origen?.fecha ?? app.appliedAt) >= desde) continue;
-      const key = app.documentId.toString();
+      if ((origen?.fecha ?? app.aplicadoEn) >= desde) continue;
+      const key = app.documentoId.toString();
       abonadoAntesPorDocumento.set(
         key,
-        (abonadoAntesPorDocumento.get(key) ?? 0) + app.amountApplied,
+        (abonadoAntesPorDocumento.get(key) ?? 0) + app.montoAplicado,
       );
     }
     const cargosAnteriores = [
       ...facturas.map((f) => ({
         id: f._id,
         tipo: 'FV',
-        numeroCompleto: f.fullNumber,
-        fecha: f.issueDate,
-        vence: f.dueDate,
+        numeroCompleto: f.numeroCompleto,
+        fecha: f.fechaEmision,
+        vence: f.fechaVencimiento,
         total: f.total,
       })),
       ...notasDebito.map((nd) => ({
         id: nd._id,
         tipo: 'ND',
-        numeroCompleto: nd.fullNumber,
-        fecha: nd.issueDate,
-        vence: nd.issueDate,
+        numeroCompleto: nd.numeroCompleto,
+        fecha: nd.fechaEmision,
+        vence: nd.fechaEmision,
         total: nd.total,
       })),
       ...saldosIniciales.map((si) => ({
@@ -522,15 +522,15 @@ export class EstadoCuentaService {
     // cruces yet (fully parked as anticipo) now gets a row too, which it
     // never did before (`RespuestaEstadoCuenta.pagosDelMes`'s own docblock).
     const recibosDelPeriodo = recibosActivos.filter(
-      (r) => r.receivedDate >= desde && r.receivedDate <= hasta,
+      (r) => r.fechaRecibo >= desde && r.fechaRecibo <= hasta,
     );
     const filasRecibo: RowRaw[] = recibosDelPeriodo.map((r) => ({
-      fecha: r.receivedDate,
+      fecha: r.fechaRecibo,
       tipo: 'RC',
-      numeroCompleto: r.fullNumber,
+      numeroCompleto: r.numeroCompleto,
       concepto: ETIQUETA_DOCUMENTO.RC,
       cargo: null,
-      abono: r.receivedAmount,
+      abono: r.montoRecibido,
       categoria: 'pago',
     }));
 
@@ -601,10 +601,10 @@ export class EstadoCuentaService {
         monto: saldoDisponiblePorRecibo.get(r._id.toString()) ?? 0,
       }))
       .filter(({ monto }) => monto > 0)
-      .sort((a, b) => a.r.receivedDate.getTime() - b.r.receivedDate.getTime())
+      .sort((a, b) => a.r.fechaRecibo.getTime() - b.r.fechaRecibo.getTime())
       .map(({ r, monto }) => ({
-        numeroCompleto: r.fullNumber,
-        fecha: r.receivedDate.toISOString(),
+        numeroCompleto: r.numeroCompleto,
+        fecha: r.fechaRecibo.toISOString(),
         monto,
       }));
 

@@ -126,7 +126,7 @@ export interface ContextoCreacionRecibo {
  * whenever the caller left `observaciones` blank, so both paths render
  * identically). Mirrors `recibo-nuevo.tsx`'s `observacionesSugeridas`
  * formatting exactly: bare document numbers (never the prefixed
- * `fullNumber`), comma-only joins (no "y" before the last one — that "y" is
+ * `numeroCompleto`), comma-only joins (no "y" before the last one — that "y" is
  * reserved for chaining "genera anticipo"), grouped Cancela-antes-que-Abona,
  * Facturas-antes-que-Notas-Débito.
  */
@@ -194,8 +194,8 @@ export const redactarObservaciones = (
  * `LotesFacturacionService` documents on its own constructor). `asientos` and
  * `copropiedades` are used on EVERY `crear()` call, unconditionally — not
  * only when `aplicaciones`/`aplicacionAutomatica` is present — because the
- * full `receivedAmount` must always be booked (debited to
- * `destinationAccount`) the moment a Recibo is created, whether or not any of
+ * full `montoRecibido` must always be booked (debited to
+ * `cuentaDestino`) the moment a Recibo is created, whether or not any of
  * it has been applied yet (design decision, Task 2); `numeracion` and
  * `connection` are what make RC numbering and every balance write live inside
  * one Mongo transaction (design §6).
@@ -208,8 +208,8 @@ export const redactarObservaciones = (
  *
  * `notasDebito` was APPENDED as an eleventh argument when Notas Débito
  * shipped: `aplicarManual`/`aplicarFifo` must be able to decrement a Nota
- * Débito's own `outstandingBalance` (via `decrementarSaldoNotaDebito`),
- * since `AplicacionCartera.documentType` admits `'ND'` as a target and a
+ * Débito's own `saldoPendiente` (via `decrementarSaldoNotaDebito`),
+ * since `AplicacionCartera.tipoDocumento` admits `'ND'` as a target and a
  * Recibo can pay one exactly like it pays a Factura (Notas Débito design
  * §5/§6). Same append-only discipline as `periodo` — last, so every
  * position above keeps its meaning.
@@ -220,7 +220,7 @@ export const redactarObservaciones = (
  * placement as `periodo.exigirAbierto` — a refusal costs no session.
  *
  * `saldoDocumentoOrigen` was APPENDED for the same reason `saldoTotalDocumento`
- * was: `Recibo.appliedAmount`/`unappliedAmount` are no longer live fields on
+ * was: `Recibo.montoAplicado`/`montoSinAplicar` are no longer live fields on
  * the (now immutable) document — `SaldoDocumentoOrigen` is where
  * `decrementarSaldoDocumentoOrigen`/`restaurarSaldoDocumentoOrigen` now read
  * and write that balance (see that schema's own docblock).
@@ -484,14 +484,14 @@ export class RecibosService {
         .find({
           copropiedadId,
           inmuebleId: { $in: inmuebleIds },
-          status: 'emitida',
+          estado: 'emitida',
         })
         .exec(),
       this.notasDebito
         .find({
           copropiedadId,
           inmuebleId: { $in: inmuebleIds },
-          status: 'emitida',
+          estado: 'emitida',
         })
         .exec(),
       this.saldosIniciales
@@ -499,7 +499,7 @@ export class RecibosService {
             .find({
               copropiedadId,
               inmuebleId: { $in: inmuebleIds },
-              status: 'activo',
+              estado: 'activo',
             })
             .exec()
         : Promise.resolve([]),
@@ -562,8 +562,8 @@ export class RecibosService {
         )
         .sort(
           (a, b) =>
-            (a.dueDate ?? a.issueDate).getTime() -
-            (b.dueDate ?? b.issueDate).getTime(),
+            (a.fechaVencimiento ?? a.fechaEmision).getTime() -
+            (b.fechaVencimiento ?? b.fechaEmision).getTime(),
         );
       const notasDebitoAbiertas = notasDebito
         .filter(
@@ -571,7 +571,7 @@ export class RecibosService {
             n.inmuebleId.equals(inmueble._id) &&
             saldoPorDocumentoGlobal.has(n._id.toString()),
         )
-        .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
+        .sort((a, b) => a.fechaEmision.getTime() - b.fechaEmision.getTime());
       const saldosInicialesAbiertos = saldosIniciales
         .filter(
           (s) =>
@@ -584,9 +584,9 @@ export class RecibosService {
 
       const prioridadDe = (c: CandidatoAplicacionLote): Date =>
         c.tipo === 'FV'
-          ? (c.doc.dueDate ?? c.doc.issueDate)
+          ? (c.doc.fechaVencimiento ?? c.doc.fechaEmision)
           : c.tipo === 'ND'
-            ? c.doc.issueDate
+            ? c.doc.fechaEmision
             : c.doc.fechaVencimiento;
 
       const candidatosOrdenados: CandidatoAplicacionLote[] = [
@@ -646,8 +646,8 @@ export class RecibosService {
       periodoAbiertoPorMes,
       ultimoLoteFacturacion: ultimoLoteFacturacion
         ? {
-            periodStart: ultimoLoteFacturacion.periodStart,
-            periodEnd: ultimoLoteFacturacion.periodEnd,
+            periodoDesde: ultimoLoteFacturacion.periodoDesde,
+            periodoHasta: ultimoLoteFacturacion.periodoHasta,
           }
         : null,
     };
@@ -698,22 +698,22 @@ export class RecibosService {
           copropiedadId,
           inmuebleId: new Types.ObjectId(dto.inmuebleId),
           terceroId: new Types.ObjectId(dto.terceroId),
-          prefix: numero.prefijo,
-          number: numero.numero,
-          fullNumber: numero.completo,
-          receivedAmount: dto.montoRecibido,
-          receivedDate: new Date(dto.fechaRecibo),
-          paymentMethod: dto.medioPago,
-          destinationAccount,
-          reference: dto.referencia ?? null,
-          notes: dto.observaciones ?? null,
+          prefijo: numero.prefijo,
+          numero: numero.numero,
+          numeroCompleto: numero.completo,
+          montoRecibido: dto.montoRecibido,
+          fechaRecibo: new Date(dto.fechaRecibo),
+          medioPago: dto.medioPago,
+          cuentaDestino: destinationAccount,
+          referencia: dto.referencia ?? null,
+          observaciones: dto.observaciones ?? null,
           // Frozen from here on — the document is immutable once issued.
           // `SaldoDocumentoOrigen` (seeded right below) is the live source
           // every application/reversal actually moves from now on.
-          appliedAmount: 0,
-          unappliedAmount: dto.montoRecibido,
-          status: 'activo',
-          generatedBy: accountId,
+          montoAplicado: 0,
+          montoSinAplicar: dto.montoRecibido,
+          estado: 'activo',
+          generadoPor: accountId,
         },
       ],
       { session },
@@ -747,7 +747,7 @@ export class RecibosService {
         diferenciaConfirmada,
       );
       totalAplicadoAhora = resultado.creadas.reduce(
-        (acc, a) => acc + a.amountApplied,
+        (acc, a) => acc + a.montoAplicado,
         0,
       );
       desglose = resultado.desglose;
@@ -765,7 +765,7 @@ export class RecibosService {
         accountId,
       );
       totalAplicadoAhora = resultado.aplicadas.reduce(
-        (acc, a) => acc + a.amountApplied,
+        (acc, a) => acc + a.montoAplicado,
         0,
       );
       desglose = resultado.desglose;
@@ -815,13 +815,13 @@ export class RecibosService {
         generado = generado ? `${generado} — ${nota}` : nota;
       }
       if (generado) {
-        camposFrozen.notes = generado;
+        camposFrozen.observaciones = generado;
       }
     }
-    // Frozen alongside `notes` — see `Recibo.otherIncomeAmount`'s own
+    // Frozen alongside `observaciones` — see `Recibo.montoOtrosIngresos`'s own
     // docblock on why this can't be derived later the way a discount can.
     if (enviarAOtrosIngresos) {
-      camposFrozen.otherIncomeAmount = sobranteReal;
+      camposFrozen.montoOtrosIngresos = sobranteReal;
     }
     if (Object.keys(camposFrozen).length > 0) {
       await this.recibos
@@ -880,12 +880,12 @@ export class RecibosService {
     // "Aplicado" is the full amount CREDITED TO CARTERA — cartera-cash
     // plus whatever discount absorbed the rest (see `anular()`'s own
     // `montoAplicadoCarteraTotal`, the established convention this
-    // mirrors: `recibo.appliedAmount` alone is cash-only, same trap).
+    // mirrors: `recibo.montoAplicado` alone is cash-only, same trap).
     // `totalAplicadoAhora` already includes any discount, confirmed or
     // automatic — see its own comment above. Otros Ingresos is deliberately
     // NEVER folded in here — it never touched cartera at all, so it's its
     // own field (`montoOtrosIngresos`, read by `toRecibo` straight off
-    // `final.otherIncomeAmount`, just persisted above) instead of being
+    // `final.montoOtrosIngresos`, just persisted above) instead of being
     // added to "Aplicado", which previously made the two indistinguishable.
     return toRecibo(
       final!,
@@ -1100,14 +1100,14 @@ export class RecibosService {
   /**
    * Voids a Recibo, cascading unconditionally: every `activa`
    * AplicacionRecibo it made is reversed, its Factura's
-   * `outstandingBalance` is restored — even one already voided through
+   * `saldoPendiente` is restored — even one already voided through
    * another path, which is harmless bookkeeping and never "reopens" that
    * document (design §6) — and ONE consolidated reversing journal entry is
    * always posted, using the Recibo's OWN cached totals
-   * (`appliedAmount`/`unappliedAmount`/`receivedAmount`) rather than
+   * (`montoAplicado`/`montoSinAplicar`/`montoRecibido`) rather than
    * replaying every prior call's history (Task 2's corrected accounting
    * design). It is unconditional, unlike the old (buggy) version of this
-   * method: `receivedAmount` is always > 0 (DTO validation), so there is
+   * method: `montoRecibido` is always > 0 (DTO validation), so there is
    * always something to reverse — at minimum the original cash entry.
    */
   async anular(
@@ -1138,12 +1138,12 @@ export class RecibosService {
       if (!reciboDoc) {
         throw new NotFoundException(`No se encontró el recibo ${id}`);
       }
-      if (reciboDoc.status === 'anulado') {
+      if (reciboDoc.estado === 'anulado') {
         throw new ConflictException(
-          `El recibo ${reciboDoc.fullNumber} ya está anulado`,
+          `El recibo ${reciboDoc.numeroCompleto} ya está anulado`,
         );
       }
-      // `appliedAmount`/`unappliedAmount` are no longer live fields on the
+      // `montoAplicado`/`montoSinAplicar` are no longer live fields on the
       // (now immutable) Recibo — merged in fresh from `SaldoDocumentoOrigen`
       // so the reversing entry below (which reads the Recibo's OWN cached
       // totals) sees the REAL current split, not the frozen creation-time
@@ -1153,8 +1153,8 @@ export class RecibosService {
         .session(session)
         .exec();
       const recibo = Object.assign(reciboDoc, {
-        unappliedAmount: saldoOrigenPrevio?.saldoDisponible ?? 0,
-        appliedAmount:
+        montoSinAplicar: saldoOrigenPrevio?.saldoDisponible ?? 0,
+        montoAplicado:
           (saldoOrigenPrevio?.montoOriginal ?? 0) -
           (saldoOrigenPrevio?.saldoDisponible ?? 0),
       });
@@ -1164,7 +1164,7 @@ export class RecibosService {
           copropiedadId,
           sourceType: 'RC',
           sourceId: recibo._id,
-          status: 'activa',
+          estado: 'activa',
         })
         .session(session)
         .exec();
@@ -1189,7 +1189,7 @@ export class RecibosService {
       let montoDescuentoTotal = 0;
 
       for (const aplicacion of aplicacionesActivas) {
-        if (aplicacion.documentType === 'SI') {
+        if (aplicacion.tipoDocumento === 'SI') {
           // Replays the EXACT recorded split (`detalleConceptos`), same as
           // every OTHER reversal here (never re-derives one via a fresh
           // waterfall) — the original application may have been a
@@ -1198,7 +1198,7 @@ export class RecibosService {
           // `actualizarRemanentesLinea` — those write to a Factura-only
           // `lines[].remainingAmount` field a Saldo Inicial doesn't have.
           const saldoInicialDoc = await this.saldosIniciales
-            ?.findOne({ _id: aplicacion.documentId, copropiedadId })
+            ?.findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (saldoInicialDoc) {
@@ -1206,7 +1206,7 @@ export class RecibosService {
               this.saldoTotalDocumento,
               session,
               saldoInicialDoc._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const partes = await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
@@ -1218,7 +1218,7 @@ export class RecibosService {
                 conceptoId: d.conceptoId,
                 monto: d.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
               { tipoDocumento: 'SI', documentoId: saldoInicialDoc._id },
             );
@@ -1237,7 +1237,7 @@ export class RecibosService {
                   numeroDocumento: saldoInicialDoc.numero,
                 });
               }
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMora += parte.parte;
               }
             }
@@ -1246,12 +1246,12 @@ export class RecibosService {
           await this.aplicaciones
             .findOneAndUpdate(
               { _id: aplicacion._id, copropiedadId },
-              { $set: { status: 'revertida', revertedAt: new Date() } },
+              { $set: { estado: 'revertida', revertidoEn: new Date() } },
               { session },
             )
             .exec();
 
-          montoDescuentoTotal += aplicacion.discountApplied ?? 0;
+          montoDescuentoTotal += aplicacion.montoDescuento ?? 0;
           continue;
         }
 
@@ -1261,7 +1261,7 @@ export class RecibosService {
         // branch below looks that Nota Débito up instead, for its own
         // documento cruce número.
         const facturaDoc = await this.facturas
-          .findOne({ _id: aplicacion.documentId, copropiedadId })
+          .findOne({ _id: aplicacion.documentoId, copropiedadId })
           .session(session)
           .exec();
 
@@ -1275,7 +1275,7 @@ export class RecibosService {
             .session(session)
             .exec();
           const factura = Object.assign(facturaDoc, {
-            outstandingBalance: saldoPrevio?.saldoPendiente ?? 0,
+            saldoPendiente: saldoPrevio?.saldoPendiente ?? 0,
           });
           // Replays the EXACT split this application recorded
           // (`detalleConceptos`) instead of re-deriving one via the default
@@ -1288,7 +1288,7 @@ export class RecibosService {
             this.saldoTotalDocumento,
             session,
             factura._id,
-            aplicacion.amountApplied,
+            aplicacion.montoAplicado,
           );
           const partes = await ajustarSaldosCarteraPorDistribucion(
             this.saldos,
@@ -1300,7 +1300,7 @@ export class RecibosService {
               conceptoId: d.conceptoId,
               monto: d.monto,
             })),
-            aplicacion.amountApplied,
+            aplicacion.montoAplicado,
             1,
             { tipoDocumento: 'FV', documentoId: factura._id },
           );
@@ -1317,7 +1317,7 @@ export class RecibosService {
             })),
           );
           for (const parte of partes) {
-            const linea = factura.lines.find((l) =>
+            const linea = factura.lineas.find((l) =>
               l.conceptoId.equals(parte.conceptoId),
             );
             if (parte.parte !== 0) {
@@ -1328,16 +1328,16 @@ export class RecibosService {
                 ),
                 monto: parte.parte,
                 tipoDocumento: 'FV',
-                numeroDocumento: factura.number,
+                numeroDocumento: factura.numero,
               });
             }
-            if (linea?.conceptKind === 'intereses') {
+            if (linea?.tipoConcepto === 'intereses') {
               montoAplicadoMora += parte.parte;
             }
           }
         } else {
           const notaDebitoDoc = await this.notasDebito
-            .findOne({ _id: aplicacion.documentId, copropiedadId })
+            .findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (notaDebitoDoc) {
@@ -1360,7 +1360,7 @@ export class RecibosService {
               this.saldoTotalDocumento,
               session,
               notaDebitoDoc._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const partesNd = await ajustarSaldosCarteraPorDistribucion(
               this.saldos,
@@ -1372,7 +1372,7 @@ export class RecibosService {
                 conceptoId: d.conceptoId,
                 monto: d.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
               { tipoDocumento: 'ND', documentoId: notaDebitoDoc._id },
             );
@@ -1382,7 +1382,7 @@ export class RecibosService {
                 cuenta: null,
                 monto: parte.parte,
                 tipoDocumento: 'ND',
-                numeroDocumento: notaDebitoDoc.number,
+                numeroDocumento: notaDebitoDoc.numero,
               });
             }
           }
@@ -1391,12 +1391,12 @@ export class RecibosService {
         await this.aplicaciones
           .findOneAndUpdate(
             { _id: aplicacion._id, copropiedadId },
-            { $set: { status: 'revertida', revertedAt: new Date() } },
+            { $set: { estado: 'revertida', revertidoEn: new Date() } },
             { session },
           )
           .exec();
 
-        montoDescuentoTotal += aplicacion.discountApplied ?? 0;
+        montoDescuentoTotal += aplicacion.montoDescuento ?? 0;
       }
 
       // ALWAYS posted (no `if (totalRevertido > 0)` gate — that gate was
@@ -1411,28 +1411,28 @@ export class RecibosService {
       const cuentaDescuentos =
         copropiedad?.descuentosCuentaCredito ?? CUENTA_SIN_ASIGNAR;
       const desgloseCartera = desglose.map((d) => ({
-        account: d.cuenta ?? cuentaCartera,
+        cuenta: d.cuenta ?? cuentaCartera,
         monto: d.monto,
         tipoDocumento: d.tipoDocumento,
         numeroDocumento: d.numeroDocumento,
       }));
       // The cartera side to restore is the FULL amount originally credited
-      // (cash plus any discount it absorbed) — `recibo.appliedAmount` alone
+      // (cash plus any discount it absorbed) — `recibo.montoAplicado` alone
       // is cash-only (see `crear()`'s own `cashAplicadoAhora`), so the
       // discount this loop just totaled has to be added back. NOT derived
-      // by summing `desgloseCartera`: a factura with no matching `lines`
+      // by summing `desgloseCartera`: a factura with no matching `lineas`
       // (already-edge-case territory `ajustarSaldosCartera` guards against)
       // would leave that sum short of what was actually applied, silently
       // understating the reversal — the Recibo's own cached total is the
-      // one number that is always right regardless of what `lines` shows
-      // today, months after the original application. `otherIncomeAmount`
+      // one number that is always right regardless of what `lineas` shows
+      // today, months after the original application. `montoOtrosIngresos`
       // is subtracted for the same reason `findOne`/`findAll` subtract it:
-      // `recibo.appliedAmount` (from `SaldoDocumentoOrigen`) was decremented
+      // `recibo.montoAplicado` (from `SaldoDocumentoOrigen`) was decremented
       // for it too, but it never touched cartera at all — see below, where
       // it's reversed on the OTHER side of this entry instead.
-      const otherIncomeAmount = recibo.otherIncomeAmount ?? 0;
+      const otherIncomeAmount = recibo.montoOtrosIngresos ?? 0;
       const montoAplicadoCarteraTotal =
-        recibo.appliedAmount - otherIncomeAmount + montoDescuentoTotal;
+        recibo.montoAplicado - otherIncomeAmount + montoDescuentoTotal;
       // A Recibo never has both a real anticipo leftover AND an Otros
       // Ingresos amount (`crear()`'s `destinoSobrante` is a single choice
       // per document) — whichever is nonzero picks which account/description
@@ -1445,17 +1445,17 @@ export class RecibosService {
         : cuentaAnticipos;
       const montoAnticiposReversar = reversaOtrosIngresos
         ? otherIncomeAmount
-        : recibo.unappliedAmount;
+        : recibo.montoSinAplicar;
       const descripcionAnticiposReversar = reversaOtrosIngresos
         ? 'Reversión de otros ingresos — anulación de recibo de caja'
         : undefined;
       let entries = construirContraAsientoCruce(
-        recibo.destinationAccount,
+        recibo.cuentaDestino,
         cuentaCartera,
         cuentaAnticiposReversar,
         montoAplicadoCarteraTotal,
         montoAnticiposReversar,
-        recibo.receivedAmount,
+        recibo.montoRecibido,
         'RC',
         cuentasOrdenDe(copropiedad),
         desgloseCartera,
@@ -1482,11 +1482,11 @@ export class RecibosService {
             reciboId: recibo._id,
             // The date the user declared for THIS anulación (validated
             // above, before the transaction opened) — never `new Date()`.
-            // `voidedAt` below stays the real audit instant on purpose: the
-            // business date and the "when it was actually recorded" trail
-            // are never the same field.
-            date: new Date(dto.fecha),
-            entries,
+            // `fechaAnulacion` below stays the real audit instant on
+            // purpose: the business date and the "when it was actually
+            // recorded" trail are never the same field.
+            fecha: new Date(dto.fecha),
+            movimientos: entries,
           },
         ],
         { session },
@@ -1494,8 +1494,8 @@ export class RecibosService {
 
       // Once voided, a Recibo offers no anticipo and shows no applied
       // amount — every AplicacionRecibo it made is now `revertida`, so
-      // appliedAmount is legitimately 0; unappliedAmount is set to 0 too
-      // (not receivedAmount) so a stale `unappliedAmount > 0` query can
+      // montoAplicado is legitimately 0; montoSinAplicar is set to 0 too
+      // (not montoRecibido) so a stale `montoSinAplicar > 0` query can
       // never surface a voided receipt as available anticipo without also
       // checking `estado` (design §6 does not specify this; documented
       // here as the deliberate choice).
@@ -1504,15 +1504,15 @@ export class RecibosService {
           { _id: id, copropiedadId },
           {
             $set: {
-              status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
+              estado: 'anulado',
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
               // Same $set as the rest of the void so the actor can never be
               // written without the state transition, or the other way round.
-              voidedBy: accountId,
-              appliedAmount: 0,
-              unappliedAmount: 0,
+              anuladoPor: accountId,
+              montoAplicado: 0,
+              montoSinAplicar: 0,
             },
           },
           { session },
@@ -1554,7 +1554,7 @@ export class RecibosService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.estado) filtro.status = query.estado;
+    if (query.estado) filtro.estado = query.estado;
     if (query.conAnticipoDisponible) {
       // No longer a field on Recibo itself — resolve candidate ids from
       // `SaldoDocumentoOrigen` first (see that schema's own docblock), same
@@ -1569,7 +1569,7 @@ export class RecibosService {
       filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
     if (query.desde || query.hasta) {
-      filtro.receivedDate = {
+      filtro.fechaRecibo = {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
         ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
       };
@@ -1581,7 +1581,7 @@ export class RecibosService {
     const [documentos, total] = await Promise.all([
       this.recibos
         .find(filtro)
-        .sort({ number: -1, _id: -1 })
+        .sort({ numero: -1, _id: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -1603,7 +1603,7 @@ export class RecibosService {
               copropiedadId,
               sourceType: 'RC',
               sourceId: { $in: ids },
-              status: 'activa',
+              estado: 'activa',
             })
             .exec()
         : [],
@@ -1619,7 +1619,7 @@ export class RecibosService {
       const clave = a.sourceId.toString();
       descuentoPorRecibo.set(
         clave,
-        (descuentoPorRecibo.get(clave) ?? 0) + a.discountApplied,
+        (descuentoPorRecibo.get(clave) ?? 0) + a.montoDescuento,
       );
     }
 
@@ -1644,11 +1644,11 @@ export class RecibosService {
         const appliedAmountCash = saldo
           ? saldo.montoOriginal - saldo.saldoDisponible
           : 0;
-        // Subtract `otherIncomeAmount` for the same reason `findOne` does —
+        // Subtract `montoOtrosIngresos` for the same reason `findOne` does —
         // `doc` already carries it, no extra query needed.
         const appliedAmount =
           appliedAmountCash -
-          (doc.otherIncomeAmount ?? 0) +
+          (doc.montoOtrosIngresos ?? 0) +
           (descuentoPorRecibo.get(idDoc) ?? 0);
         return toRecibo(
           doc,
@@ -1685,33 +1685,33 @@ export class RecibosService {
       : 0;
     const aplicaciones = await this.aplicaciones
       .find({ copropiedadId, sourceType: 'RC', sourceId: recibo._id })
-      .sort({ appliedAt: 1 })
+      .sort({ aplicadoEn: 1 })
       .exec();
     // Same convention `anular()` already documents on its own
-    // `montoAplicadoCarteraTotal`: `appliedAmount` (from `SaldoDocumentoOrigen`)
+    // `montoAplicadoCarteraTotal`: `montoAplicado` (from `SaldoDocumentoOrigen`)
     // is cash-only — a discount (automatic pronto pago, or a confirmed
     // shortfall) credited MORE to cartera than cash actually moved, so it has
     // to be added back for "Aplicado" to match what each document's own
-    // `AplicacionCartera.amountApplied` row shows. `otherIncomeAmount` has to
+    // `AplicacionCartera.montoAplicado` row shows. `montoOtrosIngresos` has to
     // be SUBTRACTED for the opposite reason: `SaldoDocumentoOrigen` was
     // decremented for it too (so it stays out of future anticipo
     // reapplication), but it never touched cartera — it's `montoOtrosIngresos`
     // on the contract, not part of "Aplicado" (see `crear()`'s own note).
     const appliedAmount =
       appliedAmountCash -
-      (recibo.otherIncomeAmount ?? 0) +
+      (recibo.montoOtrosIngresos ?? 0) +
       aplicaciones
-        .filter((a) => a.status === 'activa')
-        .reduce((acc, a) => acc + a.discountApplied, 0);
+        .filter((a) => a.estado === 'activa')
+        .reduce((acc, a) => acc + a.montoDescuento, 0);
 
     // Batch-resolve each application's target document's own printed
-    // number ("FV-1") for display — this row only stores `documentId`.
+    // number ("FV-1") for display — this row only stores `documentoId`.
     const facturaIds = aplicaciones
-      .filter((a) => a.documentType === 'FV')
-      .map((a) => a.documentId);
+      .filter((a) => a.tipoDocumento === 'FV')
+      .map((a) => a.documentoId);
     const notaDebitoIds = aplicaciones
-      .filter((a) => a.documentType === 'ND')
-      .map((a) => a.documentId);
+      .filter((a) => a.tipoDocumento === 'ND')
+      .map((a) => a.documentoId);
     const [facturasDoc, notasDebitoDoc] = await Promise.all([
       facturaIds.length
         ? this.facturas.find({ copropiedadId, _id: { $in: facturaIds } }).exec()
@@ -1724,9 +1724,9 @@ export class RecibosService {
     ]);
     const numerosPorDocumento = new Map<string, string>();
     for (const f of facturasDoc)
-      numerosPorDocumento.set(f._id.toString(), f.fullNumber);
+      numerosPorDocumento.set(f._id.toString(), f.numeroCompleto);
     for (const nd of notasDebitoDoc) {
-      numerosPorDocumento.set(nd._id.toString(), nd.fullNumber);
+      numerosPorDocumento.set(nd._id.toString(), nd.numeroCompleto);
     }
 
     // `objectPath`/`generatedAt` — resolved from `presentacion_documento` the
@@ -1778,9 +1778,9 @@ export class RecibosService {
           copropiedadId,
           sourceType: 'RC',
           sourceId: recibo._id,
-          status: 'activa',
+          estado: 'activa',
         })
-        .sort({ appliedAt: 1 })
+        .sort({ aplicadoEn: 1 })
         .exec(),
       this.copropiedades.findById(copropiedadId).exec(),
     ]);
@@ -1844,8 +1844,8 @@ export class RecibosService {
   ): Promise<AplicacionCarteraDocument[]> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.aplicaciones
-      .find({ copropiedadId, sourceType, sourceId, status: 'activa' })
-      .sort({ appliedAt: 1 })
+      .find({ copropiedadId, sourceType, sourceId, estado: 'activa' })
+      .sort({ aplicadoEn: 1 })
       .exec();
   }
 
@@ -1890,7 +1890,7 @@ export class RecibosService {
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
-        sourceDate: recibo.receivedDate,
+        sourceDate: recibo.fechaRecibo,
         accountId,
         usaCuentasOrden: copropiedad?.usaCuentasOrden ?? false,
       },
@@ -1941,7 +1941,7 @@ export class RecibosService {
         recibo,
         sourceType: 'RC',
         sourceId: recibo._id,
-        sourceDate: recibo.receivedDate,
+        sourceDate: recibo.fechaRecibo,
         accountId,
         usaCuentasOrden: copropiedad?.usaCuentasOrden ?? false,
       },
@@ -1996,8 +1996,8 @@ export class RecibosService {
 
   /**
    * Posts the CREATION-time journal entry: always one debit to
-   * `recibo.destinationAccount` for the full `montoAplicado + montoSinAplicar`
-   * (= `receivedAmount`), and one or two credits splitting between
+   * `recibo.cuentaDestino` for the full `montoAplicado + montoSinAplicar`
+   * (= `montoRecibido`), and one or two credits splitting between
    * `cuentaCartera` (whatever was applied in this same `crear()` call) and
    * `cuentaAnticipos` (whatever remains as anticipo) — see the corrected
    * accounting design on Task 2. Called unconditionally by `crear()`, even
@@ -2042,17 +2042,17 @@ export class RecibosService {
         : undefined;
     const cuentaDescuentos =
       copropiedad?.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
-    // `cuenta: null` (no accountingReceivableAccount for that concepto, or a
+    // `cuenta: null` (no cuentaCartera for that concepto, or a
     // Nota Débito application) resolves to the coproperty's shared
     // cuentaCartera.
     const desgloseCartera = desglose.map((d) => ({
-      account: d.cuenta ?? cuentaCartera,
+      cuenta: d.cuenta ?? cuentaCartera,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
     }));
     let entries = construirAsientoCruce(
-      recibo.destinationAccount,
+      recibo.cuentaDestino,
       cuentaCartera,
       cuentaAnticipos,
       montoAplicado,
@@ -2083,8 +2083,8 @@ export class RecibosService {
           loteId: null,
           facturaId: null,
           reciboId: recibo._id,
-          date: recibo.receivedDate,
-          entries,
+          fecha: recibo.fechaRecibo,
+          movimientos: entries,
         },
       ],
       { session },

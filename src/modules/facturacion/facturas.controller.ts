@@ -198,8 +198,8 @@ export class FacturasController {
     // its lote's PDF was already frozen. Same read-time-only stamping as
     // `GeneracionDocumentoService.documentoPdf` uses for the other five
     // document types; the frozen combined file in Storage is never touched.
-    const bytesRespuesta = esAnulado(factura.status)
-      ? await estamparAnulado(Buffer.from(bytesPagina), factura.status)
+    const bytesRespuesta = esAnulado(factura.estado)
+      ? await estamparAnulado(Buffer.from(bytesPagina), factura.estado)
       : bytesPagina;
 
     res.set({

@@ -14,10 +14,10 @@ const notaBase = (over: Record<string, unknown> = {}): NotaDebitoDocument =>
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     conceptoId: CONCEPTO,
-    fullNumber: 'ND-0002',
-    issueDate: new Date('2026-08-12'),
+    numeroCompleto: 'ND-0002',
+    fechaEmision: new Date('2026-08-12'),
     total: 50000,
-    description: null,
+    descripcion: null,
     ...over,
   }) as unknown as NotaDebitoDocument;
 
@@ -58,9 +58,9 @@ const modelosCon = (
     findOne: jest.fn(() => ({
       exec: () =>
         Promise.resolve({
-          entries: [
-            { account: '130510', type: 'debito', amount: 50000 },
-            { account: '413505', type: 'credito', amount: 50000 },
+          movimientos: [
+            { cuenta: '130510', tipo: 'debito', monto: 50000 },
+            { cuenta: '413505', tipo: 'credito', monto: 50000 },
           ],
         }),
     })),
@@ -114,9 +114,9 @@ describe('construirDatosImpresionNotaDebito', () => {
     );
   });
 
-  it('usa description cuando la nota la tiene', async () => {
+  it('usa descripcion cuando la nota la tiene', async () => {
     const datos = await construirDatosImpresionNotaDebito(
-      notaBase({ description: 'Multa por mascota sin correa' }),
+      notaBase({ descripcion: 'Multa por mascota sin correa' }),
       copropiedadBase(),
       COP,
       modelosCon() as never,
@@ -126,9 +126,9 @@ describe('construirDatosImpresionNotaDebito', () => {
     expect(datos.concepto).toBe('Multa por mascota sin correa');
   });
 
-  it('cae al nombre del concepto cuando la nota no tiene description propia', async () => {
+  it('cae al nombre del concepto cuando la nota no tiene descripcion propia', async () => {
     const datos = await construirDatosImpresionNotaDebito(
-      notaBase({ description: null }),
+      notaBase({ descripcion: null }),
       copropiedadBase(),
       COP,
       modelosCon() as never,

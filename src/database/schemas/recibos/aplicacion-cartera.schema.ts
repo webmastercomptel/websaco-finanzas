@@ -19,21 +19,21 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
  * time from `ajustarSaldosCartera`'s/`ajustarSaldosCarteraPorDistribucion`'s
  * own per-concepto split, the SAME numbers the accounting ledger's per-line
  * credit already uses (`RecibosService.aplicarManual`/`aplicarFifo`). Stored
- * here, not re-derived later from `AsientoContable.entries` by account code:
- * two concepts can share one account, which would make that reconstruction
- * ambiguous — this is the one place "how much of THIS payment went to THIS
- * cargo" is unambiguous and named.
+ * here, not re-derived later from `AsientoContable.movimientos` by account
+ * code: two concepts can share one account, which would make that
+ * reconstruction ambiguous — this is the one place "how much of THIS
+ * payment went to THIS cargo" is unambiguous and named.
  */
 @Schema({ _id: false })
 export class DetalleConceptoAplicacion {
   @Prop({ type: SchemaTypes.ObjectId, required: true })
   conceptoId: Types.ObjectId;
 
-  /** `ConceptoCobro.nombre`/`FacturaLinea.conceptName` at application time —
-   *  frozen, same reasoning as `FacturaLinea.conceptName` itself: a later
-   *  rename of the concepto must not reword history. */
+  /** `ConceptoCobro.nombre`/`FacturaLinea.nombreConcepto` at application
+   *  time — frozen, same reasoning as `FacturaLinea.nombreConcepto` itself:
+   *  a later rename of the concepto must not reword history. */
   @Prop({ required: true, trim: true })
-  conceptName: string;
+  nombreConcepto: string;
 
   @Prop({ required: true })
   monto: number;
@@ -48,10 +48,10 @@ export const DetalleConceptoAplicacionSchema = SchemaFactory.createForClass(
  * de Anticipo against a document. `sourceType` discriminates which kind of
  * document made the application — the source-of-truth event log all three
  * modules share (design §3.1). A Nota de Anticipo (`'NA'`) always draws
- * against a Recibo's own `unappliedAmount` — it exists specifically for
+ * against a Recibo's own `montoSinAplicar` — it exists specifically for
  * applying a Recibo's leftover anticipo LATER, as its own auditable
  * document, instead of a second call mutating the Recibo directly.
- * `Factura.outstandingBalance` and `SaldoCartera.balance` are reconcilable
+ * `Factura.saldoPendiente` and `SaldoCartera.saldoPendiente` are reconcilable
  * caches derived from these rows.
  *
  * GENERALIZED FROM `AplicacionRecibo` (Recibos de Caja, merged earlier this
@@ -91,24 +91,24 @@ export class AplicacionCartera {
   sourceId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: DOCUMENT_TYPES })
-  documentType: DocumentType;
+  tipoDocumento: DocumentType;
 
   @Prop({ type: SchemaTypes.ObjectId, required: true })
-  documentId: Types.ObjectId;
+  documentoId: Types.ObjectId;
 
   @Prop({ required: true })
-  amountApplied: number;
+  montoAplicado: number;
 
-  /** Portion of `amountApplied` that is early-payment discount, not real
+  /** Portion of `montoAplicado` that is early-payment discount, not real
    *  money drawn from the source's own balance — 0 in the normal case (no
    *  discount, or the discount didn't activate) and always 0 for a Nota
-   *  Débito target (never carries a discount). `amountApplied -
-   *  discountApplied` is the real cash this application drew down. See
+   *  Débito target (never carries a discount). `montoAplicado -
+   *  montoDescuento` is the real cash this application drew down. See
    *  `evaluarAplicacionConDescuento` (`cruce.util.ts`). */
   @Prop({ required: true, default: 0 })
-  discountApplied: number;
+  montoDescuento: number;
 
-  /** How `amountApplied` breaks down across the target document's own
+  /** How `montoAplicado` breaks down across the target document's own
    *  conceptos — empty on documents predating this field (a Nota Débito
    *  application from before it always had exactly one concepto anyway, so
    *  the frontend falls back to a single generic row for those). */
@@ -116,37 +116,38 @@ export class AplicacionCartera {
   detalleConceptos: DetalleConceptoAplicacion[];
 
   @Prop({ required: true, enum: ['activa', 'revertida'], default: 'activa' })
-  status: 'activa' | 'revertida';
+  estado: 'activa' | 'revertida';
 
   @Prop({ required: true })
-  appliedAt: Date;
+  aplicadoEn: Date;
 
-  /** The SOURCE document's own declared business date — `Recibo.receivedDate`
-   *  for `sourceType: 'RC'`, `NotaCredito.issueDate ?? createdAt` for `'NC'`,
-   *  `NotaAnticipo.issueDate` for `'NA'` — frozen at application time, never
-   *  `appliedAt` (the system-entry timestamp, always `new Date()`). Historical
-   *  point-in-time reports (`activeAsOf`/`calcularDocumentosConSaldoAFecha`,
-   *  Conciliación de Cartera's `saldoAnterior`, Cartera General, Vencimientos)
-   *  must ask "was this payment effective as of that date", which is this
-   *  field — a Recibo dated June but entered late (`appliedAt` in July)
-   *  belongs to June's balance, not July's, exactly like Conciliación de
-   *  Cartera's own current-period rows already treat it (see
+  /** The SOURCE document's own declared business date — `Recibo.fechaRecibo`
+   *  for `sourceType: 'RC'`, `NotaCredito.fecha ?? createdAt` for `'NC'`,
+   *  `NotaAnticipo.fechaEmision` for `'NA'` — frozen at application time,
+   *  never `aplicadoEn` (the system-entry timestamp, always `new Date()`).
+   *  Historical point-in-time reports (`activeAsOf`/
+   *  `calcularDocumentosConSaldoAFecha`, Conciliación de Cartera's
+   *  `saldoAnterior`, Cartera General, Vencimientos) must ask "was this
+   *  payment effective as of that date", which is this field — a Recibo
+   *  dated June but entered late (`aplicadoEn` in July) belongs to June's
+   *  balance, not July's, exactly like Conciliación de Cartera's own
+   *  current-period rows already treat it (see
    *  `ConciliacionCarteraService.movimientoDeFuentes`'s docblock, which this
    *  field brings to the historical side too — a real drift reported for the
-   *  July reconciliation before this field existed). `revertedAt` stays
+   *  July reconciliation before this field existed). `revertidoEn` stays
    *  system-time on purpose — an anulación's OWN effect is genuinely dated by
    *  when it happened, matching Conciliación's own anulación rows. */
   @Prop({ type: Date, required: true })
-  sourceDate: Date;
+  fechaOrigen: Date;
 
-  /** Set at the same moment `status` flips to 'revertida' — closes the
+  /** Set at the same moment `estado` flips to 'revertida' — closes the
    *  "was this application active on date X?" gap for historical cartera
    *  queries (Vencimientos §8, Cartera General §2). */
   @Prop({ type: Date, default: null })
-  revertedAt: Date | null;
+  revertidoEn: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  appliedBy: Types.ObjectId;
+  aplicadoPor: Types.ObjectId;
 }
 
 export const AplicacionCarteraSchema =
@@ -154,7 +155,7 @@ export const AplicacionCarteraSchema =
 
 // Every application against a given document — the future Auxiliar de
 // Cartera screen's query (design §3.1), unchanged in shape from before.
-AplicacionCarteraSchema.index({ documentType: 1, documentId: 1 });
+AplicacionCarteraSchema.index({ tipoDocumento: 1, documentoId: 1 });
 // Every application a given Recibo OR Nota Crédito made — the void-cascade
 // query. Replaces the old `{ reciboId: 1 }` index (see class docblock).
 AplicacionCarteraSchema.index({ sourceType: 1, sourceId: 1 });

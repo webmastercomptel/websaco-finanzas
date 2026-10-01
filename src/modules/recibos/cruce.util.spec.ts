@@ -59,7 +59,7 @@ describe('decrementarSaldoFactura', () => {
     _id: facturaId,
     inmuebleId: new Types.ObjectId(),
     total: 500000,
-    lines: [],
+    lineas: [],
   };
   const facturasCon = (doc: unknown = facturaDoc) => ({
     findOne: jest.fn(() => ({
@@ -80,7 +80,7 @@ describe('decrementarSaldoFactura', () => {
       200000,
     );
 
-    expect(resultado.outstandingBalance).toBe(300000);
+    expect(resultado.saldoPendiente).toBe(300000);
     expect(resultado._id).toEqual(facturaId);
   });
 
@@ -252,10 +252,10 @@ describe('ajustarSaldosCartera', () => {
         _id: new Types.ObjectId(),
         inmuebleId,
         total: 500000,
-        outstandingBalance: 400000, // primer pago de esta factura: 500000 → 400000
-        lines: [
-          { conceptoId: conceptoA, totalAmount: 400000 },
-          { conceptoId: conceptoB, totalAmount: 100000 },
+        saldoPendiente: 400000, // primer pago de esta factura: 500000 → 400000
+        lineas: [
+          { conceptoId: conceptoA, valorTotal: 400000 },
+          { conceptoId: conceptoB, valorTotal: 100000 },
         ],
       },
       100000,
@@ -272,8 +272,8 @@ describe('ajustarSaldosCartera', () => {
           copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
-          balance: {
-            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -100000] }],
+          saldoPendiente: {
+            $max: [0, { $add: [{ $ifNull: ['$saldoPendiente', 0] }, -100000] }],
           },
         },
       },
@@ -307,10 +307,10 @@ describe('ajustarSaldosCartera', () => {
         _id: new Types.ObjectId(),
         inmuebleId,
         total: 500000,
-        outstandingBalance: 400000,
-        lines: [
-          { conceptoId: conceptoA, totalAmount: 400000 },
-          { conceptoId: conceptoB, totalAmount: 100000 },
+        saldoPendiente: 400000,
+        lineas: [
+          { conceptoId: conceptoA, valorTotal: 400000 },
+          { conceptoId: conceptoB, valorTotal: 100000 },
         ],
       },
       100000,
@@ -331,9 +331,9 @@ describe('ajustarSaldosCartera', () => {
       _id: new Types.ObjectId(),
       inmuebleId,
       total: 100000,
-      lines: [
-        { conceptoId: conceptoAdministracion, totalAmount: 80000 },
-        { conceptoId: conceptoMultas, totalAmount: 20000 },
+      lineas: [
+        { conceptoId: conceptoAdministracion, valorTotal: 80000 },
+        { conceptoId: conceptoMultas, valorTotal: 20000 },
       ],
     };
 
@@ -351,7 +351,7 @@ describe('ajustarSaldosCartera', () => {
       carteraPorDocumentoMock() as never,
       SESSION,
       COP,
-      { ...factura, outstandingBalance: 80000 }, // 100000 → 80000
+      { ...factura, saldoPendiente: 80000 }, // 100000 → 80000
       20000,
       -1,
     );
@@ -371,7 +371,7 @@ describe('ajustarSaldosCartera', () => {
       carteraPorDocumentoMock() as never,
       SESSION,
       COP,
-      { ...factura, outstandingBalance: 0 }, // 80000 → 0
+      { ...factura, saldoPendiente: 0 }, // 80000 → 0
       80000,
       -1,
     );
@@ -398,17 +398,21 @@ describe('ajustarSaldosCartera', () => {
         _id: new Types.ObjectId(),
         inmuebleId,
         total: 100000,
-        outstandingBalance: 100000, // restaurado por completo: 0 → 100000
-        lines: [{ conceptoId: conceptoA, totalAmount: 100000 }],
+        saldoPendiente: 100000, // restaurado por completo: 0 → 100000
+        lineas: [{ conceptoId: conceptoA, valorTotal: 100000 }],
       },
       100000,
       1,
     );
 
     const pipeline = llamadas[0][1] as [
-      { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      {
+        $set: {
+          saldoPendiente: { $max: [number, { $add: [string, number] }] };
+        };
+      },
     ];
-    expect(pipeline[0].$set.balance.$max[1].$add[1]).toBe(100000);
+    expect(pipeline[0].$set.saldoPendiente.$max[1].$add[1]).toBe(100000);
   });
 
   it('no hace nada si la factura no tiene líneas o el monto es cero', async () => {
@@ -423,8 +427,8 @@ describe('ajustarSaldosCartera', () => {
         _id: new Types.ObjectId(),
         inmuebleId,
         total: 0,
-        outstandingBalance: 0,
-        lines: [],
+        saldoPendiente: 0,
+        lineas: [],
       },
       0,
       -1,
@@ -480,8 +484,8 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
           copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoA] },
-          balance: {
-            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -60000] }],
+          saldoPendiente: {
+            $max: [0, { $add: [{ $ifNull: ['$saldoPendiente', 0] }, -60000] }],
           },
         },
       },
@@ -493,8 +497,8 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
           copropiedadId: { $ifNull: ['$copropiedadId', COP] },
           inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
           conceptoId: { $ifNull: ['$conceptoId', conceptoB] },
-          balance: {
-            $max: [0, { $add: [{ $ifNull: ['$balance', 0] }, -40000] }],
+          saldoPendiente: {
+            $max: [0, { $add: [{ $ifNull: ['$saldoPendiente', 0] }, -40000] }],
           },
         },
       },
@@ -565,10 +569,12 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
         -(
           pipeline as [
             {
-              $set: { balance: { $max: [number, { $add: [string, number] }] } };
+              $set: {
+                saldoPendiente: { $max: [number, { $add: [string, number] }] };
+              };
             },
           ]
-        )[0].$set.balance.$max[1].$add[1],
+        )[0].$set.saldoPendiente.$max[1].$add[1],
     );
     expect(montos.reduce((a, b) => a + b, 0)).toBe(10000);
   });
@@ -594,9 +600,13 @@ describe('ajustarSaldosCarteraPorDistribucion', () => {
     );
 
     const pipeline = llamadas[0][1] as [
-      { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+      {
+        $set: {
+          saldoPendiente: { $max: [number, { $add: [string, number] }] };
+        };
+      },
     ];
-    expect(pipeline[0].$set.balance.$max[1].$add[1]).toBe(60000);
+    expect(pipeline[0].$set.saldoPendiente.$max[1].$add[1]).toBe(60000);
   });
 
   it('no hace nada si la distribución está vacía o el monto es cero', async () => {
@@ -649,7 +659,7 @@ describe('decrementarSaldoNotaDebito', () => {
       20000,
     );
 
-    expect(resultado.outstandingBalance).toBe(30000);
+    expect(resultado.saldoPendiente).toBe(30000);
   });
 
   it('rechaza cuando el monto excede el saldo pendiente', async () => {
@@ -735,9 +745,9 @@ describe('decrementarSaldoNotaDebito', () => {
 describe('evaluarAplicacionConDescuento', () => {
   const deadline = new Date('2026-08-10');
   const facturaConDescuento = (over: Record<string, unknown> = {}) => ({
-    outstandingBalance: 400000,
-    discountAmount: 40000,
-    discountDeadline: deadline,
+    saldoPendiente: 400000,
+    montoDescuento: 40000,
+    fechaLimiteDescuento: deadline,
     ...over,
   });
 
@@ -779,7 +789,7 @@ describe('evaluarAplicacionConDescuento', () => {
 
   it('no ofrece descuento cuando la factura no tiene uno configurado', () => {
     const resultado = evaluarAplicacionConDescuento(
-      facturaConDescuento({ discountAmount: 0, discountDeadline: null }),
+      facturaConDescuento({ montoDescuento: 0, fechaLimiteDescuento: null }),
       new Date('2026-08-05'),
       360000,
     );
@@ -789,8 +799,8 @@ describe('evaluarAplicacionConDescuento', () => {
   it('capa el descuento al saldo de la factura cuando el configurado es mayor (Parámetros mal configurado)', () => {
     const resultado = evaluarAplicacionConDescuento(
       facturaConDescuento({
-        outstandingBalance: 100000,
-        discountAmount: 999999,
+        saldoPendiente: 100000,
+        montoDescuento: 999999,
       }),
       new Date('2026-08-05'),
       0,
@@ -806,9 +816,9 @@ describe('evaluarAplicacionConDescuento', () => {
   it('no capa el monto cuando el descuento no se activa — deja que decrementarSaldoFactura rechace si excede (modo manual)', () => {
     const resultado = evaluarAplicacionConDescuento(
       facturaConDescuento({
-        outstandingBalance: 100000,
-        discountAmount: 0,
-        discountDeadline: null,
+        saldoPendiente: 100000,
+        montoDescuento: 0,
+        fechaLimiteDescuento: null,
       }),
       new Date('2026-08-05'),
       200000,
@@ -821,15 +831,15 @@ describe('remanentesPorLinea', () => {
   const conceptoAdmin = new Types.ObjectId();
   const conceptoIntereses = new Types.ObjectId();
 
-  it('sin ningún remainingAmount rastreado (factura nunca tocada por un reparto elegido), lo deriva de la cascada — mismo orden que ajustarSaldosCartera', () => {
+  it('sin ningún saldoPendiente de línea rastreado (factura nunca tocada por un reparto elegido), lo deriva de la cascada — mismo orden que ajustarSaldosCartera', () => {
     // Factura de 500000 (Admin 300000 + Intereses 200000, Intereses de
     // último en el arreglo → primero en la cascada); 150000 ya aplicados.
     const remanentes = remanentesPorLinea({
       total: 500000,
-      outstandingBalance: 350000,
-      lines: [
-        { conceptoId: conceptoAdmin, totalAmount: 300000 },
-        { conceptoId: conceptoIntereses, totalAmount: 200000 },
+      saldoPendiente: 350000,
+      lineas: [
+        { conceptoId: conceptoAdmin, valorTotal: 300000 },
+        { conceptoId: conceptoIntereses, valorTotal: 200000 },
       ],
     });
 
@@ -837,16 +847,16 @@ describe('remanentesPorLinea', () => {
     expect(remanentes.get(conceptoAdmin.toString())).toBe(300000);
   });
 
-  it('con remainingAmount ya rastreado en una línea, lo reporta tal cual — sin importar el estado de las demás', () => {
+  it('con saldoPendiente de línea ya rastreado, lo reporta tal cual — sin importar el estado de las demás', () => {
     const remanentes = remanentesPorLinea({
       total: 500000,
-      outstandingBalance: 350000,
-      lines: [
-        { conceptoId: conceptoAdmin, totalAmount: 300000 }, // sin rastrear
+      saldoPendiente: 350000,
+      lineas: [
+        { conceptoId: conceptoAdmin, valorTotal: 300000 }, // sin rastrear
         {
           conceptoId: conceptoIntereses,
-          totalAmount: 200000,
-          remainingAmount: 50000, // ya rastreado por un reparto anterior
+          valorTotal: 200000,
+          saldoPendiente: 50000, // ya rastreado por un reparto anterior
         },
       ],
     });
@@ -898,10 +908,10 @@ describe('calcularPartesWaterfall', () => {
     const conceptoB = new Types.ObjectId();
     const factura = {
       total: 100000,
-      outstandingBalance: 40000, // ya se aplicaron 60000 de 100000
-      lines: [
-        { conceptoId: conceptoA, totalAmount: 60000 }, // Administración, sortOrder 1
-        { conceptoId: conceptoB, totalAmount: 40000 }, // Parqueadero, sortOrder 2
+      saldoPendiente: 40000, // ya se aplicaron 60000 de 100000
+      lineas: [
+        { conceptoId: conceptoA, valorTotal: 60000 }, // Administración, sortOrder 1
+        { conceptoId: conceptoB, valorTotal: 40000 }, // Parqueadero, sortOrder 2
       ],
     };
 
@@ -916,7 +926,7 @@ describe('calcularPartesWaterfall', () => {
 
   it('no reparte nada cuando la factura no tiene líneas', () => {
     const partes = calcularPartesWaterfall(
-      { total: 0, outstandingBalance: 0, lines: [] },
+      { total: 0, saldoPendiente: 0, lineas: [] },
       10000,
       -1,
     );
@@ -927,8 +937,8 @@ describe('calcularPartesWaterfall', () => {
     const conceptoA = new Types.ObjectId();
     const factura = {
       total: 50000,
-      outstandingBalance: 50000, // ya se restauró todo antes de esta llamada
-      lines: [{ conceptoId: conceptoA, totalAmount: 50000 }],
+      saldoPendiente: 50000, // ya se restauró todo antes de esta llamada
+      lineas: [{ conceptoId: conceptoA, valorTotal: 50000 }],
     };
 
     const partes = calcularPartesWaterfall(factura, 20000, 1);

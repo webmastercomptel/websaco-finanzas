@@ -315,12 +315,12 @@ export class DocumentosService {
    *
    * Plain `find()` + in-memory max, never `.aggregate()` — house convention
    * (see CLAUDE.md and every other cross-collection computation in this
-   * backend). `fullNumber` is the real persisted field
+   * backend). `numeroCompleto` is the real persisted field
    * (`NumeracionService`'s `componer()`: `"${prefix}-${numero}"`, or bare
-   * `numero` when the prefix is empty) — there is no separate `prefijo`/
-   * `numeroCompleto` field on any of these documents; those are Spanish
-   * contract-layer names that only exist after mapping, never in the
-   * database.
+   * `numero` when the prefix is empty) on the six financial-document
+   * schemas below — unlike `ConsecutivoDocumento`/`ResolucionFacturacion`
+   * (numeracion/, still English, out of scope here), which keep `prefix`/
+   * `nextNumber` as-is.
    *
    * `categoria` alone is not always enough to pick the right collection:
    * "NA" (Nota de Anticipo) is configured under category NT ("Nota
@@ -339,7 +339,7 @@ export class DocumentosService {
   ): Promise<number> {
     const modelMap: Record<
       CategoriaDocumento,
-      LeanFindModel<{ fullNumber: string }>
+      LeanFindModel<{ numeroCompleto: string }>
     > = {
       FV: this.facturas,
       IN: this.recibos,
@@ -352,7 +352,7 @@ export class DocumentosService {
     // and `LeanFindModel`, and `.find()` below would have to satisfy BOTH
     // — including every one of `Model`'s own overloads this call never
     // uses.
-    const model: LeanFindModel<{ fullNumber: string }> =
+    const model: LeanFindModel<{ numeroCompleto: string }> =
       code === 'NA' ? this.notasAnticipo : modelMap[categoria];
 
     const matchPrefix = prefix ? `${prefix}-` : '';
@@ -360,16 +360,16 @@ export class DocumentosService {
       .find(
         {
           copropiedadId,
-          fullNumber: { $regex: `^${escapeRegex(matchPrefix)}` },
+          numeroCompleto: { $regex: `^${escapeRegex(matchPrefix)}` },
         },
-        { fullNumber: 1 },
+        { numeroCompleto: 1 },
       )
       .lean()
       .exec();
 
     let max = 0;
     for (const doc of docs) {
-      const suffix = doc.fullNumber.slice(matchPrefix.length);
+      const suffix = doc.numeroCompleto.slice(matchPrefix.length);
       const numero = Number.parseInt(suffix, 10);
       if (Number.isFinite(numero) && numero > max) max = numero;
     }

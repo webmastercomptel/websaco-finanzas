@@ -83,7 +83,7 @@ export interface DatosBatchAplicacionLote {
   /** Keyed by `claveMesDe(fila.fechaPago)` — one entry per DISTINCT month
    *  among the lote's pending rows, not per row. */
   periodoAbiertoPorMes: Map<string, boolean>;
-  ultimoLoteFacturacion: { periodStart: Date; periodEnd: Date } | null;
+  ultimoLoteFacturacion: { periodoDesde: Date; periodoHasta: Date } | null;
 }
 
 export { claveMesDe };
@@ -139,13 +139,13 @@ export function validarFilaAplicacionLote(
   }
 
   if (datos.ultimoLoteFacturacion) {
-    const { periodStart, periodEnd } = datos.ultimoLoteFacturacion;
-    if (fila.fechaPago < periodStart || fila.fechaPago > periodEnd) {
+    const { periodoDesde, periodoHasta } = datos.ultimoLoteFacturacion;
+    if (fila.fechaPago < periodoDesde || fila.fechaPago > periodoHasta) {
       return {
         valido: false,
         mensaje:
           'La fecha de pago debe estar dentro del período de facturación ' +
-          `actual (${formatoFecha(periodStart)} – ${formatoFecha(periodEnd)})`,
+          `actual (${formatoFecha(periodoDesde)} – ${formatoFecha(periodoHasta)})`,
       };
     }
   }
@@ -161,10 +161,10 @@ export interface AplicacionEnMemoria {
   documentId: Types.ObjectId;
   numeroDocumento: number;
   montoAplicado: number;
-  discountApplied: number;
+  montoDescuento: number;
   detalleConceptos: {
     conceptoId: Types.ObjectId;
-    conceptName: string;
+    nombreConcepto: string;
     monto: number;
   }[];
   /** Always negative (a consumption) — the total to `$inc` onto this
@@ -241,18 +241,18 @@ export function aplicarFifoEnMemoria(
         cuenta: null,
         monto,
         tipoDocumento: 'ND',
-        numeroDocumento: nota.number,
+        numeroDocumento: nota.numero,
       });
       aplicaciones.push({
         tipo: 'ND',
         documentId: documentoId,
-        numeroDocumento: nota.number,
+        numeroDocumento: nota.numero,
         montoAplicado: monto,
-        discountApplied: 0,
+        montoDescuento: 0,
         detalleConceptos: [
           {
             conceptoId: nota.conceptoId,
-            conceptName: nota.description ?? 'Nota Débito',
+            nombreConcepto: nota.descripcion ?? 'Nota Débito',
             monto,
           },
         ],
@@ -272,7 +272,7 @@ export function aplicarFifoEnMemoria(
       });
       resumen.push({
         tipo: 'ND',
-        numero: nota.number,
+        numero: nota.numero,
         completa: saldoPendienteDespues === 0,
       });
       restante -= monto;
@@ -284,9 +284,9 @@ export function aplicarFifoEnMemoria(
       const { montoAFactura: montoSinCapar, montoDescuento } =
         evaluarAplicacionConDescuento(
           {
-            outstandingBalance: saldoPendiente,
-            discountAmount: factura.discountAmount,
-            discountDeadline: factura.discountDeadline,
+            saldoPendiente,
+            montoDescuento: factura.montoDescuento,
+            fechaLimiteDescuento: factura.fechaLimiteDescuento,
           },
           fechaRecibo,
           restante,
@@ -296,31 +296,31 @@ export function aplicarFifoEnMemoria(
       const saldoPendienteDespues = saldoPendiente - monto;
       datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
 
-      const lines = factura.lines.map((l) => ({
+      const lineas = factura.lineas.map((l) => ({
         conceptoId: l.conceptoId,
-        totalAmount: l.totalAmount,
+        valorTotal: l.valorTotal,
       }));
       const partes = calcularPartesWaterfall(
         {
           total: factura.total,
-          outstandingBalance: saldoPendienteDespues,
-          lines,
+          saldoPendiente: saldoPendienteDespues,
+          lineas,
         },
         monto,
         -1,
       );
       const detalleConceptos = partes.map((p) => {
-        const linea = factura.lines.find((l) =>
+        const linea = factura.lineas.find((l) =>
           l.conceptoId.equals(p.conceptoId),
         );
         return {
           conceptoId: p.conceptoId,
-          conceptName: linea?.conceptName ?? 'Concepto',
+          nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
           monto: p.parte,
         };
       });
       for (const p of partes) {
-        const linea = factura.lines.find((l) =>
+        const linea = factura.lineas.find((l) =>
           l.conceptoId.equals(p.conceptoId),
         );
         if (p.parte !== 0) {
@@ -328,19 +328,19 @@ export function aplicarFifoEnMemoria(
             cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
             monto: p.parte,
             tipoDocumento: 'FV',
-            numeroDocumento: factura.number,
+            numeroDocumento: factura.numero,
           });
         }
-        if (linea?.conceptKind === 'intereses') {
+        if (linea?.tipoConcepto === 'intereses') {
           montoAplicadoMora += p.parte;
         }
       }
       aplicaciones.push({
         tipo: 'FV',
         documentId: documentoId,
-        numeroDocumento: factura.number,
+        numeroDocumento: factura.numero,
         montoAplicado: monto,
-        discountApplied: montoDescuento,
+        montoDescuento,
         detalleConceptos,
         saldoTotalDocumentoDelta: -monto,
         saldoCarteraDeltas: partes.map((p) => ({
@@ -358,7 +358,7 @@ export function aplicarFifoEnMemoria(
       });
       resumen.push({
         tipo: 'FV',
-        numero: factura.number,
+        numero: factura.numero,
         completa: saldoPendienteDespues === 0,
       });
       montoDescuentoTotal += montoDescuento;
@@ -373,15 +373,15 @@ export function aplicarFifoEnMemoria(
     const saldoPendienteDespues = saldoPendiente - monto;
     datosInmueble.saldoPorDocumento.set(clave, saldoPendienteDespues);
 
-    const lines = saldoInicial.filas.map((l) => ({
+    const lineas = saldoInicial.filas.map((l) => ({
       conceptoId: l.conceptoId,
-      totalAmount: l.montoOriginal,
+      valorTotal: l.montoOriginal,
     }));
     const partes = calcularPartesWaterfall(
       {
         total: saldoInicial.monto,
-        outstandingBalance: saldoPendienteDespues,
-        lines,
+        saldoPendiente: saldoPendienteDespues,
+        lineas,
       },
       monto,
       -1,
@@ -392,7 +392,7 @@ export function aplicarFifoEnMemoria(
       );
       return {
         conceptoId: p.conceptoId,
-        conceptName: linea?.nombreConcepto ?? 'Concepto',
+        nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
         monto: p.parte,
       };
     });
@@ -408,7 +408,7 @@ export function aplicarFifoEnMemoria(
           numeroDocumento: saldoInicial.numero,
         });
       }
-      if (linea?.conceptKind === 'intereses') {
+      if (linea?.tipoConcepto === 'intereses') {
         montoAplicadoMora += p.parte;
       }
     }
@@ -417,7 +417,7 @@ export function aplicarFifoEnMemoria(
       documentId: documentoId,
       numeroDocumento: saldoInicial.numero,
       montoAplicado: monto,
-      discountApplied: 0,
+      montoDescuento: 0,
       detalleConceptos,
       saldoTotalDocumentoDelta: -monto,
       saldoCarteraDeltas: partes.map((p) => ({
@@ -511,7 +511,7 @@ export function construirEscrituraFilaAplicacion(ctx: {
     ctx.copropiedad?.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR;
   const cuentasOrden = cuentasOrdenDe(ctx.copropiedad);
   const desgloseCartera = ctx.resultadoFifo.desglose.map((d) => ({
-    account: d.cuenta ?? cuentaCartera,
+    cuenta: d.cuenta ?? cuentaCartera,
     monto: d.monto,
     tipoDocumento: d.tipoDocumento,
     numeroDocumento: d.numeroDocumento,
@@ -551,20 +551,20 @@ export function construirEscrituraFilaAplicacion(ctx: {
       copropiedadId: ctx.copropiedadId,
       inmuebleId: ctx.datosInmueble.inmueble._id,
       terceroId: ctx.datosInmueble.inmueble.holderId,
-      prefix: ctx.numero.prefijo,
-      number: ctx.numero.numero,
-      fullNumber: ctx.numero.completo,
-      receivedAmount: ctx.fila.valorRecibido,
-      receivedDate: ctx.fila.fechaPago,
-      paymentMethod: ctx.medioPago,
-      destinationAccount: ctx.destinationAccount,
-      reference: null,
-      notes,
-      appliedAmount: 0,
-      unappliedAmount: ctx.fila.valorRecibido,
-      status: 'activo',
-      generatedBy: ctx.accountId,
-      otherIncomeAmount: 0,
+      prefijo: ctx.numero.prefijo,
+      numero: ctx.numero.numero,
+      numeroCompleto: ctx.numero.completo,
+      montoRecibido: ctx.fila.valorRecibido,
+      fechaRecibo: ctx.fila.fechaPago,
+      medioPago: ctx.medioPago,
+      cuentaDestino: ctx.destinationAccount,
+      referencia: null,
+      observaciones: notes,
+      montoAplicado: 0,
+      montoSinAplicar: ctx.fila.valorRecibido,
+      estado: 'activo',
+      generadoPor: ctx.accountId,
+      montoOtrosIngresos: 0,
     },
     saldoDocumentoOrigen: {
       copropiedadId: ctx.copropiedadId,
@@ -577,23 +577,23 @@ export function construirEscrituraFilaAplicacion(ctx: {
       copropiedadId: ctx.copropiedadId,
       sourceType: 'RC',
       sourceId: reciboId,
-      documentType: a.tipo,
-      documentId: a.documentId,
-      amountApplied: a.montoAplicado,
-      discountApplied: a.discountApplied,
+      tipoDocumento: a.tipo,
+      documentoId: a.documentId,
+      montoAplicado: a.montoAplicado,
+      montoDescuento: a.montoDescuento,
       detalleConceptos: a.detalleConceptos,
-      status: 'activa',
-      appliedAt: new Date(),
-      sourceDate: ctx.fila.fechaPago,
-      appliedBy: ctx.accountId,
+      estado: 'activa',
+      aplicadoEn: new Date(),
+      fechaOrigen: ctx.fila.fechaPago,
+      aplicadoPor: ctx.accountId,
     })),
     asientoContable: {
       copropiedadId: ctx.copropiedadId,
       loteId: null,
       facturaId: null,
       reciboId,
-      date: ctx.fila.fechaPago,
-      entries,
+      fecha: ctx.fila.fechaPago,
+      movimientos: entries,
     },
     saldoTotalDocumentoDeltas: ctx.resultadoFifo.aplicaciones.map((a) => ({
       documentoId: a.documentId,

@@ -11,28 +11,28 @@ import { ConceptoCobro } from '../conceptos/concepto-cobro.schema';
 @Schema({ _id: false })
 export class TitularCongelado {
   @Prop({ required: true, trim: true })
-  name: string;
+  nombre: string;
 
   @Prop({ type: String, default: null, trim: true })
-  identificationType: string | null;
+  tipoIdentificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  identificationNumber: string | null;
+  numeroIdentificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  identificationVerificationDigit: string | null;
+  digitoVerificacion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  address: string | null;
+  direccion: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  city: string | null;
+  ciudad: string | null;
 
   @Prop({ type: String, default: null, trim: true })
   email: string | null;
 
   @Prop({ type: String, default: null, trim: true })
-  phone: string | null;
+  telefono: string | null;
 }
 
 export const TitularCongeladoSchema =
@@ -55,29 +55,29 @@ export class FacturaLinea {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  conceptName: string;
+  nombreConcepto: string;
 
   @Prop({
     required: true,
     enum: ['administracion', 'intereses', 'otro'],
   })
-  conceptKind: 'administracion' | 'intereses' | 'otro';
+  tipoConcepto: 'administracion' | 'intereses' | 'otro';
 
   @Prop({ type: String, default: null, trim: true })
-  accountingIncomeAccount: string | null;
+  cuentaIngreso: string | null;
 
   /** This concept's DEBIT account — null falls back to the coproperty's
    *  shared `cuentaContableCartera` at posting time, the same way
-   *  `accountingIncomeAccount` falls back to `CUENTA_SIN_ASIGNAR`. See
+   *  `cuentaIngreso` falls back to `CUENTA_SIN_ASIGNAR`. See
    *  `construirMovimientos` (asiento.builder.ts). */
   @Prop({ type: String, default: null, trim: true })
-  accountingReceivableAccount: string | null;
+  cuentaCartera: string | null;
 
   /** This concept's TAX account (`ConceptoCobro.cuentaImpuestoId`), frozen
-   *  the same way as `accountingIncomeAccount` — null when the concept has
-   *  no tax account configured, or when `taxAmount` is 0. */
+   *  the same way as `cuentaIngreso` — null when the concept has no tax
+   *  account configured, or when `valorImpuesto` is 0. */
   @Prop({ type: String, default: null, trim: true })
-  accountingTaxAccount: string | null;
+  cuentaImpuesto: string | null;
 
   /** Whether this line came from the unit's standing monthly template, a
    *  one-off novedad for this run, or the computed mora interest line. */
@@ -85,7 +85,7 @@ export class FacturaLinea {
     required: true,
     enum: ['recurrente', 'novedad', 'interes'],
   })
-  source: 'recurrente' | 'novedad' | 'interes';
+  origen: 'recurrente' | 'novedad' | 'interes';
 
   /**
    * The NovedadLote this line came from or was replaced by — null for a
@@ -100,46 +100,46 @@ export class FacturaLinea {
   novedadId: Types.ObjectId | null;
 
   @Prop({ required: true })
-  baseAmount: number;
+  valorBase: number;
 
   @Prop({ required: true, default: 0 })
-  taxRate: number;
+  tasaImpuesto: number;
 
   @Prop({ required: true, default: 0 })
-  taxAmount: number;
+  valorImpuesto: number;
 
   @Prop({ required: true })
-  totalAmount: number;
+  valorTotal: number;
 
   /**
    * This line's own currently pending balance — the mutable field every
    * application against this factura decrements, replacing the old trick of
-   * re-deriving a per-línea remainder from `Factura.outstandingBalance` plus
+   * re-deriving a per-línea remainder from `Factura.saldoPendiente` plus
    * a fixed drain order (see `remanentesPorLinea` in `recibos/cruce.util.ts`).
    * `null` on any Factura issued before this field existed; those
    * self-heal — the first application touching them derives this value once
    * (from the SAME order every payment against them has always used) and
-   * persists it, same reasoning `discountAmount`/`discountDeadline` used for
-   * their own backward compatibility.
+   * persists it, same reasoning `montoDescuento`/`fechaLimiteDescuento` used
+   * for their own backward compatibility.
    */
   @Prop({ type: Number, default: null })
-  remainingAmount: number | null;
+  saldoPendiente: number | null;
 
   /**
    * This concept's SaldoCartera balance for the unit immediately before and
-   * after this line's `totalAmount` was added — frozen at the moment the
+   * after this line's `valorTotal` was added — frozen at the moment the
    * line was built (consolidación time for a real Factura, "as of right
    * now" for a still-editable FacturaPreliminar), never recomputed later.
    * Lets the printed document show "Saldo Anterior / Nuevo Saldo" per
    * concept the way the predecessor system did, without depending on the
    * live (payment-mutable) SaldoCartera when the PDF is regenerated months
-   * afterward. `balanceAfter - balanceBefore` always equals `totalAmount`.
+   * afterward. `saldoNuevo - saldoAnterior` always equals `valorTotal`.
    */
   @Prop({ required: true })
-  balanceBefore: number;
+  saldoAnterior: number;
 
   @Prop({ required: true })
-  balanceAfter: number;
+  saldoNuevo: number;
 }
 
 export const FacturaLineaSchema = SchemaFactory.createForClass(FacturaLinea);

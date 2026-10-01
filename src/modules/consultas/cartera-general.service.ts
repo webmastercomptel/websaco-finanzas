@@ -285,7 +285,7 @@ export class CarteraGeneralService {
     copropiedadId: Types.ObjectId,
   ): Promise<CarteraPorConcepto[]> {
     const saldos = await this.saldosCartera
-      .find({ copropiedadId, balance: { $gt: 0 } })
+      .find({ copropiedadId, saldoPendiente: { $gt: 0 } })
       .exec();
 
     if (saldos.length === 0) return [];
@@ -294,7 +294,7 @@ export class CarteraGeneralService {
     const conceptoMap = new Map<string, number>();
     for (const sc of saldos) {
       const key = sc.conceptoId.toString();
-      conceptoMap.set(key, (conceptoMap.get(key) ?? 0) + sc.balance);
+      conceptoMap.set(key, (conceptoMap.get(key) ?? 0) + sc.saldoPendiente);
     }
 
     // Resolve concepto names, in the coproperty's own catalog order — the
@@ -353,8 +353,8 @@ export class CarteraGeneralService {
     const apps = await this.aplicaciones
       .find({
         copropiedadId,
-        status: 'activa',
-        appliedAt: { $gte: startMonth, $lte: hoy },
+        estado: 'activa',
+        aplicadoEn: { $gte: startMonth, $lte: hoy },
       })
       .exec();
 
@@ -371,10 +371,10 @@ export class CarteraGeneralService {
 
     // Fill buckets
     for (const app of apps) {
-      const d = app.appliedAt;
+      const d = app.aplicadoEn;
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       if (buckets.has(key)) {
-        buckets.set(key, (buckets.get(key) ?? 0) + app.amountApplied);
+        buckets.set(key, (buckets.get(key) ?? 0) + app.montoAplicado);
       }
     }
 

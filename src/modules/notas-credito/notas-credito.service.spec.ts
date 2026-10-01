@@ -50,11 +50,11 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
-  status: 'emitida',
-  fullNumber: 'FV-1',
+  estado: 'emitida',
+  numeroCompleto: 'FV-1',
   outstandingBalance: 200000,
   total: 200000,
-  lines: [{ conceptoId: CONCEPTO, totalAmount: 200000 }],
+  lineas: [{ conceptoId: CONCEPTO, valorTotal: 200000 }],
   ...over,
 });
 
@@ -198,8 +198,8 @@ const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
 /** `SaldoDocumentoOrigen` mock, backed by whichever NotaCredito fixtures the
  *  caller passes — same shared-mutable-state trick `modeloSaldoTotalDocumento`
  *  uses, just for the SOURCE side (NotaCredito) instead of the charge side.
- *  Reuses each fixture's own `unappliedAmount` as the live `saldoDisponible`
- *  and `totalAmount` as the frozen `montoOriginal`. Mirrors
+ *  Reuses each fixture's own `montoSinAplicar` as the live `saldoDisponible`
+ *  and `montoTotal` as the frozen `montoOriginal`. Mirrors
  *  `recibos.service.spec.ts`'s own helper of the same name. */
 const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
   create: jest.fn(() => Promise.resolve([{}])),
@@ -215,18 +215,18 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
         if (!doc) return Promise.resolve(null);
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((doc.unappliedAmount as number) < monto) {
+          if ((doc.montoSinAplicar as number) < monto) {
             return Promise.resolve(null);
           }
-          doc.unappliedAmount = (doc.unappliedAmount as number) - monto;
+          doc.montoSinAplicar = (doc.montoSinAplicar as number) - monto;
         } else if (update.$inc) {
-          doc.unappliedAmount =
-            (doc.unappliedAmount as number) + update.$inc.saldoDisponible;
+          doc.montoSinAplicar =
+            (doc.montoSinAplicar as number) + update.$inc.saldoDisponible;
         }
         return Promise.resolve({
           documentoId: doc._id,
-          montoOriginal: doc.totalAmount,
-          saldoDisponible: doc.unappliedAmount,
+          montoOriginal: doc.montoTotal,
+          saldoDisponible: doc.montoSinAplicar,
         });
       },
     }),
@@ -243,8 +243,8 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
       return doc
         ? {
             documentoId: doc._id,
-            montoOriginal: doc.totalAmount,
-            saldoDisponible: doc.unappliedAmount,
+            montoOriginal: doc.montoTotal,
+            saldoDisponible: doc.montoSinAplicar,
           }
         : null;
     })();
@@ -266,11 +266,11 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
         ? documentos.filter((d) =>
             idsFiltro.map(String).includes(String(d._id)),
           )
-        : documentos.filter((d) => (d.unappliedAmount as number) > 0);
+        : documentos.filter((d) => (d.montoSinAplicar as number) > 0);
       return Promise.resolve(
         resultado.map((d) => ({
           documentoId: d._id,
-          saldoDisponible: d.unappliedAmount,
+          saldoDisponible: d.montoSinAplicar,
         })),
       );
     },
@@ -292,18 +292,18 @@ const modeloSaldoDocumentoOrigenUnico = (nota: Record<string, unknown>) => ({
       exec: () => {
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((nota.unappliedAmount as number) < monto) {
+          if ((nota.montoSinAplicar as number) < monto) {
             return Promise.resolve(null);
           }
-          nota.unappliedAmount = (nota.unappliedAmount as number) - monto;
+          nota.montoSinAplicar = (nota.montoSinAplicar as number) - monto;
         } else if (update.$inc) {
-          nota.unappliedAmount =
-            (nota.unappliedAmount as number) + update.$inc.saldoDisponible;
+          nota.montoSinAplicar =
+            (nota.montoSinAplicar as number) + update.$inc.saldoDisponible;
         }
         return Promise.resolve({
           documentoId: nota._id,
-          montoOriginal: nota.totalAmount,
-          saldoDisponible: nota.unappliedAmount,
+          montoOriginal: nota.montoTotal,
+          saldoDisponible: nota.montoSinAplicar,
         });
       },
     }),
@@ -311,8 +311,8 @@ const modeloSaldoDocumentoOrigenUnico = (nota: Record<string, unknown>) => ({
   findOne: jest.fn(() => {
     const resultado = {
       documentoId: nota._id,
-      montoOriginal: nota.totalAmount,
-      saldoDisponible: nota.unappliedAmount,
+      montoOriginal: nota.montoTotal,
+      saldoDisponible: nota.montoSinAplicar,
     };
     const cadena = {
       session: () => cadena,
@@ -324,7 +324,7 @@ const modeloSaldoDocumentoOrigenUnico = (nota: Record<string, unknown>) => ({
   find: jest.fn(() => ({
     exec: () =>
       Promise.resolve([
-        { documentoId: nota._id, saldoDisponible: nota.unappliedAmount },
+        { documentoId: nota._id, saldoDisponible: nota.montoSinAplicar },
       ]),
   })),
 });
@@ -481,20 +481,20 @@ const notaCreditoCreada = (over: Record<string, unknown> = {}) => ({
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
   facturaId: new Types.ObjectId(),
-  issueDate: new Date('2026-01-15'),
-  prefix: 'NC',
-  number: 1,
-  fullNumber: 'NC-1',
-  reason: 'error_facturacion',
-  totalAmount: 200000,
-  distribution: [{ conceptoId: CONCEPTO, amount: 200000 }],
-  appliedAmount: 0,
-  unappliedAmount: 200000,
-  notes: null,
-  status: 'activo',
-  voidedReason: null,
-  voidedDetail: null,
-  voidedAt: null,
+  fecha: new Date('2026-01-15'),
+  prefijo: 'NC',
+  numero: 1,
+  numeroCompleto: 'NC-1',
+  motivo: 'error_facturacion',
+  montoTotal: 200000,
+  distribucion: [{ conceptoId: CONCEPTO, monto: 200000 }],
+  montoAplicado: 0,
+  montoSinAplicar: 200000,
+  observaciones: null,
+  estado: 'activo',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
   ...over,
 });
 
@@ -523,7 +523,7 @@ describe('NotasCreditoService.crear', () => {
     const [[filas]] = aplicaciones.create.mock.calls;
     expect(filas[0]).toMatchObject({
       sourceType: 'NC',
-      documentType: 'FV',
+      tipoDocumento: 'FV',
       amountApplied: 200000,
     });
     // Persisted for printing (Nota Crédito's own PDF, styled after Recibo's
@@ -531,9 +531,9 @@ describe('NotasCreditoService.crear', () => {
     // carries). Never reconstructable after the fact otherwise: this is the
     // only point `dto.distribucion` scaled against `montoAAplicar` exists.
     expect(filas[0].detalleConceptos).toEqual([
-      { conceptoId: CONCEPTO, conceptName: 'Concepto', monto: 200000 },
+      { conceptoId: CONCEPTO, nombreConcepto: 'Concepto', monto: 200000 },
     ]);
-    // La NotaCredito ya no cachea `appliedAmount`/`unappliedAmount` — el
+    // La NotaCredito ya no cachea `montoAplicado`/`montoSinAplicar` — el
     // decremento vivo ahora es el `$expr`-guarded `findOneAndUpdate` contra
     // `SaldoDocumentoOrigen` (ver `decrementarSaldoDocumentoOrigen`).
     expect(saldoDocumentoOrigen.findOneAndUpdate).toHaveBeenCalledWith(
@@ -582,11 +582,11 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const entries = fila[0].entries as Array<{
-      account: string;
+      cuenta: string;
       tercero?: string | null;
       centroCosto?: string | null;
     }>;
-    const devoluciones = entries.find((e) => e.account === '413595');
+    const devoluciones = entries.find((e) => e.cuenta === '413595');
     expect(devoluciones?.tercero).toBe('1304');
     expect(devoluciones?.centroCosto).toBe('CC-01');
   });
@@ -597,11 +597,11 @@ describe('NotasCreditoService.crear', () => {
     // llamada siempre lo omitía, moviendo el par memo aunque la nota
     // corrigiera solo Administración.
     const factura = facturaDoc({
-      lines: [
+      lineas: [
         {
           conceptoId: CONCEPTO,
-          conceptKind: 'administracion',
-          totalAmount: 200000,
+          tipoConcepto: 'administracion',
+          valorTotal: 200000,
         },
       ],
     });
@@ -631,9 +631,9 @@ describe('NotasCreditoService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{ account: string }>;
-    expect(entries.some((e) => e.account === '831505')).toBe(false);
-    expect(entries.some((e) => e.account === '831510')).toBe(false);
+    const entries = fila[0].entries as Array<{ cuenta: string }>;
+    expect(entries.some((e) => e.cuenta === '831505')).toBe(false);
+    expect(entries.some((e) => e.cuenta === '831510')).toBe(false);
   });
 
   it('mueve cuentasOrden SOLO por la porción de la nota aplicada contra un concepto de intereses', async () => {
@@ -641,20 +641,20 @@ describe('NotasCreditoService.crear', () => {
     const factura = facturaDoc({
       outstandingBalance: 200000,
       total: 200000,
-      lines: [
+      lineas: [
         {
           conceptoId: CONCEPTO,
-          conceptKind: 'administracion',
-          totalAmount: 150000,
+          tipoConcepto: 'administracion',
+          valorTotal: 150000,
         },
         {
           conceptoId: conceptoMora,
-          conceptKind: 'intereses',
-          totalAmount: 50000,
+          tipoConcepto: 'intereses',
+          valorTotal: 50000,
         },
       ],
     });
-    const notaCreada = notaCreditoCreada({ totalAmount: 200000 });
+    const notaCreada = notaCreditoCreada({ montoTotal: 200000 });
     const { service, asientos } = construirServicio({
       notaCreada,
       factura,
@@ -690,14 +690,14 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const entries = fila[0].entries as Array<{
-      account: string;
-      amount: number;
+      cuenta: string;
+      monto: number;
     }>;
     // El par memo debe moverse por 50000 (solo mora) — nunca por los 200000
     // totales de la nota.
     expect(
-      entries.find((e) => e.account === '831505' || e.account === '831510')
-        ?.amount,
+      entries.find((e) => e.cuenta === '831505' || e.cuenta === '831510')
+        ?.monto,
     ).toBe(50000);
   });
 
@@ -706,24 +706,24 @@ describe('NotasCreditoService.crear', () => {
     const factura = facturaDoc({
       outstandingBalance: 200000,
       total: 200000,
-      lines: [
+      lineas: [
         {
           conceptoId: CONCEPTO,
-          conceptKind: 'administracion',
-          totalAmount: 150000,
-          accountingIncomeAccount: '413501',
-          accountingReceivableAccount: '130599',
+          tipoConcepto: 'administracion',
+          valorTotal: 150000,
+          cuentaIngreso: '413501',
+          cuentaCartera: '130599',
         },
         {
           conceptoId: conceptoMora,
-          conceptKind: 'intereses',
-          totalAmount: 50000,
-          accountingIncomeAccount: '413502',
-          accountingReceivableAccount: '130502',
+          tipoConcepto: 'intereses',
+          valorTotal: 50000,
+          cuentaIngreso: '413502',
+          cuentaCartera: '130502',
         },
       ],
     });
-    const notaCreada = notaCreditoCreada({ totalAmount: 200000 });
+    const notaCreada = notaCreditoCreada({ montoTotal: 200000 });
     const { service, asientos } = construirServicio({
       notaCreada,
       factura,
@@ -759,35 +759,35 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const entries = fila[0].entries as Array<{
-      account: string;
-      amount: number;
+      cuenta: string;
+      monto: number;
     }>;
 
     // La cuenta real de intereses (CxC/Ingreso) nunca debe aparecer — su
     // reverso va SOLO por cuentasOrden, igual que su cargo original nunca
     // las tocó (construirMovimientos).
-    expect(entries.some((e) => e.account === '413502')).toBe(false);
-    expect(entries.some((e) => e.account === '130502')).toBe(false);
+    expect(entries.some((e) => e.cuenta === '413502')).toBe(false);
+    expect(entries.some((e) => e.cuenta === '130502')).toBe(false);
 
     // Administración sí se mueve normalmente por sus propias cuentas.
-    expect(entries.find((e) => e.account === '413501')?.amount).toBe(150000);
-    expect(entries.find((e) => e.account === '130599')?.amount).toBe(150000);
+    expect(entries.find((e) => e.cuenta === '413501')?.monto).toBe(150000);
+    expect(entries.find((e) => e.cuenta === '130599')?.monto).toBe(150000);
 
     // cuentasOrden se mueve por los 50000 de mora, sin cambios.
     expect(
-      entries.find((e) => e.account === '831505' || e.account === '831510')
-        ?.amount,
+      entries.find((e) => e.cuenta === '831505' || e.cuenta === '831510')
+        ?.monto,
     ).toBe(50000);
   });
 
   it('acredita la cuenta propia del concepto cuando la línea de la factura ancla la trae configurada', async () => {
     const factura = facturaDoc({
-      number: 42,
-      lines: [
+      numero: 42,
+      lineas: [
         {
           conceptoId: CONCEPTO,
-          totalAmount: 200000,
-          accountingReceivableAccount: '130599',
+          valorTotal: 200000,
+          cuentaCartera: '130599',
         },
       ],
     });
@@ -800,9 +800,9 @@ describe('NotasCreditoService.crear', () => {
       [Record<string, unknown>[]]
     >;
     const entries = fila[0].entries as Array<{
-      account: string;
+      cuenta: string;
       type: string;
-      amount: number;
+      monto: number;
       tipoDocumento: string | null;
       numeroDocumento: number | null;
     }>;
@@ -813,10 +813,10 @@ describe('NotasCreditoService.crear', () => {
     // que en `aplicarManual`/`aplicarFifo`.
     expect(creditos).toEqual([
       {
-        account: '130599',
+        cuenta: '130599',
         type: 'credito',
-        amount: 200000,
-        description: expect.any(String) as string,
+        monto: 200000,
+        descripcion: expect.any(String) as string,
         tipoDocumento: 'FV',
         numeroDocumento: 42,
       },
@@ -827,12 +827,12 @@ describe('NotasCreditoService.crear', () => {
     const factura = facturaDoc({
       outstandingBalance: 120000,
       total: 300000,
-      lines: [{ conceptoId: CONCEPTO, totalAmount: 300000 }],
+      lineas: [{ conceptoId: CONCEPTO, valorTotal: 300000 }],
     });
     const notaCreada = notaCreditoCreada({
-      totalAmount: 300000,
-      unappliedAmount: 300000,
-      distribution: [{ conceptoId: CONCEPTO, amount: 300000 }],
+      montoTotal: 300000,
+      montoSinAplicar: 300000,
+      distribucion: [{ conceptoId: CONCEPTO, monto: 300000 }],
     });
     const { service, aplicaciones } = construirServicio({
       notaCreada,
@@ -918,8 +918,8 @@ describe('NotasCreditoService.crear', () => {
     // más de 50000 disponibles.
     const notaPrevia = {
       facturaId: new Types.ObjectId(),
-      status: 'activo',
-      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+      estado: 'activo',
+      distribucion: [{ conceptoId: CONCEPTO, monto: 150000 }],
     };
     const { service, notasCredito } = construirServicio({
       notaCreada: {},
@@ -938,17 +938,17 @@ describe('NotasCreditoService.crear', () => {
     // Solo cuenta lo emitido bajo la MISMA factura ancla, y solo mientras
     // sigue activo — una nota anulada ya reversó su crédito.
     expect(notasCredito.find).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'activo' }),
+      expect.objectContaining({ estado: 'activo' }),
     );
   });
 
   it('acepta cuando lo ya acreditado por otras notas crédito activas más esta nueva cabe exacto en el valor de emisión del concepto', async () => {
     const notaPrevia = {
       facturaId: new Types.ObjectId(),
-      status: 'activo',
-      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+      estado: 'activo',
+      distribucion: [{ conceptoId: CONCEPTO, monto: 150000 }],
     };
-    const notaCreada = notaCreditoCreada({ totalAmount: 50000 });
+    const notaCreada = notaCreditoCreada({ montoTotal: 50000 });
     const { service } = construirServicio({
       notaCreada,
       notasCreditoPrevias: [notaPrevia],
@@ -966,7 +966,7 @@ describe('NotasCreditoService.crear', () => {
   });
 
   it('rechaza una nota crédito contra una factura ya anulada', async () => {
-    const factura = facturaDoc({ status: 'anulada' });
+    const factura = facturaDoc({ estado: 'anulada' });
     const { service } = construirServicio({ notaCreada: {}, factura });
 
     await expect(service.crear('acc-1', dtoBase())).rejects.toBeInstanceOf(
@@ -998,21 +998,21 @@ describe('NotasCreditoService.crear', () => {
     const factura = facturaDoc({
       outstandingBalance: 400000,
       total: 600000,
-      lines: [
-        { conceptoId: conceptoP, totalAmount: 300000 },
-        { conceptoId: conceptoQ, totalAmount: 300000 },
+      lineas: [
+        { conceptoId: conceptoP, valorTotal: 300000 },
+        { conceptoId: conceptoQ, valorTotal: 300000 },
       ],
     });
     const notaCreada = notaCreditoCreada({
-      totalAmount: 400000,
+      montoTotal: 400000,
       // El saldo VIVO pre-aplicación (`SaldoDocumentoOrigen`, reusa este
       // mismo campo de fixture) tiene que arrancar en el monto total: esta
       // es la auto-aplicación de `crear()` contra la factura ancla, no un
       // estado final ya aplicado.
-      unappliedAmount: 400000,
-      distribution: [
-        { conceptoId: conceptoP, amount: 250000 },
-        { conceptoId: conceptoQ, amount: 150000 },
+      montoSinAplicar: 400000,
+      distribucion: [
+        { conceptoId: conceptoP, monto: 250000 },
+        { conceptoId: conceptoQ, monto: 150000 },
       ],
     });
     const llamadasSaldos: Array<[Record<string, unknown>, unknown]> = [];
@@ -1066,7 +1066,7 @@ describe('NotasCreditoService.crear', () => {
     ];
     expect(entrada.notaCreditoId).toEqual(notaCreada._id);
     expect(entrada.entries[0]).toMatchObject({
-      account: '413595',
+      cuenta: '413595',
       type: 'debito',
     });
   });
@@ -1077,7 +1077,7 @@ describe('NotasCreditoService.crear', () => {
     // fechado "hoy" (el instante del servidor) en vez de la fecha que el
     // usuario eligió — Consulta de Movimientos filtra por AsientoContable.date,
     // así que la nota no aparecía al buscar por su propio período.
-    const notaCreada = notaCreditoCreada({ issueDate: new Date('2026-01-05') });
+    const notaCreada = notaCreditoCreada({ fecha: new Date('2026-01-05') });
     const { service, asientos } = construirServicio({ notaCreada });
 
     await service.crear('acc-1', dtoBase({ fecha: '2026-01-05' }));
@@ -1089,33 +1089,33 @@ describe('NotasCreditoService.crear', () => {
     expect(entrada.date).toEqual(new Date('2026-01-05'));
   });
 
-  it('debita la cuenta de ingreso PROPIA de cada concepto (accountingIncomeAccount de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
+  it('debita la cuenta de ingreso PROPIA de cada concepto (cuentaIngreso de la factura ancla) — nunca una sola cuentaDevoluciones para todo', async () => {
     // Reportado en producción: el PDF salía con "Sin cuenta asignada" en el
     // débito porque copropiedad.cuentaDevoluciones no estaba configurada —
     // pero además, aun configurada, una sola cuenta para TODA la nota es
     // incorrecto: debe reversar el ingreso de cada concepto en la MISMA
     // cuenta que se acreditó al facturarlo (ConceptoCobro.cuentaCreditoId,
-    // congelada como FacturaLinea.accountingIncomeAccount).
+    // congelada como FacturaLinea.cuentaIngreso).
     const conceptoAdmin = new Types.ObjectId();
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
       outstandingBalance: 130000,
       total: 130000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          totalAmount: 100000,
-          accountingIncomeAccount: '413501',
+          valorTotal: 100000,
+          cuentaIngreso: '413501',
         },
         {
           conceptoId: conceptoMora,
-          totalAmount: 30000,
-          accountingIncomeAccount: '413502',
+          valorTotal: 30000,
+          cuentaIngreso: '413502',
         },
       ],
     });
     const { service, asientos } = construirServicio({
-      notaCreada: notaCreditoCreada({ totalAmount: 130000 }),
+      notaCreada: notaCreditoCreada({ montoTotal: 130000 }),
       factura,
     });
 
@@ -1138,8 +1138,8 @@ describe('NotasCreditoService.crear', () => {
     ];
     const debitos = entrada.entries.filter((e) => e.type === 'debito');
     expect(debitos).toEqual([
-      expect.objectContaining({ account: '413501', amount: 100000 }),
-      expect.objectContaining({ account: '413502', amount: 30000 }),
+      expect.objectContaining({ cuenta: '413501', monto: 100000 }),
+      expect.objectContaining({ cuenta: '413502', monto: 30000 }),
     ]);
   });
 });
@@ -1151,12 +1151,12 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     conceptoId: CONCEPTO,
-    status: 'emitida',
-    fullNumber: 'ND-1',
-    number: 1,
+    estado: 'emitida',
+    numeroCompleto: 'ND-1',
+    numero: 1,
     total: 150000,
     outstandingBalance: 150000,
-    description: 'Multa por parqueo',
+    descripcion: 'Multa por parqueo',
     ...over,
   });
 
@@ -1197,8 +1197,8 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
       facturaId: null,
       notaDebitoId: notaDebito._id,
       tipoDocumentoAncla: 'ND',
-      totalAmount: 150000,
-      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+      montoTotal: 150000,
+      distribucion: [{ conceptoId: CONCEPTO, monto: 150000 }],
     });
     const notasCredito = modeloNotasCredito(notaCreada);
     const saldoTotalDocumento = modeloSaldoTotalDocumentoUnico(notaDebito);
@@ -1253,8 +1253,8 @@ describe('NotasCreditoService.crear — ancla Nota Débito', () => {
       facturaId: null,
       notaDebitoId: notaDebito._id,
       tipoDocumentoAncla: 'ND',
-      totalAmount: 150000,
-      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
+      montoTotal: 150000,
+      distribucion: [{ conceptoId: CONCEPTO, monto: 150000 }],
     });
     const notasCredito = modeloNotasCredito(notaCreada);
     const concepto = {
@@ -1349,7 +1349,7 @@ describe('NotasCreditoService.crear — fecha de la nota', () => {
     const [filas] = notasCredito.create.mock.calls[0] as unknown as [
       Record<string, unknown>[],
     ];
-    expect(filas[0]).toMatchObject({ issueDate: new Date('2026-01-20') });
+    expect(filas[0]).toMatchObject({ fecha: new Date('2026-01-20') });
   });
 
   it('rechaza una fecha de un mes distinto al del último lote consolidado', async () => {
@@ -1445,12 +1445,12 @@ const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
   // that throws a TypeError instead of returning the mapped contract. Added
   // additively — no existing assertion touches either field.
   facturaId: new Types.ObjectId(),
-  distribution: [],
-  fullNumber: 'NC-1',
-  totalAmount: 200000,
-  appliedAmount: 120000,
-  unappliedAmount: 80000,
-  status: 'activo',
+  distribucion: [],
+  numeroCompleto: 'NC-1',
+  montoTotal: 200000,
+  montoAplicado: 120000,
+  montoSinAplicar: 80000,
+  estado: 'activo',
   // NotaCredito has no declared business date field of its own —
   // `createdAt` is its issue date, read by `toAplicacionCartera` via a cast
   // (see `notas-credito.service.ts`'s own `fechaNota`).
@@ -1459,7 +1459,7 @@ const notaActivaDoc = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('NotasCreditoService.aplicar', () => {
-  it('aplica manualmente contra otra factura del mismo inmueble y descuenta unappliedAmount', async () => {
+  it('aplica manualmente contra otra factura del mismo inmueble y descuenta montoSinAplicar', async () => {
     const nota = notaActivaDoc();
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -1469,8 +1469,8 @@ describe('NotasCreditoService.aplicar', () => {
         (_f: unknown, update: { $inc?: Record<string, number> }) => ({
           exec: () => {
             if (update?.$inc) {
-              nota.appliedAmount += update.$inc.appliedAmount ?? 0;
-              nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
+              nota.montoAplicado += update.$inc.montoAplicado ?? 0;
+              nota.montoSinAplicar += update.$inc.montoSinAplicar ?? 0;
             }
             return Promise.resolve(null);
           },
@@ -1526,7 +1526,7 @@ describe('NotasCreditoService.aplicar', () => {
     // DEFERRED application (`aplicarManual`), so it must capture
     // `ajustarSaldosCartera`'s own return, not `dto.distribucion`.
     expect(filas[0].detalleConceptos).toEqual([
-      { conceptoId: CONCEPTO, conceptName: 'Concepto', monto: 80000 },
+      { conceptoId: CONCEPTO, nombreConcepto: 'Concepto', monto: 80000 },
     ]);
   });
 
@@ -1538,7 +1538,7 @@ describe('NotasCreditoService.aplicar', () => {
     // detectaría: el monto no calzaría con el split 75/25 de la OTRA
     // factura.
     const nota = notaActivaDoc({
-      distribution: [{ conceptoId: CONCEPTO, amount: 999999 }],
+      distribucion: [{ conceptoId: CONCEPTO, monto: 999999 }],
     });
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -1548,8 +1548,8 @@ describe('NotasCreditoService.aplicar', () => {
         (_f: unknown, update: { $inc?: Record<string, number> }) => ({
           exec: () => {
             if (update?.$inc) {
-              nota.appliedAmount += update.$inc.appliedAmount ?? 0;
-              nota.unappliedAmount += update.$inc.unappliedAmount ?? 0;
+              nota.montoAplicado += update.$inc.montoAplicado ?? 0;
+              nota.montoSinAplicar += update.$inc.montoSinAplicar ?? 0;
             }
             return Promise.resolve(null);
           },
@@ -1562,9 +1562,9 @@ describe('NotasCreditoService.aplicar', () => {
       outstandingBalance: 80000,
       inmuebleId: INMUEBLE,
       total: 80000,
-      lines: [
-        { conceptoId: conceptoR, totalAmount: 60000 },
-        { conceptoId: conceptoS, totalAmount: 20000 },
+      lineas: [
+        { conceptoId: conceptoR, valorTotal: 60000 },
+        { conceptoId: conceptoS, valorTotal: 20000 },
       ],
     });
     const facturas = modeloFacturas(otraFactura);
@@ -1666,7 +1666,7 @@ describe('NotasCreditoService.aplicar', () => {
   });
 
   it('rechaza aplicar sobre una nota crédito anulada', async () => {
-    const nota = notaActivaDoc({ status: 'anulado' });
+    const nota = notaActivaDoc({ estado: 'anulado' });
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -1733,29 +1733,29 @@ describe('NotasCreditoService.anular', () => {
   it('revierte cada AplicacionCartera activa (sourceType NC) y restaura el outstandingBalance de cada factura afectada', async () => {
     const facturaId = new Types.ObjectId();
     const nota = notaActivaDoc({
-      appliedAmount: 120000,
-      unappliedAmount: 80000,
-      totalAmount: 200000,
+      montoAplicado: 120000,
+      montoSinAplicar: 80000,
+      montoTotal: 200000,
     });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      documentType: 'FV',
+      documentoId: facturaId,
+      tipoDocumento: 'FV',
       amountApplied: 120000,
-      status: 'activa',
+      estado: 'activa',
     };
     const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 200000,
-      lines: [],
+      lineas: [],
     };
     const facturas = {
       // Resolves `desgloseOrigen`'s per-concepto débito accounts (looked up
       // by `nota.facturaId`, a DIFFERENT id here) — `null` there just means
       // the reversal falls back to `cuentaDevoluciones`, which this test
       // doesn't assert on. The reversal loop's own lookup, by
-      // `aplicacion.documentId` (== `facturaId`), DOES need a real document.
+      // `aplicacion.documentoId` (== `facturaId`), DOES need a real document.
       findOne: jest.fn((filtro: Record<string, unknown>) => ({
         session: () => ({
           exec: () =>
@@ -1828,41 +1828,41 @@ describe('NotasCreditoService.anular', () => {
     expect(resultado.montoSinAplicar).toBe(0);
   });
 
-  it('reversa el débito por la cuenta de ingreso PROPIA de cada concepto (nota.distribution + accountingIncomeAccount de la factura ancla) — nunca cuentaDevoluciones sola', async () => {
+  it('reversa el débito por la cuenta de ingreso PROPIA de cada concepto (nota.distribution + cuentaIngreso de la factura ancla) — nunca cuentaDevoluciones sola', async () => {
     const facturaId = new Types.ObjectId();
     const conceptoAdmin = new Types.ObjectId();
     const conceptoMora = new Types.ObjectId();
     const nota = notaActivaDoc({
       facturaId,
-      distribution: [
-        { conceptoId: conceptoAdmin, amount: 100000 },
-        { conceptoId: conceptoMora, amount: 30000 },
+      distribucion: [
+        { conceptoId: conceptoAdmin, monto: 100000 },
+        { conceptoId: conceptoMora, monto: 30000 },
       ],
-      appliedAmount: 130000,
-      unappliedAmount: 0,
-      totalAmount: 130000,
+      montoAplicado: 130000,
+      montoSinAplicar: 0,
+      montoTotal: 130000,
     });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      documentType: 'FV',
+      documentoId: facturaId,
+      tipoDocumento: 'FV',
       amountApplied: 130000,
-      status: 'activa',
+      estado: 'activa',
     };
     const facturaAncla = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 130000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          totalAmount: 100000,
-          accountingIncomeAccount: '413501',
+          valorTotal: 100000,
+          cuentaIngreso: '413501',
         },
         {
           conceptoId: conceptoMora,
-          totalAmount: 30000,
-          accountingIncomeAccount: '413502',
+          valorTotal: 30000,
+          cuentaIngreso: '413502',
         },
       ],
     };
@@ -1932,8 +1932,8 @@ describe('NotasCreditoService.anular', () => {
     ];
     const creditos = entrada.entries.filter((e) => e.type === 'credito');
     expect(creditos).toEqual([
-      expect.objectContaining({ account: '413501', amount: 100000 }),
-      expect.objectContaining({ account: '413502', amount: 30000 }),
+      expect.objectContaining({ cuenta: '413501', monto: 100000 }),
+      expect.objectContaining({ cuenta: '413502', monto: 30000 }),
     ]);
   });
 
@@ -1947,29 +1947,29 @@ describe('NotasCreditoService.anular', () => {
     const conceptoMora = new Types.ObjectId();
     const nota = notaActivaDoc({
       facturaId,
-      distribution: [
-        { conceptoId: conceptoAdmin, amount: 100000 },
-        { conceptoId: conceptoMora, amount: 30000 },
+      distribucion: [
+        { conceptoId: conceptoAdmin, monto: 100000 },
+        { conceptoId: conceptoMora, monto: 30000 },
       ],
-      appliedAmount: 130000,
-      unappliedAmount: 0,
-      totalAmount: 130000,
+      montoAplicado: 130000,
+      montoSinAplicar: 0,
+      montoTotal: 130000,
     });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      documentType: 'FV',
+      documentoId: facturaId,
+      tipoDocumento: 'FV',
       amountApplied: 130000,
-      status: 'activa',
+      estado: 'activa',
       detalleConceptos: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administración',
+          nombreConcepto: 'Administración',
           monto: 100000,
         },
         {
           conceptoId: conceptoMora,
-          conceptName: 'Intereses por mora',
+          nombreConcepto: 'Intereses por mora',
           monto: 30000,
         },
       ],
@@ -1978,18 +1978,18 @@ describe('NotasCreditoService.anular', () => {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 130000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          conceptKind: 'administracion',
-          totalAmount: 100000,
-          accountingIncomeAccount: '413501',
+          tipoConcepto: 'administracion',
+          valorTotal: 100000,
+          cuentaIngreso: '413501',
         },
         {
           conceptoId: conceptoMora,
-          conceptKind: 'intereses',
-          totalAmount: 30000,
-          accountingIncomeAccount: '413502',
+          tipoConcepto: 'intereses',
+          valorTotal: 30000,
+          cuentaIngreso: '413502',
         },
       ],
     };
@@ -2069,12 +2069,12 @@ describe('NotasCreditoService.anular', () => {
       [Record<string, unknown>[]]
     >;
     const [entrada] = creado as unknown as [
-      { entries: { account: string; amount: number }[] },
+      { entries: { cuenta: string; monto: number }[] },
     ];
     const memo = entrada.entries.find(
-      (e) => e.account === '831505' || e.account === '831510',
+      (e) => e.cuenta === '831505' || e.cuenta === '831510',
     );
-    expect(memo?.amount).toBe(30000);
+    expect(memo?.monto).toBe(30000);
   });
 
   // Mirrors `recibos.service.spec.ts`'s
@@ -2084,16 +2084,16 @@ describe('NotasCreditoService.anular', () => {
   it('revierte la aplicación aunque la factura afectada ya esté anulada por otra vía (no rompe, es contabilidad inofensiva)', async () => {
     const facturaId = new Types.ObjectId();
     const nota = notaActivaDoc({
-      appliedAmount: 120000,
-      unappliedAmount: 80000,
-      totalAmount: 200000,
+      montoAplicado: 120000,
+      montoSinAplicar: 80000,
+      montoTotal: 200000,
     });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      documentType: 'FV',
+      documentoId: facturaId,
+      tipoDocumento: 'FV',
       amountApplied: 120000,
-      status: 'activa',
+      estado: 'activa',
     };
 
     // La factura ya no existe bajo esas condiciones (anulada por otra vía) —
@@ -2166,50 +2166,50 @@ describe('NotasCreditoService.anular', () => {
 
     const nota = notaActivaDoc({
       facturaId: facturaAncla,
-      distribution: [
-        { conceptoId: conceptoX, amount: 150000 },
-        { conceptoId: conceptoY, amount: 50000 },
+      distribucion: [
+        { conceptoId: conceptoX, monto: 150000 },
+        { conceptoId: conceptoY, monto: 50000 },
       ],
-      appliedAmount: 280000,
-      unappliedAmount: 0,
-      totalAmount: 280000,
+      montoAplicado: 280000,
+      montoSinAplicar: 0,
+      montoTotal: 280000,
     });
 
     // La ancla: creada en crear() contra `facturaAncla`, aplicando el total
     // de la distribución (200000 = 150000 + 50000).
     const aplicacionAncla = {
       _id: new Types.ObjectId(),
-      documentId: facturaAncla,
-      documentType: 'FV',
+      documentoId: facturaAncla,
+      tipoDocumento: 'FV',
       amountApplied: 200000,
-      status: 'activa',
+      estado: 'activa',
     };
     // La NO ancla: creada más tarde vía aplicar() contra OTRA factura, sin
     // relación con `nota.distribution`.
     const aplicacionOtra = {
       _id: new Types.ObjectId(),
-      documentId: facturaOtra,
-      documentType: 'FV',
+      documentoId: facturaOtra,
+      tipoDocumento: 'FV',
       amountApplied: 80000,
-      status: 'activa',
+      estado: 'activa',
     };
 
     const facturaAnclaRestaurada = {
       _id: facturaAncla,
       inmuebleId: INMUEBLE,
       total: 200000,
-      lines: [{ conceptoId: conceptoX, totalAmount: 200000 }],
+      lineas: [{ conceptoId: conceptoX, valorTotal: 200000 }],
     };
     const facturaOtraRestaurada = {
       _id: facturaOtra,
       inmuebleId: INMUEBLE,
       total: 80000,
-      lines: [{ conceptoId: conceptoZ, totalAmount: 80000 }],
+      lineas: [{ conceptoId: conceptoZ, valorTotal: 80000 }],
     };
 
     const facturas = {
       // Resolves `desgloseOrigen`'s per-concepto débito accounts from the
-      // anchor Factura's own `lines` — no `accountingIncomeAccount` set on
+      // anchor Factura's own `lines` — no `cuentaIngreso` set on
       // them here, so the reversal falls back to `cuentaDevoluciones`, which
       // this test doesn't assert on (it only checks the SaldoCartera math).
       findOne: jest.fn((filtro: Record<string, unknown>) => ({
@@ -2321,9 +2321,9 @@ describe('NotasCreditoService.anular', () => {
 
   it('postea SIEMPRE el contra-asiento, acreditando cuentaDevoluciones por el montoTotal completo', async () => {
     const nota = notaActivaDoc({
-      appliedAmount: 200000,
-      unappliedAmount: 0,
-      totalAmount: 200000,
+      montoAplicado: 200000,
+      montoSinAplicar: 0,
+      montoTotal: 200000,
     });
     const notasCredito = {
       findOne: jest.fn(() => ({
@@ -2380,13 +2380,13 @@ describe('NotasCreditoService.anular', () => {
       { entries: Record<string, unknown>[] },
     ];
     expect(entrada.entries.find((m) => m.type === 'credito')).toMatchObject({
-      account: '413595',
-      amount: 200000,
+      cuenta: '413595',
+      monto: 200000,
     });
   });
 
   it('rechaza anular una nota crédito ya anulada', async () => {
-    const nota = notaActivaDoc({ status: 'anulado' });
+    const nota = notaActivaDoc({ estado: 'anulado' });
     const notasCredito = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(nota) }),
@@ -2431,10 +2431,10 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
       facturaId: null,
       notaDebitoId,
       tipoDocumentoAncla: 'ND',
-      distribution: [{ conceptoId: CONCEPTO, amount: 150000 }],
-      totalAmount: 150000,
-      appliedAmount: 150000,
-      unappliedAmount: 0,
+      distribucion: [{ conceptoId: CONCEPTO, monto: 150000 }],
+      montoTotal: 150000,
+      montoAplicado: 150000,
+      montoSinAplicar: 0,
     });
     const notaDebitoFrozen = {
       _id: notaDebitoId,
@@ -2442,16 +2442,16 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
       conceptoId: CONCEPTO,
       total: 150000,
       outstandingBalance: 0,
-      description: 'Multa por parqueo',
-      number: 1,
-      fullNumber: 'ND-1',
+      descripcion: 'Multa por parqueo',
+      numero: 1,
+      numeroCompleto: 'ND-1',
     };
     const aplicacionAncla = {
       _id: new Types.ObjectId(),
-      documentId: notaDebitoId,
-      documentType: 'ND',
+      documentoId: notaDebitoId,
+      tipoDocumento: 'ND',
       amountApplied: 150000,
-      status: 'activa',
+      estado: 'activa',
     };
     const facturas = {
       // Never consulted for an ND-anchored note — a call here (rather than
@@ -2511,8 +2511,8 @@ describe('NotasCreditoService.anular — ancla Nota Débito', () => {
     const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([
       {
         _id: nota._id,
-        totalAmount: nota.totalAmount,
-        unappliedAmount: nota.unappliedAmount,
+        montoTotal: nota.montoTotal,
+        montoSinAplicar: nota.montoSinAplicar,
       },
     ]);
 
@@ -2605,8 +2605,8 @@ describe('NotasCreditoService.findAll', () => {
     ).toEqual({
       copropiedadId: COP,
       inmuebleId: INMUEBLE.toString(),
-      status: 'activo',
-      $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
+      estado: 'activo',
+      $or: [{ fecha: rango }, { fecha: null, createdAt: rango }],
     });
   });
 
@@ -2614,7 +2614,7 @@ describe('NotasCreditoService.findAll', () => {
     const documentos: unknown[] = [];
     const notaConAnticipo = {
       _id: new Types.ObjectId(),
-      unappliedAmount: 50000,
+      montoSinAplicar: 50000,
     };
     const notasCredito = {
       find: jest.fn((filtro: Record<string, unknown>) => {
@@ -2707,10 +2707,10 @@ describe('NotasCreditoService.findOne', () => {
       _id: new Types.ObjectId(),
       sourceType: 'NC',
       sourceId: nota._id,
-      documentType: 'FV',
-      documentId: facturaOtra,
+      tipoDocumento: 'FV',
+      documentoId: facturaOtra,
       amountApplied: 50000,
-      status: 'activa',
+      estado: 'activa',
       appliedAt: new Date('2026-08-30'),
     };
     const aplicaciones = {
@@ -2722,8 +2722,8 @@ describe('NotasCreditoService.findOne', () => {
       find: jest.fn(() => ({
         exec: () =>
           Promise.resolve([
-            { _id: facturaAncla, fullNumber: 'FV-0001' },
-            { _id: facturaOtra, fullNumber: 'FV-0042' },
+            { _id: facturaAncla, numeroCompleto: 'FV-0001' },
+            { _id: facturaOtra, numeroCompleto: 'FV-0042' },
           ]),
       })),
     };

@@ -101,8 +101,8 @@ describe('validarFilaAplicacionLote', () => {
       filaBase({ fechaPago: new Date('2026-05-01') }),
       datosBase({
         ultimoLoteFacturacion: {
-          periodStart: new Date('2026-06-01'),
-          periodEnd: new Date('2026-06-30'),
+          periodoDesde: new Date('2026-06-01'),
+          periodoHasta: new Date('2026-06-30'),
         },
       }),
     );
@@ -151,20 +151,20 @@ const facturaCandidato = (over: Record<string, unknown> = {}) => {
     doc: {
       _id: new Types.ObjectId(),
       inmuebleId: new Types.ObjectId(),
-      number: 1,
+      numero: 1,
       total: 100000,
-      discountAmount: 0,
-      discountDeadline: null,
-      dueDate: new Date('2026-05-10'),
-      issueDate: new Date('2026-05-01'),
-      lines: [
+      montoDescuento: 0,
+      fechaLimiteDescuento: null,
+      fechaVencimiento: new Date('2026-05-10'),
+      fechaEmision: new Date('2026-05-01'),
+      lineas: [
         {
           conceptoId,
-          conceptName: 'Administración',
-          conceptKind: 'administracion',
-          accountingReceivableAccount: '130505',
-          accountingIncomeAccount: '413505',
-          totalAmount: 100000,
+          nombreConcepto: 'Administración',
+          tipoConcepto: 'administracion',
+          cuentaCartera: '130505',
+          cuentaIngreso: '413505',
+          valorTotal: 100000,
         },
       ],
       ...over,
@@ -241,8 +241,8 @@ describe('aplicarFifoEnMemoria', () => {
   it('activa el descuento por pronto pago solo cuando el pago cancela la factura completa dentro del plazo', () => {
     const candidato = facturaCandidato({
       total: 100000,
-      discountAmount: 5000,
-      discountDeadline: new Date('2026-06-10'),
+      montoDescuento: 5000,
+      fechaLimiteDescuento: new Date('2026-06-10'),
     });
     const datos = inmuebleDatos([candidato], {
       [candidato.doc._id.toString()]: 100000,
@@ -256,32 +256,32 @@ describe('aplicarFifoEnMemoria', () => {
     );
 
     expect(resultado.aplicaciones[0].montoAplicado).toBe(100000);
-    expect(resultado.aplicaciones[0].discountApplied).toBe(5000);
+    expect(resultado.aplicaciones[0].montoDescuento).toBe(5000);
     expect(resultado.montoDescuentoTotal).toBe(5000);
     expect(resultado.montoSinAplicar).toBe(0);
   });
 
-  it('acumula montoAplicadoMora solo por las partes de líneas conceptKind intereses', () => {
+  it('acumula montoAplicadoMora solo por las partes de líneas tipoConcepto intereses', () => {
     const conceptoMora = new Types.ObjectId();
     const conceptoAdmin = new Types.ObjectId();
     const candidato = facturaCandidato({
       total: 120000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administración',
-          conceptKind: 'administracion',
-          accountingReceivableAccount: '130505',
-          accountingIncomeAccount: '413505',
-          totalAmount: 100000,
+          nombreConcepto: 'Administración',
+          tipoConcepto: 'administracion',
+          cuentaCartera: '130505',
+          cuentaIngreso: '413505',
+          valorTotal: 100000,
         },
         {
           conceptoId: conceptoMora,
-          conceptName: 'Intereses de mora',
-          conceptKind: 'intereses',
-          accountingReceivableAccount: '130510',
-          accountingIncomeAccount: '413510',
-          totalAmount: 20000,
+          nombreConcepto: 'Intereses de mora',
+          tipoConcepto: 'intereses',
+          cuentaCartera: '130510',
+          cuentaIngreso: '413510',
+          valorTotal: 20000,
         },
       ],
     });
@@ -309,11 +309,11 @@ describe('aplicarFifoEnMemoria', () => {
       doc: {
         _id: notaDebitoId,
         inmuebleId: new Types.ObjectId(),
-        number: 7,
+        numero: 7,
         total: 30000,
         conceptoId,
-        description: 'Multa por parqueadero',
-        issueDate: new Date('2026-05-05'),
+        descripcion: 'Multa por parqueadero',
+        fechaEmision: new Date('2026-05-05'),
       } as never, // not a real NotaDebitoDocument — same reasoning as facturaCandidato's own cast
     };
     const datos = inmuebleDatos([candidato], {
@@ -330,7 +330,7 @@ describe('aplicarFifoEnMemoria', () => {
     expect(resultado.aplicaciones[0]).toMatchObject({
       tipo: 'ND',
       montoAplicado: 30000,
-      discountApplied: 0,
+      montoDescuento: 0,
     });
     expect(resultado.resumen[0]).toEqual({
       tipo: 'ND',
@@ -379,7 +379,7 @@ describe('construirEscrituraFilaAplicacion', () => {
       resultadoFifo: resultadoFifoBase({ montoSinAplicar: 100000 }),
     });
 
-    expect(escritura.recibo.notes).toBe('Genera anticipo');
+    expect(escritura.recibo.observaciones).toBe('Genera anticipo');
     expect(escritura.saldoDocumentoOrigen.saldoDisponible).toBe(100000);
     expect(escritura.aplicacionesCartera).toHaveLength(0);
   });
@@ -401,7 +401,7 @@ describe('construirEscrituraFilaAplicacion', () => {
             documentId: new Types.ObjectId(),
             numeroDocumento: 42,
             montoAplicado: 100000,
-            discountApplied: 0,
+            montoDescuento: 0,
             detalleConceptos: [],
             saldoTotalDocumentoDelta: -100000,
             saldoCarteraDeltas: [],
@@ -412,7 +412,7 @@ describe('construirEscrituraFilaAplicacion', () => {
       }),
     });
 
-    expect(escritura.recibo.notes).toBe('Cancela factura 42');
+    expect(escritura.recibo.observaciones).toBe('Cancela factura 42');
     expect(escritura.saldoDocumentoOrigen.saldoDisponible).toBe(0);
   });
 
@@ -427,7 +427,7 @@ describe('construirEscrituraFilaAplicacion', () => {
             documentId: new Types.ObjectId(),
             numeroDocumento: 42,
             montoAplicado: 100000,
-            discountApplied: 0,
+            montoDescuento: 0,
             detalleConceptos: [],
             saldoTotalDocumentoDelta: -100000,
             saldoCarteraDeltas: [],
@@ -438,7 +438,7 @@ describe('construirEscrituraFilaAplicacion', () => {
       }),
     });
 
-    expect(escritura.recibo.notes).toBe('Abona a factura 42');
+    expect(escritura.recibo.observaciones).toBe('Abona a factura 42');
   });
 
   it('un descuento por pronto pago que cancela la factura: notes sigue diciendo "Cancela", y el asiento incluye la línea de descuento', () => {
@@ -468,7 +468,7 @@ describe('construirEscrituraFilaAplicacion', () => {
             documentId: new Types.ObjectId(),
             numeroDocumento: 42,
             montoAplicado: 100000,
-            discountApplied: 5000,
+            montoDescuento: 5000,
             detalleConceptos: [],
             saldoTotalDocumentoDelta: -100000,
             saldoCarteraDeltas: [],
@@ -479,10 +479,10 @@ describe('construirEscrituraFilaAplicacion', () => {
       }),
     });
 
-    expect(escritura.recibo.notes).toBe('Cancela factura 42');
+    expect(escritura.recibo.observaciones).toBe('Cancela factura 42');
     expect(
-      (escritura.asientoContable.entries as { account: string }[]).some(
-        (m) => m.account === '530505',
+      (escritura.asientoContable.movimientos as { cuenta: string }[]).some(
+        (m) => m.cuenta === '530505',
       ),
     ).toBe(true);
   });

@@ -36,8 +36,8 @@ export const toLoteRecibos = (
   numerosPorReciboId: Map<string, string> = new Map(),
 ): LoteRecibosContract => ({
   id: doc._id.toString(),
-  numero: doc.number,
-  estado: doc.status,
+  numero: doc.numero,
+  estado: doc.estado,
   creadoEn: doc.creadoEn.toISOString(),
   codigo: doc.codigo,
   medioPago: doc.medioPago,

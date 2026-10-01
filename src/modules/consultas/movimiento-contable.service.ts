@@ -50,7 +50,7 @@ import type { RespuestaMovimientoContable } from '../../contracts';
 
 /** One anchor document's identity — enough to resolve `numeroDocumento` and
  *  which inmueble it belongs to, across all six document types. */
-type AnchorInfo = { fullNumber: string; inmuebleId: Types.ObjectId };
+type AnchorInfo = { numeroCompleto: string; inmuebleId: Types.ObjectId };
 
 type InmuebleMeta = {
   inmuebleCodigo: string | null;
@@ -105,8 +105,8 @@ export class MovimientoContableService {
     const hasta = new Date(params.hasta);
 
     const asientos = await this.asientos
-      .find({ copropiedadId, date: { $gte: desde, $lte: hasta } })
-      .sort({ date: 1 })
+      .find({ copropiedadId, fecha: { $gte: desde, $lte: hasta } })
+      .sort({ fecha: 1 })
       .exec();
 
     if (asientos.length === 0) return { movimientos: [] };
@@ -119,7 +119,7 @@ export class MovimientoContableService {
     const metaMap = await this.resolveMetaBatch(inmuebleIds, copropiedadId);
 
     const cuentaCodigos = [
-      ...new Set(asientos.flatMap((a) => a.entries.map((e) => e.account))),
+      ...new Set(asientos.flatMap((a) => a.movimientos.map((e) => e.cuenta))),
     ];
     const nombrePorCuenta = await this.resolveNombresCuenta(
       cuentaCodigos,
@@ -129,7 +129,7 @@ export class MovimientoContableService {
     const movimientos = asientos.map((a) => {
       const anchorId = resolveAnchorId(a).toString();
       const anchorInfo = anchorMap.get(anchorId);
-      const numeroDocumento = anchorInfo?.fullNumber ?? '—';
+      const numeroDocumento = anchorInfo?.numeroCompleto ?? '—';
       const meta = anchorInfo
         ? (metaMap.get(anchorInfo.inmuebleId.toString()) ?? META_VACIA)
         : META_VACIA;
@@ -240,7 +240,7 @@ export class MovimientoContableService {
         string,
         Model<{
           _id: Types.ObjectId;
-          fullNumber: string;
+          numeroCompleto: string;
           inmuebleId: Types.ObjectId;
         }>,
       ]
@@ -259,12 +259,12 @@ export class MovimientoContableService {
       const docs = await model
         .find(
           { _id: { $in: ids }, copropiedadId },
-          { fullNumber: 1, inmuebleId: 1 },
+          { numeroCompleto: 1, inmuebleId: 1 },
         )
         .exec();
       for (const doc of docs) {
         map.set(doc._id.toString(), {
-          fullNumber: doc.fullNumber,
+          numeroCompleto: doc.numeroCompleto,
           inmuebleId: doc.inmuebleId,
         });
       }

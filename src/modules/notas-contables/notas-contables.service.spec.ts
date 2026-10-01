@@ -61,16 +61,16 @@ const notaContableCreada = (over: Record<string, unknown> = {}) => ({
   documentoId: FACTURA,
   conceptoOrigenId: CONCEPTO_ORIGEN,
   conceptoDestinoId: CONCEPTO_DESTINO,
-  issueDate: new Date('2026-08-15'),
+  fecha: new Date('2026-08-15'),
   monto: 100000,
-  description: 'Reclasificación de prueba',
-  prefix: 'NT',
-  number: 1,
-  fullNumber: 'NT-1',
-  status: 'activo',
-  voidedReason: null,
-  voidedDetail: null,
-  voidedAt: null,
+  descripcion: 'Reclasificación de prueba',
+  prefijo: 'NT',
+  numero: 1,
+  numeroCompleto: 'NT-1',
+  estado: 'activo',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
   ...over,
 });
 
@@ -229,9 +229,13 @@ describe('NotasContablesService.crear', () => {
       if (!llamada)
         throw new Error(`No hubo llamada para ${conceptoId.toString()}`);
       const pipeline = llamada[1] as [
-        { $set: { balance: { $max: [number, { $add: [string, number] }] } } },
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
       ];
-      return pipeline[0].$set.balance.$max[1].$add[1];
+      return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
 
     expect(extraerMonto(CONCEPTO_ORIGEN)).toBe(-100000);
@@ -326,11 +330,11 @@ describe('NotasContablesService.crear', () => {
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
     >;
-    const entries = fila[0].entries as Array<{
-      account: string;
+    const entries = fila[0].movimientos as Array<{
+      cuenta: string;
       tercero?: string | null;
     }>;
-    const destino = entries.find((e) => e.account === '413501');
+    const destino = entries.find((e) => e.cuenta === '413501');
     expect(destino?.tercero).toBe('1304');
   });
 
@@ -475,15 +479,15 @@ describe('NotasContablesService.crear', () => {
     );
     const calls = (asientos.create as jest.Mock).mock.calls as unknown[][][];
     const creado = calls[0][0][0] as {
-      entries: { type: string; account: string }[];
+      movimientos: { tipo: string; cuenta: string }[];
     };
     // Vista de cartera, no de ingreso: origen se acredita (se le quita el
     // saldo), destino se debita (se le agrega) — ver el docblock de
     // `construirMovimientosReclasificacion`.
-    const debit = creado.entries.find((m) => m.type === 'debito');
-    const credit = creado.entries.find((m) => m.type === 'credito');
-    expect(debit!.account).toBe('413502');
-    expect(credit!.account).toBe('413501');
+    const debit = creado.movimientos.find((m) => m.tipo === 'debito');
+    const credit = creado.movimientos.find((m) => m.tipo === 'credito');
+    expect(debit!.cuenta).toBe('413502');
+    expect(credit!.cuenta).toBe('413501');
   });
 });
 
@@ -594,7 +598,7 @@ describe('NotasContablesService.anular', () => {
   });
 
   it('rechaza anular una nota contable ya anulada', async () => {
-    const nota = notaContableCreada({ status: 'anulado' });
+    const nota = notaContableCreada({ estado: 'anulado' });
     const service = new NotasContablesService(
       modeloNotasContables(nota) as never,
       modeloSaldos() as never,
@@ -710,19 +714,19 @@ describe('NotasContablesService.anular', () => {
 
     const calls = (asientos.create as jest.Mock).mock.calls as unknown[][][];
     const creado = calls[0][0][0] as {
-      entries: { type: string; account: string }[];
+      movimientos: { tipo: string; cuenta: string }[];
     };
     // Reversal of creation's origen=crédito/destino=débito: origen is
     // debited back, destino is credited back.
-    const debito = creado.entries.find((m) => m.type === 'debito');
-    const credito = creado.entries.find((m) => m.type === 'credito');
-    expect(debito!.account).toBe('413501');
-    expect(credito!.account).toBe('413502');
+    const debito = creado.movimientos.find((m) => m.tipo === 'debito');
+    const credito = creado.movimientos.find((m) => m.tipo === 'credito');
+    expect(debito!.cuenta).toBe('413501');
+    expect(credito!.cuenta).toBe('413502');
   });
 });
 
 describe('NotasContablesService.findAll', () => {
-  it('filtra por copropiedad, inmueble, estado y rango de fecha (issueDate, con fallback a createdAt para notas sin issueDate)', async () => {
+  it('filtra por copropiedad, inmueble, estado y rango de fecha (fecha, con fallback a createdAt para notas sin fecha)', async () => {
     const documentos: unknown[] = [];
     const notasContables = {
       find: jest.fn((filtro: Record<string, unknown>) => {
@@ -768,8 +772,8 @@ describe('NotasContablesService.findAll', () => {
     ).toEqual({
       copropiedadId: COP,
       inmuebleId: INMUEBLE.toString(),
-      status: 'activo',
-      $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
+      estado: 'activo',
+      $or: [{ fecha: rango }, { fecha: null, createdAt: rango }],
     });
   });
 });

@@ -59,8 +59,8 @@ import type { ConsultarConciliacionCarteraDto } from './dto/consultar-conciliaci
 /** A source document, reduced to what a doc-range lookup needs. */
 type FuenteAplicacion = {
   _id: Types.ObjectId;
-  fullNumber: string;
-  number: number;
+  numeroCompleto: string;
+  numero: number;
 };
 
 const ETIQUETAS: Record<ConceptoConciliacionCartera, string> = {
@@ -124,18 +124,18 @@ export class ConciliacionCarteraService {
     // an anulada Factura still belongs in this report.
     const facturas = await this.facturas
       .find({ copropiedadId })
-      .sort({ periodStart: -1 })
+      .sort({ periodoDesde: -1 })
       .exec();
 
     const seen = new Set<string>();
     const result: PeriodoFacturado[] = [];
     for (const f of facturas) {
-      const key = `${f.periodStart.toISOString()}|${f.periodEnd.toISOString()}`;
+      const key = `${f.periodoDesde.toISOString()}|${f.periodoHasta.toISOString()}`;
       if (!seen.has(key)) {
         seen.add(key);
         result.push({
-          periodStart: f.periodStart.toISOString(),
-          periodEnd: f.periodEnd.toISOString(),
+          periodStart: f.periodoDesde.toISOString(),
+          periodEnd: f.periodoHasta.toISOString(),
         });
       }
     }
@@ -180,7 +180,7 @@ export class ConciliacionCarteraService {
       0,
     );
     const saldoCarteraReal = saldosCartera.reduce(
-      (sum, s) => sum + s.balance,
+      (sum, s) => sum + s.saldoPendiente,
       0,
     );
 
@@ -220,23 +220,23 @@ export class ConciliacionCarteraService {
       const docs = await this.facturas
         .find({
           copropiedadId,
-          issueDate: { $gte: desde, $lte: hasta },
+          fechaEmision: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const valor = docs.reduce((sum, d) => sum + d.total, 0);
       agregar('facturacion', primero(docs), ultimo(docs), valor, 0);
     }
 
-    // Ingresos por Recibos de Caja → crédito. `receivedDate` is the date the
+    // Ingresos por Recibos de Caja → crédito. `fechaRecibo` is the date the
     // user declared for the payment (`dto.fechaRecibo`) — never
-    // `AplicacionCartera.appliedAt`, which is always `new Date()` at cruce
+    // `AplicacionCartera.aplicadoEn`, which is always `new Date()` at cruce
     // time and can land outside the period the payment was actually FOR
     // (see `movimientoDeFuentes`'s own docblock).
     {
       const recibosEnPeriodo = await this.recibos
-        .find({ copropiedadId, receivedDate: { $gte: desde, $lte: hasta } })
-        .sort({ number: 1 })
+        .find({ copropiedadId, fechaRecibo: { $gte: desde, $lte: hasta } })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -248,16 +248,16 @@ export class ConciliacionCarteraService {
     }
 
     // Anulación de Recibos de Caja → débito (reversa el ingreso). Keyed by
-    // the Recibo's own `voidedAt` — the real moment the void happened, same
-    // field Notas Débito's own anulación row uses below.
+    // the Recibo's own `fechaAnulacion` — the real moment the void happened,
+    // same field Notas Débito's own anulación row uses below.
     {
       const recibosAnulados = await this.recibos
         .find({
           copropiedadId,
-          status: 'anulado',
-          voidedAt: { $gte: desde, $lte: hasta },
+          estado: 'anulado',
+          fechaAnulacion: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -268,7 +268,7 @@ export class ConciliacionCarteraService {
       agregar('anulacion_recibos_caja', desdeDoc, hastaDoc, valor, 0);
     }
 
-    // Notas Crédito → crédito. `issueDate` ?? `createdAt` — the exact
+    // Notas Crédito → crédito. `fecha` ?? `createdAt` — the exact
     // fallback `fechaNotaCredito` uses for a note created before that field
     // existed (mirrors `NotasCreditoService.findAll`'s identical `$or`).
     {
@@ -276,9 +276,9 @@ export class ConciliacionCarteraService {
       const notasEnPeriodo = await this.notasCredito
         .find({
           copropiedadId,
-          $or: [{ issueDate: rango }, { issueDate: null, createdAt: rango }],
+          $or: [{ fecha: rango }, { fecha: null, createdAt: rango }],
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -294,10 +294,10 @@ export class ConciliacionCarteraService {
       const notasAnuladas = await this.notasCredito
         .find({
           copropiedadId,
-          status: 'anulado',
-          voidedAt: { $gte: desde, $lte: hasta },
+          estado: 'anulado',
+          fechaAnulacion: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -313,10 +313,10 @@ export class ConciliacionCarteraService {
       const docs = await this.notasDebito
         .find({
           copropiedadId,
-          status: 'emitida',
-          issueDate: { $gte: desde, $lte: hasta },
+          estado: 'emitida',
+          fechaEmision: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const valor = docs.reduce((sum, d) => sum + d.total, 0);
       agregar('notas_debito', primero(docs), ultimo(docs), valor, 0);
@@ -327,10 +327,10 @@ export class ConciliacionCarteraService {
       const docs = await this.notasDebito
         .find({
           copropiedadId,
-          status: 'anulada',
-          voidedAt: { $gte: desde, $lte: hasta },
+          estado: 'anulada',
+          fechaAnulacion: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const valor = docs.reduce((sum, d) => sum + d.total, 0);
       agregar('anulacion_notas_debito', primero(docs), ultimo(docs), 0, valor);
@@ -339,8 +339,8 @@ export class ConciliacionCarteraService {
     // Notas de Anticipo → crédito
     {
       const notasEnPeriodo = await this.notasAnticipo
-        .find({ copropiedadId, issueDate: { $gte: desde, $lte: hasta } })
-        .sort({ number: 1 })
+        .find({ copropiedadId, fechaEmision: { $gte: desde, $lte: hasta } })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -356,10 +356,10 @@ export class ConciliacionCarteraService {
       const notasAnuladas = await this.notasAnticipo
         .find({
           copropiedadId,
-          status: 'anulado',
-          voidedAt: { $gte: desde, $lte: hasta },
+          estado: 'anulado',
+          fechaAnulacion: { $gte: desde, $lte: hasta },
         })
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const { valor, desdeDoc, hastaDoc } = await this.movimientoDeFuentes(
         copropiedadId,
@@ -376,12 +376,12 @@ export class ConciliacionCarteraService {
     {
       const filtro: Record<string, unknown> = {
         copropiedadId,
-        status: 'activo',
+        estado: 'activo',
         createdAt: { $gte: desde, $lte: hasta },
       };
       const docs = await this.notasContables
         .find(filtro)
-        .sort({ number: 1 })
+        .sort({ numero: 1 })
         .exec();
       const valor = docs.reduce((sum, d) => sum + d.monto, 0);
       agregar('notas_contables', primero(docs), ultimo(docs), valor, valor);
@@ -431,8 +431,8 @@ export class ConciliacionCarteraService {
     hasta: Date,
   ): Promise<AnticipoPendienteConciliacion[]> {
     const recibos = await this.recibos
-      .find({ copropiedadId, receivedDate: { $lte: hasta } })
-      .sort({ number: 1 })
+      .find({ copropiedadId, fechaRecibo: { $lte: hasta } })
+      .sort({ numero: 1 })
       .exec();
     if (recibos.length === 0) return [];
 
@@ -467,7 +467,7 @@ export class ConciliacionCarteraService {
       if (!reciboId) continue;
       aplicadoActivoPorRecibo.set(
         reciboId,
-        (aplicadoActivoPorRecibo.get(reciboId) ?? 0) + app.amountApplied,
+        (aplicadoActivoPorRecibo.get(reciboId) ?? 0) + app.montoAplicado,
       );
     }
 
@@ -488,15 +488,15 @@ export class ConciliacionCarteraService {
         r,
         pendiente: Math.max(
           0,
-          r.receivedAmount -
+          r.montoRecibido -
             (aplicadoActivoPorRecibo.get(r._id.toString()) ?? 0),
         ),
       }))
       .filter(({ pendiente }) => pendiente > 0)
       .map(({ r, pendiente }) => ({
         inmuebleCodigo: codigoPorInmueble.get(r.inmuebleId.toString()) ?? '—',
-        fecha: r.receivedDate.toISOString(),
-        numeroRecibo: r.fullNumber,
+        fecha: r.fechaRecibo.toISOString(),
+        numeroRecibo: r.numeroCompleto,
         valor: pendiente,
       }));
   }
@@ -532,7 +532,7 @@ export class ConciliacionCarteraService {
   private async movimientoDeFuentes(
     copropiedadId: Types.ObjectId,
     sourceType: SourceType,
-    status: 'activa' | 'revertida',
+    estado: 'activa' | 'revertida',
     fuentes: FuenteAplicacion[],
   ): Promise<{
     valor: number;
@@ -544,25 +544,25 @@ export class ConciliacionCarteraService {
 
     const ids = fuentes.map((f) => f._id);
     const apps = await this.aplicaciones
-      .find({ copropiedadId, sourceType, status, sourceId: { $in: ids } })
+      .find({ copropiedadId, sourceType, estado, sourceId: { $in: ids } })
       .exec();
     if (apps.length === 0) return { valor: 0, desdeDoc: null, hastaDoc: null };
 
-    const valor = apps.reduce((sum, a) => sum + a.amountApplied, 0);
+    const valor = apps.reduce((sum, a) => sum + a.montoAplicado, 0);
 
     const idsConMovimiento = new Set(apps.map((a) => a.sourceId.toString()));
     const usados = fuentes
       .filter((f) => idsConMovimiento.has(f._id.toString()))
-      .sort((a, b) => a.number - b.number);
+      .sort((a, b) => a.numero - b.numero);
 
     return { valor, desdeDoc: primero(usados), hastaDoc: ultimo(usados) };
   }
 }
 
-function primero(docs: Array<{ fullNumber: string }>): string | null {
-  return docs[0]?.fullNumber ?? null;
+function primero(docs: Array<{ numeroCompleto: string }>): string | null {
+  return docs[0]?.numeroCompleto ?? null;
 }
 
-function ultimo(docs: Array<{ fullNumber: string }>): string | null {
-  return docs.length > 0 ? docs[docs.length - 1].fullNumber : null;
+function ultimo(docs: Array<{ numeroCompleto: string }>): string | null {
+  return docs.length > 0 ? docs[docs.length - 1].numeroCompleto : null;
 }

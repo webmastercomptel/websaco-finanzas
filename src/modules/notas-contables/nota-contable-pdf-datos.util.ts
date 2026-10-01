@@ -103,11 +103,11 @@ export async function construirDatosImpresionNotaContable(
 
   return {
     tituloDocumento,
-    numeroCompleto: nota.fullNumber,
+    numeroCompleto: nota.numeroCompleto,
     fecha: fechaNotaContable(nota),
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
-    concepto: nota.description,
+    concepto: nota.descripcion,
     monto: nota.monto,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),

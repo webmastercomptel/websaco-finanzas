@@ -72,11 +72,11 @@ export async function construirDatosImpresionNotaAnticipo(
   const cuentaAnticipos = copropiedad.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
 
   const facturaIds = aplicaciones
-    .filter((a) => a.documentType === 'FV')
-    .map((a) => a.documentId);
+    .filter((a) => a.tipoDocumento === 'FV')
+    .map((a) => a.documentoId);
   const notaIds = aplicaciones
-    .filter((a) => a.documentType === 'ND')
-    .map((a) => a.documentId);
+    .filter((a) => a.tipoDocumento === 'ND')
+    .map((a) => a.documentoId);
 
   const [
     facturas,
@@ -121,7 +121,7 @@ export async function construirDatosImpresionNotaAnticipo(
       cuentaNombre: '',
       tipoDocumento: null,
       numeroDocumento: null,
-      debito: nota.appliedAmount,
+      debito: nota.montoAplicado,
       credito: 0,
     },
   ];
@@ -137,38 +137,37 @@ export async function construirDatosImpresionNotaAnticipo(
         : [
             {
               conceptoId: null,
-              conceptName: 'Aplicación',
-              monto: aplicacion.amountApplied,
+              nombreConcepto: 'Aplicación',
+              monto: aplicacion.montoAplicado,
             },
           ];
 
-    if (aplicacion.documentType === 'FV') {
-      const factura = facturaPorId.get(aplicacion.documentId.toString());
+    if (aplicacion.tipoDocumento === 'FV') {
+      const factura = facturaPorId.get(aplicacion.documentoId.toString());
       for (const detalle of detalles) {
         const lineaFactura = detalle.conceptoId
-          ? factura?.lines.find((l) => l.conceptoId.equals(detalle.conceptoId))
+          ? factura?.lineas.find((l) => l.conceptoId.equals(detalle.conceptoId))
           : undefined;
-        const codigo =
-          lineaFactura?.accountingReceivableAccount ?? cuentaCartera;
+        const codigo = lineaFactura?.cuentaCartera ?? cuentaCartera;
         codigosUsados.add(codigo);
         lineas.push({
           cuentaCodigo: codigo,
           cuentaNombre: '',
           tipoDocumento: 'FV',
-          numeroDocumento: factura?.number ?? null,
+          numeroDocumento: factura?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
       }
     } else {
-      const notaDebito = notaPorId.get(aplicacion.documentId.toString());
+      const notaDebito = notaPorId.get(aplicacion.documentoId.toString());
       codigosUsados.add(cuentaCartera);
       for (const detalle of detalles) {
         lineas.push({
           cuentaCodigo: cuentaCartera,
           cuentaNombre: '',
           tipoDocumento: 'ND',
-          numeroDocumento: notaDebito?.number ?? null,
+          numeroDocumento: notaDebito?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
@@ -187,16 +186,16 @@ export async function construirDatosImpresionNotaAnticipo(
 
   return {
     tituloDocumento,
-    numeroCompleto: nota.fullNumber,
-    fecha: nota.issueDate,
+    numeroCompleto: nota.numeroCompleto,
+    fecha: nota.fechaEmision,
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
     concepto: saldoInicialAnticipoOrigen
-      ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.fullNumber}`
+      ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.numeroCompleto}`
       : reciboOrigen
-        ? `Aplicación de anticipo — recibo ${reciboOrigen.fullNumber}`
+        ? `Aplicación de anticipo — recibo ${reciboOrigen.numeroCompleto}`
         : 'Aplicación de anticipo',
-    monto: nota.appliedAmount,
+    monto: nota.montoAplicado,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),

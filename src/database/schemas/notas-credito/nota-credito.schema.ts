@@ -34,7 +34,7 @@ export const VOID_REASONS_NOTA_CREDITO = [
 ] as const;
 export type VoidReasonNotaCredito = (typeof VOID_REASONS_NOTA_CREDITO)[number];
 
-/** One line of `distribution` — how much of `totalAmount` corrects a given
+/** One line of `distribucion` — how much of `montoTotal` corrects a given
  *  concepto on the anchor invoice (design §3.2/§6). */
 @Schema({ _id: false })
 export class DistribucionLinea {
@@ -42,7 +42,7 @@ export class DistribucionLinea {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true })
-  amount: number;
+  monto: number;
 }
 
 export const DistribucionLineaSchema =
@@ -51,8 +51,8 @@ export const DistribucionLineaSchema =
 /**
  * A credit note ("NC") — always issued against exactly one anchor invoice,
  * unlike `Recibo` (design §3.2: "the anchor invoice — required, unlike
- * Recibo"). `appliedAmount`/`unappliedAmount` are the mutable fields, same
- * pattern as `Recibo`/`Factura.outstandingBalance`.
+ * Recibo"). `montoAplicado`/`montoSinAplicar` are the mutable fields, same
+ * pattern as `Recibo`/`Factura.saldoPendiente`.
  *
  * `terceroId` is nullable — see this task's own note: it is copied from
  * `factura.terceroId` at creation, which is itself nullable.
@@ -125,73 +125,76 @@ export class NotaCredito {
 
   /** The date the user declared for this note — validated at creation
    *  against the coproperty's current billing period, same role
-   *  `Recibo.receivedDate` plays for a Recibo (`RecibosService.crear()`).
+   *  `Recibo.fechaRecibo` plays for a Recibo (`RecibosService.crear()`).
    *  Nullable ONLY for documents created before this field existed, which
    *  used `createdAt` (the Mongoose timestamp) as their date instead — see
    *  `fechaNotaCredito` (`notas-credito.mapper.ts`) for the fallback every
    *  reader must use. Every new write always sets it. */
   @Prop({ type: Date, default: null })
-  issueDate: Date | null;
+  fecha: Date | null;
 
   @Prop({ type: String, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   @Prop({ type: Number, default: 0 })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   @Prop({ type: String, required: true, enum: MOTIVOS_NOTA_CREDITO })
-  reason: MotivoNotaCredito;
+  motivo: MotivoNotaCredito;
 
   @Prop({ required: true })
-  totalAmount: number;
+  montoTotal: number;
 
   @Prop({ type: [DistribucionLineaSchema], required: true })
-  distribution: DistribucionLinea[];
+  distribucion: DistribucionLinea[];
 
-  /** Mutable cache: sum of active AplicacionCartera.amountApplied where
+  /** Mutable cache: sum of active AplicacionCartera.montoAplicado where
    *  sourceType: 'NC', sourceId: this._id. */
   @Prop({ required: true, default: 0 })
-  appliedAmount: number;
+  montoAplicado: number;
 
-  /** Mutable cache: totalAmount - appliedAmount. */
+  /** Mutable cache: montoTotal - montoAplicado. */
   @Prop({ required: true })
-  unappliedAmount: number;
+  montoSinAplicar: number;
 
   @Prop({ type: String, default: null, trim: true })
-  notes: string | null;
+  observaciones: string | null;
 
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
-  status: 'activo' | 'anulado';
+  estado: 'activo' | 'anulado';
 
   @Prop({ type: String, enum: VOID_REASONS_NOTA_CREDITO, default: null })
-  voidedReason: VoidReasonNotaCredito | null;
+  motivoAnulacion: VoidReasonNotaCredito | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 }
 
 export const NotaCreditoSchema = SchemaFactory.createForClass(NotaCredito);
 
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as Recibo/Factura.
-NotaCreditoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
+NotaCreditoSchema.index(
+  { copropiedadId: 1, numeroCompleto: 1 },
+  { unique: true },
+);
 
 // GET /notas-credito?inmuebleId=...&conAnticipoDisponible=true-shaped query,
 // same reasoning as Recibo's own index.
 NotaCreditoSchema.index({
   copropiedadId: 1,
   inmuebleId: 1,
-  unappliedAmount: 1,
+  montoSinAplicar: 1,
 });

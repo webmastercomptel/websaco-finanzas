@@ -58,13 +58,13 @@ export class Factura {
   /** Frozen — see the note on Tercero's schema for why a unit's code
    *  changing later must not alter an already-issued document. */
   @Prop({ required: true, trim: true })
-  unitCode: string;
+  codigoInmueble: string;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
-  holder: TitularCongelado | null;
+  titular: TitularCongelado | null;
 
   /**
    * Null when this invoice was numbered through the simple FV consecutivo
@@ -80,34 +80,34 @@ export class Factura {
   resolucionId: Types.ObjectId | null;
 
   @Prop({ required: true, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   @Prop({ required: true })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   @Prop({ required: true })
-  issueDate: Date;
+  fechaEmision: Date;
 
   @Prop({ required: true })
-  dueDate: Date;
+  fechaVencimiento: Date;
 
   @Prop({ required: true })
-  periodStart: Date;
+  periodoDesde: Date;
 
   @Prop({ required: true })
-  periodEnd: Date;
+  periodoHasta: Date;
 
   @Prop({ type: [FacturaLineaSchema], required: true, default: [] })
-  lines: FacturaLinea[];
+  lineas: FacturaLinea[];
 
   @Prop({ required: true })
   subtotal: number;
 
   @Prop({ required: true, default: 0 })
-  totalTax: number;
+  totalImpuestos: number;
 
   @Prop({ required: true })
   total: number;
@@ -115,14 +115,14 @@ export class Factura {
   /** The one mutable field on an otherwise immutable document. Starts equal
    *  to `total`; a future Recibo decreases it. */
   @Prop({ required: true })
-  outstandingBalance: number;
+  saldoPendiente: number;
 
   /**
    * Early-payment discount this invoice offers — computed ONCE at
-   * `consolidar()` time from the lote's own `earlyPaymentDiscount`/
-   * `earlyPaymentDiscountFixedValue` against this invoice's own
+   * `consolidar()` time from the lote's own `descuentoProntoPago`/
+   * `valorFijoDescuentoProntoPago` against this invoice's own
    * Administración cargo, and frozen here forever after, same immutability
-   * as every other field above (`total`, `lines`, …) — an invoice's terms
+   * as every other field above (`total`, `lineas`, …) — an invoice's terms
    * never change after it is issued. 0 when the invoice carries any mora
    * line and `Copropiedad.descuentoAplicaConMora` is false (the
    * default), or when the lote had no discount configured at all. See
@@ -130,16 +130,16 @@ export class Factura {
    * pago.util.ts`) for the exact rule.
    */
   @Prop({ required: true, default: 0 })
-  discountAmount: number;
+  montoDescuento: number;
 
-  /** Last date a Recibo still earns `discountAmount` — copied verbatim from
-   *  `LoteFacturacion.discountDeadline` at `consolidar()` time. Always null
-   *  exactly when `discountAmount` is 0 — never read on its own. */
+  /** Last date a Recibo still earns `montoDescuento` — copied verbatim from
+   *  `LoteFacturacion.fechaLimiteDescuento` at `consolidar()` time. Always
+   *  null exactly when `montoDescuento` is 0 — never read on its own. */
   @Prop({ type: Date, default: null })
-  discountDeadline: Date | null;
+  fechaLimiteDescuento: Date | null;
 
   @Prop({ required: true, enum: ['emitida', 'anulada'], default: 'emitida' })
-  status: 'emitida' | 'anulada';
+  estado: 'emitida' | 'anulada';
 
   /** Set together with the four fields below it, at the same anulación —
    *  the Nota Crédito that reversed this invoice's cartera and accounting
@@ -148,16 +148,16 @@ export class Factura {
   voidedByCreditNoteId: Types.ObjectId | null;
 
   @Prop({ type: String, enum: VOID_REASONS_FACTURA, default: null })
-  voidedReason: VoidReasonFactura | null;
+  motivoAnulacion: VoidReasonFactura | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: 'Account', default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 
   /**
    * Frozen `DatosPlantillaFactura` (contracts/index.ts) exactly as it stood
@@ -187,7 +187,7 @@ export class Factura {
    * `printSnapshot`, from the same `facturasLean` array index
    * `LotesController.confirmarGeneracionFacturas` already iterates in.
    * That array is `FacturasService.findAllRawPorLote(loteId)`, sorted by
-   * `unitCode` — the EXACT same query, same sort, `solicitarGeneracionFacturas`
+   * `codigoInmueble` — the EXACT same query, same sort, `solicitarGeneracionFacturas`
    * used moments earlier to build the frontend's `contextos` array that
    * `construirDocumento` turned into pages, one page break per item, in
    * that same order. Two separate queries against the same criteria, but
@@ -214,4 +214,4 @@ export const FacturaSchema = SchemaFactory.createForClass(Factura);
 // (NumeracionService's atomic reservation), but a compound index here makes
 // that guarantee visible to the database too, not just to the code path
 // that happens to be the only writer today.
-FacturaSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
+FacturaSchema.index({ copropiedadId: 1, numeroCompleto: 1 }, { unique: true });

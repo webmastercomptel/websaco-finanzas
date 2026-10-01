@@ -69,61 +69,64 @@ export class NotaDebito {
   conceptoId: Types.ObjectId;
 
   @Prop({ type: String, required: true, enum: MOTIVOS_NOTA_DEBITO })
-  reason: MotivoNotaDebito;
+  motivo: MotivoNotaDebito;
 
   @Prop({ type: String, default: null, trim: true })
-  description: string | null;
+  descripcion: string | null;
 
   @Prop({ type: String, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   @Prop({ type: Number, default: 0 })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   @Prop({ required: true })
-  issueDate: Date;
+  fechaEmision: Date;
 
   @Prop({ required: true })
-  dueDate: Date;
+  fechaVencimiento: Date;
 
   @Prop({ required: true })
   total: number;
 
   /** Mutable cache: starts equal to `total`; a future Recibo decreases it. */
   @Prop({ required: true })
-  outstandingBalance: number;
+  saldoPendiente: number;
 
   @Prop({ required: true, enum: ['emitida', 'anulada'], default: 'emitida' })
-  status: 'emitida' | 'anulada';
+  estado: 'emitida' | 'anulada';
 
   @Prop({ type: String, enum: VOID_REASONS_NOTA_DEBITO, default: null })
-  voidedReason: VoidReasonNotaDebito | null;
+  motivoAnulacion: VoidReasonNotaDebito | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 }
 
 export const NotaDebitoSchema = SchemaFactory.createForClass(NotaDebito);
 
 // A resolution's numbers are unique within a coproperty by construction
 // (NumeracionService's atomic reservation), same reasoning as Recibo/Factura.
-NotaDebitoSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
+NotaDebitoSchema.index(
+  { copropiedadId: 1, numeroCompleto: 1 },
+  { unique: true },
+);
 
 // GET /notas-debito?inmuebleId=...-shaped query — outstanding balance per unit.
 NotaDebitoSchema.index({
   copropiedadId: 1,
   inmuebleId: 1,
-  outstandingBalance: 1,
+  saldoPendiente: 1,
 });

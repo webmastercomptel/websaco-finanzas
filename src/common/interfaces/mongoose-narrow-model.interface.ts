@@ -36,7 +36,7 @@ import type { ClientSession, QueryFilter } from 'mongoose';
  */
 export interface LeanFindModel<T> {
   // A plain `Record` filter, not `QueryFilter<T>`: every call site filters
-  // on `copropiedadId` alongside `T`'s own fields (`fullNumber`), a key
+  // on `copropiedadId` alongside `T`'s own fields (`numeroCompleto`), a key
   // `QueryFilter<T>` would reject as foreign to this narrow `T`.
   find(
     filter: Record<string, unknown>,

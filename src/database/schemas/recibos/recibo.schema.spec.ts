@@ -19,13 +19,13 @@ const base = (over: Record<string, unknown> = {}) => ({
   copropiedadId: copropiedad,
   inmuebleId: inmueble,
   terceroId: tercero,
-  fullNumber: 'RC-1',
-  receivedAmount: 500000,
-  receivedDate: new Date('2026-08-27'),
-  paymentMethod: 'transferencia',
-  destinationAccount: '111005',
-  unappliedAmount: 500000,
-  generatedBy: cuenta,
+  numeroCompleto: 'RC-1',
+  montoRecibido: 500000,
+  fechaRecibo: new Date('2026-08-27'),
+  medioPago: 'transferencia',
+  cuentaDestino: '111005',
+  montoSinAplicar: 500000,
+  generadoPor: cuenta,
   ...over,
 });
 
@@ -46,23 +46,23 @@ describe('ReciboSchema — forma', () => {
     await expect(validar({})).resolves.toBeNull();
   });
 
-  it('arranca activo, con appliedAmount en cero y sin datos de anulación', () => {
+  it('arranca activo, con montoAplicado en cero y sin datos de anulación', () => {
     const doc = new ReciboModel(base());
-    expect(doc.status).toBe('activo');
-    expect(doc.appliedAmount).toBe(0);
-    expect(doc.voidedReason).toBeNull();
-    expect(doc.voidedDetail).toBeNull();
-    expect(doc.voidedAt).toBeNull();
+    expect(doc.estado).toBe('activo');
+    expect(doc.montoAplicado).toBe(0);
+    expect(doc.motivoAnulacion).toBeNull();
+    expect(doc.detalleAnulacion).toBeNull();
+    expect(doc.fechaAnulacion).toBeNull();
   });
 
   it('rechaza un medioPago fuera del catálogo', async () => {
-    await expect(validar({ paymentMethod: 'bitcoin' })).resolves.toBeInstanceOf(
+    await expect(validar({ medioPago: 'bitcoin' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
   it('rechaza un estado fuera de activo/anulado', async () => {
-    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(
+    await expect(validar({ estado: 'pendiente' })).resolves.toBeInstanceOf(
       Error,
     );
   });
@@ -76,7 +76,7 @@ describe('ReciboSchema — forma', () => {
 describe('ReciboSchema — índices', () => {
   it('el número completo es único por copropiedad', () => {
     const indice = indices().find(
-      ([campos]) => campos.copropiedadId === 1 && campos.fullNumber === 1,
+      ([campos]) => campos.copropiedadId === 1 && campos.numeroCompleto === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });
@@ -87,7 +87,7 @@ describe('ReciboSchema — índices', () => {
       ([campos]) =>
         campos.copropiedadId === 1 &&
         campos.inmuebleId === 1 &&
-        campos.unappliedAmount === 1,
+        campos.montoSinAplicar === 1,
     );
     expect(indice).toBeDefined();
   });

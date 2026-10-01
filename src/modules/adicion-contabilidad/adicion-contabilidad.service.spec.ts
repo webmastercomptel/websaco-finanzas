@@ -25,9 +25,9 @@ const modeloCon = (docs: Record<string, unknown>[]) => ({
   })),
 });
 
-const entriesFijas = [
-  { account: '1305', type: 'debito' as const, amount: 100, description: 'x' },
-  { account: '4135', type: 'credito' as const, amount: 100, description: 'y' },
+const movimientosFijos = [
+  { cuenta: '1305', tipo: 'debito' as const, monto: 100, descripcion: 'x' },
+  { cuenta: '4135', tipo: 'credito' as const, monto: 100, descripcion: 'y' },
 ];
 
 const asientoFixture = (over: Record<string, unknown>) => ({
@@ -40,8 +40,8 @@ const asientoFixture = (over: Record<string, unknown>) => ({
   notaDebitoId: null,
   notaContableId: null,
   notaAnticipoId: null,
-  date: new Date('2026-09-05'),
-  entries: entriesFijas,
+  fecha: new Date('2026-09-05'),
+  movimientos: movimientosFijos,
   contabilidadLoteId: null,
   ...over,
 });
@@ -56,18 +56,18 @@ describe('AdicionContabilidadService.generar', () => {
       asientoFixture({ notaAnticipoId }),
       asientoFixture({
         facturaId,
-        entries: [
+        movimientos: [
           {
-            account: '4135',
-            type: 'credito' as const,
-            amount: 100,
-            description: 'Administración',
+            cuenta: '4135',
+            tipo: 'credito' as const,
+            monto: 100,
+            descripcion: 'Administración',
           },
           {
-            account: '1305',
-            type: 'debito' as const,
-            amount: 100,
-            description: 'Cartera por cobrar — factura de venta',
+            cuenta: '1305',
+            tipo: 'debito' as const,
+            monto: 100,
+            descripcion: 'Cartera por cobrar — factura de venta',
           },
         ],
       }),
@@ -101,50 +101,50 @@ describe('AdicionContabilidadService.generar', () => {
     const facturasModel = modeloCon([
       {
         _id: facturaId,
-        prefix: 'FV',
-        number: 60,
-        periodStart: new Date('2026-09-01'),
-        periodEnd: new Date('2026-09-30'),
+        prefijo: 'FV',
+        numero: 60,
+        periodoDesde: new Date('2026-09-01'),
+        periodoHasta: new Date('2026-09-30'),
       },
     ]);
     const recibosModel = modeloCon([
       {
         _id: reciboIdRC,
-        prefix: 'RC',
-        number: 10,
-        notes: 'Pago cuota administración enero',
+        prefijo: 'RC',
+        numero: 10,
+        observaciones: 'Pago cuota administración enero',
       },
-      { _id: reciboIdOrigenNA, prefix: 'RC', number: 55, notes: null },
+      { _id: reciboIdOrigenNA, prefijo: 'RC', numero: 55, observaciones: null },
     ]);
     const notasCreditoModel = modeloCon([
       {
         _id: notaCreditoId,
-        prefix: 'NC',
-        number: 20,
-        notes: 'Corrección error de digitación',
+        prefijo: 'NC',
+        numero: 20,
+        observaciones: 'Corrección error de digitación',
       },
     ]);
     const notasDebitoModel = modeloCon([
       {
         _id: notaDebitoId,
-        prefix: 'ND',
-        number: 30,
-        description: 'Cobro por daño en zona común',
+        prefijo: 'ND',
+        numero: 30,
+        descripcion: 'Cobro por daño en zona común',
       },
     ]);
     const notasContablesModel = modeloCon([
       {
         _id: notaContableId,
-        prefix: 'NT',
-        number: 40,
-        description: 'Reclasificación de Administración a Intereses',
+        prefijo: 'NT',
+        numero: 40,
+        descripcion: 'Reclasificación de Administración a Intereses',
       },
     ]);
     const notasAnticipoModel = modeloCon([
       {
         _id: notaAnticipoId,
-        prefix: 'NA',
-        number: 50,
+        prefijo: 'NA',
+        numero: 50,
         reciboOrigenId: reciboIdOrigenNA,
       },
     ]);
@@ -154,8 +154,8 @@ describe('AdicionContabilidadService.generar', () => {
     } as unknown as TenantContextService;
     const lotesFacturacion: LotesFacturacionService = {
       obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
-        periodStart: new Date('2026-09-01'),
-        periodEnd: new Date('2026-09-30'),
+        periodoDesde: new Date('2026-09-01'),
+        periodoHasta: new Date('2026-09-30'),
       }),
     } as unknown as LotesFacturacionService;
     const connection = {
@@ -199,7 +199,7 @@ describe('AdicionContabilidadService.generar', () => {
     );
 
     // MOVMESDO: cada línea del mismo asiento lleva el MISMO detalle que el
-    // header — ya no el texto por línea débito/crédito de `entries[]`.
+    // header — ya no el texto por línea débito/crédito de `movimientos[]`.
     const lineasMovmesdo = resultado.movmesdo
       .split('\r\n')
       .filter((l) => l.length > 0);
@@ -214,12 +214,12 @@ describe('AdicionContabilidadService.generar', () => {
   it('recurre al texto del asiento cuando el documento no tiene concepto propio', async () => {
     const asiento = asientoFixture({
       reciboId: reciboIdRC,
-      entries: [
+      movimientos: [
         {
-          account: '1305',
-          type: 'debito' as const,
-          amount: 100,
-          description: 'Recaudo recibido — recibo de caja',
+          cuenta: '1305',
+          tipo: 'debito' as const,
+          monto: 100,
+          descripcion: 'Recaudo recibido — recibo de caja',
         },
       ],
     });
@@ -249,9 +249,9 @@ describe('AdicionContabilidadService.generar', () => {
     };
     const consecutivosDocumentoModel = modeloCon([]);
     const facturasModel = modeloCon([]);
-    // notes: null — el recibo no trae observaciones.
+    // observaciones: null — el recibo no trae observaciones.
     const recibosModel = modeloCon([
-      { _id: reciboIdRC, prefix: 'RC', number: 10, notes: null },
+      { _id: reciboIdRC, prefijo: 'RC', numero: 10, observaciones: null },
     ]);
     const notasCreditoModel = modeloCon([]);
     const notasDebitoModel = modeloCon([]);
@@ -263,8 +263,8 @@ describe('AdicionContabilidadService.generar', () => {
     } as unknown as TenantContextService;
     const lotesFacturacion: LotesFacturacionService = {
       obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
-        periodStart: new Date('2026-09-01'),
-        periodEnd: new Date('2026-09-30'),
+        periodoDesde: new Date('2026-09-01'),
+        periodoHasta: new Date('2026-09-30'),
       }),
     } as unknown as LotesFacturacionService;
     const connection = {

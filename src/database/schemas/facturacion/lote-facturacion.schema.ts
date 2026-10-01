@@ -21,7 +21,7 @@ export type LoteFacturacionDocument = HydratedDocument<LoteFacturacion>;
  * `PATCH /lotes/:id/novedades/:novedadId` — needed once editing became
  * per-line instead of "replace the whole file".
  *
- * `overrides` is null for an ordinary additive charge (the Excel/manual case
+ * `sobrescribe` is null for an ordinary additive charge (the Excel/manual case
  * that always existed): it becomes its own FacturaLinea, alongside whatever
  * else the unit is charged. Set to `'recurrente'` or `'interes'`, it instead
  * REPLACES what construirPreview() would have computed from ValorRecurrente
@@ -43,21 +43,21 @@ export class NovedadLote {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true })
-  amount: number;
+  monto: number;
 
   @Prop({ type: String, default: null, trim: true })
-  note: string | null;
+  nota: string | null;
 
   @Prop({ type: String, enum: ['recurrente', 'interes'], default: null })
-  overrides: 'recurrente' | 'interes' | null;
+  sobrescribe: 'recurrente' | 'interes' | null;
 }
 
 export const NovedadLoteSchema = SchemaFactory.createForClass(NovedadLote);
 
 /**
  * One unit's computed-but-not-yet-issued invoice. Everything Factura needs
- * except what only consolidación assigns: no `number`, no `fullNumber`, no
- * `resolucionId`, no `outstandingBalance`, no `status`.
+ * except what only consolidación assigns: no `numero`, no `numeroCompleto`,
+ * no `resolucionId`, no `saldoPendiente`, no `estado`.
  */
 @Schema({ _id: false })
 export class FacturaPreliminar {
@@ -65,22 +65,22 @@ export class FacturaPreliminar {
   inmuebleId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })
-  unitCode: string;
+  codigoInmueble: string;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Tercero.name, default: null })
   terceroId: Types.ObjectId | null;
 
   @Prop({ type: TitularCongeladoSchema, default: null })
-  holder: TitularCongelado | null;
+  titular: TitularCongelado | null;
 
   @Prop({ type: [FacturaLineaSchema], required: true, default: [] })
-  lines: FacturaLinea[];
+  lineas: FacturaLinea[];
 
   @Prop({ required: true })
   subtotal: number;
 
   @Prop({ required: true, default: 0 })
-  totalTax: number;
+  totalImpuestos: number;
 
   @Prop({ required: true })
   total: number;
@@ -94,7 +94,7 @@ export const FacturaPreliminarSchema =
  * discount and mora rates, the novedades that were uploaded) stay
  * inspectable long after the run is consolidado, and so a run in progress
  * survives a page refresh. See the design doc's §3.1 for the full reasoning,
- * including why `number` is its own atomic counter rather than reusing
+ * including why `numero` is its own atomic counter rather than reusing
  * ConsecutivoDocumento's TIPOS_DOCUMENTO.
  */
 @Schema({ timestamps: true, collection: 'lotes_facturacion' })
@@ -108,26 +108,26 @@ export class LoteFacturacion {
   copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
-  number: number;
+  numero: number;
 
   @Prop({
     required: true,
     enum: ['borrador', 'liquidado', 'consolidado'],
     default: 'borrador',
   })
-  status: 'borrador' | 'liquidado' | 'consolidado';
+  estado: 'borrador' | 'liquidado' | 'consolidado';
 
   @Prop({ required: true })
-  billingDate: Date;
+  fechaFacturacion: Date;
 
   @Prop({ required: true })
-  dueDate: Date;
+  fechaVencimiento: Date;
 
   @Prop({ required: true })
-  periodStart: Date;
+  periodoDesde: Date;
 
   @Prop({ required: true })
-  periodEnd: Date;
+  periodoHasta: Date;
 
   /**
    * Set only for a "Factura Individual" — a one-off, single-unit run created
@@ -150,25 +150,25 @@ export class LoteFacturacion {
   inmuebleId: Types.ObjectId | null;
 
   // Percentage form of the discount — mutually exclusive with
-  // `earlyPaymentDiscountFixedValue` below (Parámetros de Facturación §4's
+  // `valorFijoDescuentoProntoPago` below (Parámetros de Facturación §4's
   // own rule: a fixed value only applies when there is no percentage).
   // Applied per-invoice at `consolidar()` time, frozen onto each
-  // `Factura.discountAmount` — see that field's own comment.
+  // `Factura.montoDescuento` — see that field's own comment.
   @Prop({ required: true, default: 0 })
-  earlyPaymentDiscount: number;
+  descuentoProntoPago: number;
 
-  // Fixed-value form of the discount, used INSTEAD of `earlyPaymentDiscount`
+  // Fixed-value form of the discount, used INSTEAD of `descuentoProntoPago`
   // when that percentage is 0 — same exclusion rule as
   // `Copropiedad.descuentoValorFijo`, which this defaults from at `crear()`
-  // time (same pattern as `discountGraceDays` below).
+  // time (same pattern as `diasGraciaDescuento` below).
   @Prop({ required: true, default: 0 })
-  earlyPaymentDiscountFixedValue: number;
+  valorFijoDescuentoProntoPago: number;
 
   @Prop({ required: true, default: 0 })
-  discountGraceDays: number;
+  diasGraciaDescuento: number;
 
   @Prop({ required: true, default: 0 })
-  lateInterestRate: number;
+  interesMora: number;
 
   /**
    * Minimum overdue balance before mora is calculated for a unit this run —
@@ -177,31 +177,32 @@ export class LoteFacturacion {
    * per-lote here without changing the standing parameter.
    */
   @Prop({ type: Number, default: null })
-  lateInterestCap: number | null;
+  topeInteresMora: number | null;
 
   /**
    * "Fecha límite para descuento" — the last date a payment still earns the
    * early-payment discount. Defaults at `crear()` time to
-   * `billingDate + discountGraceDays - 1 día`, editable per-lote same as
-   * every other field on this screen (design note in `crear-lote.dto.ts`).
-   * Frozen onto each `Factura.discountDeadline` at `consolidar()` time — see
-   * that field's own comment.
+   * `fechaFacturacion + diasGraciaDescuento - 1 día`, editable per-lote same
+   * as every other field on this screen (design note in `crear-lote.dto.ts`).
+   * Frozen onto each `Factura.fechaLimiteDescuento` at `consolidar()` time —
+   * see that field's own comment.
    */
   @Prop({ required: true })
-  discountDeadline: Date;
+  fechaLimiteDescuento: Date;
 
   /**
-   * "Fecha de suspensión del servicio" — defaults to `periodEnd` (the last
-   * day of the billing month), editable per-lote. Not yet read anywhere.
+   * "Fecha de suspensión del servicio" — defaults to `periodoHasta` (the
+   * last day of the billing month), editable per-lote. Not yet read
+   * anywhere.
    */
   @Prop({ required: true })
-  serviceSuspensionDate: Date;
+  fechaSuspension: Date;
 
   @Prop({ type: [NovedadLoteSchema], required: true, default: [] })
-  adjustments: NovedadLote[];
+  novedades: NovedadLote[];
 
   @Prop({ type: [FacturaPreliminarSchema], required: true, default: [] })
-  preview: FacturaPreliminar[];
+  previsualizacion: FacturaPreliminar[];
 
   @Prop({
     type: [SchemaTypes.ObjectId],
@@ -209,32 +210,32 @@ export class LoteFacturacion {
     required: true,
     default: [],
   })
-  invoiceIds: Types.ObjectId[];
+  facturaIds: Types.ObjectId[];
 
   @Prop({
     type: {
-      totalAmount: { type: Number, required: true },
-      totalInvoices: { type: Number, required: true },
-      totalUnits: { type: Number, required: true },
-      firstInvoiceNumber: { type: String, required: true },
-      lastInvoiceNumber: { type: String, required: true },
+      montoTotal: { type: Number, required: true },
+      totalFacturas: { type: Number, required: true },
+      totalInmuebles: { type: Number, required: true },
+      primerNumero: { type: String, required: true },
+      ultimoNumero: { type: String, required: true },
     },
     default: null,
   })
-  // `firstInvoiceNumber`/`lastInvoiceNumber` are absent on a lote
-  // consolidado before this field existed — Mongoose enforces `required`
-  // only on save, never on read — so the mapper falls back to `null` for
-  // those two on an old document, same pattern as `discountDeadline` above.
-  summary: {
-    totalAmount: number;
-    totalInvoices: number;
-    totalUnits: number;
-    firstInvoiceNumber: string;
-    lastInvoiceNumber: string;
+  // `primerNumero`/`ultimoNumero` are absent on a lote consolidado before
+  // this field existed — Mongoose enforces `required` only on save, never on
+  // read — so the mapper falls back to `null` for those two on an old
+  // document, same pattern as `fechaLimiteDescuento` above.
+  resumen: {
+    montoTotal: number;
+    totalFacturas: number;
+    totalInmuebles: number;
+    primerNumero: string;
+    ultimoNumero: string;
   } | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   /**
    * Set while `consolidar()` is running, cleared (`null`) the moment it
@@ -245,12 +246,12 @@ export class LoteFacturacion {
    */
   @Prop({
     type: {
-      current: { type: Number, required: true },
+      actual: { type: Number, required: true },
       total: { type: Number, required: true },
     },
     default: null,
   })
-  progress: { current: number; total: number } | null;
+  progreso: { actual: number; total: number } | null;
 }
 
 export const LoteFacturacionSchema =
@@ -268,7 +269,7 @@ LoteFacturacionSchema.index(
   { copropiedadId: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $in: ['borrador', 'liquidado'] } },
+    partialFilterExpression: { estado: { $in: ['borrador', 'liquidado'] } },
     name: 'unico_lote_en_curso_por_copropiedad',
   },
 );

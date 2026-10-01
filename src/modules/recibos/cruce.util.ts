@@ -19,7 +19,7 @@ import type { SessionFindOneModel } from '../../common/interfaces/mongoose-narro
 /**
  * Raised when a Factura cannot accept the requested application — it does
  * not exist under this tenant, it is not `emitida`, or its
- * `outstandingBalance` is smaller than the amount requested (design §6,
+ * `saldoPendiente` is smaller than the amount requested (design §6,
  * "the document was voided between the user viewing it and confirming").
  * A `ConflictException` subclass on purpose: every caller can just let it
  * propagate and NestJS renders a 409 with this message, no translation step
@@ -41,9 +41,9 @@ export class AplicacionInvalidaError extends ConflictException {
  *  balance resolved from `SaldoTotalDocumento` — never a real field on the
  *  document itself anymore (see that schema's own docblock on why the
  *  atomic guard had to move off the immutable document). Every caller that
- *  used to read `.outstandingBalance` straight off the Mongoose result
- *  keeps working unchanged against this shape. */
-type ConSaldoPendiente<T> = T & { outstandingBalance: number };
+ *  used to read `.saldoPendiente` straight off the Mongoose result keeps
+ *  working unchanged against this shape. */
+type ConSaldoPendiente<T> = T & { saldoPendiente: number };
 
 /**
  * Atomically decrements one Factura's `SaldoTotalDocumento` row by `amount`,
@@ -68,8 +68,8 @@ type ConSaldoPendiente<T> = T & { outstandingBalance: number };
  * balance with NaN. Both must be rejected before touching the database.
  *
  * Reads the Factura itself (immutable, so a plain `findOne` after the guard
- * already passed is safe — its `lines`/`total`/`inmuebleId` never change) to
- * return everything a caller needs in one shape, `outstandingBalance`
+ * already passed is safe — its `lineas`/`total`/`inmuebleId` never change) to
+ * return everything a caller needs in one shape, `saldoPendiente`
  * included, so `ajustarSaldosCartera`/`resumen` builders elsewhere need no
  * changes of their own.
  */
@@ -103,7 +103,7 @@ export async function decrementarSaldoFactura(
   }
 
   const factura = await facturas
-    .findOne({ _id: facturaId, copropiedadId, status: 'emitida' })
+    .findOne({ _id: facturaId, copropiedadId, estado: 'emitida' })
     .session(session)
     .exec();
   if (!factura) {
@@ -111,7 +111,7 @@ export async function decrementarSaldoFactura(
   }
 
   return Object.assign(factura, {
-    outstandingBalance: saldoActualizado.saldoPendiente,
+    saldoPendiente: saldoActualizado.saldoPendiente,
   });
 }
 
@@ -154,7 +154,7 @@ export async function decrementarSaldoNotaDebito(
   }
 
   const notaDebito = await notasDebito
-    .findOne({ _id: notaDebitoId, copropiedadId, status: 'emitida' })
+    .findOne({ _id: notaDebitoId, copropiedadId, estado: 'emitida' })
     .session(session)
     .exec();
   if (!notaDebito) {
@@ -162,7 +162,7 @@ export async function decrementarSaldoNotaDebito(
   }
 
   return Object.assign(notaDebito, {
-    outstandingBalance: saldoActualizado.saldoPendiente,
+    saldoPendiente: saldoActualizado.saldoPendiente,
   });
 }
 
@@ -171,7 +171,7 @@ export async function decrementarSaldoNotaDebito(
  * `amount`, inside `session`, refusing (throwing) if that would push it
  * below zero — sibling to `decrementarSaldoFactura`/`decrementarSaldoNotaDebito`,
  * same discipline. Unlike a Nota Débito, a Saldo Inicial has several
- * conceptos (like a Factura) — its `outstandingBalance` is settled through
+ * conceptos (like a Factura) — its `saldoPendiente` is settled through
  * the SAME `ajustarSaldosCartera`/`ajustarSaldosCarteraPorDistribucion`
  * functions a Factura uses, just retargeted via their `tipoDocumento`
  * parameter, never a separate cascade written for this document.
@@ -204,7 +204,7 @@ export async function decrementarSaldoInicial(
   }
 
   const saldoInicial = await saldosIniciales
-    .findOne({ _id: saldoInicialId, copropiedadId, status: 'activo' })
+    .findOne({ _id: saldoInicialId, copropiedadId, estado: 'activo' })
     .session(session)
     .exec();
   if (!saldoInicial) {
@@ -212,7 +212,7 @@ export async function decrementarSaldoInicial(
   }
 
   return Object.assign(saldoInicial, {
-    outstandingBalance: saldoActualizado.saldoPendiente,
+    saldoPendiente: saldoActualizado.saldoPendiente,
   });
 }
 
@@ -220,7 +220,7 @@ export async function decrementarSaldoInicial(
  * Atomically restores (increments) one document's `SaldoTotalDocumento` row
  * by `amount` — the reversal counterpart to `decrementarSaldoFactura`/
  * `decrementarSaldoNotaDebito`, used by every `anular()` that used to
- * `$inc: { outstandingBalance: +amount }` straight on the Factura/NotaDebito.
+ * `$inc: { saldoPendiente: +amount }` straight on the Factura/NotaDebito.
  * Unconditional, no `$expr` guard: a reversal only ever adds back money that
  * a prior successful decrement already proved was there — never a floor to
  * enforce, same reasoning `RecibosService.anular()`'s own comment already
@@ -245,12 +245,12 @@ export async function restaurarSaldoTotalDocumento(
  *  balance resolved from `SaldoDocumentoOrigen` — never a real field on the
  *  document itself anymore (see that schema's own docblock on why the
  *  atomic guard had to move off the immutable document, same reasoning as
- *  `ConSaldoPendiente` on the charge side). `appliedAmount` is derived the
+ *  `ConSaldoPendiente` on the charge side). `montoAplicado` is derived the
  *  same way `SaldoDocumentoOrigen` itself derives it: `montoOriginal -
  *  saldoDisponible`. */
 type ConSaldoDisponible<T> = T & {
-  unappliedAmount: number;
-  appliedAmount: number;
+  montoSinAplicar: number;
+  montoAplicado: number;
 };
 
 /**
@@ -259,7 +259,7 @@ type ConSaldoDisponible<T> = T & {
  * it below zero — the source-side twin of `decrementarSaldoFactura`, same
  * `$expr`-guarded `findOneAndUpdate` discipline, same reason the guard lives
  * off the (now immutable) document: two concurrent applications drawing
- * against the same leftover `unappliedAmount` could otherwise each read
+ * against the same leftover `montoSinAplicar` could otherwise each read
  * "enough" from a stale value and both proceed, jointly overdrawing it.
  *
  * `estadoActivo` is the caller's own "still usable" status literal (`'activo'`
@@ -304,7 +304,7 @@ export async function decrementarSaldoDocumentoOrigen<
   }
 
   const doc = await documentos
-    .findOne({ _id: documentoId, copropiedadId, status: estadoActivo })
+    .findOne({ _id: documentoId, copropiedadId, estado: estadoActivo })
     .session(session)
     .exec();
   if (!doc) {
@@ -315,8 +315,8 @@ export async function decrementarSaldoDocumentoOrigen<
   }
 
   return Object.assign(doc, {
-    unappliedAmount: saldoActualizado.saldoDisponible,
-    appliedAmount:
+    montoSinAplicar: saldoActualizado.saldoDisponible,
+    montoAplicado:
       saldoActualizado.montoOriginal - saldoActualizado.saldoDisponible,
   });
 }
@@ -325,7 +325,7 @@ export async function decrementarSaldoDocumentoOrigen<
  * Atomically restores (increments) one Recibo's or Nota Crédito's
  * `SaldoDocumentoOrigen` row by `amount` — the reversal counterpart to
  * `decrementarSaldoDocumentoOrigen`, used by every `anular()` that used to
- * `$inc: { unappliedAmount: +amount, appliedAmount: -amount }` straight on
+ * `$inc: { montoSinAplicar: +amount, montoAplicado: -amount }` straight on
  * the Recibo/NotaCredito. Unconditional, no `$expr` guard — same reasoning as
  * `restaurarSaldoTotalDocumento`: a reversal only ever adds back money a
  * prior successful decrement already proved was there.
@@ -356,7 +356,7 @@ export async function restaurarSaldoDocumentoOrigen(
  * per-document row is no less a target for drift than the aggregate is.
  *
  * `upsert: true` — every OTHER caller only ever targets a concepto the
- * document's own lines already seeded a row for at consolidación time, so
+ * document's own lineas already seeded a row for at consolidación time, so
  * this never actually inserts for them. `NotasContablesService`'s
  * `conceptoDestinoId` is the one caller where the concepto can legitimately
  * be one this document never had a row for (that's the whole point of a
@@ -415,23 +415,23 @@ async function ajustarCarteraPorDocumento(
 }
 
 /**
- * Splits `montoTotal` across a Factura's lines as a WATERFALL, not
- * proportionally: `factura.lines` arrives sorted by each line's own
+ * Splits `montoTotal` across a Factura's lineas as a WATERFALL, not
+ * proportionally: `factura.lineas` arrives sorted by each line's own
  * `ConceptoCobro.orden` ASCENDING (`LotesFacturacionService.consolidar()`
  * sorts them that way before freezing the document, "Cargos order" —
  * Administración is seeded first and so normally sits at index 0). This
  * walks them in REVERSE — most-recently-created concept first — filling each
- * one's own `totalAmount` bucket completely before spilling into the next,
+ * one's own `valorTotal` bucket completely before spilling into the next,
  * so Administración (`sortOrder` 1, almost always the oldest concept in a
  * building's Cargos table) is the LAST bucket to receive money. Business
  * rule, not a technical default: ancillary charges (parking, fines, other
  * income…) get paid off before the core administration fee does.
  *
  * Buckets are laid out on one running number line in that priority order —
- * concept N's bucket is `[cursor, cursor + N.totalAmount)` — and each call
+ * concept N's bucket is `[cursor, cursor + N.valorTotal)` — and each call
  * only fills/drains the segment `[lo, hi)` between how much of the invoice
  * was applied BEFORE this call and how much is applied AFTER it (both
- * derived from `factura.total` and the ALREADY-UPDATED `outstandingBalance`
+ * derived from `factura.total` and the ALREADY-UPDATED `saldoPendiente`
  * the caller passes in, post-`decrementarSaldoFactura`/post-restore). This
  * is what makes repeated partial payments against the SAME invoice correct:
  * a second payment does not re-fill a bucket a first payment already
@@ -453,27 +453,27 @@ async function ajustarCarteraPorDocumento(
 export function calcularPartesWaterfall(
   factura: {
     total: number;
-    outstandingBalance: number;
-    lines: { conceptoId: Types.ObjectId; totalAmount: number }[];
+    saldoPendiente: number;
+    lineas: { conceptoId: Types.ObjectId; valorTotal: number }[];
   },
   montoTotal: number,
   signo: 1 | -1,
 ): { conceptoId: Types.ObjectId; parte: number }[] {
-  if (factura.lines.length === 0 || factura.total === 0 || montoTotal === 0) {
+  if (factura.lineas.length === 0 || factura.total === 0 || montoTotal === 0) {
     return [];
   }
 
-  const aplicadoDespues = factura.total - factura.outstandingBalance;
+  const aplicadoDespues = factura.total - factura.saldoPendiente;
   const aplicadoAntes = aplicadoDespues + signo * montoTotal;
   const lo = Math.min(aplicadoAntes, aplicadoDespues);
   const hi = Math.max(aplicadoAntes, aplicadoDespues);
 
-  const ordenAplicacion = [...factura.lines].reverse();
+  const ordenAplicacion = [...factura.lineas].reverse();
   const partes: { conceptoId: Types.ObjectId; parte: number }[] = [];
   let cursor = 0;
   for (const linea of ordenAplicacion) {
     const inicioLinea = cursor;
-    const finLinea = cursor + linea.totalAmount;
+    const finLinea = cursor + linea.valorTotal;
     cursor = finLinea;
 
     const parte = Math.max(
@@ -495,8 +495,8 @@ export async function ajustarSaldosCartera(
     _id: Types.ObjectId;
     inmuebleId: Types.ObjectId;
     total: number;
-    outstandingBalance: number;
-    lines: { conceptoId: Types.ObjectId; totalAmount: number }[];
+    saldoPendiente: number;
+    lineas: { conceptoId: Types.ObjectId; valorTotal: number }[];
   },
   montoTotal: number,
   signo: 1 | -1,
@@ -518,10 +518,12 @@ export async function ajustarSaldosCartera(
               copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
               inmuebleId: { $ifNull: ['$inmuebleId', factura.inmuebleId] },
               conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
-              balance: {
+              saldoPendiente: {
                 $max: [
                   0,
-                  { $add: [{ $ifNull: ['$balance', 0] }, signo * parte] },
+                  {
+                    $add: [{ $ifNull: ['$saldoPendiente', 0] }, signo * parte],
+                  },
                 ],
               },
             },
@@ -551,52 +553,52 @@ export async function ajustarSaldosCartera(
 }
 
 /**
- * How much of each of a Factura's own lines is CURRENTLY pending — the
+ * How much of each of a Factura's own lineas is CURRENTLY pending — the
  * number a user-chosen manual distribution is validated against (never the
- * frozen `totalAmount`, unlike `validarDistribucionNotaCredito`'s own cap: a
+ * frozen `valorTotal`, unlike `validarDistribucionNotaCredito`'s own cap: a
  * Nota Crédito typically runs against a still-fresh invoice, but a Recibo's
  * manual application can run against one already partly paid down).
  *
  * Resolved per LINE, independently: a line already carrying a real
- * `remainingAmount` (written by a prior manual distribution against this
+ * `saldoPendiente` (written by a prior manual distribution against this
  * same factura — see `ejecutarAplicacionManual`) reports that value
- * directly; a line that has never been touched that way (`remainingAmount`
+ * directly; a line that has never been touched that way (`saldoPendiente`
  * still `null`, true for every factura issued before this field existed, and
- * for any of THIS factura's lines a manual distribution never targeted)
- * derives it from `factura.total`/`outstandingBalance` via the SAME reverse-
+ * for any of THIS factura's lineas a manual distribution never targeted)
+ * derives it from `factura.total`/`saldoPendiente` via the SAME reverse-
  * order cascade `ajustarSaldosCartera` above has always used — the only
  * order any of its own money could ever have drained through until now, so
  * this reproduces exactly what that line's true remainder is.
  *
  * Deliberately does NOT require every line to be in the same state (all
- * tracked or all derived) — a factura can have some lines already migrated
+ * tracked or all derived) — a factura can have some lineas already migrated
  * by an earlier manual distribution and others still legacy, and each is
  * resolved on its own.
  */
 export function remanentesPorLinea(factura: {
   total: number;
-  outstandingBalance: number;
-  lines: {
+  saldoPendiente: number;
+  lineas: {
     conceptoId: Types.ObjectId;
-    totalAmount: number;
-    remainingAmount?: number | null;
+    valorTotal: number;
+    saldoPendiente?: number | null;
   }[];
 }): Map<string, number> {
-  const aplicado = factura.total - factura.outstandingBalance;
-  const ordenAplicacion = [...factura.lines].reverse();
+  const aplicado = factura.total - factura.saldoPendiente;
+  const ordenAplicacion = [...factura.lineas].reverse();
   const resultado = new Map<string, number>();
   let cursor = 0;
   for (const linea of ordenAplicacion) {
     const inicioLinea = cursor;
-    const finLinea = cursor + linea.totalAmount;
+    const finLinea = cursor + linea.valorTotal;
     cursor = finLinea;
 
-    if (linea.remainingAmount != null) {
-      resultado.set(linea.conceptoId.toString(), linea.remainingAmount);
+    if (linea.saldoPendiente != null) {
+      resultado.set(linea.conceptoId.toString(), linea.saldoPendiente);
       continue;
     }
     const pagado = Math.max(0, Math.min(finLinea, aplicado) - inicioLinea);
-    resultado.set(linea.conceptoId.toString(), linea.totalAmount - pagado);
+    resultado.set(linea.conceptoId.toString(), linea.valorTotal - pagado);
   }
   return resultado;
 }
@@ -635,7 +637,7 @@ export function validarDistribucionManual(
 }
 
 /**
- * Persists this factura's per-línea `remainingAmount` after a manual
+ * Persists this factura's per-línea `saldoPendiente` after a manual
  * distribution touched it — one targeted `$set` per línea (never `$inc`: a
  * line still at its `null` default has nothing numeric to increment from,
  * and the caller already knows the exact new value from
@@ -656,9 +658,9 @@ export async function actualizarRemanentesLinea(
         {
           _id: facturaId,
           copropiedadId,
-          'lines.conceptoId': cambio.conceptoId,
+          'lineas.conceptoId': cambio.conceptoId,
         },
-        { $set: { 'lines.$.remainingAmount': cambio.nuevoValor } },
+        { $set: { 'lineas.$.saldoPendiente': cambio.nuevoValor } },
         { session },
       )
       .exec();
@@ -677,7 +679,7 @@ export async function actualizarRemanentesLinea(
  * `ajustarSaldosCartera`'s proportional split. A Nota Crédito is different:
  * its creation form asks the user to pick exactly which conceptos this
  * credit corrects and by how much, captured verbatim in
- * `NotaCredito.distribution`. That breakdown has no required relationship to
+ * `NotaCredito.distribucion`. That breakdown has no required relationship to
  * the anchor invoice's own line proportions (e.g. a discount aimed entirely
  * at one concepto on a multi-line invoice) — reusing the proportional split
  * would silently discard the user's explicit choice. Same clamp-at-zero
@@ -693,7 +695,7 @@ export async function actualizarRemanentesLinea(
  * absorbs whatever remainder keeps the parts summing exactly to
  * `montoAplicado`. `montoAplicado` can never exceed `sum(distribucion)` —
  * already enforced upstream (`crear()`'s
- * `Math.min(montoTotal, factura.outstandingBalance)` plus
+ * `Math.min(montoTotal, factura.saldoPendiente)` plus
  * `validarDistribucionNotaCredito`'s own sum-to-`montoTotal` check) — so this
  * never guards that direction.
  *
@@ -763,10 +765,12 @@ export async function ajustarSaldosCarteraPorDistribucion(
               copropiedadId: { $ifNull: ['$copropiedadId', copropiedadId] },
               inmuebleId: { $ifNull: ['$inmuebleId', inmuebleId] },
               conceptoId: { $ifNull: ['$conceptoId', conceptoId] },
-              balance: {
+              saldoPendiente: {
                 $max: [
                   0,
-                  { $add: [{ $ifNull: ['$balance', 0] }, signo * parte] },
+                  {
+                    $add: [{ $ifNull: ['$saldoPendiente', 0] }, signo * parte],
+                  },
                 ],
               },
             },
@@ -800,10 +804,10 @@ export async function ajustarSaldosCarteraPorDistribucion(
 /**
  * One applied document's outcome, as needed to redact a Recibo's
  * Observaciones automatically ("Cancela factura 6, 173" / "Abona a factura
- * 340") — `numero` is the document's bare number (never `fullNumber`, which
- * carries the "FV-"/"ND-" prefix the redacted text doesn't want), `completa`
- * is whether THIS application brought the document's `outstandingBalance`
- * to exactly zero (a partial application never can, since
+ * 340") — `numero` is the document's bare number (never `numeroCompleto`,
+ * which carries the "FV-"/"ND-" prefix the redacted text doesn't want),
+ * `completa` is whether THIS application brought the document's
+ * `saldoPendiente` to exactly zero (a partial application never can, since
  * `decrementarSaldoFactura`/`decrementarSaldoNotaDebito` refuse to go
  * negative — `=== 0` is unambiguous, no epsilon needed).
  */
@@ -815,9 +819,9 @@ export type ResumenAplicacion = {
 
 /** One credit-side line an application produces, per concepto of whichever
  *  Factura/Nota Débito it just settled — `cuenta: null` means that concepto
- *  has no `accountingReceivableAccount` configured (or, for a Nota Débito,
- *  which never breaks its charge down by concepto here), resolved to the
- *  coproperty's shared `cuentaCartera` only once the caller building the
+ *  has no `cuentaCartera` configured (or, for a Nota Débito, which never
+ *  breaks its charge down by concepto here), resolved to the coproperty's
+ *  shared `cuentaContableCartera` only once the caller building the
  *  final `Movimiento[]` knows it. `tipoDocumento`/`numeroDocumento` are this
  *  line's own documento cruce — the SPECIFIC Factura/Nota Débito it settled,
  *  never merged across documents even when several share the same `cuenta`
@@ -826,9 +830,9 @@ export type ResumenAplicacion = {
  *  `FacturaLinea`/`SaldoInicialLinea` structurally, kept minimal so it isn't
  *  tied to either Mongoose subdocument type. */
 interface LineaParaDesglose {
-  conceptKind?: 'administracion' | 'intereses' | 'otro';
-  accountingReceivableAccount?: string | null;
-  accountingIncomeAccount?: string | null;
+  tipoConcepto?: 'administracion' | 'intereses' | 'otro';
+  cuentaCartera?: string | null;
+  cuentaIngreso?: string | null;
 }
 
 /**
@@ -836,25 +840,25 @@ interface LineaParaDesglose {
  * whatever was posted for it at invoice time — mirrors
  * `construirMovimientos`'s own `usaCuentasOrden` check (asiento.builder.ts):
  * an `intereses` (mora) línea, on a coproperty that `usaCuentasOrden`,
- * was NEVER debited to its own `accountingReceivableAccount` when invoiced —
+ * was NEVER debited to its own `cuentaCartera` when invoiced —
  * `construirMovimientos` posted the memorandum pair there instead, since
  * mora income isn't recognized until it's actually collected. So collecting
- * it now must credit `accountingIncomeAccount` (the Cargos tab's crédito
+ * it now must credit `cuentaIngreso` (the Cargos tab's crédito
  * account, recognizing the income for the first time), never
- * `accountingReceivableAccount` (nothing was ever debited there to zero
+ * `cuentaCartera` (nothing was ever debited there to zero
  * out). Every other línea — administración/otro always, and intereses too
  * when the coproperty doesn't use memorandum accounts — was debited to its
- * own `accountingReceivableAccount` at invoice time, same as always, so
+ * own `cuentaCartera` at invoice time, same as always, so
  * that's still the right account to credit here.
  */
 export function cuentaCarteraDeLinea(
   linea: LineaParaDesglose | null | undefined,
   usaCuentasOrden: boolean,
 ): string | null {
-  if (linea?.conceptKind === 'intereses' && usaCuentasOrden) {
-    return linea.accountingIncomeAccount ?? null;
+  if (linea?.tipoConcepto === 'intereses' && usaCuentasOrden) {
+    return linea.cuentaIngreso ?? null;
   }
-  return linea?.accountingReceivableAccount ?? null;
+  return linea?.cuentaCartera ?? null;
 }
 
 export type DesgloseCarteraAplicacion = {
@@ -865,7 +869,7 @@ export type DesgloseCarteraAplicacion = {
 };
 
 /** `montoAFactura` — how much to actually decrement/credit for this
- *  document: its full `outstandingBalance` when the discount activates,
+ *  document: its full `saldoPendiente` when the discount activates,
  *  otherwise `montoDisponible` VERBATIM, uncapped — the caller decides
  *  whether/how to cap that (see this function's own docblock on why).
  *  `montoDescuento` is the portion of that which is discount, not real
@@ -878,14 +882,14 @@ export interface ResultadoElegibilidadDescuento {
 /**
  * The single place the early-payment-discount business rule lives, shared
  * by `ejecutarAplicacionFifo` and `ejecutarAplicacionManual` — a document
- * only ever earns its own `discountAmount` when paying it off COMPLETELY,
+ * only ever earns its own `montoDescuento` when paying it off COMPLETELY,
  * never prorated onto a partial abono (confirmed with product: "debe
  * pagarla totalmente"). Never called for a Nota Débito target — those never
  * carry a discount, so both callers skip straight to their own plain path
  * for that branch.
  *
  * Deliberately does NOT cap the "didn't activate" branch to
- * `outstandingBalance` — `ejecutarAplicacionFifo` needs that cap (FIFO always
+ * `saldoPendiente` — `ejecutarAplicacionFifo` needs that cap (FIFO always
  * bounds itself to what a document can accept), but `ejecutarAplicacionManual`
  * must NOT: capping there would silently shrink a caller's over-large
  * request instead of letting `decrementarSaldoFactura`'s own `$expr` guard
@@ -893,7 +897,7 @@ export interface ResultadoElegibilidadDescuento {
  * supposed to get. So this returns `montoDisponible` untouched here; FIFO
  * applies its own `Math.min` on the result.
  *
- * `factura.discountAmount` is capped to `outstandingBalance` defensively —
+ * `factura.montoDescuento` is capped to `saldoPendiente` defensively —
  * a discount larger than what's actually owed (a misconfigured Parámetros
  * value, or a partial payment already landed between consolidación and
  * this Recibo) must never let `montoAFactura - montoDescuento` (the real
@@ -901,28 +905,28 @@ export interface ResultadoElegibilidadDescuento {
  */
 export function evaluarAplicacionConDescuento(
   factura: {
-    outstandingBalance: number;
-    discountAmount: number;
-    discountDeadline: Date | null;
+    saldoPendiente: number;
+    montoDescuento: number;
+    fechaLimiteDescuento: Date | null;
   },
   fechaRecibo: Date,
   montoDisponible: number,
 ): ResultadoElegibilidadDescuento {
   const descuentoOfrecido = Math.min(
-    factura.discountAmount,
-    factura.outstandingBalance,
+    factura.montoDescuento,
+    factura.saldoPendiente,
   );
   const dentroDePlazo =
     descuentoOfrecido > 0 &&
-    factura.discountDeadline !== null &&
-    fechaRecibo.getTime() <= factura.discountDeadline.getTime();
+    factura.fechaLimiteDescuento !== null &&
+    fechaRecibo.getTime() <= factura.fechaLimiteDescuento.getTime();
 
   if (
     dentroDePlazo &&
-    montoDisponible + descuentoOfrecido >= factura.outstandingBalance
+    montoDisponible + descuentoOfrecido >= factura.saldoPendiente
   ) {
     return {
-      montoAFactura: factura.outstandingBalance,
+      montoAFactura: factura.saldoPendiente,
       montoDescuento: descuentoOfrecido,
     };
   }
@@ -935,16 +939,16 @@ export function evaluarAplicacionConDescuento(
  * `ContextoAplicacion.recibo` can also be a `SaldoInicialAnticipoDocument`
  * (an imported opening anticipo balance, see that schema's own docblock)
  * without this file importing that schema or knowing it exists. Both
- * documents name their fields identically on purpose — `fullNumber`,
- * `receivedDate` — precisely so either one satisfies this shape with no
+ * documents name their fields identically on purpose — `numeroCompleto`,
+ * `fechaRecibo` — precisely so either one satisfies this shape with no
  * adapter.
  */
 export interface OrigenAplicacion {
   _id: Types.ObjectId;
   inmuebleId: Types.ObjectId;
   terceroId: Types.ObjectId | null;
-  fullNumber: string;
-  receivedDate: Date;
+  numeroCompleto: string;
+  fechaRecibo: Date;
 }
 
 /**
@@ -958,7 +962,7 @@ export interface OrigenAplicacion {
  * `sourceType: 'RC'`, `sourceId: recibo._id`) or `NotasAnticipoService`
  * (applying a leftover anticipo LATER, as its own document — `sourceType:
  * 'NA'`, `sourceId` the new Nota de Anticipo's `_id`). Either way, the
- * balance that actually decreases is the origin's own `unappliedAmount` — a
+ * balance that actually decreases is the origin's own `montoSinAplicar` — a
  * Nota de Anticipo has no running balance of its own, it is one complete
  * record of a single application event.
  *
@@ -993,11 +997,11 @@ export interface ContextoAplicacion<
   recibo: TOrigen;
   sourceType: 'RC' | 'NA';
   sourceId: Types.ObjectId;
-  /** The source document's own declared business date — `recibo.receivedDate`
+  /** The source document's own declared business date — `recibo.fechaRecibo`
    *  when `sourceType: 'RC'` (the recibo IS the source), or the new Nota de
-   *  Anticipo's own `issueDate` when `sourceType: 'NA'` (a later, separately
+   *  Anticipo's own `fechaEmision` when `sourceType: 'NA'` (a later, separately
    *  dated document — never the original recibo's date). Frozen onto every
-   *  `AplicacionCartera` this call creates, as `sourceDate` — see that
+   *  `AplicacionCartera` this call creates, as `fechaOrigen` — see that
    *  field's own schema docblock for why. */
   sourceDate: Date;
   accountId: string;
@@ -1009,7 +1013,7 @@ export interface ContextoAplicacion<
 
 /**
  * Applies `solicitadas` against their documents — ALL of them, or none: if
- * the sum exceeds `ctx.recibo.unappliedAmount`, or any single line's
+ * the sum exceeds `ctx.recibo.montoSinAplicar`, or any single line's
  * `decrementarSaldoFactura` call throws, the whole transaction aborts
  * (manual application mode is all-or-nothing).
  *
@@ -1026,9 +1030,9 @@ export async function ejecutarAplicacionManual<
   solicitadas: AplicacionSolicitadaDto[],
   // A user-confirmed payment shortfall (`RecibosService.crear()`'s own
   // `confirmarDescuentoFaltante` flag) — widens the pre-check below (the
-  // request is allowed to exceed `ctx.recibo`'s own `unappliedAmount` by
+  // request is allowed to exceed `ctx.recibo`'s own `montoSinAplicar` by
   // exactly this much), and gets attributed onto the LAST línea's own
-  // `AplicacionCartera.discountApplied`, exactly like an automatic
+  // `AplicacionCartera.montoDescuento`, exactly like an automatic
   // pronto-pago discount would be — never left as an untraceable
   // receipt-level adjustment: the accountant needs to see WHICH document
   // absorbed it (Auxiliar de Cartera, the Recibo's own printed PDF). "Last"
@@ -1064,7 +1068,7 @@ export async function ejecutarAplicacionManual<
     usaCuentasOrden,
   } = ctx;
 
-  // `recibo.unappliedAmount` is no longer a field the (now immutable)
+  // `recibo.montoSinAplicar` is no longer a field the (now immutable)
   // document carries live — resolved fresh here from `SaldoDocumentoOrigen`,
   // same pattern `decrementarSaldoFactura` uses for its own return value.
   // Only a PRE-check for a friendlier error message: the real enforcement is
@@ -1075,16 +1079,16 @@ export async function ejecutarAplicacionManual<
     .findOne({ documentoId: recibo._id })
     .session(session)
     .exec();
-  const unappliedAmountActual = saldoOrigenActual?.saldoDisponible ?? 0;
+  const montoSinAplicarActual = saldoOrigenActual?.saldoDisponible ?? 0;
 
   const sumaSolicitada = solicitadas.reduce(
     (acc, a) => acc + a.montoAplicado,
     0,
   );
-  if (sumaSolicitada > unappliedAmountActual + descuentoConfirmadoExtra) {
+  if (sumaSolicitada > montoSinAplicarActual + descuentoConfirmadoExtra) {
     throw new ConflictException(
       `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
-        `del recibo ${recibo.fullNumber} (${unappliedAmountActual})`,
+        `del recibo ${recibo.numeroCompleto} (${montoSinAplicarActual})`,
     );
   }
 
@@ -1122,7 +1126,7 @@ export async function ejecutarAplicacionManual<
         throw new ConflictException(
           `La nota débito ${documentoId.toString()} pertenece a otro ` +
             `inmueble (${notaDebito.inmuebleId.toString()}) que el recibo ` +
-            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+            `${recibo.numeroCompleto} (${recibo.inmuebleId.toString()})`,
         );
       }
 
@@ -1141,7 +1145,7 @@ export async function ejecutarAplicacionManual<
         cuenta: null,
         monto: solicitada.montoAplicado,
         tipoDocumento: 'ND',
-        numeroDocumento: notaDebito.number,
+        numeroDocumento: notaDebito.numero,
       });
       sumaCashAplicada += solicitada.montoAplicado - descuentoLinea;
       montoDescuentoTotal += descuentoLinea;
@@ -1152,21 +1156,21 @@ export async function ejecutarAplicacionManual<
             copropiedadId,
             sourceType,
             sourceId,
-            documentType: 'ND',
-            documentId: documentoId,
-            amountApplied: solicitada.montoAplicado,
-            discountApplied: descuentoLinea,
+            tipoDocumento: 'ND',
+            documentoId: documentoId,
+            montoAplicado: solicitada.montoAplicado,
+            montoDescuento: descuentoLinea,
             detalleConceptos: [
               {
                 conceptoId: notaDebito.conceptoId,
-                conceptName: notaDebito.description ?? 'Nota Débito',
+                nombreConcepto: notaDebito.descripcion ?? 'Nota Débito',
                 monto: solicitada.montoAplicado,
               },
             ],
-            status: 'activa',
-            appliedAt: new Date(),
-            sourceDate,
-            appliedBy: accountId,
+            estado: 'activa',
+            aplicadoEn: new Date(),
+            fechaOrigen: sourceDate,
+            aplicadoPor: accountId,
           },
         ],
         { session },
@@ -1174,8 +1178,8 @@ export async function ejecutarAplicacionManual<
       creadas.push(creada);
       resumen.push({
         tipo: 'ND',
-        numero: notaDebito.number,
-        completa: notaDebito.outstandingBalance === 0,
+        numero: notaDebito.numero,
+        completa: notaDebito.saldoPendiente === 0,
       });
       continue;
     }
@@ -1189,7 +1193,7 @@ export async function ejecutarAplicacionManual<
       // A Saldo Inicial has several conceptos, like a Factura — same
       // waterfall/distribucion choice, never the ND single-concepto path.
       const saldoInicialDoc = await saldosIniciales
-        .findOne({ _id: documentoId, copropiedadId, status: 'activo' })
+        .findOne({ _id: documentoId, copropiedadId, estado: 'activo' })
         .session(session)
         .exec();
       if (!saldoInicialDoc) {
@@ -1202,20 +1206,20 @@ export async function ejecutarAplicacionManual<
         .findOne({ documentoId })
         .session(session)
         .exec();
-      // Adapted shape, `lines[].totalAmount` in place of `.montoOriginal` —
+      // Adapted shape, `filas[].montoOriginal` in place of `.valorTotal` —
       // `ajustarSaldosCartera`/`remanentesPorLinea` are duck-typed against
       // Factura's own field names; a Saldo Inicial never carries a
-      // persisted per-línea `remainingAmount` (no Factura-style lazy
+      // persisted per-línea `saldoPendiente` (no Factura-style lazy
       // migration field), so remainders always derive fresh from the
       // aggregate, same as a legacy Factura línea that predates that field.
       const saldoInicialActual = {
         _id: saldoInicialDoc._id,
         inmuebleId: saldoInicialDoc.inmuebleId,
         total: saldoInicialDoc.monto,
-        outstandingBalance: saldoPrevioInicial?.saldoPendiente ?? 0,
-        lines: saldoInicialDoc.filas.map((l) => ({
+        saldoPendiente: saldoPrevioInicial?.saldoPendiente ?? 0,
+        lineas: saldoInicialDoc.filas.map((l) => ({
           conceptoId: l.conceptoId,
-          totalAmount: l.montoOriginal,
+          valorTotal: l.montoOriginal,
         })),
       };
       const repartoElegidoSI = solicitada.distribucion?.length
@@ -1242,7 +1246,7 @@ export async function ejecutarAplicacionManual<
         throw new ConflictException(
           `El saldo inicial ${documentoId.toString()} pertenece a otro ` +
             `inmueble (${saldoInicial.inmuebleId.toString()}) que el recibo ` +
-            `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+            `${recibo.numeroCompleto} (${recibo.inmuebleId.toString()})`,
         );
       }
 
@@ -1278,7 +1282,7 @@ export async function ejecutarAplicacionManual<
         );
         return {
           conceptoId: parte.conceptoId,
-          conceptName: linea?.nombreConcepto ?? 'Concepto',
+          nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
           monto: parte.parte,
         };
       });
@@ -1294,7 +1298,7 @@ export async function ejecutarAplicacionManual<
             numeroDocumento: saldoInicial.numero,
           });
         }
-        if (linea?.conceptKind === 'intereses') {
+        if (linea?.tipoConcepto === 'intereses') {
           montoAplicadoMora += parte.parte;
         }
       }
@@ -1307,15 +1311,15 @@ export async function ejecutarAplicacionManual<
             copropiedadId,
             sourceType,
             sourceId,
-            documentType: 'SI',
-            documentId: documentoId,
-            amountApplied: solicitada.montoAplicado,
-            discountApplied: descuentoLinea,
+            tipoDocumento: 'SI',
+            documentoId: documentoId,
+            montoAplicado: solicitada.montoAplicado,
+            montoDescuento: descuentoLinea,
             detalleConceptos: detalleConceptosSI,
-            status: 'activa',
-            appliedAt: new Date(),
-            sourceDate,
-            appliedBy: accountId,
+            estado: 'activa',
+            aplicadoEn: new Date(),
+            fechaOrigen: sourceDate,
+            aplicadoPor: accountId,
           },
         ],
         { session },
@@ -1324,7 +1328,7 @@ export async function ejecutarAplicacionManual<
       resumen.push({
         tipo: 'SI',
         numero: saldoInicial.numero,
-        completa: saldoInicial.outstandingBalance === 0,
+        completa: saldoInicial.saldoPendiente === 0,
       });
       continue;
     }
@@ -1336,12 +1340,12 @@ export async function ejecutarAplicacionManual<
     // below still guards the actual write with its own `$expr`, so a stale
     // read here just means that guard throws (same failure mode as today),
     // never a lost update. `Factura` is immutable now, so this is no longer
-    // `facturaDoc.outstandingBalance` itself (permanently frozen at
+    // `facturaDoc.saldoPendiente` itself (permanently frozen at
     // creation-time `total` — see `SaldoTotalDocumento`'s own docblock);
     // it's merged in fresh from there, same pattern `decrementarSaldoFactura`
     // itself uses for its own return value.
     const facturaDoc = await facturas
-      .findOne({ _id: documentoId, copropiedadId, status: 'emitida' })
+      .findOne({ _id: documentoId, copropiedadId, estado: 'emitida' })
       .session(session)
       .exec();
     if (!facturaDoc) {
@@ -1355,11 +1359,11 @@ export async function ejecutarAplicacionManual<
       .session(session)
       .exec();
     const facturaActual = Object.assign(facturaDoc, {
-      outstandingBalance: saldoPrevioFactura?.saldoPendiente ?? 0,
+      saldoPendiente: saldoPrevioFactura?.saldoPendiente ?? 0,
     });
     // El usuario tomó control explícito del reparto por concepto — validado
     // contra el saldo pendiente REAL de cada concepto de esta factura (nunca
-    // contra su totalAmount congelado, a diferencia de una Nota Crédito: esta
+    // contra su valorTotal congelado, a diferencia de una Nota Crédito: esta
     // factura puede ya venir parcialmente pagada). El descuento por pronto
     // pago se omite en este caso — solo tiene sentido en la vía automática,
     // donde saldar la factura completa lo activa; aquí el usuario ya decidió
@@ -1381,7 +1385,7 @@ export async function ejecutarAplicacionManual<
     } else {
       ({ montoAFactura, montoDescuento } = evaluarAplicacionConDescuento(
         facturaActual,
-        recibo.receivedDate,
+        recibo.fechaRecibo,
         solicitada.montoAplicado,
       ));
     }
@@ -1402,7 +1406,7 @@ export async function ejecutarAplicacionManual<
       throw new ConflictException(
         `La factura ${documentoId.toString()} pertenece a otro inmueble ` +
           `(${factura.inmuebleId.toString()}) que el recibo ` +
-          `${recibo.fullNumber} (${recibo.inmuebleId.toString()})`,
+          `${recibo.numeroCompleto} (${recibo.inmuebleId.toString()})`,
       );
     }
 
@@ -1447,17 +1451,17 @@ export async function ejecutarAplicacionManual<
     }
 
     const detalleConceptos = partes.map((parte) => {
-      const linea = factura.lines.find((l) =>
+      const linea = factura.lineas.find((l) =>
         l.conceptoId.equals(parte.conceptoId),
       );
       return {
         conceptoId: parte.conceptoId,
-        conceptName: linea?.conceptName ?? 'Concepto',
+        nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
         monto: parte.parte,
       };
     });
     for (const parte of partes) {
-      const linea = factura.lines.find((l) =>
+      const linea = factura.lineas.find((l) =>
         l.conceptoId.equals(parte.conceptoId),
       );
       if (parte.parte !== 0) {
@@ -1465,10 +1469,10 @@ export async function ejecutarAplicacionManual<
           cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
           monto: parte.parte,
           tipoDocumento: 'FV',
-          numeroDocumento: factura.number,
+          numeroDocumento: factura.numero,
         });
       }
-      if (linea?.conceptKind === 'intereses') {
+      if (linea?.tipoConcepto === 'intereses') {
         montoAplicadoMora += parte.parte;
       }
     }
@@ -1481,15 +1485,15 @@ export async function ejecutarAplicacionManual<
           copropiedadId,
           sourceType,
           sourceId,
-          documentType: 'FV',
-          documentId: documentoId,
-          amountApplied: montoAFactura,
-          discountApplied: montoDescuento,
+          tipoDocumento: 'FV',
+          documentoId: documentoId,
+          montoAplicado: montoAFactura,
+          montoDescuento: montoDescuento,
           detalleConceptos,
-          status: 'activa',
-          appliedAt: new Date(),
-          sourceDate,
-          appliedBy: accountId,
+          estado: 'activa',
+          aplicadoEn: new Date(),
+          fechaOrigen: sourceDate,
+          aplicadoPor: accountId,
         },
       ],
       { session },
@@ -1497,8 +1501,8 @@ export async function ejecutarAplicacionManual<
     creadas.push(creada);
     resumen.push({
       tipo: 'FV',
-      numero: factura.number,
-      completa: factura.outstandingBalance === 0,
+      numero: factura.numero,
+      completa: factura.saldoPendiente === 0,
     });
   }
 
@@ -1584,11 +1588,11 @@ export async function ejecutarAplicacionFifo<
     saldoInicialesDelInmueble,
   ] = await Promise.all([
     facturas
-      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
+      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, estado: 'emitida' })
       .session(session)
       .exec(),
     notasDebito
-      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, status: 'emitida' })
+      .find({ copropiedadId, inmuebleId: recibo.inmuebleId, estado: 'emitida' })
       .session(session)
       .exec(),
     saldosIniciales
@@ -1596,7 +1600,7 @@ export async function ejecutarAplicacionFifo<
           .find({
             copropiedadId,
             inmuebleId: recibo.inmuebleId,
-            status: 'activo',
+            estado: 'activo',
           })
           .session(session)
           .exec()
@@ -1623,12 +1627,12 @@ export async function ejecutarAplicacionFifo<
     .filter((f) => saldoPorDocumento.has(f._id.toString()))
     .sort(
       (a, b) =>
-        (a.dueDate ?? a.issueDate).getTime() -
-        (b.dueDate ?? b.issueDate).getTime(),
+        (a.fechaVencimiento ?? a.fechaEmision).getTime() -
+        (b.fechaVencimiento ?? b.fechaEmision).getTime(),
     );
   const notasDebitoAbiertas = notasDebitoDelInmueble
     .filter((n) => saldoPorDocumento.has(n._id.toString()))
-    .sort((a, b) => a.issueDate.getTime() - b.issueDate.getTime());
+    .sort((a, b) => a.fechaEmision.getTime() - b.fechaEmision.getTime());
   const saldoInicialesAbiertos = saldoInicialesDelInmueble
     .filter((s) => saldoPorDocumento.has(s._id.toString()))
     .sort(
@@ -1660,13 +1664,13 @@ export async function ejecutarAplicacionFifo<
       tipo: 'FV',
       doc: factura,
       saldoPendiente: saldoPorDocumento.get(factura._id.toString())!,
-      prioridad: factura.dueDate ?? factura.issueDate,
+      prioridad: factura.fechaVencimiento ?? factura.fechaEmision,
     })),
     ...notasDebitoAbiertas.map((nota): Candidato => ({
       tipo: 'ND',
       doc: nota,
       saldoPendiente: saldoPorDocumento.get(nota._id.toString())!,
-      prioridad: nota.issueDate,
+      prioridad: nota.fechaEmision,
     })),
     ...saldoInicialesAbiertos.map((saldoInicial): Candidato => ({
       tipo: 'SI',
@@ -1701,11 +1705,11 @@ export async function ejecutarAplicacionFifo<
       candidato.tipo === 'FV'
         ? evaluarAplicacionConDescuento(
             {
-              outstandingBalance: candidato.saldoPendiente,
-              discountAmount: candidato.doc.discountAmount,
-              discountDeadline: candidato.doc.discountDeadline,
+              saldoPendiente: candidato.saldoPendiente,
+              montoDescuento: candidato.doc.montoDescuento,
+              fechaLimiteDescuento: candidato.doc.fechaLimiteDescuento,
             },
-            recibo.receivedDate,
+            recibo.fechaRecibo,
             restante,
           )
         : { montoAFactura: restante, montoDescuento: 0 };
@@ -1743,7 +1747,7 @@ export async function ejecutarAplicacionFifo<
           cuenta: null,
           monto,
           tipoDocumento: 'ND',
-          numeroDocumento: notaActualizada.number,
+          numeroDocumento: notaActualizada.numero,
         });
 
         const [creada] = await aplicaciones.create(
@@ -1752,21 +1756,21 @@ export async function ejecutarAplicacionFifo<
               copropiedadId,
               sourceType,
               sourceId,
-              documentType: 'ND',
-              documentId: candidato.doc._id,
-              amountApplied: monto,
-              discountApplied: 0,
+              tipoDocumento: 'ND',
+              documentoId: candidato.doc._id,
+              montoAplicado: monto,
+              montoDescuento: 0,
               detalleConceptos: [
                 {
                   conceptoId: notaActualizada.conceptoId,
-                  conceptName: notaActualizada.description ?? 'Nota Débito',
+                  nombreConcepto: notaActualizada.descripcion ?? 'Nota Débito',
                   monto,
                 },
               ],
-              status: 'activa',
-              appliedAt: new Date(),
-              sourceDate,
-              appliedBy: accountId,
+              estado: 'activa',
+              aplicadoEn: new Date(),
+              fechaOrigen: sourceDate,
+              aplicadoPor: accountId,
             },
           ],
           { session },
@@ -1775,8 +1779,8 @@ export async function ejecutarAplicacionFifo<
         aplicadas.push(creada);
         resumen.push({
           tipo: 'ND',
-          numero: notaActualizada.number,
-          completa: notaActualizada.outstandingBalance === 0,
+          numero: notaActualizada.numero,
+          completa: notaActualizada.saldoPendiente === 0,
         });
         restante -= cashUsado;
         totalAplicado += cashUsado;
@@ -1787,7 +1791,7 @@ export async function ejecutarAplicacionFifo<
         // Several conceptos, like a Factura — same waterfall cascade,
         // reused via `ajustarSaldosCartera`'s own `tipoDocumento` parameter
         // (see `decrementarSaldoInicial`'s own docblock), never a discount
-        // (a Saldo Inicial never carries `discountAmount`/`discountDeadline`
+        // (a Saldo Inicial never carries `montoDescuento`/`fechaLimiteDescuento`
         // — `montoDescuento` is already 0 for it, from the ternary above).
         // Non-null: reaching this branch means `saldoInicialesAbiertos` was
         // non-empty, which only happens when `saldosIniciales` was truthy at
@@ -1809,10 +1813,10 @@ export async function ejecutarAplicacionFifo<
             _id: saldoInicialActualizado._id,
             inmuebleId: saldoInicialActualizado.inmuebleId,
             total: saldoInicialActualizado.monto,
-            outstandingBalance: saldoInicialActualizado.outstandingBalance,
-            lines: saldoInicialActualizado.filas.map((l) => ({
+            saldoPendiente: saldoInicialActualizado.saldoPendiente,
+            lineas: saldoInicialActualizado.filas.map((l) => ({
               conceptoId: l.conceptoId,
-              totalAmount: l.montoOriginal,
+              valorTotal: l.montoOriginal,
             })),
           },
           monto,
@@ -1825,7 +1829,7 @@ export async function ejecutarAplicacionFifo<
           );
           return {
             conceptoId: parte.conceptoId,
-            conceptName: linea?.nombreConcepto ?? 'Concepto',
+            nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
             monto: parte.parte,
           };
         });
@@ -1841,7 +1845,7 @@ export async function ejecutarAplicacionFifo<
               numeroDocumento: saldoInicialActualizado.numero,
             });
           }
-          if (linea?.conceptKind === 'intereses') {
+          if (linea?.tipoConcepto === 'intereses') {
             montoAplicadoMora += parte.parte;
           }
         }
@@ -1852,15 +1856,15 @@ export async function ejecutarAplicacionFifo<
               copropiedadId,
               sourceType,
               sourceId,
-              documentType: 'SI',
-              documentId: candidato.doc._id,
-              amountApplied: monto,
-              discountApplied: 0,
+              tipoDocumento: 'SI',
+              documentoId: candidato.doc._id,
+              montoAplicado: monto,
+              montoDescuento: 0,
               detalleConceptos: detalleConceptosSI,
-              status: 'activa',
-              appliedAt: new Date(),
-              sourceDate,
-              appliedBy: accountId,
+              estado: 'activa',
+              aplicadoEn: new Date(),
+              fechaOrigen: sourceDate,
+              aplicadoPor: accountId,
             },
           ],
           { session },
@@ -1870,7 +1874,7 @@ export async function ejecutarAplicacionFifo<
         resumen.push({
           tipo: 'SI',
           numero: saldoInicialActualizado.numero,
-          completa: saldoInicialActualizado.outstandingBalance === 0,
+          completa: saldoInicialActualizado.saldoPendiente === 0,
         });
         restante -= cashUsado;
         totalAplicado += cashUsado;
@@ -1895,17 +1899,17 @@ export async function ejecutarAplicacionFifo<
         -1,
       );
       const detalleConceptos = partes.map((parte) => {
-        const linea = facturaActualizada.lines.find((l) =>
+        const linea = facturaActualizada.lineas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         return {
           conceptoId: parte.conceptoId,
-          conceptName: linea?.conceptName ?? 'Concepto',
+          nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
           monto: parte.parte,
         };
       });
       for (const parte of partes) {
-        const linea = facturaActualizada.lines.find((l) =>
+        const linea = facturaActualizada.lineas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         if (parte.parte !== 0) {
@@ -1913,10 +1917,10 @@ export async function ejecutarAplicacionFifo<
             cuenta: cuentaCarteraDeLinea(linea, usaCuentasOrden),
             monto: parte.parte,
             tipoDocumento: 'FV',
-            numeroDocumento: facturaActualizada.number,
+            numeroDocumento: facturaActualizada.numero,
           });
         }
-        if (linea?.conceptKind === 'intereses') {
+        if (linea?.tipoConcepto === 'intereses') {
           montoAplicadoMora += parte.parte;
         }
       }
@@ -1927,15 +1931,15 @@ export async function ejecutarAplicacionFifo<
             copropiedadId,
             sourceType,
             sourceId,
-            documentType: 'FV',
-            documentId: candidato.doc._id,
-            amountApplied: monto,
-            discountApplied: montoDescuento,
+            tipoDocumento: 'FV',
+            documentoId: candidato.doc._id,
+            montoAplicado: monto,
+            montoDescuento: montoDescuento,
             detalleConceptos,
-            status: 'activa',
-            appliedAt: new Date(),
-            sourceDate,
-            appliedBy: accountId,
+            estado: 'activa',
+            aplicadoEn: new Date(),
+            fechaOrigen: sourceDate,
+            aplicadoPor: accountId,
           },
         ],
         { session },
@@ -1944,8 +1948,8 @@ export async function ejecutarAplicacionFifo<
       aplicadas.push(creada);
       resumen.push({
         tipo: 'FV',
-        numero: facturaActualizada.number,
-        completa: facturaActualizada.outstandingBalance === 0,
+        numero: facturaActualizada.numero,
+        completa: facturaActualizada.saldoPendiente === 0,
       });
       montoDescuentoTotal += montoDescuento;
       restante -= cashUsado;

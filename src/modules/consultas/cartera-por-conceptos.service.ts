@@ -117,21 +117,21 @@ export class CarteraPorConceptosService {
       this.facturas
         .find({
           copropiedadId,
-          status: 'emitida',
-          issueDate: { $lte: limiteEmision },
+          estado: 'emitida',
+          fechaEmision: { $lte: limiteEmision },
         })
         .exec(),
       this.notasDebito
         .find({
           copropiedadId,
-          status: 'emitida',
-          issueDate: { $lte: limiteEmision },
+          estado: 'emitida',
+          fechaEmision: { $lte: limiteEmision },
         })
         .exec(),
       this.saldosIniciales
         .find({
           copropiedadId,
-          status: 'activo',
+          estado: 'activo',
           fecha: { $lte: limiteEmision },
         })
         .exec(),
@@ -149,7 +149,7 @@ export class CarteraPorConceptosService {
     const [aplicaciones, carteraPorDocumentoRows, saldoTotalRows, inmuebles] =
       await Promise.all([
         this.aplicaciones
-          .find({ copropiedadId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentoId: { $in: docIds } })
           .exec(),
         esConsultaVigente
           ? this.carteraPorDocumento
@@ -166,7 +166,7 @@ export class CarteraPorConceptosService {
 
     const appsByDoc = new Map<string, typeof aplicaciones>();
     for (const app of aplicaciones) {
-      const key = app.documentId.toString();
+      const key = app.documentoId.toString();
       const list = appsByDoc.get(key) ?? [];
       list.push(app);
       appsByDoc.set(key, list);
@@ -264,27 +264,27 @@ export class CarteraPorConceptosService {
         f.total -
           apps
             .filter((a) => activeAsOf(a, fecha))
-            .reduce((sum, a) => sum + a.amountApplied, 0),
+            .reduce((sum, a) => sum + a.montoAplicado, 0),
       );
       // Proportional split of the document's own frozen lines — the same
       // fallback Cartera por Inmueble uses for a historical query, or for a
       // document the live ledger never tracked.
       const factor = f.total > 0 ? saldoActivo / f.total : 0;
       const cargosFallback: Record<string, number> = {};
-      for (const line of f.lines) {
+      for (const line of f.lineas) {
         const key = line.conceptoId.toString();
         cargosFallback[key] =
-          (cargosFallback[key] ?? 0) + line.totalAmount * factor;
+          (cargosFallback[key] ?? 0) + line.valorTotal * factor;
       }
 
       agregar(
         f.inmuebleId,
         f._id,
         'FV',
-        f.fullNumber,
-        f.number,
-        f.issueDate,
-        f.dueDate,
+        f.numeroCompleto,
+        f.numero,
+        f.fechaEmision,
+        f.fechaVencimiento,
         saldoActivo,
         cargosFallback,
       );
@@ -296,15 +296,15 @@ export class CarteraPorConceptosService {
         nd.total -
           apps
             .filter((a) => activeAsOf(a, fecha))
-            .reduce((sum, a) => sum + a.amountApplied, 0),
+            .reduce((sum, a) => sum + a.montoAplicado, 0),
       );
       agregar(
         nd.inmuebleId,
         nd._id,
         'ND',
-        nd.fullNumber,
-        nd.number,
-        nd.issueDate,
+        nd.numeroCompleto,
+        nd.numero,
+        nd.fechaEmision,
         null,
         saldoActivo,
         { [nd.conceptoId.toString()]: saldoActivo },
@@ -317,7 +317,7 @@ export class CarteraPorConceptosService {
         si.monto -
           apps
             .filter((a) => activeAsOf(a, fecha))
-            .reduce((sum, a) => sum + a.amountApplied, 0),
+            .reduce((sum, a) => sum + a.montoAplicado, 0),
       );
       const factor = si.monto > 0 ? saldoActivo / si.monto : 0;
       const cargosFallback: Record<string, number> = {};

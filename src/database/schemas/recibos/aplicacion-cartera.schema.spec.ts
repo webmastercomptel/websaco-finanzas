@@ -20,12 +20,12 @@ const base = (over: Record<string, unknown> = {}) => ({
   copropiedadId: copropiedad,
   sourceType: 'RC',
   sourceId: recibo,
-  documentType: 'FV',
-  documentId: factura,
-  amountApplied: 250000,
-  appliedAt: new Date('2026-08-27'),
-  sourceDate: new Date('2026-08-27'),
-  appliedBy: cuenta,
+  tipoDocumento: 'FV',
+  documentoId: factura,
+  montoAplicado: 250000,
+  aplicadoEn: new Date('2026-08-27'),
+  fechaOrigen: new Date('2026-08-27'),
+  aplicadoPor: cuenta,
   ...over,
 });
 
@@ -58,21 +58,21 @@ describe('AplicacionCarteraSchema — forma', () => {
 
   it('arranca activa', () => {
     const doc = new AplicacionModel(base());
-    expect(doc.status).toBe('activa');
+    expect(doc.estado).toBe('activa');
   });
 
   it('admite el tipo de documento ND, reservado para Notas Débito (fuera de alcance hoy)', async () => {
-    await expect(validar({ documentType: 'ND' })).resolves.toBeNull();
+    await expect(validar({ tipoDocumento: 'ND' })).resolves.toBeNull();
   });
 
   it('rechaza un tipo de documento fuera del catálogo', async () => {
-    await expect(validar({ documentType: 'NC' })).resolves.toBeInstanceOf(
+    await expect(validar({ tipoDocumento: 'NC' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
   it('rechaza un estado fuera de activa/revertida', async () => {
-    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(
+    await expect(validar({ estado: 'pendiente' })).resolves.toBeInstanceOf(
       Error,
     );
   });
@@ -81,7 +81,7 @@ describe('AplicacionCarteraSchema — forma', () => {
 describe('AplicacionCarteraSchema — índices (generalización, no duplicación)', () => {
   it('indexa por documento, para "cada aplicación contra la factura X"', () => {
     const indice = indices().find(
-      ([campos]) => campos.documentType === 1 && campos.documentId === 1,
+      ([campos]) => campos.tipoDocumento === 1 && campos.documentoId === 1,
     );
     expect(indice).toBeDefined();
   });

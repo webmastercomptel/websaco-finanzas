@@ -12,22 +12,22 @@ const COP = new Types.ObjectId();
 const lote = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'lote-1' },
   copropiedadId: COP,
-  number: 12,
-  status: 'consolidado',
-  billingDate: new Date('2026-08-06'),
-  dueDate: new Date('2026-08-31'),
+  numero: 12,
+  estado: 'consolidado',
+  fechaFacturacion: new Date('2026-08-06'),
+  fechaVencimiento: new Date('2026-08-31'),
   ...over,
 });
 
 const linea = (over: Record<string, unknown> = {}) => ({
   conceptoId: { toString: () => 'con-admin' },
-  conceptName: 'Administración',
-  conceptKind: 'administracion',
-  source: 'recurrente',
-  baseAmount: 100000,
-  taxRate: 0,
-  taxAmount: 0,
-  totalAmount: 100000,
+  nombreConcepto: 'Administración',
+  tipoConcepto: 'administracion',
+  origen: 'recurrente',
+  valorBase: 100000,
+  tasaImpuesto: 0,
+  valorImpuesto: 0,
+  valorTotal: 100000,
   ...over,
 });
 
@@ -36,17 +36,17 @@ const factura = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   loteId: 'lote-1',
   inmuebleId: { toString: () => 'inm-1' },
-  unitCode: '301',
-  prefix: 'CONJ-2026',
-  number: 1041,
-  fullNumber: 'CONJ-2026-1041',
-  issueDate: new Date('2026-08-06'),
-  dueDate: new Date('2026-08-31'),
-  lines: [linea()],
+  codigoInmueble: '301',
+  prefijo: 'CONJ-2026',
+  numero: 1041,
+  numeroCompleto: 'CONJ-2026-1041',
+  fechaEmision: new Date('2026-08-06'),
+  fechaVencimiento: new Date('2026-08-31'),
+  lineas: [linea()],
   subtotal: 100000,
-  totalTax: 0,
+  totalImpuestos: 0,
   total: 100000,
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -113,7 +113,7 @@ describe('ConsultaFacturacionService.generar', () => {
   });
 
   it('lanza ConflictException si el lote no está consolidado', async () => {
-    const service = makeService({ lote: [lote({ status: 'liquidado' })] });
+    const service = makeService({ lote: [lote({ estado: 'liquidado' })] });
     await expect(service.generar('lote-1')).rejects.toBeInstanceOf(
       ConflictException,
     );
@@ -121,7 +121,7 @@ describe('ConsultaFacturacionService.generar', () => {
 
   it('excluye facturas anuladas de los totales y las filas', async () => {
     const service = makeService({
-      facturas: [factura({ status: 'emitida' })],
+      facturas: [factura({ estado: 'emitida' })],
     });
     const resultado = await service.generar('lote-1');
 
@@ -133,7 +133,7 @@ describe('ConsultaFacturacionService.generar', () => {
     const service = makeService({
       facturas: [
         factura({
-          lines: [linea({ baseAmount: 60000 }), linea({ baseAmount: 40000 })],
+          lineas: [linea({ valorBase: 60000 }), linea({ valorBase: 40000 })],
           subtotal: 100000,
         }),
       ],
@@ -148,16 +148,16 @@ describe('ConsultaFacturacionService.generar', () => {
     const service = makeService({
       facturas: [
         factura({
-          lines: [
+          lineas: [
             linea({
               conceptoId: { toString: () => 'con-intereses' },
-              conceptName: 'Intereses',
-              baseAmount: 5000,
+              nombreConcepto: 'Intereses',
+              valorBase: 5000,
             }),
             linea({
               conceptoId: { toString: () => 'con-admin' },
-              conceptName: 'Administración',
-              baseAmount: 100000,
+              nombreConcepto: 'Administración',
+              valorBase: 100000,
             }),
           ],
         }),
@@ -183,19 +183,19 @@ describe('ConsultaFacturacionService.generar', () => {
     const service = makeService({
       facturas: [
         factura({
-          lines: [
-            linea({ baseAmount: 100000, taxRate: 0, taxAmount: 0 }),
+          lineas: [
+            linea({ valorBase: 100000, tasaImpuesto: 0, valorImpuesto: 0 }),
             linea({
               conceptoId: { toString: () => 'con-multas' },
-              conceptName: 'Multas',
-              baseAmount: 50000,
-              taxRate: 10,
-              taxAmount: 5000,
-              totalAmount: 55000,
+              nombreConcepto: 'Multas',
+              valorBase: 50000,
+              tasaImpuesto: 10,
+              valorImpuesto: 5000,
+              valorTotal: 55000,
             }),
           ],
           subtotal: 150000,
-          totalTax: 5000,
+          totalImpuestos: 5000,
           total: 155000,
         }),
       ],
@@ -232,7 +232,7 @@ describe('ConsultaFacturacionService.generar', () => {
 
   it('resuelve id, titular, saldoPendiente y estado por fila — mismas columnas que Facturas', async () => {
     const service = makeService({
-      facturas: [factura({ holder: { name: 'Juan Pérez' } })],
+      facturas: [factura({ titular: { nombre: 'Juan Pérez' } })],
       saldos: [
         { documentoId: { toString: () => 'fac-1' }, saldoPendiente: 40000 },
       ],

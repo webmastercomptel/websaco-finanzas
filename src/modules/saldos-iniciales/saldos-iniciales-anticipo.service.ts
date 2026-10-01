@@ -129,7 +129,7 @@ export class SaldosInicialesAnticipoService {
     // clears this and allows a fresh attempt, without ever deleting
     // anything.
     const activos = await this.saldosInicialesAnticipo
-      .countDocuments({ copropiedadId, status: 'activo' })
+      .countDocuments({ copropiedadId, estado: 'activo' })
       .exec();
     if (activos > 0) {
       throw new ConflictException(
@@ -268,10 +268,10 @@ export class SaldosInicialesAnticipoService {
                   numero,
                   tipoDocumentoOriginal: fila.tipoDocumento,
                   numeroOriginal: fila.numero,
-                  fullNumber: `${fila.tipoDocumento} ${fila.numero}`,
-                  receivedDate: new Date(fila.fecha),
+                  numeroCompleto: `${fila.tipoDocumento} ${fila.numero}`,
+                  fechaRecibo: new Date(fila.fecha),
                   montoOriginal: fila.valor,
-                  status: 'activo',
+                  estado: 'activo',
                   generadoPor: accountId,
                 },
               ],
@@ -389,7 +389,7 @@ export class SaldosInicialesAnticipoService {
           `No se encontró el saldo inicial de anticipo ${id}`,
         );
       }
-      if (doc.status === 'anulado') {
+      if (doc.estado === 'anulado') {
         throw new ConflictException(
           `El saldo inicial de anticipo ${doc.numeroOriginal} ya está anulado`,
         );
@@ -414,7 +414,7 @@ export class SaldosInicialesAnticipoService {
           { _id: saldoInicialAnticipoId, copropiedadId },
           {
             $set: {
-              status: 'anulado',
+              estado: 'anulado',
               motivoAnulacion: dto.motivo,
               detalleAnulacion: dto.detalle,
               fechaAnulacion: new Date(),

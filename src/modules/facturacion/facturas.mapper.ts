@@ -12,14 +12,14 @@ export const titularDe = (
 ): TitularFactura | null =>
   titular
     ? {
-        nombre: titular.name,
-        tipoIdentificacion: titular.identificationType,
-        numeroIdentificacion: titular.identificationNumber,
-        digitoVerificacion: titular.identificationVerificationDigit,
-        direccion: titular.address,
-        ciudad: titular.city,
+        nombre: titular.nombre,
+        tipoIdentificacion: titular.tipoIdentificacion,
+        numeroIdentificacion: titular.numeroIdentificacion,
+        digitoVerificacion: titular.digitoVerificacion,
+        direccion: titular.direccion,
+        ciudad: titular.ciudad,
         email: titular.email,
-        telefono: titular.phone,
+        telefono: titular.telefono,
       }
     : null;
 
@@ -28,16 +28,16 @@ export const lineaDe = (
   saldoPendiente: number,
 ): FacturaLineaContract => ({
   conceptoId: linea.conceptoId.toString(),
-  nombreConcepto: linea.conceptName,
-  tipoConcepto: linea.conceptKind,
-  origen: linea.source,
+  nombreConcepto: linea.nombreConcepto,
+  tipoConcepto: linea.tipoConcepto,
+  origen: linea.origen,
   novedadId: linea.novedadId ? linea.novedadId.toString() : null,
-  valorBase: linea.baseAmount,
-  tasaImpuesto: linea.taxRate,
-  valorImpuesto: linea.taxAmount,
-  valorTotal: linea.totalAmount,
-  saldoAnterior: linea.balanceBefore,
-  nuevoSaldo: linea.balanceAfter,
+  valorBase: linea.valorBase,
+  tasaImpuesto: linea.tasaImpuesto,
+  valorImpuesto: linea.valorImpuesto,
+  valorTotal: linea.valorTotal,
+  saldoAnterior: linea.saldoAnterior,
+  nuevoSaldo: linea.saldoNuevo,
   // El saldo VIVO de esta línea — a diferencia de saldoAnterior/nuevoSaldo,
   // que son la foto congelada al emitir, este es cuánto le queda pendiente
   // hoy (lo que valida y muestra el reparto manual de un Recibo).
@@ -51,8 +51,8 @@ export const lineaDe = (
  * two meet — see "the contract law" in CLAUDE.md.
  *
  * `saldoPendiente` (top-level) and each línea's own `saldoPendiente` are no
- * longer fields on the (now immutable) document — `Factura.outstandingBalance`/
- * `FacturaLinea.remainingAmount` are gone precisely so a Factura never changes
+ * longer fields on the (now immutable) document — `Factura.saldoPendiente`/
+ * `FacturaLinea.saldoPendiente` are gone precisely so a Factura never changes
  * after issuance (see `SaldoTotalDocumento`/`CarteraPorDocumento`'s own
  * docblocks). Both are resolved by the caller — `FacturasService`, which
  * batch-reads them from those two live ledgers — and passed in here, same
@@ -74,29 +74,29 @@ export const toFactura = (
   id: doc._id.toString(),
   loteId: doc.loteId.toString(),
   inmuebleId: doc.inmuebleId.toString(),
-  inmuebleCodigo: doc.unitCode,
+  inmuebleCodigo: doc.codigoInmueble,
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
-  titular: titularDe(doc.holder),
-  prefijo: doc.prefix,
-  numero: doc.number,
-  numeroCompleto: doc.fullNumber,
-  fechaEmision: doc.issueDate.toISOString(),
-  fechaVencimiento: doc.dueDate.toISOString(),
-  periodoDesde: doc.periodStart.toISOString(),
-  periodoHasta: doc.periodEnd.toISOString(),
-  lineas: doc.lines.map((linea) =>
+  titular: titularDe(doc.titular),
+  prefijo: doc.prefijo,
+  numero: doc.numero,
+  numeroCompleto: doc.numeroCompleto,
+  fechaEmision: doc.fechaEmision.toISOString(),
+  fechaVencimiento: doc.fechaVencimiento.toISOString(),
+  periodoDesde: doc.periodoDesde.toISOString(),
+  periodoHasta: doc.periodoHasta.toISOString(),
+  lineas: doc.lineas.map((linea) =>
     lineaDe(linea, saldoPorConcepto.get(linea.conceptoId.toString()) ?? 0),
   ),
   subtotal: doc.subtotal,
-  totalImpuestos: doc.totalTax,
+  totalImpuestos: doc.totalImpuestos,
   total: doc.total,
   saldoPendiente,
-  montoDescuento: doc.discountAmount,
-  fechaLimiteDescuento: doc.discountDeadline
-    ? doc.discountDeadline.toISOString()
+  montoDescuento: doc.montoDescuento,
+  fechaLimiteDescuento: doc.fechaLimiteDescuento
+    ? doc.fechaLimiteDescuento.toISOString()
     : null,
-  estado: doc.status,
-  motivoAnulacion: doc.voidedReason,
-  detalleAnulacion: doc.voidedDetail,
-  fechaAnulacion: doc.voidedAt ? doc.voidedAt.toISOString() : null,
+  estado: doc.estado,
+  motivoAnulacion: doc.motivoAnulacion,
+  detalleAnulacion: doc.detalleAnulacion,
+  fechaAnulacion: doc.fechaAnulacion ? doc.fechaAnulacion.toISOString() : null,
 });

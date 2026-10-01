@@ -174,7 +174,7 @@ export class LoteRecibosController {
   ): Promise<SolicitudGeneracionReciboLote> {
     const lote = await this.loteRecibos.findOneRaw(id);
 
-    if (lote.status !== 'aplicado') {
+    if (lote.estado !== 'aplicado') {
       throw new BadRequestException(
         `El lote de recibos ${id} todavía no está aplicado — generá el combinado recién cuando todas las filas se hayan aplicado con éxito`,
       );

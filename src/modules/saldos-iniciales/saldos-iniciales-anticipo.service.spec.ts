@@ -72,7 +72,7 @@ const construirServicio = () => {
       exec: () =>
         Promise.resolve(
           documentos.filter((d) =>
-            filtro.status ? d.status === filtro.status : true,
+            filtro.estado ? d.estado === filtro.estado : true,
           ).length,
         ),
     })),
@@ -206,7 +206,7 @@ describe('SaldosInicialesAnticipoService.importar', () => {
     expect(documentos[0]).toMatchObject({
       tipoDocumentoOriginal: 'RC',
       numeroOriginal: '4152',
-      fullNumber: 'RC 4152',
+      numeroCompleto: 'RC 4152',
       montoOriginal: 300000,
       terceroId: HOLDER,
     });

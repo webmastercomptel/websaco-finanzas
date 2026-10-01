@@ -115,21 +115,21 @@ export interface DocumentoConSaldoAFecha {
  */
 export function activeAsOf(
   app: {
-    status: string;
-    appliedAt: Date;
-    sourceDate?: Date;
-    revertedAt: Date | null;
+    estado: string;
+    aplicadoEn: Date;
+    fechaOrigen?: Date;
+    revertidoEn: Date | null;
   },
   fecha: Date,
 ): boolean {
-  const efectiva = app.sourceDate ?? app.appliedAt;
+  const efectiva = app.fechaOrigen ?? app.aplicadoEn;
   const fechaComparacion =
-    app.sourceDate && esFechaDeCorte(fecha)
+    app.fechaOrigen && esFechaDeCorte(fecha)
       ? new Date(fecha.getTime() - CORRIMIENTO_FIN_DIA_MS)
       : fecha;
   if (efectiva > fechaComparacion) return false;
-  if (app.status === 'activa') return true;
-  if (app.status === 'revertida' && app.revertedAt && app.revertedAt > fecha)
+  if (app.estado === 'activa') return true;
+  if (app.estado === 'revertida' && app.revertidoEn && app.revertidoEn > fecha)
     return true;
   return false;
 }
@@ -144,18 +144,18 @@ export function activeAsOf(
 function saldoDocumentoAFecha(
   total: number,
   apps: Array<{
-    amountApplied: number;
-    appliedAt: Date;
-    sourceDate?: Date;
-    status: string;
-    revertedAt: Date | null;
+    montoAplicado: number;
+    aplicadoEn: Date;
+    fechaOrigen?: Date;
+    estado: string;
+    revertidoEn: Date | null;
   }>,
   fecha: Date,
 ): number {
   let activeAtFecha = 0;
   for (const app of apps) {
     if (activeAsOf(app, fecha)) {
-      activeAtFecha += app.amountApplied;
+      activeAtFecha += app.montoAplicado;
     }
   }
   return Math.max(0, total - activeAtFecha);
@@ -187,22 +187,22 @@ export async function calcularDocumentosConSaldoAFecha(
   const limiteEmision = limiteEmisionParaCorte(fecha);
   const facturasFilter: Record<string, unknown> = {
     copropiedadId,
-    status: 'emitida',
-    issueDate: { $lte: limiteEmision },
+    estado: 'emitida',
+    fechaEmision: { $lte: limiteEmision },
   };
   const ndFilter: Record<string, unknown> = {
     copropiedadId,
-    status: 'emitida',
-    issueDate: { $lte: limiteEmision },
+    estado: 'emitida',
+    fechaEmision: { $lte: limiteEmision },
   };
-  // A Saldo Inicial's own `fecha` is its equivalent of `issueDate` — always
-  // in the past relative to any real period this coproperty runs in this
-  // system (see `SaldoInicial`'s own schema docblock), but filtered the same
-  // way for consistency and to correctly exclude one from a cutoff BEFORE
-  // its own declared date.
+  // A Saldo Inicial's own `fecha` is its equivalent of `fechaEmision` —
+  // always in the past relative to any real period this coproperty runs in
+  // this system (see `SaldoInicial`'s own schema docblock), but filtered the
+  // same way for consistency and to correctly exclude one from a cutoff
+  // BEFORE its own declared date.
   const siFilter: Record<string, unknown> = {
     copropiedadId,
-    status: 'activo',
+    estado: 'activo',
     fecha: { $lte: limiteEmision },
   };
 
@@ -212,9 +212,9 @@ export async function calcularDocumentosConSaldoAFecha(
     siFilter.inmuebleId = opciones.inmuebleId;
   }
   if (opciones?.conceptoId) {
-    facturasFilter['lines.conceptoId'] = opciones.conceptoId;
+    facturasFilter['lineas.conceptoId'] = opciones.conceptoId;
     ndFilter.conceptoId = opciones.conceptoId;
-    siFilter['lines.conceptoId'] = opciones.conceptoId;
+    siFilter['filas.conceptoId'] = opciones.conceptoId;
   }
 
   const [facturas, notasDebito, saldosIniciales] = await Promise.all([
@@ -233,14 +233,14 @@ export async function calcularDocumentosConSaldoAFecha(
 
   const aplicaciones = docIds.length
     ? await models.aplicaciones
-        .find({ copropiedadId, documentId: { $in: docIds } })
+        .find({ copropiedadId, documentoId: { $in: docIds } })
         .exec()
     : [];
 
-  // Index applications by documentId
+  // Index applications by documentoId
   const appsByDoc = new Map<string, typeof aplicaciones>();
   for (const app of aplicaciones) {
-    const key = app.documentId.toString();
+    const key = app.documentoId.toString();
     const list = appsByDoc.get(key) ?? [];
     list.push(app);
     appsByDoc.set(key, list);
@@ -256,7 +256,7 @@ export async function calcularDocumentosConSaldoAFecha(
         inmuebleId: f.inmuebleId,
         tipo: 'FV',
         montoPendiente: monto,
-        fechaReferencia: f.dueDate,
+        fechaReferencia: f.fechaVencimiento,
       });
     }
   }
@@ -269,7 +269,7 @@ export async function calcularDocumentosConSaldoAFecha(
         inmuebleId: nd.inmuebleId,
         tipo: 'ND',
         montoPendiente: monto,
-        fechaReferencia: nd.issueDate,
+        fechaReferencia: nd.fechaEmision,
       });
     }
   }

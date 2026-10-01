@@ -30,7 +30,7 @@ function makeDeps(estado: string, bytesCombinado: Buffer) {
     printSnapshot: {},
     paginaEnLote: 1,
     loteId: 'lote-1',
-    status: estado,
+    estado,
   };
   const facturas = { findOneRaw: jest.fn(() => Promise.resolve(factura)) };
   const presentacionDocumento = {

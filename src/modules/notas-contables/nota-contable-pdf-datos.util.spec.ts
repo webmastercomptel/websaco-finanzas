@@ -16,9 +16,9 @@ const notaBase = (over: Record<string, unknown> = {}): NotaContableDocument =>
     conceptoOrigenId: CONCEPTO_ORIGEN,
     conceptoDestinoId: CONCEPTO_DESTINO,
     monto: 100000,
-    description: 'Reclasificación de TV a Pintura',
-    fullNumber: 'NT-0003',
-    issueDate: new Date('2026-08-15'),
+    descripcion: 'Reclasificación de TV a Pintura',
+    numeroCompleto: 'NT-0003',
+    fecha: new Date('2026-08-15'),
     ...over,
   }) as unknown as NotaContableDocument;
 

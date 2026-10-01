@@ -139,13 +139,13 @@ export class AuxiliarCarteraService {
     ] = await Promise.all([
       this.facturas.find({ copropiedadId, inmuebleId }).exec(),
       this.notasDebito
-        .find({ copropiedadId, inmuebleId, status: 'emitida' })
+        .find({ copropiedadId, inmuebleId, estado: 'emitida' })
         .exec(),
       this.saldosIniciales.find({ copropiedadId, inmuebleId }).exec(),
       this.recibos.find({ copropiedadId, inmuebleId }).exec(),
       this.notasCredito.find({ copropiedadId, inmuebleId }).exec(),
       this.notasContables
-        .find({ copropiedadId, inmuebleId, status: 'activo' })
+        .find({ copropiedadId, inmuebleId, estado: 'activo' })
         .exec(),
       this.notasAnticipo.find({ copropiedadId, inmuebleId }).exec(),
     ]);
@@ -161,23 +161,23 @@ export class AuxiliarCarteraService {
           .find({
             copropiedadId,
             sourceId: { $in: sourceIds },
-            status: 'activa',
+            estado: 'activa',
           })
           .exec()
       : [];
 
     // Step 3: build lookup maps for resolving target document numbers
     const facturaMap = new Map(
-      facturas.map((f) => [f._id.toString(), f.fullNumber]),
+      facturas.map((f) => [f._id.toString(), f.numeroCompleto]),
     );
     const ndMap = new Map(
-      notasDebito.map((nd) => [nd._id.toString(), nd.fullNumber]),
+      notasDebito.map((nd) => [nd._id.toString(), nd.numeroCompleto]),
     );
     const siMap = new Map(
       saldosIniciales.map((si) => [si._id.toString(), si.numeroOriginal]),
     );
     // Each carries the source document's own business date — never
-    // `AplicacionCartera.appliedAt`, which is always `new Date()` at cruce
+    // `AplicacionCartera.aplicadoEn`, which is always `new Date()` at cruce
     // time (needed for the accounting entry, posted at the real instant)
     // and can land in a completely different period than the date the user
     // actually declared for the payment. Same reasoning/fix as
@@ -185,19 +185,19 @@ export class AuxiliarCarteraService {
     const reciboMap = new Map(
       recibos.map((r) => [
         r._id.toString(),
-        { fullNumber: r.fullNumber, fecha: r.receivedDate },
+        { fullNumber: r.numeroCompleto, fecha: r.fechaRecibo },
       ]),
     );
     const ncMap = new Map(
       notasCredito.map((nc) => [
         nc._id.toString(),
-        { fullNumber: nc.fullNumber, fecha: fechaNotaCredito(nc) },
+        { fullNumber: nc.numeroCompleto, fecha: fechaNotaCredito(nc) },
       ]),
     );
     const naMap = new Map(
       notasAnticipo.map((na) => [
         na._id.toString(),
-        { fullNumber: na.fullNumber, fecha: na.issueDate },
+        { fullNumber: na.numeroCompleto, fecha: na.fechaEmision },
       ]),
     );
 
@@ -207,9 +207,9 @@ export class AuxiliarCarteraService {
     // Facturas → Débito
     for (const f of facturas) {
       rows.push({
-        fecha: f.issueDate,
+        fecha: f.fechaEmision,
         tipo: 'FC',
-        numeroCompleto: f.fullNumber,
+        numeroCompleto: f.numeroCompleto,
         concepto: 'Factura de Venta',
         refCruce: null,
         debito: f.total,
@@ -220,10 +220,10 @@ export class AuxiliarCarteraService {
     // Notas Débito → Débito
     for (const nd of notasDebito) {
       rows.push({
-        fecha: nd.issueDate,
+        fecha: nd.fechaEmision,
         tipo: 'ND',
-        numeroCompleto: nd.fullNumber,
-        concepto: nd.description ?? 'Nota Débito',
+        numeroCompleto: nd.numeroCompleto,
+        concepto: nd.descripcion ?? 'Nota Débito',
         refCruce: null,
         debito: nd.total,
         credito: null,
@@ -264,21 +264,21 @@ export class AuxiliarCarteraService {
       const sourceNumber = origen?.fullNumber ?? app.sourceId.toString();
 
       const targetMap =
-        app.documentType === 'FV'
+        app.tipoDocumento === 'FV'
           ? facturaMap
-          : app.documentType === 'SI'
+          : app.tipoDocumento === 'SI'
             ? siMap
             : ndMap;
-      const refCruce = targetMap.get(app.documentId.toString()) ?? null;
+      const refCruce = targetMap.get(app.documentoId.toString()) ?? null;
 
       rows.push({
-        fecha: origen?.fecha ?? app.appliedAt,
+        fecha: origen?.fecha ?? app.aplicadoEn,
         tipo: sourceType,
         numeroCompleto: sourceNumber,
         concepto: `${etiqueta} ${sourceNumber}`,
         refCruce,
         debito: null,
-        credito: app.amountApplied,
+        credito: app.montoAplicado,
       });
     }
 
@@ -293,8 +293,8 @@ export class AuxiliarCarteraService {
       rows.push({
         fecha,
         tipo: 'NT',
-        numeroCompleto: nc.fullNumber,
-        concepto: nc.description,
+        numeroCompleto: nc.numeroCompleto,
+        concepto: nc.descripcion,
         refCruce: null,
         debito: nc.monto,
         credito: null,
@@ -302,8 +302,8 @@ export class AuxiliarCarteraService {
       rows.push({
         fecha,
         tipo: 'NT',
-        numeroCompleto: nc.fullNumber,
-        concepto: nc.description,
+        numeroCompleto: nc.numeroCompleto,
+        concepto: nc.descripcion,
         refCruce: null,
         debito: null,
         credito: nc.monto,

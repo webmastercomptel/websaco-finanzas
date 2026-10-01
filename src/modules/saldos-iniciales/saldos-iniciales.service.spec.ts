@@ -181,11 +181,13 @@ const construirServicio = () => {
             fila = {
               inmuebleId: filtro.inmuebleId,
               conceptoId: filtro.conceptoId,
-              balance: 0,
+              saldoPendiente: 0,
             };
             saldosCarteraFilas.push(fila);
           }
-          fila.balance = (fila.balance as number) + (update.$inc.balance ?? 0);
+          fila.saldoPendiente =
+            (fila.saldoPendiente as number) +
+            (update.$inc.saldoPendiente ?? 0);
           return Promise.resolve(fila);
         },
       }),
@@ -312,7 +314,7 @@ describe('SaldosInicialesService.importar', () => {
       saldoPendiente: 300000,
     });
     expect(carteraPorDocumentoFilas).toHaveLength(1);
-    expect(saldosCarteraFilas[0]).toMatchObject({ balance: 300000 });
+    expect(saldosCarteraFilas[0]).toMatchObject({ saldoPendiente: 300000 });
   });
 
   it('rechaza el archivo completo sin persistir nada si un inmueble no existe', async () => {

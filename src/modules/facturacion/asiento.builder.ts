@@ -2,46 +2,47 @@ import type { Movimiento } from '../../database/schemas/facturacion/asiento-cont
 
 /** The minimal line shape this builder needs — decoupled from the full
  *  FacturaLinea document type so it stays testable without Mongoose, but
- *  using the exact same (English) field names so a real FacturaLinea is
- *  assignable here without a translation step. */
+ *  using the exact same field names so a real FacturaLinea is assignable
+ *  here without a translation step. */
 export interface FacturaLineaParaAsiento {
-  accountingIncomeAccount: string | null;
+  cuentaIngreso: string | null;
   /** This line's DEBIT account. Optional/`null` falls back to
    *  `cuentaCartera` — every caller that predates per-concept debit
    *  accounts (e.g. Nota Débito's single-line posting) keeps its exact
    *  prior behavior without passing this field. */
-  accountingReceivableAccount?: string | null;
-  /** The concept's `kind` (`ConceptoCobro.tipo`/`FacturaLinea.conceptKind`).
+  cuentaCartera?: string | null;
+  /** The concept's `kind` (`ConceptoCobro.tipo`/`FacturaLinea.tipoConcepto`).
    *  Optional so non-invoice callers (e.g. Nota Débito's single-line
    *  posting) that never set it simply never match `'intereses'` below.
    *  Only `'intereses'` is inspected — see `construirMovimientos`'s
    *  cuentasOrden override. */
-  conceptKind?: 'administracion' | 'intereses' | 'otro';
+  tipoConcepto?: 'administracion' | 'intereses' | 'otro';
   /** The concept's name, exactly as configured in the Cargos tab
-   *  (`ConceptoCobro.nombre`/`FacturaLinea.conceptName`) — used verbatim as
-   *  this line's movimiento description, debit and credit alike, so a
+   *  (`ConceptoCobro.nombre`/`FacturaLinea.nombreConcepto`) — used verbatim
+   *  as this line's movimiento description, debit and credit alike, so a
    *  bookkeeper reading the ledger sees which cargo each line belongs to.
    *  Optional so non-invoice callers (e.g. Nota Débito's single-line
    *  posting, which has no per-line cargo name to hand over) fall back to
    *  the generic description below. */
-  conceptName?: string;
-  totalAmount: number;
-  /** This line's tax portion (`FacturaLinea.taxAmount`) — optional so every
-   *  caller that predates per-line tax splitting (Nota Débito's single-line
-   *  posting) keeps crediting the full amount to `accountingIncomeAccount`,
-   *  same as before. `> 0` is what triggers the split in
+  nombreConcepto?: string;
+  valorTotal: number;
+  /** This line's tax portion (`FacturaLinea.valorImpuesto`) — optional so
+   *  every caller that predates per-line tax splitting (Nota Débito's
+   *  single-line posting) keeps crediting the full amount to
+   *  `cuentaIngreso`, same as before. `> 0` is what triggers the split in
    *  `construirMovimientos`. */
-  taxAmount?: number;
+  valorImpuesto?: number;
   /** This line's tax account (`ConceptoCobro.cuentaImpuestoId`, frozen as
-   *  `FacturaLinea.accountingTaxAccount`) — falls back to
-   *  `CUENTA_SIN_ASIGNAR` when `taxAmount > 0` but no account is configured,
-   *  same reasoning as every other unconfigured-account fallback here. */
-  accountingTaxAccount?: string | null;
+   *  `FacturaLinea.cuentaImpuesto`) — falls back to
+   *  `CUENTA_SIN_ASIGNAR` when `valorImpuesto > 0` but no account is
+   *  configured, same reasoning as every other unconfigured-account
+   *  fallback here. */
+  cuentaImpuesto?: string | null;
 }
 
 export interface FacturaParaAsiento {
   total: number;
-  lines: FacturaLineaParaAsiento[];
+  lineas: FacturaLineaParaAsiento[];
 }
 
 /**
@@ -108,16 +109,16 @@ function movimientosCuentasOrden(
   const credito = invertido ? cuentasOrden.debito : cuentasOrden.credito;
   return [
     {
-      account: debito,
-      type: 'debito',
-      amount: monto,
-      description: descripcion,
+      cuenta: debito,
+      tipo: 'debito',
+      monto,
+      descripcion,
     },
     {
-      account: credito,
-      type: 'credito',
-      amount: monto,
-      description: descripcion,
+      cuenta: credito,
+      tipo: 'credito',
+      monto,
+      descripcion,
     },
   ];
 }
@@ -133,14 +134,14 @@ function movimientosCuentasOrden(
  * cargo that never shows its own line in the ledger is, from a bookkeeper's
  * standpoint, uncoded — silently merging it into a neighboring concept's
  * line was the bug this fixes. A line's debit account is its own
- * `accountingReceivableAccount` — set per `ConceptoCobro.cuentaDebitoId` —
+ * `cuentaCartera` — set per `ConceptoCobro.cuentaDebitoId` —
  * falling back to the shared `cuentaCartera` (the coproperty's
  * `cuentaContableCartera`) when that concept has none configured; its credit
- * account is `accountingIncomeAccount` (`ConceptoCobro.cuentaCreditoId`),
+ * account is `cuentaIngreso` (`ConceptoCobro.cuentaCreditoId`),
  * falling back to `CUENTA_SIN_ASIGNAR`.
  *
  * PER-LINE override: `cuentasOrden`, when given, replaces the accounts used
- * ONLY for the mora-interest line — `conceptKind === 'intereses'`, the
+ * ONLY for the mora-interest line — `tipoConcepto === 'intereses'`, the
  * "Cargo 2" of the predecessor system's fixed Administración/Intereses/
  * Multas trio — with `cuentasOrden.debito`/`cuentasOrden.credito` from
  * Parámetros de Facturación instead of that concept's own Cargos accounts.
@@ -154,22 +155,22 @@ function movimientosCuentasOrden(
  * database, and a pure function is what makes that check trivial to test in
  * isolation from Mongo.
  *
- * DESCRIPTION per line is the concept's own `conceptName` (Cargos tab), debit
- * and credit alike — so two lines that share an account still read as
+ * DESCRIPTION per line is the concept's own `nombreConcepto` (Cargos tab),
+ * debit and credit alike — so two lines that share an account still read as
  * distinct cargos in the ledger, not just distinct amounts. Falls back to a
  * generic debit/credit description when a caller has no cargo name to give
  * (Nota Débito's single-line posting), or to a "Cuenta de orden" label when
- * the intereses line's own `conceptName` is unavailable but `cuentasOrden`
- * fired — `conceptName`, when present, always wins.
+ * the intereses line's own `nombreConcepto` is unavailable but
+ * `cuentasOrden` fired — `nombreConcepto`, when present, always wins.
  *
- * TAX SPLIT: a line with `taxAmount > 0` (never true for the `cuentasOrden`
- * path — mora carries no tax) posts its credit side as TWO movements instead
- * of one: `accountingIncomeAccount` for the base only
- * (`totalAmount - taxAmount`), and `accountingTaxAccount` (falling back to
+ * TAX SPLIT: a line with `valorImpuesto > 0` (never true for the
+ * `cuentasOrden` path — mora carries no tax) posts its credit side as TWO
+ * movements instead of one: `cuentaIngreso` for the base only
+ * (`valorTotal - valorImpuesto`), and `cuentaImpuesto` (falling back to
  * `CUENTA_SIN_ASIGNAR`, same as any other unconfigured account) for
- * `taxAmount` — carrying `baseGravable` so the tax line shows what it was
- * computed from. The debit side is unchanged either way: the receivable
- * always covers the full `totalAmount`, tax included. Confirmed with
+ * `valorImpuesto` — carrying `baseGravable` so the tax line shows what it
+ * was computed from. The debit side is unchanged either way: the receivable
+ * always covers the full `valorTotal`, tax included. Confirmed with
  * product: crediting the tax portion straight to income (the prior
  * behavior) is wrong — it belongs in its own tax-payable account.
  */
@@ -180,50 +181,51 @@ export function construirMovimientos(
 ): Movimiento[] {
   const movimientos: Movimiento[] = [];
 
-  for (const linea of factura.lines) {
-    const usaCuentasOrden = !!cuentasOrden && linea.conceptKind === 'intereses';
+  for (const linea of factura.lineas) {
+    const usaCuentasOrden =
+      !!cuentasOrden && linea.tipoConcepto === 'intereses';
     const debito = usaCuentasOrden
       ? cuentasOrden.debito
-      : (linea.accountingReceivableAccount ?? cuentaCartera);
+      : (linea.cuentaCartera ?? cuentaCartera);
     const credito = usaCuentasOrden
       ? cuentasOrden.credito
-      : (linea.accountingIncomeAccount ?? CUENTA_SIN_ASIGNAR);
+      : (linea.cuentaIngreso ?? CUENTA_SIN_ASIGNAR);
     const descripcion =
-      linea.conceptName ??
+      linea.nombreConcepto ??
       (usaCuentasOrden
         ? 'Cuenta de orden — intereses de mora, factura de venta'
         : undefined);
 
     movimientos.push({
-      account: debito,
-      type: 'debito',
-      amount: linea.totalAmount,
-      description: descripcion ?? 'Cartera por cobrar — factura de venta',
+      cuenta: debito,
+      tipo: 'debito',
+      monto: linea.valorTotal,
+      descripcion: descripcion ?? 'Cartera por cobrar — factura de venta',
     });
 
-    const taxAmount = linea.taxAmount ?? 0;
-    const separaImpuesto = !usaCuentasOrden && taxAmount > 0;
+    const valorImpuesto = linea.valorImpuesto ?? 0;
+    const separaImpuesto = !usaCuentasOrden && valorImpuesto > 0;
     if (separaImpuesto) {
-      const baseGravable = linea.totalAmount - taxAmount;
+      const baseGravable = linea.valorTotal - valorImpuesto;
       movimientos.push({
-        account: credito,
-        type: 'credito',
-        amount: baseGravable,
-        description: descripcion ?? 'Ingreso por factura de venta',
+        cuenta: credito,
+        tipo: 'credito',
+        monto: baseGravable,
+        descripcion: descripcion ?? 'Ingreso por factura de venta',
       });
       movimientos.push({
-        account: linea.accountingTaxAccount ?? CUENTA_SIN_ASIGNAR,
-        type: 'credito',
-        amount: taxAmount,
-        description: `${descripcion ?? 'Ingreso por factura de venta'} — Impuesto`,
+        cuenta: linea.cuentaImpuesto ?? CUENTA_SIN_ASIGNAR,
+        tipo: 'credito',
+        monto: valorImpuesto,
+        descripcion: `${descripcion ?? 'Ingreso por factura de venta'} — Impuesto`,
         baseGravable,
       });
     } else {
       movimientos.push({
-        account: credito,
-        type: 'credito',
-        amount: linea.totalAmount,
-        description: descripcion ?? 'Ingreso por factura de venta',
+        cuenta: credito,
+        tipo: 'credito',
+        monto: linea.valorTotal,
+        descripcion: descripcion ?? 'Ingreso por factura de venta',
       });
     }
   }
@@ -243,9 +245,9 @@ export interface MarcasCuentaContable {
 }
 
 /** Which Factura/Nota Débito a "documento cruce" line references — `numero`
- *  is the plain sequential number (`Factura.number`/`NotaDebito.number`),
- *  never the prefixed `fullNumber`, same convention `LineaAsientoImpresion`
- *  already uses for its own `numeroDocumento`. */
+ *  is the plain sequential number (`Factura.numero`/`NotaDebito.numero`),
+ *  never the prefixed `numeroCompleto`, same convention
+ *  `LineaAsientoImpresion` already uses for its own `numeroDocumento`. */
 export interface DocumentoCruce {
   tipo: 'FV' | 'ND' | 'SI';
   numero: number;
@@ -295,7 +297,7 @@ export function enriquecerMovimientosConAuxiliares(
   contexto: ContextoAuxiliares,
 ): Movimiento[] {
   return movimientos.map((movimiento) => {
-    const marcas = cuentasPorCodigo.get(movimiento.account);
+    const marcas = cuentasPorCodigo.get(movimiento.cuenta);
     if (!marcas) return movimiento;
     // `?? contexto.documentoCruce` only fills in when the caller hasn't
     // already tagged this exact line with its own document (the per-línea
@@ -426,9 +428,11 @@ const DESCRIPCIONES: Record<OrigenAsiento, DescripcionesAsiento> = {
  *  `numeroDocumento` are the caller's per-línea documento cruce — omit them
  *  (or pass `null`) for a line that doesn't need one; `agruparPorCuentaYDocumento`
  *  below still merges those purely by account, unchanged from before this
- *  existed. */
+ *  existed. Same field names as `cruce.util.ts`'s `DesgloseCarteraAplicacion`
+ *  on purpose — every caller passes that shape straight through, with no
+ *  adapter. */
 export interface DesgloseCuenta {
-  account: string;
+  cuenta: string;
   monto: number;
   tipoDocumento?: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento?: number | null;
@@ -446,7 +450,7 @@ export interface DesgloseCuenta {
  * account, exactly like before this field existed.
  */
 function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
-  account: string;
+  cuenta: string;
   monto: number;
   tipoDocumento: 'FV' | 'ND' | 'SI' | null;
   numeroDocumento: number | null;
@@ -454,23 +458,23 @@ function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
   const porClave = new Map<
     string,
     {
-      account: string;
+      cuenta: string;
       monto: number;
       tipoDocumento: 'FV' | 'ND' | 'SI' | null;
       numeroDocumento: number | null;
     }
   >();
-  for (const { account, monto, tipoDocumento, numeroDocumento } of desglose) {
+  for (const { cuenta, monto, tipoDocumento, numeroDocumento } of desglose) {
     if (monto === 0) continue;
     const tipo = tipoDocumento ?? null;
     const numero = numeroDocumento ?? null;
-    const clave = `${account}|${tipo ?? ''}|${numero ?? ''}`;
+    const clave = `${cuenta}|${tipo ?? ''}|${numero ?? ''}`;
     const existente = porClave.get(clave);
     if (existente) {
       existente.monto += monto;
     } else {
       porClave.set(clave, {
-        account,
+        cuenta,
         monto,
         tipoDocumento: tipo,
         numeroDocumento: numero,
@@ -518,8 +522,8 @@ function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
  * `cuentasOrden.debito`, credit `cuentasOrden.credito`); a cruce document
  * closes it when that same mora is actually collected — reversed sides, so
  * the pair nets to zero across the two events instead of doubling. Scoped
- * the same way facturación scopes it: only a line whose own `conceptKind` is
- * `intereses` opens the pair (see `construirMovimientos`), so a cruce
+ * the same way facturación scopes it: only a line whose own `tipoConcepto`
+ * is `intereses` opens the pair (see `construirMovimientos`), so a cruce
  * document must mirror that scoping too, or a receipt that never touched a
  * mora charge (e.g. one paying only Administración) would still post a
  * memo entry, and one that pays BOTH mora and other concepts would post the
@@ -541,7 +545,7 @@ function agruparPorCuentaYDocumento(desglose: DesgloseCuenta[]): {
  * debit with one debit per distinct account in it — mirrors `desgloseCartera`
  * on the credit side, same reasoning, opposite side. A Nota Crédito reverses
  * REVENUE, not cash like a Recibo's bank debit — the correct account to debit
- * is each concepto's own `accountingIncomeAccount` (frozen on the anchor
+ * is each concepto's own `cuentaIngreso` (frozen on the anchor
  * Factura's line, `ConceptoCobro.cuentaCreditoId` — the SAME account that was
  * credited when the concept was originally billed), never a single
  * coproperty-wide "cuenta de devoluciones" lumping every concept together.
@@ -584,69 +588,69 @@ export function construirAsientoCruce(
   const movimientos: Movimiento[] = [];
   if (desgloseOrigen && desgloseOrigen.length > 0) {
     for (const {
-      account,
+      cuenta,
       monto,
       tipoDocumento,
       numeroDocumento,
     } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
-        account,
-        type: 'debito',
-        amount: monto,
-        description: d.creacionDebito,
+        cuenta,
+        tipo: 'debito',
+        monto,
+        descripcion: d.creacionDebito,
         tipoDocumento,
         numeroDocumento,
       });
     }
   } else {
     movimientos.push({
-      account: cuentaOrigen,
-      type: 'debito',
-      amount: montoAplicado + montoSinAplicar - (descuento?.monto ?? 0),
-      description: d.creacionDebito,
+      cuenta: cuentaOrigen,
+      tipo: 'debito',
+      monto: montoAplicado + montoSinAplicar - (descuento?.monto ?? 0),
+      descripcion: d.creacionDebito,
     });
   }
   if (descuento && descuento.monto > 0) {
     movimientos.push({
-      account: descuento.cuenta,
-      type: 'debito',
-      amount: descuento.monto,
-      description: descripcionDescuento,
+      cuenta: descuento.cuenta,
+      tipo: 'debito',
+      monto: descuento.monto,
+      descripcion: descripcionDescuento,
     });
   }
 
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
       for (const {
-        account,
+        cuenta,
         monto,
         tipoDocumento,
         numeroDocumento,
       } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
-          account,
-          type: 'credito',
-          amount: monto,
-          description: d.creacionCreditoCartera,
+          cuenta,
+          tipo: 'credito',
+          monto,
+          descripcion: d.creacionCreditoCartera,
           tipoDocumento,
           numeroDocumento,
         });
       }
     } else {
       movimientos.push({
-        account: cuentaCartera,
-        type: 'credito',
-        amount: montoAplicado,
-        description: d.creacionCreditoCartera,
+        cuenta: cuentaCartera,
+        tipo: 'credito',
+        monto: montoAplicado,
+        descripcion: d.creacionCreditoCartera,
       });
     }
   }
   if (montoSinAplicar > 0) {
     movimientos.push({
-      account: cuentaAnticipos,
-      type: 'credito',
-      amount: montoSinAplicar,
-      description: descripcionAnticipo ?? d.creacionCreditoAnticipo,
+      cuenta: cuentaAnticipos,
+      tipo: 'credito',
+      monto: montoSinAplicar,
+      descripcion: descripcionAnticipo ?? d.creacionCreditoAnticipo,
     });
   }
 
@@ -690,35 +694,35 @@ export function construirMovimientosAplicacionAnticipo(
   const d = DESCRIPCIONES[origen];
   const movimientos: Movimiento[] = [
     {
-      account: cuentaAnticipos,
-      type: 'debito',
-      amount: montoAplicado,
-      description: d.aplicacionDebitoAnticipo,
+      cuenta: cuentaAnticipos,
+      tipo: 'debito',
+      monto: montoAplicado,
+      descripcion: d.aplicacionDebitoAnticipo,
     },
   ];
 
   if (desgloseCartera && desgloseCartera.length > 0) {
     for (const {
-      account,
+      cuenta,
       monto,
       tipoDocumento,
       numeroDocumento,
     } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
-        account,
-        type: 'credito',
-        amount: monto,
-        description: d.aplicacionCreditoCartera,
+        cuenta,
+        tipo: 'credito',
+        monto,
+        descripcion: d.aplicacionCreditoCartera,
         tipoDocumento,
         numeroDocumento,
       });
     }
   } else {
     movimientos.push({
-      account: cuentaCartera,
-      type: 'credito',
-      amount: montoAplicado,
-      description: d.aplicacionCreditoCartera,
+      cuenta: cuentaCartera,
+      tipo: 'credito',
+      monto: montoAplicado,
+      descripcion: d.aplicacionCreditoCartera,
     });
   }
 
@@ -768,34 +772,34 @@ export function construirContraAsientoAplicacionAnticipo(
 
   if (desgloseCartera && desgloseCartera.length > 0) {
     for (const {
-      account,
+      cuenta,
       monto,
       tipoDocumento,
       numeroDocumento,
     } of agruparPorCuentaYDocumento(desgloseCartera)) {
       movimientos.push({
-        account,
-        type: 'debito',
-        amount: monto,
-        description: d.contraDebitoCartera,
+        cuenta,
+        tipo: 'debito',
+        monto,
+        descripcion: d.contraDebitoCartera,
         tipoDocumento,
         numeroDocumento,
       });
     }
   } else {
     movimientos.push({
-      account: cuentaCartera,
-      type: 'debito',
-      amount: montoAplicado,
-      description: d.contraDebitoCartera,
+      cuenta: cuentaCartera,
+      tipo: 'debito',
+      monto: montoAplicado,
+      descripcion: d.contraDebitoCartera,
     });
   }
 
   movimientos.push({
-    account: cuentaAnticipos,
-    type: 'credito',
-    amount: montoAplicado,
-    description: d.contraCreditoAnticipo,
+    cuenta: cuentaAnticipos,
+    tipo: 'credito',
+    monto: montoAplicado,
+    descripcion: d.contraCreditoAnticipo,
   });
 
   movimientos.push(
@@ -848,7 +852,7 @@ export function construirContraAsientoAplicacionAnticipo(
  * from the debit-side account creation used). `montoAplicado` here is
  * already the full cartera amount (cash plus discount, same convention as
  * `construirAsientoCruce`), and `montoOrigen` is the Recibo's own cached
- * `receivedAmount` (real cash only) — the balance holds without any other
+ * `montoRecibido` (real cash only) — the balance holds without any other
  * change: debits (`cuentaCartera`/`desgloseCartera` restore + `cuentaAnticipos`
  * restore) equal credits (`cuentaOrigen` for `montoOrigen` + `descuento.cuenta`
  * for `descuento.monto`), since `montoAplicado + montoSinAplicar ===
@@ -885,69 +889,69 @@ export function construirContraAsientoCruce(
   if (montoAplicado > 0) {
     if (desgloseCartera && desgloseCartera.length > 0) {
       for (const {
-        account,
+        cuenta,
         monto,
         tipoDocumento,
         numeroDocumento,
       } of agruparPorCuentaYDocumento(desgloseCartera)) {
         movimientos.push({
-          account,
-          type: 'debito',
-          amount: monto,
-          description: d.contraDebitoCartera,
+          cuenta,
+          tipo: 'debito',
+          monto,
+          descripcion: d.contraDebitoCartera,
           tipoDocumento,
           numeroDocumento,
         });
       }
     } else {
       movimientos.push({
-        account: cuentaCartera,
-        type: 'debito',
-        amount: montoAplicado,
-        description: d.contraDebitoCartera,
+        cuenta: cuentaCartera,
+        tipo: 'debito',
+        monto: montoAplicado,
+        descripcion: d.contraDebitoCartera,
       });
     }
   }
   if (montoSinAplicar > 0) {
     movimientos.push({
-      account: cuentaAnticipos,
-      type: 'debito',
-      amount: montoSinAplicar,
-      description: descripcionAnticipo ?? d.contraDebitoAnticipo,
+      cuenta: cuentaAnticipos,
+      tipo: 'debito',
+      monto: montoSinAplicar,
+      descripcion: descripcionAnticipo ?? d.contraDebitoAnticipo,
     });
   }
 
   if (desgloseOrigen && desgloseOrigen.length > 0) {
     for (const {
-      account,
+      cuenta,
       monto,
       tipoDocumento,
       numeroDocumento,
     } of agruparPorCuentaYDocumento(desgloseOrigen)) {
       movimientos.push({
-        account,
-        type: 'credito',
-        amount: monto,
-        description: d.contraCredito,
+        cuenta,
+        tipo: 'credito',
+        monto,
+        descripcion: d.contraCredito,
         tipoDocumento,
         numeroDocumento,
       });
     }
   } else {
     movimientos.push({
-      account: cuentaOrigen,
-      type: 'credito',
-      amount: montoOrigen,
-      description: d.contraCredito,
+      cuenta: cuentaOrigen,
+      tipo: 'credito',
+      monto: montoOrigen,
+      descripcion: d.contraCredito,
     });
   }
 
   if (descuento && descuento.monto > 0) {
     movimientos.push({
-      account: descuento.cuenta,
-      type: 'credito',
-      amount: descuento.monto,
-      description:
+      cuenta: descuento.cuenta,
+      tipo: 'credito',
+      monto: descuento.monto,
+      descripcion:
         'Reversión de descuento por pronto pago — anulación de recibo de caja',
     });
   }
@@ -1018,16 +1022,16 @@ export function construirMovimientosReclasificacion(
 
   return [
     {
-      account: cuentaOrigen,
-      type: 'credito',
-      amount: monto,
-      description: 'Reclasificación de ingreso — nota contable',
+      cuenta: cuentaOrigen,
+      tipo: 'credito',
+      monto,
+      descripcion: 'Reclasificación de ingreso — nota contable',
     },
     {
-      account: cuentaDestino,
-      type: 'debito',
-      amount: monto,
-      description: 'Reclasificación de ingreso — nota contable',
+      cuenta: cuentaDestino,
+      tipo: 'debito',
+      monto,
+      descripcion: 'Reclasificación de ingreso — nota contable',
     },
     ...(netoHaciaIntereses !== 0
       ? movimientosCuentasOrden(
@@ -1068,16 +1072,16 @@ export function construirContraAsientoNotaDebito(
 ): Movimiento[] {
   return [
     {
-      account: cuentaIngreso,
-      type: 'debito',
-      amount: monto,
-      description: 'Reversión de ingreso — anulación de nota débito',
+      cuenta: cuentaIngreso,
+      tipo: 'debito',
+      monto,
+      descripcion: 'Reversión de ingreso — anulación de nota débito',
     },
     {
-      account: cuentaCartera,
-      type: 'credito',
-      amount: monto,
-      description: 'Reversión de cartera — anulación de nota débito',
+      cuenta: cuentaCartera,
+      tipo: 'credito',
+      monto,
+      descripcion: 'Reversión de cartera — anulación de nota débito',
     },
     ...movimientosCuentasOrden(
       cuentasOrden,

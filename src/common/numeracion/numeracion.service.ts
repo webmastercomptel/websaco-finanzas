@@ -356,11 +356,11 @@ export class NumeracionService {
     const actualizado = await this.consecutivosLote
       .findOneAndUpdate(
         { copropiedadId: new Types.ObjectId(copropiedadId) },
-        { $inc: { nextNumber: 1 } },
+        { $inc: { siguienteNumero: 1 } },
         { returnDocument: 'after', upsert: true },
       )
       .exec();
 
-    return actualizado.nextNumber;
+    return actualizado.siguienteNumero;
   }
 }

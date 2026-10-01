@@ -19,13 +19,13 @@ const base = (over: Record<string, unknown> = {}) => ({
   inmuebleId: inmueble,
   terceroId: tercero,
   conceptoId: concepto,
-  reason: 'intereses',
-  fullNumber: 'ND-1',
-  issueDate: new Date(),
-  dueDate: new Date(),
+  motivo: 'intereses',
+  numeroCompleto: 'ND-1',
+  fechaEmision: new Date(),
+  fechaVencimiento: new Date(),
   total: 150000,
-  outstandingBalance: 150000,
-  generatedBy: cuenta,
+  saldoPendiente: 150000,
+  generadoPor: cuenta,
   ...over,
 });
 
@@ -50,18 +50,18 @@ describe('NotaDebitoSchema — forma', () => {
     await expect(validar({ terceroId: null })).resolves.toBeNull();
   });
 
-  it('acepta description null', async () => {
-    await expect(validar({ description: null })).resolves.toBeNull();
+  it('acepta descripcion null', async () => {
+    await expect(validar({ descripcion: null })).resolves.toBeNull();
   });
 
-  it('arranca emitida, con outstandingBalance igual a total y sin datos de anulación', () => {
+  it('arranca emitida, con saldoPendiente igual a total y sin datos de anulación', () => {
     const doc = new NotaDebitoModel(base());
-    expect(doc.status).toBe('emitida');
-    expect(doc.outstandingBalance).toBe(doc.total);
-    expect(doc.voidedReason).toBeNull();
-    expect(doc.voidedDetail).toBeNull();
-    expect(doc.voidedAt).toBeNull();
-    expect(doc.voidedBy).toBeNull();
+    expect(doc.estado).toBe('emitida');
+    expect(doc.saldoPendiente).toBe(doc.total);
+    expect(doc.motivoAnulacion).toBeNull();
+    expect(doc.detalleAnulacion).toBeNull();
+    expect(doc.fechaAnulacion).toBeNull();
+    expect(doc.anuladoPor).toBeNull();
   });
 
   it('exige conceptoId', async () => {
@@ -69,20 +69,20 @@ describe('NotaDebitoSchema — forma', () => {
     expect(error?.message).toContain('conceptoId');
   });
 
-  it('exige reason (el motivo DIAN de la corrección)', async () => {
-    const error = await validar({ reason: undefined });
-    expect(error?.message).toContain('reason');
+  it('exige motivo (el motivo DIAN de la corrección)', async () => {
+    const error = await validar({ motivo: undefined });
+    expect(error?.message).toContain('motivo');
   });
 
   it('rechaza un motivo fuera del catálogo DIAN', async () => {
-    await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(
+    await expect(validar({ motivo: 'porque_si' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
-  it('exige issueDate', async () => {
-    const error = await validar({ issueDate: undefined });
-    expect(error?.message).toContain('issueDate');
+  it('exige fechaEmision', async () => {
+    const error = await validar({ fechaEmision: undefined });
+    expect(error?.message).toContain('fechaEmision');
   });
 
   it('exige total', async () => {
@@ -90,20 +90,20 @@ describe('NotaDebitoSchema — forma', () => {
     expect(error?.message).toContain('total');
   });
 
-  it('exige outstandingBalance', async () => {
-    const error = await validar({ outstandingBalance: undefined });
-    expect(error?.message).toContain('outstandingBalance');
+  it('exige saldoPendiente', async () => {
+    const error = await validar({ saldoPendiente: undefined });
+    expect(error?.message).toContain('saldoPendiente');
   });
 
   it('rechaza un estado fuera de emitida/anulada', async () => {
-    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(
+    await expect(validar({ estado: 'pendiente' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
   it('rechaza un motivo de anulación fuera del catálogo', async () => {
     await expect(
-      validar({ voidedReason: 'porque_si' }),
+      validar({ motivoAnulacion: 'porque_si' }),
     ).resolves.toBeInstanceOf(Error);
   });
 });
@@ -111,7 +111,7 @@ describe('NotaDebitoSchema — forma', () => {
 describe('NotaDebitoSchema — índices', () => {
   it('el número completo es único por copropiedad', () => {
     const indice = indices().find(
-      ([campos]) => campos.copropiedadId === 1 && campos.fullNumber === 1,
+      ([campos]) => campos.copropiedadId === 1 && campos.numeroCompleto === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });
@@ -122,7 +122,7 @@ describe('NotaDebitoSchema — índices', () => {
       ([campos]) =>
         campos.copropiedadId === 1 &&
         campos.inmuebleId === 1 &&
-        campos.outstandingBalance === 1,
+        campos.saldoPendiente === 1,
     );
     expect(indice).toBeDefined();
   });

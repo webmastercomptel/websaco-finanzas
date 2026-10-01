@@ -109,12 +109,15 @@ export class FacturasService {
     if (query.buscar) {
       // Escaped: a search box is user input, and an unescaped regex lets a
       // stray "(" throw, or a crafted one pin the database at 100%.
-      filtro.fullNumber = { $regex: escapeRegex(query.buscar), $options: 'i' };
+      filtro.numeroCompleto = {
+        $regex: escapeRegex(query.buscar),
+        $options: 'i',
+      };
     }
     if (query.estado) {
-      filtro.status = query.estado;
+      filtro.estado = query.estado;
     } else if (query.conSaldoPendiente) {
-      filtro.status = 'emitida';
+      filtro.estado = 'emitida';
     }
     if (query.conSaldoPendiente) {
       // No longer a field on Factura itself — resolve candidate ids from
@@ -130,7 +133,7 @@ export class FacturasService {
       filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
     if (query.fechaDesde || query.fechaHasta) {
-      filtro.issueDate = {
+      filtro.fechaEmision = {
         ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
         ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
       };
@@ -142,7 +145,7 @@ export class FacturasService {
     const [documentos, total] = await Promise.all([
       this.facturas
         .find(filtro)
-        .sort({ issueDate: -1, _id: -1 })
+        .sort({ fechaEmision: -1, _id: -1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
         .exec(),
@@ -231,7 +234,7 @@ export class FacturasService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.facturas
       .find({ copropiedadId, loteId })
-      .sort({ unitCode: 1 })
+      .sort({ codigoInmueble: 1 })
       .lean()
       .exec();
   }
@@ -241,7 +244,7 @@ export class FacturasService {
    * document's own frozen fields — never persisted on the document itself,
    * always read live: `referencia` off the current `Inmueble` row (per
    * product decision, this is a live cross-reference, not a billing fact
-   * worth freezing the way `unitCode`/`holder` are), and `totalAnticipos`
+   * worth freezing the way `codigoInmueble`/`titular` are), and `totalAnticipos`
    * from that unit's own currently pending Recibo balances.
    *
    * `totalAnticipos` reuses the exact "anticipos pendientes" definition
@@ -263,7 +266,7 @@ export class FacturasService {
     const [inmuebles, recibosActivos] = await Promise.all([
       this.inmuebles.find({ _id: { $in: ids }, copropiedadId }).exec(),
       this.recibos
-        .find({ copropiedadId, inmuebleId: { $in: ids }, status: 'activo' })
+        .find({ copropiedadId, inmuebleId: { $in: ids }, estado: 'activo' })
         .exec(),
     ]);
 
@@ -322,24 +325,26 @@ export class FacturasService {
     uso: string | null,
   ): DatosPlantillaFactura {
     const totalSaldoAnterior = lines.reduce(
-      (acc, l) => acc + l.balanceBefore,
+      (acc, l) => acc + l.saldoAnterior,
       0,
     );
-    const totalCargosDelMes = lines.reduce((acc, l) => acc + l.baseAmount, 0);
+    const totalCargosDelMes = lines.reduce((acc, l) => acc + l.valorBase, 0);
     const totalNuevoSaldo = totalSaldoAnterior + totalCargosDelMes;
-    const totalIva = lines.reduce((acc, l) => acc + l.taxAmount, 0);
-    const totalAPagar = lines.reduce((acc, l) => acc + l.balanceAfter, 0);
+    const totalIva = lines.reduce((acc, l) => acc + l.valorImpuesto, 0);
+    const totalAPagar = lines.reduce((acc, l) => acc + l.saldoNuevo, 0);
 
     const cargos = lines.map((l) => ({
       nombre:
-        l.taxAmount > 0 ? `${l.conceptName} (${l.taxRate}%)` : l.conceptName,
-      saldoAnterior: l.balanceBefore,
-      cargosDelMes: l.baseAmount,
-      nuevoSaldo: l.balanceBefore + l.baseAmount,
+        l.valorImpuesto > 0
+          ? `${l.nombreConcepto} (${l.tasaImpuesto}%)`
+          : l.nombreConcepto,
+      saldoAnterior: l.saldoAnterior,
+      cargosDelMes: l.valorBase,
+      nuevoSaldo: l.saldoAnterior + l.valorBase,
     }));
 
     const tasasIva = new Set(
-      lines.filter((l) => l.taxAmount > 0).map((l) => l.taxRate),
+      lines.filter((l) => l.valorImpuesto > 0).map((l) => l.tasaImpuesto),
     );
     const etiquetaIva =
       tasasIva.size === 1 ? `IVA ${[...tasasIva][0]}%` : 'IVA';
@@ -453,10 +458,10 @@ export class FacturasService {
         factura.inmuebleId.toString(),
       );
     const descuento =
-      factura.discountAmount > 0 && factura.discountDeadline
+      factura.montoDescuento > 0 && factura.fechaLimiteDescuento
         ? {
-            monto: factura.discountAmount,
-            fechaLimite: factura.discountDeadline,
+            monto: factura.montoDescuento,
+            fechaLimite: factura.fechaLimiteDescuento,
           }
         : null;
     // Non-null: always injected in the real app, same trailing-optional
@@ -466,10 +471,10 @@ export class FacturasService {
     const { titulo, resolucion } = await this.tituloDocumento!.resolverFactura(
       factura.copropiedadId,
       factura.resolucionId,
-      factura.prefix,
+      factura.prefijo,
     );
     return this.construirDatosPlantilla(
-      factura.lines,
+      factura.lineas,
       descuento,
       visuales?.totalAnticipos ?? 0,
       visuales?.referencia ?? null,
@@ -477,7 +482,7 @@ export class FacturasService {
       titulo,
       emisorDe(copropiedad),
       resolucion,
-      titularDe(factura.holder),
+      titularDe(factura.titular),
       visuales?.usage ?? null,
     );
   }
@@ -505,7 +510,7 @@ export class FacturasService {
    * on every call, same as the rest of a Prefactura's response, since it has
    * no issuance moment to freeze at. The discount is recomputed from the
    * lote's own parameters (`calcularDescuentoProntoPago`), unlike an issued
-   * Factura's already-frozen `discountAmount`/`discountDeadline`.
+   * Factura's already-frozen `montoDescuento`/`fechaLimiteDescuento`.
    */
   datosPlantillaPreliminar(
     preliminar: FacturaPreliminar,
@@ -514,10 +519,10 @@ export class FacturasService {
     datosVisuales?: DatosVisualesFactura,
   ): DatosPlantillaFactura {
     const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
-      preliminar.lines,
-      lote.earlyPaymentDiscount,
-      lote.earlyPaymentDiscountFixedValue,
-      lote.discountDeadline,
+      preliminar.lineas,
+      lote.descuentoProntoPago,
+      lote.valorFijoDescuentoProntoPago,
+      lote.fechaLimiteDescuento,
       copropiedad.descuentoAplicaConMora,
     );
     const descuento =
@@ -525,7 +530,7 @@ export class FacturasService {
         ? { monto: discountAmount, fechaLimite: discountDeadline }
         : null;
     return this.construirDatosPlantilla(
-      preliminar.lines,
+      preliminar.lineas,
       descuento,
       datosVisuales?.totalAnticipos ?? 0,
       datosVisuales?.referencia ?? null,
@@ -538,7 +543,7 @@ export class FacturasService {
       // No frozen resolución to show yet — a Prefactura is unnumbered, so
       // there is nothing to resolve (see this method's own docblock).
       null,
-      titularDe(preliminar.holder),
+      titularDe(preliminar.titular),
       datosVisuales?.usage ?? null,
     );
   }

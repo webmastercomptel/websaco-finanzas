@@ -65,7 +65,7 @@ export class SaldoCartera {
   conceptoId: Types.ObjectId;
 
   @Prop({ required: true, default: 0 })
-  balance: number;
+  saldoPendiente: number;
 }
 
 export const SaldoCarteraSchema = SchemaFactory.createForClass(SaldoCartera);

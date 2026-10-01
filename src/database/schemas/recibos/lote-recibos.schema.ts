@@ -68,14 +68,14 @@ export class LoteRecibos {
   copropiedadId: Types.ObjectId;
 
   @Prop({ required: true })
-  number: number;
+  numero: number;
 
   @Prop({
     required: true,
     enum: ['borrador', 'cargado', 'aplicado'],
     default: 'borrador',
   })
-  status: 'borrador' | 'cargado' | 'aplicado';
+  estado: 'borrador' | 'cargado' | 'aplicado';
 
   /** Tipo de documento (código) every Recibo in this lote is numbered
    *  under — common to the whole batch, same as medioPago/cuentaDestino
@@ -102,7 +102,7 @@ export class LoteRecibos {
   filas: LoteRecibosFila[];
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 
   /** When this batch was created — a domain field set explicitly at
    *  `crear()` time, deliberately NOT the same thing as Mongoose's own
@@ -122,7 +122,7 @@ LoteRecibosSchema.index(
   { copropiedadId: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $in: ['borrador', 'cargado'] } },
+    partialFilterExpression: { estado: { $in: ['borrador', 'cargado'] } },
     name: 'unico_lote_recibos_en_curso_por_copropiedad',
   },
 );

@@ -262,13 +262,13 @@ export class NotasContablesService {
             conceptoOrigenId,
             conceptoDestinoId,
             monto: dto.monto,
-            description: dto.descripcion,
-            issueDate: new Date(dto.fecha),
-            prefix: numero.prefijo,
-            number: numero.numero,
-            fullNumber: numero.completo,
-            status: 'activo',
-            generatedBy: accountId,
+            descripcion: dto.descripcion,
+            fecha: new Date(dto.fecha),
+            prefijo: numero.prefijo,
+            numero: numero.numero,
+            numeroCompleto: numero.completo,
+            estado: 'activo',
+            generadoPor: accountId,
           },
         ],
         { session },
@@ -379,20 +379,17 @@ export class NotasContablesService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.estado) filtro.status = query.estado;
+    if (query.estado) filtro.estado = query.estado;
     if (query.fechaDesde || query.fechaHasta) {
       const rango = {
         ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
         ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
       };
-      // A note carries a real `issueDate` from that feature onward; one
-      // created before it existed has `issueDate: null` and must fall back
+      // A note carries a real `fecha` from that feature onward; one
+      // created before it existed has `fecha: null` and must fall back
       // to `createdAt` — same pattern `NotasCreditoService.findAll` already
-      // uses for its own `issueDate`.
-      filtro.$or = [
-        { issueDate: rango },
-        { issueDate: null, createdAt: rango },
-      ];
+      // uses for its own `fecha`.
+      filtro.$or = [{ fecha: rango }, { fecha: null, createdAt: rango }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -521,9 +518,9 @@ export class NotasContablesService {
       if (!nota) {
         throw new NotFoundException(`No se encontró la nota contable ${id}`);
       }
-      if (nota.status === 'anulado') {
+      if (nota.estado === 'anulado') {
         throw new ConflictException(
-          `La nota contable ${nota.fullNumber} ya está anulada`,
+          `La nota contable ${nota.numeroCompleto} ya está anulada`,
         );
       }
 
@@ -576,11 +573,11 @@ export class NotasContablesService {
           { _id: id, copropiedadId },
           {
             $set: {
-              status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
+              estado: 'anulado',
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
             },
           },
           { session },
@@ -670,8 +667,8 @@ export class NotasContablesService {
           notaCreditoId: null,
           notaDebitoId: null,
           notaContableId: nota._id,
-          date: fecha,
-          entries,
+          fecha,
+          movimientos: entries,
         },
       ],
       { session },

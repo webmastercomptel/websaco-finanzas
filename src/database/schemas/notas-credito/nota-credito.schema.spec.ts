@@ -21,12 +21,12 @@ const base = (over: Record<string, unknown> = {}) => ({
   inmuebleId: inmueble,
   terceroId: tercero,
   facturaId: factura,
-  fullNumber: 'NC-1',
-  reason: 'ajuste_precio',
-  totalAmount: 200000,
-  distribution: [{ conceptoId: concepto, amount: 200000 }],
-  unappliedAmount: 200000,
-  generatedBy: cuenta,
+  numeroCompleto: 'NC-1',
+  motivo: 'ajuste_precio',
+  montoTotal: 200000,
+  distribucion: [{ conceptoId: concepto, monto: 200000 }],
+  montoSinAplicar: 200000,
+  generadoPor: cuenta,
   ...over,
 });
 
@@ -67,35 +67,35 @@ describe('NotaCreditoSchema — forma', () => {
     expect(doc.notaDebitoId).toBeNull();
   });
 
-  it('arranca activo, con appliedAmount en cero y sin datos de anulación', () => {
+  it('arranca activo, con montoAplicado en cero y sin datos de anulación', () => {
     const doc = new NotaCreditoModel(base());
-    expect(doc.status).toBe('activo');
-    expect(doc.appliedAmount).toBe(0);
-    expect(doc.voidedReason).toBeNull();
-    expect(doc.voidedDetail).toBeNull();
-    expect(doc.voidedAt).toBeNull();
+    expect(doc.estado).toBe('activo');
+    expect(doc.montoAplicado).toBe(0);
+    expect(doc.motivoAnulacion).toBeNull();
+    expect(doc.detalleAnulacion).toBeNull();
+    expect(doc.fechaAnulacion).toBeNull();
   });
 
-  it('issueDate arranca null — solo una nota creada antes de este campo lo deja así', () => {
+  it('fecha arranca null — solo una nota creada antes de este campo lo deja así', () => {
     const doc = new NotaCreditoModel(base());
-    expect(doc.issueDate).toBeNull();
+    expect(doc.fecha).toBeNull();
   });
 
-  it('acepta issueDate — la fecha que el usuario declaró al crearla', async () => {
+  it('acepta fecha — la fecha que el usuario declaró al crearla', async () => {
     const fecha = new Date('2026-08-15');
-    const doc = new NotaCreditoModel(base({ issueDate: fecha }));
+    const doc = new NotaCreditoModel(base({ fecha }));
     await expect(doc.validate()).resolves.toBeUndefined();
-    expect(doc.issueDate).toEqual(fecha);
+    expect(doc.fecha).toEqual(fecha);
   });
 
   it('rechaza un motivo fuera del catálogo', async () => {
-    await expect(validar({ reason: 'porque_si' })).resolves.toBeInstanceOf(
+    await expect(validar({ motivo: 'porque_si' })).resolves.toBeInstanceOf(
       Error,
     );
   });
 
   it('rechaza un estado fuera de activo/anulado', async () => {
-    await expect(validar({ status: 'pendiente' })).resolves.toBeInstanceOf(
+    await expect(validar({ estado: 'pendiente' })).resolves.toBeInstanceOf(
       Error,
     );
   });
@@ -104,7 +104,7 @@ describe('NotaCreditoSchema — forma', () => {
 describe('NotaCreditoSchema — índices', () => {
   it('el número completo es único por copropiedad', () => {
     const indice = indices().find(
-      ([campos]) => campos.copropiedadId === 1 && campos.fullNumber === 1,
+      ([campos]) => campos.copropiedadId === 1 && campos.numeroCompleto === 1,
     );
     expect(indice).toBeDefined();
     expect(indice?.[1]).toMatchObject({ unique: true });
@@ -115,7 +115,7 @@ describe('NotaCreditoSchema — índices', () => {
       ([campos]) =>
         campos.copropiedadId === 1 &&
         campos.inmuebleId === 1 &&
-        campos.unappliedAmount === 1,
+        campos.montoSinAplicar === 1,
     );
     expect(indice).toBeDefined();
   });

@@ -94,9 +94,9 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
 
   it('emite LOTE_FACTURAS_PDF_CONFIRMADO con los números de factura en el mismo orden que facturasLean', async () => {
     const facturasLean = [
-      facturaLean({ fullNumber: 'FV-1', unitCode: 'A-101' }),
-      facturaLean({ fullNumber: 'FV-2', unitCode: 'A-102' }),
-      facturaLean({ fullNumber: 'FV-3', unitCode: 'A-103' }),
+      facturaLean({ numeroCompleto: 'FV-1', codigoInmueble: 'A-101' }),
+      facturaLean({ numeroCompleto: 'FV-2', codigoInmueble: 'A-102' }),
+      facturaLean({ numeroCompleto: 'FV-3', codigoInmueble: 'A-103' }),
     ];
     const { controller, eventos, objectPath } =
       await construirController(facturasLean);
@@ -131,7 +131,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
 
   it('espera (await) el emitAsync antes de devolver el resultado', async () => {
     const facturasLean = [
-      facturaLean({ fullNumber: 'FV-1', unitCode: 'A-101' }),
+      facturaLean({ numeroCompleto: 'FV-1', codigoInmueble: 'A-101' }),
     ];
     const { controller, eventos, objectPath } =
       await construirController(facturasLean);

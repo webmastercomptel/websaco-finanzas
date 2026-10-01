@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * `dd/mm/aaaa` of a bare calendar date (`periodStart`/`periodEnd`, always a
+ * `dd/mm/aaaa` of a bare calendar date (`periodoDesde`/`periodoHasta`, always a
  * plain "YYYY-MM-DD" parsed as UTC midnight) — reads UTC getters on purpose,
  * same reasoning as the rest of this file: a host running a negative UTC
  * offset (Colombia, UTC-5 — this backend's own users) would otherwise roll
@@ -17,7 +17,7 @@ export const formatoFecha = (fecha: Date): string => {
  * The one check every document-dating call site in this backend needs
  * before trusting a caller-supplied business date: it must fall within the
  * coproperty's last consolidated billing run's own period
- * (`periodStart`–`periodEnd`, inclusive). Shared so the rule — and its exact
+ * (`periodoDesde`–`periodoHasta`, inclusive). Shared so the rule — and its exact
  * wording — can never drift between a document's own creation
  * (`fechaRecibo`, a Nota Crédito's `fecha`, …) and its anulación (which now
  * takes its own `fecha` too, for the same reason: the reversing asiento must
@@ -39,14 +39,14 @@ export const formatoFecha = (fecha: Date): string => {
  */
 export function exigirPeriodoFacturacionActual(
   fecha: Date,
-  ultimoLote: { periodStart: Date; periodEnd: Date } | null,
+  ultimoLote: { periodoDesde: Date; periodoHasta: Date } | null,
   etiqueta: string,
 ): void {
   if (!ultimoLote) return;
-  if (fecha < ultimoLote.periodStart || fecha > ultimoLote.periodEnd) {
+  if (fecha < ultimoLote.periodoDesde || fecha > ultimoLote.periodoHasta) {
     throw new BadRequestException(
       `${etiqueta} debe estar dentro del período de facturación actual ` +
-        `(${formatoFecha(ultimoLote.periodStart)} – ${formatoFecha(ultimoLote.periodEnd)})`,
+        `(${formatoFecha(ultimoLote.periodoDesde)} – ${formatoFecha(ultimoLote.periodoHasta)})`,
     );
   }
 }

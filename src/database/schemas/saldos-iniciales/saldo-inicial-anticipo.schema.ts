@@ -30,8 +30,8 @@ export type VoidReasonSaldoInicialAnticipo =
  * Feeds `SaldoDocumentoOrigen` (`tipoDocumento: 'SI'`) exactly like a Recibo
  * feeds its own `'RC'` row, so `NotaAnticipoService` can draw against it
  * through the SAME generic `cruce.util.ts` machinery — see
- * `NotaAnticipo.origenTipo`'s own docblock. `fullNumber`/`receivedDate` are
- * named to match `Recibo`'s own fields on purpose, for that same reason:
+ * `NotaAnticipo.origenTipo`'s own docblock. `numeroCompleto`/`fechaRecibo`
+ * are named to match `Recibo`'s own fields on purpose, for that same reason:
  * `cruce.util.ts`'s `OrigenAplicacion` constraint reads them regardless of
  * which collection the document actually came from.
  *
@@ -90,38 +90,36 @@ export class SaldoInicialAnticipo {
   numeroOriginal: string;
 
   /** This system's own frozen display string (`tipoDocumentoOriginal` +
-   *  `numeroOriginal`) — never a real consecutivo, but named `fullNumber`
-   *  (deliberately English, NOT `numeroCompleto`) so it satisfies
-   *  `cruce.util.ts`'s `OrigenAplicacion` shape the exact same way
-   *  `Recibo.fullNumber` does — that interface is structurally typed, and
-   *  `Recibo` (out of scope this batch) still names its own field this way.
-   *  Renaming this one alone would stop this document from satisfying the
-   *  shape `ContextoAplicacion<SaldoInicialAnticipoDocument>` needs. */
+   *  `numeroOriginal`) — never a real consecutivo, but named `numeroCompleto`
+   *  so it satisfies `cruce.util.ts`'s `OrigenAplicacion` shape the exact
+   *  same way `Recibo.numeroCompleto` does — that interface is structurally
+   *  typed, and `Recibo` (migrated in the same batch as this field) names
+   *  its own field the same way. Renaming only one side would stop this
+   *  document from satisfying the shape
+   *  `ContextoAplicacion<SaldoInicialAnticipoDocument>` needs. */
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   /** When this money actually arrived, per the client's previous system —
-   *  same semantic as `Recibo.receivedDate`, same field name (deliberately
-   *  English, same reasoning as `fullNumber` above) so this document
+   *  same semantic as `Recibo.fechaRecibo`, same field name so this document
    *  satisfies `cruce.util.ts`'s `OrigenAplicacion` shape without any
    *  adapter. Drives pronto-pago discount eligibility exactly like a real
-   *  Recibo's own `receivedDate` would (`evaluarAplicacionConDescuento`
+   *  Recibo's own `fechaRecibo` would (`evaluarAplicacionConDescuento`
    *  reads it regardless of which collection the origin came from). */
   @Prop({ required: true })
-  receivedDate: Date;
+  fechaRecibo: Date;
 
   @Prop({ required: true })
   montoOriginal: number;
 
-  // `status` is deliberately NOT `estado` here, unlike every other renamed
-  // field on this document: `decrementarSaldoDocumentoOrigen` (cruce.util.ts)
-  // is ONE generic function shared verbatim with `Recibo` (still English,
-  // out of scope this batch) — it queries `{ status: estadoActivo }` with a
-  // hardcoded key against whichever model it's given. Renaming this field
-  // alone, without also touching that shared out-of-scope function, would
-  // silently break every query it runs against this collection.
+  // `estado` matches `Recibo.estado` and every other renamed field on this
+  // document now that `Recibo` itself is migrated in the same batch —
+  // `decrementarSaldoDocumentoOrigen` (cruce.util.ts) is ONE generic
+  // function shared with `Recibo`'s model — it queries
+  // `{ estado: estadoActivo }` with a hardcoded key against whichever model
+  // it's given, so both documents must use the same key.
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
-  status: 'activo' | 'anulado';
+  estado: 'activo' | 'anulado';
 
   @Prop({
     type: String,

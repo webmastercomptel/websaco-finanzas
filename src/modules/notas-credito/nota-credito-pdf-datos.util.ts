@@ -134,7 +134,7 @@ export async function construirDatosImpresionNotaCredito(
     mapa.set(id.toString(), id);
   };
   agregarId(anclaTipo, anclaId);
-  for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
+  for (const a of aplicaciones) agregarId(a.tipoDocumento, a.documentoId);
 
   const [facturas, notasDebito, saldosIniciales, inmueble, tercero] =
     await Promise.all([
@@ -215,36 +215,35 @@ export async function construirDatosImpresionNotaCredito(
         : [
             {
               conceptoId: null,
-              conceptName: 'Aplicación',
-              monto: aplicacion.amountApplied,
+              nombreConcepto: 'Aplicación',
+              monto: aplicacion.montoAplicado,
             },
           ];
 
-    if (aplicacion.documentType === 'FV') {
-      const factura = facturaPorId.get(aplicacion.documentId.toString());
+    if (aplicacion.tipoDocumento === 'FV') {
+      const factura = facturaPorId.get(aplicacion.documentoId.toString());
       for (const detalle of detalles) {
         const lineaFactura = detalle.conceptoId
-          ? factura?.lines.find((l) => l.conceptoId.equals(detalle.conceptoId))
+          ? factura?.lineas.find((l) => l.conceptoId.equals(detalle.conceptoId))
           : undefined;
-        const codigo =
-          lineaFactura?.accountingReceivableAccount ?? cuentaCartera;
+        const codigo = lineaFactura?.cuentaCartera ?? cuentaCartera;
         codigosUsados.add(codigo);
         lineas.push({
           cuentaCodigo: codigo,
           cuentaNombre: '',
           tipoDocumento: 'FV',
-          numeroDocumento: factura?.number ?? null,
+          numeroDocumento: factura?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
       }
-    } else if (aplicacion.documentType === 'SI') {
+    } else if (aplicacion.tipoDocumento === 'SI') {
       // Only ever reachable when THIS aplicación is the note's own anchor
       // (the deferred `aplicar()` path never targets a Saldo Inicial —
       // see this function's own docblock). Already frozen per-línea, same
       // as a Factura.
       const saldoInicial = saldoInicialPorId.get(
-        aplicacion.documentId.toString(),
+        aplicacion.documentoId.toString(),
       );
       for (const detalle of detalles) {
         const lineaSI = detalle.conceptoId
@@ -252,7 +251,7 @@ export async function construirDatosImpresionNotaCredito(
               l.conceptoId.equals(detalle.conceptoId),
             )
           : undefined;
-        const codigo = lineaSI?.accountingReceivableAccount ?? cuentaCartera;
+        const codigo = lineaSI?.cuentaCartera ?? cuentaCartera;
         codigosUsados.add(codigo);
         lineas.push({
           cuentaCodigo: codigo,
@@ -267,7 +266,7 @@ export async function construirDatosImpresionNotaCredito(
       // Only ever reachable when THIS aplicación is the note's own anchor
       // (the deferred `aplicar()` path never targets a Nota Débito — see
       // this function's own docblock).
-      const notaDebito = notaDebitoPorId.get(aplicacion.documentId.toString());
+      const notaDebito = notaDebitoPorId.get(aplicacion.documentoId.toString());
       const codigo = notaDebito
         ? (cuentaCarteraDe(notaDebito) ?? cuentaCartera)
         : cuentaCartera;
@@ -277,7 +276,7 @@ export async function construirDatosImpresionNotaCredito(
           cuentaCodigo: codigo,
           cuentaNombre: '',
           tipoDocumento: 'ND',
-          numeroDocumento: notaDebito?.number ?? null,
+          numeroDocumento: notaDebito?.numero ?? null,
           debito: 0,
           credito: detalle.monto,
         });
@@ -305,21 +304,20 @@ export async function construirDatosImpresionNotaCredito(
     anclaTipo === 'FV' ? facturaPorId.get(anclaId.toString()) : undefined;
   const saldoInicialAncla =
     anclaTipo === 'SI' ? saldoInicialPorId.get(anclaId.toString()) : undefined;
-  for (const linea of nota.distribution) {
-    const lineaFactura = facturaAncla?.lines.find((l) =>
+  for (const linea of nota.distribucion) {
+    const lineaFactura = facturaAncla?.lineas.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
-    // A Saldo Inicial's own `accountingIncomeAccount` is deliberately
-    // always `null` (see its schema docblock — nothing was ever posted as
-    // income in this system for an opening balance), so this falls straight
-    // through to `cuentaDevoluciones`, same as an unconfigured Factura/ND
-    // concept.
+    // A Saldo Inicial's own `cuentaIngreso` is deliberately always `null`
+    // (see its schema docblock — nothing was ever posted as income in this
+    // system for an opening balance), so this falls straight through to
+    // `cuentaDevoluciones`, same as an unconfigured Factura/ND concept.
     const lineaSaldoInicial = saldoInicialAncla?.filas.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
     const codigo =
-      lineaFactura?.accountingIncomeAccount ??
-      lineaSaldoInicial?.accountingIncomeAccount ??
+      lineaFactura?.cuentaIngreso ??
+      lineaSaldoInicial?.cuentaIngreso ??
       (notaDebitoAncla ? cuentaIngresoDe(notaDebitoAncla) : null) ??
       cuentaDevoluciones;
     codigosUsados.add(codigo);
@@ -328,7 +326,7 @@ export async function construirDatosImpresionNotaCredito(
       cuentaNombre: '',
       tipoDocumento: null,
       numeroDocumento: null,
-      debito: linea.amount,
+      debito: linea.monto,
       credito: 0,
     });
   }
@@ -344,12 +342,12 @@ export async function construirDatosImpresionNotaCredito(
 
   return {
     tituloDocumento,
-    numeroCompleto: nota.fullNumber,
+    numeroCompleto: nota.numeroCompleto,
     fecha: fechaNotaCredito(nota),
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
-    concepto: nota.notes ?? MOTIVOS_LABELS[nota.reason] ?? nota.reason,
-    monto: nota.totalAmount,
+    concepto: nota.observaciones ?? MOTIVOS_LABELS[nota.motivo] ?? nota.motivo,
+    monto: nota.montoTotal,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),
     totalCredito: lineas.reduce((acc, l) => acc + l.credito, 0),

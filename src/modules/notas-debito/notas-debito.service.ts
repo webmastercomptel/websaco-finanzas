@@ -290,17 +290,17 @@ export class NotasDebitoService {
             inmuebleId,
             terceroId,
             conceptoId,
-            reason: dto.motivo,
-            description: dto.descripcion ?? null,
-            prefix: numero.prefijo,
-            number: numero.numero,
-            fullNumber: numero.completo,
-            issueDate: new Date(dto.fechaCargo),
-            dueDate: new Date(dto.fechaVencimiento),
+            motivo: dto.motivo,
+            descripcion: dto.descripcion ?? null,
+            prefijo: numero.prefijo,
+            numero: numero.numero,
+            numeroCompleto: numero.completo,
+            fechaEmision: new Date(dto.fechaCargo),
+            fechaVencimiento: new Date(dto.fechaVencimiento),
             total: dto.total,
-            outstandingBalance: dto.total,
-            status: 'emitida',
-            generatedBy: accountId,
+            saldoPendiente: dto.total,
+            estado: 'emitida',
+            generadoPor: accountId,
           },
         ],
         { session },
@@ -317,13 +317,13 @@ export class NotasDebitoService {
         .findOne({ copropiedadId, inmuebleId, conceptoId })
         .session(session)
         .exec();
-      const saldoAnterior = saldoPrevio?.balance ?? 0;
+      const saldoAnterior = saldoPrevio?.saldoPendiente ?? 0;
 
       await this.saldos
         .findOneAndUpdate(
           { copropiedadId, inmuebleId, conceptoId },
           {
-            $inc: { balance: dto.total },
+            $inc: { saldoPendiente: dto.total },
             $setOnInsert: { copropiedadId, inmuebleId, conceptoId },
           },
           { session, upsert: true },
@@ -440,7 +440,7 @@ export class NotasDebitoService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.estado) filtro.status = query.estado;
+    if (query.estado) filtro.estado = query.estado;
     if (query.conSaldoPendiente) {
       // No longer a field on NotaDebito itself — resolve candidate ids from
       // `SaldoTotalDocumento` first (see that schema's own docblock).
@@ -454,7 +454,7 @@ export class NotasDebitoService {
       filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
     }
     if (query.fechaDesde || query.fechaHasta) {
-      filtro.issueDate = {
+      filtro.fechaEmision = {
         ...(query.fechaDesde ? { $gte: new Date(query.fechaDesde) } : {}),
         ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
       };
@@ -525,14 +525,14 @@ export class NotasDebitoService {
       .findOne({ documentoId: nota._id })
       .exec();
     const aplicaciones = await this.aplicaciones
-      .find({ copropiedadId, documentType: 'ND', documentId: nota._id })
-      .sort({ appliedAt: 1 })
+      .find({ copropiedadId, tipoDocumento: 'ND', documentoId: nota._id })
+      .sort({ aplicadoEn: 1 })
       .exec();
 
     // Each aplicación's source (who paid this nota) can be a different
     // Recibo/Nota Crédito/Nota de Anticipo — batch-resolve their own
     // business dates instead of showing the real cruce instant
-    // (`appliedAt`), same reasoning as every other `appliedAt` fix this
+    // (`aplicadoEn`), same reasoning as every other `aplicadoEn` fix this
     // session.
     const idsPorTipo = {
       RC: [] as string[],
@@ -562,7 +562,7 @@ export class NotasDebitoService {
     const fechasPorSourceId = new Map<string, Date>([
       ...recibosOrigen.map((r): [string, Date] => [
         r._id.toString(),
-        r.receivedDate,
+        r.fechaRecibo,
       ]),
       ...notasCreditoOrigen.map((nc): [string, Date] => [
         nc._id.toString(),
@@ -570,7 +570,7 @@ export class NotasDebitoService {
       ]),
       ...notasAnticipoOrigen.map((na): [string, Date] => [
         na._id.toString(),
-        na.issueDate,
+        na.fechaEmision,
       ]),
     ]);
 
@@ -656,9 +656,9 @@ export class NotasDebitoService {
       if (!nota) {
         throw new NotFoundException(`No se encontró la nota débito ${id}`);
       }
-      if (nota.status === 'anulada') {
+      if (nota.estado === 'anulada') {
         throw new ConflictException(
-          `La nota débito ${nota.fullNumber} ya está anulada`,
+          `La nota débito ${nota.numeroCompleto} ya está anulada`,
         );
       }
 
@@ -666,9 +666,9 @@ export class NotasDebitoService {
       const aplicacionesActivas = await this.aplicaciones
         .find({
           copropiedadId,
-          documentType: 'ND',
-          documentId: nota._id,
-          status: 'activa',
+          tipoDocumento: 'ND',
+          documentoId: nota._id,
+          estado: 'activa',
         })
         .session(session)
         .exec();
@@ -680,7 +680,7 @@ export class NotasDebitoService {
         await this.aplicaciones
           .findOneAndUpdate(
             { _id: aplicacion._id, copropiedadId },
-            { $set: { status: 'revertida', revertedAt: new Date() } },
+            { $set: { estado: 'revertida', revertidoEn: new Date() } },
             { session },
           )
           .exec();
@@ -725,7 +725,7 @@ export class NotasDebitoService {
         nota.inmuebleId,
         copropiedad,
         entries,
-        { tipo: 'ND', numero: nota.number },
+        { tipo: 'ND', numero: nota.numero },
       );
       await this.asientos.create(
         [
@@ -738,10 +738,11 @@ export class NotasDebitoService {
             notaDebitoId: nota._id,
             // The date the user declared for THIS anulación (validated
             // above, before the transaction opened) — never `new Date()`.
-            // `voidedAt` stays the real audit instant, a separate field on
-            // purpose (see the creation entry's own note on this split).
-            date: new Date(dto.fecha),
-            entries,
+            // `fechaAnulacion` stays the real audit instant, a separate
+            // field on purpose (see the creation entry's own note on this
+            // split).
+            fecha: new Date(dto.fecha),
+            movimientos: entries,
           },
         ],
         { session },
@@ -777,8 +778,11 @@ export class NotasDebitoService {
             [
               {
                 $set: {
-                  balance: {
-                    $max: [0, { $add: ['$balance', -saldoPendienteActual] }],
+                  saldoPendiente: {
+                    $max: [
+                      0,
+                      { $add: ['$saldoPendiente', -saldoPendienteActual] },
+                    ],
                   },
                 },
               },
@@ -808,12 +812,12 @@ export class NotasDebitoService {
           { _id: id, copropiedadId },
           {
             $set: {
-              status: 'anulada',
-              outstandingBalance: 0,
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
+              estado: 'anulada',
+              saldoPendiente: 0,
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
             },
           },
           { session },
@@ -850,27 +854,27 @@ export class NotasDebitoService {
     aplicacion: AplicacionCarteraDocument,
   ): Promise<void> {
     if (aplicacion.sourceType === 'RC') {
-      // Live source of `unappliedAmount`/`appliedAmount` is
+      // Live source of `montoSinAplicar`/`montoAplicado` is
       // `SaldoDocumentoOrigen` now — the Recibo itself is immutable once
       // issued (see that schema's own docblock).
       await restaurarSaldoDocumentoOrigen(
         this.saldoDocumentoOrigen,
         session,
         aplicacion.sourceId,
-        aplicacion.amountApplied,
+        aplicacion.montoAplicado,
       );
     } else if (aplicacion.sourceType === 'NC') {
       await restaurarSaldoDocumentoOrigen(
         this.saldoDocumentoOrigen,
         session,
         aplicacion.sourceId,
-        aplicacion.amountApplied,
+        aplicacion.montoAplicado,
       );
     } else if (aplicacion.sourceType === 'NA') {
       const notaAnticipo = await this.notasAnticipo
         .findOneAndUpdate(
           { _id: aplicacion.sourceId, copropiedadId },
-          { $inc: { appliedAmount: -aplicacion.amountApplied } },
+          { $inc: { montoAplicado: -aplicacion.montoAplicado } },
           { session },
         )
         .exec();
@@ -879,7 +883,7 @@ export class NotasDebitoService {
           this.saldoDocumentoOrigen,
           session,
           notaAnticipo.reciboOrigenId,
-          aplicacion.amountApplied,
+          aplicacion.montoAplicado,
         );
       }
     }
@@ -916,12 +920,12 @@ export class NotasDebitoService {
     let entries = construirMovimientos(
       {
         total: nota.total,
-        lines: [
+        lineas: [
           {
-            accountingReceivableAccount: cuentaDebito,
-            accountingIncomeAccount: incomeAccount,
-            totalAmount: nota.total,
-            conceptKind: conceptoKind,
+            cuentaCartera: cuentaDebito,
+            cuentaIngreso: incomeAccount,
+            valorTotal: nota.total,
+            tipoConcepto: conceptoKind,
           },
         ],
       },
@@ -934,7 +938,7 @@ export class NotasDebitoService {
       nota.inmuebleId,
       copropiedad,
       entries,
-      { tipo: 'ND', numero: nota.number },
+      { tipo: 'ND', numero: nota.numero },
     );
 
     await this.asientos.create(
@@ -948,10 +952,10 @@ export class NotasDebitoService {
           notaDebitoId: nota._id,
           // The nota's own declared business date (`dto.fechaCargo`), not
           // the real instant of posting — same reasoning as Factura's
-          // `lote.billingDate`/Recibo's `receivedDate`: this document can be
+          // `lote.billingDate`/Recibo's `fechaRecibo`: this document can be
           // keyed in days after the date it actually charges.
-          date: nota.issueDate,
-          entries,
+          fecha: nota.fechaEmision,
+          movimientos: entries,
         },
       ],
       { session },

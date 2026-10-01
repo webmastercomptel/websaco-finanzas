@@ -58,8 +58,8 @@ export async function construirDatosImpresionNotaDebito(
     modelos.asientos.findOne({ copropiedadId, notaDebitoId: nota._id }).exec(),
   ]);
 
-  const movimientos = asiento?.entries ?? [];
-  const codigosUsados = new Set(movimientos.map((m) => m.account));
+  const movimientos = asiento?.movimientos ?? [];
+  const codigosUsados = new Set(movimientos.map((m) => m.cuenta));
   const cuentas = await modelos.cuentasContables
     .find({ copropiedadId, codigo: { $in: [...codigosUsados] } })
     .exec();
@@ -69,21 +69,21 @@ export async function construirDatosImpresionNotaDebito(
   // el mismo `null`/`null` que ya usa la línea de banco/anticipo de un
   // Recibo para lo que no liquida un documento específico.
   const lineas: LineaAsientoImpresion[] = movimientos.map((m) => ({
-    cuentaCodigo: m.account,
-    cuentaNombre: nombrePorCodigo.get(m.account) ?? m.account,
+    cuentaCodigo: m.cuenta,
+    cuentaNombre: nombrePorCodigo.get(m.cuenta) ?? m.cuenta,
     tipoDocumento: null,
     numeroDocumento: null,
-    debito: m.type === 'debito' ? m.amount : 0,
-    credito: m.type === 'credito' ? m.amount : 0,
+    debito: m.tipo === 'debito' ? m.monto : 0,
+    credito: m.tipo === 'credito' ? m.monto : 0,
   }));
 
   return {
     tituloDocumento,
-    numeroCompleto: nota.fullNumber,
-    fecha: nota.issueDate,
+    numeroCompleto: nota.numeroCompleto,
+    fecha: nota.fechaEmision,
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
-    concepto: nota.description ?? concepto?.nombre ?? 'Cargo manual',
+    concepto: nota.descripcion ?? concepto?.nombre ?? 'Cargo manual',
     monto: nota.total,
     lineas,
     totalDebito: lineas.reduce((acc, l) => acc + l.debito, 0),

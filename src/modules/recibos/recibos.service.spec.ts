@@ -76,7 +76,7 @@ const modeloRecibos = (creado: Record<string, unknown>) => ({
   // Mutates the shared `creado` object per `$set`, same as a real
   // `findOneAndUpdate` — needed so a later `findOne` in the same `crear()`
   // call (or this test's own assertions) sees fields frozen mid-transaction
-  // (`notes`, `otherIncomeAmount`), not the pre-update fixture.
+  // (`observaciones`, `montoOtrosIngresos`), not the pre-update fixture.
   findOneAndUpdate: jest.fn(
     (_filtro: unknown, update?: { $set?: Record<string, unknown> }) => ({
       exec: () => {
@@ -91,12 +91,12 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
-  status: 'emitida',
-  outstandingBalance: 500000,
+  estado: 'emitida',
+  saldoPendiente: 500000,
   total: 500000,
-  lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 500000 }],
-  discountAmount: 0,
-  discountDeadline: null,
+  lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 500000 }],
+  montoDescuento: 0,
+  fechaLimiteDescuento: null,
   ...over,
 });
 
@@ -105,10 +105,10 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   conceptoId: new Types.ObjectId(),
-  status: 'emitida',
-  outstandingBalance: 150000,
+  estado: 'emitida',
+  saldoPendiente: 150000,
   total: 150000,
-  issueDate: new Date('2026-08-01'),
+  fechaEmision: new Date('2026-08-01'),
   ...over,
 });
 
@@ -143,7 +143,7 @@ const modeloCarteraPorDocumento = () => ({
 /** Combined `SaldoTotalDocumento` mock, backed by whichever Factura/NotaDebito
  *  fixtures the caller passes — same shared-mutable-state trick
  *  `modeloFacturas`/`modeloNotasDebito` used to run directly on their own
- *  `outstandingBalance` field, just relocated off those (now immutable)
+ *  `saldoPendiente` field, just relocated off those (now immutable)
  *  documents onto this collection instead (see `SaldoTotalDocumento`'s own
  *  docblock on why the atomic guard had to move). */
 const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
@@ -159,17 +159,17 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
         if (!doc) return Promise.resolve(null);
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((doc.outstandingBalance as number) < monto) {
+          if ((doc.saldoPendiente as number) < monto) {
             return Promise.resolve(null);
           }
-          doc.outstandingBalance = (doc.outstandingBalance as number) - monto;
+          doc.saldoPendiente = (doc.saldoPendiente as number) - monto;
         } else if (update.$inc) {
-          doc.outstandingBalance =
-            (doc.outstandingBalance as number) + update.$inc.saldoPendiente;
+          doc.saldoPendiente =
+            (doc.saldoPendiente as number) + update.$inc.saldoPendiente;
         }
         return Promise.resolve({
           documentoId: doc._id,
-          saldoPendiente: doc.outstandingBalance,
+          saldoPendiente: doc.saldoPendiente,
         });
       },
     }),
@@ -182,7 +182,7 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
         );
         return Promise.resolve(
           doc
-            ? { documentoId: doc._id, saldoPendiente: doc.outstandingBalance }
+            ? { documentoId: doc._id, saldoPendiente: doc.saldoPendiente }
             : null,
         );
       },
@@ -196,12 +196,11 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
           documentos
             .filter(
               (d) =>
-                ids.includes(String(d._id)) &&
-                (d.outstandingBalance as number) > 0,
+                ids.includes(String(d._id)) && (d.saldoPendiente as number) > 0,
             )
             .map((d) => ({
               documentoId: d._id,
-              saldoPendiente: d.outstandingBalance,
+              saldoPendiente: d.saldoPendiente,
             })),
         );
       },
@@ -212,8 +211,8 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
 /** `SaldoDocumentoOrigen` mock, backed by whichever Recibo fixtures the
  *  caller passes — same shared-mutable-state trick `modeloSaldoTotalDocumento`
  *  uses, just for the SOURCE side (Recibo/NotaCredito) instead of the
- *  charge side. Reuses each fixture's own `unappliedAmount` field as the
- *  live `saldoDisponible`, and `receivedAmount` as the frozen
+ *  charge side. Reuses each fixture's own `montoSinAplicar` field as the
+ *  live `saldoDisponible`, and `montoRecibido` as the frozen
  *  `montoOriginal` — test fixture convenience, not a real schema shape. */
 const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
   create: jest.fn(() => Promise.resolve([{}])),
@@ -229,18 +228,18 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
         if (!doc) return Promise.resolve(null);
         if (filtro.$expr) {
           const monto = (filtro.$expr as { $gte: [string, number] }).$gte[1];
-          if ((doc.unappliedAmount as number) < monto) {
+          if ((doc.montoSinAplicar as number) < monto) {
             return Promise.resolve(null);
           }
-          doc.unappliedAmount = (doc.unappliedAmount as number) - monto;
+          doc.montoSinAplicar = (doc.montoSinAplicar as number) - monto;
         } else if (update.$inc) {
-          doc.unappliedAmount =
-            (doc.unappliedAmount as number) + update.$inc.saldoDisponible;
+          doc.montoSinAplicar =
+            (doc.montoSinAplicar as number) + update.$inc.saldoDisponible;
         }
         return Promise.resolve({
           documentoId: doc._id,
-          montoOriginal: doc.receivedAmount,
-          saldoDisponible: doc.unappliedAmount,
+          montoOriginal: doc.montoRecibido,
+          saldoDisponible: doc.montoSinAplicar,
         });
       },
     }),
@@ -258,8 +257,8 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
       return doc
         ? {
             documentoId: doc._id,
-            montoOriginal: doc.receivedAmount,
-            saldoDisponible: doc.unappliedAmount,
+            montoOriginal: doc.montoRecibido,
+            saldoDisponible: doc.montoSinAplicar,
           }
         : null;
     })();
@@ -283,12 +282,12 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
         ? documentos.filter((d) =>
             idsFiltro.map(String).includes(String(d._id)),
           )
-        : documentos.filter((d) => (d.unappliedAmount as number) > 0);
+        : documentos.filter((d) => (d.montoSinAplicar as number) > 0);
       return Promise.resolve(
         resultado.map((d) => ({
           documentoId: d._id,
-          montoOriginal: d.receivedAmount,
-          saldoDisponible: d.unappliedAmount,
+          montoOriginal: d.montoRecibido,
+          saldoDisponible: d.montoSinAplicar,
         })),
       );
     },
@@ -443,12 +442,12 @@ describe('RecibosService.crear — elección de aplicación obligatoria', () => 
         _id: new Types.ObjectId(),
         inmuebleId: INMUEBLE,
         terceroId: TERCERO,
-        fullNumber: 'RC-1',
-        destinationAccount: '111005',
-        unappliedAmount: 500000,
-        appliedAmount: 0,
-        receivedAmount: 500000,
-        status: 'activo',
+        numeroCompleto: 'RC-1',
+        cuentaDestino: '111005',
+        montoSinAplicar: 500000,
+        montoAplicado: 0,
+        montoRecibido: 500000,
+        estado: 'activo',
       },
     });
 
@@ -464,7 +463,7 @@ describe('RecibosService.crear — elección de aplicación obligatoria', () => 
     const { service } = construirServicio({
       reciboCreado: {
         _id: new Types.ObjectId(),
-        status: 'activo',
+        estado: 'activo',
       },
     });
 
@@ -485,31 +484,31 @@ describe('RecibosService.crear — elección de aplicación obligatoria', () => 
 });
 
 describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100% anticipo)', () => {
-  it('crea el recibo con unappliedAmount = montoRecibido y SÍ postea el asiento — el efectivo ya llegó al banco', async () => {
+  it('crea el recibo con montoSinAplicar = montoRecibido y SÍ postea el asiento — el efectivo ya llegó al banco', async () => {
     // Corrección de un bug de partida doble en un borrador anterior de este
     // plan: un anticipo puro NO deja de tener efecto contable — el dinero
-    // entró de verdad a `destinationAccount` y tiene que verse ahí para que
+    // entró de verdad a `cuentaDestino` y tiene que verse ahí para que
     // la conciliación bancaria cierre, aunque todavía no se haya cruzado
     // contra ningún documento (design decision, Task 2).
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 500000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 500000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, asientos } = construirServicio({ reciboCreado });
 
@@ -550,21 +549,21 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 500000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 500000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, asientos } = construirServicio({
       reciboCreado,
@@ -620,14 +619,14 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 500000,
-      status: 'activo',
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 500000,
+      estado: 'activo',
     };
     const { service, recibos } = construirServicio({ reciboCreado });
 
@@ -638,7 +637,7 @@ describe('RecibosService.crear — aplicacionAutomatica sin cartera abierta (100
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: reciboCreado._id, copropiedadId: COP },
-      { $set: { notes: 'Genera anticipo' } },
+      { $set: { observaciones: 'Genera anticipo' } },
       expect.anything(),
     );
   });
@@ -663,21 +662,21 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '999000',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 500000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '999000',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 500000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, recibos } = construirServicio({
       reciboCreado,
@@ -700,7 +699,7 @@ describe('RecibosService.crear — cuentaDestino por defecto', () => {
     const [[payloads]] = (recibos.create as jest.Mock).mock.calls as [
       [Array<Record<string, unknown>>],
     ];
-    expect(payloads[0].destinationAccount).toBe('999000');
+    expect(payloads[0].cuentaDestino).toBe('999000');
   });
 
   it('rechaza crear el recibo cuando faltan cuentaDestino Y cuentaBancariaDefecto', async () => {
@@ -729,21 +728,21 @@ describe('RecibosService.crear — candado de periodo contable', () => {
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedAmount: 500000,
-    receivedDate: new Date('2026-08-27'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    appliedAmount: 0,
-    unappliedAmount: 500000,
-    status: 'activo',
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    montoRecibido: 500000,
+    fechaRecibo: new Date('2026-08-27'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    montoAplicado: 0,
+    montoSinAplicar: 500000,
+    estado: 'activo',
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
   });
 
   it('rechaza crear un recibo fechado en un periodo ya cerrado', async () => {
@@ -806,29 +805,29 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedAmount: 500000,
-    receivedDate: new Date('2026-08-27'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    appliedAmount: 0,
-    unappliedAmount: 500000,
-    status: 'activo',
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    montoRecibido: 500000,
+    fechaRecibo: new Date('2026-08-27'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    montoAplicado: 0,
+    montoSinAplicar: 500000,
+    estado: 'activo',
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
   });
 
   it('rechaza una fecha de pago de un mes distinto al del último lote consolidado', async () => {
     const { service, recibos, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -848,8 +847,8 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
     const { service, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -888,8 +887,8 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
     const { service, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       },
     });
 
@@ -903,17 +902,17 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
     expect(asientos.create).toHaveBeenCalledTimes(1);
   });
 
-  it('rechaza una fecha de pago del mismo mes calendario pero fuera del rango real del período (periodEnd, no fin de mes)', async () => {
+  it('rechaza una fecha de pago del mismo mes calendario pero fuera del rango real del período (periodoHasta, no fin de mes)', async () => {
     // El período de un lote no siempre coincide con el mes calendario
     // entero (ciclos quincenales, cortes a mitad de mes) — esta validación
-    // compara contra el rango real (`periodStart`/`periodEnd`), no contra
-    // "mismo mes/año", así que un recibo posterior a `periodEnd` se rechaza
+    // compara contra el rango real (`periodoDesde`/`periodoHasta`), no contra
+    // "mismo mes/año", así que un recibo posterior a `periodoHasta` se rechaza
     // aunque siga siendo el mismo mes.
     const { service, recibos, asientos } = construirServicio({
       reciboCreado: reciboCreado(),
       ultimoLoteConsolidado: {
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-15'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-15'),
       },
     });
 
@@ -931,28 +930,28 @@ describe('RecibosService.crear — candado de período de facturación (mes/año
 });
 
 describe('RecibosService.crear — con aplicaciones manuales', () => {
-  it('descuenta outstandingBalance de la factura y postea el asiento por lo aplicado', async () => {
+  it('descuenta saldoPendiente de la factura y postea el asiento por lo aplicado', async () => {
     const facturaId = new Types.ObjectId();
     const factura = facturaDoc({ _id: facturaId });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 200000,
-      unappliedAmount: 300000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 200000,
+      montoSinAplicar: 300000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, saldoTotalDocumento, asientos } = construirServicio({
       reciboCreado,
@@ -996,7 +995,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
-        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // La fixture de `facturaDoc()` no trae `.numero` — el fallback de
         // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
@@ -1015,11 +1014,11 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoMora,
-          totalAmount: 500000,
-          accountingReceivableAccount: '130599',
+          valorTotal: 500000,
+          cuentaCartera: '130599',
         },
       ],
     });
@@ -1027,21 +1026,21 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 200000,
-      unappliedAmount: 300000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 200000,
+      montoSinAplicar: 300000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, asientos, aplicaciones } = construirServicio({
       reciboCreado,
@@ -1068,7 +1067,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     expect(filaAplicacion[0].detalleConceptos).toEqual([
       {
         conceptoId: conceptoMora,
-        conceptName: expect.any(String) as string,
+        nombreConcepto: expect.any(String) as string,
         monto: 200000,
       },
     ]);
@@ -1091,7 +1090,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
         type: 'credito',
         amount: 200000,
         description: expect.any(String) as string,
-        // La fixture de `facturaDoc()` no trae `.number` — el fallback de
+        // La fixture de `facturaDoc()` no trae `.numero` — el fallback de
         // `agruparPorCuentaYDocumento` normaliza a `null`, no `undefined`.
         tipoDocumento: 'FV',
         numeroDocumento: null,
@@ -1111,19 +1110,19 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const conceptoMora = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
           conceptKind: 'administracion',
-          totalAmount: 200000,
-          accountingReceivableAccount: '130501',
+          valorTotal: 200000,
+          cuentaCartera: '130501',
         },
         {
           conceptoId: conceptoMora,
           conceptKind: 'intereses',
-          totalAmount: 40000,
-          accountingReceivableAccount: '130599',
-          accountingIncomeAccount: '413505',
+          valorTotal: 40000,
+          cuentaCartera: '130599',
+          cuentaIngreso: '413505',
         },
       ],
     });
@@ -1131,23 +1130,23 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 240000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 240000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
       // Read by aplicarManual's guard BEFORE this call's own application —
-      // the full receivedAmount, same as any freshly created recibo.
-      unappliedAmount: 240000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      // the full montoRecibido, same as any freshly created recibo.
+      montoSinAplicar: 240000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const copropiedades = {
       findById: jest.fn(() => ({
@@ -1193,10 +1192,10 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     // mora — el par de cuentas de orden debe reflejar 40.000, no 240.000.
     expect(entries.find((m) => m.account === '831505')?.amount).toBe(40000);
     expect(entries.find((m) => m.account === '831510')?.amount).toBe(40000);
-    // La mora nunca se debitó a su `accountingReceivableAccount` (130599)
+    // La mora nunca se debitó a su `cuentaCartera` (130599)
     // al facturar — cuentas de orden ocupó ese lugar (par memo arriba). Al
     // recaudarla, el crédito real de ingreso debe ir a la cuenta CRÉDITO de
-    // Cargos (`accountingIncomeAccount`, 413505), nunca a la cuenta
+    // Cargos (`cuentaIngreso`, 413505), nunca a la cuenta
     // db/cartera (130599) — ese es justamente el bug que esta prueba cubre.
     expect(
       entries.find((m) => m.account === '413505' && m.type === 'credito')
@@ -1209,12 +1208,12 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const facturaId = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      lines: [
+      lineas: [
         {
           conceptoId: new Types.ObjectId(),
           conceptKind: 'administracion',
-          totalAmount: 200000,
-          accountingReceivableAccount: '130501',
+          valorTotal: 200000,
+          cuentaCartera: '130501',
         },
       ],
     });
@@ -1222,22 +1221,22 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 200000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 200000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
       // Same reasoning as the test above.
-      unappliedAmount: 200000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      montoSinAplicar: 200000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const copropiedades = {
       findById: jest.fn(() => ({
@@ -1280,7 +1279,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
   });
 
   it('rechaza — todo o nada — cuando la suma solicitada supera el monto recibido', async () => {
-    const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
+    const reciboCreado = { _id: new Types.ObjectId(), montoSinAplicar: 500000 };
     const { service } = construirServicio({ reciboCreado });
 
     await expect(
@@ -1299,8 +1298,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
 
   it('rechaza — todo o nada — cuando una línea supera el saldo pendiente actual de su factura', async () => {
     const facturaId = new Types.ObjectId();
-    const factura = facturaDoc({ _id: facturaId, outstandingBalance: 100000 });
-    const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
+    const factura = facturaDoc({ _id: facturaId, saldoPendiente: 100000 });
+    const reciboCreado = { _id: new Types.ObjectId(), montoSinAplicar: 500000 };
     const { service } = construirServicio({ reciboCreado, factura });
 
     await expect(
@@ -1320,7 +1319,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
   it('rechaza — todo o nada — aplicar contra una factura de OTRO inmueble', async () => {
     // FIFO filtra sus candidatas por inmuebleId; el modo manual acepta el
     // documentoId que le manden, y `decrementarSaldoFactura` sólo mira
-    // {_id, copropiedadId, status, saldo}. Sin este chequeo, un recibo de una
+    // {_id, copropiedadId, estado, saldo}. Sin este chequeo, un recibo de una
     // unidad se podía cruzar contra la factura de OTRA unidad de la misma
     // copropiedad, y las dos vistas de saldo por inmueble quedaban corruptas.
     const OTRO_INMUEBLE = new Types.ObjectId();
@@ -1329,8 +1328,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
-      fullNumber: 'RC-1',
-      unappliedAmount: 500000,
+      numeroCompleto: 'RC-1',
+      montoSinAplicar: 500000,
     };
     const { service, aplicaciones } = construirServicio({
       reciboCreado,
@@ -1356,10 +1355,10 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     expect(aplicaciones.create).not.toHaveBeenCalled();
   });
 
-  it("descuenta outstandingBalance de una Nota Débito cuando tipoDocumento es 'ND'", async () => {
+  it("descuenta saldoPendiente de una Nota Débito cuando tipoDocumento es 'ND'", async () => {
     // El bug real que esto reemplaza: `AplicacionSolicitadaDto.tipoDocumento`
     // ya aceptaba 'ND', pero `aplicarManual` nunca lo leía — siempre llamaba
-    // `decrementarSaldoFactura` y hardcodeaba `documentType: 'FV'`, así que
+    // `decrementarSaldoFactura` y hardcodeaba `tipoDocumento: 'FV'`, así que
     // pedir una aplicación manual contra una Nota Débito real explotaba con
     // AplicacionInvalidaError (buscaba el id como si fuera una Factura).
     const notaDebitoId = new Types.ObjectId();
@@ -1368,21 +1367,21 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 100000,
-      unappliedAmount: 400000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 100000,
+      montoSinAplicar: 400000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const { service, saldoTotalDocumento, aplicaciones } = construirServicio({
       reciboCreado,
@@ -1406,9 +1405,9 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
       [Record<string, unknown>[]]
     >;
     expect(fila[0]).toMatchObject({
-      documentType: 'ND',
-      documentId: notaDebitoId,
-      amountApplied: 100000,
+      tipoDocumento: 'ND',
+      documentoId: notaDebitoId,
+      montoAplicado: 100000,
     });
   });
 
@@ -1422,8 +1421,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
-      fullNumber: 'RC-1',
-      unappliedAmount: 500000,
+      numeroCompleto: 'RC-1',
+      montoSinAplicar: 500000,
     };
     const { service, aplicaciones } = construirServicio({
       reciboCreado,
@@ -1447,7 +1446,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
   });
 
   it('rechaza pedir aplicación manual Y automática a la vez', async () => {
-    const reciboCreado = { _id: new Types.ObjectId(), unappliedAmount: 500000 };
+    const reciboCreado = { _id: new Types.ObjectId(), montoSinAplicar: 500000 };
     const { service } = construirServicio({ reciboCreado });
 
     await expect(
@@ -1474,23 +1473,23 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const facturaId = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      number: 173,
-      outstandingBalance: 200000,
+      numero: 173,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 200000,
-      status: 'activo',
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 200000,
+      estado: 'activo',
     };
     const { service, recibos } = construirServicio({ reciboCreado, factura });
 
@@ -1508,7 +1507,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: reciboCreado._id, copropiedadId: COP },
-      { $set: { notes: 'Cancela factura 173' } },
+      { $set: { observaciones: 'Cancela factura 173' } },
       expect.anything(),
     );
   });
@@ -1517,23 +1516,23 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const facturaId = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      number: 173,
-      outstandingBalance: 200000,
+      numero: 173,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      reference: null,
-      notes: 'Texto digitado a mano',
-      appliedAmount: 0,
-      unappliedAmount: 200000,
-      status: 'activo',
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      referencia: null,
+      observaciones: 'Texto digitado a mano',
+      montoAplicado: 0,
+      montoSinAplicar: 200000,
+      estado: 'activo',
     };
     const { service, recibos } = construirServicio({ reciboCreado, factura });
 
@@ -1553,8 +1552,8 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const llamadasConNotes = (
       recibos.findOneAndUpdate as jest.Mock
     ).mock.calls.filter(
-      ([, cambios]: [unknown, { $set?: { notes?: unknown } }]) =>
-        cambios.$set?.notes !== undefined,
+      ([, cambios]: [unknown, { $set?: { observaciones?: unknown } }]) =>
+        cambios.$set?.observaciones !== undefined,
     );
     expect(llamadasConNotes).toHaveLength(0);
   });
@@ -1563,25 +1562,25 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     const facturaId = new Types.ObjectId();
     const factura = facturaDoc({
       _id: facturaId,
-      number: 173,
-      outstandingBalance: 400000,
+      numero: 173,
+      saldoPendiente: 400000,
       total: 400000,
-      discountAmount: 40000,
-      discountDeadline: new Date('2026-08-31'),
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 400000 }],
+      montoDescuento: 40000,
+      fechaLimiteDescuento: new Date('2026-08-31'),
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 400000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 360000,
-      status: 'activo',
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 360000,
+      estado: 'activo',
     };
     const copropiedades = {
       findById: jest.fn(() => ({
@@ -1652,9 +1651,9 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
     const facturaId = new Types.ObjectId();
     return facturaDoc({
       _id: facturaId,
-      outstandingBalance: 849000,
+      saldoPendiente: 849000,
       total: 849000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 849000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 849000 }],
     });
   };
 
@@ -1662,21 +1661,21 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedAmount: 848000,
-    receivedDate: new Date('2026-09-06'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    appliedAmount: 0,
-    unappliedAmount: 848000,
-    status: 'activo',
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    montoRecibido: 848000,
+    fechaRecibo: new Date('2026-09-06'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    montoAplicado: 0,
+    montoSinAplicar: 848000,
+    estado: 'activo',
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
   });
 
   const dtoFaltante = (
@@ -1739,7 +1738,7 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
 
     // "Aplicado" es lo CREDITADO a cartera (849000 — la factura completa),
     // no solo el efectivo real (848000) — mismo criterio que `anular()` ya
-    // usa (`montoAplicadoCarteraTotal`): `appliedAmount` solo es efectivo,
+    // usa (`montoAplicadoCarteraTotal`): `montoAplicado` solo es efectivo,
     // hay que sumarle el descuento para saber cuánto se canceló de verdad.
     expect(resultado.montoAplicado).toBe(849000);
     expect(resultado.montoSinAplicar).toBe(0);
@@ -1750,8 +1749,8 @@ describe('RecibosService.crear — faltante confirmado a cuenta de Descuentos', 
     const [[filasAplicacion]] = (aplicaciones.create as jest.Mock).mock
       .calls as Array<[Record<string, unknown>[]]>;
     expect(filasAplicacion[0]).toMatchObject({
-      amountApplied: 849000,
-      discountApplied: 1000,
+      montoAplicado: 849000,
+      montoDescuento: 1000,
     });
 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
@@ -1788,22 +1787,22 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedAmount: 500000,
-    receivedDate: new Date('2026-09-06'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    appliedAmount: 0,
-    unappliedAmount: 500000,
-    otherIncomeAmount: 0,
-    status: 'activo',
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    montoRecibido: 500000,
+    fechaRecibo: new Date('2026-09-06'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    montoAplicado: 0,
+    montoSinAplicar: 500000,
+    montoOtrosIngresos: 0,
+    estado: 'activo',
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
   });
 
   const dtoSobrante = (
@@ -1872,7 +1871,7 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
     // El propio SaldoDocumentoOrigen del recibo (mock de estado compartido)
     // quedó en 0 — no solo el valor de retorno. Nada disponible para una
     // Nota de Anticipo futura, porque ya se contabilizó como ingreso hoy.
-    expect(recibo.unappliedAmount).toBe(0);
+    expect(recibo.montoSinAplicar).toBe(0);
 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
@@ -1909,7 +1908,7 @@ describe('RecibosService.crear — sobrante confirmado (Anticipos u Otros Ingres
     expect(resultado.montoOtrosIngresos).toBe(0);
     // El anticipo sigue disponible — a diferencia de Otros Ingresos, este
     // sí se puede aplicar después vía Nota de Anticipo.
-    expect(recibo.unappliedAmount).toBe(300000);
+    expect(recibo.montoSinAplicar).toBe(300000);
 
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
@@ -1931,21 +1930,21 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedAmount: 150000,
-    receivedDate: new Date('2026-08-27'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    appliedAmount: 0,
-    unappliedAmount: 150000,
-    status: 'activo',
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    montoRecibido: 150000,
+    fechaRecibo: new Date('2026-08-27'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    montoAplicado: 0,
+    montoSinAplicar: 150000,
+    estado: 'activo',
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
   });
 
   it('aplica TODO el abono a un solo concepto elegido por el usuario, dejando el otro intacto', async () => {
@@ -1955,18 +1954,18 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     const factura = facturaDoc({
       _id: facturaId,
       total: 500000,
-      outstandingBalance: 500000,
-      lines: [
+      saldoPendiente: 500000,
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          totalAmount: 300000,
-          accountingReceivableAccount: '130501',
+          valorTotal: 300000,
+          cuentaCartera: '130501',
         },
         {
           conceptoId: conceptoIntereses,
-          totalAmount: 200000,
+          valorTotal: 200000,
           conceptKind: 'intereses',
-          accountingReceivableAccount: '130599',
+          cuentaCartera: '130599',
         },
       ],
     });
@@ -1999,11 +1998,11 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     expect(filaAplicacion[0].detalleConceptos).toEqual([
       {
         conceptoId: conceptoIntereses,
-        conceptName: expect.any(String) as string,
+        nombreConcepto: expect.any(String) as string,
         monto: 150000,
       },
     ]);
-    expect(filaAplicacion[0].discountApplied).toBe(0);
+    expect(filaAplicacion[0].montoDescuento).toBe(0);
 
     // El asiento acredita la cuenta de Intereses, nunca la de Administración.
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
@@ -2025,8 +2024,8 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     // El saldo pendiente de esta línea queda registrado para la próxima vez
     // (200000 - 150000 = 50000) — Administración queda sin tocar.
     expect(facturas.updateOne).toHaveBeenCalledWith(
-      expect.objectContaining({ 'lines.conceptoId': conceptoIntereses }),
-      { $set: { 'lines.$.remainingAmount': 50000 } },
+      expect.objectContaining({ 'lineas.conceptoId': conceptoIntereses }),
+      { $set: { 'lineas.$.saldoPendiente': 50000 } },
       expect.anything(),
     );
   });
@@ -2037,8 +2036,8 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     const factura = facturaDoc({
       _id: facturaId,
       total: 500000,
-      outstandingBalance: 500000,
-      lines: [{ conceptoId: conceptoIntereses, totalAmount: 200000 }],
+      saldoPendiente: 500000,
+      lineas: [{ conceptoId: conceptoIntereses, valorTotal: 200000 }],
     });
     const { service } = construirServicio({
       reciboCreado: reciboBase(),
@@ -2069,8 +2068,8 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     const factura = facturaDoc({
       _id: facturaId,
       total: 500000,
-      outstandingBalance: 500000,
-      lines: [{ conceptoId: conceptoIntereses, totalAmount: 100000 }],
+      saldoPendiente: 500000,
+      lineas: [{ conceptoId: conceptoIntereses, valorTotal: 100000 }],
     });
     const { service } = construirServicio({
       reciboCreado: reciboBase(),
@@ -2095,8 +2094,8 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('valida el reparto manual contra el saldo pendiente REAL (SaldoTotalDocumento), no contra el outstandingBalance congelado de la Factura', async () => {
-    // Regresión: `Factura.outstandingBalance` queda congelado en su total
+  it('valida el reparto manual contra el saldo pendiente REAL (SaldoTotalDocumento), no contra el saldoPendiente congelado de la Factura', async () => {
+    // Regresión: `Factura.saldoPendiente` queda congelado en su total
     // original desde que `SaldoTotalDocumento` es la fuente viva (ver su
     // propio docblock) — nunca vuelve a decrementarse. Esta factura ya tuvo
     // una cascada previa que agotó Intereses por completo (200000) y dejó
@@ -2111,18 +2110,18 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
     const facturaCongelada = facturaDoc({
       _id: facturaId,
       total: 500000,
-      outstandingBalance: 500000,
-      lines: [
+      saldoPendiente: 500000,
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          totalAmount: 300000,
-          accountingReceivableAccount: '130501',
+          valorTotal: 300000,
+          cuentaCartera: '130501',
         },
         {
           conceptoId: conceptoIntereses,
-          totalAmount: 200000,
+          valorTotal: 200000,
           conceptKind: 'intereses',
-          accountingReceivableAccount: '130599',
+          cuentaCartera: '130599',
         },
       ],
     });
@@ -2132,7 +2131,7 @@ describe('RecibosService.crear — con aplicaciones manuales, reparto por concep
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 300000 },
+      { _id: facturaId, saldoPendiente: 300000 },
     ]);
     const recibo = reciboBase();
     const saldoDocumentoOrigen = modeloSaldoDocumentoOrigen([recibo]);
@@ -2203,36 +2202,36 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const vieja = facturaDoc({
       _id: new Types.ObjectId(),
       dueDate: new Date('2026-06-30'),
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const nueva = facturaDoc({
       _id: new Types.ObjectId(),
       dueDate: new Date('2026-07-31'),
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      reference: null,
-      notes: null,
-      unappliedAmount: 300000,
-      appliedAmount: 0,
-      receivedAmount: 300000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      referencia: null,
+      observaciones: null,
+      montoSinAplicar: 300000,
+      montoAplicado: 0,
+      montoRecibido: 300000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
 
     const facturas = {
@@ -2300,35 +2299,35 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const facturaVieja = facturaDoc({
       _id: new Types.ObjectId(),
       dueDate: new Date('2026-07-31'),
-      outstandingBalance: 100000,
+      saldoPendiente: 100000,
       total: 100000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
     });
     const notaMasVieja = notaDebitoDoc({
       _id: new Types.ObjectId(),
-      issueDate: new Date('2026-06-01'),
-      outstandingBalance: 100000,
+      fechaEmision: new Date('2026-06-01'),
+      saldoPendiente: 100000,
       total: 100000,
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      reference: null,
-      notes: null,
-      unappliedAmount: 100000,
-      appliedAmount: 0,
-      receivedAmount: 100000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      referencia: null,
+      observaciones: null,
+      montoSinAplicar: 100000,
+      montoAplicado: 0,
+      montoRecibido: 100000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
 
     const facturas = {
@@ -2398,7 +2397,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       aplicacionAutomatica: true,
     });
 
-    // La Nota Débito (issueDate 2026-06-01) es más vieja que la Factura
+    // La Nota Débito (fechaEmision 2026-06-01) es más vieja que la Factura
     // (dueDate 2026-07-31) — tiene que pagarse primero, agotando el monto,
     // sin tocar la Factura.
     const idsLlamados = saldoTotalDocumento.findOneAndUpdate.mock.calls.map(
@@ -2409,9 +2408,9 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
       [Record<string, unknown>[]]
     >;
     expect(fila[0]).toMatchObject({
-      documentType: 'ND',
-      documentId: notaMasVieja._id,
-      amountApplied: 100000,
+      tipoDocumento: 'ND',
+      documentoId: notaMasVieja._id,
+      montoAplicado: 100000,
     });
   });
 
@@ -2423,29 +2422,29 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     const valida = facturaDoc({
       _id: new Types.ObjectId(),
       dueDate: new Date('2026-07-01'),
-      outstandingBalance: 100000,
+      saldoPendiente: 100000,
       total: 100000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      reference: null,
-      notes: null,
-      unappliedAmount: 100000,
-      appliedAmount: 0,
-      receivedAmount: 100000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      referencia: null,
+      observaciones: null,
+      montoSinAplicar: 100000,
+      montoAplicado: 0,
+      montoRecibido: 100000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
 
     const facturas = {
@@ -2508,34 +2507,34 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
     // Cualquier otra cosa viene de `ajustarSaldosCartera` o de
     // `aplicaciones.create`, que corren DESPUÉS de que el saldo de la factura
     // ya se decrementó: tragárselo dejaría commitear la transacción con la
-    // factura descontada, sin fila de auditoría y sin appliedAmount — plata
+    // factura descontada, sin fila de auditoría y sin montoAplicado — plata
     // desaparecida de la factura sin rastro.
     const factura = facturaDoc({
       _id: new Types.ObjectId(),
       dueDate: new Date('2026-06-30'),
-      outstandingBalance: 100000,
+      saldoPendiente: 100000,
       total: 100000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 100000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 100000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      reference: null,
-      notes: null,
-      unappliedAmount: 100000,
-      appliedAmount: 0,
-      receivedAmount: 100000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      referencia: null,
+      observaciones: null,
+      montoSinAplicar: 100000,
+      montoAplicado: 0,
+      montoRecibido: 100000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
 
     const facturas = {
@@ -2587,31 +2586,31 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
   it('redacta "Abona a factura N" cuando la Automática solo alcanza para un pago parcial', async () => {
     const factura = facturaDoc({
       _id: new Types.ObjectId(),
-      number: 340,
+      numero: 340,
       dueDate: new Date('2026-06-30'),
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
     const reciboCreado = {
       _id: new Types.ObjectId(),
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      destinationAccount: '111005',
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      reference: null,
-      notes: null,
-      unappliedAmount: 100000,
-      appliedAmount: 0,
-      receivedAmount: 100000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      cuentaDestino: '111005',
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      referencia: null,
+      observaciones: null,
+      montoSinAplicar: 100000,
+      montoAplicado: 0,
+      montoRecibido: 100000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
 
     const facturas = {
@@ -2652,7 +2651,7 @@ describe('RecibosService.crear — con aplicacionAutomatica (FIFO)', () => {
 
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: reciboCreado._id, copropiedadId: COP },
-      { $set: { notes: 'Abona a factura 340' } },
+      { $set: { observaciones: 'Abona a factura 340' } },
       expect.anything(),
     );
   });
@@ -2664,21 +2663,21 @@ describe('RecibosService.anular', () => {
     copropiedadId: COP,
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    prefix: 'RC',
-    number: 1,
-    fullNumber: 'RC-1',
-    receivedDate: new Date('2026-08-20'),
-    paymentMethod: 'transferencia',
-    destinationAccount: '111005',
-    reference: null,
-    notes: null,
-    status: 'activo',
-    unappliedAmount: 100000,
-    appliedAmount: 200000,
-    receivedAmount: 300000,
-    voidedReason: null,
-    voidedDetail: null,
-    voidedAt: null,
+    prefijo: 'RC',
+    numero: 1,
+    numeroCompleto: 'RC-1',
+    fechaRecibo: new Date('2026-08-20'),
+    medioPago: 'transferencia',
+    cuentaDestino: '111005',
+    referencia: null,
+    observaciones: null,
+    estado: 'activo',
+    montoSinAplicar: 100000,
+    montoAplicado: 200000,
+    montoRecibido: 300000,
+    motivoAnulacion: null,
+    detalleAnulacion: null,
+    fechaAnulacion: null,
     ...over,
   });
 
@@ -2689,14 +2688,14 @@ describe('RecibosService.anular', () => {
     findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
   });
 
-  it('revierte cada AplicacionRecibo activa y restaura el outstandingBalance de cada factura afectada', async () => {
+  it('revierte cada AplicacionRecibo activa y restaura el saldoPendiente de cada factura afectada', async () => {
     const facturaId = new Types.ObjectId();
     const recibo = reciboActivo();
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 200000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 200000,
+      estado: 'activa',
       detalleConceptos: [],
     };
 
@@ -2704,7 +2703,7 @@ describe('RecibosService.anular', () => {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      lines: [],
+      lineas: [],
     };
     const facturas = {
       findOne: jest.fn(() => ({
@@ -2712,7 +2711,7 @@ describe('RecibosService.anular', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 300000 },
+      { _id: facturaId, saldoPendiente: 300000 },
     ]);
     const recibos = {
       findOne: jest.fn(() => ({
@@ -2769,31 +2768,31 @@ describe('RecibosService.anular', () => {
     );
     expect(aplicaciones.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: aplicacionActiva._id, copropiedadId: COP },
-      { $set: { status: 'revertida', revertedAt: expect.any(Date) as Date } },
+      { $set: { estado: 'revertida', revertidoEn: expect.any(Date) as Date } },
       expect.objectContaining({ session: expect.anything() as unknown }),
     );
     expect(asientos.create).toHaveBeenCalledTimes(1);
     // El propio Recibo transiciona de estado — este endpoint responde con el
     // Recibo actualizado, y motivo/detalle/fecha de anulación son exactamente
     // los campos que un caller lee (recibos.mapper.ts). Un refactor que
-    // dejara de escribir voidedDetail, o que lo confundiera con voidedReason,
+    // dejara de escribir detalleAnulacion, o que lo confundiera con motivoAnulacion,
     // pasaría inadvertido sin esta aserción.
     expect(recibos.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: recibo._id.toString(), copropiedadId: COP },
       {
         $set: {
-          status: 'anulado',
-          voidedReason: 'duplicado',
-          voidedDetail:
+          estado: 'anulado',
+          motivoAnulacion: 'duplicado',
+          detalleAnulacion:
             'Se cargó el mismo comprobante dos veces por error del cajero',
-          voidedAt: expect.any(Date) as Date,
+          fechaAnulacion: expect.any(Date) as Date,
           // El actor de la anulación sale del caller autenticado y se escribe
           // en el MISMO $set que la transición de estado — nunca uno sin el
           // otro. Es la operación más auditada del módulo y era la única
           // mutación del módulo que no registraba quién la hizo.
-          voidedBy: CUENTA.toString(),
-          appliedAmount: 0,
-          unappliedAmount: 0,
+          anuladoPor: CUENTA.toString(),
+          montoAplicado: 0,
+          montoSinAplicar: 0,
         },
       },
       expect.objectContaining({ session: expect.anything() as unknown }),
@@ -2804,8 +2803,8 @@ describe('RecibosService.anular', () => {
       'Se cargó el mismo comprobante dos veces por error del cajero',
     );
     expect(resultado.fechaAnulacion).toEqual(expect.any(String) as string);
-    // Usa los totales CACHEADOS del recibo (appliedAmount/unappliedAmount/
-    // receivedAmount), no una suma recalculada del loop de arriba — no hace
+    // Usa los totales CACHEADOS del recibo (montoAplicado/montoSinAplicar/
+    // montoRecibido), no una suma recalculada del loop de arriba — no hace
     // falta "reproducir" la historia para saber cuánto revertir.
     const [[fila]] = (asientos.create as jest.Mock).mock.calls as Array<
       [Record<string, unknown>[]]
@@ -2848,9 +2847,9 @@ describe('RecibosService.anular', () => {
     const recibo = reciboActivo();
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: notaDebitoId,
-      amountApplied: 200000,
-      status: 'activa',
+      documentoId: notaDebitoId,
+      montoAplicado: 200000,
+      estado: 'activa',
       detalleConceptos: [{ conceptoId: conceptoNd, monto: 200000 }],
     };
     // `facturas.findOne` resuelve null — la aplicación revertida no apunta a
@@ -2863,13 +2862,13 @@ describe('RecibosService.anular', () => {
     const notaDebitoFrozen = {
       _id: notaDebitoId,
       inmuebleId: INMUEBLE,
-      number: 7,
+      numero: 7,
       conceptoId: conceptoNd,
       total: 200000,
     };
     const notasDebito = modeloNotasDebito([notaDebitoFrozen]);
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: notaDebitoId, outstandingBalance: 0 },
+      { _id: notaDebitoId, saldoPendiente: 0 },
     ]);
     const saldos = modeloSaldos();
     const carteraPorDocumento = modeloCarteraPorDocumento();
@@ -2929,23 +2928,23 @@ describe('RecibosService.anular', () => {
     const recibo = reciboActivo();
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 200000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 200000,
+      estado: 'activa',
       detalleConceptos: [{ conceptoId: conceptoMora, monto: 200000 }],
     };
     // Antes de esta anulación: 200.000 de los 500.000 de la factura estaban
-    // aplicados (outstandingBalance=300.000); el $inc de la reversión la
+    // aplicados (saldoPendiente=300.000); el $inc de la reversión la
     // deja de nuevo en 500.000 (factura.total), toda ella otra vez pendiente.
     const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoMora,
-          totalAmount: 500000,
-          accountingReceivableAccount: '130599',
+          valorTotal: 500000,
+          cuentaCartera: '130599',
         },
       ],
     };
@@ -2956,7 +2955,7 @@ describe('RecibosService.anular', () => {
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 300000 },
+      { _id: facturaId, saldoPendiente: 300000 },
     ]);
     const recibos = {
       findOne: jest.fn(() => ({
@@ -3016,21 +3015,21 @@ describe('RecibosService.anular', () => {
     const recibo = reciboActivo();
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 200000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 200000,
+      estado: 'activa',
       detalleConceptos: [{ conceptoId: conceptoMora, monto: 200000 }],
     };
     const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoMora,
           conceptKind: 'intereses',
-          totalAmount: 500000,
-          accountingReceivableAccount: '130599',
+          valorTotal: 500000,
+          cuentaCartera: '130599',
         },
       ],
     };
@@ -3041,7 +3040,7 @@ describe('RecibosService.anular', () => {
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 300000 },
+      { _id: facturaId, saldoPendiente: 300000 },
     ]);
     const recibos = {
       findOne: jest.fn(() => ({
@@ -3101,7 +3100,7 @@ describe('RecibosService.anular', () => {
       type: string;
       amount: number;
     }>;
-    // 300.000 es el receivedAmount total del recibo, pero solo 200.000
+    // 300.000 es el montoRecibido total del recibo, pero solo 200.000
     // fueron mora — el par memo revertido debe ser 200.000, no 300.000.
     // La creación posteó con los lados invertidos respecto a facturación
     // (831510 débito / 831505 crédito) — anular() vuelve a los lados
@@ -3127,26 +3126,26 @@ describe('RecibosService.anular', () => {
     // Intereses (bug que este cambio corrige).
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 150000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 150000,
+      estado: 'activa',
       detalleConceptos: [{ conceptoId: conceptoIntereses, monto: 150000 }],
     };
     const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          totalAmount: 300000,
-          accountingReceivableAccount: '130501',
+          valorTotal: 300000,
+          cuentaCartera: '130501',
         },
         {
           conceptoId: conceptoIntereses,
-          totalAmount: 200000,
+          valorTotal: 200000,
           conceptKind: 'intereses',
-          accountingReceivableAccount: '130599',
+          cuentaCartera: '130599',
         },
       ],
     };
@@ -3157,7 +3156,7 @@ describe('RecibosService.anular', () => {
       updateOne: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 350000 },
+      { _id: facturaId, saldoPendiente: 350000 },
     ]);
     const recibos = {
       findOne: jest.fn(() => ({
@@ -3210,8 +3209,8 @@ describe('RecibosService.anular', () => {
     // El saldo pendiente de Intereses vuelve a subir por lo revertido
     // (200000 - 150000 + 150000 = 200000, otra vez completo).
     expect(facturas.updateOne).toHaveBeenCalledWith(
-      expect.objectContaining({ 'lines.conceptoId': conceptoIntereses }),
-      { $set: { 'lines.$.remainingAmount': 200000 } },
+      expect.objectContaining({ 'lineas.conceptoId': conceptoIntereses }),
+      { $set: { 'lineas.$.saldoPendiente': 200000 } },
       expect.anything(),
     );
   });
@@ -3221,9 +3220,9 @@ describe('RecibosService.anular', () => {
     const recibo = reciboActivo();
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 100000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 100000,
+      estado: 'activa',
     };
 
     // La factura ya no existe bajo esas condiciones (voidedByCreditNoteId,
@@ -3278,7 +3277,7 @@ describe('RecibosService.anular', () => {
   });
 
   it('rechaza anular un recibo ya anulado', async () => {
-    const recibo = reciboActivo({ status: 'anulado' });
+    const recibo = reciboActivo({ estado: 'anulado' });
     const recibos = {
       findOne: jest.fn(() => ({
         session: () => ({ exec: () => Promise.resolve(recibo) }),
@@ -3316,31 +3315,31 @@ describe('RecibosService.anular', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('con otherIncomeAmount > 0, debita otrosIngresosCuentaCredito (no cuentaAnticipos) y NO infla la reversión de cartera', async () => {
+  it('con montoOtrosIngresos > 0, debita otrosIngresosCuentaCredito (no cuentaAnticipos) y NO infla la reversión de cartera', async () => {
     const facturaId = new Types.ObjectId();
     // 500000 recibidos: 200000 a cartera, 300000 confirmados como Otros
     // Ingresos — `SaldoDocumentoOrigen` fue decrementado por AMBOS
     // (`crear()`'s own `enviarAOtrosIngresos` branch), así que
-    // `unappliedAmount` (== saldoDisponible) llega en 0 aquí, igual que un
+    // `montoSinAplicar` (== saldoDisponible) llega en 0 aquí, igual que un
     // recibo normal totalmente aplicado — la única forma de distinguir los
-    // 300000 es `otherIncomeAmount`, no `SaldoDocumentoOrigen`.
+    // 300000 es `montoOtrosIngresos`, no `SaldoDocumentoOrigen`.
     const recibo = reciboActivo({
-      unappliedAmount: 0,
-      receivedAmount: 500000,
-      otherIncomeAmount: 300000,
+      montoSinAplicar: 0,
+      montoRecibido: 500000,
+      montoOtrosIngresos: 300000,
     });
     const aplicacionActiva = {
       _id: new Types.ObjectId(),
-      documentId: facturaId,
-      amountApplied: 200000,
-      status: 'activa',
+      documentoId: facturaId,
+      montoAplicado: 200000,
+      estado: 'activa',
       detalleConceptos: [],
     };
     const facturaFrozen = {
       _id: facturaId,
       inmuebleId: INMUEBLE,
       total: 500000,
-      lines: [],
+      lineas: [],
     };
     const facturas = {
       findOne: jest.fn(() => ({
@@ -3348,7 +3347,7 @@ describe('RecibosService.anular', () => {
       })),
     };
     const saldoTotalDocumento = modeloSaldoTotalDocumento([
-      { _id: facturaId, outstandingBalance: 300000 },
+      { _id: facturaId, saldoPendiente: 300000 },
     ]);
     const recibos = {
       findOne: jest.fn(() => ({
@@ -3408,7 +3407,7 @@ describe('RecibosService.anular', () => {
       description: string;
     }>;
     // El debito de cartera es SOLO los 200000 reales, no 500000 — el bug
-    // este test evita: `recibo.appliedAmount` (500000, desde
+    // este test evita: `recibo.montoAplicado` (500000, desde
     // SaldoDocumentoOrigen) incluye los Otros Ingresos, así que hay que
     // restarlos antes de reconstruir el lado de cartera.
     expect(
@@ -3424,7 +3423,7 @@ describe('RecibosService.anular', () => {
     expect(otrosIngresos?.description).toMatch(/otros ingresos/i);
     expect(entries.some((m) => m.account === '210505')).toBe(false);
     // El crédito de vuelta a la cuenta destino sigue siendo el
-    // receivedAmount completo (500000) — la partida sigue cuadrando.
+    // montoRecibido completo (500000) — la partida sigue cuadrando.
     expect(
       entries.find((m) => m.account === '111005' && m.type === 'credito')
         ?.amount,
@@ -3506,7 +3505,7 @@ describe('RecibosService.findAll', () => {
   it('aplica conAnticipoDisponible resolviendo candidatos desde SaldoDocumentoOrigen', async () => {
     const reciboConAnticipo = {
       _id: new Types.ObjectId(),
-      unappliedAmount: 50000,
+      montoSinAplicar: 50000,
     };
     const recibos = modeloListado([]);
     const service = construirParaListado(recibos, [reciboConAnticipo]);
@@ -3524,7 +3523,7 @@ describe('RecibosService.findAll', () => {
 
     await service.findAll({ estado: 'anulado' });
 
-    expect(recibos.filtros[0]).toMatchObject({ status: 'anulado' });
+    expect(recibos.filtros[0]).toMatchObject({ estado: 'anulado' });
   });
 
   it('ordena descendente por número de recibo, no por fecha', async () => {
@@ -3533,7 +3532,7 @@ describe('RecibosService.findAll', () => {
 
     await service.findAll({});
 
-    expect(recibos.ordenes[0]).toEqual({ number: -1, _id: -1 });
+    expect(recibos.ordenes[0]).toEqual({ numero: -1, _id: -1 });
   });
 
   it('"Aplicado" del listado también suma de vuelta el descuento, igual que findOne', async () => {
@@ -3542,19 +3541,19 @@ describe('RecibosService.findAll', () => {
       _id: reciboId,
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 848000,
-      receivedDate: new Date('2026-09-06'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 848000,
+      fechaRecibo: new Date('2026-09-06'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const recibos = modeloListado([reciboDoc]);
     const aplicaciones = {
@@ -3564,8 +3563,8 @@ describe('RecibosService.findAll', () => {
           Promise.resolve([
             {
               sourceId: reciboId,
-              discountApplied: 1000,
-              status: 'activa',
+              montoDescuento: 1000,
+              estado: 'activa',
             },
           ]),
       })),
@@ -3586,7 +3585,7 @@ describe('RecibosService.findAll', () => {
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
       modeloSaldoDocumentoOrigen([
-        { _id: reciboId, receivedAmount: 848000, unappliedAmount: 0 },
+        { _id: reciboId, montoRecibido: 848000, montoSinAplicar: 0 },
       ]) as never,
     );
 
@@ -3603,21 +3602,21 @@ describe('RecibosService.findOne', () => {
       _id: reciboId,
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 500000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 0,
-      unappliedAmount: 500000,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 500000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 0,
+      montoSinAplicar: 500000,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const recibos = {
       findOne: jest.fn(() => ({ exec: () => Promise.resolve(reciboDoc) })),
@@ -3659,33 +3658,33 @@ describe('RecibosService.findOne', () => {
       _id: reciboId,
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 200000,
-      receivedDate: new Date('2026-08-27'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 200000,
-      unappliedAmount: 0,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 200000,
+      fechaRecibo: new Date('2026-08-27'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 200000,
+      montoSinAplicar: 0,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const aplicacionDoc = {
       _id: new Types.ObjectId(),
       sourceType: 'RC',
       sourceId: reciboId,
-      documentType: 'FV',
-      documentId: facturaId,
-      amountApplied: 200000,
+      tipoDocumento: 'FV',
+      documentoId: facturaId,
+      montoAplicado: 200000,
       detalleConceptos: [
-        { conceptoId, conceptName: 'Administración', monto: 200000 },
+        { conceptoId, nombreConcepto: 'Administración', monto: 200000 },
       ],
-      status: 'activa',
+      estado: 'activa',
       appliedAt: new Date('2026-08-27'),
     };
     const recibos = {
@@ -3698,7 +3697,8 @@ describe('RecibosService.findOne', () => {
     };
     const facturas = {
       find: jest.fn(() => ({
-        exec: () => Promise.resolve([{ _id: facturaId, fullNumber: 'FV-1' }]),
+        exec: () =>
+          Promise.resolve([{ _id: facturaId, numeroCompleto: 'FV-1' }]),
       })),
     };
     const service = new RecibosService(
@@ -3737,8 +3737,8 @@ describe('RecibosService.findOne', () => {
   it('"Aplicado" suma de vuelta el descuento — SaldoDocumentoOrigen por sí solo solo ve el efectivo', async () => {
     // Regresión: una factura de 849000 cancelada con 848000 de efectivo +
     // 1000 de descuento (por pronto pago o por faltante confirmado, da
-    // igual) deja `SaldoDocumentoOrigen.appliedAmount` en 848000 (todo lo
-    // que decrementó fue caja real) — sin sumar `discountApplied`, "Aplicado"
+    // igual) deja `SaldoDocumentoOrigen.montoAplicado` en 848000 (todo lo
+    // que decrementó fue caja real) — sin sumar `montoDescuento`, "Aplicado"
     // mostraría 848000 en vez de los 849000 que la factura realmente vio.
     const reciboId = new Types.ObjectId();
     const facturaId = new Types.ObjectId();
@@ -3746,32 +3746,32 @@ describe('RecibosService.findOne', () => {
       _id: reciboId,
       inmuebleId: INMUEBLE,
       terceroId: TERCERO,
-      prefix: 'RC',
-      number: 1,
-      fullNumber: 'RC-1',
-      receivedAmount: 848000,
-      receivedDate: new Date('2026-09-06'),
-      paymentMethod: 'transferencia',
-      destinationAccount: '111005',
-      reference: null,
-      notes: null,
-      appliedAmount: 848000,
-      unappliedAmount: 0,
-      status: 'activo',
-      voidedReason: null,
-      voidedDetail: null,
-      voidedAt: null,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 848000,
+      fechaRecibo: new Date('2026-09-06'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      montoAplicado: 848000,
+      montoSinAplicar: 0,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
     };
     const aplicacionDoc = {
       _id: new Types.ObjectId(),
       sourceType: 'RC',
       sourceId: reciboId,
-      documentType: 'FV',
-      documentId: facturaId,
-      amountApplied: 849000,
-      discountApplied: 1000,
+      tipoDocumento: 'FV',
+      documentoId: facturaId,
+      montoAplicado: 849000,
+      montoDescuento: 1000,
       detalleConceptos: [],
-      status: 'activa',
+      estado: 'activa',
       appliedAt: new Date('2026-09-06'),
     };
     const recibos = {
@@ -3784,7 +3784,8 @@ describe('RecibosService.findOne', () => {
     };
     const facturas = {
       find: jest.fn(() => ({
-        exec: () => Promise.resolve([{ _id: facturaId, fullNumber: 'FV-4' }]),
+        exec: () =>
+          Promise.resolve([{ _id: facturaId, numeroCompleto: 'FV-4' }]),
       })),
     };
     const service = new RecibosService(
@@ -3849,7 +3850,7 @@ describe('RecibosService — ciclo de vida completo', () => {
   /**
    * Modelos con ESTADO COMPARTIDO, no stubs de una sola respuesta: `crear` →
    * `aplicar` → `anular` tienen que ver el mismo recibo evolucionar
-   * (appliedAmount/unappliedAmount se mueven con $inc, y `anular` lee esos
+   * (montoAplicado/montoSinAplicar se mueven con $inc, y `anular` lee esos
    * totales cacheados), igual que lo verían contra un Mongo real. Los stubs
    * que usa el resto de este archivo no alcanzan para eso.
    */
@@ -3906,7 +3907,7 @@ describe('RecibosService — ciclo de vida completo', () => {
 
     // La guardia atómica vive ahora en `SaldoTotalDocumento`, no en
     // `Factura` — mismo mapa `porId` (mismas referencias) que
-    // `facturasConEstado` para que mutar `outstandingBalance` aquí sea
+    // `facturasConEstado` para que mutar `saldoPendiente` aquí sea
     // visible en `facturaA` directamente, igual que antes.
     const saldoTotalDocumentoConEstado = {
       findOneAndUpdate: jest.fn(
@@ -3920,13 +3921,13 @@ describe('RecibosService — ciclo de vida completo', () => {
             const delta = update.$inc.saldoPendiente;
             // Réplica del piso en cero que la guardia $expr impone; una
             // restitución (delta > 0) nunca lo necesita.
-            if (delta < 0 && (doc.outstandingBalance as number) < -delta) {
+            if (delta < 0 && (doc.saldoPendiente as number) < -delta) {
               return Promise.resolve(null);
             }
-            doc.outstandingBalance = (doc.outstandingBalance as number) + delta;
+            doc.saldoPendiente = (doc.saldoPendiente as number) + delta;
             return Promise.resolve({
               documentoId: doc._id,
-              saldoPendiente: doc.outstandingBalance,
+              saldoPendiente: doc.saldoPendiente,
             });
           },
         }),
@@ -3939,7 +3940,7 @@ describe('RecibosService — ciclo de vida completo', () => {
               doc
                 ? {
                     documentoId: doc._id,
-                    saldoPendiente: doc.outstandingBalance,
+                    saldoPendiente: doc.saldoPendiente,
                   }
                 : null,
             );
@@ -3958,7 +3959,7 @@ describe('RecibosService — ciclo de vida completo', () => {
         session: () => ({
           exec: () =>
             Promise.resolve(
-              aplicacionesStore.filter((a) => a.status === 'activa'),
+              aplicacionesStore.filter((a) => a.estado === 'activa'),
             ),
         }),
       })),
@@ -4101,16 +4102,16 @@ describe('RecibosService — ciclo de vida completo', () => {
   it('crear (parcial) → anular deja cada cuenta contable en cero', async () => {
     // LA INVARIANTE CENTRAL DEL DISEÑO: un recibo anulado no puede dejar
     // rastro contable neto en NINGUNA de las tres cuentas del esquema
-    // (destinationAccount / cartera / anticipos). Los dos asientos se arman
+    // (cuentaDestino / cartera / anticipos). Los dos asientos se arman
     // en lugares distintos — `construirAsientoCruce` al crear y
     // `construirContraAsientoCruce` al anular usando los totales cacheados
     // del propio recibo — así que sólo un test que recorra el ciclo entero
     // los ata entre sí.
     const facturaA = facturaDoc({
       _id: new Types.ObjectId(),
-      outstandingBalance: 200000,
+      saldoPendiente: 200000,
       total: 200000,
-      lines: [{ conceptoId: new Types.ObjectId(), totalAmount: 200000 }],
+      lineas: [{ conceptoId: new Types.ObjectId(), valorTotal: 200000 }],
     });
 
     const { service, netoPorCuenta, asientosStore, leerRecibo } =
@@ -4131,7 +4132,7 @@ describe('RecibosService — ciclo de vida completo', () => {
     });
     expect(creado.montoAplicado).toBe(200000);
     expect(creado.montoSinAplicar).toBe(300000);
-    expect(facturaA.outstandingBalance).toBe(0);
+    expect(facturaA.saldoPendiente).toBe(0);
 
     // 2. Anular: cascada sobre la aplicación y contra-asiento consolidado.
     const anulado = await service.anular(
@@ -4145,7 +4146,7 @@ describe('RecibosService — ciclo de vida completo', () => {
     );
     expect(anulado.estado).toBe('anulado');
     // La cascada restituyó el saldo de la factura.
-    expect(facturaA.outstandingBalance).toBe(200000);
+    expect(facturaA.saldoPendiente).toBe(200000);
 
     // LA ASERCIÓN: dos asientos posteados, y neto CERO en cada cuenta.
     expect(asientosStore).toHaveLength(2);
@@ -4321,7 +4322,7 @@ describe('RecibosService.leerDatosBatchAplicacionLote', () => {
   const facturaDoc = (over: Record<string, unknown> = {}) => ({
     _id: FACTURA_ABIERTA_ID,
     inmuebleId: INMUEBLE_ID,
-    issueDate: new Date('2026-05-01'),
+    fechaEmision: new Date('2026-05-01'),
     dueDate: new Date('2026-05-10'),
     ...over,
   });
@@ -4418,7 +4419,7 @@ describe('RecibosService.escribirEscriturasTandaAplicacionLote', () => {
     reciboId: new Types.ObjectId(),
     recibo: { copropiedadId: COP },
     saldoDocumentoOrigen: {},
-    aplicacionesCartera: [{ documentId: documentoId }],
+    aplicacionesCartera: [{ documentoId: documentoId }],
     asientoContable: {},
     saldoTotalDocumentoDeltas: [{ documentoId, delta }],
     saldoCarteraDeltas: [],

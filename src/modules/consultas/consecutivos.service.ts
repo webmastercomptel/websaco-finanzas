@@ -248,8 +248,8 @@ export class ConsecutivosService {
     const recibos = await this.recibos
       .find({
         copropiedadId,
-        prefix,
-        receivedDate: { $gte: desde, $lte: hasta },
+        prefijo: prefix,
+        fechaRecibo: { $gte: desde, $lte: hasta },
       })
       .exec();
     if (recibos.length === 0) return [];
@@ -260,7 +260,7 @@ export class ConsecutivosService {
         copropiedadId,
         sourceType: 'RC',
         sourceId: { $in: reciboIds },
-        status: 'activa',
+        estado: 'activa',
       })
       .exec();
 
@@ -277,11 +277,11 @@ export class ConsecutivosService {
     return recibos.map((r) => ({
       documentoId: r._id.toString(),
       tipoDocumento: codigo,
-      numero: r.number,
-      numeroCompleto: r.fullNumber,
+      numero: r.numero,
+      numeroCompleto: r.numeroCompleto,
       inmuebleId: r.inmuebleId,
-      fecha: r.receivedDate.toISOString(),
-      valorTotal: r.receivedAmount,
+      fecha: r.fechaRecibo.toISOString(),
+      valorTotal: r.montoRecibido,
       cargosPorConcepto: cargosPorRecibo.get(r._id.toString()) ?? {},
     }));
   }
@@ -293,11 +293,11 @@ export class ConsecutivosService {
     desde: Date,
     hasta: Date,
   ): Promise<FilaInterna[]> {
-    // `issueDate` is nullable on documents that predate that field — fetch
+    // `fecha` is nullable on documents that predate that field — fetch
     // by prefix/status alone and filter by the resolved date in JS, same
     // fallback `fechaNotaCredito` exists for.
     const notas = await this.notasCredito
-      .find({ copropiedadId, prefix, status: 'activo' })
+      .find({ copropiedadId, prefijo: prefix, estado: 'activo' })
       .exec();
 
     return notas
@@ -305,21 +305,21 @@ export class ConsecutivosService {
       .filter(({ fecha }) => fecha >= desde && fecha <= hasta)
       .map(({ nota: n, fecha }) => {
         const cargosPorConcepto: Record<string, number> = {};
-        for (const linea of n.distribution) {
+        for (const linea of n.distribucion) {
           sumarCargo(
             cargosPorConcepto,
             linea.conceptoId.toString(),
-            linea.amount,
+            linea.monto,
           );
         }
         return {
           documentoId: n._id.toString(),
           tipoDocumento: codigo,
-          numero: n.number,
-          numeroCompleto: n.fullNumber,
+          numero: n.numero,
+          numeroCompleto: n.numeroCompleto,
           inmuebleId: n.inmuebleId,
           fecha: fecha.toISOString(),
-          valorTotal: n.totalAmount,
+          valorTotal: n.montoTotal,
           cargosPorConcepto,
         };
       });
@@ -335,19 +335,19 @@ export class ConsecutivosService {
     const notas = await this.notasDebito
       .find({
         copropiedadId,
-        prefix,
-        status: 'emitida',
-        issueDate: { $gte: desde, $lte: hasta },
+        prefijo: prefix,
+        estado: 'emitida',
+        fechaEmision: { $gte: desde, $lte: hasta },
       })
       .exec();
 
     return notas.map((n) => ({
       documentoId: n._id.toString(),
       tipoDocumento: codigo,
-      numero: n.number,
-      numeroCompleto: n.fullNumber,
+      numero: n.numero,
+      numeroCompleto: n.numeroCompleto,
       inmuebleId: n.inmuebleId,
-      fecha: n.issueDate.toISOString(),
+      fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
       cargosPorConcepto: { [n.conceptoId.toString()]: n.total },
     }));
@@ -361,7 +361,7 @@ export class ConsecutivosService {
     hasta: Date,
   ): Promise<FilaInterna[]> {
     const notas = await this.notasContables
-      .find({ copropiedadId, prefix, status: 'activo' })
+      .find({ copropiedadId, prefijo: prefix, estado: 'activo' })
       .exec();
 
     return notas
@@ -370,8 +370,8 @@ export class ConsecutivosService {
       .map(({ nota: n, fecha }) => ({
         documentoId: n._id.toString(),
         tipoDocumento: codigo,
-        numero: n.number,
-        numeroCompleto: n.fullNumber,
+        numero: n.numero,
+        numeroCompleto: n.numeroCompleto,
         inmuebleId: n.inmuebleId,
         fecha: fecha.toISOString(),
         valorTotal: n.monto,
@@ -392,9 +392,9 @@ export class ConsecutivosService {
     const notas = await this.notasAnticipo
       .find({
         copropiedadId,
-        prefix,
-        status: 'activo',
-        issueDate: { $gte: desde, $lte: hasta },
+        prefijo: prefix,
+        estado: 'activo',
+        fechaEmision: { $gte: desde, $lte: hasta },
       })
       .exec();
     if (notas.length === 0) return [];
@@ -405,7 +405,7 @@ export class ConsecutivosService {
         copropiedadId,
         sourceType: 'NA',
         sourceId: { $in: notaIds },
-        status: 'activa',
+        estado: 'activa',
       })
       .exec();
 
@@ -422,11 +422,11 @@ export class ConsecutivosService {
     return notas.map((n) => ({
       documentoId: n._id.toString(),
       tipoDocumento: codigo,
-      numero: n.number,
-      numeroCompleto: n.fullNumber,
+      numero: n.numero,
+      numeroCompleto: n.numeroCompleto,
       inmuebleId: n.inmuebleId,
-      fecha: n.issueDate.toISOString(),
-      valorTotal: n.appliedAmount,
+      fecha: n.fechaEmision.toISOString(),
+      valorTotal: n.montoAplicado,
       cargosPorConcepto: cargosPorNota.get(n._id.toString()) ?? {},
     }));
   }
@@ -441,28 +441,28 @@ export class ConsecutivosService {
     const facturas = await this.facturas
       .find({
         copropiedadId,
-        prefix,
-        status: 'emitida',
-        issueDate: { $gte: desde, $lte: hasta },
+        prefijo: prefix,
+        estado: 'emitida',
+        fechaEmision: { $gte: desde, $lte: hasta },
       })
       .exec();
 
     return facturas.map((f) => {
       const cargosPorConcepto: Record<string, number> = {};
-      for (const linea of f.lines) {
+      for (const linea of f.lineas) {
         sumarCargo(
           cargosPorConcepto,
           linea.conceptoId.toString(),
-          linea.totalAmount,
+          linea.valorTotal,
         );
       }
       return {
         documentoId: f._id.toString(),
         tipoDocumento: codigo,
-        numero: f.number,
-        numeroCompleto: f.fullNumber,
+        numero: f.numero,
+        numeroCompleto: f.numeroCompleto,
         inmuebleId: f.inmuebleId,
-        fecha: f.issueDate.toISOString(),
+        fecha: f.fechaEmision.toISOString(),
         valorTotal: f.total,
         cargosPorConcepto,
       };

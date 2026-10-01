@@ -25,20 +25,20 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   inmuebleId: INMUEBLE,
   terceroId: null,
   conceptoId: CONCEPTO,
-  description: 'Cargo de prueba',
-  prefix: 'ND',
-  number: 1,
-  fullNumber: 'ND-1',
-  issueDate: new Date('2026-09-01'),
-  dueDate: new Date('2026-09-30'),
+  descripcion: 'Cargo de prueba',
+  prefijo: 'ND',
+  numero: 1,
+  numeroCompleto: 'ND-1',
+  fechaEmision: new Date('2026-09-01'),
+  fechaVencimiento: new Date('2026-09-30'),
   total: 50000,
-  outstandingBalance: 50000,
-  status: 'emitida',
-  voidedReason: null,
-  voidedDetail: null,
-  voidedAt: null,
-  voidedBy: null,
-  generatedBy: CUENTA,
+  saldoPendiente: 50000,
+  estado: 'emitida',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
+  anuladoPor: null,
+  generadoPor: CUENTA,
   ...over,
 });
 
@@ -110,7 +110,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
       find: jest.fn(() => ({
         exec: jest.fn(() =>
           Promise.resolve([
-            { documentoId: nota._id, saldoPendiente: nota.outstandingBalance },
+            { documentoId: nota._id, saldoPendiente: nota.saldoPendiente },
           ]),
         ),
       })),
@@ -121,7 +121,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
       findOne: jest.fn(() => {
         const resultado = {
           documentoId: nota._id,
-          saldoPendiente: nota.outstandingBalance,
+          saldoPendiente: nota.saldoPendiente,
         };
         const cadena = {
           session: () => cadena,
@@ -345,11 +345,11 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string; type: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
       ];
-      const debito = documentos[0].entries.find((e) => e.type === 'debito');
-      expect(debito?.account).toBe('130510');
-      const cuentas = documentos[0].entries.map((e) => e.account);
+      const debito = documentos[0].movimientos.find((e) => e.tipo === 'debito');
+      expect(debito?.cuenta).toBe('130510');
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
       expect(cuentas).not.toContain('1305');
     });
 
@@ -371,16 +371,16 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string; type: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
       ];
-      const debito = documentos[0].entries.find((e) => e.type === 'debito');
-      expect(debito?.account).toBe('1305');
+      const debito = documentos[0].movimientos.find((e) => e.tipo === 'debito');
+      expect(debito?.cuenta).toBe('1305');
     });
 
-    it('postea el asiento con la fecha declarada (issueDate/fechaCargo), no el instante real del servidor', async () => {
+    it('postea el asiento con la fecha declarada (fechaEmision/fechaCargo), no el instante real del servidor', async () => {
       const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
-      // La nota mockeada trae un issueDate bien distinto de "hoy" — si el
-      // asiento se postea con `new Date()` en vez de `nota.issueDate`, esta
+      // La nota mockeada trae un fechaEmision bien distinto de "hoy" — si el
+      // asiento se postea con `new Date()` en vez de `nota.fechaEmision`, esta
       // fecha nunca aparecería en la llamada.
       const svc = servicio({ asientos });
 
@@ -395,9 +395,9 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ date: Date }[]],
+        [{ fecha: Date }[]],
       ];
-      expect(documentos[0].date).toEqual(new Date('2026-09-01'));
+      expect(documentos[0].fecha).toEqual(new Date('2026-09-01'));
     });
 
     it('agrega tercero/centroCosto/flujoCaja cuando cuentasContables está disponible', async () => {
@@ -458,9 +458,18 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string; flujoCaja?: string | null }> }[]],
+        [
+          {
+            movimientos: Array<{
+              cuenta: string;
+              flujoCaja?: string | null;
+            }>;
+          }[],
+        ],
       ];
-      const credito = documentos[0].entries.find((e) => e.account === '4105');
+      const credito = documentos[0].movimientos.find(
+        (e) => e.cuenta === '4105',
+      );
       expect(credito?.flujoCaja).toBe('FC-OPER');
     });
 
@@ -514,9 +523,9 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string }> }[]],
       ];
-      const cuentas = documentos[0].entries.map((e) => e.account);
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
       expect(cuentas).not.toContain('831505');
       expect(cuentas).not.toContain('831510');
     });
@@ -566,12 +575,12 @@ describe('NotasDebitoService', () => {
       });
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string; amount: number }> }[]],
+        [{ movimientos: Array<{ cuenta: string; monto: number }> }[]],
       ];
-      const memo = documentos[0].entries.find(
-        (e) => e.account === '831505' || e.account === '831510',
+      const memo = documentos[0].movimientos.find(
+        (e) => e.cuenta === '831505' || e.cuenta === '831510',
       );
-      expect(memo?.amount).toBe(50000);
+      expect(memo?.monto).toBe(50000);
     });
 
     it('rechaza concepto inexistente', async () => {
@@ -603,8 +612,8 @@ describe('NotasDebitoService', () => {
           exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
           obtenerUltimoConsolidado: jest.fn(() =>
             Promise.resolve({
-              periodStart: new Date('2026-08-01'),
-              periodEnd: new Date('2026-08-31'),
+              periodoDesde: new Date('2026-08-01'),
+              periodoHasta: new Date('2026-08-31'),
             }),
           ),
         },
@@ -629,8 +638,8 @@ describe('NotasDebitoService', () => {
           exigirSinLoteAbierto: jest.fn(() => Promise.resolve(undefined)),
           obtenerUltimoConsolidado: jest.fn(() =>
             Promise.resolve({
-              periodStart: new Date('2026-08-01'),
-              periodEnd: new Date('2026-08-31'),
+              periodoDesde: new Date('2026-08-01'),
+              periodoHasta: new Date('2026-08-31'),
             }),
           ),
         },
@@ -712,9 +721,9 @@ describe('NotasDebitoService', () => {
       );
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string }> }[]],
       ];
-      const cuentas = documentos[0].entries.map((e) => e.account);
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
       expect(cuentas).toContain('413501-CONCEPTO');
       expect(cuentas).not.toContain('413599-COPROPIEDAD');
     });
@@ -761,9 +770,9 @@ describe('NotasDebitoService', () => {
       );
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string }> }[]],
       ];
-      const cuentas = documentos[0].entries.map((e) => e.account);
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
       expect(cuentas).toContain('SIN-CUENTA-ASIGNADA');
       expect(cuentas).not.toContain('413599-COPROPIEDAD');
     });
@@ -813,9 +822,9 @@ describe('NotasDebitoService', () => {
       );
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string }> }[]],
+        [{ movimientos: Array<{ cuenta: string }> }[]],
       ];
-      const cuentas = documentos[0].entries.map((e) => e.account);
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
       expect(cuentas).not.toContain('831505');
       expect(cuentas).not.toContain('831510');
     });
@@ -865,12 +874,12 @@ describe('NotasDebitoService', () => {
       );
 
       const [[documentos]] = asientos.create.mock.calls as unknown as [
-        [{ entries: Array<{ account: string; amount: number }> }[]],
+        [{ movimientos: Array<{ cuenta: string; monto: number }> }[]],
       ];
-      const memo = documentos[0].entries.find(
-        (e) => e.account === '831505' || e.account === '831510',
+      const memo = documentos[0].movimientos.find(
+        (e) => e.cuenta === '831505' || e.cuenta === '831510',
       );
-      expect(memo?.amount).toBe(50000);
+      expect(memo?.monto).toBe(50000);
     });
 
     it('anula nota débito con aplicaciones activas, restaurando fuentes RC', async () => {
@@ -878,10 +887,10 @@ describe('NotasDebitoService', () => {
         _id: new Types.ObjectId(),
         sourceType: 'RC',
         sourceId: new Types.ObjectId(),
-        documentType: 'ND',
-        documentId: new Types.ObjectId(),
-        amountApplied: 20000,
-        status: 'activa',
+        tipoDocumento: 'ND',
+        documentoId: new Types.ObjectId(),
+        montoAplicado: 20000,
+        estado: 'activa',
       };
       const saldoDocumentoOrigenFindOneAndUpdate = jest.fn(() => ({
         exec: jest.fn(() => Promise.resolve({ saldoDisponible: 20000 })),
@@ -931,10 +940,10 @@ describe('NotasDebitoService', () => {
         _id: new Types.ObjectId(),
         sourceType: 'NC',
         sourceId: new Types.ObjectId(),
-        documentType: 'ND',
-        documentId: new Types.ObjectId(),
-        amountApplied: 30000,
-        status: 'activa',
+        tipoDocumento: 'ND',
+        documentoId: new Types.ObjectId(),
+        montoAplicado: 30000,
+        estado: 'activa',
       };
       const saldoDocumentoOrigenFindOneAndUpdate = jest.fn(() => ({
         exec: jest.fn(() => Promise.resolve({ saldoDisponible: 30000 })),
@@ -977,7 +986,7 @@ describe('NotasDebitoService', () => {
 
     it('anula nota débito con aplicación activa de una Nota de Anticipo, restaurando el Recibo de origen', async () => {
       // Una Nota de Anticipo no tiene saldo propio (ver su schema) — deshacer
-      // su aplicación reduce SU propio appliedAmount y devuelve el dinero al
+      // su aplicación reduce SU propio montoAplicado y devuelve el dinero al
       // Recibo del que salió, no a la Nota de Anticipo misma.
       const reciboOrigenId = new Types.ObjectId();
       const notaAnticipoId = new Types.ObjectId();
@@ -985,10 +994,10 @@ describe('NotasDebitoService', () => {
         _id: new Types.ObjectId(),
         sourceType: 'NA',
         sourceId: notaAnticipoId,
-        documentType: 'ND',
-        documentId: new Types.ObjectId(),
-        amountApplied: 40000,
-        status: 'activa',
+        tipoDocumento: 'ND',
+        documentoId: new Types.ObjectId(),
+        montoAplicado: 40000,
+        estado: 'activa',
       };
       const notasAnticipoFindOneAndUpdate = jest.fn(() => ({
         session: jest.fn().mockReturnThis(),
@@ -1031,7 +1040,7 @@ describe('NotasDebitoService', () => {
       expect(resultado.estado).toBe('anulada');
       expect(notasAnticipoFindOneAndUpdate).toHaveBeenCalledWith(
         expect.objectContaining({ _id: notaAnticipoId }),
-        expect.objectContaining({ $inc: { appliedAmount: -40000 } }),
+        expect.objectContaining({ $inc: { montoAplicado: -40000 } }),
         expect.anything(),
       );
       expect(saldoDocumentoOrigenFindOneAndUpdate).toHaveBeenCalledWith(
@@ -1046,10 +1055,10 @@ describe('NotasDebitoService', () => {
         _id: new Types.ObjectId(),
         sourceType: 'RC',
         sourceId: new Types.ObjectId(),
-        documentType: 'ND',
-        documentId: new Types.ObjectId(),
-        amountApplied: 10000,
-        status: 'revertida',
+        tipoDocumento: 'ND',
+        documentoId: new Types.ObjectId(),
+        montoAplicado: 10000,
+        estado: 'revertida',
       };
       const saldoDocumentoOrigen = {
         findOneAndUpdate: jest.fn(() => ({
@@ -1065,7 +1074,7 @@ describe('NotasDebitoService', () => {
             exec: jest.fn(() =>
               // Only return documents that match the status filter.
               Promise.resolve(
-                filtro.status === 'activa' ? [] : [aplicacionRevertida],
+                filtro.estado === 'activa' ? [] : [aplicacionRevertida],
               ),
             ),
           })),
@@ -1098,7 +1107,7 @@ describe('NotasDebitoService', () => {
           findOne: jest.fn(() => ({
             session: jest.fn().mockReturnThis(),
             exec: jest.fn(() =>
-              Promise.resolve(notaDebitoDoc({ status: 'anulada' })),
+              Promise.resolve(notaDebitoDoc({ estado: 'anulada' })),
             ),
           })),
           findOneAndUpdate: jest.fn(),
@@ -1120,7 +1129,7 @@ describe('NotasDebitoService', () => {
     });
 
     it('revierte SaldoCartera por el saldo PENDIENTE actual, no por el total original de la nota', async () => {
-      // Regresión: `nota.outstandingBalance` es un campo congelado desde
+      // Regresión: `nota.saldoPendiente` es un campo congelado desde
       // que `SaldoTotalDocumento` se volvió la fuente viva (ver su propio
       // docblock) — leerlo directo de `nota` siempre habría dado el total
       // original, sin importar cuánto de la nota ya se hubiera pagado antes
@@ -1168,9 +1177,15 @@ describe('NotasDebitoService', () => {
       expect(llamadasSaldos).toHaveLength(1);
       const [, pipeline] = llamadasSaldos[0] as [
         unknown,
-        [{ $set: { balance: { $max: [number, { $add: [string, number] }] } } }],
+        [
+          {
+            $set: {
+              saldoPendiente: { $max: [number, { $add: [string, number] }] };
+            };
+          },
+        ],
       ];
-      expect(pipeline[0].$set.balance.$max[1].$add[1]).toBe(-20000);
+      expect(pipeline[0].$set.saldoPendiente.$max[1].$add[1]).toBe(-20000);
     });
   });
 

@@ -155,23 +155,23 @@ export class CarteraPorInmuebleService {
         .find({
           copropiedadId,
           inmuebleId,
-          status: 'emitida',
-          issueDate: { $lte: limiteEmision },
+          estado: 'emitida',
+          fechaEmision: { $lte: limiteEmision },
         })
         .exec(),
       this.notasDebito
         .find({
           copropiedadId,
           inmuebleId,
-          status: 'emitida',
-          issueDate: { $lte: limiteEmision },
+          estado: 'emitida',
+          fechaEmision: { $lte: limiteEmision },
         })
         .exec(),
       this.saldosIniciales
         .find({
           copropiedadId,
           inmuebleId,
-          status: 'activo',
+          estado: 'activo',
           fecha: { $lte: limiteEmision },
         })
         .exec(),
@@ -184,13 +184,13 @@ export class CarteraPorInmuebleService {
     ];
     const aplicaciones = docIds.length
       ? await this.aplicaciones
-          .find({ copropiedadId, documentId: { $in: docIds } })
+          .find({ copropiedadId, documentoId: { $in: docIds } })
           .exec()
       : [];
 
     const appsByDoc = new Map<string, typeof aplicaciones>();
     for (const app of aplicaciones) {
-      const key = app.documentId.toString();
+      const key = app.documentoId.toString();
       const list = appsByDoc.get(key) ?? [];
       list.push(app);
       appsByDoc.set(key, list);
@@ -253,7 +253,7 @@ export class CarteraPorInmuebleService {
               f.total -
                 apps
                   .filter((a) => activeAsOf(a, fecha))
-                  .reduce((sum, a) => sum + a.amountApplied, 0),
+                  .reduce((sum, a) => sum + a.montoAplicado, 0),
             );
       if (saldo <= 0) continue;
 
@@ -278,9 +278,9 @@ export class CarteraPorInmuebleService {
         // `SaldoCartera`'s own maintenance uses.
         const factor = f.total > 0 ? saldo / f.total : 0;
         cargosDoc = {};
-        for (const line of f.lines) {
+        for (const line of f.lineas) {
           const key = line.conceptoId.toString();
-          const monto = line.totalAmount * factor;
+          const monto = line.valorTotal * factor;
           cargosDoc[key] = (cargosDoc[key] ?? 0) + monto;
           totalesDocumentos.set(key, (totalesDocumentos.get(key) ?? 0) + monto);
         }
@@ -289,9 +289,9 @@ export class CarteraPorInmuebleService {
       documentos.push({
         documentoId: f._id.toString(),
         tipo: 'FV',
-        numeroCompleto: f.fullNumber,
-        fecha: f.issueDate.toISOString(),
-        vence: f.dueDate.toISOString(),
+        numeroCompleto: f.numeroCompleto,
+        fecha: f.fechaEmision.toISOString(),
+        vence: f.fechaVencimiento.toISOString(),
         saldo,
         cargosPorConcepto: cargosDoc,
       });
@@ -308,7 +308,7 @@ export class CarteraPorInmuebleService {
               nd.total -
                 apps
                   .filter((a) => activeAsOf(a, fecha))
-                  .reduce((sum, a) => sum + a.amountApplied, 0),
+                  .reduce((sum, a) => sum + a.montoAplicado, 0),
             );
       if (saldo <= 0) continue;
 
@@ -336,8 +336,8 @@ export class CarteraPorInmuebleService {
       documentos.push({
         documentoId: nd._id.toString(),
         tipo: 'ND',
-        numeroCompleto: nd.fullNumber,
-        fecha: nd.issueDate.toISOString(),
+        numeroCompleto: nd.numeroCompleto,
+        fecha: nd.fechaEmision.toISOString(),
         vence: null,
         saldo,
         cargosPorConcepto: cargosDoc,
@@ -355,7 +355,7 @@ export class CarteraPorInmuebleService {
               si.monto -
                 apps
                   .filter((a) => activeAsOf(a, fecha))
-                  .reduce((sum, a) => sum + a.amountApplied, 0),
+                  .reduce((sum, a) => sum + a.montoAplicado, 0),
             );
       if (saldo <= 0) continue;
 
@@ -406,7 +406,7 @@ export class CarteraPorInmuebleService {
     ]);
     const saldosPorConcepto = new Map<string, number>();
     for (const s of saldos) {
-      saldosPorConcepto.set(s.conceptoId.toString(), s.balance);
+      saldosPorConcepto.set(s.conceptoId.toString(), s.saldoPendiente);
     }
 
     // Prefer SaldoCartera (reflects a Nota Contable reclassification) — but

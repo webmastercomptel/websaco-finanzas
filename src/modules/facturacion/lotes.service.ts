@@ -106,11 +106,11 @@ import {
 const TAMANO_TANDA_CONSOLIDACION = 20;
 const CONCURRENCIA_TANDAS_CONSOLIDACION = 4;
 
-/** One row of `LoteFacturacionDocument['preview']` — the exact type
- *  `lote.preview.entries()` always yielded, kept as an alias rather than
- *  re-importing `FacturaPreliminar` so it stays byte-identical to the
+/** One row of `LoteFacturacionDocument['previsualizacion']` — the exact type
+ *  `lote.previsualizacion.entries()` always yielded, kept as an alias rather
+ *  than re-importing `FacturaPreliminar` so it stays byte-identical to the
  *  Mongoose subdocument type every call site already relied on. */
-type FilaPreliminar = LoteFacturacionDocument['preview'][number];
+type FilaPreliminar = LoteFacturacionDocument['previsualizacion'][number];
 
 /** `indiceEnPreview` is the row's real position in `lote.preview` — kept
  *  explicit rather than re-derived later via `findIndex(inmuebleId match)`,
@@ -161,7 +161,7 @@ type FilaPreparada = {
   asientoDoc: Record<string, unknown>;
   total: number;
   numero: number;
-  fullNumber: string;
+  numeroCompleto: string;
 };
 
 /**
@@ -258,7 +258,7 @@ export class LotesFacturacionService {
     const yaHayUno = await this.lotes
       .exists({
         copropiedadId,
-        status: { $in: ['borrador', 'liquidado'] },
+        estado: { $in: ['borrador', 'liquidado'] },
       })
       .exec();
     if (yaHayUno) {
@@ -285,8 +285,8 @@ export class LotesFacturacionService {
       const fechaFacturacion = new Date(dto.fechaFacturacion);
       const periodoEsperado = new Date(
         Date.UTC(
-          ultimoConsolidado.billingDate.getUTCFullYear(),
-          ultimoConsolidado.billingDate.getUTCMonth() + 1,
+          ultimoConsolidado.fechaFacturacion.getUTCFullYear(),
+          ultimoConsolidado.fechaFacturacion.getUTCMonth() + 1,
           1,
         ),
       );
@@ -354,25 +354,25 @@ export class LotesFacturacionService {
 
     const creado = await this.lotes.create({
       copropiedadId,
-      number: numero,
-      status: 'borrador',
-      billingDate: new Date(dto.fechaFacturacion),
-      dueDate: new Date(dto.fechaVencimiento),
-      periodStart: new Date(dto.periodoDesde),
-      periodEnd: new Date(dto.periodoHasta),
-      earlyPaymentDiscount: earlyPaymentDiscount ?? 0,
-      earlyPaymentDiscountFixedValue: earlyPaymentDiscountFixedValue ?? 0,
-      discountGraceDays: descuentoDiasGracia,
-      lateInterestRate:
+      numero,
+      estado: 'borrador',
+      fechaFacturacion: new Date(dto.fechaFacturacion),
+      fechaVencimiento: new Date(dto.fechaVencimiento),
+      periodoDesde: new Date(dto.periodoDesde),
+      periodoHasta: new Date(dto.periodoHasta),
+      descuentoProntoPago: earlyPaymentDiscount ?? 0,
+      valorFijoDescuentoProntoPago: earlyPaymentDiscountFixedValue ?? 0,
+      diasGraciaDescuento: descuentoDiasGracia,
+      interesMora:
         dto.interesMora ??
         (copropiedad?.moraHabilitada ? copropiedad.moraTasaInteres : 0),
-      lateInterestCap:
+      topeInteresMora:
         dto.topeInteresMora ?? copropiedad?.moraValorLimite ?? null,
-      discountDeadline,
-      serviceSuspensionDate: dto.fechaSuspension
+      fechaLimiteDescuento: discountDeadline,
+      fechaSuspension: dto.fechaSuspension
         ? new Date(dto.fechaSuspension)
         : new Date(dto.periodoHasta),
-      generatedBy: accountId,
+      generadoPor: accountId,
     });
 
     return toLote(creado);
@@ -410,7 +410,7 @@ export class LotesFacturacionService {
     const yaHayUno = await this.lotes
       .exists({
         copropiedadId,
-        status: { $in: ['borrador', 'liquidado'] },
+        estado: { $in: ['borrador', 'liquidado'] },
       })
       .exec();
     if (yaHayUno) {
@@ -446,26 +446,26 @@ export class LotesFacturacionService {
 
     const creado = await this.lotes.create({
       copropiedadId,
-      number: numero,
-      status: 'borrador',
+      numero,
+      estado: 'borrador',
       inmuebleId: new Types.ObjectId(dto.inmuebleId),
       // Todo lo demás, copiado tal cual del período actual — nunca
       // recalculado desde los parámetros vigentes de la copropiedad, para
       // que esta factura quede indistinguible de una emitida por el lote
       // real de ese mismo ciclo.
-      billingDate: ultimoConsolidado.billingDate,
-      dueDate: ultimoConsolidado.dueDate,
-      periodStart: ultimoConsolidado.periodStart,
-      periodEnd: ultimoConsolidado.periodEnd,
-      earlyPaymentDiscount: ultimoConsolidado.earlyPaymentDiscount,
-      earlyPaymentDiscountFixedValue:
-        ultimoConsolidado.earlyPaymentDiscountFixedValue,
-      discountGraceDays: ultimoConsolidado.discountGraceDays,
-      lateInterestRate: ultimoConsolidado.lateInterestRate,
-      lateInterestCap: ultimoConsolidado.lateInterestCap,
-      discountDeadline: ultimoConsolidado.discountDeadline,
-      serviceSuspensionDate: ultimoConsolidado.serviceSuspensionDate,
-      generatedBy: accountId,
+      fechaFacturacion: ultimoConsolidado.fechaFacturacion,
+      fechaVencimiento: ultimoConsolidado.fechaVencimiento,
+      periodoDesde: ultimoConsolidado.periodoDesde,
+      periodoHasta: ultimoConsolidado.periodoHasta,
+      descuentoProntoPago: ultimoConsolidado.descuentoProntoPago,
+      valorFijoDescuentoProntoPago:
+        ultimoConsolidado.valorFijoDescuentoProntoPago,
+      diasGraciaDescuento: ultimoConsolidado.diasGraciaDescuento,
+      interesMora: ultimoConsolidado.interesMora,
+      topeInteresMora: ultimoConsolidado.topeInteresMora,
+      fechaLimiteDescuento: ultimoConsolidado.fechaLimiteDescuento,
+      fechaSuspension: ultimoConsolidado.fechaSuspension,
+      generadoPor: accountId,
     });
 
     return toLote(creado);
@@ -489,7 +489,7 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${id} ya está consolidado y su definición no puede editarse`,
       );
@@ -500,34 +500,37 @@ export class LotesFacturacionService {
       if (valor !== undefined) doc[clave] = valor;
     };
     set(
-      'billingDate',
+      'fechaFacturacion',
       dto.fechaFacturacion ? new Date(dto.fechaFacturacion) : undefined,
     );
     set(
-      'dueDate',
+      'fechaVencimiento',
       dto.fechaVencimiento ? new Date(dto.fechaVencimiento) : undefined,
     );
     set(
-      'periodStart',
+      'periodoDesde',
       dto.periodoDesde ? new Date(dto.periodoDesde) : undefined,
     );
-    set('periodEnd', dto.periodoHasta ? new Date(dto.periodoHasta) : undefined);
     set(
-      'discountDeadline',
+      'periodoHasta',
+      dto.periodoHasta ? new Date(dto.periodoHasta) : undefined,
+    );
+    set(
+      'fechaLimiteDescuento',
       dto.fechaLimiteDescuento ? new Date(dto.fechaLimiteDescuento) : undefined,
     );
     set(
-      'serviceSuspensionDate',
+      'fechaSuspension',
       dto.fechaSuspension ? new Date(dto.fechaSuspension) : undefined,
     );
-    set('earlyPaymentDiscount', dto.descuentoProntoPago);
-    set('earlyPaymentDiscountFixedValue', dto.valorFijoDescuentoProntoPago);
-    set('discountGraceDays', dto.diasGraciaDescuento);
-    set('lateInterestRate', dto.interesMora);
-    set('lateInterestCap', dto.topeInteresMora);
-    doc.status = 'borrador';
-    doc.preview = [];
-    doc.summary = null;
+    set('descuentoProntoPago', dto.descuentoProntoPago);
+    set('valorFijoDescuentoProntoPago', dto.valorFijoDescuentoProntoPago);
+    set('diasGraciaDescuento', dto.diasGraciaDescuento);
+    set('interesMora', dto.interesMora);
+    set('topeInteresMora', dto.topeInteresMora);
+    doc.estado = 'borrador';
+    doc.previsualizacion = [];
+    doc.resumen = null;
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
@@ -571,7 +574,7 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} ya está consolidado y no se le pueden cargar novedades`,
       );
@@ -610,23 +613,23 @@ export class LotesFacturacionService {
         _id: new Types.ObjectId(),
         inmuebleId: inmueble._id,
         conceptoId: concepto._id,
-        amount: fila.monto,
-        note: fila.observacion?.trim() ? fila.observacion : null,
-        overrides: null,
+        monto: fila.monto,
+        nota: fila.observacion?.trim() ? fila.observacion : null,
+        sobrescribe: null,
       });
     }
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
-        { $push: { adjustments: { $each: novedades } } },
+        { _id: loteId, copropiedadId, estado: { $ne: 'consolidado' } },
+        { $push: { novedades: { $each: novedades } } },
         { returnDocument: 'after' },
       )
       .exec();
 
     if (
       actualizado &&
-      actualizado.status === 'liquidado' &&
+      actualizado.estado === 'liquidado' &&
       novedades.length > 0
     ) {
       await this.recalcularYPersistirPreview(actualizado, copropiedadId);
@@ -655,7 +658,7 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} ya está consolidado y no se le pueden agregar cargos`,
       );
@@ -690,7 +693,7 @@ export class LotesFacturacionService {
     }
     if (dto.overrides) {
       this.validarUnicidadOverride(
-        lote.adjustments,
+        lote.novedades,
         dto.inmuebleId,
         dto.conceptoId,
         dto.overrides,
@@ -701,15 +704,15 @@ export class LotesFacturacionService {
       _id: new Types.ObjectId(),
       inmuebleId: new Types.ObjectId(dto.inmuebleId),
       conceptoId: new Types.ObjectId(dto.conceptoId),
-      amount: dto.amount,
-      note: dto.note?.trim() ? dto.note : null,
-      overrides: dto.overrides ?? null,
+      monto: dto.amount,
+      nota: dto.note?.trim() ? dto.note : null,
+      sobrescribe: dto.overrides ?? null,
     };
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
-        { $push: { adjustments: nuevaNovedad } },
+        { _id: loteId, copropiedadId, estado: { $ne: 'consolidado' } },
+        { $push: { novedades: nuevaNovedad } },
         { returnDocument: 'after' },
       )
       .exec();
@@ -719,7 +722,7 @@ export class LotesFacturacionService {
       );
     }
 
-    if (actualizado.status === 'liquidado') {
+    if (actualizado.estado === 'liquidado') {
       return this.recalcularYPersistirPreview(actualizado, copropiedadId);
     }
     return toLote(actualizado);
@@ -744,28 +747,26 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} ya está consolidado y no se le pueden editar cargos`,
       );
     }
-    const novedad = lote.adjustments.find(
-      (n) => n._id.toString() === novedadId,
-    );
+    const novedad = lote.novedades.find((n) => n._id.toString() === novedadId);
     if (!novedad) {
       throw new NotFoundException(
         `No se encontró la novedad ${novedadId} en el lote ${loteId}`,
       );
     }
-    novedad.amount = dto.amount;
+    novedad.monto = dto.amount;
     if (dto.note !== undefined) {
-      novedad.note = dto.note.trim() ? dto.note : null;
+      novedad.nota = dto.note.trim() ? dto.note : null;
     }
 
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, copropiedadId, status: { $ne: 'consolidado' } },
-        { $set: { adjustments: lote.adjustments } },
+        { _id: loteId, copropiedadId, estado: { $ne: 'consolidado' } },
+        { $set: { novedades: lote.novedades } },
         { returnDocument: 'after' },
       )
       .exec();
@@ -775,7 +776,7 @@ export class LotesFacturacionService {
       );
     }
 
-    if (actualizado.status === 'liquidado') {
+    if (actualizado.estado === 'liquidado') {
       return this.recalcularYPersistirPreview(actualizado, copropiedadId);
     }
     return toLote(actualizado);
@@ -793,11 +794,11 @@ export class LotesFacturacionService {
    */
   async exigirSinLoteAbierto(copropiedadId: string): Promise<void> {
     const abierto = await this.lotes
-      .findOne({ copropiedadId, status: { $in: ['borrador', 'liquidado'] } })
+      .findOne({ copropiedadId, estado: { $in: ['borrador', 'liquidado'] } })
       .exec();
     if (abierto) {
       throw new ConflictException(
-        `Hay un lote de facturación (No. ${abierto.number}) en curso para esta copropiedad. ` +
+        `Hay un lote de facturación (No. ${abierto.numero}) en curso para esta copropiedad. ` +
           'No se pueden registrar recibos ni notas mientras el proceso de facturación no termine.',
       );
     }
@@ -816,8 +817,8 @@ export class LotesFacturacionService {
     copropiedadId: string,
   ): Promise<LoteFacturacionDocument | null> {
     return this.lotes
-      .findOne({ copropiedadId, status: 'consolidado' })
-      .sort({ number: -1 })
+      .findOne({ copropiedadId, estado: 'consolidado' })
+      .sort({ numero: -1 })
       .exec();
   }
 
@@ -827,14 +828,14 @@ export class LotesFacturacionService {
    *  calls this: `editarNovedadLinea` never changes `overrides`, so it can
    *  never create this conflict on an existing row. */
   private validarUnicidadOverride(
-    adjustments: NovedadLote[],
+    novedades: NovedadLote[],
     inmuebleId: string,
     conceptoId: string,
     overrides: 'recurrente' | 'interes',
   ): void {
-    const conflicto = adjustments.find(
+    const conflicto = novedades.find(
       (n) =>
-        n.overrides === overrides &&
+        n.sobrescribe === overrides &&
         n.inmuebleId.toString() === inmuebleId &&
         n.conceptoId.toString() === conceptoId,
     );
@@ -858,8 +859,8 @@ export class LotesFacturacionService {
     const preview = await this.construirPreview(lote, copropiedadId);
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: lote._id, copropiedadId, status: { $ne: 'consolidado' } },
-        { $set: { preview } },
+        { _id: lote._id, copropiedadId, estado: { $ne: 'consolidado' } },
+        { $set: { previsualizacion: preview } },
         { returnDocument: 'after' },
       )
       .exec();
@@ -885,7 +886,7 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${loteId}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${loteId} ya está consolidado y no puede volver a liquidarse`,
       );
@@ -896,7 +897,7 @@ export class LotesFacturacionService {
     const actualizado = await this.lotes
       .findOneAndUpdate(
         { _id: loteId, copropiedadId },
-        { $set: { preview, status: 'liquidado' } },
+        { $set: { previsualizacion: preview, estado: 'liquidado' } },
         { returnDocument: 'after' },
       )
       .exec();
@@ -1018,20 +1019,20 @@ export class LotesFacturacionService {
       // construirPreview never does).
       const saldosUnidad = saldosPorUnidad.get(unidad._id.toString()) ?? [];
       const saldoCorrientePorConcepto = new Map(
-        saldosUnidad.map((s) => [s.conceptoId.toString(), s.balance]),
+        saldosUnidad.map((s) => [s.conceptoId.toString(), s.saldoPendiente]),
       );
 
       for (const valor of valoresRecurrentes) {
         if (valor.inmuebleId.toString() !== unidad._id.toString()) continue;
         const concepto = conceptoPorId.get(valor.conceptoId.toString());
         if (!concepto) continue;
-        const override = lote.adjustments.find(
+        const override = lote.novedades.find(
           (n) =>
-            n.overrides === 'recurrente' &&
+            n.sobrescribe === 'recurrente' &&
             n.inmuebleId.toString() === unidad._id.toString() &&
             n.conceptoId.toString() === valor.conceptoId.toString(),
         );
-        const monto = override ? override.amount : valor.monto;
+        const monto = override ? override.monto : valor.monto;
         if (monto === 0) continue;
         lines.push(
           this.aLinea(
@@ -1044,18 +1045,18 @@ export class LotesFacturacionService {
         );
       }
 
-      for (const novedad of lote.adjustments) {
+      for (const novedad of lote.novedades) {
         if (novedad.inmuebleId.toString() !== unidad._id.toString()) continue;
         // Consumed above/below as an override candidate, not an additive
         // line of its own.
-        if (novedad.overrides) continue;
+        if (novedad.sobrescribe) continue;
         const concepto = conceptoPorId.get(novedad.conceptoId.toString());
         if (!concepto) continue;
-        if (novedad.amount === 0) continue;
+        if (novedad.monto === 0) continue;
         lines.push(
           this.aLinea(
             concepto,
-            novedad.amount,
+            novedad.monto,
             'novedad',
             novedad._id,
             saldoCorrientePorConcepto,
@@ -1064,9 +1065,9 @@ export class LotesFacturacionService {
       }
 
       if (interesConcepto) {
-        const overrideInteres = lote.adjustments.find(
+        const overrideInteres = lote.novedades.find(
           (n) =>
-            n.overrides === 'interes' &&
+            n.sobrescribe === 'interes' &&
             n.inmuebleId.toString() === unidad._id.toString() &&
             n.conceptoId.toString() === interesConcepto._id.toString(),
         );
@@ -1074,11 +1075,11 @@ export class LotesFacturacionService {
           // Confirmed with product: a manual mora override has no ceiling —
           // it may land above or below what the automatic formula would
           // have given, same as an override on a recurrente line.
-          if (overrideInteres.amount !== 0) {
+          if (overrideInteres.monto !== 0) {
             lines.push(
               this.aLinea(
                 interesConcepto,
-                overrideInteres.amount,
+                overrideInteres.monto,
                 'interes',
                 overrideInteres._id,
                 saldoCorrientePorConcepto,
@@ -1098,21 +1099,21 @@ export class LotesFacturacionService {
           const saldoAdministracionAnterior =
             saldosUnidad.find(
               (s) => s.conceptoId.toString() === idAdministracion,
-            )?.balance ?? 0;
-          // `lateInterestCap` is a MINIMUM overdue balance to bother
+            )?.saldoPendiente ?? 0;
+          // `topeInteresMora` is a MINIMUM overdue balance to bother
           // charging mora at all, not a ceiling on the amount — see the
           // note on `Copropiedad.moraValorLimite`. Null means no
           // threshold: mora is always calculated when the rate is set.
-          const minimo = lote.lateInterestCap;
+          const minimo = lote.topeInteresMora;
           const alcanzaElMinimo =
             minimo === null || saldoAdministracionAnterior >= minimo;
           if (
-            lote.lateInterestRate > 0 &&
+            lote.interesMora > 0 &&
             saldoAdministracionAnterior > 0 &&
             alcanzaElMinimo
           ) {
             const valor = Math.round(
-              saldoAdministracionAnterior * (lote.lateInterestRate / 100),
+              saldoAdministracionAnterior * (lote.interesMora / 100),
             );
             if (valor > 0) {
               lines.push(
@@ -1158,35 +1159,35 @@ export class LotesFacturacionService {
       });
 
       const subtotal = lines.reduce(
-        (acc, l) => acc + (l.baseAmount as number),
+        (acc, l) => acc + (l.valorBase as number),
         0,
       );
       const totalTax = lines.reduce(
-        (acc, l) => acc + (l.taxAmount as number),
+        (acc, l) => acc + (l.valorImpuesto as number),
         0,
       );
 
       preview.push({
         inmuebleId: unidad._id,
-        unitCode: unidad.codigo,
+        codigoInmueble: unidad.codigo,
         terceroId: tercero?._id ?? null,
-        holder: tercero
+        titular: tercero
           ? {
-              name: tercero.nombre,
-              identificationType: tercero.tipoIdentificacion,
-              identificationNumber: tercero.numeroIdentificacion,
-              identificationVerificationDigit: tercero.digitoVerificacion,
-              address: tercero.direccion,
-              city: tercero.ciudad,
+              nombre: tercero.nombre,
+              tipoIdentificacion: tercero.tipoIdentificacion,
+              numeroIdentificacion: tercero.numeroIdentificacion,
+              digitoVerificacion: tercero.digitoVerificacion,
+              direccion: tercero.direccion,
+              ciudad: tercero.ciudad,
               // The PDF prints one address, not a list — see the product
               // decision on `TitularCongelado.email`, 2026-09-22.
               email: tercero.emails[0] ?? null,
-              phone: tercero.telefono,
+              telefono: tercero.telefono,
             }
           : null,
-        lines,
+        lineas: lines,
         subtotal,
-        totalTax,
+        totalImpuestos: totalTax,
         total: subtotal + totalTax,
       });
     }
@@ -1284,15 +1285,15 @@ export class LotesFacturacionService {
     // one (never liquidado, so `preview` is empty — consolidating it would
     // burn the coproperty's one active-lote slot on a batch that produced
     // nothing and can never be corrected).
-    if (lote.status !== 'liquidado') {
+    if (lote.estado !== 'liquidado') {
       throw new ConflictException(
-        `El lote ${loteId} debe estar liquidado antes de consolidar (estado actual: ${lote.status})`,
+        `El lote ${loteId} debe estar liquidado antes de consolidar (estado actual: ${lote.estado})`,
       );
     }
 
     await this.periodo.exigirAbierto(
       copropiedadId.toString(),
-      lote.billingDate,
+      lote.fechaFacturacion,
     );
 
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
@@ -1320,7 +1321,7 @@ export class LotesFacturacionService {
     // on every retry instead of being silently re-invoiced (a second real
     // DIAN number) or silently left incomplete.
     const facturasExistentes = await this.facturas
-      .find({ copropiedadId, loteId, status: 'emitida' })
+      .find({ copropiedadId, loteId, estado: 'emitida' })
       .exec();
     const idsExistentes = facturasExistentes.map((f) => f._id.toString());
     const asientosExistentes = await this.asientos
@@ -1365,18 +1366,18 @@ export class LotesFacturacionService {
     for (const factura of facturasExistentes) {
       const facturaId = factura._id.toString();
       facturaIds.push(facturaId);
-      registrarNumero(factura.number, factura.fullNumber);
+      registrarNumero(factura.numero, factura.numeroCompleto);
       if (idsConAsiento.has(facturaId)) {
         montoTotal += factura.total;
         continue;
       }
-      const filaEnPreview = lote.preview.findIndex(
+      const filaEnPreview = lote.previsualizacion.findIndex(
         (p) => p.inmuebleId.toString() === factura.inmuebleId.toString(),
       );
       errores.push({
         fila: filaEnPreview >= 0 ? filaEnPreview + 1 : 0,
-        inmuebleCodigo: factura.unitCode,
-        mensaje: `La factura ${factura.fullNumber} quedó incompleta en un intento anterior (falta su asiento contable) y requiere reconciliación manual`,
+        inmuebleCodigo: factura.codigoInmueble,
+        mensaje: `La factura ${factura.numeroCompleto} quedó incompleta en un intento anterior (falta su asiento contable) y requiere reconciliación manual`,
       });
     }
 
@@ -1397,7 +1398,7 @@ export class LotesFacturacionService {
     // re-deriving it later via `findIndex(inmuebleId match)`, which
     // silently mis-reports `fila` whenever two preview rows share an
     // `inmuebleId` (see `FilaNumerada`'s own docblock).
-    const filasPendientesConIndice = lote.preview
+    const filasPendientesConIndice = lote.previsualizacion
       .map((preliminar, indiceEnPreview) => ({ preliminar, indiceEnPreview }))
       .filter(
         ({ preliminar }) =>
@@ -1407,7 +1408,7 @@ export class LotesFacturacionService {
     const conceptoIdsPendientes = Array.from(
       new Map(
         filasPendientes.flatMap((p) =>
-          p.lines.map((l) => [l.conceptoId.toString(), l.conceptoId] as const),
+          p.lineas.map((l) => [l.conceptoId.toString(), l.conceptoId] as const),
         ),
       ).values(),
     );
@@ -1424,7 +1425,7 @@ export class LotesFacturacionService {
     const saldoPorClave = new Map<string, number>(
       saldosExistentes.map((s) => [
         `${s.inmuebleId.toString()}:${s.conceptoId.toString()}`,
-        s.balance,
+        s.saldoPendiente,
       ]),
     );
 
@@ -1457,7 +1458,7 @@ export class LotesFacturacionService {
         filasPendientesConIndice[numerosReservados.length];
       errores.push({
         fila: primeraSinNumero.indiceEnPreview + 1,
-        inmuebleCodigo: primeraSinNumero.preliminar.unitCode,
+        inmuebleCodigo: primeraSinNumero.preliminar.codigoInmueble,
         mensaje:
           `Se agotó el rango de numeración disponible para este lote ` +
           `(se pudieron numerar ${numerosReservados.length} de ` +
@@ -1485,7 +1486,7 @@ export class LotesFacturacionService {
           { _id: loteId, copropiedadId },
           {
             $set: {
-              progress: { current: filasCompletadas, total: totalPendientes },
+              progreso: { actual: filasCompletadas, total: totalPendientes },
             },
           },
         )
@@ -1553,21 +1554,21 @@ export class LotesFacturacionService {
         { _id: loteId, copropiedadId },
         {
           $set: {
-            status: consolidadoDelTodo ? 'consolidado' : 'liquidado',
-            invoiceIds: facturaIds,
-            summary:
+            estado: consolidadoDelTodo ? 'consolidado' : 'liquidado',
+            facturaIds: facturaIds,
+            resumen:
               consolidadoDelTodo && primerNumeroCompleto && ultimoNumeroCompleto
                 ? {
-                    totalAmount: montoTotal,
-                    totalInvoices: facturaIds.length,
-                    totalUnits: facturaIds.length,
-                    firstInvoiceNumber: primerNumeroCompleto,
-                    lastInvoiceNumber: ultimoNumeroCompleto,
+                    montoTotal: montoTotal,
+                    totalFacturas: facturaIds.length,
+                    totalInmuebles: facturaIds.length,
+                    primerNumero: primerNumeroCompleto,
+                    ultimoNumero: ultimoNumeroCompleto,
                   }
                 : null,
             // The call is over either way (fully consolidado or stopped on
             // an error) — nothing left to poll for.
-            progress: null,
+            progreso: null,
           },
         },
         { returnDocument: 'after' },
@@ -1669,7 +1670,7 @@ export class LotesFacturacionService {
       for (const { preliminar, indiceEnPreview } of tanda) {
         ctx.errores.push({
           fila: indiceEnPreview + 1,
-          inmuebleCodigo: preliminar.unitCode,
+          inmuebleCodigo: preliminar.codigoInmueble,
           mensaje,
         });
       }
@@ -1681,7 +1682,7 @@ export class LotesFacturacionService {
     for (const p of preparados) {
       ctx.facturaIds.push(p.facturaId.toString());
       ctx.sumarMonto(p.total);
-      ctx.registrarNumero(p.numero, p.fullNumber);
+      ctx.registrarNumero(p.numero, p.numeroCompleto);
     }
   }
 
@@ -1711,23 +1712,23 @@ export class LotesFacturacionService {
         ctx.marcasPorCuenta,
         {
           ...ctx.contextoAuxiliares,
-          terceroCode: preliminar.unitCode,
+          terceroCode: preliminar.codigoInmueble,
         },
       );
     }
     const sumaDebitos = entries
-      .filter((m) => m.type === 'debito')
-      .reduce((acc, m) => acc + m.amount, 0);
+      .filter((m) => m.tipo === 'debito')
+      .reduce((acc, m) => acc + m.monto, 0);
     const sumaCreditos = entries
-      .filter((m) => m.type === 'credito')
-      .reduce((acc, m) => acc + m.amount, 0);
+      .filter((m) => m.tipo === 'credito')
+      .reduce((acc, m) => acc + m.monto, 0);
     if (sumaDebitos !== sumaCreditos) {
       throw new Error(
-        `Asiento contable desbalanceado para la unidad ${preliminar.unitCode}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
+        `Asiento contable desbalanceado para la unidad ${preliminar.codigoInmueble}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
       );
     }
 
-    // `preliminar.lines[].balanceBefore/After` were computed back at
+    // `preliminar.lineas[].saldoAnterior/saldoNuevo` were computed back at
     // liquidar() time — stale the moment a payment posts in between. The
     // number that actually gets printed on the issued Factura must reflect
     // SaldoCartera as it stood when this consolidar() call started (see
@@ -1735,7 +1736,7 @@ export class LotesFacturacionService {
     // the same running-map trick as aLinea() for a unit whose lines repeat
     // a concept (e.g. recurrente + novedad on the same concepto).
     const saldoCorrientePorConcepto = new Map<string, number>();
-    for (const linea of preliminar.lines) {
+    for (const linea of preliminar.lineas) {
       const key = linea.conceptoId.toString();
       let balanceBefore = saldoCorrientePorConcepto.get(key);
       if (balanceBefore === undefined) {
@@ -1743,17 +1744,17 @@ export class LotesFacturacionService {
           ctx.saldoPorClave.get(`${preliminar.inmuebleId.toString()}:${key}`) ??
           0;
       }
-      const balanceAfter = balanceBefore + linea.totalAmount;
-      linea.balanceBefore = balanceBefore;
-      linea.balanceAfter = balanceAfter;
+      const balanceAfter = balanceBefore + linea.valorTotal;
+      linea.saldoAnterior = balanceBefore;
+      linea.saldoNuevo = balanceAfter;
       saldoCorrientePorConcepto.set(key, balanceAfter);
     }
 
     const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
-      preliminar.lines,
-      ctx.lote.earlyPaymentDiscount,
-      ctx.lote.earlyPaymentDiscountFixedValue,
-      ctx.lote.discountDeadline,
+      preliminar.lineas,
+      ctx.lote.descuentoProntoPago,
+      ctx.lote.valorFijoDescuentoProntoPago,
+      ctx.lote.fechaLimiteDescuento,
       ctx.copropiedad?.descuentoAplicaConMora ?? false,
     );
 
@@ -1764,27 +1765,27 @@ export class LotesFacturacionService {
       copropiedadId: ctx.copropiedadId,
       loteId: ctx.loteId,
       inmuebleId: preliminar.inmuebleId,
-      unitCode: preliminar.unitCode,
+      codigoInmueble: preliminar.codigoInmueble,
       terceroId: preliminar.terceroId,
-      holder: preliminar.holder,
+      titular: preliminar.titular,
       // Null when siguienteFactura fell back to the plain FV consecutivo
       // because this coproperty has no active DIAN resolution.
       resolucionId: numero.resolucionId ?? null,
-      prefix: numero.prefijo,
-      number: numero.numero,
-      fullNumber: numero.completo,
-      issueDate: ctx.lote.billingDate,
-      dueDate: ctx.lote.dueDate,
-      periodStart: ctx.lote.periodStart,
-      periodEnd: ctx.lote.periodEnd,
-      lines: preliminar.lines,
+      prefijo: numero.prefijo,
+      numero: numero.numero,
+      numeroCompleto: numero.completo,
+      fechaEmision: ctx.lote.fechaFacturacion,
+      fechaVencimiento: ctx.lote.fechaVencimiento,
+      periodoDesde: ctx.lote.periodoDesde,
+      periodoHasta: ctx.lote.periodoHasta,
+      lineas: preliminar.lineas,
       subtotal: preliminar.subtotal,
-      totalTax: preliminar.totalTax,
+      totalImpuestos: preliminar.totalImpuestos,
       total: preliminar.total,
-      outstandingBalance: preliminar.total,
-      discountAmount,
-      discountDeadline,
-      status: 'emitida' as const,
+      saldoPendiente: preliminar.total,
+      montoDescuento: discountAmount,
+      fechaLimiteDescuento: discountDeadline,
+      estado: 'emitida' as const,
     };
 
     // Seeds this Factura's own atomically-guarded total-balance row — see
@@ -1800,7 +1801,7 @@ export class LotesFacturacionService {
 
     // Same atomic, commutative $inc per document as before — just batched
     // into ONE bulkWrite per tanda instead of one per row.
-    const saldosOps = preliminar.lines.map((linea) => ({
+    const saldosOps = preliminar.lineas.map((linea) => ({
       updateOne: {
         filter: {
           copropiedadId: ctx.copropiedadId,
@@ -1808,7 +1809,7 @@ export class LotesFacturacionService {
           conceptoId: linea.conceptoId,
         },
         update: {
-          $inc: { balance: linea.totalAmount },
+          $inc: { saldoPendiente: linea.valorTotal },
           $setOnInsert: {
             copropiedadId: ctx.copropiedadId,
             inmuebleId: preliminar.inmuebleId,
@@ -1823,16 +1824,16 @@ export class LotesFacturacionService {
     // one per line, alongside `SaldoCartera` above (kept as an
     // independent, redundantly-maintained audit control; see
     // `CarteraPorDocumento`'s own docblock).
-    const carteraDocs = preliminar.lines.map((linea) => ({
+    const carteraDocs = preliminar.lineas.map((linea) => ({
       copropiedadId: ctx.copropiedadId,
       inmuebleId: preliminar.inmuebleId,
       tipoDocumento: 'FV' as const,
       documentoId: facturaId,
       conceptoId: linea.conceptoId,
-      montoOriginal: linea.totalAmount,
-      saldoPendiente: linea.totalAmount,
-      saldoAnterior: linea.balanceBefore,
-      saldoNuevo: linea.balanceAfter,
+      montoOriginal: linea.valorTotal,
+      saldoPendiente: linea.valorTotal,
+      saldoAnterior: linea.saldoAnterior,
+      saldoNuevo: linea.saldoNuevo,
     }));
 
     // Documento cruce self-reference (FV, this SAME factura's own número)
@@ -1845,7 +1846,7 @@ export class LotesFacturacionService {
     const entriesFinal = ctx.marcasPorCuenta
       ? enriquecerMovimientosConAuxiliares(entries, ctx.marcasPorCuenta, {
           ...ctx.contextoAuxiliares,
-          terceroCode: preliminar.unitCode,
+          terceroCode: preliminar.codigoInmueble,
           documentoCruce: { tipo: 'FV', numero: numero.numero },
         })
       : entries;
@@ -1854,8 +1855,8 @@ export class LotesFacturacionService {
       copropiedadId: ctx.copropiedadId,
       loteId: ctx.loteId,
       facturaId: facturaId.toString(),
-      date: ctx.lote.billingDate,
-      entries: entriesFinal,
+      fecha: ctx.lote.fechaFacturacion,
+      movimientos: entriesFinal,
     };
 
     return {
@@ -1867,7 +1868,7 @@ export class LotesFacturacionService {
       asientoDoc,
       total: preliminar.total,
       numero: numero.numero,
-      fullNumber: numero.completo,
+      numeroCompleto: numero.completo,
     };
   }
 
@@ -1875,7 +1876,7 @@ export class LotesFacturacionService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const documentos = await this.lotes
       .find({ copropiedadId })
-      .sort({ number: -1 })
+      .sort({ numero: -1 })
       .exec();
     return documentos.map(toLote);
   }
@@ -1892,8 +1893,9 @@ export class LotesFacturacionService {
   }
 
   /** Returns the raw Mongoose document — used by the prefactura PDF, which
-   *  needs the parent Lote's dates (billingDate/dueDate/periodStart/
-   *  periodEnd) that the mapped contract does not carry per row. */
+   *  needs the parent Lote's dates (fechaFacturacion/fechaVencimiento/
+   *  periodoDesde/periodoHasta) that the mapped contract does not carry per
+   *  row. */
   async findOneRaw(id: string): Promise<LoteFacturacionDocument> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.lotes
@@ -1924,7 +1926,7 @@ export class LotesFacturacionService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote ${id}`);
     }
-    if (lote.status === 'consolidado') {
+    if (lote.estado === 'consolidado') {
       throw new ConflictException(
         `El lote ${id} ya está consolidado y generó facturas reales; no puede cancelarse`,
       );
@@ -1934,7 +1936,7 @@ export class LotesFacturacionService {
 
   /** Builds one frozen invoice line from a concept and a base amount —
    *  shared by the recurrente, novedad, and interes cases in
-   *  construirPreview(). `accountingIncomeAccount`/`accountingReceivableAccount`
+   *  construirPreview(). `cuentaIngreso`/`cuentaCartera`
    *  on the resulting line are the concept's CREDIT and DEBIT account codes —
    *  invoicing credits income and debits cartera per concept, per
    *  `construirMovimientos` in asiento.builder.ts. `novedadId` is the
@@ -2000,26 +2002,24 @@ export class LotesFacturacionService {
     saldoCorrientePorConcepto.set(key, balanceAfter);
     return {
       conceptoId: concepto._id,
-      conceptName: concepto.nombre,
-      conceptKind: concepto.tipo,
-      accountingIncomeAccount: codigoDeCuentaContable(concepto.cuentaCreditoId),
-      accountingReceivableAccount: codigoDeCuentaContable(
-        concepto.cuentaDebitoId,
-      ),
-      accountingTaxAccount: codigoDeCuentaContable(concepto.cuentaImpuestoId),
-      source: origen,
+      nombreConcepto: concepto.nombre,
+      tipoConcepto: concepto.tipo,
+      cuentaIngreso: codigoDeCuentaContable(concepto.cuentaCreditoId),
+      cuentaCartera: codigoDeCuentaContable(concepto.cuentaDebitoId),
+      cuentaImpuesto: codigoDeCuentaContable(concepto.cuentaImpuestoId),
+      origen,
       novedadId,
-      baseAmount,
-      taxRate: concepto.tasaImpuesto,
-      taxAmount,
-      totalAmount,
+      valorBase: baseAmount,
+      tasaImpuesto: concepto.tasaImpuesto,
+      valorImpuesto: taxAmount,
+      valorTotal: totalAmount,
       // Seeds this line's own pending-balance tracker — see
-      // `FacturaLinea.remainingAmount`'s own comment. Harmless on a
+      // `FacturaLinea.saldoPendiente`'s own comment. Harmless on a
       // FacturaPreliminar (never persisted); on the real Factura this is
       // what every future application against this concepto decrements.
-      remainingAmount: totalAmount,
-      balanceBefore,
-      balanceAfter,
+      saldoPendiente: totalAmount,
+      saldoAnterior: balanceBefore,
+      saldoNuevo: balanceAfter,
     };
   }
 }

@@ -53,24 +53,24 @@ export class InicioResumenService {
     // coproperty with no Factura yet has no period at all, a legitimate
     // empty state (spec's "Empty-state" note), never an error.
     const ultimaFactura = await this.facturas
-      .findOne({ copropiedadId, status: 'emitida' })
-      .sort({ issueDate: -1 })
+      .findOne({ copropiedadId, estado: 'emitida' })
+      .sort({ fechaEmision: -1 })
       .exec();
 
     if (!ultimaFactura) {
       return RESUMEN_VACIO;
     }
 
-    const { periodStart, periodEnd } = ultimaFactura;
+    const { periodoDesde, periodoHasta } = ultimaFactura;
 
     // Card 1: Total Facturado — every active Factura sharing that exact
     // period pair (a lote run issues many Facturas for the same period).
     const facturasDelPeriodo = await this.facturas
       .find({
         copropiedadId,
-        status: 'emitida',
-        periodStart,
-        periodEnd,
+        estado: 'emitida',
+        periodoDesde,
+        periodoHasta,
       })
       .exec();
 
@@ -78,35 +78,35 @@ export class InicioResumenService {
     const facturadoMap = new Map<string, MontoPorConcepto>();
     for (const factura of facturasDelPeriodo) {
       totalFacturado += factura.total;
-      for (const linea of factura.lines) {
+      for (const linea of factura.lineas) {
         const key = linea.conceptoId.toString();
         const existente = facturadoMap.get(key);
         if (existente) {
-          existente.monto += linea.totalAmount;
+          existente.monto += linea.valorTotal;
         } else {
           facturadoMap.set(key, {
             conceptoId: key,
-            nombre: linea.conceptName,
-            monto: linea.totalAmount,
+            nombre: linea.nombreConcepto,
+            monto: linea.valorTotal,
           });
         }
       }
     }
 
     // Card 3: Total Ingresos Recibidos — gross cash, active Recibos whose
-    // OWN receivedDate falls in the resolved period (same philosophy as
+    // OWN fechaRecibo falls in the resolved period (same philosophy as
     // Estado de Cuenta's `pagosDelMes`, coproperty-wide instead of
     // per-inmueble).
     const recibosDelPeriodo = await this.recibos
       .find({
         copropiedadId,
-        status: 'activo',
-        receivedDate: { $gte: periodStart, $lte: periodEnd },
+        estado: 'activo',
+        fechaRecibo: { $gte: periodoDesde, $lte: periodoHasta },
       })
       .exec();
 
     const totalIngresosRecibidos = recibosDelPeriodo.reduce(
-      (sum, r) => sum + r.receivedAmount,
+      (sum, r) => sum + r.montoRecibido,
       0,
     );
 
@@ -124,7 +124,7 @@ export class InicioResumenService {
         .find({
           copropiedadId,
           sourceType: 'RC',
-          status: 'activa',
+          estado: 'activa',
           sourceId: { $in: reciboIds },
         })
         .exec();
@@ -132,16 +132,16 @@ export class InicioResumenService {
       for (const app of aplicacionesDelPeriodo) {
         // `detalleConceptos[i].monto` records the FULL credit posted to a
         // concept, which can include an early-payment discount portion
-        // (`discountApplied`) that isn't real received cash. Scaling every
-        // line by (amountApplied - discountApplied) / amountApplied before
+        // (`montoDescuento`) that isn't real received cash. Scaling every
+        // line by (montoAplicado - montoDescuento) / montoAplicado before
         // summing keeps the per-concept slices honest and leaves exactly
         // the real unapplied cash to fall through to the Anticipos slice
         // below — see the spec's worked example (Recibo $1.000.000 gross,
         // $909.800 cash + $52.200 discount applied → Anticipos must be
         // $90.200, not the naive $38.000).
         const factor =
-          app.discountApplied > 0 && app.amountApplied > 0
-            ? (app.amountApplied - app.discountApplied) / app.amountApplied
+          app.montoDescuento > 0 && app.montoAplicado > 0
+            ? (app.montoAplicado - app.montoDescuento) / app.montoAplicado
             : 1;
 
         for (const detalle of app.detalleConceptos) {
@@ -153,7 +153,7 @@ export class InicioResumenService {
           } else {
             recibidoMap.set(key, {
               conceptoId: key,
-              nombre: detalle.conceptName,
+              nombre: detalle.nombreConcepto,
               monto: montoEscalado,
             });
           }
@@ -182,8 +182,8 @@ export class InicioResumenService {
 
     return {
       periodo: {
-        periodStart: periodStart.toISOString(),
-        periodEnd: periodEnd.toISOString(),
+        periodStart: periodoDesde.toISOString(),
+        periodEnd: periodoHasta.toISOString(),
       },
       totalFacturado,
       facturadoPorConcepto: [...facturadoMap.values()],

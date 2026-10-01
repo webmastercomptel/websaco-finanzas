@@ -189,7 +189,7 @@ export class LotesController {
   ): Promise<DocumentoPrefactura> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
-    const preliminar = lote.preview.find(
+    const preliminar = lote.previsualizacion.find(
       (p) => p.inmuebleId.toString() === inmuebleId,
     );
     if (!preliminar) {
@@ -236,14 +236,16 @@ export class LotesController {
   ): Promise<DocumentoPrefacturaLote[]> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
-    if (lote.preview.length === 0) {
+    if (lote.previsualizacion.length === 0) {
       throw new NotFoundException(
         `El lote ${id} todavía no tiene una previsualización generada`,
       );
     }
     const [copropiedad, datosVisualesPorInmueble] = await Promise.all([
       this.copropiedades.findById(copropiedadId).exec(),
-      this.facturas.datosVisualesPdf(lote.preview.map((p) => p.inmuebleId)),
+      this.facturas.datosVisualesPdf(
+        lote.previsualizacion.map((p) => p.inmuebleId),
+      ),
     ]);
     if (!copropiedad) {
       throw new NotFoundException(
@@ -251,9 +253,9 @@ export class LotesController {
       );
     }
 
-    return lote.preview.map((preliminar) => ({
+    return lote.previsualizacion.map((preliminar) => ({
       inmuebleId: preliminar.inmuebleId.toString(),
-      inmuebleCodigo: preliminar.unitCode,
+      inmuebleCodigo: preliminar.codigoInmueble,
       datos: this.facturas.datosPlantillaPreliminar(
         preliminar,
         lote,
@@ -289,7 +291,7 @@ export class LotesController {
 
     return facturas.map((factura) => ({
       id: factura._id.toString(),
-      inmuebleCodigo: factura.unitCode,
+      inmuebleCodigo: factura.codigoInmueble,
     }));
   }
 
@@ -393,7 +395,7 @@ export class LotesController {
       copropiedadId: copropiedadId.toString(),
       loteId: lote._id.toString(),
       objectPath: resultado.objectPath,
-      numerosFactura: facturasLean.map((f) => f.fullNumber),
+      numerosFactura: facturasLean.map((f) => f.numeroCompleto),
     } satisfies LoteFacturasPdfConfirmadoEvent);
 
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();

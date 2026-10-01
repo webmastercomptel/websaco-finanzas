@@ -23,8 +23,8 @@ export type VoidReasonNotaContable =
  * An accounting reclassification note ("NT") — moves an amount between two
  * ConceptoCobro balances within one inmueble's cartera.
  *
- * Unlike Factura/NotaDebito (payable documents with outstandingBalance) or
- * Recibo/NotaCredito (application sources with unappliedAmount), a
+ * Unlike Factura/NotaDebito (payable documents with saldoPendiente) or
+ * Recibo/NotaCredito (application sources with montoSinAplicar), a
  * NotaContable is a one-shot event: the full `monto` moves atomically at
  * creation time. No outstanding balance, no application lifecycle.
  *
@@ -61,7 +61,7 @@ export class NotaContable {
 
   /** The Factura's or NotaDebito's own `_id` — which collection to look in
    *  is determined by `tipoDocumento`, same convention as
-   *  `AplicacionCartera.documentId`/`CarteraPorDocumento.documentoId`. */
+   *  `AplicacionCartera.documentoId`/`CarteraPorDocumento.documentoId`. */
   @Prop({ type: SchemaTypes.ObjectId, required: true })
   documentoId: Types.ObjectId;
 
@@ -83,49 +83,52 @@ export class NotaContable {
   monto: number;
 
   @Prop({ required: true, trim: true })
-  description: string;
+  descripcion: string;
 
   /** The date the user declared for this note — validated at creation
    *  against the coproperty's current billing period, same role
-   *  `NotaCredito.issueDate` plays. Nullable ONLY for documents created
+   *  `NotaCredito.fecha` plays. Nullable ONLY for documents created
    *  before this field existed, which used `createdAt` instead — see
    *  `fechaNotaContable` (`notas-contables.mapper.ts`) for the fallback
    *  every reader must use. Every new write always sets it. */
   @Prop({ type: Date, default: null })
-  issueDate: Date | null;
+  fecha: Date | null;
 
   @Prop({ type: String, trim: true, default: '' })
-  prefix: string;
+  prefijo: string;
 
   @Prop({ type: Number, default: 0 })
-  number: number;
+  numero: number;
 
   @Prop({ required: true, trim: true })
-  fullNumber: string;
+  numeroCompleto: string;
 
   @Prop({ required: true, enum: ['activo', 'anulado'], default: 'activo' })
-  status: 'activo' | 'anulado';
+  estado: 'activo' | 'anulado';
 
   @Prop({ type: String, enum: VOID_REASONS_NOTA_CONTABLE, default: null })
-  voidedReason: VoidReasonNotaContable | null;
+  motivoAnulacion: VoidReasonNotaContable | null;
 
   @Prop({ type: String, default: null, trim: true })
-  voidedDetail: string | null;
+  detalleAnulacion: string | null;
 
   @Prop({ type: Date, default: null })
-  voidedAt: Date | null;
+  fechaAnulacion: Date | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
-  voidedBy: Types.ObjectId | null;
+  anuladoPor: Types.ObjectId | null;
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
-  generatedBy: Types.ObjectId;
+  generadoPor: Types.ObjectId;
 }
 
 export const NotaContableSchema = SchemaFactory.createForClass(NotaContable);
 
 // Unique numbering per coproperty — same reasoning as Recibo/Factura.
-NotaContableSchema.index({ copropiedadId: 1, fullNumber: 1 }, { unique: true });
+NotaContableSchema.index(
+  { copropiedadId: 1, numeroCompleto: 1 },
+  { unique: true },
+);
 
 // GET /notas-contables?inmuebleId=...-shaped query.
 NotaContableSchema.index({ copropiedadId: 1, inmuebleId: 1 });

@@ -109,14 +109,14 @@ export class LoteRecibosService {
     const actualizado = await this.consecutivos
       .findOneAndUpdate(
         { copropiedadId },
-        { $inc: { nextNumber: 1 } },
+        { $inc: { siguienteNumero: 1 } },
         { new: true, upsert: true },
       )
       .exec();
-    return actualizado.nextNumber;
+    return actualizado.siguienteNumero;
   }
 
-  /** Batch-resolves `fullNumber` for every row that already has a
+  /** Batch-resolves `numeroCompleto` for every row that already has a
    *  `reciboId` — shared by every method below that returns a mapped
    *  contract, same reasoning as `toReciboDetalle`'s own
    *  `numerosPorDocumento`. */
@@ -131,7 +131,7 @@ export class LoteRecibosService {
     const recibos = await this.recibos
       .find({ copropiedadId, _id: { $in: reciboIds } })
       .exec();
-    return new Map(recibos.map((r) => [r._id.toString(), r.fullNumber]));
+    return new Map(recibos.map((r) => [r._id.toString(), r.numeroCompleto]));
   }
 
   async crear(
@@ -141,7 +141,7 @@ export class LoteRecibosService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const yaHayUno = await this.lotes
-      .exists({ copropiedadId, status: { $in: ['borrador', 'cargado'] } })
+      .exists({ copropiedadId, estado: { $in: ['borrador', 'cargado'] } })
       .exec();
     if (yaHayUno) {
       throw new ConflictException(
@@ -153,14 +153,14 @@ export class LoteRecibosService {
     const numero = await this.siguienteNumero(copropiedadId);
     const creado = await this.lotes.create({
       copropiedadId,
-      number: numero,
-      status: 'borrador',
+      numero,
+      estado: 'borrador',
       codigo: dto.codigo,
       medioPago: dto.medioPago,
       cuentaDestino: dto.cuentaDestino ?? null,
       totalDigitado: dto.totalDigitado,
       filas: [],
-      generatedBy: accountId,
+      generadoPor: accountId,
       creadoEn: new Date(),
     });
 
@@ -197,7 +197,7 @@ export class LoteRecibosService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const lotes = await this.lotes
       .find({ copropiedadId })
-      .sort({ number: -1 })
+      .sort({ numero: -1 })
       .exec();
     return Promise.all(
       lotes.map(async (lote) => {
@@ -224,9 +224,9 @@ export class LoteRecibosService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
-    if (lote.status === 'aplicado') {
+    if (lote.estado === 'aplicado') {
       throw new ConflictException(
-        `El lote ${lote.number} ya está aplicado y no admite un nuevo archivo`,
+        `El lote ${lote.numero} ya está aplicado y no admite un nuevo archivo`,
       );
     }
 
@@ -255,7 +255,7 @@ export class LoteRecibosService {
     const actualizado = await this.lotes
       .findOneAndUpdate(
         { _id: id, copropiedadId },
-        { $set: { filas, status: 'cargado', generatedBy: accountId } },
+        { $set: { filas, estado: 'cargado', generadoPor: accountId } },
         { new: true },
       )
       .exec();
@@ -269,9 +269,9 @@ export class LoteRecibosService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
-    if (lote.status === 'aplicado') {
+    if (lote.estado === 'aplicado') {
       throw new ConflictException(
-        `El lote ${lote.number} ya está aplicado y generó recibos reales; no puede cancelarse`,
+        `El lote ${lote.numero} ya está aplicado y generó recibos reales; no puede cancelarse`,
       );
     }
     await this.lotes.deleteOne({ _id: id, copropiedadId }).exec();
@@ -332,9 +332,9 @@ export class LoteRecibosService {
     if (!lote) {
       throw new NotFoundException(`No se encontró el lote de recibos ${id}`);
     }
-    if (lote.status !== 'cargado') {
+    if (lote.estado !== 'cargado') {
       throw new ConflictException(
-        `El lote ${lote.number} debe estar cargado antes de aplicarse`,
+        `El lote ${lote.numero} debe estar cargado antes de aplicarse`,
       );
     }
 
@@ -433,7 +433,7 @@ export class LoteRecibosService {
     // `inmuebleId` is a permanent problem this same lote can never resolve,
     // and must never be what keeps the batch from ever completing.
     const todasResueltas = filasElegibles.every((f) => f.reciboId !== null);
-    lote.status = todasResueltas ? 'aplicado' : 'cargado';
+    lote.estado = todasResueltas ? 'aplicado' : 'cargado';
     // `filas` is an array of `_id: false` subdocuments mutated in place
     // above (`fila.reciboId = ...`) — marking it explicitly guarantees
     // Mongoose persists those changes regardless of how reliably it would

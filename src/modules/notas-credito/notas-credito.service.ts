@@ -148,16 +148,16 @@ type DesgloseCarteraAplicacion = {
  *  Nota Débito's own `conceptoId` (resolved via `ConceptoCobro`, which a
  *  Nota Débito never freezes onto itself the way a Factura line freezes its
  *  own accounts) when the anchor is `'ND'` — see `resolverLineasAncla`.
- *  Every place that used to read `factura.lines.find(...)` reads this
+ *  Every place that used to read `factura.lineas.find(...)` reads this
  *  instead, so the rest of `crear()`/`anular()` never branches by document
  *  type again past this point. */
 type LineaAncla = {
   conceptoId: Types.ObjectId;
-  totalAmount: number;
-  accountingIncomeAccount: string | null;
-  accountingReceivableAccount: string | null;
-  conceptKind: 'administracion' | 'intereses' | 'otro';
-  conceptName: string;
+  valorTotal: number;
+  cuentaIngreso: string | null;
+  cuentaCartera: string | null;
+  tipoConcepto: 'administracion' | 'intereses' | 'otro';
+  nombreConcepto: string;
 };
 
 /**
@@ -299,13 +299,13 @@ export class NotasCreditoService {
   ): Promise<LineaAncla[]> {
     if (tipoDocumento === 'FV') {
       const factura = documento as FacturaDocument;
-      return factura.lines.map((linea) => ({
+      return factura.lineas.map((linea) => ({
         conceptoId: linea.conceptoId,
-        totalAmount: linea.totalAmount,
-        accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
-        accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
-        conceptKind: linea.conceptKind,
-        conceptName: linea.conceptName,
+        valorTotal: linea.valorTotal,
+        cuentaIngreso: linea.cuentaIngreso ?? null,
+        cuentaCartera: linea.cuentaCartera ?? null,
+        tipoConcepto: linea.tipoConcepto,
+        nombreConcepto: linea.nombreConcepto,
       }));
     }
     if (tipoDocumento === 'SI') {
@@ -316,11 +316,11 @@ export class NotasCreditoService {
       const saldoInicial = documento as SaldoInicialDocument;
       return saldoInicial.filas.map((linea) => ({
         conceptoId: linea.conceptoId,
-        totalAmount: linea.montoOriginal,
-        accountingIncomeAccount: linea.accountingIncomeAccount ?? null,
-        accountingReceivableAccount: linea.accountingReceivableAccount ?? null,
-        conceptKind: linea.conceptKind,
-        conceptName: linea.nombreConcepto,
+        valorTotal: linea.montoOriginal,
+        cuentaIngreso: linea.cuentaIngreso ?? null,
+        cuentaCartera: linea.cuentaCartera ?? null,
+        tipoConcepto: linea.tipoConcepto,
+        nombreConcepto: linea.nombreConcepto,
       }));
     }
     const notaDebito = documento as NotaDebitoDocument;
@@ -333,16 +333,16 @@ export class NotasCreditoService {
     return [
       {
         conceptoId: notaDebito.conceptoId,
-        totalAmount: notaDebito.total,
-        accountingIncomeAccount: concepto
+        valorTotal: notaDebito.total,
+        cuentaIngreso: concepto
           ? codigoDeCuentaContable(concepto.cuentaCreditoId)
           : null,
-        accountingReceivableAccount: concepto
+        cuentaCartera: concepto
           ? codigoDeCuentaContable(concepto.cuentaDebitoId)
           : null,
-        conceptKind: concepto?.tipo ?? 'otro',
-        conceptName:
-          concepto?.nombre ?? notaDebito.description ?? 'Nota Débito',
+        tipoConcepto: concepto?.tipo ?? 'otro',
+        nombreConcepto:
+          concepto?.nombre ?? notaDebito.descripcion ?? 'Nota Débito',
       },
     ];
   }
@@ -435,7 +435,7 @@ export class NotasCreditoService {
       const anclaVigente =
         dto.tipoDocumento === 'SI'
           ? (documentoAncla as SaldoInicialDocument).estado === 'activo'
-          : (documentoAncla as FacturaDocument | NotaDebitoDocument).status ===
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).estado ===
             'emitida';
       // `numeroDocumentoAncla` — a Saldo Inicial has no `fullNumber` (see its
       // own schema docblock); `numeroOriginal` is the closest equivalent for
@@ -443,15 +443,16 @@ export class NotasCreditoService {
       const numeroDocumentoAncla =
         dto.tipoDocumento === 'SI'
           ? (documentoAncla as SaldoInicialDocument).numeroOriginal
-          : (documentoAncla as FacturaDocument | NotaDebitoDocument).fullNumber;
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument)
+              .numeroCompleto;
       // The anchor's bare number — `SaldoInicial.numero` vs
-      // `Factura`/`NotaDebito.number` (out of scope this batch, still
+      // `Factura`/`NotaDebito.numero` (out of scope this batch, still
       // English). Resolved once here, same reasoning as
       // `numeroDocumentoAncla` right above.
       const numeroAncla =
         dto.tipoDocumento === 'SI'
           ? (documentoAncla as SaldoInicialDocument).numero
-          : (documentoAncla as FacturaDocument | NotaDebitoDocument).number;
+          : (documentoAncla as FacturaDocument | NotaDebitoDocument).numero;
       if (!anclaVigente) {
         throw new ConflictException(
           `${etiquetaAncla} ${numeroDocumentoAncla} está anulada y no admite una nota crédito`,
@@ -512,16 +513,16 @@ export class NotasCreditoService {
             ? { notaDebitoId: documentoId }
             : { saldoInicialId: documentoId };
       const notasCreditoPrevias = await this.notasCredito
-        .find({ copropiedadId, ...filtroAncla, status: 'activo' })
+        .find({ copropiedadId, ...filtroAncla, estado: 'activo' })
         .session(session)
         .exec();
       const yaCreditadoPorConcepto = new Map<string, number>();
       for (const notaPrevia of notasCreditoPrevias) {
-        for (const linea of notaPrevia.distribution) {
+        for (const linea of notaPrevia.distribucion) {
           const id = linea.conceptoId.toString();
           yaCreditadoPorConcepto.set(
             id,
-            (yaCreditadoPorConcepto.get(id) ?? 0) + linea.amount,
+            (yaCreditadoPorConcepto.get(id) ?? 0) + linea.monto,
           );
         }
       }
@@ -536,7 +537,7 @@ export class NotasCreditoService {
         dto.montoTotal,
         lineasAncla.map((l) => ({
           conceptoId: l.conceptoId,
-          totalAmount: l.totalAmount,
+          totalAmount: l.valorTotal,
         })),
         yaCreditadoPorConcepto,
       );
@@ -557,24 +558,24 @@ export class NotasCreditoService {
             notaDebitoId: dto.tipoDocumento === 'ND' ? documentoId : null,
             saldoInicialId: dto.tipoDocumento === 'SI' ? documentoId : null,
             tipoDocumentoAncla: dto.tipoDocumento,
-            issueDate: new Date(dto.fecha),
-            prefix: numero.prefijo,
-            number: numero.numero,
-            fullNumber: numero.completo,
-            reason: dto.motivo,
-            totalAmount: dto.montoTotal,
-            distribution: dto.distribucion.map((l) => ({
+            fecha: new Date(dto.fecha),
+            prefijo: numero.prefijo,
+            numero: numero.numero,
+            numeroCompleto: numero.completo,
+            motivo: dto.motivo,
+            montoTotal: dto.montoTotal,
+            distribucion: dto.distribucion.map((l) => ({
               conceptoId: new Types.ObjectId(l.conceptoId),
-              amount: l.monto,
+              monto: l.monto,
             })),
             // Frozen from here on — the document is immutable once issued.
             // `SaldoDocumentoOrigen` (seeded right below) is the live source
             // every application/reversal actually moves from now on.
-            appliedAmount: 0,
-            unappliedAmount: dto.montoTotal,
-            notes: dto.observaciones ?? null,
-            status: 'activo',
-            generatedBy: accountId,
+            montoAplicado: 0,
+            montoSinAplicar: dto.montoTotal,
+            observaciones: dto.observaciones ?? null,
+            estado: 'activo',
+            generadoPor: accountId,
           },
         ],
         { session },
@@ -645,11 +646,11 @@ export class NotasCreditoService {
         const lineaAncla = lineasAncla.find((l) =>
           l.conceptoId.equals(linea.conceptoId),
         );
-        if (esAplicacionCompleta && lineaAncla?.conceptKind === 'intereses') {
+        if (esAplicacionCompleta && lineaAncla?.tipoConcepto === 'intereses') {
           continue;
         }
         desgloseOrigen.push({
-          cuenta: lineaAncla?.accountingIncomeAccount ?? null,
+          cuenta: lineaAncla?.cuentaIngreso ?? null,
           monto: linea.monto,
           tipoDocumento: dto.tipoDocumento,
           numeroDocumento: numeroAncla,
@@ -720,7 +721,7 @@ export class NotasCreditoService {
           );
           return {
             conceptoId: parte.conceptoId,
-            conceptName: lineaAncla?.conceptName ?? 'Concepto',
+            nombreConcepto: lineaAncla?.nombreConcepto ?? 'Concepto',
             monto: parte.parte,
           };
         });
@@ -728,7 +729,7 @@ export class NotasCreditoService {
           const lineaAncla = lineasAncla.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
-          const esIntereses = lineaAncla?.conceptKind === 'intereses';
+          const esIntereses = lineaAncla?.tipoConcepto === 'intereses';
           if (esIntereses) {
             montoAplicadoMora += parte.parte;
           }
@@ -737,7 +738,7 @@ export class NotasCreditoService {
           // cuentasOrden (via montoAplicadoMora).
           if (esIntereses && esAplicacionCompleta) continue;
           desglose.push({
-            cuenta: lineaAncla?.accountingReceivableAccount ?? null,
+            cuenta: lineaAncla?.cuentaCartera ?? null,
             monto: parte.parte,
             tipoDocumento: dto.tipoDocumento,
             numeroDocumento: numeroAncla,
@@ -749,19 +750,19 @@ export class NotasCreditoService {
               copropiedadId,
               sourceType: 'NC',
               sourceId: creada._id,
-              documentType: dto.tipoDocumento,
-              documentId: documentoId,
-              amountApplied: montoAAplicar,
+              tipoDocumento: dto.tipoDocumento,
+              documentoId: documentoId,
+              montoAplicado: montoAAplicar,
               // Same "per-concepto breakdown, for printing" purpose as
               // `ejecutarAplicacionManual`'s identical field (cruce.util.ts)
               // — the ONLY point this split is ever reconstructable: `partes`
               // is computed once, here, from `dto.distribucion` scaled to
               // `montoAAplicar`, and never persisted anywhere else.
               detalleConceptos,
-              status: 'activa',
-              appliedAt: new Date(),
-              sourceDate: fechaNotaCredito(creada),
-              appliedBy: accountId,
+              estado: 'activa',
+              aplicadoEn: new Date(),
+              fechaOrigen: fechaNotaCredito(creada),
+              aplicadoPor: accountId,
             },
           ],
           { session },
@@ -856,18 +857,18 @@ export class NotasCreditoService {
     if (!factura) {
       throw new NotFoundException(`No se encontró la factura ${id}`);
     }
-    if (factura.status !== 'emitida') {
+    if (factura.estado !== 'emitida') {
       throw new ConflictException(
-        `La factura ${factura.fullNumber} ya está anulada`,
+        `La factura ${factura.numeroCompleto} ya está anulada`,
       );
     }
 
     const tieneAbonos = await this.aplicaciones
-      .exists({ copropiedadId, documentType: 'FV', documentId: facturaId })
+      .exists({ copropiedadId, tipoDocumento: 'FV', documentoId: facturaId })
       .exec();
     if (tieneAbonos) {
       throw new ConflictException(
-        `La factura ${factura.fullNumber} tiene abonos aplicados y no se puede anular`,
+        `La factura ${factura.numeroCompleto} tiene abonos aplicados y no se puede anular`,
       );
     }
 
@@ -876,11 +877,11 @@ export class NotasCreditoService {
     // same concepto (a recurrente charge plus a novedad override, say), but
     // `validarDistribucionNotaCredito` expects one cap per concepto.
     const montosPorConcepto = new Map<string, number>();
-    for (const linea of factura.lines) {
+    for (const linea of factura.lineas) {
       const key = linea.conceptoId.toString();
       montosPorConcepto.set(
         key,
-        (montosPorConcepto.get(key) ?? 0) + linea.totalAmount,
+        (montosPorConcepto.get(key) ?? 0) + linea.valorTotal,
       );
     }
     const distribucion = [...montosPorConcepto.entries()].map(
@@ -901,7 +902,7 @@ export class NotasCreditoService {
       motivo: 'anulacion_factura',
       montoTotal: factura.total,
       distribucion,
-      observaciones: `Anulación de la factura ${factura.fullNumber}: ${dto.detalle}`,
+      observaciones: `Anulación de la factura ${factura.numeroCompleto}: ${dto.detalle}`,
     });
 
     // The note above already zeroed the invoice's cartera and posted its
@@ -915,11 +916,11 @@ export class NotasCreditoService {
       { _id: facturaId, copropiedadId },
       {
         $set: {
-          status: 'anulada',
-          voidedReason: dto.motivo,
-          voidedDetail: dto.detalle,
-          voidedAt: new Date(dto.fecha),
-          voidedBy: accountId,
+          estado: 'anulada',
+          motivoAnulacion: dto.motivo,
+          detalleAnulacion: dto.detalle,
+          fechaAnulacion: new Date(dto.fecha),
+          anuladoPor: accountId,
           voidedByCreditNoteId: new Types.ObjectId(notaCredito.id),
         },
       },
@@ -975,9 +976,9 @@ export class NotasCreditoService {
       if (!notaDoc) {
         throw new NotFoundException(`No se encontró la nota crédito ${id}`);
       }
-      if (notaDoc.status !== 'activo') {
+      if (notaDoc.estado !== 'activo') {
         throw new ConflictException(
-          `La nota crédito ${notaDoc.fullNumber} está anulada y no admite nuevas aplicaciones`,
+          `La nota crédito ${notaDoc.numeroCompleto} está anulada y no admite nuevas aplicaciones`,
         );
       }
       // `unappliedAmount` is no longer a live field on the (now immutable)
@@ -988,7 +989,7 @@ export class NotasCreditoService {
         .session(session)
         .exec();
       const nota = Object.assign(notaDoc, {
-        unappliedAmount: saldoOrigen?.saldoDisponible ?? 0,
+        montoSinAplicar: saldoOrigen?.saldoDisponible ?? 0,
       });
 
       if (dto.aplicaciones?.length) {
@@ -1000,7 +1001,7 @@ export class NotasCreditoService {
           accountId,
         );
         const totalAplicado = creadas.reduce(
-          (acc, a) => acc + a.amountApplied,
+          (acc, a) => acc + a.montoAplicado,
           0,
         );
         if (totalAplicado > 0) {
@@ -1017,7 +1018,7 @@ export class NotasCreditoService {
           aplicadas: creadas.map((a) =>
             toAplicacionCartera(a, null, fechaNota),
           ),
-          montoSinAplicar: nota.unappliedAmount - totalAplicado,
+          montoSinAplicar: nota.montoSinAplicar - totalAplicado,
           errores: [],
         };
       }
@@ -1026,11 +1027,11 @@ export class NotasCreditoService {
         session,
         copropiedadId,
         nota,
-        nota.unappliedAmount,
+        nota.montoSinAplicar,
         accountId,
       );
       const totalAplicado = resultado.aplicadas.reduce(
-        (acc, a) => acc + a.amountApplied,
+        (acc, a) => acc + a.montoAplicado,
         0,
       );
       if (totalAplicado > 0) {
@@ -1109,7 +1110,7 @@ export class NotasCreditoService {
 
   /** Mirrors `RecibosService.aplicarManual` exactly — `sourceType: 'NC'` in
    *  place of `'RC'`, `nota` in place of `recibo`. All-or-nothing: if the
-   *  sum exceeds `nota.unappliedAmount`, or any line's cross-unit guard or
+   *  sum exceeds `nota.montoSinAplicar`, or any line's cross-unit guard or
    *  `decrementarSaldoFactura` call throws, the whole transaction aborts. */
   private async aplicarManual(
     session: ClientSession,
@@ -1125,10 +1126,10 @@ export class NotasCreditoService {
       (acc, a) => acc + a.montoAplicado,
       0,
     );
-    if (sumaSolicitada > nota.unappliedAmount) {
+    if (sumaSolicitada > nota.montoSinAplicar) {
       throw new ConflictException(
         `La suma solicitada (${sumaSolicitada}) supera el saldo sin aplicar ` +
-          `de la nota crédito ${nota.fullNumber} (${nota.unappliedAmount})`,
+          `de la nota crédito ${nota.numeroCompleto} (${nota.montoSinAplicar})`,
       );
     }
 
@@ -1149,7 +1150,7 @@ export class NotasCreditoService {
         throw new ConflictException(
           `La factura ${facturaId.toString()} pertenece a otro inmueble ` +
             `(${factura.inmuebleId.toString()}) que la nota crédito ` +
-            `${nota.fullNumber} (${nota.inmuebleId.toString()})`,
+            `${nota.numeroCompleto} (${nota.inmuebleId.toString()})`,
         );
       }
 
@@ -1163,12 +1164,12 @@ export class NotasCreditoService {
         -1,
       );
       const detalleConceptos = partes.map((parte) => {
-        const linea = factura.lines.find((l) =>
+        const linea = factura.lineas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         return {
           conceptoId: parte.conceptoId,
-          conceptName: linea?.conceptName ?? 'Concepto',
+          nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
           monto: parte.parte,
         };
       });
@@ -1176,14 +1177,14 @@ export class NotasCreditoService {
       // a deferred application can settle a completely different invoice.
       // Per-concepto accounts, same as `crear()`'s own `desglose`.
       for (const parte of partes) {
-        const linea = factura.lines.find((l) =>
+        const linea = factura.lineas.find((l) =>
           l.conceptoId.equals(parte.conceptoId),
         );
         desglose.push({
-          cuenta: linea?.accountingReceivableAccount ?? null,
+          cuenta: linea?.cuentaCartera ?? null,
           monto: parte.parte,
           tipoDocumento: 'FV',
-          numeroDocumento: factura.number,
+          numeroDocumento: factura.numero,
         });
       }
 
@@ -1193,14 +1194,14 @@ export class NotasCreditoService {
             copropiedadId,
             sourceType: 'NC',
             sourceId: nota._id,
-            documentType: 'FV',
-            documentId: facturaId,
-            amountApplied: solicitada.montoAplicado,
+            tipoDocumento: 'FV',
+            documentoId: facturaId,
+            montoAplicado: solicitada.montoAplicado,
             detalleConceptos,
-            status: 'activa',
-            appliedAt: new Date(),
-            sourceDate: fechaNotaCredito(nota),
-            appliedBy: accountId,
+            estado: 'activa',
+            aplicadoEn: new Date(),
+            fechaOrigen: fechaNotaCredito(nota),
+            aplicadoPor: accountId,
           },
         ],
         { session },
@@ -1243,7 +1244,7 @@ export class NotasCreditoService {
     // still have a positive balance, since that's no longer a field this
     // query can filter on directly (see `SaldoTotalDocumento`'s docblock).
     const facturasDelInmueble = await this.facturas
-      .find({ copropiedadId, inmuebleId: nota.inmuebleId, status: 'emitida' })
+      .find({ copropiedadId, inmuebleId: nota.inmuebleId, estado: 'emitida' })
       .session(session)
       .exec();
     const idsDelInmueble = facturasDelInmueble.map((f) => f._id);
@@ -1263,8 +1264,8 @@ export class NotasCreditoService {
       .filter((f) => saldoPorDocumento.has(f._id.toString()))
       .sort(
         (a, b) =>
-          (a.dueDate ?? a.issueDate).getTime() -
-          (b.dueDate ?? b.issueDate).getTime(),
+          (a.fechaVencimiento ?? a.fechaEmision).getTime() -
+          (b.fechaVencimiento ?? b.fechaEmision).getTime(),
       );
 
     const aplicadas: AplicacionCarteraDocument[] = [];
@@ -1299,26 +1300,26 @@ export class NotasCreditoService {
           -1,
         );
         const detalleConceptos = partes.map((parte) => {
-          const linea = facturaActualizada.lines.find((l) =>
+          const linea = facturaActualizada.lineas.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
           return {
             conceptoId: parte.conceptoId,
-            conceptName: linea?.conceptName ?? 'Concepto',
+            nombreConcepto: linea?.nombreConcepto ?? 'Concepto',
             monto: parte.parte,
           };
         });
         // Documento cruce per línea — same reasoning as `aplicarManual`'s
         // own identical block.
         for (const parte of partes) {
-          const linea = facturaActualizada.lines.find((l) =>
+          const linea = facturaActualizada.lineas.find((l) =>
             l.conceptoId.equals(parte.conceptoId),
           );
           desglose.push({
-            cuenta: linea?.accountingReceivableAccount ?? null,
+            cuenta: linea?.cuentaCartera ?? null,
             monto: parte.parte,
             tipoDocumento: 'FV',
-            numeroDocumento: facturaActualizada.number,
+            numeroDocumento: facturaActualizada.numero,
           });
         }
 
@@ -1328,14 +1329,14 @@ export class NotasCreditoService {
               copropiedadId,
               sourceType: 'NC',
               sourceId: nota._id,
-              documentType: 'FV',
-              documentId: factura._id,
-              amountApplied: monto,
+              tipoDocumento: 'FV',
+              documentoId: factura._id,
+              montoAplicado: monto,
               detalleConceptos,
-              status: 'activa',
-              appliedAt: new Date(),
-              sourceDate: fechaNotaCredito(nota),
-              appliedBy: accountId,
+              estado: 'activa',
+              aplicadoEn: new Date(),
+              fechaOrigen: fechaNotaCredito(nota),
+              aplicadoPor: accountId,
             },
           ],
           { session },
@@ -1413,9 +1414,9 @@ export class NotasCreditoService {
       if (!notaDoc) {
         throw new NotFoundException(`No se encontró la nota crédito ${id}`);
       }
-      if (notaDoc.status === 'anulado') {
+      if (notaDoc.estado === 'anulado') {
         throw new ConflictException(
-          `La nota crédito ${notaDoc.fullNumber} ya está anulada`,
+          `La nota crédito ${notaDoc.numeroCompleto} ya está anulada`,
         );
       }
       // `appliedAmount`/`unappliedAmount` are no longer live fields on the
@@ -1427,8 +1428,8 @@ export class NotasCreditoService {
         .session(session)
         .exec();
       const nota = Object.assign(notaDoc, {
-        unappliedAmount: saldoOrigenPrevio?.saldoDisponible ?? 0,
-        appliedAmount:
+        montoSinAplicar: saldoOrigenPrevio?.saldoDisponible ?? 0,
+        montoAplicado:
           (saldoOrigenPrevio?.montoOriginal ?? 0) -
           (saldoOrigenPrevio?.saldoDisponible ?? 0),
       });
@@ -1440,7 +1441,7 @@ export class NotasCreditoService {
           copropiedadId,
           sourceType: 'NC',
           sourceId: nota._id,
-          status: 'activa',
+          estado: 'activa',
         })
         .session(session)
         .exec();
@@ -1469,12 +1470,12 @@ export class NotasCreditoService {
         // applying against it) — so no code path in this module can create
         // a second anchor-targeting row.
         const esAncla =
-          aplicacion.documentType === anclaTipo &&
-          aplicacion.documentId.equals(anclaId);
+          aplicacion.tipoDocumento === anclaTipo &&
+          aplicacion.documentoId.equals(anclaId);
 
-        if (aplicacion.documentType === 'FV') {
+        if (aplicacion.tipoDocumento === 'FV') {
           const facturaDoc = await this.facturas
-            .findOne({ _id: aplicacion.documentId, copropiedadId })
+            .findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (facturaDoc) {
@@ -1482,20 +1483,20 @@ export class NotasCreditoService {
               this.saldoTotalDocumento,
               session,
               facturaDoc._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const factura = Object.assign(facturaDoc, {
-              outstandingBalance: saldoRestaurado?.saldoPendiente ?? 0,
+              saldoPendiente: saldoRestaurado?.saldoPendiente ?? 0,
             });
             // `detalleConceptos` is empty on an application predating that
             // field (schema's own note) — contributes nothing to
             // `montoAplicadoMoraTotal`, same "no known split" fallback the
             // frontend already uses for those.
             for (const detalle of aplicacion.detalleConceptos ?? []) {
-              const linea = factura.lines.find((l) =>
+              const linea = factura.lineas.find((l) =>
                 l.conceptoId.equals(detalle.conceptoId),
               );
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMoraTotal += detalle.monto;
               }
             }
@@ -1506,13 +1507,13 @@ export class NotasCreditoService {
                 session,
                 copropiedadId,
                 nota.inmuebleId,
-                nota.distribution.map((l) => ({
+                nota.distribucion.map((l) => ({
                   conceptoId: l.conceptoId,
-                  monto: l.amount,
+                  monto: l.monto,
                 })),
-                aplicacion.amountApplied,
+                aplicacion.montoAplicado,
                 1,
-                { tipoDocumento: 'FV', documentoId: aplicacion.documentId },
+                { tipoDocumento: 'FV', documentoId: aplicacion.documentoId },
               );
             } else {
               await ajustarSaldosCartera(
@@ -1521,19 +1522,19 @@ export class NotasCreditoService {
                 session,
                 copropiedadId,
                 factura,
-                aplicacion.amountApplied,
+                aplicacion.montoAplicado,
                 1,
               );
             }
           }
-        } else if (aplicacion.documentType === 'SI') {
+        } else if (aplicacion.tipoDocumento === 'SI') {
           // Only ever reachable as the note's own anchor application — the
           // deferred `aplicar()` path never targets a Saldo Inicial (see
           // that method's own docblock), same reasoning as the `'ND'`
           // branch below — always `ajustarSaldosCarteraPorDistribucion`
-          // with `nota.distribution`, never the proportional cascade.
+          // with `nota.distribucion`, never the proportional cascade.
           const saldoInicialDoc = await this.saldosIniciales
-            ?.findOne({ _id: aplicacion.documentId, copropiedadId })
+            ?.findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (saldoInicialDoc) {
@@ -1541,7 +1542,7 @@ export class NotasCreditoService {
               this.saldoTotalDocumento,
               session,
               saldoInicialDoc._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const lineasAncla = await this.resolverLineasAncla(
               session,
@@ -1553,7 +1554,7 @@ export class NotasCreditoService {
               const linea = lineasAncla.find((l) =>
                 l.conceptoId.equals(detalle.conceptoId),
               );
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMoraTotal += detalle.monto;
               }
             }
@@ -1563,24 +1564,24 @@ export class NotasCreditoService {
               session,
               copropiedadId,
               nota.inmuebleId,
-              nota.distribution.map((l) => ({
+              nota.distribucion.map((l) => ({
                 conceptoId: l.conceptoId,
-                monto: l.amount,
+                monto: l.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
-              { tipoDocumento: 'SI', documentoId: aplicacion.documentId },
+              { tipoDocumento: 'SI', documentoId: aplicacion.documentoId },
             );
           }
         } else {
-          // `aplicacion.documentType === 'ND'` — only ever reachable when
+          // `aplicacion.tipoDocumento === 'ND'` — only ever reachable when
           // THIS row is the note's own anchor application (the deferred
           // `aplicar()` path never targets a Nota Débito, see `aplicar()`'s
           // own docblock), so this is always the `ajustarSaldosCarteraPorDistribucion`
           // branch, never the proportional `ajustarSaldosCartera` cascade
           // (which needs a `lines` array a Nota Débito doesn't have).
           const notaDebitoDoc = await this.notasDebito
-            .findOne({ _id: aplicacion.documentId, copropiedadId })
+            .findOne({ _id: aplicacion.documentoId, copropiedadId })
             .session(session)
             .exec();
           if (notaDebitoDoc) {
@@ -1588,7 +1589,7 @@ export class NotasCreditoService {
               this.saldoTotalDocumento,
               session,
               notaDebitoDoc._id,
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
             );
             const lineasAncla = await this.resolverLineasAncla(
               session,
@@ -1600,7 +1601,7 @@ export class NotasCreditoService {
               const linea = lineasAncla.find((l) =>
                 l.conceptoId.equals(detalle.conceptoId),
               );
-              if (linea?.conceptKind === 'intereses') {
+              if (linea?.tipoConcepto === 'intereses') {
                 montoAplicadoMoraTotal += detalle.monto;
               }
             }
@@ -1610,13 +1611,13 @@ export class NotasCreditoService {
               session,
               copropiedadId,
               nota.inmuebleId,
-              nota.distribution.map((l) => ({
+              nota.distribucion.map((l) => ({
                 conceptoId: l.conceptoId,
-                monto: l.amount,
+                monto: l.monto,
               })),
-              aplicacion.amountApplied,
+              aplicacion.montoAplicado,
               1,
-              { tipoDocumento: 'ND', documentoId: aplicacion.documentId },
+              { tipoDocumento: 'ND', documentoId: aplicacion.documentoId },
             );
           }
         }
@@ -1624,7 +1625,7 @@ export class NotasCreditoService {
         await this.aplicaciones
           .findOneAndUpdate(
             { _id: aplicacion._id, copropiedadId },
-            { $set: { status: 'revertida', revertedAt: new Date() } },
+            { $set: { estado: 'revertida', revertidoEn: new Date() } },
             { session },
           )
           .exec();
@@ -1669,22 +1670,22 @@ export class NotasCreditoService {
             documentoAncla,
           )
         : [];
-      const desgloseOrigen = nota.distribution.map((linea) => {
+      const desgloseOrigen = nota.distribucion.map((linea) => {
         const lineaAncla = lineasAncla.find((l) =>
           l.conceptoId.equals(linea.conceptoId),
         );
         return {
-          account: lineaAncla?.accountingIncomeAccount ?? cuentaDevoluciones,
-          monto: linea.amount,
+          cuenta: lineaAncla?.cuentaIngreso ?? cuentaDevoluciones,
+          monto: linea.monto,
         };
       });
       let entries = construirContraAsientoCruce(
         cuentaDevoluciones,
         cuentaCartera,
         cuentaAnticipos,
-        nota.appliedAmount,
-        nota.unappliedAmount,
-        nota.totalAmount,
+        nota.montoAplicado,
+        nota.montoSinAplicar,
+        nota.montoTotal,
         'NC',
         cuentasOrdenDe(copropiedad),
         undefined,
@@ -1705,7 +1706,7 @@ export class NotasCreditoService {
                 anclaTipo === 'SI'
                   ? (documentoAncla as SaldoInicialDocument).numero
                   : (documentoAncla as FacturaDocument | NotaDebitoDocument)
-                      .number,
+                      .numero,
             }
           : null,
       );
@@ -1719,12 +1720,12 @@ export class NotasCreditoService {
             notaCreditoId: nota._id,
             // The date the user declared for THIS anulación (validated
             // above, before the transaction opened) — never `new Date()`.
-            // `voidedAt` below stays the real audit instant on purpose (see
-            // its own field comment): this is the business date, that is
-            // the "when it was actually recorded" trail — never the same
+            // `fechaAnulacion` below stays the real audit instant on purpose
+            // (see its own field comment): this is the business date, that
+            // is the "when it was actually recorded" trail — never the same
             // field, never conflated.
-            date: new Date(dto.fecha),
-            entries,
+            fecha: new Date(dto.fecha),
+            movimientos: entries,
           },
         ],
         { session },
@@ -1737,13 +1738,13 @@ export class NotasCreditoService {
           { _id: id, copropiedadId },
           {
             $set: {
-              status: 'anulado',
-              voidedReason: dto.motivo,
-              voidedDetail: dto.detalle,
-              voidedAt: new Date(),
-              voidedBy: accountId,
-              appliedAmount: 0,
-              unappliedAmount: 0,
+              estado: 'anulado',
+              motivoAnulacion: dto.motivo,
+              detalleAnulacion: dto.detalle,
+              fechaAnulacion: new Date(),
+              anuladoPor: accountId,
+              montoAplicado: 0,
+              montoSinAplicar: 0,
             },
           },
           { session },
@@ -1775,7 +1776,7 @@ export class NotasCreditoService {
   /**
    * Lean listing (design §5, `GET /notas-credito`) — always scoped to the
    * active copropiedad, honoring `ListarNotasCreditoDto`'s filters
-   * (`inmuebleId`, `estado`, date range on `issueDate`). Uses `toNotaCredito`,
+   * (`inmuebleId`, `estado`, date range on `fecha`). Uses `toNotaCredito`,
    * never `toNotaCreditoDetalle` — no per-row `AplicacionCartera` lookup
    * here, unlike `findOne` below. Mirrors `RecibosService.findAll`.
    */
@@ -1785,7 +1786,7 @@ export class NotasCreditoService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
-    if (query.estado) filtro.status = query.estado;
+    if (query.estado) filtro.estado = query.estado;
     if (query.conAnticipoDisponible) {
       // No longer a field on NotaCredito itself — resolve candidate ids from
       // `SaldoDocumentoOrigen` first, same pattern `RecibosService.findAll`
@@ -1804,15 +1805,12 @@ export class NotasCreditoService {
         ...(query.desde ? { $gte: new Date(query.desde) } : {}),
         ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
       };
-      // A note carries a real `issueDate` from this feature onward; one
-      // created before it existed has `issueDate: null` and must fall back
+      // A note carries a real `fecha` from this feature onward; one
+      // created before it existed has `fecha: null` and must fall back
       // to `createdAt` — same fallback `fechaNotaCredito` applies when
       // reading a single document, expressed as a query since Mongo can't
       // run that function per-row.
-      filtro.$or = [
-        { issueDate: rango },
-        { issueDate: null, createdAt: rango },
-      ];
+      filtro.$or = [{ fecha: rango }, { fecha: null, createdAt: rango }];
     }
 
     const pagina = query.pagina ?? 1;
@@ -1928,7 +1926,7 @@ export class NotasCreditoService {
       mapa.set(docId.toString(), docId);
     };
     agregarId(anclaTipo, anclaId);
-    for (const a of aplicaciones) agregarId(a.documentType, a.documentId);
+    for (const a of aplicaciones) agregarId(a.tipoDocumento, a.documentoId);
 
     const [facturasDoc, notasDebitoDoc, saldosInicialesDoc] = await Promise.all(
       [
@@ -1961,11 +1959,11 @@ export class NotasCreditoService {
     const numerosPorDocumento = new Map<string, string>([
       ...facturasDoc.map((f): [string, string] => [
         f._id.toString(),
-        f.fullNumber,
+        f.numeroCompleto,
       ]),
       ...notasDebitoDoc.map((n): [string, string] => [
         n._id.toString(),
-        n.fullNumber,
+        n.numeroCompleto,
       ]),
       ...(saldosInicialesDoc ?? []).map((s): [string, string] => [
         s._id.toString(),
@@ -2039,7 +2037,7 @@ export class NotasCreditoService {
       copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
     const cuentaAnticipos = copropiedad?.cuentaAnticipos ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
-      account: d.cuenta ?? cuentaCartera,
+      cuenta: d.cuenta ?? cuentaCartera,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
@@ -2071,8 +2069,8 @@ export class NotasCreditoService {
           facturaId: null,
           reciboId: null,
           notaCreditoId: nota._id,
-          date: new Date(),
-          entries,
+          fecha: new Date(),
+          movimientos: entries,
         },
       ],
       { session },
@@ -2118,7 +2116,7 @@ export class NotasCreditoService {
     const cuentaDevoluciones =
       copropiedad?.cuentaDevoluciones ?? CUENTA_SIN_ASIGNAR;
     const desgloseCartera = desglose.map((d) => ({
-      account: d.cuenta ?? cuentaCartera,
+      cuenta: d.cuenta ?? cuentaCartera,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
@@ -2129,7 +2127,7 @@ export class NotasCreditoService {
     // no `accountingIncomeAccount` configured, same fallback role
     // `cuentaCartera` plays for `desgloseCartera` above.
     const desgloseOrigenCuentas = desgloseOrigen.map((d) => ({
-      account: d.cuenta ?? cuentaDevoluciones,
+      cuenta: d.cuenta ?? cuentaDevoluciones,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
@@ -2165,14 +2163,14 @@ export class NotasCreditoService {
           reciboId: null,
           notaCreditoId: nota._id,
           // The note's OWN declared date, never `new Date()` — same
-          // reasoning as `postearAsientoRecibo`'s `recibo.receivedDate`.
+          // reasoning as `postearAsientoRecibo`'s `recibo.fechaRecibo`.
           // `aplicar()`/`anular()` stay dated `new Date()` (the real cruce
           // instant, no caller-supplied date to prefer) — this is creation,
           // which does have one. Getting this wrong is exactly why a
           // backdated Nota Crédito could silently vanish from Consulta de
           // Movimientos when queried by its own declared período.
-          date: fechaNotaCredito(nota),
-          entries,
+          fecha: fechaNotaCredito(nota),
+          movimientos: entries,
         },
       ],
       { session },
