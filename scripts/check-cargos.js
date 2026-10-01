@@ -11,10 +11,10 @@ async function run() {
   await mongoose.connect(MONGO_URI);
   const db = mongoose.connection.db;
   const docs = await db.collection('conceptos_cobro')
-    .find({ coPropertyId: new mongoose.Types.ObjectId('6a99c1602a21f712fb8c6f8e') })
+    .find({ copropiedadId: new mongoose.Types.ObjectId('6a99c1602a21f712fb8c6f8e') })
     .toArray();
   console.log('Conceptos:', docs.length);
-  docs.forEach(d => console.log(' -', d.name, '| isSystem:', d.isSystem));
+  docs.forEach(d => console.log(' -', d.nombre, '| sistema:', d.sistema));
   await mongoose.disconnect();
 }
 

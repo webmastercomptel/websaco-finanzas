@@ -7,7 +7,7 @@
 // facturación transactional/historical data (lotes, facturas, recibos,
 // notas, asientos contables, saldos de cartera, períodos contables) and
 // WITHOUT any access grant carried over (no `Asignacion` rows, and
-// `managingEntityId` is nulled out on the clone — leaving it set would let
+// `entidadId` is nulled out on the clone — leaving it set would let
 // anyone with entity-level access to the source's managing company also
 // reach the test tenant, which defeats the "empty access" intent).
 //
@@ -43,12 +43,12 @@ const NUEVO_NOMBRE = 'TEST SANTIAGO';
 async function siguienteCodigo(db) {
   const [maximo] = await db
     .collection('copropiedades')
-    .find({ code: /^\d+$/ })
+    .find({ codigo: /^\d+$/ })
     .collation({ locale: 'en_US', numericOrdering: true })
-    .sort({ code: -1 })
+    .sort({ codigo: -1 })
     .limit(1)
     .toArray();
-  const pisoCopropiedades = maximo ? parseInt(maximo.code, 10) : 0;
+  const pisoCopropiedades = maximo ? parseInt(maximo.codigo, 10) : 0;
 
   const contadorActual = await db
     .collection('contadores_copropiedades')
@@ -88,7 +88,7 @@ async function run() {
 
   const yaExiste = await db
     .collection('copropiedades')
-    .findOne({ name: NUEVO_NOMBRE });
+    .findOne({ nombre: NUEVO_NOMBRE });
   if (yaExiste) {
     throw new Error(
       `Ya existe una copropiedad llamada "${NUEVO_NOMBRE}" (${yaExiste._id}) — borrala primero si querés reclonar.`,
@@ -105,13 +105,13 @@ async function run() {
 
   await db.collection('copropiedades').insertOne({
     _id: nuevaCopropiedadId,
-    ...sinIdentidad(origen, 'code', 'name', 'managingEntityId', 'status'),
-    code,
-    name: NUEVO_NOMBRE,
+    ...sinIdentidad(origen, 'codigo', 'nombre', 'entidadId', 'estado'),
+    codigo: code,
+    nombre: NUEVO_NOMBRE,
     // See file header: nulled out so entity-level access to the source's
     // managing company doesn't silently reach this test tenant too.
-    managingEntityId: null,
-    status: 'active',
+    entidadId: null,
+    estado: 'active',
     createdAt: ahora,
     updatedAt: ahora,
   });
@@ -121,7 +121,7 @@ async function run() {
   const idsTerceros = new Map();
   const terceros = await db
     .collection('terceros')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (terceros.length > 0) {
     const nuevos = terceros.map((t) => {
@@ -129,8 +129,8 @@ async function run() {
       idsTerceros.set(t._id.toString(), nuevoId);
       return {
         _id: nuevoId,
-        ...sinIdentidad(t, 'coPropertyId'),
-        coPropertyId: nuevaCopropiedadId,
+        ...sinIdentidad(t, 'copropiedadId'),
+        copropiedadId: nuevaCopropiedadId,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -139,11 +139,11 @@ async function run() {
   }
   console.log(`Terceros clonados: ${terceros.length}`);
 
-  // 2) Inmuebles — holderId -> Tercero.
+  // 2) Inmuebles — titularId -> Tercero.
   const idsInmuebles = new Map();
   const inmuebles = await db
     .collection('inmuebles')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (inmuebles.length > 0) {
     const nuevos = inmuebles.map((i) => {
@@ -151,9 +151,9 @@ async function run() {
       idsInmuebles.set(i._id.toString(), nuevoId);
       return {
         _id: nuevoId,
-        ...sinIdentidad(i, 'coPropertyId', 'holderId'),
-        coPropertyId: nuevaCopropiedadId,
-        holderId: i.holderId ? (idsTerceros.get(i.holderId.toString()) ?? null) : null,
+        ...sinIdentidad(i, 'copropiedadId', 'titularId'),
+        copropiedadId: nuevaCopropiedadId,
+        titularId: i.titularId ? (idsTerceros.get(i.titularId.toString()) ?? null) : null,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -166,7 +166,7 @@ async function run() {
   const idsCuentas = new Map();
   const cuentas = await db
     .collection('cuentas_contables')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (cuentas.length > 0) {
     const nuevos = cuentas.map((c) => {
@@ -174,8 +174,8 @@ async function run() {
       idsCuentas.set(c._id.toString(), nuevoId);
       return {
         _id: nuevoId,
-        ...sinIdentidad(c, 'coPropertyId'),
-        coPropertyId: nuevaCopropiedadId,
+        ...sinIdentidad(c, 'copropiedadId'),
+        copropiedadId: nuevaCopropiedadId,
         createdAt: ahora,
         updatedAt: ahora,
       };
@@ -188,7 +188,7 @@ async function run() {
   const idsConceptos = new Map();
   const conceptos = await db
     .collection('conceptos_cobro')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (conceptos.length > 0) {
     const remapCuenta = (id) => (id ? (idsCuentas.get(id.toString()) ?? null) : null);
@@ -199,12 +199,12 @@ async function run() {
         _id: nuevoId,
         ...sinIdentidad(
           c,
-          'coPropertyId',
+          'copropiedadId',
           'cuentaDebitoId',
           'cuentaCreditoId',
           'cuentaImpuestoId',
         ),
-        coPropertyId: nuevaCopropiedadId,
+        copropiedadId: nuevaCopropiedadId,
         cuentaDebitoId: remapCuenta(c.cuentaDebitoId),
         cuentaCreditoId: remapCuenta(c.cuentaCreditoId),
         cuentaImpuestoId: remapCuenta(c.cuentaImpuestoId),
@@ -219,7 +219,7 @@ async function run() {
   // 5) Valores recurrentes — inmuebleId -> Inmueble, conceptoId -> ConceptoCobro.
   const valores = await db
     .collection('valores_recurrentes')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   let valoresClonados = 0;
   if (valores.length > 0) {
@@ -235,8 +235,8 @@ async function run() {
       }
       nuevos.push({
         _id: new ObjectId(),
-        ...sinIdentidad(v, 'coPropertyId', 'inmuebleId', 'conceptoId'),
-        coPropertyId: nuevaCopropiedadId,
+        ...sinIdentidad(v, 'copropiedadId', 'inmuebleId', 'conceptoId'),
+        copropiedadId: nuevaCopropiedadId,
         inmuebleId: nuevoInmuebleId,
         conceptoId: nuevoConceptoId,
         createdAt: ahora,
@@ -248,45 +248,45 @@ async function run() {
   }
   console.log(`Valores recurrentes clonados: ${valoresClonados} de ${valores.length}`);
 
-  // 6) Resolución de facturación — nextNumber reinicia a rangeFrom: un
+  // 6) Resolución de facturación — siguienteNumero reinicia a rangoDesde: un
   // tenant de prueba no debe heredar la posición real de numeración.
   const resoluciones = await db
     .collection('resoluciones_facturacion')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (resoluciones.length > 0) {
     const nuevos = resoluciones.map((r) => ({
       _id: new ObjectId(),
-      ...sinIdentidad(r, 'coPropertyId', 'nextNumber'),
-      coPropertyId: nuevaCopropiedadId,
-      nextNumber: r.rangeFrom,
+      ...sinIdentidad(r, 'copropiedadId', 'siguienteNumero'),
+      copropiedadId: nuevaCopropiedadId,
+      siguienteNumero: r.rangoDesde,
       createdAt: ahora,
       updatedAt: ahora,
     }));
     await db.collection('resoluciones_facturacion').insertMany(nuevos);
   }
   console.log(
-    `Resoluciones de facturación clonadas: ${resoluciones.length} (nextNumber reiniciado a rangeFrom)`,
+    `Resoluciones de facturación clonadas: ${resoluciones.length} (siguienteNumero reiniciado a rangoDesde)`,
   );
 
-  // 7) Consecutivos de documento — nextNumber reinicia a 1, misma razón.
+  // 7) Consecutivos de documento — siguienteNumero reinicia a 1, misma razón.
   const consecutivos = await db
     .collection('consecutivos_documento')
-    .find({ coPropertyId: sourceId })
+    .find({ copropiedadId: sourceId })
     .toArray();
   if (consecutivos.length > 0) {
     const nuevos = consecutivos.map((c) => ({
       _id: new ObjectId(),
-      ...sinIdentidad(c, 'coPropertyId', 'nextNumber'),
-      coPropertyId: nuevaCopropiedadId,
-      nextNumber: 1,
+      ...sinIdentidad(c, 'copropiedadId', 'siguienteNumero'),
+      copropiedadId: nuevaCopropiedadId,
+      siguienteNumero: 1,
       createdAt: ahora,
       updatedAt: ahora,
     }));
     await db.collection('consecutivos_documento').insertMany(nuevos);
   }
   console.log(
-    `Consecutivos de documento clonados: ${consecutivos.length} (nextNumber reiniciado a 1)`,
+    `Consecutivos de documento clonados: ${consecutivos.length} (siguienteNumero reiniciado a 1)`,
   );
 
   await mongoose.disconnect();

@@ -19,7 +19,7 @@
 | Multi-tenancy | CLS (Continuation-Local Storage) | `X-CoProperty-Id` header |
 | Validación DTOs | class-validator + class-transformer | HTML5 native + server-side |
 | API prefix | `api/v1` | - |
-| Persistencia (English) | Schemas en inglés | Contratos API en español |
+| Persistencia (Spanish) | Schemas en español | Contratos API en español |
 
 ---
 
@@ -60,15 +60,15 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `code` | string | required, unique, trim | - | Código identificador (ej: "ENT-001") |
-| `name` | string | required, trim | - | Nombre de la empresa |
-| `taxId` | string | nullable, trim | null | NIT sin dígito verificación |
-| `taxIdVerificationDigit` | string | nullable, trim | null | Dígito verificación |
+| `codigo` | string | required, unique, trim | - | Código identificador (ej: "ENT-001") |
+| `nombre` | string | required, trim | - | Nombre de la empresa |
+| `nit` | string | nullable, trim | null | NIT sin dígito verificación |
+| `digitoVerificacion` | string | nullable, trim | null | Dígito verificación |
 | `email` | string | nullable, trim | null | Email contacto |
-| `phone` | string | nullable, trim | null | Teléfono |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `telefono` | string | nullable, trim | null | Teléfono |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 
-**Índices únicos**: `code` (global)
+**Índices únicos**: `codigo` (global)
 
 ---
 
@@ -79,25 +79,25 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `code` | string | required, unique, trim | - | Código (ej: "COP-001") |
-| `name` | string | required, trim | - | Nombre |
-| `taxId` | string | nullable, trim | null | NIT |
-| `taxIdVerificationDigit` | string | nullable, trim | null | Dígito verificación |
-| `address` | string | nullable, trim | null | Dirección |
-| `city` | string | nullable, trim | null | Ciudad |
-| `phone` | string | nullable, trim | null | Teléfono |
+| `codigo` | string | required, unique, trim | - | Código (ej: "COP-001") |
+| `nombre` | string | required, trim | - | Nombre |
+| `nit` | string | nullable, trim | null | NIT |
+| `digitoVerificacion` | string | nullable, trim | null | Dígito verificación |
+| `direccion` | string | nullable, trim | null | Dirección |
+| `ciudad` | string | nullable, trim | null | Ciudad |
+| `telefono` | string | nullable, trim | null | Teléfono |
 | `email` | string | nullable, trim | null | Email |
-| `managingEntityId` | ObjectId → EntidadAdministradora | nullable, indexed | null | Empresa administradora |
-| `administratorName` | string | nullable, trim | null | Administrador interno (si no tiene entidad) |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
-| `usesBuildingManagement` | boolean | required | false | Usa sistema de gestión edificios |
-| `receivablesAccount` | string | nullable, trim | null | Cuenta contable cartera |
-| `advancesAccount` | string | nullable, trim | null | Cuenta anticipos |
-| `creditNotesAccount` | string | nullable, trim | null | Cuenta notas crédito |
-| `debitNotesAccount` | string | nullable, trim | null | Cuenta notas débito |
+| `entidadId` | ObjectId → EntidadAdministradora | nullable, indexed | null | Empresa administradora |
+| `nombreAdministrador` | string | nullable, trim | null | Administrador interno (si no tiene entidad) |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `usaGestionEdificios` | boolean | required | false | Usa sistema de gestión edificios |
+| `cuentaContableCartera` | string | nullable, trim | null | Cuenta contable cartera |
+| `cuentaAnticipos` | string | nullable, trim | null | Cuenta anticipos |
+| `cuentaDevoluciones` | string | nullable, trim | null | Cuenta notas crédito |
+| `cuentaNotasDebito` | string | nullable, trim | null | Cuenta notas débito |
 
-**Regla de negocio**: Si se asigna `managingEntityId` → se limpia `administratorName` y viceversa.
-**Índices únicos**: `code` (global)
+**Regla de negocio**: Si se asigna `entidadId` → se limpia `nombreAdministrador` y viceversa.
+**Índices únicos**: `codigo` (global)
 
 ---
 
@@ -108,23 +108,23 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `coPropertyId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
-| `code` | string | required, trim | - | Ej: "301", "Local 2" |
-| `block` | string | nullable, trim | null | Torre/bloque |
-| `zone` | string | nullable, trim | null | Zona |
-| `usage` | string | nullable, trim | null | Uso |
-| `costCentre` | string | nullable, trim | null | Centro de costos |
+| `copropiedadId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
+| `codigo` | string | required, trim | - | Ej: "301", "Local 2" |
+| `bloque` | string | nullable, trim | null | Torre/bloque |
+| `zona` | string | nullable, trim | null | Zona |
+| `uso` | string | nullable, trim | null | Uso |
+| ~~`costCentre`~~ | string | nullable, trim | null | **Movido** a `Copropiedad.centroCostoDefecto` — ya no vive en Inmueble |
 | `area` | number | nullable | null | Metros cuadrados |
-| `participationFactor` | number | nullable | null | Coeficiente participación (%) |
-| `holderId` | ObjectId → Tercero | nullable, indexed | null | Titular responsable |
-| `holderKind` | enum | required | 'propietario' | `'propietario'` \| `'arrendatario'` |
-| `holderResides` | boolean | required | true | Reside en el inmueble |
-| `collectionStatus` | enum | required | 'vigente' | `'vigente'` \| `'juridico'` \| `'dificil_recaudo'` |
-| `contactName` | string | nullable, trim | null | Persona de contacto |
-| `notes` | string | nullable, trim | null | Observaciones |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `coeficiente` | number | nullable | null | Coeficiente participación (%) |
+| `titularId` | ObjectId → Tercero | nullable, indexed | null | Titular responsable |
+| `tipoTitular` | enum | required | 'propietario' | `'propietario'` \| `'arrendatario'` |
+| `resideEnElInmueble` | boolean | required | true | Reside en el inmueble |
+| `estadoCartera` | enum | required | 'vigente' | `'vigente'` \| `'juridico'` \| `'dificil_recaudo'` |
+| `contacto` | string | nullable, trim | null | Persona de contacto |
+| `observaciones` | string | nullable, trim | null | Observaciones |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 
-**Índice compuesto único**: `{ coPropertyId: 1, code: 1 }` (código único por copropiedad)
+**Índice compuesto único**: `{ copropiedadId: 1, codigo: 1 }` (código único por copropiedad)
 
 ---
 
@@ -135,27 +135,27 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `coPropertyId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
-| `personType` | enum | required | 'natural' | `'natural'` \| `'juridica'` |
-| `name` | string | required, trim | - | Nombre / Razón social |
-| `identificationType` | string | nullable, trim | null | CC, NIT, CE, Pasaporte |
-| `identificationNumber` | string | nullable, trim | null | Número identificación |
-| `identificationVerificationDigit` | string | nullable, trim | null | Dígito verificación |
-| `email` | string | nullable, trim | null | Email (documentos, no login) |
-| `phone` | string | nullable, trim | null | Teléfono |
-| `address` | string | nullable, trim | null | Dirección |
-| `city` | string | nullable, trim | null | Ciudad |
-| `einvoiceIdentificationType` | string | nullable, trim | null | Facturación electrónica |
-| `einvoiceIdentificationNumber` | string | nullable, trim | null | |
-| `einvoiceVerificationDigit` | string | nullable, trim | null | |
-| `ciiuCode` | string | nullable, trim | null | Código CIIU |
-| `salesRegime` | string | nullable, trim | null | Régimen de ventas |
-| `fiscalResponsibilities` | string[] | required | [] | Responsabilidades fiscales |
-| `withholdsIncomeTax` | boolean | required | false | Retiene renta |
-| `withholdsLocalTax` | boolean | required | false | Retiene ICA |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `copropiedadId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
+| `tipoPersona` | enum | required | 'natural' | `'natural'` \| `'juridica'` |
+| `nombre` | string | required, trim | - | Nombre / Razón social (compuesto de `primerNombre`/`primerApellido`/etc. para `natural`, o `razonSocial` para `juridica`) |
+| `tipoIdentificacion` | string | nullable, trim | null | CC, NIT, CE, Pasaporte |
+| `numeroIdentificacion` | string | nullable, trim | null | Número identificación |
+| `digitoVerificacion` | string | nullable, trim | null | Dígito verificación |
+| `emails` | string[] | required | [] | Email(s) — documentos, no login |
+| `telefono` | string | nullable, trim | null | Teléfono |
+| `direccion` | string | nullable, trim | null | Dirección |
+| `ciudad` | string | nullable, trim | null | Ciudad |
+| `tipoIdentificacionFe` | string | nullable, trim | null | Facturación electrónica |
+| `numeroIdentificacionFe` | string | nullable, trim | null | |
+| `digitoVerificacionFe` | string | nullable, trim | null | |
+| `codigoCiiu` | string | nullable, trim | null | Código CIIU |
+| `regimenVentas` | string | nullable, trim | null | Régimen de ventas |
+| `responsabilidadesFiscales` | string[] | required | [] | Responsabilidades fiscales |
+| `retieneRenta` | boolean | required | false | Retiene renta |
+| `retieneIca` | boolean | required | false | Retiene ICA |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 
-**Índice parcial único**: `{ coPropertyId: 1, identificationNumber: 1 }` (donde identificationNumber es string)
+**Índice parcial único**: `{ copropiedadId: 1, numeroIdentificacion: 1 }` (donde numeroIdentificacion es string)
 
 ---
 
@@ -168,9 +168,9 @@
 |---|---|---|---|---|
 | `firebaseUid` | string | required, unique, trim | - | UID Firebase (o `pendiente:<email>` antes del 1er login) |
 | `email` | string | required, unique, trim, lowercase | - | Email |
-| `fullName` | string | required, trim | - | Nombre completo |
-| `isPlatformAdmin` | boolean | required | false | Administrador de plataforma |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `nombreCompleto` | string | required, trim | - | Nombre completo |
+| `esAdministradorPlataforma` | boolean | required | false | Administrador de plataforma |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 
 ---
 
@@ -182,17 +182,17 @@
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
 | `accountId` | ObjectId → Account | required, indexed | - | FK usuario |
-| `scope` | enum | required | - | `'copropiedad'` \| `'entidad'` |
-| `coPropertyId` | ObjectId → Copropiedad | nullable, indexed | null | FK copropiedad (scope='copropiedad') |
-| `entidadId` | ObjectId → EntidadAdministradora | nullable, indexed | null | FK entidad (scope='entidad') |
-| `permissions` | string[] | required | [] | Permisos CASL (ej: `facturas.anular`) |
-| `status` | enum | required | 'active' | `'active'` \| `'inactive'` |
+| `alcance` | enum | required | - | `'copropiedad'` \| `'entidad'` |
+| `copropiedadId` | ObjectId → Copropiedad | nullable, indexed | null | FK copropiedad (alcance='copropiedad') |
+| `entidadId` | ObjectId → EntidadAdministradora | nullable, indexed | null | FK entidad (alcance='entidad') |
+| `permisos` | string[] | required | [] | Permisos CASL (ej: `facturas.anular`) |
+| `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 
 **Índices parciales únicos**:
-- `{ accountId: 1, coPropertyId: 1 }` donde scope='copropiedad'
-- `{ accountId: 1, entidadId: 1 }` donde scope='entidad'
+- `{ accountId: 1, copropiedadId: 1 }` donde alcance='copropiedad'
+- `{ accountId: 1, entidadId: 1 }` donde alcance='entidad'
 
-**Hook pre-validate**: Asegura que scope coincida con la presencia del ID correcto.
+**Hook pre-validate**: Asegura que alcance coincida con la presencia del ID correcto.
 
 ---
 
@@ -203,17 +203,17 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `coPropertyId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
-| `name` | string | required, trim | - | Nombre del concepto |
-| `kind` | enum | required | 'otro' | `'administracion'` \| `'intereses'` \| `'otro'` |
-| `taxRate` | number | required, min:0, max:100 | 0 | Tasa IVA (%) |
-| `sortOrder` | number | required | 100 | Orden visualización |
-| `accountingIncomeAccount` | string | nullable, trim | null | Cuenta contable ingreso |
-| `active` | boolean | required | true | `false` = retirado (no eliminado) |
+| `copropiedadId` | ObjectId → Copropiedad | required, indexed | - | FK tenant |
+| `nombre` | string | required, trim | - | Nombre del concepto |
+| `tipo` | enum | required | 'otro' | `'administracion'` \| `'intereses'` \| `'otro'` |
+| `tasaImpuesto` | number | required, min:0, max:100 | 0 | Tasa IVA (%) |
+| `orden` | number | required | 100 | Orden visualización |
+| ~~`accountingIncomeAccount`~~ | string | nullable, trim | null | **Reestructurado** — reemplazado por `cuentaDebitoId`/`cuentaCreditoId`/`cuentaImpuestoId` (ObjectId → CuentaContable), no un solo string |
+| ~~`active`~~ | boolean | required | true | **No existe en el schema actual** — no hay campo de baja/reactivación en ConceptoCobro hoy; solo `sistema` (marca si el cargo fue creado automáticamente) |
 
 **Índices únicos**:
-- `{ coPropertyId: 1, name: 1 }` (nombre único por copropiedad)
-- `{ coPropertyId: 1, kind: 1 }` donde kind ∈ ['administracion', 'intereses'] (máximo uno de cada tipo)
+- `{ copropiedadId: 1, nombre: 1 }` (nombre único por copropiedad)
+- `{ copropiedadId: 1, tipo: 1 }` donde tipo ∈ ['administracion', 'intereses'] (máximo uno de cada tipo)
 
 ---
 
@@ -224,10 +224,10 @@
 
 | Campo | Tipo | Restricciones | Default | Descripción |
 |---|---|---|---|---|
-| `coPropertyId` | ObjectId → Copropiedad | required, indexed | - | Denormalizado de unidad |
+| `copropiedadId` | ObjectId → Copropiedad | required, indexed | - | Denormalizado de unidad |
 | `inmuebleId` | ObjectId → Inmueble | required, indexed | - | FK inmueble |
 | `conceptoId` | ObjectId → ConceptoCobro | required, indexed | - | FK concepto |
-| `amount` | number | required | 0 | Monto mensual |
+| `monto` | number | required | 0 | Monto mensual |
 
 **Índice único**: `{ inmuebleId: 1, conceptoId: 1 }`
 
@@ -256,22 +256,22 @@
 ```
 EntidadAdministradora (Empresa)
   │
-  ├──< Copropiedad (managingEntityId → EntidadAdministradora)
+  ├──< Copropiedad (entidadId → EntidadAdministradora)
   │      │
-  │      ├──< Inmueble (coPropertyId → Copropiedad)
+  │      ├──< Inmueble (copropiedadId → Copropiedad)
   │      │      │
   │      │      ├──< ValorRecurrente (inmuebleId → Inmueble)
-  │      │      └──> Tercero (holderId → Tercero)  [opcional]
+  │      │      └──> Tercero (titularId → Tercero)  [opcional]
   │      │
-  │      ├──< Tercero (coPropertyId → Copropiedad)
+  │      ├──< Tercero (copropiedadId → Copropiedad)
   │      │
-  │      ├──< ConceptoCobro (coPropertyId → Copropiedad)
+  │      ├──< ConceptoCobro (copropiedadId → Copropiedad)
   │      │      │
   │      │      └──< ValorRecurrente (conceptoId → ConceptoCobro)
   │      │
-  │      └──< Asignacion (coPropertyId → Copropiedad) [scope='copropiedad']
+  │      └──< Asignacion (copropiedadId → Copropiedad) [alcance='copropiedad']
   │
-  └──< Asignacion (entidadId → EntidadAdministradora) [scope='entidad']
+  └──< Asignacion (entidadId → EntidadAdministradora) [alcance='entidad']
 
 Account (Cuenta)
   │
@@ -461,7 +461,7 @@ Account (Cuenta)
   estadoCartera?: 'vigente' | 'juridico' | 'dificil_recaudo'
   contacto?: string                // max:120
   observaciones?: string           // max:2000
-  // coPropertyId viene del tenant context (no del body)
+  // copropiedadId viene del tenant context (no del body)
 }
 ```
 
@@ -533,13 +533,13 @@ Account (Cuenta)
 
 | Entidad | Campo | Unicidad | Mecanismo |
 |---|---|---|---|
-| EntidadAdministradora | `code` | Global | Índice unique MongoDB |
-| Copropiedad | `code` | Global | Índice unique MongoDB |
-| Inmueble | `code` | Por copropiedad | Índice compuesto unique |
-| Tercero | `identificationNumber` | Por copropiedad | Índice parcial unique |
-| ConceptoCobro | `name` | Por copropiedad | Índice unique |
-| ConceptoCobro | `kind=administracion` | Máx 1 por copropiedad | Índice parcial unique |
-| ConceptoCobro | `kind=intereses` | Máx 1 por copropiedad | Índice parcial unique |
+| EntidadAdministradora | `codigo` | Global | Índice unique MongoDB |
+| Copropiedad | `codigo` | Global | Índice unique MongoDB |
+| Inmueble | `codigo` | Por copropiedad | Índice compuesto unique |
+| Tercero | `numeroIdentificacion` | Por copropiedad | Índice parcial unique |
+| ConceptoCobro | `nombre` | Por copropiedad | Índice unique |
+| ConceptoCobro | `tipo=administracion` | Máx 1 por copropiedad | Índice parcial unique |
+| ConceptoCobro | `tipo=intereses` | Máx 1 por copropiedad | Índice parcial unique |
 
 **Los checks se hacen ANTES de la escritura** → `ConflictException` amigable.
 
@@ -555,7 +555,7 @@ Account (Cuenta)
 | Tercero | **SÍ** | `TenantContextService.resolveCoPropertyId()` via CLS |
 | ConceptoCobro | **SÍ** | `TenantContextService.resolveCoPropertyId()` via CLS |
 
-**Regla**: Nunca usar `findById(x)` sin `coPropertyId` para datos tenant-scoped.
+**Regla**: Nunca usar `findById(x)` sin `copropiedadId` para datos tenant-scoped.
 
 ### 7.3 Flujo de Provisionamiento de Usuario
 
@@ -563,7 +563,7 @@ Account (Cuenta)
 1. Verificar unicidad de email local
 2. Crear identidad Firebase → FirebaseUsuariosService.crear()
 3. Crear Account local con el firebaseUid
-4. Si NO es admin plataforma → crear Asignacion (scope + permisos)
+4. Si NO es admin plataforma → crear Asignacion (alcance + permisos)
 5. Escribir registro de auditoría
 ```
 
@@ -572,7 +572,7 @@ Account (Cuenta)
 ### 7.4 Flujo de Desactivación de Usuario
 
 ```
-1. Actualizar Account: status = 'inactive'
+1. Actualizar Account: estado = 'inactive'
 2. FirebaseUsuariosService.establecerHabilitado(uid, false)
 3. Verificación inmediata: verifyIdToken(token, { checkRevoked: true })
 ```
@@ -584,8 +584,8 @@ Account (Cuenta)
 
 ```
 acceso = UNION(
-  Asignaciones directas (scope='copropiedad'),
-  Asignaciones por entidad (scope='entidad') → todas las copropiedades activas de esa entidad
+  Asignaciones directas (alcance='copropiedad'),
+  Asignaciones por entidad (alcance='entidad') → todas las copropiedades activas de esa entidad
 )
 ```
 
@@ -610,14 +610,14 @@ acceso = UNION(
 
 ### 7.8 Relación Copropiedad ↔ Administrador
 
-- Si se asigna `managingEntityId` → se limpia `administratorName`
-- Si se asigna `administratorName` → se limpia `managingEntityId`
+- Si se asigna `entidadId` → se limpia `nombreAdministrador`
+- Si se asigna `nombreAdministrador` → se limpia `entidadId`
 - El administrador real siempre es un Account con Asignacion
 
 ### 7.9 Restricciones de ConceptoCobro
 
-- `kind='administracion'` → cobro recurrente base del ciclo de facturación
-- `kind='intereses'` →计算 desde saldos vencidos
+- `tipo='administracion'` → cobro recurrente base del ciclo de facturación
+- `tipo='intereses'` → calculado desde saldos vencidos
 - Máximo uno de cada tipo por copropiedad (índice parcial unique + check en servicio)
 
 ---
@@ -1023,7 +1023,7 @@ type ResumenPanelControl = {
 3. **Mapper pattern**: Funciones puras en `<module>.mapper.ts` traducen Mongoose → contrato español.
 4. **Fire-and-forget Firebase**: `FirebaseUsuariosService` es la ÚNICA excepción que escribe a Firebase.
 5. **Code splitting**: Todas las páginas son `React.lazy()` con `Suspense`.
-6. **Separación idioma**: Código/identificadores en inglés, contrato de API y UI en español.
+6. **Separación idioma**: Persistencia (schemas de Mongoose) y contrato de API/UI, ambos en español; código/identificadores TypeScript en inglés. Ver "the contract law" en `CLAUDE.md`.
 7. **Validación dual**: Frontend HTML5 + Backend class-validator (el backend es el gate real).
 8. **Multi-tenancy CLS**: `X-CoProperty-Id` header → CLS → TenantContextService → queries.
 
@@ -1043,7 +1043,7 @@ type ResumenPanelControl = {
 - 5 Conceptos de Cobro base por copropiedad
 - 60 Inmuebles en la primera (para paginación), 10 en las demás
 - Terceros (propietarios) con datos realistas por inmueble
-- Idempotente: keyed by code, nunca sobrescribe
+- Idempotente: keyed by codigo, nunca sobrescribe
 
 ---
 

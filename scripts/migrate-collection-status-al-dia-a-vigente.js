@@ -1,19 +1,20 @@
 // Run with: node scripts/migrate-collection-status-al-dia-a-vigente.js
 // (from the backend package root, with a .env file present — see below)
 //
-// WHY THIS EXISTS: `Inmueble.collectionStatus` was renamed from 'al_dia' to
-// 'vigente' — the old name read as "no mora", but this status only ever
-// meant "not escalated to jurídico or difícil recaudo"; a unit a few days
-// overdue could already be `al_dia` under the old name, which misled anyone
-// reading it at face value. See `inmueble.schema.ts`'s own docblock on
-// `collectionStatus` for the corrected meaning.
+// WHY THIS EXISTS: `Inmueble.estadoCartera` (English `collectionStatus` at
+// the time this script was written) was renamed from 'al_dia' to 'vigente'
+// — the old name read as "no mora", but this status only ever meant "not
+// escalated to jurídico or difícil recaudo"; a unit a few days overdue
+// could already be `al_dia` under the old name, which misled anyone reading
+// it at face value. See `inmueble.schema.ts`'s own docblock on
+// `estadoCartera` for the corrected meaning.
 //
 // Every document written BEFORE this change still carries the literal
 // string 'al_dia', which the new Mongoose enum (['vigente', 'juridico',
 // 'dificil_recaudo']) no longer accepts — this one-time-updates those rows
 // in place, same value, new name.
 //
-// SAFE TO RUN MULTIPLE TIMES: only touches documents where collectionStatus
+// SAFE TO RUN MULTIPLE TIMES: only touches documents where estadoCartera
 // is still 'al_dia'; a second run matches nothing. No-op against a fresh/
 // empty database.
 'use strict';
@@ -52,12 +53,12 @@ async function run() {
   const resultado = await db
     .collection('inmuebles')
     .updateMany(
-      { collectionStatus: 'al_dia' },
-      { $set: { collectionStatus: 'vigente' } },
+      { estadoCartera: 'al_dia' },
+      { $set: { estadoCartera: 'vigente' } },
     );
 
   console.log(
-    `inmuebles.collectionStatus: ${resultado.modifiedCount} actualizados de 'al_dia' a 'vigente'`,
+    `inmuebles.estadoCartera: ${resultado.modifiedCount} actualizados de 'al_dia' a 'vigente'`,
   );
 
   await mongoose.disconnect();
