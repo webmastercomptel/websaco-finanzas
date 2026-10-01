@@ -131,6 +131,14 @@ maintainer works.
 | Document active/voided state | `estado` | `status` — enum values `'activo'`/`'anulado'` (or `'emitida'`/`'anulada'` for Factura/NotaDebito, `'activa'`/`'revertida'` for AplicacionCartera) |
 | Cartera line-item accounting routing (FacturaLinea, SaldoInicialLinea) | `cuentaCartera` / `cuentaIngreso` / `tipoConcepto` | `accountingReceivableAccount` / `accountingIncomeAccount` / `conceptKind` |
 | Cross-document application reference (AplicacionCartera) | `documentoId` / `montoAplicado` | `documentId` / `amountApplied` |
+| Document-type admin row's human label (ConsecutivoDocumento, ResolucionFacturacion) | `nombreDocumento` | `displayName` |
+| Accounting voucher code (ConsecutivoDocumento, ResolucionFacturacion) | `comprobanteContable` | `accountingVoucherCode` — matches the DTO field name already in use (`CrearConsecutivoDto.comprobanteContable` etc.) |
+| Reserved DIAN electronic-invoicing number (ConsecutivoDocumento, ResolucionFacturacion) | `numeroElectronico` | `electronicNumber` |
+| Resolución's own authorisation number / numeric range / validity window | `numeroResolucion` / `rangoDesde` / `rangoHasta` / `vigenciaDesde` / `vigenciaHasta` | `resolutionNumber` / `rangeFrom` / `rangeTo` / `validFrom` / `validUntil` |
+| Outbox row snapshot of the tenant's own tax id (PublicacionLote) | `nit` | `taxId` — matches `Copropiedad.nit`, the field it snapshots |
+| Outbox row's retry/queue bookkeeping (PublicacionLote) | `estado` / `reintentable` / `intentos` / `proximoIntentoEn` / `reclamadoEn` / `tokenReclamo` / `ultimoCodigoEstado` / `ultimoError` / `enviadoEn` | `status` / `retryable` / `attempts` / `nextAttemptAt` / `claimedAt` / `claimToken` / `lastStatusCode` / `lastError` / `sentAt` |
+| Opaque two-phase storage pointer (PresentacionDocumento, and forwarded verbatim through Recibo/NotaCredito/NotaDebito/NotaContable/NotaAnticipo/PublicacionLote contracts) | *(stays English — established exception)* | `objectPath` / `generatedAt` are NOT translated: this exact pair is already baked untranslated into six already-migrated financial-document modules' own contracts (`contracts/index.ts`) and mappers; renaming now would mean touching all of them for no benefit. `PresentacionDocumento.plantillaVersion` → `versionPlantilla` **is** renamed (narrower blast radius, not part of that frozen contract) |
+| Opaque pdfmake/print blob (PlantillaDocumento.docDefinition, Factura.printSnapshot) | *(stays English — established exception)* | Both fields are explicitly cross-referenced in each other's docblocks as "same pragmatic choice" — an internal, never-queried snapshot, not domain vocabulary. Don't translate one without the other, and don't translate either without updating both docblocks |
 
 **Resolved — the structural/duck-typed contracts below are now consistent, not a pending seam:**
 
