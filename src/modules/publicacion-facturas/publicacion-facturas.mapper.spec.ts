@@ -2,9 +2,9 @@ import { construirPayload } from './publicacion-facturas.mapper';
 
 describe('construirPayload', () => {
   const fila = {
-    taxId: '900123456',
+    nit: '900123456',
     loteId: 'lote-1',
-    invoiceNumbers: ['FV-3', 'FV-1', 'FV-2'],
+    numerosFactura: ['FV-3', 'FV-1', 'FV-2'],
   };
   const url = 'https://storage.googleapis.com/bucket/lote-1.pdf?signed=1';
   const expiresAt = new Date('2026-09-24T12:00:00.000Z');
@@ -25,7 +25,7 @@ describe('construirPayload', () => {
     });
   });
 
-  it('preserva el orden de invoiceNumbers sin reordenarlo', () => {
+  it('preserva el orden de numerosFactura sin reordenarlo', () => {
     const payload = construirPayload(fila, url, expiresAt);
 
     expect(payload.facturas.map((f) => f.numeroFactura)).toEqual([

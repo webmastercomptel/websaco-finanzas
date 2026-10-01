@@ -20,7 +20,7 @@ export type EstadoPublicacionLote = (typeof ESTADOS_PUBLICACION_LOTE)[number];
  * → `procesar` → `liberar`) and `design.md`'s "State Machine" section for the
  * full transition diagram.
  *
- * `taxId`/`invoiceNumbers`/`objectPath` are snapshotted at enqueue time and
+ * `nit`/`numerosFactura`/`objectPath` are snapshotted at enqueue time and
  * never re-read on retry — only the signed read URL is fresh on every
  * attempt (`presentacion_documento`'s FV row is write-once, so `objectPath`
  * cannot drift underneath a pending retry).
@@ -43,15 +43,15 @@ export class PublicacionLote {
   })
   loteId: Types.ObjectId;
 
-  /** Snapshot of `Copropiedad.taxId` at enqueue time — WITHOUT the
+  /** Snapshot of `Copropiedad.nit` at enqueue time — WITHOUT the
    *  verification digit, same convention as the schema it is copied from. */
   @Prop({ type: String, required: true, trim: true })
-  taxId: string;
+  nit: string;
 
   /** Snapshot of `numerosFactura` from the triggering event, in PDF page
    *  order — see `LoteFacturasPdfConfirmadoEvent.numerosFactura`. */
   @Prop({ type: [String], required: true })
-  invoiceNumbers: string[];
+  numerosFactura: string[];
 
   /** Snapshot of the lote's combined-PDF storage path. */
   @Prop({ type: String, required: true })
@@ -63,49 +63,49 @@ export class PublicacionLote {
     enum: ESTADOS_PUBLICACION_LOTE,
     default: 'pendiente',
   })
-  status: EstadoPublicacionLote;
+  estado: EstadoPublicacionLote;
 
   /** Whether this row remains eligible for a future retry. `false` marks a
    *  TERMINAL `fallido` — either a non-retriable response code (401/403) or
    *  a retriable one that exhausted `WEBSACO3_PUBLICACION_MAX_INTENTOS`. */
   @Prop({ type: Boolean, required: true, default: true })
-  retryable: boolean;
+  reintentable: boolean;
 
   /** Incremented AT CLAIM TIME (`reclamar`), not after a send completes — so
    *  a crash loop that never reaches `liberar` still counts toward the max
    *  and eventually reaches terminal `fallido` instead of retrying forever. */
   @Prop({ type: Number, required: true, default: 0 })
-  attempts: number;
+  intentos: number;
 
   /** When this row next becomes claimable. `null` once the row is final
    *  (`enviado`, or terminal `fallido`). */
   @Prop({ type: Date, default: null })
-  nextAttemptAt: Date | null;
+  proximoIntentoEn: Date | null;
 
   /** Set by `reclamar` when this row is claimed by an in-flight attempt;
    *  cleared by `liberar`. A stale `enviando` row (older than
    *  `CLAIM_TTL_MS`) is re-claimable — see the state machine's crash-recovery
    *  branch. */
   @Prop({ type: Date, default: null })
-  claimedAt: Date | null;
+  reclamadoEn: Date | null;
 
   /** Per-claim token, checked by `liberar`'s conditional update so a stale
    *  re-claim can never have its outcome overwritten by the claim it
    *  superseded. */
   @Prop({ type: String, default: null })
-  claimToken: string | null;
+  tokenReclamo: string | null;
 
   @Prop({ type: Number, default: null })
-  lastStatusCode: number | null;
+  ultimoCodigoEstado: number | null;
 
   /** A SHORT CODE only (e.g. `"HTTP 422"`, `"timeout"`, `"url-firmada"`) —
    *  NEVER a URL or a response body. `urlSigned` must never reach this field
    *  or any log line. */
   @Prop({ type: String, default: null })
-  lastError: string | null;
+  ultimoError: string | null;
 
   @Prop({ type: Date, default: null })
-  sentAt: Date | null;
+  enviadoEn: Date | null;
 }
 
 export const PublicacionLoteSchema =
@@ -116,10 +116,10 @@ PublicacionLoteSchema.index(
   { unique: true, name: 'unico_publicacion_por_lote' },
 );
 PublicacionLoteSchema.index(
-  { status: 1, retryable: 1, nextAttemptAt: 1 },
+  { estado: 1, reintentable: 1, proximoIntentoEn: 1 },
   { name: 'escaneo_reintentos' },
 );
 PublicacionLoteSchema.index(
-  { status: 1, claimedAt: 1 },
+  { estado: 1, reclamadoEn: 1 },
   { name: 'reclamos_vencidos' },
 );

@@ -62,18 +62,18 @@ const FILA_BASE: FilaReclamada = {
   _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
   copropiedadId: new Types.ObjectId('507f1f77bcf86cd799439011'),
   loteId: new Types.ObjectId('507f1f77bcf86cd799439012'),
-  taxId: '900123456',
-  invoiceNumbers: ['FV-1', 'FV-2'],
+  nit: '900123456',
+  numerosFactura: ['FV-1', 'FV-2'],
   objectPath: 'coproprietats/cop-1/lotes/lote-1.pdf',
-  status: 'enviando',
-  retryable: true,
-  attempts: 1,
-  nextAttemptAt: null,
-  claimedAt: new Date(),
-  claimToken: 'token-1',
-  lastStatusCode: null,
-  lastError: null,
-  sentAt: null,
+  estado: 'enviando',
+  reintentable: true,
+  intentos: 1,
+  proximoIntentoEn: null,
+  reclamadoEn: new Date(),
+  tokenReclamo: 'token-1',
+  ultimoCodigoEstado: null,
+  ultimoError: null,
+  enviadoEn: null,
 };
 
 const COPROPERTY_ID = '507f1f77bcf86cd799439011';
@@ -147,12 +147,12 @@ describe('PublicacionFacturasService.encolar', () => {
     ];
     expect(opciones).toEqual({ upsert: true });
     expect(update.$setOnInsert).toMatchObject({
-      taxId: '900123456',
-      invoiceNumbers: ['FV-1', 'FV-2'],
+      nit: '900123456',
+      numerosFactura: ['FV-1', 'FV-2'],
       objectPath: EVENTO.objectPath,
-      status: 'pendiente',
-      retryable: true,
-      attempts: 0,
+      estado: 'pendiente',
+      reintentable: true,
+      intentos: 0,
     });
     expect(filtro).toHaveProperty('loteId');
   });
@@ -198,7 +198,7 @@ describe('PublicacionFacturasService.encolar', () => {
 });
 
 describe('PublicacionFacturasService.reclamar', () => {
-  it('arma el filtro/update atómico exacto, incluyendo la rama de enviando vencido y el guard attempts<max', async () => {
+  it('arma el filtro/update atómico exacto, incluyendo la rama de enviando vencido y el guard intentos<max', async () => {
     const filas = mockFilas();
     const service = new PublicacionFacturasService(
       filas as never,
@@ -217,21 +217,21 @@ describe('PublicacionFacturasService.reclamar', () => {
       Record<string, unknown>,
     ];
 
-    expect(filtro.attempts).toEqual({ $lt: 6 });
+    expect(filtro.intentos).toEqual({ $lt: 6 });
     const or = filtro.$or as Record<string, unknown>[];
     expect(or).toHaveLength(2);
     expect(or[0]).toMatchObject({
-      status: { $in: ['pendiente', 'fallido'] },
-      retryable: true,
+      estado: { $in: ['pendiente', 'fallido'] },
+      reintentable: true,
     });
-    expect(or[0]).toHaveProperty('nextAttemptAt');
-    expect(or[1]).toMatchObject({ status: 'enviando' });
-    expect(or[1]).toHaveProperty('claimedAt');
+    expect(or[0]).toHaveProperty('proximoIntentoEn');
+    expect(or[1]).toMatchObject({ estado: 'enviando' });
+    expect(or[1]).toHaveProperty('reclamadoEn');
 
-    expect((update.$set as Record<string, unknown>).status).toBe('enviando');
-    expect(update.$inc).toEqual({ attempts: 1 });
+    expect((update.$set as Record<string, unknown>).estado).toBe('enviando');
+    expect(update.$inc).toEqual({ intentos: 1 });
     expect(opciones).toMatchObject({
-      sort: { nextAttemptAt: 1 },
+      sort: { proximoIntentoEn: 1 },
       returnDocument: 'after',
     });
   });
@@ -247,24 +247,24 @@ describe('PublicacionFacturasService.reclamar', () => {
 // `backend/CLAUDE.md`; no se levanta un MongoDB real para esto.
 describe('PublicacionFacturasService.reclamar — exclusividad y ventana de reclamo vencido', () => {
   /** Replica el predicado exacto de `reclamar` (service.ts) contra UNA fila
-   *  en memoria: `attempts < max` Y (pendiente/fallido retryable due, O
-   *  enviando con claimedAt <= vencido). */
+   *  en memoria: `intentos < max` Y (pendiente/fallido reintentable due, O
+   *  enviando con reclamadoEn <= vencido). */
   function coincideFiltroDeReclamo(
     fila: FilaReclamada,
     max: number,
     ahora: Date,
     vencido: Date,
   ): boolean {
-    if (!(fila.attempts < max)) return false;
+    if (!(fila.intentos < max)) return false;
     const ramaDisponible =
-      (fila.status === 'pendiente' || fila.status === 'fallido') &&
-      fila.retryable === true &&
-      fila.nextAttemptAt !== null &&
-      fila.nextAttemptAt.getTime() <= ahora.getTime();
+      (fila.estado === 'pendiente' || fila.estado === 'fallido') &&
+      fila.reintentable === true &&
+      fila.proximoIntentoEn !== null &&
+      fila.proximoIntentoEn.getTime() <= ahora.getTime();
     const ramaEnviandoVencido =
-      fila.status === 'enviando' &&
-      fila.claimedAt !== null &&
-      fila.claimedAt.getTime() <= vencido.getTime();
+      fila.estado === 'enviando' &&
+      fila.reclamadoEn !== null &&
+      fila.reclamadoEn.getTime() <= vencido.getTime();
     return ramaDisponible || ramaEnviandoVencido;
   }
 
@@ -276,22 +276,22 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
     let intentoToken = 0;
     return {
       estadoActual: () => estado,
-      findOneAndUpdate: jest.fn((filtro: { attempts: { $lt: number } }) => ({
+      findOneAndUpdate: jest.fn((filtro: { intentos: { $lt: number } }) => ({
         lean: () => ({
           exec: () => {
             const ahora = new Date();
             const vencido = new Date(ahora.getTime() - CLAIM_TTL_MS);
-            const max = filtro.attempts.$lt;
+            const max = filtro.intentos.$lt;
             if (!coincideFiltroDeReclamo(estado, max, ahora, vencido)) {
               return Promise.resolve(null);
             }
             intentoToken += 1;
             estado = {
               ...estado,
-              status: 'enviando',
-              claimedAt: ahora,
-              claimToken: `token-${intentoToken}`,
-              attempts: estado.attempts + 1,
+              estado: 'enviando',
+              reclamadoEn: ahora,
+              tokenReclamo: `token-${intentoToken}`,
+              intentos: estado.intentos + 1,
             };
             return Promise.resolve({ ...estado });
           },
@@ -303,12 +303,12 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
   it('una segunda llamada sobre la misma fila ya reclamada (enviando, no vencida) devuelve null', async () => {
     const filaDisponible: FilaReclamada = {
       ...FILA_BASE,
-      status: 'pendiente',
-      retryable: true,
-      attempts: 0,
-      nextAttemptAt: new Date(Date.now() - 1_000),
-      claimedAt: null,
-      claimToken: null,
+      estado: 'pendiente',
+      reintentable: true,
+      intentos: 0,
+      proximoIntentoEn: new Date(Date.now() - 1_000),
+      reclamadoEn: null,
+      tokenReclamo: null,
     };
     const filas = mockFilasSimuladas(filaDisponible);
     const service = new PublicacionFacturasService(
@@ -322,7 +322,7 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
     const segundaReclamada = await service.reclamar(6);
 
     expect(primeraReclamada).not.toBeNull();
-    expect(primeraReclamada?.status).toBe('enviando');
+    expect(primeraReclamada?.estado).toBe('enviando');
     expect(segundaReclamada).toBeNull();
   });
 
@@ -334,10 +334,10 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
 
     const filaVieja: FilaReclamada = {
       ...FILA_BASE,
-      status: 'enviando',
-      claimedAt: new Date(vencidoLimite.getTime() - 1), // 1ms más viejo: vencido
-      claimToken: 'reclamo-viejo',
-      attempts: 1,
+      estado: 'enviando',
+      reclamadoEn: new Date(vencidoLimite.getTime() - 1), // 1ms más viejo: vencido
+      tokenReclamo: 'reclamo-viejo',
+      intentos: 1,
     };
     const filas = mockFilasSimuladas(filaVieja);
     const service = new PublicacionFacturasService(
@@ -350,12 +350,12 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
     const reclamada = await service.reclamar(6);
 
     expect(reclamada).not.toBeNull();
-    expect(reclamada?.status).toBe('enviando');
+    expect(reclamada?.estado).toBe('enviando');
 
     jest.useRealTimers();
   });
 
-  it('el borde exacto del TTL (claimedAt == vencido) es reclamable; 1ms más nuevo no lo es', async () => {
+  it('el borde exacto del TTL (reclamadoEn == vencido) es reclamable; 1ms más nuevo no lo es', async () => {
     jest.useFakeTimers();
     const ahoraFija = new Date('2026-01-01T00:10:00.000Z');
     jest.setSystemTime(ahoraFija);
@@ -363,10 +363,10 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
 
     const filaJustoEnElLimite: FilaReclamada = {
       ...FILA_BASE,
-      status: 'enviando',
-      claimedAt: vencidoLimite, // == vencido → $lte lo incluye
-      claimToken: 'limite-exacto',
-      attempts: 1,
+      estado: 'enviando',
+      reclamadoEn: vencidoLimite, // == vencido → $lte lo incluye
+      tokenReclamo: 'limite-exacto',
+      intentos: 1,
     };
     const filasEnLimite = mockFilasSimuladas(filaJustoEnElLimite);
     const serviceEnLimite = new PublicacionFacturasService(
@@ -379,10 +379,10 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
 
     const filaMasReciente: FilaReclamada = {
       ...FILA_BASE,
-      status: 'enviando',
-      claimedAt: new Date(vencidoLimite.getTime() + 1), // 1ms más nuevo: no vencido
-      claimToken: 'mas-reciente',
-      attempts: 1,
+      estado: 'enviando',
+      reclamadoEn: new Date(vencidoLimite.getTime() + 1), // 1ms más nuevo: no vencido
+      tokenReclamo: 'mas-reciente',
+      intentos: 1,
     };
     const filasReciente = mockFilasSimuladas(filaMasReciente);
     const serviceReciente = new PublicacionFacturasService(
@@ -420,15 +420,15 @@ describe('PublicacionFacturasService.procesar', () => {
         service as unknown as ServicioConPrivados
       ).procesar(FILA_BASE, 6);
 
-      expect(desenlace.status).toBe('enviado');
-      expect(desenlace.retryable).toBe(false);
-      expect(desenlace.lastStatusCode).toBe(status);
-      expect(desenlace.sentAt).toBeInstanceOf(Date);
+      expect(desenlace.estado).toBe('enviado');
+      expect(desenlace.reintentable).toBe(false);
+      expect(desenlace.ultimoCodigoEstado).toBe(status);
+      expect(desenlace.enviadoEn).toBeInstanceOf(Date);
     },
   );
 
   it.each([422, 502])(
-    'HTTP %i clasifica como fallido reintentable (attempts < max)',
+    'HTTP %i clasifica como fallido reintentable (intentos < max)',
     async (status) => {
       global.fetch = jest.fn().mockResolvedValue({ status });
       const service = new PublicacionFacturasService(
@@ -440,12 +440,12 @@ describe('PublicacionFacturasService.procesar', () => {
 
       const desenlace = await (
         service as unknown as ServicioConPrivados
-      ).procesar({ ...FILA_BASE, attempts: 1 }, 6);
+      ).procesar({ ...FILA_BASE, intentos: 1 }, 6);
 
-      expect(desenlace.status).toBe('fallido');
-      expect(desenlace.retryable).toBe(true);
-      expect(desenlace.nextAttemptAt).toBeInstanceOf(Date);
-      expect(desenlace.lastError).toBe(`HTTP ${status}`);
+      expect(desenlace.estado).toBe('fallido');
+      expect(desenlace.reintentable).toBe(true);
+      expect(desenlace.proximoIntentoEn).toBeInstanceOf(Date);
+      expect(desenlace.ultimoError).toBe(`HTTP ${status}`);
     },
   );
 
@@ -460,11 +460,11 @@ describe('PublicacionFacturasService.procesar', () => {
 
     const desenlace = await (
       service as unknown as ServicioConPrivados
-    ).procesar({ ...FILA_BASE, attempts: 6 }, 6);
+    ).procesar({ ...FILA_BASE, intentos: 6 }, 6);
 
-    expect(desenlace.status).toBe('fallido');
-    expect(desenlace.retryable).toBe(false);
-    expect(desenlace.nextAttemptAt).toBeNull();
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(false);
+    expect(desenlace.proximoIntentoEn).toBeNull();
   });
 
   it.each([401, 403])(
@@ -482,9 +482,9 @@ describe('PublicacionFacturasService.procesar', () => {
         service as unknown as ServicioConPrivados
       ).procesar(FILA_BASE, 6);
 
-      expect(desenlace.status).toBe('fallido');
-      expect(desenlace.retryable).toBe(false);
-      expect(desenlace.lastError).toBe(`HTTP ${status}`);
+      expect(desenlace.estado).toBe('fallido');
+      expect(desenlace.reintentable).toBe(false);
+      expect(desenlace.ultimoError).toBe(`HTTP ${status}`);
     },
   );
 
@@ -502,11 +502,11 @@ describe('PublicacionFacturasService.procesar', () => {
 
     const desenlace = await (
       service as unknown as ServicioConPrivados
-    ).procesar({ ...FILA_BASE, attempts: 1 }, 6);
+    ).procesar({ ...FILA_BASE, intentos: 1 }, 6);
 
-    expect(desenlace.status).toBe('fallido');
-    expect(desenlace.retryable).toBe(true);
-    expect(desenlace.lastError).toBe('timeout');
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(true);
+    expect(desenlace.ultimoError).toBe('timeout');
   });
 
   it('un error de red clasifica como fallido reintentable', async () => {
@@ -520,11 +520,11 @@ describe('PublicacionFacturasService.procesar', () => {
 
     const desenlace = await (
       service as unknown as ServicioConPrivados
-    ).procesar({ ...FILA_BASE, attempts: 1 }, 6);
+    ).procesar({ ...FILA_BASE, intentos: 1 }, 6);
 
-    expect(desenlace.status).toBe('fallido');
-    expect(desenlace.retryable).toBe(true);
-    expect(desenlace.lastError).toBe('red');
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(true);
+    expect(desenlace.ultimoError).toBe('red');
   });
 
   it('un fallo generando la URL firmada clasifica como fallido reintentable sin llamar a fetch', async () => {
@@ -543,11 +543,11 @@ describe('PublicacionFacturasService.procesar', () => {
 
     const desenlace = await (
       service as unknown as ServicioConPrivados
-    ).procesar({ ...FILA_BASE, attempts: 1 }, 6);
+    ).procesar({ ...FILA_BASE, intentos: 1 }, 6);
 
-    expect(desenlace.status).toBe('fallido');
-    expect(desenlace.retryable).toBe(true);
-    expect(desenlace.lastError).toBe('url-firmada');
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(true);
+    expect(desenlace.ultimoError).toBe('url-firmada');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -564,7 +564,7 @@ describe('PublicacionFacturasService.procesar', () => {
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
-      { ...FILA_BASE, attempts: 1 },
+      { ...FILA_BASE, intentos: 1 },
       6,
     );
 
@@ -622,7 +622,7 @@ describe('PublicacionFacturasService.procesar', () => {
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
-      { ...FILA_BASE, attempts: 1 },
+      { ...FILA_BASE, intentos: 1 },
       6,
     );
 
@@ -644,7 +644,7 @@ describe('PublicacionFacturasService.procesar', () => {
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
-      { ...FILA_BASE, attempts: 1 },
+      { ...FILA_BASE, intentos: 1 },
       6,
     );
 
@@ -670,7 +670,7 @@ describe('PublicacionFacturasService.procesar', () => {
 
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
     await (service as unknown as ServicioConPrivados).procesar(
-      { ...FILA_BASE, attempts: 2 },
+      { ...FILA_BASE, intentos: 2 },
       6,
     );
 
@@ -747,18 +747,18 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
           exec: () => {
             const ahora = new Date();
             const vencido = new Date(ahora.getTime() - CLAIM_TTL_MS);
-            const max = (filtro.attempts as { $gte: number }).$gte;
-            const esLaRamaDeEnviandoVencido = filtro.status === 'enviando';
+            const max = (filtro.intentos as { $gte: number }).$gte;
+            const esLaRamaDeEnviandoVencido = filtro.estado === 'enviando';
             let modificados = 0;
             for (const doc of estado) {
               const coincide = esLaRamaDeEnviandoVencido
-                ? doc.status === 'enviando' &&
-                  doc.claimedAt !== null &&
-                  (doc.claimedAt as Date).getTime() <= vencido.getTime() &&
-                  (doc.attempts as number) >= max
-                : (doc.status === 'pendiente' || doc.status === 'fallido') &&
-                  doc.retryable === true &&
-                  (doc.attempts as number) >= max;
+                ? doc.estado === 'enviando' &&
+                  doc.reclamadoEn !== null &&
+                  (doc.reclamadoEn as Date).getTime() <= vencido.getTime() &&
+                  (doc.intentos as number) >= max
+                : (doc.estado === 'pendiente' || doc.estado === 'fallido') &&
+                  doc.reintentable === true &&
+                  (doc.intentos as number) >= max;
               if (coincide) {
                 Object.assign(doc, update.$set);
                 modificados += 1;
@@ -779,17 +779,17 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
 
     const filaAgotada = {
       ...FILA_BASE,
-      status: 'enviando',
-      claimedAt: new Date(vencidoLimite.getTime() - 1_000),
-      attempts: 6, // >= max: debe cerrarse
-      retryable: true,
+      estado: 'enviando',
+      reclamadoEn: new Date(vencidoLimite.getTime() - 1_000),
+      intentos: 6, // >= max: debe cerrarse
+      reintentable: true,
     };
     const filaDentroDelPresupuesto = {
       ...FILA_BASE,
-      status: 'enviando',
-      claimedAt: new Date(vencidoLimite.getTime() - 1_000),
-      attempts: 3, // < max: NO debe tocarse
-      retryable: true,
+      estado: 'enviando',
+      reclamadoEn: new Date(vencidoLimite.getTime() - 1_000),
+      intentos: 3, // < max: NO debe tocarse
+      reintentable: true,
     };
     const filas = mockFilasConDocumentos([
       filaAgotada,
@@ -805,11 +805,11 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
     await service.barrerAgotados(6);
 
     expect(filas.estado[0]).toMatchObject({
-      status: 'fallido',
-      retryable: false,
-      lastError: 'reclamo-expirado',
+      estado: 'fallido',
+      reintentable: false,
+      ultimoError: 'reclamo-expirado',
     });
-    expect(filas.estado[1]).toMatchObject({ status: 'enviando', attempts: 3 });
+    expect(filas.estado[1]).toMatchObject({ estado: 'enviando', intentos: 3 });
 
     jest.useRealTimers();
   });
@@ -817,15 +817,15 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
   it('cierra en fallido terminal las pendientes/fallidas reintentables que agotaron max (bajado por env), sin tocar las que están dentro del presupuesto', async () => {
     const filaFallidaAgotada = {
       ...FILA_BASE,
-      status: 'fallido',
-      retryable: true,
-      attempts: 6, // >= max: debe cerrarse
+      estado: 'fallido',
+      reintentable: true,
+      intentos: 6, // >= max: debe cerrarse
     };
     const filaPendienteDentroDelPresupuesto = {
       ...FILA_BASE,
-      status: 'pendiente',
-      retryable: true,
-      attempts: 2, // < max: NO debe tocarse
+      estado: 'pendiente',
+      reintentable: true,
+      intentos: 2, // < max: NO debe tocarse
     };
     const filas = mockFilasConDocumentos([
       filaFallidaAgotada,
@@ -841,13 +841,13 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
     await service.barrerAgotados(6);
 
     expect(filas.estado[0]).toMatchObject({
-      status: 'fallido',
-      retryable: false,
+      estado: 'fallido',
+      reintentable: false,
     });
     expect(filas.estado[1]).toMatchObject({
-      status: 'pendiente',
-      attempts: 2,
-      retryable: true,
+      estado: 'pendiente',
+      intentos: 2,
+      reintentable: true,
     });
   });
 });
@@ -867,12 +867,12 @@ describe('PublicacionFacturasService.liberar', () => {
       mockConfig() as never,
     );
     const desenlace: Desenlace = {
-      status: 'enviado',
-      retryable: false,
-      nextAttemptAt: null,
-      lastStatusCode: 201,
-      lastError: null,
-      sentAt: new Date(),
+      estado: 'enviado',
+      reintentable: false,
+      proximoIntentoEn: null,
+      ultimoCodigoEstado: 201,
+      ultimoError: null,
+      enviadoEn: new Date(),
     };
 
     await service.liberar(FILA_BASE, desenlace);
@@ -884,7 +884,7 @@ describe('PublicacionFacturasService.liberar', () => {
     ];
     expect(filtro).toEqual({
       _id: FILA_BASE._id,
-      claimToken: FILA_BASE.claimToken,
+      tokenReclamo: FILA_BASE.tokenReclamo,
     });
     expect(update.$set).toMatchObject(desenlace);
     expect(warnSpy).toHaveBeenCalled();
@@ -967,7 +967,7 @@ describe('PublicacionFacturasService.procesarPendientes — presupuesto de ciclo
             exec: () =>
               Promise.resolve({
                 ...FILA_BASE,
-                claimToken: `token-${llamadasReclamar}`,
+                tokenReclamo: `token-${llamadasReclamar}`,
               }),
           }),
         };
@@ -1013,9 +1013,9 @@ describe('PublicacionFacturasService.procesarPendientes — contadores del resum
 
   it('cuenta enviadas, reintentar y terminales por separado cuando el ciclo mezcla los tres desenlaces', async () => {
     const filasParaReclamar = [
-      { ...FILA_BASE, claimToken: 'tok-enviado', attempts: 1 },
-      { ...FILA_BASE, claimToken: 'tok-reintentar', attempts: 1 },
-      { ...FILA_BASE, claimToken: 'tok-terminal', attempts: 1 },
+      { ...FILA_BASE, tokenReclamo: 'tok-enviado', intentos: 1 },
+      { ...FILA_BASE, tokenReclamo: 'tok-reintentar', intentos: 1 },
+      { ...FILA_BASE, tokenReclamo: 'tok-terminal', intentos: 1 },
     ];
     let indiceReclamo = 0;
     const filas = mockFilas({
@@ -1030,8 +1030,8 @@ describe('PublicacionFacturasService.procesarPendientes — contadores del resum
       })),
     });
 
-    // 201 → enviado; 502 (attempts 1 < max 6) → fallido reintentable;
-    // 401 → fallido terminal, sin importar attempts.
+    // 201 → enviado; 502 (intentos 1 < max 6) → fallido reintentable;
+    // 401 → fallido terminal, sin importar intentos.
     global.fetch = jest
       .fn()
       .mockResolvedValueOnce({ status: 201 })

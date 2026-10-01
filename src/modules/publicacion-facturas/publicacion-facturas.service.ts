@@ -33,14 +33,14 @@ import type { ResumenCiclo } from './publicacion-facturas.contrato';
 export type FilaReclamada = PublicacionLote & { _id: Types.ObjectId };
 
 /** What `procesar` decides and `liberar` persists — never includes
- *  `urlSigned` or any response body, only a short `lastError` code. */
+ *  `urlSigned` or any response body, only a short `ultimoError` code. */
 export interface Desenlace {
-  status: 'enviado' | 'fallido';
-  retryable: boolean;
-  nextAttemptAt: Date | null;
-  lastStatusCode: number | null;
-  lastError: string | null;
-  sentAt: Date | null;
+  estado: 'enviado' | 'fallido';
+  reintentable: boolean;
+  proximoIntentoEn: Date | null;
+  ultimoCodigoEstado: number | null;
+  ultimoError: string | null;
+  enviadoEn: Date | null;
 }
 
 /** Margin added to FETCH_TIMEOUT_MS when deciding whether the cycle has
@@ -114,18 +114,18 @@ export class PublicacionFacturasService {
             $setOnInsert: {
               copropiedadId: new Types.ObjectId(evento.copropiedadId),
               loteId: new Types.ObjectId(evento.loteId),
-              taxId: copropiedad.nit,
-              invoiceNumbers: evento.numerosFactura,
+              nit: copropiedad.nit,
+              numerosFactura: evento.numerosFactura,
               objectPath: evento.objectPath,
-              status: 'pendiente',
-              retryable: true,
-              attempts: 0,
-              nextAttemptAt: new Date(),
-              claimedAt: null,
-              claimToken: null,
-              lastStatusCode: null,
-              lastError: null,
-              sentAt: null,
+              estado: 'pendiente',
+              reintentable: true,
+              intentos: 0,
+              proximoIntentoEn: new Date(),
+              reclamadoEn: null,
+              tokenReclamo: null,
+              ultimoCodigoEstado: null,
+              ultimoError: null,
+              enviadoEn: null,
             },
           },
           { upsert: true },
@@ -139,9 +139,9 @@ export class PublicacionFacturasService {
   }
 
   /**
-   * Atomically claims ONE eligible row: due `pendiente`/retryable-`fallido`,
+   * Atomically claims ONE eligible row: due `pendiente`/reintentable-`fallido`,
    * OR a stale `enviando` row whose claim is older than `CLAIM_TTL_MS`
-   * (crash recovery). `attempts` is incremented as part of the SAME atomic
+   * (crash recovery). `intentos` is incremented as part of the SAME atomic
    * update, so a crash loop that never reaches `liberar` still counts
    * toward `max`.
    */
@@ -152,25 +152,25 @@ export class PublicacionFacturasService {
     return this.filas
       .findOneAndUpdate(
         {
-          attempts: { $lt: max },
+          intentos: { $lt: max },
           $or: [
             {
-              status: { $in: ['pendiente', 'fallido'] },
-              retryable: true,
-              nextAttemptAt: { $lte: ahora },
+              estado: { $in: ['pendiente', 'fallido'] },
+              reintentable: true,
+              proximoIntentoEn: { $lte: ahora },
             },
-            { status: 'enviando', claimedAt: { $lte: vencido } },
+            { estado: 'enviando', reclamadoEn: { $lte: vencido } },
           ],
         },
         {
           $set: {
-            status: 'enviando',
-            claimedAt: ahora,
-            claimToken: randomUUID(),
+            estado: 'enviando',
+            reclamadoEn: ahora,
+            tokenReclamo: randomUUID(),
           },
-          $inc: { attempts: 1 },
+          $inc: { intentos: 1 },
         },
-        { sort: { nextAttemptAt: 1 }, returnDocument: 'after' },
+        { sort: { proximoIntentoEn: 1 }, returnDocument: 'after' },
       )
       .lean()
       .exec();
@@ -246,12 +246,12 @@ export class PublicacionFacturasService {
         `Lote ${fila.loteId.toString()} publicado en WebSaco3 (HTTP ${respuesta.status}).`,
       );
       return {
-        status: 'enviado',
-        retryable: false,
-        nextAttemptAt: null,
-        lastStatusCode: respuesta.status,
-        lastError: null,
-        sentAt: new Date(),
+        estado: 'enviado',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado: respuesta.status,
+        ultimoError: null,
+        enviadoEn: new Date(),
       };
     }
 
@@ -260,12 +260,12 @@ export class PublicacionFacturasService {
         `Lote ${fila.loteId.toString()} rechazado de forma terminal (HTTP ${respuesta.status}).`,
       );
       return {
-        status: 'fallido',
-        retryable: false,
-        nextAttemptAt: null,
-        lastStatusCode: respuesta.status,
-        lastError: `HTTP ${respuesta.status}`,
-        sentAt: null,
+        estado: 'fallido',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado: respuesta.status,
+        ultimoError: `HTTP ${respuesta.status}`,
+        enviadoEn: null,
       };
     }
 
@@ -277,38 +277,38 @@ export class PublicacionFacturasService {
     );
   }
 
-  /** Builds a retry-branch outcome: terminal once `attempts` (already
+  /** Builds a retry-branch outcome: terminal once `intentos` (already
    *  incremented by `reclamar`) reaches `max`, otherwise scheduled with
    *  exponential backoff. */
   private desenlaceReintentar(
     fila: FilaReclamada,
     max: number,
-    lastStatusCode: number | null,
-    lastError: string,
+    ultimoCodigoEstado: number | null,
+    ultimoError: string,
   ): Desenlace {
-    const agotado = fila.attempts >= max;
+    const agotado = fila.intentos >= max;
     if (agotado) {
       return {
-        status: 'fallido',
-        retryable: false,
-        nextAttemptAt: null,
-        lastStatusCode,
-        lastError,
-        sentAt: null,
+        estado: 'fallido',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado,
+        ultimoError,
+        enviadoEn: null,
       };
     }
     return {
-      status: 'fallido',
-      retryable: true,
-      nextAttemptAt: new Date(Date.now() + retrasoTras(fila.attempts)),
-      lastStatusCode,
-      lastError,
-      sentAt: null,
+      estado: 'fallido',
+      reintentable: true,
+      proximoIntentoEn: new Date(Date.now() + retrasoTras(fila.intentos)),
+      ultimoCodigoEstado,
+      ultimoError,
+      enviadoEn: null,
     };
   }
 
   /**
-   * Releases a claimed row with its outcome — conditional on `claimToken`
+   * Releases a claimed row with its outcome — conditional on `tokenReclamo`
    * so a stale re-claim (the row's claim expired and a later cycle already
    * reclaimed it) can never have its outcome overwritten by the claim it
    * superseded. `modifiedCount === 0` means exactly that happened: log and
@@ -317,8 +317,8 @@ export class PublicacionFacturasService {
   async liberar(fila: FilaReclamada, desenlace: Desenlace): Promise<void> {
     const resultado = await this.filas
       .updateOne(
-        { _id: fila._id, claimToken: fila.claimToken },
-        { $set: { ...desenlace, claimedAt: null, claimToken: null } },
+        { _id: fila._id, tokenReclamo: fila.tokenReclamo },
+        { $set: { ...desenlace, reclamadoEn: null, tokenReclamo: null } },
       )
       .exec();
 
@@ -333,7 +333,7 @@ export class PublicacionFacturasService {
    * Two sweeps run at the start of every cycle: expired `enviando` claims
    * that already exhausted `max` go straight to terminal `fallido` (instead
    * of being re-claimed only to immediately exhaust there), and any
-   * `pendiente`/`fallido` row whose `attempts` already meets a `max` that
+   * `pendiente`/`fallido` row whose `intentos` already meets a `max` that
    * was LOWERED since it last ran also gets closed out.
    */
   async barrerAgotados(max: number): Promise<void> {
@@ -344,17 +344,17 @@ export class PublicacionFacturasService {
       this.filas
         .updateMany(
           {
-            status: 'enviando',
-            claimedAt: { $lte: vencido },
-            attempts: { $gte: max },
+            estado: 'enviando',
+            reclamadoEn: { $lte: vencido },
+            intentos: { $gte: max },
           },
           {
             $set: {
-              status: 'fallido',
-              retryable: false,
-              claimedAt: null,
-              claimToken: null,
-              lastError: 'reclamo-expirado',
+              estado: 'fallido',
+              reintentable: false,
+              reclamadoEn: null,
+              tokenReclamo: null,
+              ultimoError: 'reclamo-expirado',
             },
           },
         )
@@ -362,11 +362,11 @@ export class PublicacionFacturasService {
       this.filas
         .updateMany(
           {
-            status: { $in: ['pendiente', 'fallido'] },
-            retryable: true,
-            attempts: { $gte: max },
+            estado: { $in: ['pendiente', 'fallido'] },
+            reintentable: true,
+            intentos: { $gte: max },
           },
-          { $set: { status: 'fallido', retryable: false } },
+          { $set: { estado: 'fallido', reintentable: false } },
         )
         .exec(),
     ]);
@@ -406,8 +406,8 @@ export class PublicacionFacturasService {
         const desenlace = await this.procesar(fila, max);
         await this.liberar(fila, desenlace);
 
-        if (desenlace.status === 'enviado') resumen.enviadas += 1;
-        else if (desenlace.retryable) resumen.reintentar += 1;
+        if (desenlace.estado === 'enviado') resumen.enviadas += 1;
+        else if (desenlace.reintentable) resumen.reintentar += 1;
         else resumen.terminales += 1;
       }
       return resumen;
