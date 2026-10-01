@@ -559,9 +559,10 @@ export class LotesFacturacionService {
    * skipped the assembly) be uploaded at any point, even after the table has
    * already been hand-edited, without losing anything. Correcting a mistake
    * from an earlier upload is done by editing/zeroing the specific bad row
-   * via `editarNovedadLinea`, not by re-uploading the whole file — nothing
-   * here de-duplicates, so uploading the exact same file twice double-charges
-   * (an accepted risk, same category as typing the same manual line twice).
+   * via `editarNovedadLinea`, not by re-uploading the whole file. A row whose
+   * concepto the inmueble is already charged in this lote (recurrente, an
+   * earlier novedad, or the liquidación itself) is rejected as an error row
+   * — see `motivoCargoDuplicado`: the user edits that existing line instead.
    */
   async cargarNovedades(
     loteId: string,
@@ -581,6 +582,10 @@ export class LotesFacturacionService {
     }
     const errores: ResultadoCargaNovedades['errores'] = [];
     const novedades: Record<string, unknown>[] = [];
+    const recurrentes =
+      lote.inmuebleId != null
+        ? []
+        : await this.valoresRecurrentes.find({ copropiedadId }).exec();
 
     for (const [indice, fila] of filas.entries()) {
       const inmueble = await this.inmuebles
@@ -605,6 +610,21 @@ export class LotesFacturacionService {
         errores.push({
           fila: indice + 1,
           mensaje: `No se encontró el cargo "${fila.nombreConcepto}" o no está habilitado para novedades`,
+        });
+        continue;
+      }
+
+      const motivo = this.motivoCargoDuplicado(
+        lote,
+        recurrentes.filter((v) => v.inmuebleId.equals(inmueble._id)),
+        inmueble._id,
+        concepto._id,
+        novedades as { inmuebleId: unknown; conceptoId: unknown }[],
+      );
+      if (motivo) {
+        errores.push({
+          fila: indice + 1,
+          mensaje: `El inmueble ${inmueble.codigo} ya tiene un cargo de "${concepto.nombre}" en este lote (${motivo}). Edítelo en la liquidación en lugar de cargarlo de nuevo`,
         });
         continue;
       }
@@ -698,6 +718,24 @@ export class LotesFacturacionService {
         dto.conceptoId,
         dto.overrides,
       );
+    } else {
+      const recurrentes =
+        lote.inmuebleId != null
+          ? []
+          : await this.valoresRecurrentes
+              .find({ copropiedadId, inmuebleId: inmueble._id })
+              .exec();
+      const motivo = this.motivoCargoDuplicado(
+        lote,
+        recurrentes,
+        inmueble._id,
+        concepto._id,
+      );
+      if (motivo) {
+        throw new ConflictException(
+          `El inmueble ${inmueble.codigo} ya tiene un cargo de "${concepto.nombre}" en este lote (${motivo}). Edite ese cargo en lugar de agregar uno nuevo.`,
+        );
+      }
     }
 
     const nuevaNovedad = {
@@ -820,6 +858,59 @@ export class LotesFacturacionService {
       .findOne({ copropiedadId, estado: 'consolidado' })
       .sort({ numero: -1 })
       .exec();
+  }
+
+  /**
+   * Why an ADDITIVE charge for this inmueble+concepto would duplicate a line
+   * the invoice already gets, or `null` if it wouldn't. A Factura must carry
+   * one line per concepto — `CarteraPorDocumento` is unique per
+   * (documentoId, conceptoId), so a second line of the same concepto made
+   * consolidar()'s whole tanda fail with E11000. The user edits the existing
+   * line instead (which becomes an override, or a PATCH of its novedad).
+   * Checks the recurrente (with any override applied, same as
+   * construirPreview), an earlier additive novedad, and — once liquidado —
+   * the computed preview itself (covers the calculated mora line).
+   */
+  private motivoCargoDuplicado(
+    lote: LoteFacturacionDocument,
+    recurrentesDelInmueble: { conceptoId: Types.ObjectId; monto: number }[],
+    inmuebleId: Types.ObjectId,
+    conceptoId: Types.ObjectId,
+    novedadesNuevas: { inmuebleId: unknown; conceptoId: unknown }[] = [],
+  ): string | null {
+    const mismo = (n: { inmuebleId: unknown; conceptoId: unknown }) =>
+      String(n.inmuebleId) === inmuebleId.toString() &&
+      String(n.conceptoId) === conceptoId.toString();
+
+    const recurrente = recurrentesDelInmueble.find(
+      (v) => v.conceptoId.toString() === conceptoId.toString(),
+    );
+    if (recurrente) {
+      const override = lote.novedades.find(
+        (n) => n.sobrescribe === 'recurrente' && mismo(n),
+      );
+      if ((override ? override.monto : recurrente.monto) !== 0) {
+        return 'cargo recurrente';
+      }
+    }
+    if (
+      [...lote.novedades, ...novedadesNuevas].some(
+        (n) => !(n as { sobrescribe?: unknown }).sobrescribe && mismo(n),
+      )
+    ) {
+      return 'cargo manual ya agregado';
+    }
+    const filaPreview = lote.previsualizacion?.find(
+      (p) => p.inmuebleId.toString() === inmuebleId.toString(),
+    );
+    if (
+      filaPreview?.lineas.some(
+        (l) => l.conceptoId.toString() === conceptoId.toString(),
+      )
+    ) {
+      return 'ya está en la liquidación';
+    }
+    return null;
   }
 
   /** Rejects a second override of the same kind for the same inmueble+concepto
