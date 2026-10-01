@@ -71,12 +71,12 @@ const facturaDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  number: 1,
-  fullNumber: 'FV1',
-  issueDate: new Date('2026-09-10'),
-  dueDate: new Date('2026-10-01'),
+  numero: 1,
+  numeroCompleto: 'FV1',
+  fechaEmision: new Date('2026-09-10'),
+  fechaVencimiento: new Date('2026-10-01'),
   total: 100000,
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -84,22 +84,22 @@ const notaDebitoDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  number: 1,
-  fullNumber: 'ND1',
-  issueDate: new Date('2026-09-05'),
+  numero: 1,
+  numeroCompleto: 'ND1',
+  fechaEmision: new Date('2026-09-05'),
   total: 50000,
-  status: 'emitida',
-  voidedAt: null,
+  estado: 'emitida',
+  fechaAnulacion: null,
   ...over,
 });
 
 const notaContableDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
-  number: 1,
-  fullNumber: 'NT1',
+  numero: 1,
+  numeroCompleto: 'NT1',
   monto: 20000,
-  status: 'activo',
+  estado: 'activo',
   createdAt: new Date('2026-09-12'),
   ...over,
 });
@@ -108,23 +108,23 @@ const reciboDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  number: 1,
-  fullNumber: 'RC1',
-  receivedAmount: 0,
-  receivedDate: new Date('2026-09-15'),
-  status: 'activo',
-  voidedAt: null,
+  numero: 1,
+  numeroCompleto: 'RC1',
+  montoRecibido: 0,
+  fechaRecibo: new Date('2026-09-15'),
+  estado: 'activo',
+  fechaAnulacion: null,
   ...over,
 });
 
 const ncDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
-  number: 1,
-  fullNumber: 'NC1',
-  issueDate: new Date('2026-09-15'),
-  status: 'activo',
-  voidedAt: null,
+  numero: 1,
+  numeroCompleto: 'NC1',
+  fecha: new Date('2026-09-15'),
+  estado: 'activo',
+  fechaAnulacion: null,
   ...over,
 });
 
@@ -137,22 +137,22 @@ const appDoc = (
   copropiedadId: COP,
   sourceType,
   sourceId,
-  documentType: 'FV' as const,
-  documentId: id(),
-  amountApplied: 0,
-  discountApplied: 0,
-  status: 'activa',
-  appliedAt: new Date('2026-09-15'),
-  revertedAt: null,
+  tipoDocumento: 'FV' as const,
+  documentoId: id(),
+  montoAplicado: 0,
+  montoDescuento: 0,
+  estado: 'activa',
+  aplicadoEn: new Date('2026-09-15'),
+  revertidoEn: null,
   ...over,
 });
 
-const saldoCarteraDoc = (balance: number, over: Doc = {}): Doc => ({
+const saldoCarteraDoc = (saldoPendiente: number, over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
   conceptoId: id(),
-  balance,
+  saldoPendiente,
   ...over,
 });
 
@@ -160,11 +160,11 @@ const notaAnticipoDoc = (over: Doc = {}): Doc => ({
   _id: id(),
   copropiedadId: COP,
   reciboOrigenId: id(),
-  number: 1,
-  fullNumber: 'NA1',
-  issueDate: new Date('2026-09-15'),
-  status: 'activo',
-  voidedAt: null,
+  numero: 1,
+  numeroCompleto: 'NA1',
+  fechaEmision: new Date('2026-09-15'),
+  estado: 'activo',
+  fechaAnulacion: null,
   ...over,
 });
 
@@ -214,17 +214,17 @@ describe('ConciliacionCarteraService', () => {
       // Unlike Estado de Cuenta, no inmuebleId to filter by — two different
       // inmuebles billed in the same lote must collapse into one period.
       const f1 = facturaDoc({
-        periodStart: new Date('2026-09-01'),
-        periodEnd: new Date('2026-09-30'),
+        periodoDesde: new Date('2026-09-01'),
+        periodoHasta: new Date('2026-09-30'),
       });
       const f2 = facturaDoc({
         inmuebleId: id(),
-        periodStart: new Date('2026-09-01'),
-        periodEnd: new Date('2026-09-30'),
+        periodoDesde: new Date('2026-09-01'),
+        periodoHasta: new Date('2026-09-30'),
       });
       const f3 = facturaDoc({
-        periodStart: new Date('2026-08-01'),
-        periodEnd: new Date('2026-08-31'),
+        periodoDesde: new Date('2026-08-01'),
+        periodoHasta: new Date('2026-08-31'),
       });
 
       const svc = servicio({ facturas: [f1, f2, f3] });
@@ -255,9 +255,9 @@ describe('ConciliacionCarteraService', () => {
       const f = facturaDoc({ _id: fId, total: 100000 });
       const r = reciboDoc({ _id: rId });
       const app = appDoc(rId, 'RC', {
-        documentId: fId,
-        amountApplied: 30000,
-        appliedAt: new Date('2026-09-20'),
+        documentoId: fId,
+        montoAplicado: 30000,
+        aplicadoEn: new Date('2026-09-20'),
       });
 
       const svc = servicio({
@@ -285,18 +285,18 @@ describe('ConciliacionCarteraService', () => {
       // AnularFacturaService voids a Factura by creating a full-amount Nota
       // Crédito against it — Factura.status flips to 'anulada', but `total`
       // stays frozen (nothing financial is ever deleted). Excluding the
-      // Factura from the "Facturación" row (status: 'emitida' filter) while
+      // Factura from the "Facturación" row (estado: 'emitida' filter) while
       // its own reversal still counted as a crédito under "Notas Crédito"
       // is exactly what used to leave totalDebito short and `diferencia`
       // non-zero.
       const fId = id();
       const ncId = id();
-      const f = facturaDoc({ _id: fId, total: 100000, status: 'anulada' });
-      const nc = ncDoc({ _id: ncId, issueDate: new Date('2026-09-14') });
+      const f = facturaDoc({ _id: fId, total: 100000, estado: 'anulada' });
+      const nc = ncDoc({ _id: ncId, fecha: new Date('2026-09-14') });
       const app = appDoc(ncId, 'NC', {
-        documentId: fId,
-        amountApplied: 100000,
-        appliedAt: new Date('2026-09-14'),
+        documentoId: fId,
+        montoAplicado: 100000,
+        aplicadoEn: new Date('2026-09-14'),
       });
 
       const svc = servicio({
@@ -340,10 +340,10 @@ describe('ConciliacionCarteraService', () => {
       const f = facturaDoc({ _id: fId, total: 400000 });
       const r = reciboDoc({ _id: rId });
       const app = appDoc(rId, 'RC', {
-        documentId: fId,
-        amountApplied: 400000,
-        discountApplied: 40000,
-        appliedAt: new Date('2026-09-20'),
+        documentoId: fId,
+        montoAplicado: 400000,
+        montoDescuento: 40000,
+        aplicadoEn: new Date('2026-09-20'),
       });
 
       const svc = servicio({
@@ -359,8 +359,8 @@ describe('ConciliacionCarteraService', () => {
     });
 
     it('Facturación row sums totals and reports the first/last fullNumber by number order', async () => {
-      const f1 = facturaDoc({ number: 1, fullNumber: 'FV1', total: 50000 });
-      const f2 = facturaDoc({ number: 167, fullNumber: 'FV167', total: 60000 });
+      const f1 = facturaDoc({ numero: 1, numeroCompleto: 'FV1', total: 50000 });
+      const f2 = facturaDoc({ numero: 167, numeroCompleto: 'FV167', total: 60000 });
 
       const svc = servicio({ facturas: [f1, f2] });
       const result = await svc.findAll(PERIODO);
@@ -376,8 +376,8 @@ describe('ConciliacionCarteraService', () => {
 
     it('a Factura outside the period only affects saldoAnterior, not the Facturación row', async () => {
       const antes = facturaDoc({
-        fullNumber: 'FV-antes',
-        issueDate: new Date('2026-08-15'),
+        numeroCompleto: 'FV-antes',
+        fechaEmision: new Date('2026-08-15'),
         total: 20000,
       });
 
@@ -396,14 +396,14 @@ describe('ConciliacionCarteraService', () => {
       // Received last month, voided THIS period.
       const r = reciboDoc({
         _id: rId,
-        receivedDate: new Date('2026-08-20'),
-        status: 'anulado',
-        voidedAt: new Date('2026-09-10'),
+        fechaRecibo: new Date('2026-08-20'),
+        estado: 'anulado',
+        fechaAnulacion: new Date('2026-09-10'),
       });
       const app = appDoc(rId, 'RC', {
-        documentId: fId,
-        amountApplied: 30000,
-        status: 'revertida',
+        documentoId: fId,
+        montoAplicado: 30000,
+        estado: 'revertida',
       });
 
       const svc = servicio({
@@ -434,9 +434,9 @@ describe('ConciliacionCarteraService', () => {
       const f = facturaDoc({ _id: fId, total: 100000 });
       const nc = ncDoc({ _id: ncId });
       const app = appDoc(ncId, 'NC', {
-        documentId: fId,
-        amountApplied: 15000,
-        appliedAt: new Date('2026-09-18'),
+        documentoId: fId,
+        montoAplicado: 15000,
+        aplicadoEn: new Date('2026-09-18'),
       });
 
       const svc = servicio({
@@ -456,12 +456,12 @@ describe('ConciliacionCarteraService', () => {
     });
 
     it('Notas Débito are débito; their anulación (voidedAt in period) is crédito', async () => {
-      const emitida = notaDebitoDoc({ fullNumber: 'ND1', total: 50000 });
+      const emitida = notaDebitoDoc({ numeroCompleto: 'ND1', total: 50000 });
       const anulada = notaDebitoDoc({
-        fullNumber: 'ND2',
+        numeroCompleto: 'ND2',
         total: 20000,
-        status: 'anulada',
-        voidedAt: new Date('2026-09-22'),
+        estado: 'anulada',
+        fechaAnulacion: new Date('2026-09-22'),
       });
 
       const svc = servicio({ notasDebito: [emitida, anulada] });
@@ -507,14 +507,14 @@ describe('ConciliacionCarteraService', () => {
       const rId = id();
       const fAntes = facturaDoc({
         _id: fId,
-        issueDate: new Date('2026-08-01'),
+        fechaEmision: new Date('2026-08-01'),
         total: 100000,
       });
       const r = reciboDoc({ _id: rId });
       const app = appDoc(rId, 'RC', {
-        documentId: fId,
-        amountApplied: 30000,
-        appliedAt: new Date('2026-09-05'),
+        documentoId: fId,
+        montoAplicado: 30000,
+        aplicadoEn: new Date('2026-09-05'),
       });
 
       const svc = servicio({
@@ -549,15 +549,15 @@ describe('ConciliacionCarteraService', () => {
       const rId = id();
       const fAntes = facturaDoc({
         _id: fId,
-        issueDate: new Date('2026-05-10'),
+        fechaEmision: new Date('2026-05-10'),
         total: 100000,
       });
-      const r = reciboDoc({ _id: rId, receivedDate: new Date('2026-06-15') });
+      const r = reciboDoc({ _id: rId, fechaRecibo: new Date('2026-06-15') });
       const app = appDoc(rId, 'RC', {
-        documentId: fId,
-        amountApplied: 30000,
-        appliedAt: new Date('2026-07-05'),
-        sourceDate: new Date('2026-06-15'),
+        documentoId: fId,
+        montoAplicado: 30000,
+        aplicadoEn: new Date('2026-07-05'),
+        fechaOrigen: new Date('2026-06-15'),
       });
 
       const svc = servicio({
@@ -583,9 +583,9 @@ describe('ConciliacionCarteraService', () => {
         const inm = inmuebleDoc({ codigo: '502' });
         const r = reciboDoc({
           inmuebleId: inm._id,
-          fullNumber: 'RC5',
-          receivedAmount: 100000,
-          receivedDate: new Date('2026-09-10'),
+          numeroCompleto: 'RC5',
+          montoRecibido: 100000,
+          fechaRecibo: new Date('2026-09-10'),
         });
 
         const svc = servicio({
@@ -612,23 +612,23 @@ describe('ConciliacionCarteraService', () => {
         const r = reciboDoc({
           _id: rId,
           inmuebleId: inm._id,
-          receivedAmount: 100000,
-          receivedDate: new Date('2026-09-05'),
+          montoRecibido: 100000,
+          fechaRecibo: new Date('2026-09-05'),
         });
         const na = notaAnticipoDoc({
           _id: naId,
           reciboOrigenId: rId,
-          issueDate: new Date('2026-09-20'),
+          fechaEmision: new Date('2026-09-20'),
         });
         const appInicial = appDoc(rId, 'RC', {
-          documentId: id(),
-          amountApplied: 40000,
-          sourceDate: new Date('2026-09-05'),
+          documentoId: id(),
+          montoAplicado: 40000,
+          fechaOrigen: new Date('2026-09-05'),
         });
         const appAnticipo = appDoc(naId, 'NA', {
-          documentId: id(),
-          amountApplied: 30000,
-          sourceDate: new Date('2026-09-20'),
+          documentoId: id(),
+          montoAplicado: 30000,
+          fechaOrigen: new Date('2026-09-20'),
         });
 
         const svc = servicio({
@@ -651,13 +651,13 @@ describe('ConciliacionCarteraService', () => {
         const r = reciboDoc({
           _id: rId,
           inmuebleId: inm._id,
-          receivedAmount: 50000,
-          receivedDate: new Date('2026-09-05'),
+          montoRecibido: 50000,
+          fechaRecibo: new Date('2026-09-05'),
         });
         const app = appDoc(rId, 'RC', {
-          documentId: id(),
-          amountApplied: 50000,
-          sourceDate: new Date('2026-09-05'),
+          documentoId: id(),
+          montoAplicado: 50000,
+          fechaOrigen: new Date('2026-09-05'),
         });
 
         const svc = servicio({
@@ -677,14 +677,14 @@ describe('ConciliacionCarteraService', () => {
         const r = reciboDoc({
           _id: rId,
           inmuebleId: inm._id,
-          receivedAmount: 50000,
-          receivedDate: new Date('2026-09-05'),
+          montoRecibido: 50000,
+          fechaRecibo: new Date('2026-09-05'),
         });
         // Se aplicó recién en octubre — después del corte de septiembre.
         const app = appDoc(rId, 'RC', {
-          documentId: id(),
-          amountApplied: 50000,
-          sourceDate: new Date('2026-10-03'),
+          documentoId: id(),
+          montoAplicado: 50000,
+          fechaOrigen: new Date('2026-10-03'),
         });
 
         const svc = servicio({
@@ -704,8 +704,8 @@ describe('ConciliacionCarteraService', () => {
         const inm = inmuebleDoc();
         const r = reciboDoc({
           inmuebleId: inm._id,
-          receivedAmount: 50000,
-          receivedDate: new Date('2026-10-05'),
+          montoRecibido: 50000,
+          fechaRecibo: new Date('2026-10-05'),
         });
 
         const svc = servicio({ recibos: [r], inmuebles: [inm] });
@@ -720,13 +720,13 @@ describe('ConciliacionCarteraService', () => {
         const inm2 = inmuebleDoc({ codigo: '402' });
         const r1 = reciboDoc({
           inmuebleId: inm1._id,
-          receivedAmount: 90000,
-          receivedDate: new Date('2026-09-05'),
+          montoRecibido: 90000,
+          fechaRecibo: new Date('2026-09-05'),
         });
         const r2 = reciboDoc({
           inmuebleId: inm2._id,
-          receivedAmount: 35000,
-          receivedDate: new Date('2026-09-10'),
+          montoRecibido: 35000,
+          fechaRecibo: new Date('2026-09-10'),
         });
 
         const svc = servicio({
