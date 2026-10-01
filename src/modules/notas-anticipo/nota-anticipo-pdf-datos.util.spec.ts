@@ -16,9 +16,9 @@ const notaBase = (over: Record<string, unknown> = {}): NotaAnticipoDocument =>
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
     reciboOrigenId: RECIBO_ORIGEN,
-    fullNumber: 'NA-0003',
-    issueDate: new Date('2026-07-12'),
-    appliedAmount: 200000,
+    numeroCompleto: 'NA-0003',
+    fechaEmision: new Date('2026-07-12'),
+    montoAplicado: 200000,
     ...over,
   }) as unknown as NotaAnticipoDocument;
 
@@ -39,9 +39,9 @@ const aplicacionFV = (
   over: Record<string, unknown> = {},
 ): AplicacionCarteraDocument =>
   ({
-    documentType: 'FV',
-    documentId: FACTURA,
-    amountApplied: 200000,
+    tipoDocumento: 'FV',
+    documentoId: FACTURA,
+    montoAplicado: 200000,
     detalleConceptos: [],
     ...over,
   }) as unknown as AplicacionCarteraDocument;
@@ -51,7 +51,7 @@ const modelosVacios = () => ({
   notasDebito: { find: jest.fn(() => ({ exec: () => Promise.resolve([]) })) },
   recibos: {
     findOne: jest.fn(() => ({
-      exec: () => Promise.resolve({ fullNumber: 'RC-0009' }),
+      exec: () => Promise.resolve({ numeroCompleto: 'RC-0009' }),
     })),
   },
   inmuebles: {
@@ -124,8 +124,8 @@ describe('construirDatosImpresionNotaAnticipo', () => {
 
   it('el débito es SIEMPRE una sola línea a cuentaAnticipos por el total aplicado — nunca partido, nunca una cuenta de banco', async () => {
     const datos = await construirDatosImpresionNotaAnticipo(
-      notaBase({ appliedAmount: 200000 }),
-      [aplicacionFV({ amountApplied: 200000 })],
+      notaBase({ montoAplicado: 200000 }),
+      [aplicacionFV({ montoAplicado: 200000 })],
       copropiedadBase(),
       COP,
       modelosVacios() as never,
@@ -151,15 +151,15 @@ describe('construirDatosImpresionNotaAnticipo', () => {
         Promise.resolve([
           {
             _id: FACTURA,
-            number: 685,
-            lines: [
+            numero: 685,
+            lineas: [
               {
                 conceptoId: conceptoAdmin,
-                accountingReceivableAccount: '13050501',
+                cuentaCartera: '13050501',
               },
               {
                 conceptoId: conceptoMora,
-                accountingReceivableAccount: '13050502',
+                cuentaCartera: '13050502',
               },
             ],
           },
@@ -175,23 +175,23 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     })) as never;
 
     const aplicacion = aplicacionFV({
-      amountApplied: 130000,
+      montoAplicado: 130000,
       detalleConceptos: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administracion',
+          nombreConcepto: 'Administracion',
           monto: 100000,
         },
         {
           conceptoId: conceptoMora,
-          conceptName: 'Intereses de Mora',
+          nombreConcepto: 'Intereses de Mora',
           monto: 30000,
         },
       ],
     });
 
     const datos = await construirDatosImpresionNotaAnticipo(
-      notaBase({ appliedAmount: 130000 }),
+      notaBase({ montoAplicado: 130000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -231,24 +231,24 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     const notaId = new Types.ObjectId();
     const modelos = modelosVacios();
     modelos.notasDebito.find = jest.fn(() => ({
-      exec: () => Promise.resolve([{ _id: notaId, number: 12 }]),
+      exec: () => Promise.resolve([{ _id: notaId, numero: 12 }]),
     })) as never;
 
     const aplicacion = {
-      documentType: 'ND',
-      documentId: notaId,
-      amountApplied: 150000,
+      tipoDocumento: 'ND',
+      documentoId: notaId,
+      montoAplicado: 150000,
       detalleConceptos: [
         {
           conceptoId: new Types.ObjectId(),
-          conceptName: 'Cuota Parqueadero',
+          nombreConcepto: 'Cuota Parqueadero',
           monto: 150000,
         },
       ],
     } as unknown as AplicacionCarteraDocument;
 
     const datos = await construirDatosImpresionNotaAnticipo(
-      notaBase({ appliedAmount: 150000 }),
+      notaBase({ montoAplicado: 150000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -266,11 +266,11 @@ describe('construirDatosImpresionNotaAnticipo', () => {
 
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicación anterior a ese campo)', async () => {
     const aplicacion = aplicacionFV({
-      amountApplied: 200000,
+      montoAplicado: 200000,
       detalleConceptos: [],
     });
     const datos = await construirDatosImpresionNotaAnticipo(
-      notaBase({ appliedAmount: 200000 }),
+      notaBase({ montoAplicado: 200000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
