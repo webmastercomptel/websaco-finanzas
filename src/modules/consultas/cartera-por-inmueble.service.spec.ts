@@ -8,12 +8,12 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'FV-001',
-  issueDate: new Date('2026-08-01'),
-  dueDate: new Date('2026-08-31'),
+  numeroCompleto: 'FV-001',
+  fechaEmision: new Date('2026-08-01'),
+  fechaVencimiento: new Date('2026-08-31'),
   total: 200000,
-  lines: [],
-  status: 'emitida',
+  lineas: [],
+  estado: 'emitida',
   ...over,
 });
 
@@ -21,11 +21,11 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'ND-001',
-  issueDate: new Date('2026-07-15'),
+  numeroCompleto: 'ND-001',
+  fechaEmision: new Date('2026-07-15'),
   total: 50000,
   conceptoId: id(),
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
@@ -124,11 +124,11 @@ describe('CarteraPorInmuebleService', () => {
       _id: fId,
       inmuebleId: inmId,
       total: 200000,
-      lines: [
+      lineas: [
         {
           conceptoId,
-          conceptName: 'Administracion',
-          totalAmount: 200000,
+          nombreConcepto: 'Administracion',
+          valorTotal: 200000,
         },
       ],
     });
@@ -136,11 +136,11 @@ describe('CarteraPorInmuebleService', () => {
     const concepto = conceptoDoc({ _id: conceptoId, nombre: 'Administracion' });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 80000,
-      status: 'activa',
-      appliedAt: new Date('2026-08-10'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 80000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-08-10'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -166,7 +166,7 @@ describe('CarteraPorInmuebleService', () => {
       // Factura's own (immutable) lines — see the service's own docblock.
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 120000 }]),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 120000 }]),
       },
     });
 
@@ -204,8 +204,8 @@ describe('CarteraPorInmuebleService', () => {
       _id: fId,
       inmuebleId: inmId,
       total: 200000,
-      lines: [
-        { conceptoId, conceptName: 'Administracion', totalAmount: 200000 },
+      lineas: [
+        { conceptoId, nombreConcepto: 'Administracion', valorTotal: 200000 },
       ],
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -216,12 +216,12 @@ describe('CarteraPorInmuebleService', () => {
     const sourceDateFutura = new Date('2099-01-01');
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 30000,
-      status: 'activa',
-      appliedAt: new Date(),
-      sourceDate: sourceDateFutura,
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 30000,
+      estado: 'activa',
+      aplicadoEn: new Date(),
+      fechaOrigen: sourceDateFutura,
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -245,7 +245,7 @@ describe('CarteraPorInmuebleService', () => {
       },
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 170000 }]),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 170000 }]),
       },
       // Vivo, sin filtro de fecha — ya refleja la aplicación (esto SÍ
       // funcionaba, per el reporte del usuario).
@@ -281,16 +281,16 @@ describe('CarteraPorInmuebleService', () => {
     const f = facturaDoc({
       inmuebleId: inmId,
       total: 150000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administracion',
-          totalAmount: 100000,
+          nombreConcepto: 'Administracion',
+          valorTotal: 100000,
         },
         {
           conceptoId: conceptoMultas,
-          conceptName: 'Multas',
-          totalAmount: 50000,
+          nombreConcepto: 'Multas',
+          valorTotal: 50000,
         },
       ],
     });
@@ -324,11 +324,11 @@ describe('CarteraPorInmuebleService', () => {
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date('2026-08-10'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-08-10'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -377,7 +377,7 @@ describe('CarteraPorInmuebleService', () => {
       },
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, balance: 50000 }]),
+        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 50000 }]),
       },
     });
 
@@ -396,11 +396,11 @@ describe('CarteraPorInmuebleService', () => {
     const f = facturaDoc({
       inmuebleId: inmId,
       total: 100000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoConSaldo,
-          conceptName: 'Administracion',
-          totalAmount: 100000,
+          nombreConcepto: 'Administracion',
+          valorTotal: 100000,
         },
       ],
     });
@@ -437,7 +437,7 @@ describe('CarteraPorInmuebleService', () => {
         exec: jest
           .fn()
           .mockResolvedValue([
-            { conceptoId: conceptoConSaldo, balance: 100000 },
+            { conceptoId: conceptoConSaldo, saldoPendiente: 100000 },
           ]),
       },
     });
@@ -467,8 +467,8 @@ describe('CarteraPorInmuebleService', () => {
     const f = facturaDoc({
       inmuebleId: inmId,
       total: 200000,
-      lines: [
-        { conceptoId: conceptoTv, conceptName: 'TV', totalAmount: 200000 },
+      lineas: [
+        { conceptoId: conceptoTv, nombreConcepto: 'TV', valorTotal: 200000 },
       ],
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -498,8 +498,8 @@ describe('CarteraPorInmuebleService', () => {
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
         exec: jest.fn().mockResolvedValue([
-          { conceptoId: conceptoTv, balance: 100000 },
-          { conceptoId: conceptoPintura, balance: 100000 },
+          { conceptoId: conceptoTv, saldoPendiente: 100000 },
+          { conceptoId: conceptoPintura, saldoPendiente: 100000 },
         ]),
       },
     });
@@ -535,11 +535,11 @@ describe('CarteraPorInmuebleService', () => {
     const f = facturaDoc({
       inmuebleId: inmId,
       total: 300000,
-      lines: [
+      lineas: [
         {
           conceptoId: conceptoSinSaldoCartera,
-          conceptName: 'Parqueadero',
-          totalAmount: 300000,
+          nombreConcepto: 'Parqueadero',
+          valorTotal: 300000,
         },
       ],
     });
@@ -614,8 +614,8 @@ describe('CarteraPorInmuebleService', () => {
     const inmId = id();
     const fAntes = facturaDoc({
       inmuebleId: inmId,
-      fullNumber: 'FV-001',
-      issueDate: new Date('2026-07-01'),
+      numeroCompleto: 'FV-001',
+      fechaEmision: new Date('2026-07-01'),
       total: 100000,
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
@@ -635,7 +635,7 @@ describe('CarteraPorInmuebleService', () => {
 
     await svc.findOne({ inmuebleId: inmId.toString(), fecha: '2026-08-01' });
 
-    // `issueDate` is a PURE calendar date (always UTC midnight, never a real
+    // `fechaEmision` is a PURE calendar date (always UTC midnight, never a real
     // time-of-day) — the bound must be the un-shifted end of "2026-08-01" in
     // UTC, NOT `finDelDiaCorte`'s own 2026-08-02T04:59:59.999Z (that reach
     // is only correct for a REAL timestamp like `appliedAt`; applied here it
@@ -643,7 +643,7 @@ describe('CarteraPorInmuebleService', () => {
     // see `limiteEmisionParaCorte`'s own docblock).
     expect(facturasFind).toHaveBeenCalledWith(
       expect.objectContaining({
-        issueDate: { $lte: new Date('2026-08-01T23:59:59.999Z') },
+        fechaEmision: { $lte: new Date('2026-08-01T23:59:59.999Z') },
       }),
     );
   });
@@ -664,18 +664,18 @@ describe('CarteraPorInmuebleService', () => {
       _id: fId,
       inmuebleId: inmId,
       total: 100000,
-      issueDate: new Date('2026-06-01'),
-      lines: [],
+      fechaEmision: new Date('2026-06-01'),
+      lineas: [],
     });
     const inm = inmuebleDoc({ _id: inmId, codigo: '301' });
     const app = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date('2026-06-12T15:00:00.000Z'),
-      sourceDate: new Date('2026-06-12'),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date('2026-06-12T15:00:00.000Z'),
+      fechaOrigen: new Date('2026-06-12'),
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -722,11 +722,11 @@ describe('CarteraPorInmuebleService', () => {
     const hoyIso = hoy.toISOString().slice(0, 10);
     const appEstaTarde = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date(hoy.getTime() + 60_000),
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date(hoy.getTime() + 60_000),
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -768,11 +768,11 @@ describe('CarteraPorInmuebleService', () => {
     const hoyIso = '2026-08-15';
     const appEstaNoche = {
       _id: id(),
-      documentId: fId,
-      amountApplied: 100000,
-      status: 'activa',
-      appliedAt: new Date(hoyColombia.getTime() + 25 * 60 * 60 * 1000), // next-day 01:00 UTC
-      revertedAt: null,
+      documentoId: fId,
+      montoAplicado: 100000,
+      estado: 'activa',
+      aplicadoEn: new Date(hoyColombia.getTime() + 25 * 60 * 60 * 1000), // next-day 01:00 UTC
+      revertidoEn: null,
     };
 
     const svc = servicio({
@@ -813,12 +813,12 @@ describe('CarteraPorInmuebleService', () => {
       _id: fId,
       inmuebleId: inmId,
       total: 200000,
-      lines: [
-        { conceptoId: conceptoTv, conceptName: 'TV', totalAmount: 100000 },
+      lineas: [
+        { conceptoId: conceptoTv, nombreConcepto: 'TV', valorTotal: 100000 },
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administracion',
-          totalAmount: 100000,
+          nombreConcepto: 'Administracion',
+          valorTotal: 100000,
         },
       ],
     });
