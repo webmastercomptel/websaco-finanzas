@@ -336,9 +336,9 @@ describe('FacturasService.findAll — buscar', () => {
 
     await service.findAll({ buscar: 'CONJ-2026(1041)' });
 
-    expect((facturas.filtros[0].numeroCompleto as { $regex: string }).$regex).toBe(
-      'CONJ-2026\\(1041\\)',
-    );
+    expect(
+      (facturas.filtros[0].numeroCompleto as { $regex: string }).$regex,
+    ).toBe('CONJ-2026\\(1041\\)');
   });
 
   it('no aplica el filtro cuando buscar está ausente', async () => {

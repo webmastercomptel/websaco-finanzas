@@ -1198,8 +1198,7 @@ describe('RecibosService.crear — con aplicaciones manuales', () => {
     // Cargos (`cuentaIngreso`, 413505), nunca a la cuenta
     // db/cartera (130599) — ese es justamente el bug que esta prueba cubre.
     expect(
-      entries.find((m) => m.cuenta === '413505' && m.tipo === 'credito')
-        ?.monto,
+      entries.find((m) => m.cuenta === '413505' && m.tipo === 'credito')?.monto,
     ).toBe(40000);
     expect(entries.some((m) => m.cuenta === '130599')).toBe(false);
   });
@@ -3106,12 +3105,10 @@ describe('RecibosService.anular', () => {
     // (831510 débito / 831505 crédito) — anular() vuelve a los lados
     // planos de facturación para cerrar ese par en cero.
     expect(
-      entries.find((m) => m.cuenta === '831505' && m.tipo === 'debito')
-        ?.monto,
+      entries.find((m) => m.cuenta === '831505' && m.tipo === 'debito')?.monto,
     ).toBe(200000);
     expect(
-      entries.find((m) => m.cuenta === '831510' && m.tipo === 'credito')
-        ?.monto,
+      entries.find((m) => m.cuenta === '831510' && m.tipo === 'credito')?.monto,
     ).toBe(200000);
   });
 
@@ -3411,8 +3408,7 @@ describe('RecibosService.anular', () => {
     // SaldoDocumentoOrigen) incluye los Otros Ingresos, así que hay que
     // restarlos antes de reconstruir el lado de cartera.
     expect(
-      entries.find((m) => m.cuenta === '130501' && m.tipo === 'debito')
-        ?.monto,
+      entries.find((m) => m.cuenta === '130501' && m.tipo === 'debito')?.monto,
     ).toBe(200000);
     // Los 300000 de Otros Ingresos se revierten a SU cuenta, no a
     // cuentaAnticipos (210505) — no hubo ningún renglón ahí.
@@ -3425,8 +3421,7 @@ describe('RecibosService.anular', () => {
     // El crédito de vuelta a la cuenta destino sigue siendo el
     // montoRecibido completo (500000) — la partida sigue cuadrando.
     expect(
-      entries.find((m) => m.cuenta === '111005' && m.tipo === 'credito')
-        ?.monto,
+      entries.find((m) => m.cuenta === '111005' && m.tipo === 'credito')?.monto,
     ).toBe(500000);
   });
 });

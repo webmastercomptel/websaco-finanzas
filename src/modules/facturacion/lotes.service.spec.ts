@@ -775,8 +775,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   it('resuelve inmueble por código y concepto por nombre, y agrega la novedad sin reemplazar las anteriores', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () =>
-          Promise.resolve(loteDoc({ novedades: [{ vieja: true }] })),
+        exec: () => Promise.resolve(loteDoc({ novedades: [{ vieja: true }] })),
       })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
@@ -1337,7 +1336,9 @@ describe('LotesFacturacionService.liquidar', () => {
         valorTotal: 520000,
       }),
     ]);
-    const linea = preliminar.lineas[0] as { conceptoId: { toString(): string } };
+    const linea = preliminar.lineas[0] as {
+      conceptoId: { toString(): string };
+    };
     expect(linea.conceptoId.toString()).toBe('con-1');
     expect(actualizacion.$set.estado).toBe('liquidado');
   });
@@ -2456,7 +2457,8 @@ describe('LotesFacturacionService.consolidar', () => {
   it('rechaza consolidar un lote que nunca fue liquidado (borrador)', async () => {
     const m = construirModelos({});
     m.lotes.findOne = jest.fn(() => ({
-      exec: () => Promise.resolve(loteDoc({ estado: 'borrador', previsualizacion: [] })),
+      exec: () =>
+        Promise.resolve(loteDoc({ estado: 'borrador', previsualizacion: [] })),
     }));
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -2989,7 +2991,8 @@ describe('LotesFacturacionService.findOne', () => {
     };
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ previsualizacion: [preliminar] })),
+        exec: () =>
+          Promise.resolve(loteDoc({ previsualizacion: [preliminar] })),
       })),
     };
     const service = new LotesFacturacionService(

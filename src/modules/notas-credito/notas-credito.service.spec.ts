@@ -125,8 +125,7 @@ const modeloSaldoTotalDocumento = (documentos: Record<string, unknown>[]) => ({
           documentos
             .filter(
               (d) =>
-                ids.includes(String(d._id)) &&
-                (d.saldoPendiente as number) > 0,
+                ids.includes(String(d._id)) && (d.saldoPendiente as number) > 0,
             )
             .map((d) => ({
               documentoId: d._id,
@@ -160,8 +159,7 @@ const modeloSaldoTotalDocumentoUnico = (factura: Record<string, unknown>) => ({
           if ((factura.saldoPendiente as number) < monto) {
             return Promise.resolve(null);
           }
-          factura.saldoPendiente =
-            (factura.saldoPendiente as number) - monto;
+          factura.saldoPendiente = (factura.saldoPendiente as number) - monto;
         } else if (update.$inc) {
           factura.saldoPendiente =
             (factura.saldoPendiente as number) + update.$inc.saldoPendiente;
@@ -1043,7 +1041,11 @@ describe('NotasCreditoService.crear', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
       ];
       return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
@@ -1616,7 +1618,11 @@ describe('NotasCreditoService.aplicar', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
       ];
       return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
@@ -2300,7 +2306,11 @@ describe('NotasCreditoService.anular', () => {
         (f.conceptoId as Types.ObjectId).equals(conceptoId),
       );
       const pipeline = llamada![1] as [
-        { $set: { saldoPendiente: { $max: [number, { $add: [string, number] }] } } },
+        {
+          $set: {
+            saldoPendiente: { $max: [number, { $add: [string, number] }] };
+          };
+        },
       ];
       return pipeline[0].$set.saldoPendiente.$max[1].$add[1];
     };
@@ -2379,10 +2389,12 @@ describe('NotasCreditoService.anular', () => {
     const [entrada] = creado as unknown as [
       { movimientos: Record<string, unknown>[] },
     ];
-    expect(entrada.movimientos.find((m) => m.tipo === 'credito')).toMatchObject({
-      cuenta: '413595',
-      monto: 200000,
-    });
+    expect(entrada.movimientos.find((m) => m.tipo === 'credito')).toMatchObject(
+      {
+        cuenta: '413595',
+        monto: 200000,
+      },
+    );
   });
 
   it('rechaza anular una nota crédito ya anulada', async () => {
