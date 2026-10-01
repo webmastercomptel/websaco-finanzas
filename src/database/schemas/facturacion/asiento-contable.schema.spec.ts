@@ -18,8 +18,8 @@ const recibo = new Types.ObjectId();
 const notaCredito = new Types.ObjectId();
 
 const entradasBalanceadas = [
-  { account: '111005', type: 'debito', amount: 100000, description: 'x' },
-  { account: '130501', type: 'credito', amount: 100000, description: 'x' },
+  { cuenta: '111005', tipo: 'debito', monto: 100000, descripcion: 'x' },
+  { cuenta: '130501', tipo: 'credito', monto: 100000, descripcion: 'x' },
 ];
 
 const validar = async (
@@ -27,8 +27,8 @@ const validar = async (
 ): Promise<Error | null> => {
   const doc = new AsientoModel({
     copropiedadId: copropiedad,
-    date: new Date('2026-08-27'),
-    entries: entradasBalanceadas,
+    fecha: new Date('2026-08-27'),
+    movimientos: entradasBalanceadas,
     ...campos,
   });
   try {
@@ -53,8 +53,8 @@ describe('AsientoContableSchema — anclaje Factura/Lote (existente) vs Recibo (
   it('loteId y facturaId son opcionales ahora (default null)', () => {
     const doc = new AsientoModel({
       copropiedadId: copropiedad,
-      date: new Date(),
-      entries: entradasBalanceadas,
+      fecha: new Date(),
+      movimientos: entradasBalanceadas,
       reciboId: recibo,
     });
     expect(doc.loteId).toBeNull();
