@@ -9,21 +9,19 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'rec-1' },
   inmuebleId: { toString: () => 'inm-1' },
   terceroId: { toString: () => 'ter-1' },
-  prefix: 'RC',
-  number: 84,
-  fullNumber: 'RC-84',
-  receivedAmount: 500000,
-  receivedDate: new Date('2026-08-27'),
-  paymentMethod: 'transferencia',
-  destinationAccount: '111005',
-  reference: 'CUS123',
-  notes: null,
-  appliedAmount: 200000,
-  unappliedAmount: 300000,
-  status: 'activo',
-  voidedReason: null,
-  voidedDetail: null,
-  voidedAt: null,
+  prefijo: 'RC',
+  numero: 84,
+  numeroCompleto: 'RC-84',
+  montoRecibido: 500000,
+  fechaRecibo: new Date('2026-08-27'),
+  medioPago: 'transferencia',
+  cuentaDestino: '111005',
+  referencia: 'CUS123',
+  observaciones: null,
+  estado: 'activo',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
   ...over,
 });
 
@@ -31,11 +29,11 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'apl-1' },
   sourceType: 'RC',
   sourceId: { toString: () => 'rec-1' },
-  documentType: 'FV',
-  documentId: { toString: () => 'fac-1' },
-  amountApplied: 200000,
-  status: 'activa',
-  appliedAt: new Date('2026-08-27'),
+  tipoDocumento: 'FV',
+  documentoId: { toString: () => 'fac-1' },
+  montoAplicado: 200000,
+  estado: 'activa',
+  aplicadoEn: new Date('2026-08-27'),
   ...over,
 });
 
@@ -58,10 +56,10 @@ describe('toRecibo', () => {
   it('expone la fecha de anulación solo cuando existe', () => {
     const anulado = toRecibo(
       reciboDoc({
-        status: 'anulado',
-        voidedReason: 'duplicado',
-        voidedDetail: 'Cargado dos veces por error del cajero',
-        voidedAt: new Date('2026-08-28'),
+        estado: 'anulado',
+        motivoAnulacion: 'duplicado',
+        detalleAnulacion: 'Cargado dos veces por error del cajero',
+        fechaAnulacion: new Date('2026-08-28'),
       }) as never,
       0,
       0,
@@ -96,12 +94,12 @@ describe('toAplicacionCartera', () => {
     });
   });
 
-  it('usa la fecha que el caller pasa explícitamente, NUNCA appliedAt (el instante real del cruce)', () => {
-    // `appliedAt` en la fixture es 2026-08-27, pero el caller declara que la
-    // fecha de negocio real es otra — si la función leyera `doc.appliedAt`
+  it('usa la fecha que el caller pasa explícitamente, NUNCA aplicadoEn (el instante real del cruce)', () => {
+    // `aplicadoEn` en la fixture es 2026-08-27, pero el caller declara que la
+    // fecha de negocio real es otra — si la función leyera `doc.aplicadoEn`
     // por su cuenta, este test lo detectaría.
     const resultado = toAplicacionCartera(
-      aplicacionDoc({ appliedAt: new Date('2026-08-27') }) as never,
+      aplicacionDoc({ aplicadoEn: new Date('2026-08-27') }) as never,
       null,
       new Date('2026-06-02'),
     );
@@ -122,10 +120,10 @@ describe('toAplicacionCartera', () => {
     const conceptoId = new Types.ObjectId();
     const doc = aplicacionDoc({
       detalleConceptos: [
-        { conceptoId, conceptName: 'Administración', monto: 150000 },
+        { conceptoId, nombreConcepto: 'Administración', monto: 150000 },
         {
           conceptoId: new Types.ObjectId(),
-          conceptName: 'Pintura',
+          nombreConcepto: 'Pintura',
           monto: 50000,
         },
       ],
