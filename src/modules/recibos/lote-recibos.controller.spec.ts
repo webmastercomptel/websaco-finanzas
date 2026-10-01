@@ -18,7 +18,7 @@ const construirController = (
   const loteDoc = {
     _id: LOTE_ID,
     copropiedadId: COPROPERTY_ID,
-    status: overrides.estado ?? 'aplicado',
+    estado: overrides.estado ?? 'aplicado',
     filas,
   };
   const loteRecibos = {
