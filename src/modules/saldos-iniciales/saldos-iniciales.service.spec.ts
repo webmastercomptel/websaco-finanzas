@@ -186,8 +186,7 @@ const construirServicio = () => {
             saldosCarteraFilas.push(fila);
           }
           fila.saldoPendiente =
-            (fila.saldoPendiente as number) +
-            (update.$inc.saldoPendiente ?? 0);
+            (fila.saldoPendiente as number) + (update.$inc.saldoPendiente ?? 0);
           return Promise.resolve(fila);
         },
       }),

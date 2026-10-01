@@ -360,7 +360,11 @@ describe('ConciliacionCarteraService', () => {
 
     it('Facturación row sums totals and reports the first/last fullNumber by number order', async () => {
       const f1 = facturaDoc({ numero: 1, numeroCompleto: 'FV1', total: 50000 });
-      const f2 = facturaDoc({ numero: 167, numeroCompleto: 'FV167', total: 60000 });
+      const f2 = facturaDoc({
+        numero: 167,
+        numeroCompleto: 'FV167',
+        total: 60000,
+      });
 
       const svc = servicio({ facturas: [f1, f2] });
       const result = await svc.findAll(PERIODO);

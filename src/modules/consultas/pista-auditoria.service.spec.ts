@@ -146,7 +146,11 @@ describe('PistaAuditoriaService', () => {
     const loteId = id();
     const creadorId = id();
     const inmId = id();
-    const f = facturaDoc({ loteId, inmuebleId: inmId, numeroCompleto: 'FV-100' });
+    const f = facturaDoc({
+      loteId,
+      inmuebleId: inmId,
+      numeroCompleto: 'FV-100',
+    });
     const lote = loteDoc({ _id: loteId, generadoPor: creadorId });
     const creador = accountDoc({ _id: creadorId, nombreCompleto: 'Ana Pérez' });
     const inm = inmuebleDoc({ _id: inmId, codigo: '501' });

@@ -68,12 +68,8 @@ describe('toNotaCredito', () => {
 
   it('cae a createdAt cuando fecha es null (nota creada antes de este campo)', () => {
     expect(
-      toNotaCredito(
-        notaDoc({ fecha: null }) as never,
-        150000,
-        50000,
-        'A-101',
-      ).fecha,
+      toNotaCredito(notaDoc({ fecha: null }) as never, 150000, 50000, 'A-101')
+        .fecha,
     ).toBe('2026-07-01T00:00:00.000Z');
   });
 

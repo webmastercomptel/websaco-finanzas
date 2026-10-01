@@ -166,7 +166,9 @@ describe('CarteraPorInmuebleService', () => {
       // Factura's own (immutable) lines — see the service's own docblock.
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 120000 }]),
+        exec: jest
+          .fn()
+          .mockResolvedValue([{ conceptoId, saldoPendiente: 120000 }]),
       },
     });
 
@@ -245,7 +247,9 @@ describe('CarteraPorInmuebleService', () => {
       },
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 170000 }]),
+        exec: jest
+          .fn()
+          .mockResolvedValue([{ conceptoId, saldoPendiente: 170000 }]),
       },
       // Vivo, sin filtro de fecha — ya refleja la aplicación (esto SÍ
       // funcionaba, per el reporte del usuario).
@@ -377,7 +381,9 @@ describe('CarteraPorInmuebleService', () => {
       },
       saldosCartera: {
         find: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([{ conceptoId, saldoPendiente: 50000 }]),
+        exec: jest
+          .fn()
+          .mockResolvedValue([{ conceptoId, saldoPendiente: 50000 }]),
       },
     });
 
