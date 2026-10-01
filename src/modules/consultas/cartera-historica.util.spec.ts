@@ -52,12 +52,11 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  issueDate: new Date('2026-01-01'),
-  dueDate: new Date('2026-02-01'),
+  fechaEmision: new Date('2026-01-01'),
+  fechaVencimiento: new Date('2026-02-01'),
   total: 100000,
-  outstandingBalance: 100000,
-  status: 'emitida',
-  lines: [],
+  estado: 'emitida',
+  lineas: [],
   ...over,
 });
 
@@ -65,24 +64,23 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  issueDate: new Date('2026-01-15'),
+  fechaEmision: new Date('2026-01-15'),
   total: 50000,
-  outstandingBalance: 50000,
-  status: 'emitida',
+  estado: 'emitida',
   ...over,
 });
 
 const appDoc = (
-  documentId: Types.ObjectId,
+  documentoId: Types.ObjectId,
   over: Record<string, unknown> = {},
 ) => ({
   _id: id(),
   copropiedadId: COP,
-  documentId,
-  amountApplied: 0,
-  status: 'activa',
-  appliedAt: new Date('2026-01-20'),
-  revertedAt: null,
+  documentoId,
+  montoAplicado: 0,
+  estado: 'activa',
+  aplicadoEn: new Date('2026-01-20'),
+  revertidoEn: null,
   ...over,
 });
 
@@ -144,8 +142,8 @@ describe('calcularDocumentosConSaldoAFecha', () => {
     const fId = id();
     const f = facturaDoc({ _id: fId, total: 100000 });
     const app = appDoc(fId, {
-      amountApplied: 30000,
-      appliedAt: new Date('2026-02-01'),
+      montoAplicado: 30000,
+      aplicadoEn: new Date('2026-02-01'),
     });
     const models = mockModels([f], [], [app]);
 
@@ -162,10 +160,10 @@ describe('calcularDocumentosConSaldoAFecha', () => {
     const fId = id();
     const f = facturaDoc({ _id: fId, total: 100000 });
     const app = appDoc(fId, {
-      amountApplied: 40000,
-      appliedAt: new Date('2026-01-20'),
-      status: 'revertida',
-      revertedAt: new Date('2026-03-01'),
+      montoAplicado: 40000,
+      aplicadoEn: new Date('2026-01-20'),
+      estado: 'revertida',
+      revertidoEn: new Date('2026-03-01'),
     });
     const models = mockModels([f], [], [app]);
 
@@ -182,10 +180,10 @@ describe('calcularDocumentosConSaldoAFecha', () => {
     const fId = id();
     const f = facturaDoc({ _id: fId, total: 100000 });
     const app = appDoc(fId, {
-      amountApplied: 40000,
-      appliedAt: new Date('2026-01-20'),
-      status: 'revertida',
-      revertedAt: new Date('2026-01-25'),
+      montoAplicado: 40000,
+      aplicadoEn: new Date('2026-01-20'),
+      estado: 'revertida',
+      revertidoEn: new Date('2026-01-25'),
     });
     const models = mockModels([f], [], [app]);
 
@@ -201,7 +199,7 @@ describe('calcularDocumentosConSaldoAFecha', () => {
   it('un documento con montoPendiente exactamente 0 se excluye', async () => {
     const fId = id();
     const f = facturaDoc({ _id: fId, total: 100000 });
-    const app = appDoc(fId, { amountApplied: 100000 });
+    const app = appDoc(fId, { montoAplicado: 100000 });
     const models = mockModels([f], [], [app]);
 
     const result = await calcularDocumentosConSaldoAFecha(
@@ -252,7 +250,7 @@ describe('calcularDocumentosConSaldoAFecha', () => {
     const conceptoId = id();
     const f = facturaDoc({
       total: 100000,
-      lines: [{ conceptoId }, { conceptoId: id() }],
+      lineas: [{ conceptoId }, { conceptoId: id() }],
     });
     const models = mockModels([f]);
 
