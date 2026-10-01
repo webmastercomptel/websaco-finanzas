@@ -63,13 +63,13 @@ describe('InicioResumenService', () => {
     });
 
     it('usa el periodStart/periodEnd de la Factura emitida más reciente', async () => {
-      const periodStart = new Date('2026-08-01');
-      const periodEnd = new Date('2026-08-31');
+      const periodoDesde = new Date('2026-08-01');
+      const periodoHasta = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
         copropiedadId: COP,
-        periodStart,
-        periodEnd,
+        periodoDesde,
+        periodoHasta,
       };
 
       const svc = servicio({
@@ -77,11 +77,11 @@ describe('InicioResumenService', () => {
           {
             _id: id(),
             copropiedadId: COP,
-            status: 'emitida',
-            periodStart,
-            periodEnd,
+            estado: 'emitida',
+            periodoDesde,
+            periodoHasta,
             total: 0,
-            lines: [],
+            lineas: [],
           },
         ]),
       });
@@ -89,16 +89,16 @@ describe('InicioResumenService', () => {
       const result = await svc.findResumen();
 
       expect(result.periodo).toEqual({
-        periodStart: periodStart.toISOString(),
-        periodEnd: periodEnd.toISOString(),
+        periodStart: periodoDesde.toISOString(),
+        periodEnd: periodoHasta.toISOString(),
       });
     });
   });
 
   describe('Total Facturado', () => {
     it('suma total y agrupa facturadoPorConcepto por conceptoId', async () => {
-      const periodStart = new Date('2026-08-01');
-      const periodEnd = new Date('2026-08-31');
+      const periodoDesde = new Date('2026-08-01');
+      const periodoHasta = new Date('2026-08-31');
       const conceptoAdmin = id();
       const conceptoMora = id();
 
@@ -106,35 +106,35 @@ describe('InicioResumenService', () => {
         {
           _id: id(),
           copropiedadId: COP,
-          status: 'emitida',
-          periodStart,
-          periodEnd,
+          estado: 'emitida',
+          periodoDesde,
+          periodoHasta,
           total: 150000,
-          lines: [
+          lineas: [
             {
               conceptoId: conceptoAdmin,
-              conceptName: 'Administración',
-              totalAmount: 100000,
+              nombreConcepto: 'Administración',
+              valorTotal: 100000,
             },
             {
               conceptoId: conceptoMora,
-              conceptName: 'Intereses de Mora',
-              totalAmount: 50000,
+              nombreConcepto: 'Intereses de Mora',
+              valorTotal: 50000,
             },
           ],
         },
         {
           _id: id(),
           copropiedadId: COP,
-          status: 'emitida',
-          periodStart,
-          periodEnd,
+          estado: 'emitida',
+          periodoDesde,
+          periodoHasta,
           total: 100000,
-          lines: [
+          lineas: [
             {
               conceptoId: conceptoAdmin,
-              conceptName: 'Administración',
-              totalAmount: 100000,
+              nombreConcepto: 'Administración',
+              valorTotal: 100000,
             },
           ],
         },
@@ -166,29 +166,29 @@ describe('InicioResumenService', () => {
 
   describe('Total Ingresos Recibidos', () => {
     it('suma receivedAmount de Recibos activos del periodo', async () => {
-      const periodStart = new Date('2026-08-01');
-      const periodEnd = new Date('2026-08-31');
+      const periodoDesde = new Date('2026-08-01');
+      const periodoHasta = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
         copropiedadId: COP,
-        periodStart,
-        periodEnd,
+        periodoDesde,
+        periodoHasta,
       };
 
       const recibos = [
         {
           _id: id(),
           copropiedadId: COP,
-          status: 'activo',
-          receivedDate: new Date('2026-08-15'),
-          receivedAmount: 300000,
+          estado: 'activo',
+          fechaRecibo: new Date('2026-08-15'),
+          montoRecibido: 300000,
         },
         {
           _id: id(),
           copropiedadId: COP,
-          status: 'activo',
-          receivedDate: new Date('2026-08-20'),
-          receivedAmount: 200000,
+          estado: 'activo',
+          fechaRecibo: new Date('2026-08-20'),
+          montoRecibido: 200000,
         },
       ];
 
@@ -210,13 +210,13 @@ describe('InicioResumenService', () => {
 
   describe('escalado por descuento (Recibido por Concepto)', () => {
     it('reproduce el ejemplo del spec: Recibo $1.000.000, $909.800 en efectivo + $52.200 de descuento → Anticipos = $90.200', async () => {
-      const periodStart = new Date('2026-08-01');
-      const periodEnd = new Date('2026-08-31');
+      const periodoDesde = new Date('2026-08-01');
+      const periodoHasta = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
         copropiedadId: COP,
-        periodStart,
-        periodEnd,
+        periodoDesde,
+        periodoHasta,
       };
 
       const reciboId = id();
@@ -224,9 +224,9 @@ describe('InicioResumenService', () => {
         {
           _id: reciboId,
           copropiedadId: COP,
-          status: 'activo',
-          receivedDate: new Date('2026-08-10'),
-          receivedAmount: 1_000_000,
+          estado: 'activo',
+          fechaRecibo: new Date('2026-08-10'),
+          montoRecibido: 1_000_000,
         },
       ];
 
@@ -239,13 +239,13 @@ describe('InicioResumenService', () => {
           copropiedadId: COP,
           sourceType: 'RC',
           sourceId: reciboId,
-          status: 'activa',
-          amountApplied: 962_000,
-          discountApplied: 52_200,
+          estado: 'activa',
+          montoAplicado: 962_000,
+          montoDescuento: 52_200,
           detalleConceptos: [
             {
               conceptoId: conceptoAdmin,
-              conceptName: 'Administración',
+              nombreConcepto: 'Administración',
               monto: 962_000,
             },
           ],
@@ -273,13 +273,13 @@ describe('InicioResumenService', () => {
     });
 
     it('no incluye el slice Anticipos cuando no queda efectivo sin aplicar', async () => {
-      const periodStart = new Date('2026-08-01');
-      const periodEnd = new Date('2026-08-31');
+      const periodoDesde = new Date('2026-08-01');
+      const periodoHasta = new Date('2026-08-31');
       const ultimaFactura = {
         _id: id(),
         copropiedadId: COP,
-        periodStart,
-        periodEnd,
+        periodoDesde,
+        periodoHasta,
       };
 
       const reciboId = id();
@@ -287,9 +287,9 @@ describe('InicioResumenService', () => {
         {
           _id: reciboId,
           copropiedadId: COP,
-          status: 'activo',
-          receivedDate: new Date('2026-08-10'),
-          receivedAmount: 100000,
+          estado: 'activo',
+          fechaRecibo: new Date('2026-08-10'),
+          montoRecibido: 100000,
         },
       ];
 
@@ -300,13 +300,13 @@ describe('InicioResumenService', () => {
           copropiedadId: COP,
           sourceType: 'RC',
           sourceId: reciboId,
-          status: 'activa',
-          amountApplied: 100000,
-          discountApplied: 0,
+          estado: 'activa',
+          montoAplicado: 100000,
+          montoDescuento: 0,
           detalleConceptos: [
             {
               conceptoId: conceptoAdmin,
-              conceptName: 'Administración',
+              nombreConcepto: 'Administración',
               monto: 100000,
             },
           ],
