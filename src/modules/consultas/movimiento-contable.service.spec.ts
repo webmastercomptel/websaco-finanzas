@@ -11,19 +11,19 @@ const asientoDoc = (
 ) => ({
   _id: id(),
   copropiedadId: COP,
-  date: new Date('2026-08-15'),
-  entries: [
+  fecha: new Date('2026-08-15'),
+  movimientos: [
     {
-      account: '1355-01',
-      type: 'debito',
-      amount: 100000,
-      description: 'Administración',
+      cuenta: '1355-01',
+      tipo: 'debito',
+      monto: 100000,
+      descripcion: 'Administración',
     },
     {
-      account: '4135-01',
-      type: 'credito',
-      amount: 100000,
-      description: 'Ingresos',
+      cuenta: '4135-01',
+      tipo: 'credito',
+      monto: 100000,
+      descripcion: 'Ingresos',
     },
   ],
   loteId: null,
@@ -41,7 +41,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'FV-001',
+  numeroCompleto: 'FV-001',
   ...over,
 });
 
@@ -49,7 +49,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'RC-001',
+  numeroCompleto: 'RC-001',
   ...over,
 });
 
@@ -117,11 +117,11 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
 describe('MovimientoContableService', () => {
   describe('findAll', () => {
     it('returns every asiento in the coproperty within a date range, regardless of inmueble', async () => {
-      const f1 = facturaDoc({ fullNumber: 'FV-001' });
-      const f2 = facturaDoc({ fullNumber: 'FV-002' });
+      const f1 = facturaDoc({ numeroCompleto: 'FV-001' });
+      const f2 = facturaDoc({ numeroCompleto: 'FV-002' });
       const a1 = asientoDoc('facturaId', f1._id);
       const a2 = asientoDoc('facturaId', f2._id, {
-        date: new Date('2026-08-16'),
+        fecha: new Date('2026-08-16'),
       });
 
       const svc = servicio({
@@ -166,24 +166,24 @@ describe('MovimientoContableService', () => {
 
       expect(asientosFind).toHaveBeenCalledWith({
         copropiedadId: COP,
-        date: { $gte: new Date('2026-01-01'), $lte: new Date('2026-12-31') },
+        fecha: { $gte: new Date('2026-01-01'), $lte: new Date('2026-12-31') },
       });
       expect(result.movimientos).toEqual([]);
     });
 
     it('includes entries anchored to different document types and different inmuebles', async () => {
-      const f = facturaDoc({ fullNumber: 'FV-001' });
+      const f = facturaDoc({ numeroCompleto: 'FV-001' });
       const nc = {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: id(),
-        fullNumber: 'NC-001',
+        numeroCompleto: 'NC-001',
       };
       const asientoFactura = asientoDoc('facturaId', f._id, {
-        date: new Date('2026-08-05'),
+        fecha: new Date('2026-08-05'),
       });
       const asientoNC = asientoDoc('notaCreditoId', nc._id, {
-        date: new Date('2026-08-10'),
+        fecha: new Date('2026-08-10'),
       });
 
       const svc = servicio({
@@ -223,10 +223,10 @@ describe('MovimientoContableService', () => {
         _id: id(),
         copropiedadId: COP,
         inmuebleId: id(),
-        fullNumber: 'NA-001',
+        numeroCompleto: 'NA-001',
       };
       const asientoNA = asientoDoc('notaAnticipoId', na._id, {
-        date: new Date('2026-08-12'),
+        fecha: new Date('2026-08-12'),
       });
 
       const svc = servicio({
@@ -266,8 +266,8 @@ describe('MovimientoContableService', () => {
       const inm1 = id();
       const inm2 = id();
       const holder1 = id();
-      const f1 = facturaDoc({ fullNumber: 'FV-001', inmuebleId: inm1 });
-      const f2 = facturaDoc({ fullNumber: 'FV-002', inmuebleId: inm2 });
+      const f1 = facturaDoc({ numeroCompleto: 'FV-001', inmuebleId: inm1 });
+      const f2 = facturaDoc({ numeroCompleto: 'FV-002', inmuebleId: inm2 });
       const a1 = asientoDoc('facturaId', f1._id);
       const a2 = asientoDoc('facturaId', f2._id);
 
@@ -353,10 +353,10 @@ describe('MovimientoContableService', () => {
     it('a voided Recibo reversal appears in the listing, sorted by date', async () => {
       const rec = reciboDoc();
       const a1 = asientoDoc('reciboId', rec._id, {
-        date: new Date('2026-08-10'),
+        fecha: new Date('2026-08-10'),
       });
       const a2 = asientoDoc('reciboId', rec._id, {
-        date: new Date('2026-08-20'),
+        fecha: new Date('2026-08-20'),
       });
 
       const svc = servicio({
