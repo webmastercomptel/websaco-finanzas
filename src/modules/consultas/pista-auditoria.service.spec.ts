@@ -9,11 +9,11 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   loteId: id(),
   inmuebleId: id(),
-  fullNumber: 'FV-001',
+  numeroCompleto: 'FV-001',
   total: 200000,
-  status: 'emitida',
-  voidedAt: null,
-  voidedBy: null,
+  estado: 'emitida',
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-01T10:00:00.000Z'),
   ...over,
 });
@@ -21,7 +21,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  generatedBy: id(),
+  generadoPor: id(),
   ...over,
 });
 
@@ -29,12 +29,12 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'RC-001',
-  receivedAmount: 100000,
-  status: 'activo',
-  generatedBy: id(),
-  voidedAt: null,
-  voidedBy: null,
+  numeroCompleto: 'RC-001',
+  montoRecibido: 100000,
+  estado: 'activo',
+  generadoPor: id(),
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-05T15:30:00.000Z'),
   ...over,
 });
@@ -43,12 +43,12 @@ const notaCreditoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'NC-001',
-  totalAmount: 30000,
-  status: 'activo',
-  generatedBy: id(),
-  voidedAt: null,
-  voidedBy: null,
+  numeroCompleto: 'NC-001',
+  montoTotal: 30000,
+  estado: 'activo',
+  generadoPor: id(),
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-06T10:00:00.000Z'),
   ...over,
 });
@@ -57,12 +57,12 @@ const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'ND-001',
+  numeroCompleto: 'ND-001',
   total: 40000,
-  status: 'emitida',
-  generatedBy: id(),
-  voidedAt: null,
-  voidedBy: null,
+  estado: 'emitida',
+  generadoPor: id(),
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-07T10:00:00.000Z'),
   ...over,
 });
@@ -71,12 +71,12 @@ const notaContableDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'NT-001',
+  numeroCompleto: 'NT-001',
   monto: 15000,
-  status: 'activo',
-  generatedBy: id(),
-  voidedAt: null,
-  voidedBy: null,
+  estado: 'activo',
+  generadoPor: id(),
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-08T10:00:00.000Z'),
   ...over,
 });
@@ -85,12 +85,12 @@ const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  fullNumber: 'NA-001',
-  appliedAmount: 25000,
-  status: 'activo',
-  generatedBy: id(),
-  voidedAt: null,
-  voidedBy: null,
+  numeroCompleto: 'NA-001',
+  montoAplicado: 25000,
+  estado: 'activo',
+  generadoPor: id(),
+  fechaAnulacion: null,
+  anuladoPor: null,
   createdAt: new Date('2026-08-09T10:00:00.000Z'),
   ...over,
 });
@@ -146,8 +146,8 @@ describe('PistaAuditoriaService', () => {
     const loteId = id();
     const creadorId = id();
     const inmId = id();
-    const f = facturaDoc({ loteId, inmuebleId: inmId, fullNumber: 'FV-100' });
-    const lote = loteDoc({ _id: loteId, generatedBy: creadorId });
+    const f = facturaDoc({ loteId, inmuebleId: inmId, numeroCompleto: 'FV-100' });
+    const lote = loteDoc({ _id: loteId, generadoPor: creadorId });
     const creador = accountDoc({ _id: creadorId, nombreCompleto: 'Ana Pérez' });
     const inm = inmuebleDoc({ _id: inmId, codigo: '501' });
 
@@ -202,10 +202,10 @@ describe('PistaAuditoriaService', () => {
     const creadorId = id();
     const anuladorId = id();
     const r = reciboDoc({
-      status: 'anulado',
-      generatedBy: creadorId,
-      voidedBy: anuladorId,
-      voidedAt: new Date('2026-08-10T09:00:00.000Z'),
+      estado: 'anulado',
+      generadoPor: creadorId,
+      anuladoPor: anuladorId,
+      fechaAnulacion: new Date('2026-08-10T09:00:00.000Z'),
       createdAt: new Date('2026-08-05T15:30:00.000Z'),
     });
     const creador = accountDoc({ _id: creadorId, nombreCompleto: 'Creador' });
@@ -240,8 +240,8 @@ describe('PistaAuditoriaService', () => {
   it('filters by usuarioId', async () => {
     const userA = id();
     const userB = id();
-    const r1 = reciboDoc({ generatedBy: userA, fullNumber: 'RC-A' });
-    const r2 = reciboDoc({ generatedBy: userB, fullNumber: 'RC-B' });
+    const r1 = reciboDoc({ generadoPor: userA, numeroCompleto: 'RC-A' });
+    const r2 = reciboDoc({ generadoPor: userB, numeroCompleto: 'RC-B' });
 
     const svc = servicio({
       recibos: find([r1, r2]),
@@ -272,8 +272,8 @@ describe('PistaAuditoriaService', () => {
   });
 
   it('filters by numero (partial, case-insensitive match)', async () => {
-    const r1 = reciboDoc({ fullNumber: 'RC-2026-001' });
-    const r2 = reciboDoc({ fullNumber: 'RC-2026-002' });
+    const r1 = reciboDoc({ numeroCompleto: 'RC-2026-001' });
+    const r2 = reciboDoc({ numeroCompleto: 'RC-2026-002' });
 
     const svc = servicio({ recibos: find([r1, r2]) });
 
@@ -285,11 +285,11 @@ describe('PistaAuditoriaService', () => {
 
   it('filters by desde/hasta, inclusive on the event fecha', async () => {
     const rDentro = reciboDoc({
-      fullNumber: 'RC-DENTRO',
+      numeroCompleto: 'RC-DENTRO',
       createdAt: new Date('2026-08-15T00:00:00.000Z'),
     });
     const rFuera = reciboDoc({
-      fullNumber: 'RC-FUERA',
+      numeroCompleto: 'RC-FUERA',
       createdAt: new Date('2026-09-15T00:00:00.000Z'),
     });
 
@@ -307,16 +307,16 @@ describe('PistaAuditoriaService', () => {
   it('combines usuarioId, tipoDocumento and desde/hasta filters', async () => {
     const usuario = id();
     const rMatch = reciboDoc({
-      generatedBy: usuario,
-      fullNumber: 'RC-MATCH',
+      generadoPor: usuario,
+      numeroCompleto: 'RC-MATCH',
       createdAt: new Date('2026-08-15T00:00:00.000Z'),
     });
     const rOtroUsuario = reciboDoc({
-      fullNumber: 'RC-OTRO',
+      numeroCompleto: 'RC-OTRO',
       createdAt: new Date('2026-08-15T00:00:00.000Z'),
     });
     const ncMismoUsuario = notaCreditoDoc({
-      generatedBy: usuario,
+      generadoPor: usuario,
       createdAt: new Date('2026-08-15T00:00:00.000Z'),
     });
 
@@ -339,7 +339,7 @@ describe('PistaAuditoriaService', () => {
   it('paginates, sorted by fecha descending', async () => {
     const recibos = [1, 2, 3, 4, 5].map((n) =>
       reciboDoc({
-        fullNumber: `RC-00${n}`,
+        numeroCompleto: `RC-00${n}`,
         createdAt: new Date(`2026-08-0${n}T00:00:00.000Z`),
       }),
     );
@@ -362,8 +362,8 @@ describe('PistaAuditoriaService', () => {
   it('builds the usuarios distinct-actor list from every actor across all 6 types', async () => {
     const userA = id();
     const userB = id();
-    const r = reciboDoc({ generatedBy: userA });
-    const nc = notaCreditoDoc({ generatedBy: userB });
+    const r = reciboDoc({ generadoPor: userA });
+    const nc = notaCreditoDoc({ generadoPor: userB });
 
     const svc = servicio({
       recibos: find([r]),
