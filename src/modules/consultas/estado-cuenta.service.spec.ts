@@ -8,38 +8,38 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   inmuebleId: id(),
-  issueDate: new Date('2026-01-15'),
-  dueDate: new Date('2026-02-01'),
-  periodStart: new Date('2026-01-01'),
-  periodEnd: new Date('2026-01-31'),
-  fullNumber: 'FV-001-001',
+  fechaEmision: new Date('2026-01-15'),
+  fechaVencimiento: new Date('2026-02-01'),
+  periodoDesde: new Date('2026-01-01'),
+  periodoHasta: new Date('2026-01-31'),
+  numeroCompleto: 'FV-001-001',
   total: 200000,
-  status: 'emitida',
-  lines: [{}],
+  estado: 'emitida',
+  lineas: [{}],
   ...over,
 });
 
 const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  fullNumber: 'RC-001-001',
+  numeroCompleto: 'RC-001-001',
   ...over,
 });
 
 const ncDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  fullNumber: 'NC-001-001',
+  numeroCompleto: 'NC-001-001',
   ...over,
 });
 
 const ntDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  fullNumber: 'NT-001-001',
-  description: 'Reclasificación',
+  numeroCompleto: 'NT-001-001',
+  descripcion: 'Reclasificación',
   monto: 50000,
-  status: 'activo',
+  estado: 'activo',
   createdAt: new Date('2026-01-20'),
   ...over,
 });
@@ -47,8 +47,8 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
 const naDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
-  fullNumber: 'NA-001-001',
-  issueDate: new Date('2026-01-25'),
+  numeroCompleto: 'NA-001-001',
+  fechaEmision: new Date('2026-01-25'),
   ...over,
 });
 
@@ -61,11 +61,11 @@ const appDoc = (
   copropiedadId: COP,
   sourceType,
   sourceId,
-  documentType: 'FV' as const,
-  documentId: id(),
-  amountApplied: 0,
-  status: 'activa',
-  appliedAt: new Date('2026-01-25'),
+  tipoDocumento: 'FV' as const,
+  documentoId: id(),
+  montoAplicado: 0,
+  estado: 'activa',
+  aplicadoEn: new Date('2026-01-25'),
   ...over,
 });
 
@@ -119,12 +119,12 @@ describe('EstadoCuentaService', () => {
   describe('findPeriodos', () => {
     it('returns distinct periods sorted most-recent-first', async () => {
       const f1 = facturaDoc({
-        periodStart: new Date('2026-01-01'),
-        periodEnd: new Date('2026-01-31'),
+        periodoDesde: new Date('2026-01-01'),
+        periodoHasta: new Date('2026-01-31'),
       });
       const f2 = facturaDoc({
-        periodStart: new Date('2025-12-01'),
-        periodEnd: new Date('2025-12-31'),
+        periodoDesde: new Date('2025-12-01'),
+        periodoHasta: new Date('2025-12-31'),
       });
 
       const svc = servicio({
@@ -138,7 +138,7 @@ describe('EstadoCuentaService', () => {
       expect(result[1].periodStart).toBe('2025-12-01T00:00:00.000Z');
     });
 
-    it("sorts by the real periodStart field, not a typo'd name", async () => {
+    it("sorts by the real periodoDesde field, not a typo'd name", async () => {
       const facturas = mockFind([facturaDoc()]);
       const svc = servicio({ facturas });
 
@@ -147,7 +147,7 @@ describe('EstadoCuentaService', () => {
       // Mongo would silently ignore a sort key that doesn't exist on the
       // document (returning insertion order instead) — this asserts the
       // actual field name passed to .sort(), not just the mocked result.
-      expect(facturas.sort).toHaveBeenCalledWith({ periodStart: -1 });
+      expect(facturas.sort).toHaveBeenCalledWith({ periodoDesde: -1 });
     });
 
     it('returns empty array when inmueble has no facturas', async () => {
@@ -166,12 +166,12 @@ describe('EstadoCuentaService', () => {
         _id: fId,
         inmuebleId: inmId,
         total: 200000,
-        issueDate: new Date('2025-12-15'),
+        fechaEmision: new Date('2025-12-15'),
       });
       const r = reciboDoc({ _id: rId });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 50000,
-        appliedAt: new Date('2025-12-20'),
+        montoAplicado: 50000,
+        aplicadoEn: new Date('2025-12-20'),
       });
 
       const svc = servicio({
@@ -199,29 +199,29 @@ describe('EstadoCuentaService', () => {
       const fPagada = facturaDoc({
         _id: fPagadaId,
         inmuebleId: inmId,
-        fullNumber: 'FV-0010',
+        numeroCompleto: 'FV-0010',
         total: 100000,
-        issueDate: new Date('2025-11-01'),
+        fechaEmision: new Date('2025-11-01'),
       });
       const fParcial = facturaDoc({
         _id: fParcialId,
         inmuebleId: inmId,
-        fullNumber: 'FV-0020',
+        numeroCompleto: 'FV-0020',
         total: 200000,
-        issueDate: new Date('2025-12-01'),
-        dueDate: new Date('2025-12-15'),
+        fechaEmision: new Date('2025-12-01'),
+        fechaVencimiento: new Date('2025-12-15'),
       });
       // Emitida dentro del período — no forma parte del saldo anterior.
       const fDelPeriodo = facturaDoc({
         inmuebleId: inmId,
-        fullNumber: 'FV-0030',
+        numeroCompleto: 'FV-0030',
         total: 300000,
-        issueDate: new Date('2026-01-05'),
+        fechaEmision: new Date('2026-01-05'),
       });
-      const r = reciboDoc({ _id: rId, receivedDate: new Date('2025-12-20') });
+      const r = reciboDoc({ _id: rId, fechaRecibo: new Date('2025-12-20') });
       const apps = [
-        appDoc(rId, 'RC', { documentId: fPagadaId, amountApplied: 100000 }),
-        appDoc(rId, 'RC', { documentId: fParcialId, amountApplied: 50000 }),
+        appDoc(rId, 'RC', { documentoId: fPagadaId, montoAplicado: 100000 }),
+        appDoc(rId, 'RC', { documentoId: fParcialId, montoAplicado: 50000 }),
       ];
 
       const svc = servicio({
@@ -254,9 +254,9 @@ describe('EstadoCuentaService', () => {
       const inmId = id();
       const f = facturaDoc({
         inmuebleId: inmId,
-        fullNumber: 'FV-0012',
+        numeroCompleto: 'FV-0012',
         total: 300000,
-        lines: [{}, {}, {}],
+        lineas: [{}, {}, {}],
       });
 
       const svc = servicio({
@@ -291,14 +291,14 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 400000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-01-20'),
-        receivedAmount: 400000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-20'),
+        montoRecibido: 400000,
       });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 400000,
-        discountApplied: 40000,
-        appliedAt: new Date('2026-01-20'),
+        montoAplicado: 400000,
+        montoDescuento: 40000,
+        aplicadoEn: new Date('2026-01-20'),
       });
 
       const svc = servicio({
@@ -332,13 +332,13 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-01-20'),
-        receivedAmount: 30000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-20'),
+        montoRecibido: 30000,
       });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 30000,
-        appliedAt: new Date('2026-01-20'),
+        montoAplicado: 30000,
+        aplicadoEn: new Date('2026-01-20'),
       });
 
       const svc = servicio({
@@ -357,7 +357,7 @@ describe('EstadoCuentaService', () => {
       const pagoRow = result.movimientos.find((m) => m.categoria === 'pago');
       expect(pagoRow).toBeDefined();
       expect(pagoRow!.abono).toBe(30000);
-      expect(pagoRow!.numeroCompleto).toBe(r.fullNumber);
+      expect(pagoRow!.numeroCompleto).toBe(r.numeroCompleto);
       expect(pagoRow!.concepto).toBe('Recibo');
       // Exactamente UNA fila de tipo pago — el viejo estilo "una fila por
       // cruce de AplicacionCartera" queda excluido de Detalle de Movimientos.
@@ -380,13 +380,13 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-10-01'),
-        receivedAmount: 100000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-10-01'),
+        montoRecibido: 100000,
       });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 100000,
-        appliedAt: new Date('2026-09-09'),
+        montoAplicado: 100000,
+        aplicadoEn: new Date('2026-09-09'),
       });
 
       const svc = servicio({
@@ -415,19 +415,19 @@ describe('EstadoCuentaService', () => {
       const f2 = facturaDoc({ inmuebleId: inmId, total: 40000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-01-20'),
-        receivedAmount: 100000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-20'),
+        montoRecibido: 100000,
       });
       // El mismo Recibo cruzado contra dos facturas distintas dentro del
       // mismo período — cada cruce es su propia AplicacionCartera.
       const app1 = appDoc(rId, 'RC', {
-        amountApplied: 60000,
-        appliedAt: new Date('2026-01-20'),
+        montoAplicado: 60000,
+        aplicadoEn: new Date('2026-01-20'),
       });
       const app2 = appDoc(rId, 'RC', {
-        amountApplied: 40000,
-        appliedAt: new Date('2026-01-20'),
+        montoAplicado: 40000,
+        aplicadoEn: new Date('2026-01-20'),
       });
 
       const svc = servicio({
@@ -454,22 +454,22 @@ describe('EstadoCuentaService', () => {
     it('varios Recibos distintos en el mismo período producen una fila por cada uno y pagosDelMes suma los tres', async () => {
       const inmId = id();
       const r1 = reciboDoc({
-        fullNumber: 'RC-0001',
-        status: 'activo',
-        receivedDate: new Date('2026-01-05'),
-        receivedAmount: 100000,
+        numeroCompleto: 'RC-0001',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-05'),
+        montoRecibido: 100000,
       });
       const r2 = reciboDoc({
-        fullNumber: 'RC-0002',
-        status: 'activo',
-        receivedDate: new Date('2026-01-12'),
-        receivedAmount: 200000,
+        numeroCompleto: 'RC-0002',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-12'),
+        montoRecibido: 200000,
       });
       const r3 = reciboDoc({
-        fullNumber: 'RC-0003',
-        status: 'activo',
-        receivedDate: new Date('2026-01-25'),
-        receivedAmount: 300000,
+        numeroCompleto: 'RC-0003',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-25'),
+        montoRecibido: 300000,
       });
 
       const svc = servicio({
@@ -493,9 +493,9 @@ describe('EstadoCuentaService', () => {
     it('un Recibo recibido en el período pero SIN ningún cruce todavía (parqueado como anticipo) igual aparece en Detalle de Movimientos', async () => {
       const inmId = id();
       const r = reciboDoc({
-        status: 'activo',
-        receivedDate: new Date('2026-01-08'),
-        receivedAmount: 500000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-08'),
+        montoRecibido: 500000,
       });
 
       const svc = servicio({
@@ -516,16 +516,16 @@ describe('EstadoCuentaService', () => {
       );
       expect(filaRecibo).toBeDefined();
       expect(filaRecibo!.abono).toBe(500000);
-      expect(filaRecibo!.numeroCompleto).toBe(r.fullNumber);
+      expect(filaRecibo!.numeroCompleto).toBe(r.numeroCompleto);
       expect(result.pagosDelMes).toBe(500000);
     });
 
     it('un Recibo ANULADO con receivedDate en el período NO produce fila ni cuenta en pagosDelMes', async () => {
       const inmId = id();
       const r = reciboDoc({
-        status: 'anulado',
-        receivedDate: new Date('2026-01-08'),
-        receivedAmount: 500000,
+        estado: 'anulado',
+        fechaRecibo: new Date('2026-01-08'),
+        montoRecibido: 500000,
       });
 
       const svc = servicio({
@@ -554,14 +554,14 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 962000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-01-10'),
-        receivedAmount: 1000000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-10'),
+        montoRecibido: 1000000,
       });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 962000,
-        discountApplied: 52200,
-        appliedAt: new Date('2026-01-10'),
+        montoAplicado: 962000,
+        montoDescuento: 52200,
+        aplicadoEn: new Date('2026-01-10'),
       });
 
       const svc = servicio({
@@ -587,7 +587,7 @@ describe('EstadoCuentaService', () => {
       expect(result.saldoActual).toBe(-90200);
       expect(result.anticipos).toEqual([
         {
-          numeroCompleto: r.fullNumber,
+          numeroCompleto: r.numeroCompleto,
           fecha: '2026-01-10T00:00:00.000Z',
           monto: 90200,
         },
@@ -601,8 +601,8 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
       const nc = ncDoc({ _id: ncId });
       const app = appDoc(ncId, 'NC', {
-        amountApplied: 20000,
-        appliedAt: new Date('2026-01-22'),
+        montoAplicado: 20000,
+        aplicadoEn: new Date('2026-01-22'),
       });
 
       const svc = servicio({
@@ -636,12 +636,12 @@ describe('EstadoCuentaService', () => {
         _id: fId,
         inmuebleId: inmId,
         total: 100000,
-        status: 'anulada',
+        estado: 'anulada',
       });
       const nc = ncDoc({ _id: ncId });
       const app = appDoc(ncId, 'NC', {
-        amountApplied: 100000,
-        appliedAt: new Date('2026-01-22'),
+        montoAplicado: 100000,
+        aplicadoEn: new Date('2026-01-22'),
       });
 
       const svc = servicio({
@@ -675,10 +675,10 @@ describe('EstadoCuentaService', () => {
       const fId = id();
       const naId = id();
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
-      const na = naDoc({ _id: naId, issueDate: new Date('2026-01-25') });
+      const na = naDoc({ _id: naId, fechaEmision: new Date('2026-01-25') });
       const app = appDoc(naId, 'NA', {
-        amountApplied: 40000,
-        appliedAt: new Date('2026-01-25'),
+        montoAplicado: 40000,
+        aplicadoEn: new Date('2026-01-25'),
       });
 
       const svc = servicio({
@@ -701,7 +701,7 @@ describe('EstadoCuentaService', () => {
       expect(pagoRow).toBeDefined();
       expect(pagoRow!.abono).toBe(40000);
       expect(pagoRow!.concepto).toBe('Nota de Anticipo');
-      expect(pagoRow!.numeroCompleto).toBe(na.fullNumber);
+      expect(pagoRow!.numeroCompleto).toBe(na.numeroCompleto);
       expect(result.anticiposAplicados).toBe(40000);
       expect(result.pagosDelMes).toBe(0);
     });
@@ -729,7 +729,7 @@ describe('EstadoCuentaService', () => {
       );
       expect(ntRows).toHaveLength(2);
       expect(ntRows[0]).toMatchObject({
-        numeroCompleto: nt.fullNumber,
+        numeroCompleto: nt.numeroCompleto,
         concepto: 'Nota Contable',
       });
       expect(result.pagosDelMes).toBe(0);
@@ -751,10 +751,10 @@ describe('EstadoCuentaService', () => {
       ).toBe(result.saldoActual);
     });
 
-    it('una Nota Contable usa su propia issueDate, NUNCA createdAt — bug real reportado: una nota fechada en junio aparecía en septiembre', async () => {
+    it('una Nota Contable usa su propia fecha, NUNCA createdAt — bug real reportado: una nota fechada en junio aparecía en septiembre', async () => {
       const inmId = id();
       const nt = ntDoc({
-        issueDate: new Date('2026-01-10'),
+        fecha: new Date('2026-01-10'),
         createdAt: new Date('2026-09-14'),
       });
 
@@ -772,7 +772,7 @@ describe('EstadoCuentaService', () => {
       // Si se leyera createdAt (septiembre), estas filas quedarían FUERA del
       // período de enero consultado.
       const ntRows = result.movimientos.filter(
-        (m) => m.numeroCompleto === nt.fullNumber,
+        (m) => m.numeroCompleto === nt.numeroCompleto,
       );
       expect(ntRows).toHaveLength(2);
       expect(ntRows[0].fecha).toBe(new Date('2026-01-10').toISOString());
@@ -785,13 +785,13 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({ _id: fId, inmuebleId: inmId, total: 100000 });
       const r = reciboDoc({
         _id: rId,
-        status: 'activo',
-        receivedDate: new Date('2026-01-20'),
-        receivedAmount: 100000,
+        estado: 'activo',
+        fechaRecibo: new Date('2026-01-20'),
+        montoRecibido: 100000,
       });
       const app = appDoc(rId, 'RC', {
-        amountApplied: 100000,
-        appliedAt: new Date('2026-01-20'),
+        montoAplicado: 100000,
+        aplicadoEn: new Date('2026-01-20'),
       });
 
       const svc = servicio({
@@ -823,10 +823,10 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({
         _id: fId,
         inmuebleId: inmId,
-        fullNumber: 'FV-0050',
+        numeroCompleto: 'FV-0050',
         total: 200000,
-        issueDate: new Date('2026-01-01'),
-        dueDate: new Date('2020-01-01'), // muy en el pasado — vencida
+        fechaEmision: new Date('2026-01-01'),
+        fechaVencimiento: new Date('2020-01-01'), // muy en el pasado — vencida
       });
 
       const svc = servicio({
@@ -851,12 +851,12 @@ describe('EstadoCuentaService', () => {
         _id: fId,
         inmuebleId: inmId,
         total: 200000,
-        dueDate: new Date('2020-01-01'),
+        fechaVencimiento: new Date('2020-01-01'),
       });
       const pago = appDoc(id(), 'RC', {
-        documentId: fId,
-        amountApplied: 200000,
-        appliedAt: new Date('2026-01-05'),
+        documentoId: fId,
+        montoAplicado: 200000,
+        aplicadoEn: new Date('2026-01-05'),
       });
 
       const svc = servicio({
@@ -883,14 +883,14 @@ describe('EstadoCuentaService', () => {
         _id: ndId,
         copropiedadId: COP,
         inmuebleId: inmId,
-        fullNumber: 'ND-0003',
+        numeroCompleto: 'ND-0003',
         total: 50000,
         // Dentro del período consultado (para que aparezca en movimientos)
         // pero, al ser una fecha real del pasado respecto a hoy, también ya
         // vencida — su propia issueDate es su "vence", nunca hay un dueDate
         // separado.
-        issueDate: new Date('2026-01-10'),
-        status: 'emitida',
+        fechaEmision: new Date('2026-01-10'),
+        estado: 'emitida',
       };
 
       const svc = servicio({
@@ -919,20 +919,20 @@ describe('EstadoCuentaService', () => {
         _id: fId,
         inmuebleId: inmId,
         total: 100000,
-        issueDate: new Date('2026-01-15'),
+        fechaEmision: new Date('2026-01-15'),
       });
       // FC before the window (only affects saldoAnterior)
       const fBefore = facturaDoc({
         _id: fId2,
         inmuebleId: inmId,
         total: 100000,
-        issueDate: new Date('2025-12-01'),
+        fechaEmision: new Date('2025-12-01'),
       });
       const r = reciboDoc({ _id: rId });
       // RC app before the window
       const app = appDoc(rId, 'RC', {
-        amountApplied: 30000,
-        appliedAt: new Date('2025-12-20'),
+        montoAplicado: 30000,
+        aplicadoEn: new Date('2025-12-20'),
       });
 
       const svc = servicio({
@@ -1002,10 +1002,10 @@ describe('EstadoCuentaService', () => {
       const f = facturaDoc({
         inmuebleId: inmId,
         total: 100000,
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2026-01-31T23:59:59.999Z'),
-        issueDate: new Date('2026-01-15'),
-        dueDate: new Date('2026-02-01'),
+        periodoDesde: new Date('2026-01-01T00:00:00.000Z'),
+        periodoHasta: new Date('2026-01-31T23:59:59.999Z'),
+        fechaEmision: new Date('2026-01-15'),
+        fechaVencimiento: new Date('2026-02-01'),
       });
 
       // `find()` (the general fetch, step 1) must return the array; `findOne()`
@@ -1082,24 +1082,24 @@ describe('EstadoCuentaService', () => {
       // Con anticipo, dentro de otro mes — debe salir igual: es un saldo
       // vivo, no un movimiento del período.
       const rConAnticipo = reciboDoc({
-        fullNumber: 'RC-0011',
-        status: 'activo',
-        receivedDate: new Date('2026-06-02'),
+        numeroCompleto: 'RC-0011',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-06-02'),
         unappliedAmount: 180200,
       });
       // Sin saldo pendiente — no debe salir.
       const rSinAnticipo = reciboDoc({
-        fullNumber: 'RC-0009',
-        status: 'activo',
-        receivedDate: new Date('2026-05-01'),
+        numeroCompleto: 'RC-0009',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-05-01'),
         unappliedAmount: 0,
       });
       // Anulado — nunca es un anticipo disponible, aunque quedara
       // unappliedAmount > 0 sin limpiar.
       const rAnulado = reciboDoc({
-        fullNumber: 'RC-0007',
-        status: 'anulado',
-        receivedDate: new Date('2026-04-01'),
+        numeroCompleto: 'RC-0007',
+        estado: 'anulado',
+        fechaRecibo: new Date('2026-04-01'),
         unappliedAmount: 50000,
       });
 
