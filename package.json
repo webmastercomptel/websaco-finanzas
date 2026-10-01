@@ -22,7 +22,8 @@
     "test:cov": "jest --coverage",
     "seed:admin": "ts-node src/seed/seed-admin.ts",
     "seed:demo": "ts-node src/seed/seed-demo.ts",
-    "clear:demo": "ts-node src/seed/clear-demo.ts"
+    "clear:demo": "ts-node src/seed/clear-demo.ts",
+    "migrar:nombre-propio": "ts-node src/seed/migrar-nombre-propio.ts"
   },
   "dependencies": {
     "@casl/ability": "^7.0.1",

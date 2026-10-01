@@ -2,6 +2,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, SchemaTypes, Types } from 'mongoose';
 import { Copropiedad } from '../copropiedades/copropiedad.schema';
+import { comoNombrePropio } from '../../../common/utils/nombre-propio';
 
 export type TerceroDocument = HydratedDocument<Tercero>;
 
@@ -56,7 +57,7 @@ export class Tercero {
    * to split a Spanish name into parts, so it keeps writing this field
    * directly rather than guessing a split.
    */
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, set: comoNombrePropio })
   nombre: string;
 
   /**
@@ -68,16 +69,16 @@ export class Tercero {
    * files can report each part on its own — `nombre` alone loses the split
    * once concatenated.
    */
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   primerNombre: string | null;
 
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   segundoNombre: string | null;
 
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   primerApellido: string | null;
 
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   segundoApellido: string | null;
 
   /**
@@ -85,7 +86,7 @@ export class Tercero {
    * apart from `nombre` for the same reporting reason as the four fields
    * above, even though today the two are identical for a company.
    */
-  @Prop({ type: String, default: null, trim: true })
+  @Prop({ type: String, default: null, trim: true, set: comoNombrePropio })
   razonSocial: string | null;
 
   /** CC, NIT, CE, passport. Free text — the catalogue varies by country. */

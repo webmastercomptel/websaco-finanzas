@@ -13,6 +13,7 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../database/schemas/copropiedades/copropiedad.schema';
+import { nombrePropio } from '../common/utils/nombre-propio';
 
 const COPROPIEDAD_CODE = '0001';
 
@@ -49,7 +50,10 @@ async function run() {
   );
 
   const nuevos = CARGOS_SISTEMA.filter(
-    (s) => !existentes.some((e) => e.tipo === s.tipo && e.nombre === s.nombre),
+    (s) =>
+      !existentes.some(
+        (e) => e.tipo === s.tipo && e.nombre === nombrePropio(s.nombre),
+      ),
   );
 
   if (nuevos.length === 0) {
