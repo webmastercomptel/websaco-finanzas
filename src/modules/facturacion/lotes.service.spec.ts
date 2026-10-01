@@ -1385,6 +1385,7 @@ describe('LotesFacturacionService.liquidar', () => {
     nombre: 'Administración',
     tipo: 'administracion',
     tasaImpuesto: 0,
+    liquidaMora: true,
     cuentaCreditoId: { codigo: '413501' },
     ...over,
   });
@@ -1690,14 +1691,29 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(actualizacion.$set.previsualizacion).toEqual([]);
   });
 
-  it('calcula el interés como % del saldo ANTERIOR de Administración, ignorando el saldo de otros conceptos', async () => {
+  it('calcula el interés como % del saldo ANTERIOR de todos los cargos con "liquida mora" prendido, ignorando los que lo tienen apagado y el propio concepto de intereses', async () => {
     const m = construirModelos({
       conceptos: [
-        concepto(), // con-1, tipo: 'administracion'
+        concepto(), // con-1, Administración, liquidaMora: true
+        concepto({
+          _id: { toString: () => 'con-pintura' },
+          nombre: 'Pintura',
+          tipo: 'otro',
+          liquidaMora: true,
+        }),
+        concepto({
+          _id: { toString: () => 'con-multas' },
+          nombre: 'Multas',
+          tipo: 'otro',
+          liquidaMora: false,
+        }),
         concepto({
           _id: { toString: () => 'con-intereses' },
           nombre: 'Interés por mora',
           tipo: 'intereses',
+          // Prendido a propósito: igual NO debe entrar a la base
+          // (no se cobra interés sobre interés).
+          liquidaMora: true,
           cuentaCreditoId: { codigo: '413595' },
         }),
       ],
@@ -1705,21 +1721,27 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1', // Administración
-          saldoPendiente: 3000000,
+          saldoPendiente: 2000000,
         },
-        // Saldo de OTRO concepto (p.ej. Multas) — NO debe sumarse a la base
-        // de la mora, por grande que sea. Si el fix regresara al viejo
-        // "saldo total", este número (1,000,000) haría que la mora
-        // calculada fuera 76,000 en vez de 57,000.
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'con-pintura',
+          saldoPendiente: 1000000,
+        },
+        // Multas tiene la casilla apagada — no suma, por grande que sea.
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-multas',
           saldoPendiente: 1000000,
         },
+        {
+          inmuebleId: { toString: () => 'inm-1' },
+          conceptoId: 'con-intereses',
+          saldoPendiente: 500000,
+        },
       ],
-      // topeInteresMora ahora es el MÍNIMO de saldo para cobrar mora, no un
-      // tope — 3,000,000 (solo Administración) supera el mínimo de 50,000,
-      // así que se calcula completo: 1.9% de 3,000,000 = 57,000, sin topar.
+      // Base = 2,000,000 (Administración) + 1,000,000 (Pintura) = 3,000,000,
+      // supera el mínimo de 50,000: 1.9% de 3,000,000 = 57,000.
       lote: { interesMora: 1.9, topeInteresMora: 50000 },
     });
     const service = new LotesFacturacionService(

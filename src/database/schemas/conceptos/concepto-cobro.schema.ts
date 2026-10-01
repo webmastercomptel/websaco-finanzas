@@ -104,8 +104,10 @@ export class ConceptoCobro {
   cuentaImpuestoId: Types.ObjectId | null;
 
   /**
-   * Whether this concept triggers late-interest calculation on overdue
-   * balances. Only `intereses` kind typically has this true.
+   * Whether this concept's overdue balance counts toward the mora-interest
+   * base (`construirPreview` in lotes.service.ts sums the prior balance of
+   * every flagged concepto). Ignored on the `intereses` concept itself —
+   * no interest on interest.
    */
   @Prop({ required: true, default: false })
   liquidaMora: boolean;

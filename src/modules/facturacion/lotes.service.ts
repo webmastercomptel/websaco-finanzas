@@ -1047,8 +1047,13 @@ export class LotesFacturacionService {
     ]);
     const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
     const interesConcepto = conceptos.find((c) => c.tipo === 'intereses');
-    const administracionConcepto = conceptos.find(
-      (c) => c.tipo === 'administracion',
+    // The mora base: every concepto the building flagged "liquida mora" on
+    // its cargo — never the intereses concepto itself, even if flagged
+    // (interest on interest, anatocismo).
+    const conceptosBaseMora = new Set(
+      conceptos
+        .filter((c) => c.liquidaMora && c.tipo !== 'intereses')
+        .map((c) => c._id.toString()),
     );
 
     // Both fetched in bulk, ONE round-trip each for every unit in the lote —
@@ -1177,35 +1182,27 @@ export class LotesFacturacionService {
               ),
             );
           }
-        } else if (administracionConcepto && !esIndividual) {
-          // Mora is charged on Administración's OWN prior balance — not the
-          // unit's total cartera across every concepto (product correction:
-          // Multas/Parqueadero/etc. sitting overdue must never inflate the
-          // interest base). Read straight from `saldosUnidad`, the pre-cycle
-          // snapshot, rather than `saldoCorrientePorConcepto` — that map gets
-          // mutated to `balanceAfter` the moment Administración's own
-          // recurrente/novedad line is built above, which would double-count
-          // this cycle's own charge into "saldo anterior".
-          const idAdministracion = administracionConcepto._id.toString();
-          const saldoAdministracionAnterior =
-            saldosUnidad.find(
-              (s) => s.conceptoId.toString() === idAdministracion,
-            )?.saldoPendiente ?? 0;
+        } else if (conceptosBaseMora.size > 0 && !esIndividual) {
+          // Mora is charged on the prior balance of every concepto whose
+          // cargo has `liquidaMora` on — the building decides per cargo
+          // (e.g. Administración, Pintura, Cuota Extra yes; Multas no), not a
+          // hardcoded Administración-only rule. Read straight from
+          // `saldosUnidad`, the pre-cycle snapshot, rather than
+          // `saldoCorrientePorConcepto` — that map gets mutated to
+          // `balanceAfter` the moment each concepto's own recurrente/novedad
+          // line is built above, which would double-count this cycle's own
+          // charges into "saldo anterior".
+          const saldoBaseMora = saldosUnidad
+            .filter((s) => conceptosBaseMora.has(s.conceptoId.toString()))
+            .reduce((suma, s) => suma + Math.max(0, s.saldoPendiente), 0);
           // `topeInteresMora` is a MINIMUM overdue balance to bother
           // charging mora at all, not a ceiling on the amount — see the
           // note on `Copropiedad.moraValorLimite`. Null means no
           // threshold: mora is always calculated when the rate is set.
           const minimo = lote.topeInteresMora;
-          const alcanzaElMinimo =
-            minimo === null || saldoAdministracionAnterior >= minimo;
-          if (
-            lote.interesMora > 0 &&
-            saldoAdministracionAnterior > 0 &&
-            alcanzaElMinimo
-          ) {
-            const valor = Math.round(
-              saldoAdministracionAnterior * (lote.interesMora / 100),
-            );
+          const alcanzaElMinimo = minimo === null || saldoBaseMora >= minimo;
+          if (lote.interesMora > 0 && saldoBaseMora > 0 && alcanzaElMinimo) {
+            const valor = Math.round(saldoBaseMora * (lote.interesMora / 100));
             if (valor > 0) {
               lines.push(
                 this.aLinea(
