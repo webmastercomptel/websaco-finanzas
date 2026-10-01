@@ -13,11 +13,11 @@ const reciboBase = (over: Record<string, unknown> = {}): ReciboDocument =>
     _id: new Types.ObjectId(),
     inmuebleId: INMUEBLE,
     terceroId: TERCERO,
-    fullNumber: 'RC-0005',
-    receivedDate: new Date('2026-08-06'),
-    receivedAmount: 905040,
-    destinationAccount: '11100502',
-    notes: 'Cancela factura 685',
+    numeroCompleto: 'RC-0005',
+    fechaRecibo: new Date('2026-08-06'),
+    montoRecibido: 905040,
+    cuentaDestino: '11100502',
+    observaciones: 'Cancela factura 685',
     ...over,
   }) as unknown as ReciboDocument;
 
@@ -38,9 +38,9 @@ const aplicacionFV = (
   over: Record<string, unknown> = {},
 ): AplicacionCarteraDocument =>
   ({
-    documentType: 'FV',
-    documentId: new Types.ObjectId(),
-    amountApplied: 453000,
+    tipoDocumento: 'FV',
+    documentoId: new Types.ObjectId(),
+    montoAplicado: 453000,
     detalleConceptos: [],
     ...over,
   }) as unknown as AplicacionCarteraDocument;
@@ -131,7 +131,7 @@ describe('construirDatosImpresionRecibo', () => {
 
   it('usa "Pago recibido" cuando el recibo no tiene notes', async () => {
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ notes: null }),
+      reciboBase({ observaciones: null }),
       [],
       copropiedadBase(),
       COP,
@@ -152,15 +152,15 @@ describe('construirDatosImpresionRecibo', () => {
         Promise.resolve([
           {
             _id: facturaId,
-            number: 685,
-            lines: [
+            numero: 685,
+            lineas: [
               {
                 conceptoId: conceptoAdmin,
-                accountingReceivableAccount: '13050501',
+                cuentaCartera: '13050501',
               },
               {
                 conceptoId: conceptoMora,
-                accountingReceivableAccount: '13050502',
+                cuentaCartera: '13050502',
               },
             ],
           },
@@ -176,24 +176,24 @@ describe('construirDatosImpresionRecibo', () => {
     })) as never;
 
     const aplicacion = aplicacionFV({
-      documentId: facturaId,
-      amountApplied: 520000,
+      documentoId: facturaId,
+      montoAplicado: 520000,
       detalleConceptos: [
         {
           conceptoId: conceptoAdmin,
-          conceptName: 'Administracion',
+          nombreConcepto: 'Administracion',
           monto: 453000,
         },
         {
           conceptoId: conceptoMora,
-          conceptName: 'Intereses de Mora',
+          nombreConcepto: 'Intereses de Mora',
           monto: 67000,
         },
       ],
     });
 
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 520000 }),
+      reciboBase({ montoRecibido: 520000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -230,9 +230,9 @@ describe('construirDatosImpresionRecibo', () => {
   });
 
   it('agrega una línea de anticipo cuando el recibo dejó dinero sin aplicar en su propia creación', async () => {
-    const aplicacion = aplicacionFV({ amountApplied: 300000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 300000 });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 500000 }),
+      reciboBase({ montoRecibido: 500000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -252,9 +252,9 @@ describe('construirDatosImpresionRecibo', () => {
     // después una Nota de Anticipo consumió parte de ese saldo,
     // `unappliedAmount` en la base de datos ya bajó — pero el propio recibo
     // debe seguir imprimiendo lo que ÉL posteó, no el saldo vivo.
-    const aplicacion = aplicacionFV({ amountApplied: 300000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 300000 });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 500000, unappliedAmount: 50000 }),
+      reciboBase({ montoRecibido: 500000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -273,11 +273,11 @@ describe('construirDatosImpresionRecibo', () => {
     // fue solo 950.000 (1.000.000 - 50.000 de descuento) — el resto
     // (50.000) es anticipo, no dinero que "desapareció" en la factura.
     const aplicacion = aplicacionFV({
-      amountApplied: 1000000,
-      discountApplied: 50000,
+      montoAplicado: 1000000,
+      montoDescuento: 50000,
     });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 1000000 }),
+      reciboBase({ montoRecibido: 1000000 }),
       [aplicacion],
       copropiedadBase({ descuentosCuentaDebito: '530525' }),
       COP,
@@ -302,9 +302,9 @@ describe('construirDatosImpresionRecibo', () => {
     // Otros Ingresos (`destinoSobrante: 'otros_ingresos'`) — la línea debe
     // salir en SU cuenta (429505), nunca en Anticipos (210505), el bug
     // reportado en vivo (screenshot: salió en 28050501 "Anticipos").
-    const aplicacion = aplicacionFV({ amountApplied: 300000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 300000 });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 500000, otherIncomeAmount: 200000 }),
+      reciboBase({ montoRecibido: 500000, montoOtrosIngresos: 200000 }),
       [aplicacion],
       copropiedadBase({ otrosIngresosCuentaCredito: '429505' }),
       COP,
@@ -323,9 +323,9 @@ describe('construirDatosImpresionRecibo', () => {
   });
 
   it('no agrega línea de anticipo cuando el recibo se aplicó por completo', async () => {
-    const aplicacion = aplicacionFV({ amountApplied: 500000 });
+    const aplicacion = aplicacionFV({ montoAplicado: 500000 });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 500000 }),
+      reciboBase({ montoRecibido: 500000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -340,24 +340,24 @@ describe('construirDatosImpresionRecibo', () => {
     const notaId = new Types.ObjectId();
     const modelos = modelosVacios();
     modelos.notasDebito.find = jest.fn(() => ({
-      exec: () => Promise.resolve([{ _id: notaId, number: 12 }]),
+      exec: () => Promise.resolve([{ _id: notaId, numero: 12 }]),
     })) as never;
 
     const aplicacion = {
-      documentType: 'ND',
-      documentId: notaId,
-      amountApplied: 150000,
+      tipoDocumento: 'ND',
+      documentoId: notaId,
+      montoAplicado: 150000,
       detalleConceptos: [
         {
           conceptoId: new Types.ObjectId(),
-          conceptName: 'Cuota Parqueadero',
+          nombreConcepto: 'Cuota Parqueadero',
           monto: 150000,
         },
       ],
     } as unknown as AplicacionCarteraDocument;
 
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 150000 }),
+      reciboBase({ montoRecibido: 150000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
@@ -375,11 +375,11 @@ describe('construirDatosImpresionRecibo', () => {
 
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicaciones anteriores a ese campo)', async () => {
     const aplicacion = aplicacionFV({
-      amountApplied: 400000,
+      montoAplicado: 400000,
       detalleConceptos: [],
     });
     const datos = await construirDatosImpresionRecibo(
-      reciboBase({ receivedAmount: 400000 }),
+      reciboBase({ montoRecibido: 400000 }),
       [aplicacion],
       copropiedadBase(),
       COP,
