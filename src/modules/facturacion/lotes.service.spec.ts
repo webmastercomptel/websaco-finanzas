@@ -19,31 +19,31 @@ const CUENTA = new Types.ObjectId().toString();
 const loteDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'lote-1' },
   copropiedadId: COP,
-  number: 1,
-  status: 'borrador',
-  billingDate: new Date('2026-08-27'),
-  dueDate: new Date('2026-08-31'),
-  periodStart: new Date('2026-08-01'),
-  periodEnd: new Date('2026-08-31'),
-  earlyPaymentDiscount: 0,
-  earlyPaymentDiscountFixedValue: 0,
-  discountGraceDays: 0,
-  lateInterestRate: 0,
-  lateInterestCap: null,
-  discountDeadline: new Date('2026-08-27'),
-  serviceSuspensionDate: new Date('2026-08-31'),
-  adjustments: [],
-  preview: [],
-  invoiceIds: [],
-  summary: null,
-  generatedBy: { toString: () => CUENTA },
+  numero: 1,
+  estado: 'borrador',
+  fechaFacturacion: new Date('2026-08-27'),
+  fechaVencimiento: new Date('2026-08-31'),
+  periodoDesde: new Date('2026-08-01'),
+  periodoHasta: new Date('2026-08-31'),
+  descuentoProntoPago: 0,
+  valorFijoDescuentoProntoPago: 0,
+  diasGraciaDescuento: 0,
+  interesMora: 0,
+  topeInteresMora: null,
+  fechaLimiteDescuento: new Date('2026-08-27'),
+  fechaSuspension: new Date('2026-08-31'),
+  novedades: [],
+  previsualizacion: [],
+  facturaIds: [],
+  resumen: null,
+  generadoPor: { toString: () => CUENTA },
   ...over,
 });
 
 /** `ultimoConsolidado` es `null` por defecto — "esta copropiedad nunca
  *  consolidó nada", que es exactamente el caso en el que `crear()` no debe
  *  validar ninguna secuencia de fechas. Los tests que sí ejercitan esa
- *  validación pasan su propio lote con `billingDate`. */
+ *  validación pasan su propio lote con `fechaFacturacion`. */
 const lotesModeloCon = (
   opts: {
     activo?: Record<string, unknown>;
@@ -148,10 +148,10 @@ describe('LotesFacturacionService.crear', () => {
 
     expect(lotes.escrituras[0]).toMatchObject({
       copropiedadId: COP,
-      number: 7,
-      status: 'borrador',
-      lateInterestRate: 1.9,
-      generatedBy: CUENTA,
+      numero: 7,
+      estado: 'borrador',
+      interesMora: 1.9,
+      generadoPor: CUENTA,
     });
   });
 
@@ -192,8 +192,8 @@ describe('LotesFacturacionService.crear', () => {
     });
 
     expect(lotes.escrituras[0]).toMatchObject({
-      lateInterestRate: 2.5,
-      lateInterestCap: 50000,
+      interesMora: 2.5,
+      topeInteresMora: 50000,
     });
   });
 
@@ -236,7 +236,7 @@ describe('LotesFacturacionService.crear', () => {
     });
 
     expect(lotes.escrituras[0]).toMatchObject({
-      lateInterestRate: 0,
+      interesMora: 0,
     });
   });
 
@@ -270,9 +270,9 @@ describe('LotesFacturacionService.crear', () => {
       diasGraciaDescuento: 10,
     });
 
-    const escritura = lotes.escrituras[0] as { discountDeadline: Date };
+    const escritura = lotes.escrituras[0] as { fechaLimiteDescuento: Date };
     // 2026-09-01 + 10 días de gracia - 1 = 2026-09-10.
-    expect(escritura.discountDeadline.toISOString().slice(0, 10)).toBe(
+    expect(escritura.fechaLimiteDescuento.toISOString().slice(0, 10)).toBe(
       '2026-09-10',
     );
   });
@@ -310,13 +310,13 @@ describe('LotesFacturacionService.crear', () => {
     });
 
     const escritura = lotes.escrituras[0] as {
-      discountDeadline: Date;
-      serviceSuspensionDate: Date;
+      fechaLimiteDescuento: Date;
+      fechaSuspension: Date;
     };
-    expect(escritura.discountDeadline.toISOString().slice(0, 10)).toBe(
+    expect(escritura.fechaLimiteDescuento.toISOString().slice(0, 10)).toBe(
       '2026-09-15',
     );
-    expect(escritura.serviceSuspensionDate.toISOString().slice(0, 10)).toBe(
+    expect(escritura.fechaSuspension.toISOString().slice(0, 10)).toBe(
       '2026-10-05',
     );
   });
@@ -350,8 +350,8 @@ describe('LotesFacturacionService.crear', () => {
       periodoHasta: '2026-09-30',
     });
 
-    const escritura = lotes.escrituras[0] as { serviceSuspensionDate: Date };
-    expect(escritura.serviceSuspensionDate.toISOString().slice(0, 10)).toBe(
+    const escritura = lotes.escrituras[0] as { fechaSuspension: Date };
+    expect(escritura.fechaSuspension.toISOString().slice(0, 10)).toBe(
       '2026-09-30',
     );
   });
@@ -395,8 +395,8 @@ describe('LotesFacturacionService.crear', () => {
     await service.crear(CUENTA, dtoBase());
 
     expect(lotes.escrituras[0]).toMatchObject({
-      earlyPaymentDiscount: 5,
-      earlyPaymentDiscountFixedValue: 0,
+      descuentoProntoPago: 5,
+      valorFijoDescuentoProntoPago: 0,
     });
   });
 
@@ -432,8 +432,8 @@ describe('LotesFacturacionService.crear', () => {
     await service.crear(CUENTA, dtoBase());
 
     expect(lotes.escrituras[0]).toMatchObject({
-      earlyPaymentDiscount: 0,
-      earlyPaymentDiscountFixedValue: 15000,
+      descuentoProntoPago: 0,
+      valorFijoDescuentoProntoPago: 15000,
     });
   });
 
@@ -469,8 +469,8 @@ describe('LotesFacturacionService.crear', () => {
     await service.crear(CUENTA, dtoBase());
 
     expect(lotes.escrituras[0]).toMatchObject({
-      earlyPaymentDiscount: 0,
-      earlyPaymentDiscountFixedValue: 0,
+      descuentoProntoPago: 0,
+      valorFijoDescuentoProntoPago: 0,
     });
   });
 
@@ -507,8 +507,8 @@ describe('LotesFacturacionService.crear', () => {
     await service.crear(CUENTA, { ...dtoBase(), descuentoProntoPago: 8 });
 
     expect(lotes.escrituras[0]).toMatchObject({
-      earlyPaymentDiscount: 8,
-      earlyPaymentDiscountFixedValue: 0,
+      descuentoProntoPago: 8,
+      valorFijoDescuentoProntoPago: 0,
     });
   });
 
@@ -535,7 +535,7 @@ describe('LotesFacturacionService.crear', () => {
 
   it('rechaza una fecha de facturación que no cae en el mes siguiente al último ciclo consolidado — el bug real reportado (typo de año)', async () => {
     const lotes = lotesModeloCon({
-      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoConsolidado: { fechaFacturacion: new Date('2026-08-01') },
     });
     const service = servicioCon(lotes);
 
@@ -548,7 +548,7 @@ describe('LotesFacturacionService.crear', () => {
 
   it('acepta la fecha de facturación cuando cae exactamente en el mes siguiente al último ciclo consolidado', async () => {
     const lotes = lotesModeloCon({
-      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoConsolidado: { fechaFacturacion: new Date('2026-08-01') },
     });
     const service = servicioCon(lotes);
 
@@ -562,7 +562,7 @@ describe('LotesFacturacionService.crear', () => {
 
   it('rechaza una fecha de facturación del mismo mes que el último ciclo consolidado (no avanzó el período)', async () => {
     const lotes = lotesModeloCon({
-      ultimoConsolidado: { billingDate: new Date('2026-08-01') },
+      ultimoConsolidado: { fechaFacturacion: new Date('2026-08-01') },
     });
     const service = servicioCon(lotes);
 
@@ -573,7 +573,7 @@ describe('LotesFacturacionService.crear', () => {
 
   it('maneja el cruce de año — diciembre consolidado exige enero del año siguiente', async () => {
     const lotes = lotesModeloCon({
-      ultimoConsolidado: { billingDate: new Date('2026-12-01') },
+      ultimoConsolidado: { fechaFacturacion: new Date('2026-12-01') },
     });
     const service = servicioCon(lotes);
 
@@ -663,17 +663,17 @@ describe('LotesFacturacionService.crearIndividual', () => {
 
   it('copia fechas y parámetros del último lote consolidado, nunca de Copropiedad ni de un valor libre', async () => {
     const ultimoConsolidado = {
-      billingDate: new Date('2026-08-27'),
-      dueDate: new Date('2026-08-31'),
-      periodStart: new Date('2026-08-01'),
-      periodEnd: new Date('2026-08-31'),
-      earlyPaymentDiscount: 5,
-      earlyPaymentDiscountFixedValue: 0,
-      discountGraceDays: 3,
-      lateInterestRate: 1.9,
-      lateInterestCap: 50000,
-      discountDeadline: new Date('2026-08-29'),
-      serviceSuspensionDate: new Date('2026-08-31'),
+      fechaFacturacion: new Date('2026-08-27'),
+      fechaVencimiento: new Date('2026-08-31'),
+      periodoDesde: new Date('2026-08-01'),
+      periodoHasta: new Date('2026-08-31'),
+      descuentoProntoPago: 5,
+      valorFijoDescuentoProntoPago: 0,
+      diasGraciaDescuento: 3,
+      interesMora: 1.9,
+      topeInteresMora: 50000,
+      fechaLimiteDescuento: new Date('2026-08-29'),
+      fechaSuspension: new Date('2026-08-31'),
     };
     const lotes = lotesModeloCon({ ultimoConsolidado });
     const inmuebles = inmueblesCon({ _id: INMUEBLE });
@@ -683,10 +683,10 @@ describe('LotesFacturacionService.crearIndividual', () => {
 
     expect(lotes.escrituras[0]).toMatchObject({
       copropiedadId: COP,
-      number: 9,
-      status: 'borrador',
+      numero: 9,
+      estado: 'borrador',
       inmuebleId: new Types.ObjectId(INMUEBLE),
-      generatedBy: CUENTA,
+      generadoPor: CUENTA,
       ...ultimoConsolidado,
     });
   });
@@ -776,7 +776,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const lotes = {
       findOne: jest.fn(() => ({
         exec: () =>
-          Promise.resolve(loteDoc({ adjustments: [{ vieja: true }] })),
+          Promise.resolve(loteDoc({ novedades: [{ vieja: true }] })),
       })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
@@ -822,17 +822,17 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
     const [, actualizacion] = calls[0] as [
       Record<string, unknown>,
-      { $push: { adjustments: { $each: Record<string, unknown>[] } } },
+      { $push: { novedades: { $each: Record<string, unknown>[] } } },
     ];
     // ADDITIVE now: $push (not $set) — a fresh upload must never wipe
-    // whatever adjustments already existed on the lote.
-    expect(actualizacion.$push.adjustments.$each).toEqual([
+    // whatever novedades already existed on the lote.
+    expect(actualizacion.$push.novedades.$each).toEqual([
       expect.objectContaining({
         inmuebleId: 'inm-1',
         conceptoId: 'con-1',
-        amount: 50000,
-        note: null,
-        overrides: null,
+        monto: 50000,
+        nota: null,
+        sobrescribe: null,
       }),
     ]);
   });
@@ -885,15 +885,15 @@ describe('LotesFacturacionService.cargarNovedades', () => {
     const calls = lotes.findOneAndUpdate.mock.calls as unknown[][];
     const [, actualizacion] = calls[0] as [
       Record<string, unknown>,
-      { $push: { adjustments: { $each: Record<string, unknown>[] } } },
+      { $push: { novedades: { $each: Record<string, unknown>[] } } },
     ];
-    expect(actualizacion.$push.adjustments.$each).toEqual([
+    expect(actualizacion.$push.novedades.$each).toEqual([
       expect.objectContaining({
         inmuebleId: 'inm-1',
         conceptoId: 'con-1',
-        amount: 20000,
-        note: null,
-        overrides: null,
+        monto: 20000,
+        nota: null,
+        sobrescribe: null,
       }),
     ]);
   });
@@ -946,7 +946,7 @@ describe('LotesFacturacionService.cargarNovedades', () => {
   it('rechaza cargar novedades en un lote que ya está consolidado', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'consolidado' })),
       })),
       findOneAndUpdate: jest.fn(() => ({
         exec: () => Promise.resolve(loteDoc()),
@@ -1082,7 +1082,7 @@ describe('LotesFacturacionService.actualizar', () => {
   it('rechaza editar un lote consolidado: ya generó facturas reales', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'consolidado' })),
       })),
       findOneAndUpdate: jest.fn(),
     };
@@ -1106,13 +1106,13 @@ describe('LotesFacturacionService.actualizar', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('guarda solo los campos que vinieron en el patch, traducidos al inglés', async () => {
+  it('guarda solo los campos que vinieron en el patch', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'liquidado' })),
       })),
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'borrador' })),
       })),
     };
     const service = construir(lotes);
@@ -1123,10 +1123,10 @@ describe('LotesFacturacionService.actualizar', () => {
     });
 
     const guardado = actualizacionDe(lotes.findOneAndUpdate);
-    expect(guardado.billingDate).toEqual(new Date('2026-09-01'));
-    expect(guardado.lateInterestRate).toBe(2.1);
-    expect(guardado).not.toHaveProperty('dueDate');
-    expect(guardado).not.toHaveProperty('periodStart');
+    expect(guardado.fechaFacturacion).toEqual(new Date('2026-09-01'));
+    expect(guardado.interesMora).toBe(2.1);
+    expect(guardado).not.toHaveProperty('fechaVencimiento');
+    expect(guardado).not.toHaveProperty('periodoDesde');
   });
 
   it('siempre vuelve a borrador y borra la previsualización — ya no corresponde a los parámetros nuevos', async () => {
@@ -1134,11 +1134,14 @@ describe('LotesFacturacionService.actualizar', () => {
       findOne: jest.fn(() => ({
         exec: () =>
           Promise.resolve(
-            loteDoc({ status: 'liquidado', preview: [{ inmuebleId: 'x' }] }),
+            loteDoc({
+              estado: 'liquidado',
+              previsualizacion: [{ inmuebleId: 'x' }],
+            }),
           ),
       })),
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'borrador' })),
       })),
     };
     const service = construir(lotes);
@@ -1146,18 +1149,18 @@ describe('LotesFacturacionService.actualizar', () => {
     await service.actualizar('lote-1', { interesMora: 1 });
 
     const guardado = actualizacionDe(lotes.findOneAndUpdate);
-    expect(guardado.status).toBe('borrador');
-    expect(guardado.preview).toEqual([]);
-    expect(guardado.summary).toBeNull();
+    expect(guardado.estado).toBe('borrador');
+    expect(guardado.previsualizacion).toEqual([]);
+    expect(guardado.resumen).toBeNull();
   });
 
-  it('no toca adjustments: las novedades ya cargadas no dependen del período', async () => {
+  it('no toca novedades: las novedades ya cargadas no dependen del período', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'liquidado' })),
       })),
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'borrador' })),
       })),
     };
     const service = construir(lotes);
@@ -1165,7 +1168,7 @@ describe('LotesFacturacionService.actualizar', () => {
     await service.actualizar('lote-1', { interesMora: 1 });
 
     expect(actualizacionDe(lotes.findOneAndUpdate)).not.toHaveProperty(
-      'adjustments',
+      'novedades',
     );
   });
 });
@@ -1173,12 +1176,12 @@ describe('LotesFacturacionService.actualizar', () => {
 describe('LotesFacturacionService.liquidar', () => {
   type ActualizacionLiquidar = {
     $set: {
-      preview: Array<{
-        lines: Array<Record<string, unknown>>;
-        holder: Record<string, unknown> | null;
+      previsualizacion: Array<{
+        lineas: Array<Record<string, unknown>>;
+        titular: Record<string, unknown> | null;
         terceroId: string | null;
       }>;
-      status: string;
+      estado: string;
     };
   };
   const actualizacionDe = (mockFn: jest.Mock) => {
@@ -1323,26 +1326,26 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const preliminar = actualizacion.$set.preview[0];
-    expect(preliminar.lines).toEqual([
+    const preliminar = actualizacion.$set.previsualizacion[0];
+    expect(preliminar.lineas).toEqual([
       expect.objectContaining({
-        conceptName: 'Administración',
-        conceptKind: 'administracion',
-        accountingIncomeAccount: '413501',
-        source: 'recurrente',
-        baseAmount: 520000,
-        totalAmount: 520000,
+        nombreConcepto: 'Administración',
+        tipoConcepto: 'administracion',
+        cuentaIngreso: '413501',
+        origen: 'recurrente',
+        valorBase: 520000,
+        valorTotal: 520000,
       }),
     ]);
-    const linea = preliminar.lines[0] as { conceptoId: { toString(): string } };
+    const linea = preliminar.lineas[0] as { conceptoId: { toString(): string } };
     expect(linea.conceptoId.toString()).toBe('con-1');
-    expect(actualizacion.$set.status).toBe('liquidado');
+    expect(actualizacion.$set.estado).toBe('liquidado');
   });
 
-  it('solo trae inmuebles activos para el preview — un inmueble marcado inactivo no entra a un ciclo nuevo', async () => {
+  it('solo trae inmuebles activos para el previsualizacion — un inmueble marcado inactivo no entra a un ciclo nuevo', async () => {
     // `Inmueble.estado` (product decision, 2026-09-21): un inmueble inactivo
     // nunca debe generar Factura en un ciclo nuevo — la consulta que arma
-    // el preview es la única elegibilidad real, así que basta con
+    // el previsualizacion es la única elegibilidad real, así que basta con
     // verificar que siempre filtra por `estado: 'active'`.
     const m = construirModelos({});
     const service = new LotesFacturacionService(
@@ -1370,7 +1373,7 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(filtro?.estado).toBe('active');
   });
 
-  it('congela accountingTaxAccount desde cuentaImpuestoId del concepto', async () => {
+  it('congela cuentaImpuesto desde cuentaImpuestoId del concepto', async () => {
     const m = construirModelos({
       conceptos: [
         concepto({ tasaImpuesto: 19, cuentaImpuestoId: { codigo: '240815' } }),
@@ -1397,14 +1400,14 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const preliminar = actualizacion.$set.preview[0];
-    expect(preliminar.lines).toEqual([
+    const preliminar = actualizacion.$set.previsualizacion[0];
+    expect(preliminar.lineas).toEqual([
       expect.objectContaining({
-        accountingTaxAccount: '240815',
-        taxRate: 19,
-        baseAmount: 520000,
-        taxAmount: Math.round(520000 * 0.19),
-        totalAmount: 520000 + Math.round(520000 * 0.19),
+        cuentaImpuesto: '240815',
+        tasaImpuesto: 19,
+        valorBase: 520000,
+        valorImpuesto: Math.round(520000 * 0.19),
+        valorTotal: 520000 + Math.round(520000 * 0.19),
       }),
     ]);
   });
@@ -1445,19 +1448,19 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-admin',
-          balance: 500000,
+          saldoPendiente: 500000,
         },
       ],
       lote: {
-        lateInterestRate: 1.9,
-        lateInterestCap: null,
-        adjustments: [
+        interesMora: 1.9,
+        topeInteresMora: null,
+        novedades: [
           {
             _id: { toString: () => 'nov-multas' },
             inmuebleId: { toString: () => 'inm-1' },
             conceptoId: { toString: () => 'con-multas' },
-            amount: 50000,
-            overrides: null,
+            monto: 50000,
+            sobrescribe: null,
           },
         ],
       },
@@ -1483,8 +1486,8 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const nombres = actualizacion.$set.preview[0].lines.map(
-      (l) => (l as { conceptName: string }).conceptName,
+    const nombres = actualizacion.$set.previsualizacion[0].lineas.map(
+      (l) => (l as { nombreConcepto: string }).nombreConcepto,
     );
     expect(nombres).toEqual(['Administración', 'Intereses por Mora', 'Multas']);
   });
@@ -1512,7 +1515,7 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacion.$set.preview).toEqual([]);
+    expect(actualizacion.$set.previsualizacion).toEqual([]);
   });
 
   it('calcula el interés como % del saldo ANTERIOR de Administración, ignorando el saldo de otros conceptos', async () => {
@@ -1530,7 +1533,7 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1', // Administración
-          balance: 3000000,
+          saldoPendiente: 3000000,
         },
         // Saldo de OTRO concepto (p.ej. Multas) — NO debe sumarse a la base
         // de la mora, por grande que sea. Si el fix regresara al viejo
@@ -1539,13 +1542,13 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-multas',
-          balance: 1000000,
+          saldoPendiente: 1000000,
         },
       ],
-      // lateInterestCap ahora es el MÍNIMO de saldo para cobrar mora, no un
+      // topeInteresMora ahora es el MÍNIMO de saldo para cobrar mora, no un
       // tope — 3,000,000 (solo Administración) supera el mínimo de 50,000,
       // así que se calcula completo: 1.9% de 3,000,000 = 57,000, sin topar.
-      lote: { lateInterestRate: 1.9, lateInterestCap: 50000 },
+      lote: { interesMora: 1.9, topeInteresMora: 50000 },
     });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1568,10 +1571,10 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const interes = actualizacion.$set.preview[0].lines.find(
-      (l: { source: string }) => l.source === 'interes',
+    const interes = actualizacion.$set.previsualizacion[0].lineas.find(
+      (l: { origen: string }) => l.origen === 'interes',
     );
-    expect(interes?.totalAmount).toBe(57000);
+    expect(interes?.valorTotal).toBe(57000);
   });
 
   it('Factura Individual (lote.inmuebleId set): ignora ValorRecurrente y la mora automática — solo lo cargado a mano', async () => {
@@ -1591,21 +1594,21 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1',
-          balance: 3000000,
+          saldoPendiente: 3000000,
         },
       ],
       lote: {
         inmuebleId: { toString: () => 'inm-1' },
-        lateInterestRate: 1.9,
-        lateInterestCap: 50000,
-        adjustments: [
+        interesMora: 1.9,
+        topeInteresMora: 50000,
+        novedades: [
           {
             _id: { toString: () => 'nov-1' },
             inmuebleId: { toString: () => 'inm-1' },
             conceptoId: { toString: () => 'con-1' },
-            amount: 300000,
-            note: 'Cargo manual',
-            overrides: null,
+            monto: 300000,
+            nota: 'Cargo manual',
+            sobrescribe: null,
           },
         ],
       },
@@ -1634,14 +1637,14 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(m.valoresRecurrentes.find).not.toHaveBeenCalled();
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const lineas = actualizacion.$set.preview[0].lines as Array<{
-      source: string;
-      totalAmount: number;
+    const lineas = actualizacion.$set.previsualizacion[0].lineas as Array<{
+      origen: string;
+      valorTotal: number;
     }>;
-    expect(lineas.some((l) => l.source === 'interes')).toBe(false);
-    expect(lineas.some((l) => l.source === 'recurrente')).toBe(false);
+    expect(lineas.some((l) => l.origen === 'interes')).toBe(false);
+    expect(lineas.some((l) => l.origen === 'recurrente')).toBe(false);
     expect(lineas).toEqual([
-      expect.objectContaining({ source: 'novedad', totalAmount: 300000 }),
+      expect.objectContaining({ origen: 'novedad', valorTotal: 300000 }),
     ]);
   });
 
@@ -1660,12 +1663,12 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1', // Administración
-          balance: 30000,
+          saldoPendiente: 30000,
         },
       ],
       // 10% de 30,000 = 3,000 (no redondearía a cero), pero el saldo no
       // alcanza el mínimo de 50,000 — no se cobra mora en absoluto.
-      lote: { lateInterestRate: 10, lateInterestCap: 50000 },
+      lote: { interesMora: 10, topeInteresMora: 50000 },
     });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1688,8 +1691,8 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const interes = actualizacion.$set.preview[0].lines.find(
-      (l: { source: string }) => l.source === 'interes',
+    const interes = actualizacion.$set.previsualizacion[0].lineas.find(
+      (l: { origen: string }) => l.origen === 'interes',
     );
     expect(interes).toBeUndefined();
   });
@@ -1709,10 +1712,10 @@ describe('LotesFacturacionService.liquidar', () => {
         {
           inmuebleId: { toString: () => 'inm-1' },
           conceptoId: 'con-1', // Administración
-          balance: 10,
+          saldoPendiente: 10,
         },
       ],
-      lote: { lateInterestRate: 1.9, lateInterestCap: 50000 },
+      lote: { interesMora: 1.9, topeInteresMora: 50000 },
     });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1735,10 +1738,10 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const lineas = actualizacion.$set.preview[0].lines;
+    const lineas = actualizacion.$set.previsualizacion[0].lineas;
     // 1.9% of 10 = 0.19, rounds to 0 — no interest line should be pushed.
     expect(
-      lineas.some((l) => (l as { source: string }).source === 'interes'),
+      lineas.some((l) => (l as { origen: string }).origen === 'interes'),
     ).toBe(false);
   });
 
@@ -1767,11 +1770,11 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const preliminar = actualizacion.$set.preview[0];
-    expect(preliminar.holder?.email).toBe('ana@ejemplo.com');
+    const preliminar = actualizacion.$set.previsualizacion[0];
+    expect(preliminar.titular?.email).toBe('ana@ejemplo.com');
   });
 
-  it('congela el teléfono del titular en holder.phone', async () => {
+  it('congela el teléfono del titular en titular.telefono', async () => {
     const m = construirModelos({
       terceros: tercero({ telefono: '3108458405' }),
     });
@@ -1796,11 +1799,11 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const preliminar = actualizacion.$set.preview[0];
-    expect(preliminar.holder?.phone).toBe('3108458405');
+    const preliminar = actualizacion.$set.previsualizacion[0];
+    expect(preliminar.titular?.telefono).toBe('3108458405');
   });
 
-  it('deja holder y terceroId en null si el titular no se encuentra', async () => {
+  it('deja titular y terceroId en null si el titular no se encuentra', async () => {
     const m = construirModelos({ terceros: null });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1823,13 +1826,13 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    const preliminar = actualizacion.$set.preview[0];
-    expect(preliminar.holder).toBeNull();
+    const preliminar = actualizacion.$set.previsualizacion[0];
+    expect(preliminar.titular).toBeNull();
     expect(preliminar.terceroId).toBeNull();
   });
 
   it('rechaza liquidar un lote que ya está consolidado', async () => {
-    const m = construirModelos({ lote: { status: 'consolidado' } });
+    const m = construirModelos({ lote: { estado: 'consolidado' } });
     const service = new LotesFacturacionService(
       m.lotes as never,
       {} as never, // facturas
@@ -1854,7 +1857,7 @@ describe('LotesFacturacionService.liquidar', () => {
     expect(m.lotes.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('omite el preview de una unidad sin cargos recurrentes, sin novedades y sin interés', async () => {
+  it('omite el previsualizacion de una unidad sin cargos recurrentes, sin novedades y sin interés', async () => {
     const m = construirModelos({ valoresRecurrentes: [] });
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -1877,7 +1880,7 @@ describe('LotesFacturacionService.liquidar', () => {
     await service.liquidar('lote-1');
 
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacion.$set.preview).toEqual([]);
+    expect(actualizacion.$set.previsualizacion).toEqual([]);
   });
 });
 
@@ -1895,33 +1898,33 @@ describe('LotesFacturacionService.consolidar', () => {
 
   const preliminar = (over: Record<string, unknown> = {}) => ({
     inmuebleId: 'inm-1',
-    unitCode: '301',
+    codigoInmueble: '301',
     terceroId: 'ter-1',
-    holder: { name: 'Ana Pérez', identificationNumber: '123456' },
-    lines: [
+    titular: { nombre: 'Ana Pérez', numeroIdentificacion: '123456' },
+    lineas: [
       {
         conceptoId: 'con-1',
-        conceptName: 'Administración',
-        conceptKind: 'administracion',
-        accountingIncomeAccount: '413501',
-        source: 'recurrente',
-        baseAmount: 520000,
-        taxRate: 0,
-        taxAmount: 0,
-        totalAmount: 520000,
+        nombreConcepto: 'Administración',
+        tipoConcepto: 'administracion',
+        cuentaIngreso: '413501',
+        origen: 'recurrente',
+        valorBase: 520000,
+        tasaImpuesto: 0,
+        valorImpuesto: 0,
+        valorTotal: 520000,
       },
     ],
     subtotal: 520000,
-    totalTax: 0,
+    totalImpuestos: 0,
     total: 520000,
     ...over,
   });
 
   type ActualizacionConsolidar = {
     $set: {
-      status: string;
-      invoiceIds: string[];
-      summary: Record<string, unknown> | null;
+      estado: string;
+      facturaIds: string[];
+      resumen: Record<string, unknown> | null;
     };
   };
   const actualizacionDe = (mockFn: jest.Mock) => {
@@ -1931,7 +1934,7 @@ describe('LotesFacturacionService.consolidar', () => {
   };
 
   const construirModelos = (opts: {
-    preview?: unknown[];
+    previsualizacion?: unknown[];
     copropiedad?: Record<string, unknown>;
     facturasExistentes?: Record<string, unknown>[];
     asientosExistentes?: Record<string, unknown>[];
@@ -1949,14 +1952,14 @@ describe('LotesFacturacionService.consolidar', () => {
         exec: () =>
           Promise.resolve(
             loteDoc({
-              status: 'liquidado',
-              preview: opts.preview ?? [preliminar()],
+              estado: 'liquidado',
+              previsualizacion: opts.previsualizacion ?? [preliminar()],
               ...opts.lote,
             }),
           ),
       })),
       findOneAndUpdate: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'consolidado' })),
       })),
       // Progress tracking. Declares both parameters (even where a given
       // test doesn't assert on the call) so jest infers a two-element call
@@ -2148,26 +2151,26 @@ describe('LotesFacturacionService.consolidar', () => {
     const resultado = await servicio2.consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      fullNumber: 'CONJ-2026-1041',
-      unitCode: '301',
+      numeroCompleto: 'CONJ-2026-1041',
+      codigoInmueble: '301',
       total: 520000,
-      outstandingBalance: 520000,
-      status: 'emitida',
+      saldoPendiente: 520000,
+      estado: 'emitida',
     });
     expect(m.saldosActualizados[0]).toMatchObject({
       inmuebleId: 'inm-1',
       conceptoId: 'con-1',
     });
-    expect(m.asientosCreados[0].entries).toHaveLength(2);
+    expect(m.asientosCreados[0].movimientos).toHaveLength(2);
     expect(resultado.errores).toEqual([]);
   });
 
   it('actualiza el progreso mientras procesa las filas, y lo limpia al terminar', async () => {
     const m = construirModelos({
-      preview: [
+      previsualizacion: [
         preliminar(),
-        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
-        preliminar({ inmuebleId: 'inm-3', unitCode: '303' }),
+        preliminar({ inmuebleId: 'inm-2', codigoInmueble: '302' }),
+        preliminar({ inmuebleId: 'inm-3', codigoInmueble: '303' }),
       ],
     });
     const numeracion = {
@@ -2201,18 +2204,18 @@ describe('LotesFacturacionService.consolidar', () => {
     // First write, before any row is attempted: 0 of 3.
     const escrituras = m.lotes.updateOne.mock.calls.map(
       ([, actualizacion]) =>
-        (actualizacion as { $set: { progress: unknown } }).$set.progress,
+        (actualizacion as { $set: { progreso: unknown } }).$set.progreso,
     );
-    expect(escrituras[0]).toEqual({ current: 0, total: 3 });
+    expect(escrituras[0]).toEqual({ actual: 0, total: 3 });
     // Last progress write reaches the full count — every row completed.
     expect(escrituras[escrituras.length - 1]).toEqual({
-      current: 3,
+      actual: 3,
       total: 3,
     });
-    // The final findOneAndUpdate (status/invoiceIds/summary) clears it —
+    // The final findOneAndUpdate (estado/facturaIds/resumen) clears it —
     // nothing left to poll once consolidar() itself has returned.
     const actualizacionFinal = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacionFinal.$set).toMatchObject({ progress: null });
+    expect(actualizacionFinal.$set).toMatchObject({ progreso: null });
   });
 
   it('agrega tercero/centroCosto/flujoCaja a las líneas cuya cuenta lo requiere', async () => {
@@ -2268,14 +2271,14 @@ describe('LotesFacturacionService.consolidar', () => {
 
     await servicio2.consolidar('lote-1');
 
-    const entries = m.asientosCreados[0].entries as Array<{
-      account: string;
+    const movimientos = m.asientosCreados[0].movimientos as Array<{
+      cuenta: string;
       tercero?: string | null;
       centroCosto?: string | null;
       flujoCaja?: string | null;
     }>;
-    const debitoCartera = entries.find((e) => e.account === '130501');
-    const creditoIngreso = entries.find((e) => e.account === '413501');
+    const debitoCartera = movimientos.find((e) => e.cuenta === '130501');
+    const creditoIngreso = movimientos.find((e) => e.cuenta === '413501');
     expect(debitoCartera?.tercero).toBe('301');
     expect(debitoCartera?.centroCosto ?? null).toBeNull();
     expect(creditoIngreso?.centroCosto).toBe('CC-01');
@@ -2316,7 +2319,7 @@ describe('LotesFacturacionService.consolidar', () => {
     await servicio2.consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      fullNumber: 'FV-1',
+      numeroCompleto: 'FV-1',
       resolucionId: null,
     });
   });
@@ -2354,7 +2357,7 @@ describe('LotesFacturacionService.consolidar', () => {
 
   it('detiene todo el lote si la resolución se agota a mitad de camino, sin reintentar fila por fila', async () => {
     const m = construirModelos({
-      preview: [preliminar(), preliminar({ unitCode: '302' })],
+      previsualizacion: [preliminar(), preliminar({ codigoInmueble: '302' })],
     });
     // Kept as a separate reference and asserted on directly below — reading
     // it back off `numeracion` (typed as the real NumeracionService) is what
@@ -2417,14 +2420,14 @@ describe('LotesFacturacionService.consolidar', () => {
     // pin what was actually persisted too, since the mocked
     // findOneAndUpdate's resolved value is unrelated to its own $set.
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacion.$set.status).toBe('liquidado');
-    expect(actualizacion.$set.summary).toBeNull();
+    expect(actualizacion.$set.estado).toBe('liquidado');
+    expect(actualizacion.$set.resumen).toBeNull();
   });
 
   it('rechaza consolidar un lote que ya está consolidado', async () => {
     const m = construirModelos({});
     m.lotes.findOne = jest.fn(() => ({
-      exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+      exec: () => Promise.resolve(loteDoc({ estado: 'consolidado' })),
     }));
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -2453,7 +2456,7 @@ describe('LotesFacturacionService.consolidar', () => {
   it('rechaza consolidar un lote que nunca fue liquidado (borrador)', async () => {
     const m = construirModelos({});
     m.lotes.findOne = jest.fn(() => ({
-      exec: () => Promise.resolve(loteDoc({ status: 'borrador', preview: [] })),
+      exec: () => Promise.resolve(loteDoc({ estado: 'borrador', previsualizacion: [] })),
     }));
     const service = new LotesFacturacionService(
       m.lotes as never,
@@ -2481,14 +2484,14 @@ describe('LotesFacturacionService.consolidar', () => {
 
   it('un preliminar cuyo total declarado no coincide con la suma de sus líneas sigue generando un asiento balanceado', async () => {
     // construirMovimientos derives BOTH the debit and credit sides from the
-    // lines' own totalAmount (one partitioned by accountingReceivableAccount,
-    // the other by accountingIncomeAccount) — a stale/wrong `preliminar.total`
+    // lineas' own valorTotal (one partitioned by cuentaCartera,
+    // the other by cuentaIngreso) — a stale/wrong `preliminar.total`
     // no longer unbalances the posting, since `total` is never read for the
     // debit side anymore. See the "Asiento contable desbalanceado" check in
     // consolidar() for the (now unreachable via this path) defense-in-depth
     // it still guards.
     const m = construirModelos({
-      preview: [preliminar({ total: 999999 })],
+      previsualizacion: [preliminar({ total: 999999 })],
     });
     const numeracion = {
       siguienteLote: jest.fn().mockResolvedValue(1),
@@ -2525,17 +2528,17 @@ describe('LotesFacturacionService.consolidar', () => {
     // inm-1 already has a real Factura from that first attempt; inm-2 does
     // not yet.
     const m = construirModelos({
-      preview: [
+      previsualizacion: [
         preliminar(),
-        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+        preliminar({ inmuebleId: 'inm-2', codigoInmueble: '302' }),
       ],
       facturasExistentes: [
         {
           _id: { toString: () => 'fac-previo' },
           inmuebleId: { toString: () => 'inm-1' },
           total: 520000,
-          number: 1041,
-          fullNumber: 'CONJ-2026-1041',
+          numero: 1041,
+          numeroCompleto: 'CONJ-2026-1041',
         },
       ],
       // fac-previo's AsientoContable was already posted — this row is
@@ -2575,7 +2578,7 @@ describe('LotesFacturacionService.consolidar', () => {
 
     // Only the not-yet-invoiced unit gets a NEW Factura.
     expect(m.facturasCreadas).toHaveLength(1);
-    expect(m.facturasCreadas[0]).toMatchObject({ unitCode: '302' });
+    expect(m.facturasCreadas[0]).toMatchObject({ codigoInmueble: '302' });
     // Reserved exactly 1 — the already-invoiced unit never counted toward
     // the block size (unidadesYaFacturadas already excluded it).
     expect(reservarBloqueFacturas).toHaveBeenCalledTimes(1);
@@ -2588,14 +2591,14 @@ describe('LotesFacturacionService.consolidar', () => {
     const idNuevaFactura = (
       m.facturasCreadas[0]._id as Types.ObjectId
     ).toString();
-    expect(actualizacion.$set.invoiceIds).toEqual(
+    expect(actualizacion.$set.facturaIds).toEqual(
       expect.arrayContaining(['fac-previo', idNuevaFactura]),
     );
-    expect(actualizacion.$set.status).toBe('consolidado');
-    expect(actualizacion.$set.summary).toMatchObject({
-      totalAmount: 1040000,
-      firstInvoiceNumber: 'CONJ-2026-1041',
-      lastInvoiceNumber: 'CONJ-2026-1042',
+    expect(actualizacion.$set.estado).toBe('consolidado');
+    expect(actualizacion.$set.resumen).toMatchObject({
+      montoTotal: 1040000,
+      primerNumero: 'CONJ-2026-1041',
+      ultimoNumero: 'CONJ-2026-1042',
     });
     expect(resultado.errores).toEqual([]);
   });
@@ -2609,9 +2612,9 @@ describe('LotesFacturacionService.consolidar', () => {
     // actually failed — the accepted tradeoff documented on
     // `procesarTanda()` for batching several rows per transaction.
     const m = construirModelos({
-      preview: [
+      previsualizacion: [
         preliminar(),
-        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+        preliminar({ inmuebleId: 'inm-2', codigoInmueble: '302' }),
       ],
     });
     m.asientos.insertMany = jest
@@ -2668,8 +2671,8 @@ describe('LotesFacturacionService.consolidar', () => {
       }),
     ]);
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacion.$set.status).toBe('liquidado');
-    expect(actualizacion.$set.summary).toBeNull();
+    expect(actualizacion.$set.estado).toBe('liquidado');
+    expect(actualizacion.$set.resumen).toBeNull();
   });
 
   it('nunca marca consolidado un lote con una factura previa incompleta (sin asiento)', async () => {
@@ -2677,16 +2680,16 @@ describe('LotesFacturacionService.consolidar', () => {
     // AsientoContable was never created — a prior per-row write failure
     // between facturas.create() and asientos.create(). inm-2 is fine.
     const m = construirModelos({
-      preview: [
+      previsualizacion: [
         preliminar(),
-        preliminar({ inmuebleId: 'inm-2', unitCode: '302' }),
+        preliminar({ inmuebleId: 'inm-2', codigoInmueble: '302' }),
       ],
       facturasExistentes: [
         {
           _id: { toString: () => 'fac-huerfana' },
           inmuebleId: { toString: () => 'inm-1' },
-          unitCode: '301',
-          fullNumber: 'CONJ-2026-1040',
+          codigoInmueble: '301',
+          numeroCompleto: 'CONJ-2026-1040',
           total: 520000,
         },
       ],
@@ -2722,7 +2725,7 @@ describe('LotesFacturacionService.consolidar', () => {
 
     // inm-1 is NEVER re-invoiced (that would duplicate a real DIAN number)…
     expect(m.facturasCreadas).toHaveLength(1);
-    expect(m.facturasCreadas[0]).toMatchObject({ unitCode: '302' });
+    expect(m.facturasCreadas[0]).toMatchObject({ codigoInmueble: '302' });
     // …but the batch can never silently complete while it's unposted.
     expect(resultado.errores).toEqual([
       expect.objectContaining({
@@ -2734,15 +2737,15 @@ describe('LotesFacturacionService.consolidar', () => {
       }),
     ]);
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
-    expect(actualizacion.$set.status).toBe('liquidado');
-    expect(actualizacion.$set.summary).toBeNull();
+    expect(actualizacion.$set.estado).toBe('liquidado');
+    expect(actualizacion.$set.resumen).toBeNull();
     // The orphaned invoice is still referenced — it exists, it just isn't
-    // counted toward a completed summary. Same "read the real generated id
+    // counted toward a completed resumen. Same "read the real generated id
     // back off the mock" reasoning as the test above.
     const idNuevaFactura = (
       m.facturasCreadas[0]._id as Types.ObjectId
     ).toString();
-    expect(actualizacion.$set.invoiceIds).toEqual(
+    expect(actualizacion.$set.facturaIds).toEqual(
       expect.arrayContaining(['fac-huerfana', idNuevaFactura]),
     );
   });
@@ -2784,61 +2787,61 @@ describe('LotesFacturacionService.consolidar', () => {
   it('calcula y guarda el descuento por pronto pago en cada factura, a partir del % del lote', async () => {
     const m = construirModelos({
       lote: {
-        earlyPaymentDiscount: 5,
-        discountDeadline: new Date('2026-08-10'),
+        descuentoProntoPago: 5,
+        fechaLimiteDescuento: new Date('2026-08-10'),
       },
     });
 
     await servicioConsolidar(m).consolidar('lote-1');
 
-    // 5% de 520000 (baseAmount de Administración en `preliminar()`) = 26000.
+    // 5% de 520000 (valorBase de Administración en `preliminar()`) = 26000.
     expect(m.facturasCreadas[0]).toMatchObject({
-      discountAmount: 26000,
-      discountDeadline: new Date('2026-08-10'),
+      montoDescuento: 26000,
+      fechaLimiteDescuento: new Date('2026-08-10'),
     });
   });
 
   it('usa el valor fijo directo, sin calcular, cuando el lote no trae %', async () => {
     const m = construirModelos({
       lote: {
-        earlyPaymentDiscount: 0,
-        earlyPaymentDiscountFixedValue: 15000,
-        discountDeadline: new Date('2026-08-10'),
+        descuentoProntoPago: 0,
+        valorFijoDescuentoProntoPago: 15000,
+        fechaLimiteDescuento: new Date('2026-08-10'),
       },
     });
 
     await servicioConsolidar(m).consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      discountAmount: 15000,
-      discountDeadline: new Date('2026-08-10'),
+      montoDescuento: 15000,
+      fechaLimiteDescuento: new Date('2026-08-10'),
     });
   });
 
   it('no ofrece descuento cuando la factura tiene mora y descuentoAplicaConMora está apagado', async () => {
     const m = construirModelos({
       lote: {
-        earlyPaymentDiscount: 5,
-        discountDeadline: new Date('2026-08-10'),
+        descuentoProntoPago: 5,
+        fechaLimiteDescuento: new Date('2026-08-10'),
       },
       copropiedad: {
         cuentaContableCartera: '130501',
         descuentoAplicaConMora: false,
       },
-      preview: [
+      previsualizacion: [
         preliminar({
-          lines: [
-            ...preliminar().lines,
+          lineas: [
+            ...preliminar().lineas,
             {
               conceptoId: 'con-2',
-              conceptName: 'Intereses de mora',
-              conceptKind: 'intereses',
-              accountingIncomeAccount: '413599',
-              source: 'interes',
-              baseAmount: 5000,
-              taxRate: 0,
-              taxAmount: 0,
-              totalAmount: 5000,
+              nombreConcepto: 'Intereses de mora',
+              tipoConcepto: 'intereses',
+              cuentaIngreso: '413599',
+              origen: 'interes',
+              valorBase: 5000,
+              tasaImpuesto: 0,
+              valorImpuesto: 0,
+              valorTotal: 5000,
             },
           ],
         }),
@@ -2848,35 +2851,35 @@ describe('LotesFacturacionService.consolidar', () => {
     await servicioConsolidar(m).consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      discountAmount: 0,
-      discountDeadline: null,
+      montoDescuento: 0,
+      fechaLimiteDescuento: null,
     });
   });
 
   it('SÍ ofrece descuento con mora cuando descuentoAplicaConMora está encendido', async () => {
     const m = construirModelos({
       lote: {
-        earlyPaymentDiscount: 5,
-        discountDeadline: new Date('2026-08-10'),
+        descuentoProntoPago: 5,
+        fechaLimiteDescuento: new Date('2026-08-10'),
       },
       copropiedad: {
         cuentaContableCartera: '130501',
         descuentoAplicaConMora: true,
       },
-      preview: [
+      previsualizacion: [
         preliminar({
-          lines: [
-            ...preliminar().lines,
+          lineas: [
+            ...preliminar().lineas,
             {
               conceptoId: 'con-2',
-              conceptName: 'Intereses de mora',
-              conceptKind: 'intereses',
-              accountingIncomeAccount: '413599',
-              source: 'interes',
-              baseAmount: 5000,
-              taxRate: 0,
-              taxAmount: 0,
-              totalAmount: 5000,
+              nombreConcepto: 'Intereses de mora',
+              tipoConcepto: 'intereses',
+              cuentaIngreso: '413599',
+              origen: 'interes',
+              valorBase: 5000,
+              tasaImpuesto: 0,
+              valorImpuesto: 0,
+              valorTotal: 5000,
             },
           ],
         }),
@@ -2886,37 +2889,37 @@ describe('LotesFacturacionService.consolidar', () => {
     await servicioConsolidar(m).consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      discountAmount: 26000,
-      discountDeadline: new Date('2026-08-10'),
+      montoDescuento: 26000,
+      fechaLimiteDescuento: new Date('2026-08-10'),
     });
   });
 
   it('no ofrece descuento cuando el lote no tiene ni % ni valor fijo configurados', async () => {
     const m = construirModelos({
-      lote: { earlyPaymentDiscount: 0, earlyPaymentDiscountFixedValue: 0 },
+      lote: { descuentoProntoPago: 0, valorFijoDescuentoProntoPago: 0 },
     });
 
     await servicioConsolidar(m).consolidar('lote-1');
 
     expect(m.facturasCreadas[0]).toMatchObject({
-      discountAmount: 0,
-      discountDeadline: null,
+      montoDescuento: 0,
+      fechaLimiteDescuento: null,
     });
   });
 });
 
 describe('LotesFacturacionService.findAll', () => {
-  it('no revienta con un lote viejo al que le faltan discountDeadline/serviceSuspensionDate', async () => {
+  it('no revienta con un lote viejo al que le faltan fechaLimiteDescuento/fechaSuspension', async () => {
     // Esos dos campos son `required: true` pero SIN `default` — Mongoose solo
     // lo exige al guardar, nunca al leer, así que un lote creado antes de que
     // existieran esas columnas vuelve con `undefined` en las dos. Antes de
     // esta prueba, `.toISOString()` sobre ese `undefined` tumbaba TODA la
     // lista, no solo esta fila — justo lo que le pasó a Bernardo.
     const legado = loteDoc({
-      discountDeadline: undefined,
-      serviceSuspensionDate: undefined,
-      billingDate: new Date('2026-07-01'),
-      periodEnd: new Date('2026-07-31'),
+      fechaLimiteDescuento: undefined,
+      fechaSuspension: undefined,
+      fechaFacturacion: new Date('2026-07-01'),
+      periodoHasta: new Date('2026-07-31'),
     });
     const lotes = {
       find: jest.fn(() => ({
@@ -2956,37 +2959,37 @@ describe('LotesFacturacionService.findOne', () => {
   it('incluye la previsualización completa, no solo el conteo', async () => {
     const preliminar = {
       inmuebleId: { toString: () => 'inm-1' },
-      unitCode: '301',
+      codigoInmueble: '301',
       terceroId: { toString: () => 'ter-1' },
-      holder: {
-        name: 'Ana Pérez',
-        identificationType: 'CC',
-        identificationNumber: '123456',
-        identificationVerificationDigit: null,
-        address: null,
-        city: null,
+      titular: {
+        nombre: 'Ana Pérez',
+        tipoIdentificacion: 'CC',
+        numeroIdentificacion: '123456',
+        digitoVerificacion: null,
+        direccion: null,
+        ciudad: null,
         email: null,
       },
-      lines: [
+      lineas: [
         {
           conceptoId: { toString: () => 'con-1' },
-          conceptName: 'Administración',
-          conceptKind: 'administracion',
-          accountingIncomeAccount: '413501',
-          source: 'recurrente',
-          baseAmount: 520000,
-          taxRate: 0,
-          taxAmount: 0,
-          totalAmount: 520000,
+          nombreConcepto: 'Administración',
+          tipoConcepto: 'administracion',
+          cuentaIngreso: '413501',
+          origen: 'recurrente',
+          valorBase: 520000,
+          tasaImpuesto: 0,
+          valorImpuesto: 0,
+          valorTotal: 520000,
         },
       ],
       subtotal: 520000,
-      totalTax: 0,
+      totalImpuestos: 0,
       total: 520000,
     };
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ preview: [preliminar] })),
+        exec: () => Promise.resolve(loteDoc({ previsualizacion: [preliminar] })),
       })),
     };
     const service = new LotesFacturacionService(
@@ -3084,7 +3087,7 @@ describe('LotesFacturacionService.cancelar', () => {
     const eliminados: Filtro[] = [];
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'borrador' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'borrador' })),
       })),
       deleteOne: jest.fn((filtro: Filtro) => {
         eliminados.push(filtro);
@@ -3101,7 +3104,7 @@ describe('LotesFacturacionService.cancelar', () => {
   it('también borra uno en liquidado — todavía no generó ninguna factura real', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'liquidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'liquidado' })),
       })),
       deleteOne: jest.fn(() => ({
         exec: () => Promise.resolve({ deletedCount: 1 }),
@@ -3117,7 +3120,7 @@ describe('LotesFacturacionService.cancelar', () => {
   it('rechaza cancelar uno consolidado: ya generó facturas reales', async () => {
     const lotes = {
       findOne: jest.fn(() => ({
-        exec: () => Promise.resolve(loteDoc({ status: 'consolidado' })),
+        exec: () => Promise.resolve(loteDoc({ estado: 'consolidado' })),
       })),
       deleteOne: jest.fn(),
     };
