@@ -110,7 +110,10 @@ describe('TituloDocumentoService.resolverFactura', () => {
     ]);
     const service = new TituloDocumentoService(
       modeloConsecutivos([
-        { codigo: 'FV', nombreDocumento: 'Cobro Actual (la resolución de hoy)' },
+        {
+          codigo: 'FV',
+          nombreDocumento: 'Cobro Actual (la resolución de hoy)',
+        },
       ]) as never,
       resoluciones as never,
     );
