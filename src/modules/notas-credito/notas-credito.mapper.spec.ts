@@ -7,22 +7,20 @@ const notaDoc = (over: Record<string, unknown> = {}) => ({
   facturaId: { toString: () => 'fac-1' },
   notaDebitoId: null,
   tipoDocumentoAncla: null,
-  prefix: 'NC',
-  number: 12,
-  fullNumber: 'NC-12',
-  reason: 'ajuste_precio',
-  totalAmount: 200000,
-  distribution: [{ conceptoId: { toString: () => 'con-1' }, amount: 200000 }],
-  appliedAmount: 150000,
-  unappliedAmount: 50000,
-  notes: null,
-  status: 'activo',
-  voidedReason: null,
-  voidedDetail: null,
-  voidedAt: null,
-  issueDate: new Date('2026-08-15'),
+  prefijo: 'NC',
+  numero: 12,
+  numeroCompleto: 'NC-12',
+  motivo: 'ajuste_precio',
+  montoTotal: 200000,
+  distribucion: [{ conceptoId: { toString: () => 'con-1' }, monto: 200000 }],
+  observaciones: null,
+  estado: 'activo',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
+  fecha: new Date('2026-08-15'),
   // Legacy fallback only — see `fechaNotaCredito`'s own docblock. A note
-  // created with this feature always has `issueDate` set.
+  // created with this feature always has `fecha` set.
   createdAt: new Date('2026-07-01'),
   ...over,
 });
@@ -31,11 +29,11 @@ const aplicacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: { toString: () => 'apl-1' },
   sourceType: 'NC',
   sourceId: { toString: () => 'nc-1' },
-  documentType: 'FV',
-  documentId: { toString: () => 'fac-1' },
-  amountApplied: 150000,
-  status: 'activa',
-  appliedAt: new Date('2026-08-30'),
+  tipoDocumento: 'FV',
+  documentoId: { toString: () => 'fac-1' },
+  montoAplicado: 150000,
+  estado: 'activa',
+  aplicadoEn: new Date('2026-08-30'),
   ...over,
 });
 
@@ -68,10 +66,10 @@ describe('toNotaCredito', () => {
     });
   });
 
-  it('cae a createdAt cuando issueDate es null (nota creada antes de este campo)', () => {
+  it('cae a createdAt cuando fecha es null (nota creada antes de este campo)', () => {
     expect(
       toNotaCredito(
-        notaDoc({ issueDate: null }) as never,
+        notaDoc({ fecha: null }) as never,
         150000,
         50000,
         'A-101',
@@ -108,10 +106,10 @@ describe('toNotaCredito', () => {
   it('expone la fecha de anulación solo cuando existe', () => {
     const anulada = toNotaCredito(
       notaDoc({
-        status: 'anulado',
-        voidedReason: 'duplicado',
-        voidedDetail: 'Cargada dos veces por error del cajero',
-        voidedAt: new Date('2026-08-30'),
+        estado: 'anulado',
+        motivoAnulacion: 'duplicado',
+        detalleAnulacion: 'Cargada dos veces por error del cajero',
+        fechaAnulacion: new Date('2026-08-30'),
       }) as never,
       0,
       0,
