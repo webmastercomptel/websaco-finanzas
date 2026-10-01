@@ -11,19 +11,19 @@ const id = () => new Types.ObjectId();
 const asientoBase = (overrides: Record<string, unknown> = {}) =>
   ({
     _id: id(),
-    date: new Date('2026-08-15'),
-    entries: [
+    fecha: new Date('2026-08-15'),
+    movimientos: [
       {
-        account: '1355-01',
-        type: 'debito',
-        amount: 100000,
-        description: 'Administración agosto',
+        cuenta: '1355-01',
+        tipo: 'debito',
+        monto: 100000,
+        descripcion: 'Administración agosto',
       },
       {
-        account: '4135-01',
-        type: 'credito',
-        amount: 100000,
-        description: 'Ingresos por administración',
+        cuenta: '4135-01',
+        tipo: 'credito',
+        monto: 100000,
+        descripcion: 'Ingresos por administración',
       },
     ],
     facturaId: null,
@@ -86,24 +86,24 @@ describe('resolverMovimientoContable', () => {
   it('produces a correct MovimientoContable from a balanced asiento', () => {
     const asiento = asientoBase({
       facturaId: id(),
-      entries: [
+      movimientos: [
         {
-          account: '1355-01',
-          type: 'debito',
-          amount: 200000,
-          description: 'Línea 1',
+          cuenta: '1355-01',
+          tipo: 'debito',
+          monto: 200000,
+          descripcion: 'Línea 1',
         },
         {
-          account: '4135-01',
-          type: 'credito',
-          amount: 150000,
-          description: 'Línea 2',
+          cuenta: '4135-01',
+          tipo: 'credito',
+          monto: 150000,
+          descripcion: 'Línea 2',
         },
         {
-          account: '4135-02',
-          type: 'credito',
-          amount: 50000,
-          description: 'Línea 3',
+          cuenta: '4135-02',
+          tipo: 'credito',
+          monto: 50000,
+          descripcion: 'Línea 3',
         },
       ],
     });
@@ -129,18 +129,18 @@ describe('resolverMovimientoContable', () => {
   it('cuadra is false when totals do not match', () => {
     const asiento = asientoBase({
       reciboId: id(),
-      entries: [
+      movimientos: [
         {
-          account: '1105-01',
-          type: 'debito',
-          amount: 100000,
-          description: 'Efectivo',
+          cuenta: '1105-01',
+          tipo: 'debito',
+          monto: 100000,
+          descripcion: 'Efectivo',
         },
         {
-          account: '1355-01',
-          type: 'credito',
-          amount: 80000,
-          description: 'Parcial',
+          cuenta: '1355-01',
+          tipo: 'credito',
+          monto: 80000,
+          descripcion: 'Parcial',
         },
       ],
     });
@@ -194,18 +194,18 @@ describe('resolverMovimientoContable', () => {
   it('nombreCuenta se resuelve desde el mapa de codigo->nombre, con el codigo como respaldo', () => {
     const asiento = asientoBase({
       facturaId: id(),
-      entries: [
+      movimientos: [
         {
-          account: '1355-01',
-          type: 'debito',
-          amount: 100000,
-          description: 'Línea 1',
+          cuenta: '1355-01',
+          tipo: 'debito',
+          monto: 100000,
+          descripcion: 'Línea 1',
         },
         {
-          account: '9999-99',
-          type: 'credito',
-          amount: 100000,
-          description: 'Sin cuenta en el catalogo',
+          cuenta: '9999-99',
+          tipo: 'credito',
+          monto: 100000,
+          descripcion: 'Sin cuenta en el catalogo',
         },
       ],
     });
