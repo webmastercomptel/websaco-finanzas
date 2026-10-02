@@ -261,28 +261,30 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       consecutivosLoteCon(null) as never,
     );
 
-    await expect(service.reservarBloqueFacturas(COP, 3)).resolves.toEqual({
-      numeros: [
-        {
-          prefijo: 'CONJ-2026',
-          numero: 1041,
-          completo: 'CONJ-2026-1041',
-          resolucionId: resolucion._id,
-        },
-        {
-          prefijo: 'CONJ-2026',
-          numero: 1042,
-          completo: 'CONJ-2026-1042',
-          resolucionId: resolucion._id,
-        },
-        {
-          prefijo: 'CONJ-2026',
-          numero: 1043,
-          completo: 'CONJ-2026-1043',
-          resolucionId: resolucion._id,
-        },
-      ],
-    });
+    await expect(service.reservarBloqueFacturas(COP, 3)).resolves.toMatchObject(
+      {
+        numeros: [
+          {
+            prefijo: 'CONJ-2026',
+            numero: 1041,
+            completo: 'CONJ-2026-1041',
+            resolucionId: resolucion._id,
+          },
+          {
+            prefijo: 'CONJ-2026',
+            numero: 1042,
+            completo: 'CONJ-2026-1042',
+            resolucionId: resolucion._id,
+          },
+          {
+            prefijo: 'CONJ-2026',
+            numero: 1043,
+            completo: 'CONJ-2026-1043',
+            resolucionId: resolucion._id,
+          },
+        ],
+      },
+    );
   });
 
   it('nunca repite entre dos llamadas sucesivas', async () => {
@@ -336,7 +338,9 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       consecutivosLoteCon(null) as never,
     );
 
-    await expect(service.reservarBloqueFacturas(COP, 10)).resolves.toEqual({
+    await expect(
+      service.reservarBloqueFacturas(COP, 10),
+    ).resolves.toMatchObject({
       numeros: [
         {
           prefijo: 'CONJ-2026',
@@ -382,6 +386,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
 
     await expect(service.reservarBloqueFacturas(COP, 5)).resolves.toEqual({
       numeros: [],
+      contador: null,
     });
     expect(consecutivos.findOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -404,13 +409,15 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       consecutivosLoteCon(null) as never,
     );
 
-    await expect(service.reservarBloqueFacturas(COP, 3)).resolves.toEqual({
-      numeros: [
-        { prefijo: 'FV', numero: 11, completo: 'FV-11' },
-        { prefijo: 'FV', numero: 12, completo: 'FV-12' },
-        { prefijo: 'FV', numero: 13, completo: 'FV-13' },
-      ],
-    });
+    await expect(service.reservarBloqueFacturas(COP, 3)).resolves.toMatchObject(
+      {
+        numeros: [
+          { prefijo: 'FV', numero: 11, completo: 'FV-11' },
+          { prefijo: 'FV', numero: 12, completo: 'FV-12' },
+          { prefijo: 'FV', numero: 13, completo: 'FV-13' },
+        ],
+      },
+    );
     const [, actualizacion] = consecutivos.findOneAndUpdate.mock.calls[0];
     expect(actualizacion).toEqual({ $inc: { siguienteNumero: 3 } });
   });
@@ -433,9 +440,11 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
       consecutivosLoteCon(null) as never,
     );
 
-    await expect(service.reservarBloqueFacturas(COP, 1)).resolves.toEqual({
-      numeros: [{ prefijo: 'FV', numero: 1, completo: 'FV-1' }],
-    });
+    await expect(service.reservarBloqueFacturas(COP, 1)).resolves.toMatchObject(
+      {
+        numeros: [{ prefijo: 'FV', numero: 1, completo: 'FV-1' }],
+      },
+    );
   });
 
   it('funciona sin prefijo', async () => {
@@ -494,6 +503,7 @@ describe('NumeracionService.reservarBloqueFacturas', () => {
 
     await expect(service.reservarBloqueFacturas(COP, 0)).resolves.toEqual({
       numeros: [],
+      contador: null,
     });
     expect(resoluciones.findOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -684,5 +694,232 @@ describe('NumeracionService.reservarBloqueDocumentos', () => {
 
     expect(primero.numeros.map((n) => n.numero)).toEqual([1, 2]);
     expect(segundo.numeros.map((n) => n.numero)).toEqual([3, 4]);
+  });
+});
+
+describe('NumeracionService.reservarBloqueFacturas — contador devuelto', () => {
+  it('con resolución: antes es el próximo a emitir previo y despues suma lo otorgado', async () => {
+    const resolucion = resolucionActiva({ siguienteNumero: 1041 });
+    const resoluciones = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(resolucion),
+      })),
+    };
+    const service = new NumeracionService(
+      resoluciones as never,
+      consecutivosCon(null) as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const { contador } = await service.reservarBloqueFacturas(COP, 3);
+
+    expect(contador).toEqual({
+      resolucionId: resolucion._id,
+      consecutivoId: null,
+      antes: 1041,
+      despues: 1044,
+    });
+  });
+
+  it('con resolución casi agotada: despues suma solo lo realmente otorgado', async () => {
+    const resolucion = resolucionActiva({
+      siguienteNumero: 4998,
+      rangoHasta: 5000,
+    });
+    const resoluciones = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve(resolucion),
+      })),
+    };
+    const service = new NumeracionService(
+      resoluciones as never,
+      consecutivosCon(null) as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const { contador } = await service.reservarBloqueFacturas(COP, 10);
+
+    expect(contador).toMatchObject({ antes: 4998, despues: 5001 });
+  });
+
+  it('con el consecutivo FV: antes es el último emitido previo y despues suma la cantidad', async () => {
+    const consecutivoId = new Types.ObjectId();
+    const resoluciones = {
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const consecutivos = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () =>
+          Promise.resolve({
+            _id: consecutivoId,
+            prefijo: 'FV',
+            siguienteNumero: 10,
+          }),
+      })),
+    };
+    const service = new NumeracionService(
+      resoluciones as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+    const { contador } = await service.reservarBloqueFacturas(COP, 3);
+
+    expect(contador).toEqual({
+      resolucionId: null,
+      consecutivoId,
+      antes: 10,
+      despues: 13,
+    });
+  });
+});
+
+describe('NumeracionService.devolverContadorFacturas', () => {
+  const modeloConActualizacion = (modifiedCount: number) => ({
+    updateOne: jest.fn((_filtro?: Filtro, _update?: Filtro) => ({
+      exec: () => Promise.resolve({ modifiedCount }),
+    })),
+  });
+
+  const construir = (
+    resoluciones: unknown,
+    consecutivos: unknown = modeloConActualizacion(0),
+  ) =>
+    new NumeracionService(
+      resoluciones as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+
+  it('con resolución: vuelve a antes en UN updateOne condicionado a que siga valiendo despues', async () => {
+    const resoluciones = modeloConActualizacion(1);
+    const resolucionId = new Types.ObjectId();
+
+    const cambio = await construir(resoluciones).devolverContadorFacturas(COP, {
+      resolucionId,
+      consecutivoId: null,
+      antes: 1041,
+      despues: 1044,
+    });
+
+    expect(cambio).toBe(true);
+    expect(resoluciones.updateOne).toHaveBeenCalledTimes(1);
+    const [filtro, actualizacion] = resoluciones.updateOne.mock.calls[0];
+    expect(filtro).toMatchObject({ _id: resolucionId, siguienteNumero: 1044 });
+    expect(actualizacion).toEqual({ $set: { siguienteNumero: 1041 } });
+  });
+
+  it('con el consecutivo FV: fija el filtro al _id del consecutivo incrementado (nunca por categoría), con la misma condición', async () => {
+    const consecutivos = modeloConActualizacion(1);
+    const resoluciones = modeloConActualizacion(0);
+    const consecutivoId = new Types.ObjectId();
+
+    const cambio = await construir(
+      resoluciones,
+      consecutivos,
+    ).devolverContadorFacturas(COP, {
+      resolucionId: null,
+      consecutivoId,
+      antes: 10,
+      despues: 13,
+    });
+
+    expect(cambio).toBe(true);
+    expect(resoluciones.updateOne).not.toHaveBeenCalled();
+    const [filtro, actualizacion] = consecutivos.updateOne.mock.calls[0];
+    expect(filtro).toEqual({
+      _id: consecutivoId,
+      copropiedadId: new Types.ObjectId(COP),
+      siguienteNumero: 13,
+    });
+    expect(filtro).not.toHaveProperty('categoria');
+    expect(actualizacion).toEqual({ $set: { siguienteNumero: 10 } });
+  });
+
+  it('con FV sin consecutivoId no hay forma segura de fijar la fila: no toca nada', async () => {
+    const consecutivos = modeloConActualizacion(1);
+
+    const cambio = await construir(
+      modeloConActualizacion(0),
+      consecutivos,
+    ).devolverContadorFacturas(COP, {
+      resolucionId: null,
+      consecutivoId: null,
+      antes: 10,
+      despues: 13,
+    });
+
+    expect(cambio).toBe(false);
+    expect(consecutivos.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('no hace nada si otro movió el contador (el updateOne no encuentra coincidencia)', async () => {
+    const resoluciones = modeloConActualizacion(0);
+
+    const cambio = await construir(resoluciones).devolverContadorFacturas(COP, {
+      resolucionId: new Types.ObjectId(),
+      consecutivoId: null,
+      antes: 1041,
+      despues: 1044,
+    });
+
+    expect(cambio).toBe(false);
+  });
+
+  it('nunca sube el contador: con antes >= despues ni siquiera consulta la base', async () => {
+    const resoluciones = modeloConActualizacion(1);
+
+    const cambio = await construir(resoluciones).devolverContadorFacturas(COP, {
+      resolucionId: new Types.ObjectId(),
+      consecutivoId: null,
+      antes: 1044,
+      despues: 1044,
+    });
+
+    expect(cambio).toBe(false);
+    expect(resoluciones.updateOne).not.toHaveBeenCalled();
+  });
+});
+
+describe('NumeracionService.ubicarConsecutivoFV', () => {
+  const construir = (filas: { _id: Types.ObjectId }[]) => {
+    const consecutivos = {
+      find: jest.fn((_filtro?: Filtro, _proyeccion?: Filtro) => ({
+        limit: () => ({
+          lean: () => ({ exec: () => Promise.resolve(filas) }),
+        }),
+      })),
+    };
+    const service = new NumeracionService(
+      {} as never,
+      consecutivos as never,
+      consecutivosLoteCon(null) as never,
+    );
+    return { service, consecutivos };
+  };
+
+  it('devuelve el _id cuando exactamente una fila FV tiene ese prefijo, buscando por copropiedad, categoría y prefijo', async () => {
+    const id = new Types.ObjectId();
+    const { service, consecutivos } = construir([{ _id: id }]);
+
+    await expect(service.ubicarConsecutivoFV(COP, 'FVA')).resolves.toEqual(id);
+
+    expect(consecutivos.find.mock.calls[0][0]).toEqual({
+      copropiedadId: new Types.ObjectId(COP),
+      categoria: 'FV',
+      prefijo: 'FVA',
+    });
+  });
+
+  it('devuelve null si no hay ninguna fila o si hay más de una (ambiguo: nunca adivina)', async () => {
+    await expect(
+      construir([]).service.ubicarConsecutivoFV(COP, 'FVA'),
+    ).resolves.toBeNull();
+    await expect(
+      construir([
+        { _id: new Types.ObjectId() },
+        { _id: new Types.ObjectId() },
+      ]).service.ubicarConsecutivoFV(COP, 'FVA'),
+    ).resolves.toBeNull();
   });
 });

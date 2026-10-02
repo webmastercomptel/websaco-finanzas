@@ -30,6 +30,31 @@ export interface NumeroAsignado {
   resolucionId?: Types.ObjectId;
 }
 
+/**
+ * Where an invoice counter stood before and right after one
+ * `reservarBloqueFacturas` call — kept by the caller so a failed batch can put
+ * the counter back with `devolverContadorFacturas`.
+ *
+ * Both values are in the OWN semantics of the collection that was incremented,
+ * because the two collections disagree: on `ResolucionFacturacion`,
+ * `siguienteNumero` is the NEXT number to issue; on `ConsecutivoDocumento`
+ * (the FV fallback) it is the LAST number issued. The caller never interprets
+ * them, it only hands them back, so the difference stays inside this class.
+ */
+export interface ContadorFacturas {
+  /** Null when the FV fallback consecutivo was the one incremented. */
+  resolucionId: Types.ObjectId | null;
+  /**
+   * `_id` of the `ConsecutivoDocumento` row that was incremented (FV fallback
+   * only; null on the resolution path). `ConsecutivoDocumento` is unique per
+   * `codigo`, not per `categoria`, so several rows may share `categoria: 'FV'`
+   * — the rewind is pinned to this exact row, never to the category.
+   */
+  consecutivoId: Types.ObjectId | null;
+  antes: number;
+  despues: number;
+}
+
 const componer = (prefijo: string, numero: number): NumeroAsignado => ({
   prefijo,
   numero,
@@ -159,8 +184,12 @@ export class NumeracionService {
   async reservarBloqueFacturas(
     copropiedadId: string,
     cantidad: number,
-  ): Promise<{ numeros: NumeroAsignado[] }> {
-    if (cantidad <= 0) return { numeros: [] };
+  ): Promise<{
+    numeros: NumeroAsignado[];
+    /** Null when nothing was granted — there is nothing to give back. */
+    contador: ContadorFacturas | null;
+  }> {
+    if (cantidad <= 0) return { numeros: [], contador: null };
 
     const previa = await this.resoluciones
       .findOneAndUpdate(
@@ -221,6 +250,15 @@ export class NumeracionService {
           ...componer(previa.prefijo, previa.siguienteNumero + i),
           resolucionId: previa._id,
         })),
+        contador:
+          otorgados > 0
+            ? {
+                resolucionId: previa._id,
+                consecutivoId: null,
+                antes: previa.siguienteNumero,
+                despues: previa.siguienteNumero + otorgados,
+              }
+            : null,
       };
     }
 
@@ -254,7 +292,97 @@ export class NumeracionService {
       numeros: Array.from({ length: cantidad }, (_, i) =>
         componer(consecutivo.prefijo, consecutivo.siguienteNumero + 1 + i),
       ),
+      contador: {
+        resolucionId: null,
+        consecutivoId: consecutivo._id,
+        antes: consecutivo.siguienteNumero,
+        despues: consecutivo.siguienteNumero + cantidad,
+      },
     };
+  }
+
+  /**
+   * Finds THE FV fallback consecutivo for a prefix: `{copropiedadId,
+   * categoria: 'FV', prefijo}`. Several rows may share `categoria: 'FV'`, so
+   * the caller that needs to rewind one (`cancelar`, which has only Facturas to
+   * go on) must identify it by prefix — and gets `null` unless exactly one row
+   * matches, because guessing could rewind the wrong counter.
+   */
+  async ubicarConsecutivoFV(
+    copropiedadId: string,
+    prefijo: string,
+  ): Promise<Types.ObjectId | null> {
+    const filas = await this.consecutivos
+      .find(
+        {
+          copropiedadId: new Types.ObjectId(copropiedadId),
+          categoria: 'FV',
+          prefijo,
+        },
+        { _id: 1 },
+      )
+      .limit(2)
+      .lean()
+      .exec();
+    return filas.length === 1 ? filas[0]._id : null;
+  }
+
+  /**
+   * Puts an invoice counter back to where `reservarBloqueFacturas` found it,
+   * but ONLY if nobody has moved it since: one atomic conditional `updateOne`
+   * that matches on `siguienteNumero === contador.despues`.
+   *
+   * This is the one sanctioned exception to "numbers are consumed, never
+   * returned" (see `siguienteFactura`), and it exists for a single caller: a
+   * batch consolidación that failed and undid every document it had issued,
+   * so no invoice wears any of the numbers being given back. The condition is
+   * what keeps that true — if another process reserved numbers after this
+   * batch, the counter no longer equals `despues`, the rewind matches nothing,
+   * and the counter is left alone (rewinding it would hand out numbers that
+   * are already in use). It can therefore only ever DECREASE, never raise.
+   *
+   * The counter is deliberately never recomputed from existing Facturas: it
+   * can be set by hand with zero Facturas behind it, so the number of
+   * documents says nothing about where it should be.
+   *
+   * @returns whether the counter was actually changed.
+   */
+  async devolverContadorFacturas(
+    copropiedadId: string,
+    contador: ContadorFacturas,
+  ): Promise<boolean> {
+    // Nothing was granted (or the data is inconsistent): there is no range to
+    // give back, and "set to antes" must never be able to raise the counter.
+    if (contador.antes >= contador.despues) return false;
+
+    // The FV fallback must name the exact consecutivo row it incremented: an
+    // unpinned `categoria: 'FV'` filter could hit a sibling row, so without an
+    // id there is nothing safe to rewind.
+    if (!contador.resolucionId && !contador.consecutivoId) return false;
+
+    const resultado = contador.resolucionId
+      ? await this.resoluciones
+          .updateOne(
+            {
+              _id: contador.resolucionId,
+              copropiedadId: new Types.ObjectId(copropiedadId),
+              siguienteNumero: contador.despues,
+            },
+            { $set: { siguienteNumero: contador.antes } },
+          )
+          .exec()
+      : await this.consecutivos
+          .updateOne(
+            {
+              _id: contador.consecutivoId,
+              copropiedadId: new Types.ObjectId(copropiedadId),
+              siguienteNumero: contador.despues,
+            },
+            { $set: { siguienteNumero: contador.antes } },
+          )
+          .exec();
+
+    return resultado.modifiedCount > 0;
   }
 
   /**
