@@ -17,12 +17,19 @@ export const NOMBRE_TRABAJO_CONSOLIDACION = 'consolidar';
  *  provider, not `@InjectQueue`, since BullMQ has no decorator for it. */
 export const EVENTOS_COLA_CONSOLIDACION = Symbol('EVENTOS_COLA_CONSOLIDACION');
 
+/** The authenticated user behind an action, as the audit log records it. */
+export type ActorAuditoria = { accountId: string; nombre: string };
+
 export type DatosTrabajoConsolidacion = {
   loteId: string;
   /** Serialized `ObjectId` — a job runs outside any HTTP request's CLS
    *  context, so it can never resolve the tenant itself; the caller
    *  resolves it once and hands it over as plain data. */
   copropiedadId: string;
+  /** Who launched the consolidación — optional because a job enqueued before
+   *  this field existed carries none; the reversal audit entry then falls
+   *  back to the lote's own `generadoPor`. */
+  actor?: ActorAuditoria;
 };
 
 export type ResultadoConsolidacion = {

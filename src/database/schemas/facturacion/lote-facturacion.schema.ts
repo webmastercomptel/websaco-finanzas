@@ -252,6 +252,18 @@ export class LoteFacturacion {
     default: null,
   })
   progreso: { actual: number; total: number } | null;
+
+  /**
+   * Owner token of the current claim (`progreso` non-null): a fresh UUID set
+   * atomically with the claim by `consolidar` or `cancelar`. Every write of
+   * the run (progress, heartbeat, final write, release, the delete of a
+   * cancel) is conditioned on it, so a run whose claim went stale and was
+   * taken over can never overwrite or release the new owner's state. Internal:
+   * never exposed in the API contract. Absent/null on any lote not currently
+   * claimed (and on every lote created before this field existed).
+   */
+  @Prop({ type: String, default: null })
+  reclamoToken: string | null;
 }
 
 export const LoteFacturacionSchema =

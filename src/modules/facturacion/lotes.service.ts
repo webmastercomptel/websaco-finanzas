@@ -3,13 +3,15 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Job, Queue, QueueEvents } from 'bullmq';
 import { Connection, Model, Types } from 'mongoose';
-import type { AnyBulkWriteOperation } from 'mongoose';
+import type { AnyBulkWriteOperation, ClientSession } from 'mongoose';
 import {
   LoteFacturacion,
   LoteFacturacionDocument,
@@ -59,11 +61,33 @@ import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  AplicacionCartera,
+  AplicacionCarteraDocument,
+} from '../../database/schemas/recibos/aplicacion-cartera.schema';
+import {
+  NotaCredito,
+  NotaCreditoDocument,
+} from '../../database/schemas/notas-credito/nota-credito.schema';
+import {
+  NotaContable,
+  NotaContableDocument,
+} from '../../database/schemas/notas-contables/nota-contable.schema';
+import {
+  PresentacionDocumento,
+  PresentacionDocumentoDocument,
+} from '../../database/schemas/documentos/presentacion-documento.schema';
+import {
+  PublicacionLote,
+  PublicacionLoteDocument,
+} from '../../database/schemas/publicaciones/publicacion-lote.schema';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import {
   NumeracionService,
+  type ContadorFacturas,
   type NumeroAsignado,
 } from '../../common/numeracion/numeracion.service';
 import type {
@@ -95,6 +119,7 @@ import {
   NOMBRE_COLA_CONSOLIDACION,
   NOMBRE_TRABAJO_CONSOLIDACION,
   EVENTOS_COLA_CONSOLIDACION,
+  type ActorAuditoria,
   type DatosTrabajoConsolidacion,
   type ResultadoConsolidacion,
 } from './colas/consolidacion.constants';
@@ -105,6 +130,84 @@ import {
  *  safe to raise once the cluster has dedicated resources. */
 const TAMANO_TANDA_CONSOLIDACION = 20;
 const CONCURRENCIA_TANDAS_CONSOLIDACION = 4;
+
+/** Facturas undone per Mongo transaction by `deshacerConsolidacion` — same
+ *  size as a consolidación tanda, so an undo transaction is never heavier
+ *  than the one that created the same rows. */
+const TAMANO_BLOQUE_REVERSION = TAMANO_TANDA_CONSOLIDACION;
+
+/** A claim on a lote (`LoteFacturacion.progreso` non-null, by a consolidación
+ *  or a cancelación) older than this without any write to the lote is taken
+ *  to belong to a dead worker and may be reclaimed. A live run keeps
+ *  `updatedAt` fresh with its progress writes and, between those, with the
+ *  heartbeat below. */
+const VENTANA_RECLAMO_OBSOLETO_MS = 15 * 60 * 1000;
+
+/** A live run that has not written to its lote for longer than this touches
+ *  `updatedAt` (heartbeat) when a tanda completes, so the staleness rule above
+ *  never takes a slow-but-alive run for a dead one. Runs shorter than this
+ *  make no extra call. */
+const INTERVALO_LATIDO_MS = 60 * 1000;
+
+/** The run no longer owns its lote: its claim went stale and another
+ *  consolidación/cancelación took it over. Distinct type so the callers can
+ *  tell it apart from a real failure — in that case the run must NOT undo or
+ *  overwrite anything (the lote now belongs to someone else). */
+class ReclamoPerdidoException extends ConflictException {}
+
+/** How many Factura ids go in one `$in` of the cruce guard — keeps the
+ *  pre-pass queries bounded for a very large lote. */
+const TAMANO_LOTE_GUARDA_CRUCES = 500;
+
+/**
+ * The SaldoCartera `bulkWrite` ops for one Factura's lines — the ONE place
+ * the "balance moves by `valorTotal` per (coproperty, unit, concept)" formula
+ * lives, shared by `consolidar` (`signo = 1`, upsert: the first invoice for a
+ * concept creates the row) and `deshacerConsolidacion` (`signo = -1`, exactly
+ * the opposite `$inc`). Keeping both directions in one function is what
+ * guarantees the undo subtracts exactly what the consolidación added.
+ *
+ * The reversal never upserts: the row must already exist because the
+ * original write created it, and an upsert there would conjure a negative
+ * balance out of nothing if the row had been removed.
+ */
+const construirOpsSaldos = (
+  copropiedadId: Types.ObjectId,
+  inmuebleId: Types.ObjectId,
+  lineas: { conceptoId: Types.ObjectId; valorTotal: number }[],
+  signo: 1 | -1,
+): AnyBulkWriteOperation<SaldoCartera>[] =>
+  lineas.map((linea) => ({
+    updateOne: {
+      filter: {
+        copropiedadId,
+        inmuebleId,
+        conceptoId: linea.conceptoId,
+      },
+      update:
+        signo === 1
+          ? {
+              $inc: { saldoPendiente: linea.valorTotal },
+              $setOnInsert: {
+                copropiedadId,
+                inmuebleId,
+                conceptoId: linea.conceptoId,
+              },
+            }
+          : { $inc: { saldoPendiente: -linea.valorTotal } },
+      upsert: signo === 1,
+    },
+  }));
+
+/** Outcome of `deshacerConsolidacion`, for logging and the audit entry. */
+export type ResultadoReversion = {
+  facturasRevertidas: number;
+  /** `true` the counter was put back; `false` someone else moved it (left
+   *  alone on purpose) or there was nothing to give back; `null` the caller
+   *  had no counter to rewind (e.g. `cancelar`). */
+  contadorDevuelto: boolean | null;
+  auditoriaRegistrada: boolean;
+};
 
 /** One row of `LoteFacturacionDocument['previsualizacion']` — the exact type
  *  `lote.previsualizacion.entries()` always yielded, kept as an alias rather
@@ -147,6 +250,9 @@ type ContextoTanda = {
   registrarNumero: (numero: number, completo: string) => void;
   facturaIds: string[];
   sumarMonto: (monto: number) => void;
+  /** Called by `procesarTanda` when its transaction fails, so
+   *  `conLimiteDeConcurrencia` stops launching new tandas. */
+  marcarFallo: () => void;
 };
 
 /** One row's fully-prepared write payload — everything
@@ -206,9 +312,20 @@ type FilaPreparada = {
  * directly, in-process, whenever `cola`/`eventosCola` is undefined, which
  * is exactly the path every existing test already exercises. In the real
  * app, Nest DI always injects both.
+ *
+ * `aplicaciones`, `notasCredito`, `notasContables`, `presentaciones` and
+ * `auditoria` were APPENDED (all optional, same reason) for
+ * `deshacerConsolidacion()`: the first four are the collections its cruce
+ * guard reads, the last records the reversal. The guard FAILS CLOSED — an
+ * undo with any of the four missing refuses to run instead of skipping its
+ * check — so optional here only spares tests that never reach an undo.
+ * `publicacionesLote` (the WebSaco3 outbox) was appended later, same way:
+ * the guard also refuses once the lote has been (or is being) published.
  */
 @Injectable()
 export class LotesFacturacionService {
+  private readonly logger = new Logger(LotesFacturacionService.name);
+
   constructor(
     @InjectModel(LoteFacturacion.name)
     private readonly lotes: Model<LoteFacturacionDocument>,
@@ -245,6 +362,17 @@ export class LotesFacturacionService {
     >,
     @Inject(EVENTOS_COLA_CONSOLIDACION)
     private readonly eventosCola?: QueueEvents,
+    @InjectModel(AplicacionCartera.name)
+    private readonly aplicaciones?: Model<AplicacionCarteraDocument>,
+    @InjectModel(NotaCredito.name)
+    private readonly notasCredito?: Model<NotaCreditoDocument>,
+    @InjectModel(NotaContable.name)
+    private readonly notasContables?: Model<NotaContableDocument>,
+    @InjectModel(PresentacionDocumento.name)
+    private readonly presentaciones?: Model<PresentacionDocumentoDocument>,
+    private readonly auditoria?: AuditoriaService,
+    @InjectModel(PublicacionLote.name)
+    private readonly publicacionesLote?: Model<PublicacionLoteDocument>,
   ) {}
 
   /**
@@ -1300,16 +1428,25 @@ export class LotesFacturacionService {
    */
   async consolidar(
     loteId: string,
+    actor?: ActorAuditoria,
   ): Promise<{ lote: LoteContract; errores: ErrorConsolidacion[] }> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
 
     if (!this.cola || !this.eventosCola) {
-      return this.ejecutarConsolidacion(loteId, copropiedadId);
+      return this.ejecutarConsolidacion(
+        loteId,
+        copropiedadId,
+        undefined,
+        actor,
+      );
     }
 
     const trabajo = await this.cola.add(NOMBRE_TRABAJO_CONSOLIDACION, {
       loteId,
       copropiedadId: copropiedadId.toString(),
+      // Who launched it: a job runs outside the request, so the audit entry of
+      // a failed-run reversal could not otherwise name the person.
+      ...(actor ? { actor } : {}),
     });
     return trabajo.waitUntilFinished(this.eventosCola);
   }
@@ -1359,6 +1496,7 @@ export class LotesFacturacionService {
     loteId: string,
     copropiedadId: Types.ObjectId,
     job?: Job<DatosTrabajoConsolidacion, ResultadoConsolidacion>,
+    actor?: ActorAuditoria,
   ): Promise<ResultadoConsolidacion> {
     const lote = await this.lotes
       .findOne({ _id: loteId, copropiedadId })
@@ -1384,6 +1522,151 @@ export class LotesFacturacionService {
       lote.fechaFacturacion,
     );
 
+    // Atomic claim of the run (see `reclamarConsolidacion`): from here on this
+    // call owns the lote (identified by `token`) and MUST release the claim on
+    // every way out.
+    const token = await this.reclamarConsolidacion(loteId, copropiedadId);
+    try {
+      return await this.consolidarReclamado(
+        lote,
+        loteId,
+        copropiedadId,
+        token,
+        job,
+        actor ?? job?.data.actor,
+      );
+    } catch (err) {
+      // Whatever escaped, the run is over: never leave the claim behind (it
+      // would block `cancelar` and any retry until it goes stale). Skipped
+      // when the claim was already lost: it is not ours to release.
+      if (!(err instanceof ReclamoPerdidoException)) {
+        await this.liberarReclamo(loteId, copropiedadId, token);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Claims a liquidado lote for ONE consolidación run, atomically: a single
+   * `findOneAndUpdate` that only matches when no run is in progress
+   * (`progreso` null) or the last one went silent for
+   * `VENTANA_RECLAMO_OBSOLETO_MS` (its worker died: a live run keeps
+   * `updatedAt` fresh). Two jobs or two instances can therefore never run the
+   * same lote — and, unlike a fixed BullMQ `jobId`, a failed run never blocks
+   * its own retry, because the claim lives on the lote and is released at the
+   * end of the run.
+   *
+   * The claim stamps a fresh owner token; every later write of the run is
+   * conditioned on it, so a run that went stale and was taken over cannot
+   * touch what its successor is doing. Returns that token.
+   *
+   * Existence and estado were already checked by the caller, so a miss here
+   * means someone else holds the claim (or the lote changed in between).
+   */
+  private async reclamarConsolidacion(
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+  ): Promise<string> {
+    const limite = new Date(Date.now() - VENTANA_RECLAMO_OBSOLETO_MS);
+    const token = randomUUID();
+    const reclamado = await this.lotes
+      .findOneAndUpdate(
+        {
+          _id: loteId,
+          copropiedadId,
+          estado: 'liquidado',
+          $or: [{ progreso: null }, { updatedAt: { $lt: limite } }],
+        },
+        { $set: { progreso: { actual: 0, total: 0 }, reclamoToken: token } },
+      )
+      .exec();
+    if (!reclamado) {
+      throw new ConflictException(
+        `Ya hay una operación en curso para el lote ${loteId} (consolidación o cancelación); esperá a que termine.`,
+      );
+    }
+    return token;
+  }
+
+  /**
+   * Releases a claim, only if `token` still owns it. Never throws: it runs
+   * while another error propagates. A release that matches nothing means the
+   * claim was taken over: logged, and the successor's state is left alone.
+   */
+  private async liberarReclamo(
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+    token: string,
+  ): Promise<void> {
+    try {
+      const res = await this.lotes
+        .updateOne(
+          { _id: loteId, copropiedadId, reclamoToken: token },
+          { $set: { progreso: null, reclamoToken: null } },
+        )
+        .exec();
+      if (res?.matchedCount === 0) {
+        this.logger.warn(
+          `Lote ${loteId}: no se liberó el reclamo porque ya no pertenece a esta corrida (otra operación lo tomó).`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `No se pudo liberar el reclamo del lote ${loteId}: ${err instanceof Error ? err.message : 'error desconocido'}`,
+      );
+    }
+  }
+
+  /** Logs and builds the error for a run that found its claim taken over. */
+  private reclamoPerdido(loteId: string): ReclamoPerdidoException {
+    this.logger.warn(
+      `Lote ${loteId}: la corrida perdió el reclamo (otra consolidación o cancelación lo tomó); no se sobrescribe ni se deshace nada.`,
+    );
+    return new ReclamoPerdidoException(
+      `La operación sobre el lote ${loteId} perdió el reclamo del lote (otra consolidación o cancelación lo tomó mientras corría); no se modificó su estado. Revisá el lote y reintentá.`,
+    );
+  }
+
+  /**
+   * Heartbeat: touches `updatedAt` of a lote this run still owns, so the
+   * staleness rule does not take a live run for a dead one. Returns `false`
+   * only when the claim was verifiably lost; a transient DB error is logged
+   * and counts as "still owned" (a missed beat is not fatal, the next tanda
+   * retries it).
+   */
+  private async latir(
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+    token: string,
+  ): Promise<boolean> {
+    try {
+      const res = await this.lotes
+        .updateOne(
+          { _id: loteId, copropiedadId, reclamoToken: token },
+          { $set: { updatedAt: new Date() } },
+        )
+        .exec();
+      return res?.matchedCount !== 0;
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo renovar el latido del lote ${loteId}: ${err instanceof Error ? err.message : 'error desconocido'}`,
+      );
+      return true;
+    }
+  }
+
+  /** The body of `ejecutarConsolidacion` once this call holds the claim. */
+  private async consolidarReclamado(
+    lote: LoteFacturacionDocument,
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+    token: string,
+    job: Job<DatosTrabajoConsolidacion, ResultadoConsolidacion> | undefined,
+    actor: ActorAuditoria | undefined,
+  ): Promise<ResultadoConsolidacion> {
+    // When this run last wrote to the lote (the claim itself counts): drives
+    // the heartbeat.
+    let ultimaEscritura = Date.now();
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     const cuentaCartera =
       copropiedad?.cuentaContableCartera ?? CUENTA_SIN_ASIGNAR;
@@ -1522,113 +1805,197 @@ export class LotesFacturacionService {
     // already exactly the count of rows that will reach the numbering step
     // below (unidadesYaFacturadas-skipped rows never did). May grant fewer
     // than requested if the active resolution runs out partway through.
-    const { numeros: numerosReservados } =
-      await this.numeracion.reservarBloqueFacturas(
-        copropiedadId.toString(),
-        filasPendientes.length,
-      );
-
-    // Pairs each pending row with the number it will use, in the SAME
-    // order `filasPendientes` already carries. A row past the end of
-    // `numerosReservados` never gets processed this call — the active
-    // resolution ran out, and every remaining row would fail identically,
-    // same "global blocker" `consolidar()` always had.
-    const filasNumeradas = filasPendientesConIndice
-      .slice(0, numerosReservados.length)
-      .map(({ preliminar, indiceEnPreview }, indice) => ({
-        preliminar,
-        indiceEnPreview,
-        numero: numerosReservados[indice],
-      }));
-
-    if (filasPendientes.length > numerosReservados.length) {
-      const primeraSinNumero =
-        filasPendientesConIndice[numerosReservados.length];
-      errores.push({
-        fila: primeraSinNumero.indiceEnPreview + 1,
-        inmuebleCodigo: primeraSinNumero.preliminar.codigoInmueble,
-        mensaje:
-          `Se agotó el rango de numeración disponible para este lote ` +
-          `(se pudieron numerar ${numerosReservados.length} de ` +
-          `${filasPendientes.length} facturas). Hay que cargar una ` +
-          `resolución nueva.`,
-      });
-    }
-
-    // Coarse progress signal, purely for the frontend to poll and show
-    // "fila X de Y" instead of a frozen button — a real consolidación can
-    // run tens of seconds. Reported both into `lote.progress` (Mongo, the
-    // field the API contract has always exposed) and into the job's own
-    // BullMQ progress (Redis, cheap, available for a future push-based
-    // UI). Throttled to ~20 writes total regardless of how many tandas run.
-    const totalPendientes = filasNumeradas.length;
-    const intervaloProgreso = Math.max(1, Math.ceil(totalPendientes / 20));
-    let filasCompletadas = 0;
-    const informarProgreso = async (): Promise<void> => {
-      await job?.updateProgress({
-        current: filasCompletadas,
-        total: totalPendientes,
-      });
-      await this.lotes
-        .updateOne(
-          { _id: loteId, copropiedadId },
-          {
-            $set: {
-              progreso: { actual: filasCompletadas, total: totalPendientes },
-            },
-          },
-        )
-        .exec();
-    };
-    if (totalPendientes > 0) {
-      await informarProgreso();
-    }
-
-    // Splits the numbered rows into fixed-size tandas — one Mongo
-    // transaction per tanda instead of one per row — run with bounded
-    // concurrency. See this method's own docblock for the round-trip
-    // math and the failure-isolation tradeoff this accepts.
-    const tandas: (typeof filasNumeradas)[] = [];
-    for (
-      let i = 0;
-      i < filasNumeradas.length;
-      i += TAMANO_TANDA_CONSOLIDACION
-    ) {
-      tandas.push(filasNumeradas.slice(i, i + TAMANO_TANDA_CONSOLIDACION));
-    }
-
-    const contextoTanda: ContextoTanda = {
-      loteId,
-      lote,
-      copropiedadId,
-      cuentaCartera,
-      cuentasOrden,
-      marcasPorCuenta,
-      contextoAuxiliares,
-      saldoPorClave,
-      copropiedad,
-      errores,
-      registrarNumero,
-      facturaIds,
-      sumarMonto: (monto: number): void => {
-        montoTotal += monto;
-      },
-    };
-
-    await this.conLimiteDeConcurrencia(
-      tandas,
-      CONCURRENCIA_TANDAS_CONSOLIDACION,
-      async (tanda) => {
-        await this.procesarTanda(tanda, contextoTanda);
-        filasCompletadas += tanda.length;
-        if (
-          filasCompletadas % intervaloProgreso === 0 ||
-          filasCompletadas === totalPendientes
-        ) {
-          await informarProgreso();
-        }
-      },
+    const reserva = await this.numeracion.reservarBloqueFacturas(
+      copropiedadId.toString(),
+      filasPendientes.length,
     );
+    const numerosReservados = reserva.numeros;
+    // Where the counter stood before/after this reservation — the only thing
+    // needed to put it back if the run has to be undone below.
+    const contador: ContadorFacturas | null = reserva.contador ?? null;
+    let falloTanda = false;
+
+    // From here on numbers are consumed: anything that escapes before the
+    // lote is persisted must undo what this run wrote and give them back.
+    try {
+      // Pairs each pending row with the number it will use, in the SAME
+      // order `filasPendientes` already carries. A row past the end of
+      // `numerosReservados` never gets processed this call — the active
+      // resolution ran out, and every remaining row would fail identically,
+      // same "global blocker" `consolidar()` always had.
+      const filasNumeradas = filasPendientesConIndice
+        .slice(0, numerosReservados.length)
+        .map(({ preliminar, indiceEnPreview }, indice) => ({
+          preliminar,
+          indiceEnPreview,
+          numero: numerosReservados[indice],
+        }));
+
+      if (filasPendientes.length > numerosReservados.length) {
+        const primeraSinNumero =
+          filasPendientesConIndice[numerosReservados.length];
+        errores.push({
+          fila: primeraSinNumero.indiceEnPreview + 1,
+          inmuebleCodigo: primeraSinNumero.preliminar.codigoInmueble,
+          mensaje:
+            `Se agotó el rango de numeración disponible para este lote ` +
+            `(se pudieron numerar ${numerosReservados.length} de ` +
+            `${filasPendientes.length} facturas). Hay que cargar una ` +
+            `resolución nueva.`,
+        });
+      }
+
+      // Coarse progress signal, purely for the frontend to poll and show
+      // "fila X de Y" instead of a frozen button — a real consolidación can
+      // run tens of seconds. Reported both into `lote.progress` (Mongo, the
+      // field the API contract has always exposed) and into the job's own
+      // BullMQ progress (Redis, cheap, available for a future push-based
+      // UI). Throttled to ~20 writes total regardless of how many tandas run.
+      const totalPendientes = filasNumeradas.length;
+      const intervaloProgreso = Math.max(1, Math.ceil(totalPendientes / 20));
+      let filasCompletadas = 0;
+      const informarProgreso = async (): Promise<void> => {
+        await job?.updateProgress({
+          current: filasCompletadas,
+          total: totalPendientes,
+        });
+        const res = await this.lotes
+          .updateOne(
+            { _id: loteId, copropiedadId, reclamoToken: token },
+            {
+              $set: {
+                progreso: { actual: filasCompletadas, total: totalPendientes },
+              },
+            },
+          )
+          .exec();
+        // Matching nothing means another run took the lote over: stop, without
+        // undoing (see ReclamoPerdidoException).
+        if (res?.matchedCount === 0) throw this.reclamoPerdido(loteId);
+        ultimaEscritura = Date.now();
+      };
+      if (totalPendientes > 0) {
+        await informarProgreso();
+      }
+
+      // Splits the numbered rows into fixed-size tandas — one Mongo
+      // transaction per tanda instead of one per row — run with bounded
+      // concurrency. See this method's own docblock for the round-trip
+      // math and the failure-isolation tradeoff this accepts.
+      const tandas: (typeof filasNumeradas)[] = [];
+      for (
+        let i = 0;
+        i < filasNumeradas.length;
+        i += TAMANO_TANDA_CONSOLIDACION
+      ) {
+        tandas.push(filasNumeradas.slice(i, i + TAMANO_TANDA_CONSOLIDACION));
+      }
+
+      const contextoTanda: ContextoTanda = {
+        loteId,
+        lote,
+        copropiedadId,
+        cuentaCartera,
+        cuentasOrden,
+        marcasPorCuenta,
+        contextoAuxiliares,
+        saldoPorClave,
+        copropiedad,
+        errores,
+        registrarNumero,
+        facturaIds,
+        sumarMonto: (monto: number): void => {
+          montoTotal += monto;
+        },
+        marcarFallo: (): void => {
+          falloTanda = true;
+        },
+      };
+
+      await this.conLimiteDeConcurrencia(
+        tandas,
+        CONCURRENCIA_TANDAS_CONSOLIDACION,
+        async (tanda) => {
+          await this.procesarTanda(tanda, contextoTanda);
+          filasCompletadas += tanda.length;
+          if (
+            filasCompletadas % intervaloProgreso === 0 ||
+            filasCompletadas === totalPendientes
+          ) {
+            await informarProgreso();
+          } else if (Date.now() - ultimaEscritura > INTERVALO_LATIDO_MS) {
+            // Slow run, no progress write due: keep `updatedAt` fresh so the
+            // claim is not taken for a dead one.
+            ultimaEscritura = Date.now();
+            if (!(await this.latir(loteId, copropiedadId, token))) {
+              throw this.reclamoPerdido(loteId);
+            }
+          }
+        },
+        () => falloTanda,
+      );
+    } catch (err) {
+      // An exception escaped (the deliberately uncaught "asiento
+      // desbalanceado", a progress write, ...). `conLimiteDeConcurrencia`
+      // already waited for every in-flight tanda, so nothing is still
+      // writing: undo the lote and rethrow the ORIGINAL error.
+      if (!(err instanceof ReclamoPerdidoException)) {
+        await this.revertirTrasExcepcion(
+          lote,
+          loteId,
+          copropiedadId,
+          token,
+          contador,
+          actor,
+        );
+      }
+      throw err;
+    }
+
+    // A tanda failed: the whole lote goes back to zero and the counter back
+    // to where it was, so a retry (or an edit) starts from a clean slate
+    // instead of from a half-invoiced lote with holes in the numbering. The
+    // tanda's own `errores` are returned untouched.
+    if (falloTanda) {
+      // The undo can be long: refresh the claim first (and stop if it is gone).
+      if (!(await this.latir(loteId, copropiedadId, token))) {
+        throw this.reclamoPerdido(loteId);
+      }
+      try {
+        await this.deshacerConsolidacion(lote, copropiedadId, contador, {
+          actor,
+          motivo: 'reversión por consolidación fallida',
+        });
+        facturaIds.length = 0;
+        lote.facturaIds = [];
+        lote.resumen = null;
+      } catch (errReversion) {
+        const detalle =
+          errReversion instanceof Error
+            ? errReversion.message
+            : 'Error desconocido';
+        this.logger.error(
+          `No se pudo deshacer el lote ${loteId} tras un fallo de consolidación: ${detalle}`,
+        );
+        // A partial undo may already have deleted some Facturas: the
+        // in-memory list is stale, so persist what is REALLY left.
+        try {
+          const restantes = await this.leerFacturaIdsRestantes(
+            copropiedadId,
+            loteId,
+          );
+          facturaIds.length = 0;
+          facturaIds.push(...restantes.map(String));
+        } catch {
+          // Keep the in-memory list; the undo failure is already reported.
+        }
+        errores.push({
+          fila: 0,
+          inmuebleCodigo: '',
+          mensaje: `No se pudo deshacer el lote tras el fallo: ${detalle}`,
+        });
+      }
+    }
 
     // Presentation generation is no longer triggered here — under the
     // pdfmake + frontend-render model, `solicitar-generacion`/
@@ -1639,7 +2006,8 @@ export class LotesFacturacionService {
     const consolidadoDelTodo = errores.length === 0;
     const actualizado = await this.lotes
       .findOneAndUpdate(
-        { _id: loteId, copropiedadId },
+        // Only the current owner may write the outcome.
+        { _id: loteId, copropiedadId, reclamoToken: token },
         {
           $set: {
             estado: consolidadoDelTodo ? 'consolidado' : 'liquidado',
@@ -1655,20 +2023,27 @@ export class LotesFacturacionService {
                   }
                 : null,
             // The call is over either way (fully consolidado or stopped on
-            // an error) — nothing left to poll for.
+            // an error) — nothing left to poll for; the claim ends with it.
             progreso: null,
+            reclamoToken: null,
           },
         },
         { returnDocument: 'after' },
       )
       .exec();
 
+    if (!actualizado) {
+      // The claim was taken over (or the lote is gone): whatever exists now
+      // belongs to someone else, so do not overwrite and do not undo.
+      throw this.reclamoPerdido(loteId);
+    }
+
     // On a partial failure, the persisted status is `liquidado` (see the
     // $set above), which is exactly what the pre-update `lote` already
     // holds — using it here means the returned contract never depends on
     // the round-trip echoing back the write we just issued.
     return {
-      lote: consolidadoDelTodo ? toLote(actualizado!) : toLote(lote),
+      lote: consolidadoDelTodo ? toLote(actualizado) : toLote(lote),
       errores,
     };
   }
@@ -1677,25 +2052,44 @@ export class LotesFacturacionService {
    * Runs `tarea` over every item in `items`, at most `concurrencia`
    * promises in flight at once — a manual worker-pool since this codebase
    * carries no bounded-concurrency dependency for something this small.
+   *
+   * Stops launching NEW items as soon as one `tarea` throws or `detener()`
+   * turns true (a tanda reported failure), then waits for the ones already in
+   * flight to settle (`allSettled`, not `all`: `all` would return on the
+   * first rejection while other tandas are still writing, and the undo that
+   * follows would race them) and rethrows the first rejection. On the happy
+   * path none of this changes anything: same workers, same order, same
+   * number of awaits.
    */
   private async conLimiteDeConcurrencia<T>(
     items: T[],
     concurrencia: number,
     tarea: (item: T) => Promise<void>,
+    detener?: () => boolean,
   ): Promise<void> {
     let siguiente = 0;
+    let abortado = false;
     const trabajador = async (): Promise<void> => {
-      while (siguiente < items.length) {
+      while (siguiente < items.length && !abortado && !detener?.()) {
         const indice = siguiente;
         siguiente += 1;
-        await tarea(items[indice]);
+        try {
+          await tarea(items[indice]);
+        } catch (err) {
+          abortado = true;
+          throw err;
+        }
       }
     };
-    await Promise.all(
+    const resultados = await Promise.allSettled(
       Array.from({ length: Math.min(concurrencia, items.length) }, () =>
         trabajador(),
       ),
     );
+    const rechazado = resultados.find(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    if (rechazado) throw rechazado.reason;
   }
 
   /**
@@ -1710,16 +2104,18 @@ export class LotesFacturacionService {
    *
    * A thrown "asiento desbalanceado" (defense-in-depth — see
    * `prepararFilaParaConsolidar`) is NOT caught here: it propagates out of
-   * the whole tanda, and from there out of `consolidar()` entirely, same
-   * as it always did.
+   * the whole tanda and, once `conLimiteDeConcurrencia` has let the other
+   * in-flight tandas settle, out of `ejecutarConsolidacion()` — which first
+   * undoes the lote (`deshacerConsolidacion`) and then rethrows it.
    *
    * Any OTHER failure — the transaction can't commit, a duplicate key,
    * whatever — rolls back this tanda's transaction as a whole and records
    * EVERY row in it as its own `ErrorConsolidacion` (same message,
    * different `fila`/`inmuebleCodigo`): the tradeoff a bigger transaction
-   * unit accepts versus the old one-row-per-transaction isolation — a
-   * retry simply reprocesses the whole tanda with fresh numbers, nothing
-   * is left half-done.
+   * unit accepts versus the old one-row-per-transaction isolation. It also
+   * flags the failure (`ctx.marcarFallo`) so no new tanda starts, and
+   * `ejecutarConsolidacion()` then undoes every tanda that DID commit and
+   * gives the numbers back — nothing is left half-done.
    */
   private async procesarTanda(
     tanda: FilaNumerada[],
@@ -1754,6 +2150,9 @@ export class LotesFacturacionService {
         );
       });
     } catch (err) {
+      // Tells the pool to stop launching new tandas: the lote is going to be
+      // undone, so writing more of it would only add work to undo.
+      ctx.marcarFallo();
       const mensaje = err instanceof Error ? err.message : 'Error desconocido';
       for (const { preliminar, indiceEnPreview } of tanda) {
         ctx.errores.push({
@@ -1889,24 +2288,14 @@ export class LotesFacturacionService {
 
     // Same atomic, commutative $inc per document as before — just batched
     // into ONE bulkWrite per tanda instead of one per row.
-    const saldosOps = preliminar.lineas.map((linea) => ({
-      updateOne: {
-        filter: {
-          copropiedadId: ctx.copropiedadId,
-          inmuebleId: preliminar.inmuebleId,
-          conceptoId: linea.conceptoId,
-        },
-        update: {
-          $inc: { saldoPendiente: linea.valorTotal },
-          $setOnInsert: {
-            copropiedadId: ctx.copropiedadId,
-            inmuebleId: preliminar.inmuebleId,
-            conceptoId: linea.conceptoId,
-          },
-        },
-        upsert: true,
-      },
-    }));
+    // (Built by `construirOpsSaldos`, which `deshacerConsolidacion` reuses
+    // with the opposite sign — one formula for both directions.)
+    const saldosOps = construirOpsSaldos(
+      ctx.copropiedadId,
+      preliminar.inmuebleId,
+      preliminar.lineas,
+      1,
+    );
 
     // Seeds this Factura's own row in the per-document cartera ledger —
     // one per line, alongside `SaldoCartera` above (kept as an
@@ -1999,27 +2388,714 @@ export class LotesFacturacionService {
    * Cancels a run that never became real invoices — the one hard delete in
    * this domain, same exception the audit law already carves out for
    * `Inmueble`/`ConceptoCobro`: a `borrador`/`liquidado` lote's `preview` is
-   * a computed, throwaway draft, and its `invoiceIds` is still empty —
-   * `consolidar` is the only place that ever creates a real `Factura` and
-   * fills it in. Refused once consolidado, when that stops being true.
+   * a computed, throwaway draft. Refused once consolidado, when that stops
+   * being true.
+   *
+   * A `liquidado` lote is NOT guaranteed to be free of real documents:
+   * `consolidar` may have been interrupted, or have run before it undid its
+   * own failures, leaving Facturas (and their saldos, cartera rows and
+   * asientos) behind while `facturaIds` is still empty — that array is only
+   * written at the end of a run, so it says nothing about what exists. So this
+   * looks at the Facturas themselves, and if there are any it first runs
+   * `deshacerConsolidacion` (same narrow audit-law exception, same cruce
+   * guard) and rewinds the invoice counter when the lote's numbers are still
+   * the tail of it. If the guard blocks the undo (a payment, credit note or
+   * PDF already hangs off one of those Facturas) the cancel is rejected and
+   * nothing is deleted.
+   *
+   * The lote is claimed atomically (owner token) before anything is undone, so
+   * a concurrent `consolidar` is rejected while this runs; a claim that went
+   * stale (dead worker, 15 min without writes) is taken over, and the period
+   * state is deliberately never consulted — a closed period must not block a
+   * cancel. The final delete is conditioned on the token, and the claim is
+   * released on every failure path.
    *
    * Exists mainly to recover from a run started with wrong parameters (a
    * stale Parámetros de Facturación snapshot, say) — the unique partial
    * index only allows one `borrador`/`liquidado` lote per coproperty at a
    * time, so a mistaken one blocks every new attempt until it is gone.
    */
-  async cancelar(id: string): Promise<void> {
+  async cancelar(id: string, actor: ActorAuditoria): Promise<void> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    const lote = await this.lotes.findOne({ _id: id, copropiedadId }).exec();
+    // Atomic claim, same mechanism as `reclamarConsolidacion`: while this call
+    // holds it, no consolidación can start (it would skip units whose Facturas
+    // the undo is about to delete). A STALE claim (dead worker) is taken over
+    // and a closed period never blocks a cancel, so a dead run cannot make the
+    // lote impossible to cancel.
+    const token = randomUUID();
+    const limite = new Date(Date.now() - VENTANA_RECLAMO_OBSOLETO_MS);
+    const lote = await this.lotes
+      .findOneAndUpdate(
+        {
+          _id: id,
+          copropiedadId,
+          estado: { $in: ['borrador', 'liquidado'] },
+          $or: [{ progreso: null }, { updatedAt: { $lt: limite } }],
+        },
+        { $set: { progreso: { actual: 0, total: 0 }, reclamoToken: token } },
+        { returnDocument: 'after' },
+      )
+      .exec();
     if (!lote) {
-      throw new NotFoundException(`No se encontró el lote ${id}`);
-    }
-    if (lote.estado === 'consolidado') {
+      // Missed: say why.
+      const actual = await this.lotes
+        .findOne({ _id: id, copropiedadId })
+        .exec();
+      if (!actual) {
+        throw new NotFoundException(`No se encontró el lote ${id}`);
+      }
+      if (actual.estado === 'consolidado') {
+        throw new ConflictException(
+          `El lote ${id} ya está consolidado y generó facturas reales; no puede cancelarse`,
+        );
+      }
       throw new ConflictException(
-        `El lote ${id} ya está consolidado y generó facturas reales; no puede cancelarse`,
+        `El lote ${id} tiene una consolidación en curso; esperá a que termine antes de cancelarlo.`,
       );
     }
-    await this.lotes.deleteOne({ _id: id, copropiedadId }).exec();
+
+    try {
+      const tieneFacturas = await this.facturas
+        .exists({ copropiedadId, loteId: id })
+        .exec();
+      if (tieneFacturas) {
+        await this.deshacerConsolidacion(lote, copropiedadId, 'derivar', {
+          actor,
+          motivo: 'reversión por cancelación',
+        });
+      }
+      // Conditional on still owning the claim: if it was taken over (stale)
+      // meanwhile, the lote is not ours to delete.
+      const borrado = await this.lotes
+        .deleteOne({ _id: id, copropiedadId, reclamoToken: token })
+        .exec();
+      if (borrado.deletedCount === 0) {
+        throw this.reclamoPerdido(id);
+      }
+    } catch (err) {
+      // Never leave the claim behind (it would block consolidar and any retry
+      // until it goes stale) — unless it is no longer ours.
+      if (!(err instanceof ReclamoPerdidoException)) {
+        await this.liberarReclamo(id, copropiedadId, token);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Undoes EVERYTHING a lote persisted — its Facturas, their SaldoCartera
+   * increments, CarteraPorDocumento/SaldoTotalDocumento rows and asientos —
+   * and gives the invoice numbers back. Called when a consolidación fails
+   * halfway (so the lote goes back to zero and a retry starts clean instead of
+   * leaving a half-invoiced lote with holes in the numbering) and by
+   * `cancelar` for a lote that already has Facturas.
+   *
+   * AUDIT-LAW EXCEPTION — deliberately narrow, confirmed with accounting.
+   * This physically deletes financial documents, which the audit law
+   * otherwise forbids (voiding is `estado: 'anulada'`, never a delete). It is
+   * allowed here ONLY because every record involved (a) belongs to one `loteId`
+   * whose consolidación just failed, or is being cancelled before ever
+   * completing, (b) was never issued to anyone, never PDF'd and never
+   * published, and (c) has no cruce against it — that last point is enforced,
+   * not assumed: if ANY Factura of the lote is referenced by an
+   * AplicacionCartera (any state), a NotaCredito, a NotaContable or a
+   * generated PDF (`PresentacionDocumento.generatedAt`), or if the lote itself
+   * has a generated FV PDF, a `PublicacionLote` row or Facturas with a
+   * `printSnapshot`, the whole undo is refused BEFORE deleting anything and
+   * surfaces a clear error. A Factura with no asiento (legacy orphan) also
+   * refuses it: whether its saldo was ever applied is unknowable. It is not a
+   * template for deleting anything else. `ReiniciarCicloService` is a
+   * different, separate exception (test-only coproperties, whitelisted) and
+   * is untouched by this one. Every reversal is recorded in the audit log.
+   *
+   * Resumable and idempotent by construction: the Facturas are read from the
+   * database and processed in blocks of `TAMANO_BLOQUE_REVERSION`, each block
+   * in ONE transaction that reverses the saldos AND deletes the Facturas
+   * together — a block is either fully undone (its Facturas are gone, so a
+   * repeat never finds them and never subtracts twice) or not at all.
+   *
+   * `contador` is where `reservarBloqueFacturas` found the counter. It is put
+   * back with ONE conditional update (only if it still equals `despues`), so
+   * it can never go up and never clobbers numbers another process reserved
+   * meanwhile; if it was moved, it is left alone and reported. Pass
+   * `'derivar'` when there is no such record (`cancelar`): the range is then
+   * taken from the Facturas about to be deleted (min/max `numero`) in the
+   * semantics of the counter they came from. `null` means nothing to rewind.
+   */
+  async deshacerConsolidacion(
+    lote: LoteFacturacionDocument,
+    copropiedadId: Types.ObjectId,
+    contador: ContadorFacturas | 'derivar' | null,
+    contexto: {
+      /** Who acted. Absent only for a job enqueued without one: the entry
+       *  then falls back to the lote's `generadoPor` as "Sistema". */
+      actor?: ActorAuditoria;
+      /** Why, in Spanish — goes verbatim into the audit label. */
+      motivo: string;
+    } = { motivo: 'reversión del lote' },
+  ): Promise<ResultadoReversion> {
+    const loteId = String(lote._id);
+    const facturas = await this.facturas
+      .find({ copropiedadId, loteId })
+      .lean()
+      .exec();
+
+    let contadoresARebobinar: ContadorFacturas[] =
+      contador === null || contador === 'derivar' ? [] : [contador];
+    let contadorNoUbicable = false;
+    if (contador === 'derivar' && facturas.length > 0) {
+      const derivado = await this.derivarContadores(copropiedadId, facturas);
+      contadoresARebobinar = derivado.contadores;
+      contadorNoUbicable = derivado.sinUbicar;
+    }
+
+    if (facturas.length > 0) {
+      // Nothing is touched until the WHOLE lote is known to be free of cruces
+      // and of legacy orphans.
+      await this.exigirSinCruces(facturas, lote, null, true);
+      await this.exigirAsientosCompletos(facturas, lote);
+
+      let bloquesBorrados = 0;
+      try {
+        for (let i = 0; i < facturas.length; i += TAMANO_BLOQUE_REVERSION) {
+          const bloque = facturas.slice(i, i + TAMANO_BLOQUE_REVERSION);
+          const ids = bloque.map((f) => f._id);
+          const esUltimoBloque = i + TAMANO_BLOQUE_REVERSION >= facturas.length;
+          const session = await this.connection.startSession();
+          try {
+            await session.withTransaction(async () => {
+              // Re-checked inside the transaction: closes the window between
+              // the pre-pass and this block (a payment applied in between).
+              await this.exigirSinCruces(bloque, lote, session, false);
+              const opsSaldos = bloque.flatMap((f) =>
+                construirOpsSaldos(copropiedadId, f.inmuebleId, f.lineas, -1),
+              );
+              if (opsSaldos.length) {
+                await this.saldos.bulkWrite(opsSaldos, { session });
+              }
+              await this.asientos.deleteMany(
+                { copropiedadId, loteId, facturaId: { $in: ids } },
+                { session },
+              );
+              await this.carteraPorDocumento.deleteMany(
+                {
+                  copropiedadId,
+                  tipoDocumento: 'FV',
+                  documentoId: { $in: ids },
+                },
+                { session },
+              );
+              await this.saldoTotalDocumento.deleteMany(
+                {
+                  copropiedadId,
+                  tipoDocumento: 'FV',
+                  documentoId: { $in: ids },
+                },
+                { session },
+              );
+              await this.facturas.deleteMany(
+                { copropiedadId, loteId, _id: { $in: ids } },
+                { session },
+              );
+              if (esUltimoBloque) {
+                // A `solicitar-generacion` that was never confirmed leaves a
+                // pending lote-level PDF row (`generatedAt: null`); with the
+                // Facturas gone it would let a later `confirmar-generacion`
+                // publish a PDF of invoices that no longer exist. Done in the
+                // LAST block's transaction, after its own guard re-check saw
+                // no CONFIRMED row, so a confirmation racing the undo either
+                // is seen by that guard (undo refused) or finds no row.
+                await this.presentaciones!.deleteMany(
+                  {
+                    tipoDocumento: 'FV',
+                    documentoId: lote._id,
+                    generatedAt: null,
+                  },
+                  { session },
+                );
+              }
+            });
+          } finally {
+            await session.endSession();
+          }
+          bloquesBorrados += 1;
+        }
+      } catch (err) {
+        // KNOWN LIMITATION: when a later block fails after earlier ones were
+        // deleted, the counter is NOT rewound (some numbers of the range may
+        // still exist, so lowering it could reissue them). The lote keeps only
+        // the remaining Facturas, and a later `cancelar` re-derives the
+        // counter from THOSE alone — the numbers already deleted stay as a
+        // hole in the numbering.
+        if (bloquesBorrados > 0) {
+          await this.persistirFacturaIdsRestantes(copropiedadId, loteId);
+        }
+        throw err;
+      }
+    }
+
+    // One conditional rewind per numbering source (see `derivarContadores`).
+    const resultadosContador: boolean[] = [];
+    for (const c of contadoresARebobinar) {
+      resultadosContador.push(
+        await this.numeracion.devolverContadorFacturas(
+          copropiedadId.toString(),
+          c,
+        ),
+      );
+    }
+    const contadorDevuelto: boolean | null =
+      contadoresARebobinar.length || contadorNoUbicable
+        ? !contadorNoUbicable && resultadosContador.every(Boolean)
+        : null;
+    if (contadorDevuelto === false) {
+      this.logger.warn(
+        `Lote ${loteId}: el consecutivo de facturas no se devolvió (del todo) porque otro proceso lo movió (o no estaba al final del rango del lote); se dejó como estaba.`,
+      );
+    }
+
+    let auditoriaRegistrada = false;
+    if (this.auditoria && (facturas.length > 0 || contadorDevuelto)) {
+      const nota =
+        contadorDevuelto === false
+          ? contadorNoUbicable
+            ? ' (consecutivo NO devuelto: no se pudo ubicar de forma inequívoca)'
+            : ' (consecutivo NO devuelto: otro proceso lo movió)'
+          : '';
+      try {
+        const copropiedadEtiqueta =
+          await this.etiquetaCopropiedad(copropiedadId);
+        await this.auditoria.registrar({
+          // Who acted; only a job enqueued without an actor falls back to the
+          // lote's creator, labelled as the system.
+          actorAccountId: contexto.actor?.accountId ?? String(lote.generadoPor),
+          actorNombre: contexto.actor?.nombre ?? 'Sistema',
+          accion: 'revertir',
+          entidadTipo: 'lote-facturacion',
+          entidadId: loteId,
+          // Coproperty + lote number: the platform log spans every building.
+          entidadEtiqueta: `Lote ${lote.numero} de ${copropiedadEtiqueta}: ${facturas.length} facturas revertidas (${contexto.motivo})${nota}`,
+        });
+        auditoriaRegistrada = true;
+      } catch (err) {
+        // The undo already happened; failing here would mask the error that
+        // triggered it. Logged loudly instead.
+        this.logger.error(
+          `Lote ${loteId} revertido pero no se pudo registrar en auditoría: ${err instanceof Error ? err.message : 'error desconocido'}`,
+        );
+      }
+    }
+
+    return {
+      facturasRevertidas: facturas.length,
+      contadorDevuelto,
+      auditoriaRegistrada,
+    };
+  }
+
+  /** "CODIGO Nombre" of the coproperty for the audit label; never throws
+   *  (the undo already happened) and falls back to the id. */
+  private async etiquetaCopropiedad(
+    copropiedadId: Types.ObjectId,
+  ): Promise<string> {
+    try {
+      const cop = await this.copropiedades.findById(copropiedadId).exec();
+      const etiqueta = [cop?.codigo, cop?.nombre].filter(Boolean).join(' ');
+      return etiqueta || copropiedadId.toString();
+    } catch {
+      return copropiedadId.toString();
+    }
+  }
+
+  /**
+   * Derives what to rewind from the Facturas themselves (`cancelar`, where
+   * no reservation record exists). A lote can mix numbering sources across
+   * retries (resolution A, then B, or the FV fallback), so they are grouped
+   * by `resolucionId` (null = FV fallback) and each group gets its OWN
+   * counter entry — never one resolution applied to every number.
+   *
+   * Per group only the contiguous run that ends at the group's highest number
+   * is given back: its numbers are consecutive integers of that one source,
+   * so none can belong to another lote, and the counter can never drop below
+   * a number that still exists. An earlier, detached run (a hole left by a
+   * previous failure) is left alone. Semantics per source — resolution:
+   * `siguienteNumero` is the NEXT to issue (antes = start, despues = max + 1);
+   * FV fallback: it is the LAST issued (antes = start - 1, despues = max) and
+   * the `ConsecutivoDocumento` row is located by `{categoria: 'FV', prefijo}`;
+   * if that is not exactly one row the group is skipped and `sinUbicar` is set.
+   */
+  private async derivarContadores(
+    copropiedadId: Types.ObjectId,
+    facturas: {
+      numero: number;
+      prefijo?: string;
+      resolucionId?: Types.ObjectId | null;
+    }[],
+  ): Promise<{ contadores: ContadorFacturas[]; sinUbicar: boolean }> {
+    // FV-fallback Facturas are grouped by `prefijo` as well: several
+    // `ConsecutivoDocumento` rows may carry `categoria: 'FV'`, each with its
+    // own prefix and its own counter.
+    const grupos = new Map<
+      string,
+      {
+        resolucionId: Types.ObjectId | null;
+        prefijo: string;
+        numeros: number[];
+      }
+    >();
+    for (const f of facturas) {
+      const resolucionId = f.resolucionId ?? null;
+      const prefijo = f.prefijo ?? '';
+      const clave = resolucionId ? resolucionId.toString() : `FV|${prefijo}`;
+      const grupo = grupos.get(clave) ?? { resolucionId, prefijo, numeros: [] };
+      grupo.numeros.push(f.numero);
+      grupos.set(clave, grupo);
+    }
+    const contadores: ContadorFacturas[] = [];
+    let sinUbicar = false;
+    for (const { resolucionId, prefijo, numeros } of grupos.values()) {
+      const ordenados = [...new Set(numeros)].sort((a, b) => a - b);
+      const maximo = ordenados[ordenados.length - 1];
+      let inicio = maximo;
+      for (let i = ordenados.length - 2; i >= 0; i -= 1) {
+        if (ordenados[i] !== inicio - 1) break;
+        inicio = ordenados[i];
+      }
+      if (resolucionId) {
+        contadores.push({
+          resolucionId,
+          consecutivoId: null,
+          antes: inicio,
+          despues: maximo + 1,
+        });
+        continue;
+      }
+      const consecutivoId = await this.numeracion.ubicarConsecutivoFV(
+        copropiedadId.toString(),
+        prefijo,
+      );
+      if (!consecutivoId) {
+        // Zero or several rows match: rewinding the wrong one would hand out
+        // numbers already in use, so this counter is left alone and reported.
+        this.logger.warn(
+          `No se pudo ubicar de forma inequívoca el consecutivo FV con prefijo "${prefijo}"; no se devuelve su contador.`,
+        );
+        sinUbicar = true;
+        continue;
+      }
+      contadores.push({
+        resolucionId: null,
+        consecutivoId,
+        antes: inicio - 1,
+        despues: maximo,
+      });
+    }
+    return { contadores, sinUbicar };
+  }
+
+  /** `_id`s of the Facturas of the lote that still exist. */
+  private async leerFacturaIdsRestantes(
+    copropiedadId: Types.ObjectId,
+    loteId: string,
+  ): Promise<Types.ObjectId[]> {
+    const restantes = await this.facturas
+      .find({ copropiedadId, loteId })
+      .lean()
+      .exec();
+    return restantes.map((f) => f._id);
+  }
+
+  /**
+   * After a partially failed undo: persists the lote's `facturaIds` from the
+   * Facturas that REALLY remain (never from a stale in-memory list) and logs
+   * that the counter was not rewound. Never throws — the caller rethrows the
+   * original error.
+   */
+  private async persistirFacturaIdsRestantes(
+    copropiedadId: Types.ObjectId,
+    loteId: string,
+  ): Promise<void> {
+    try {
+      const restantes = await this.leerFacturaIdsRestantes(
+        copropiedadId,
+        loteId,
+      );
+      await this.lotes
+        .updateOne(
+          { _id: loteId, copropiedadId },
+          { $set: { facturaIds: restantes } },
+        )
+        .exec();
+      this.logger.error(
+        `Lote ${loteId}: la reversión quedó incompleta; el consecutivo de facturas NO se devolvió (podría reemitir números que aún existen) y facturaIds quedó con las ${restantes.length} facturas restantes.`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Lote ${loteId}: la reversión quedó incompleta y no se pudo actualizar facturaIds: ${err instanceof Error ? err.message : 'error desconocido'}. El consecutivo NO se devolvió.`,
+      );
+    }
+  }
+
+  /**
+   * Fails closed on legacy orphans: a Factura with no asiento predates the
+   * single-transaction write, so there is no way to know whether its
+   * SaldoCartera `$inc` was ever applied — reversing it blindly could
+   * subtract what was never added. Refused before any write.
+   */
+  private async exigirAsientosCompletos(
+    facturas: { _id: Types.ObjectId; numeroCompleto: string }[],
+    lote: LoteFacturacionDocument,
+  ): Promise<void> {
+    const copropiedadId = lote.copropiedadId;
+    const loteId = String(lote._id);
+    const conAsiento = new Set<string>();
+    for (let i = 0; i < facturas.length; i += TAMANO_LOTE_GUARDA_CRUCES) {
+      const ids = facturas
+        .slice(i, i + TAMANO_LOTE_GUARDA_CRUCES)
+        .map((f) => f._id);
+      const filas = await this.asientos
+        .find(
+          { copropiedadId, loteId, facturaId: { $in: ids } },
+          { facturaId: 1 },
+        )
+        .lean()
+        .exec();
+      for (const fila of filas) conAsiento.add(String(fila.facturaId));
+    }
+    const huerfanas = facturas.filter((f) => !conAsiento.has(f._id.toString()));
+    if (huerfanas.length === 0) return;
+    const muestra = huerfanas
+      .slice(0, 5)
+      .map((f) => f.numeroCompleto)
+      .join(', ');
+    const resto = huerfanas.length > 5 ? ` y ${huerfanas.length - 5} más` : '';
+    throw new ConflictException(
+      `No se puede deshacer el lote ${lote.numero}: ${huerfanas.length} de sus facturas ` +
+        `(${muestra}${resto}) no tienen asiento contable (registros anteriores a la escritura transaccional), ` +
+        'así que no se puede saber si sus saldos llegaron a sumarse. Requiere conciliación manual. No se eliminó nada.',
+    );
+  }
+
+  /**
+   * The undo's safety guard: refuses (ConflictException) when any of these
+   * Facturas is referenced by something that makes deleting it a real
+   * accounting event instead of a rollback — an AplicacionCartera (a payment
+   * or note applied against it, even a reverted one: its history would be left
+   * pointing at nothing), a NotaCredito, a NotaContable, or a generated PDF.
+   *
+   * Fails CLOSED: if any of the collections it reads was not injected it
+   * throws instead of silently skipping a check. Queries run one after the
+   * other, never in parallel — MongoDB does not support parallel operations
+   * inside one transaction.
+   *
+   * `previo` only changes the wording: the pre-pass runs before anything is
+   * deleted ("no se eliminó nada"), the per-block re-check may run after
+   * earlier blocks were already undone.
+   */
+  private async exigirSinCruces(
+    facturas: {
+      _id: Types.ObjectId;
+      numeroCompleto: string;
+      printSnapshot?: unknown;
+    }[],
+    lote: LoteFacturacionDocument,
+    session: ClientSession | null,
+    previo: boolean,
+  ): Promise<void> {
+    const {
+      aplicaciones,
+      notasCredito,
+      notasContables,
+      presentaciones,
+      publicacionesLote,
+    } = this;
+    if (
+      !aplicaciones ||
+      !notasCredito ||
+      !notasContables ||
+      !presentaciones ||
+      !publicacionesLote
+    ) {
+      throw new Error(
+        'No se puede deshacer un lote sin poder verificar sus cruces: faltan modelos de la guarda de seguridad',
+      );
+    }
+    const copropiedadId = lote.copropiedadId;
+    const cola = previo
+      ? 'No se eliminó nada.'
+      : 'La reversión quedó incompleta; resolvé los cruces y repetí la operación.';
+
+    // Lote-level artifacts first: the FV PDF is anchored on the LOTE (not on
+    // each Factura), and publication to WebSaco3 is keyed by `loteId`.
+    const pdfDelLote = await presentaciones
+      .find(
+        {
+          tipoDocumento: 'FV',
+          documentoId: lote._id,
+          generatedAt: { $ne: null },
+        },
+        { documentoId: 1 },
+      )
+      .session(session)
+      .lean()
+      .exec();
+    if (pdfDelLote.length > 0) {
+      throw new ConflictException(
+        `No se puede deshacer el lote ${lote.numero}: ya tiene el PDF de sus facturas generado. ${cola}`,
+      );
+    }
+    const publicaciones = await publicacionesLote
+      .find({ loteId: lote._id }, { loteId: 1 })
+      .session(session)
+      .lean()
+      .exec();
+    if (publicaciones.length > 0) {
+      throw new ConflictException(
+        `No se puede deshacer el lote ${lote.numero}: ya fue encolado o publicado a WebSaco3. ${cola}`,
+      );
+    }
+    // From the Facturas as read at the start (a confirmed PDF writes
+    // `printSnapshot` on each one); the lote-level checks above are the ones
+    // re-run inside every block's transaction.
+    const conSnapshot = facturas.filter(
+      (f) => f.printSnapshot !== null && f.printSnapshot !== undefined,
+    );
+    if (conSnapshot.length > 0) {
+      const muestra = conSnapshot
+        .slice(0, 5)
+        .map((f) => f.numeroCompleto)
+        .join(', ');
+      throw new ConflictException(
+        `No se puede deshacer el lote ${lote.numero}: ${conSnapshot.length} de sus facturas ` +
+          `(${muestra}) ya tienen su representación impresa congelada (PDF confirmado). ${cola}`,
+      );
+    }
+    const bloqueadas = new Set<string>();
+    const marcar = (filas: readonly object[], campo: string): void => {
+      for (const fila of filas) {
+        bloqueadas.add(String((fila as Record<string, unknown>)[campo]));
+      }
+    };
+
+    for (let i = 0; i < facturas.length; i += TAMANO_LOTE_GUARDA_CRUCES) {
+      const ids = facturas
+        .slice(i, i + TAMANO_LOTE_GUARDA_CRUCES)
+        .map((f) => f._id);
+      marcar(
+        await aplicaciones
+          .find(
+            { copropiedadId, tipoDocumento: 'FV', documentoId: { $in: ids } },
+            { documentoId: 1 },
+          )
+          .session(session)
+          .lean()
+          .exec(),
+        'documentoId',
+      );
+      marcar(
+        await notasCredito
+          .find({ copropiedadId, facturaId: { $in: ids } }, { facturaId: 1 })
+          .session(session)
+          .lean()
+          .exec(),
+        'facturaId',
+      );
+      marcar(
+        await notasContables
+          .find(
+            { copropiedadId, tipoDocumento: 'FV', documentoId: { $in: ids } },
+            { documentoId: 1 },
+          )
+          .session(session)
+          .lean()
+          .exec(),
+        'documentoId',
+      );
+      marcar(
+        await presentaciones
+          .find(
+            {
+              tipoDocumento: 'FV',
+              documentoId: { $in: ids },
+              generatedAt: { $ne: null },
+            },
+            { documentoId: 1 },
+          )
+          .session(session)
+          .lean()
+          .exec(),
+        'documentoId',
+      );
+    }
+
+    if (bloqueadas.size === 0) return;
+    const numeros = facturas
+      .filter((f) => bloqueadas.has(f._id.toString()))
+      .map((f) => f.numeroCompleto);
+    const muestra = numeros.slice(0, 5).join(', ');
+    const resto = numeros.length > 5 ? ` y ${numeros.length - 5} más` : '';
+    throw new ConflictException(
+      `No se puede deshacer el lote ${lote.numero}: ${numeros.length} de sus facturas ` +
+        `(${muestra}${resto}) ya tienen aplicaciones de cartera, notas o PDF generado. ` +
+        cola,
+    );
+  }
+
+  /**
+   * Exception path of `ejecutarConsolidacion`: undo what this run wrote and
+   * leave the lote with no facturaIds/resumen/progreso. Never throws — the
+   * caller is about to rethrow the ORIGINAL error and must not have it masked
+   * by a failure of the cleanup; a failed cleanup is logged instead.
+   */
+  private async revertirTrasExcepcion(
+    lote: LoteFacturacionDocument,
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+    token: string,
+    contador: ContadorFacturas | null,
+    actor?: ActorAuditoria,
+  ): Promise<void> {
+    let limpio = false;
+    try {
+      // The undo can be long: refresh the claim first, and do not undo
+      // anything if it is no longer ours.
+      if (!(await this.latir(loteId, copropiedadId, token))) {
+        throw this.reclamoPerdido(loteId);
+      }
+      await this.deshacerConsolidacion(lote, copropiedadId, contador, {
+        actor,
+        motivo: 'reversión por consolidación fallida',
+      });
+      const res = await this.lotes
+        .updateOne(
+          { _id: loteId, copropiedadId, reclamoToken: token },
+          {
+            $set: {
+              facturaIds: [],
+              resumen: null,
+              progreso: null,
+              reclamoToken: null,
+            },
+          },
+        )
+        .exec();
+      if (res?.matchedCount === 0) {
+        this.logger.warn(
+          `Lote ${loteId}: no se limpió porque la corrida perdió el reclamo durante la reversión.`,
+        );
+      }
+      limpio = true;
+    } catch (err) {
+      this.logger.error(
+        `No se pudo deshacer el lote ${loteId} tras una excepción en la consolidación: ${err instanceof Error ? err.message : 'error desconocido'}`,
+      );
+    } finally {
+      // The run is over whatever happened: a stale `progreso` would show a
+      // consolidación that no longer exists (and would block `cancelar`).
+      if (!limpio) {
+        await this.liberarReclamo(loteId, copropiedadId, token);
+      }
+    }
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —

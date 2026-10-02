@@ -7,6 +7,7 @@ import { FacturasService } from './facturas.service';
 import { LotesController } from './lotes.controller';
 import { LotesFacturacionService } from './lotes.service';
 import { ConsultaFacturacionService } from './consulta-facturacion.service';
+import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { ReiniciarCicloController } from './reiniciar-ciclo.controller';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import { ConsolidacionProcessor } from './colas/consolidacion.processor';
@@ -16,7 +17,12 @@ import {
 } from './colas/consolidacion.constants';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: NOMBRE_COLA_CONSOLIDACION })],
+  imports: [
+    // Exports AuditoriaService, which LotesFacturacionService uses to record
+    // a lote reversal. AuditoriaModule imports only Mongoose, so no cycle.
+    AuditoriaModule,
+    BullModule.registerQueue({ name: NOMBRE_COLA_CONSOLIDACION }),
+  ],
   controllers: [FacturasController, LotesController, ReiniciarCicloController],
   providers: [
     FacturasService,

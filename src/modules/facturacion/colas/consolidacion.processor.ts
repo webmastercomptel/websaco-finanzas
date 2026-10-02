@@ -27,6 +27,7 @@ export class ConsolidacionProcessor extends WorkerHost {
       job.data.loteId,
       new Types.ObjectId(job.data.copropiedadId),
       job,
+      job.data.actor,
     );
   }
 }
