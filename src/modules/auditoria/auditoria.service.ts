@@ -17,8 +17,9 @@ import { FiltrosAuditoriaDto } from './dto/filtros-auditoria.dto';
 export interface EntradaAuditoria {
   actorAccountId: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar';
-  entidadTipo: 'entidad-administradora' | 'copropiedad' | 'usuario';
+  accion: 'crear' | 'actualizar' | 'revertir';
+  entidadTipo:
+    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
   entidadId: string;
   entidadEtiqueta: string;
 }

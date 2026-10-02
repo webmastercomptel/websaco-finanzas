@@ -4,12 +4,18 @@ import { Type } from 'class-transformer';
 /** DTO for GET /auditoria — filtered, paginated audit log listing. */
 export class FiltrosAuditoriaDto {
   @IsOptional()
-  @IsIn(['entidad-administradora', 'copropiedad', 'usuario'])
-  entidadTipo?: 'entidad-administradora' | 'copropiedad' | 'usuario';
+  @IsIn([
+    'entidad-administradora',
+    'copropiedad',
+    'usuario',
+    'lote-facturacion',
+  ])
+  entidadTipo?:
+    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
 
   @IsOptional()
-  @IsIn(['crear', 'actualizar'])
-  accion?: 'crear' | 'actualizar';
+  @IsIn(['crear', 'actualizar', 'revertir'])
+  accion?: 'crear' | 'actualizar' | 'revertir';
 
   @IsOptional()
   @IsDateString()

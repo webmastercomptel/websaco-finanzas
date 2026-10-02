@@ -2071,8 +2071,9 @@ export interface RespuestaAdicionContabilidad {
 export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar';
-  entidadTipo: 'entidad-administradora' | 'copropiedad' | 'usuario';
+  accion: 'crear' | 'actualizar' | 'revertir';
+  entidadTipo:
+    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
