@@ -1,6 +1,7 @@
 // src/modules/facturacion/lotes.controller.ts
 import {
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -296,6 +297,30 @@ export class LotesController {
   }
 
   /**
+   * PDF actions only make sense for a lote that is fully `consolidado` and
+   * not being worked on: a `borrador`/`liquidado` lote has no (or only
+   * partial) Facturas, and one with an active claim (`progreso` set) is being
+   * consolidated or undone right now — a PDF of invoices that are about to
+   * appear or disappear would be published for nothing.
+   */
+  private exigirConsolidadoSinReclamo(lote: {
+    numero: number;
+    estado: string;
+    progreso?: unknown;
+  }): void {
+    if (lote.estado !== 'consolidado') {
+      throw new ConflictException(
+        `El lote ${lote.numero} debe estar consolidado para generar sus PDF (estado actual: ${lote.estado}).`,
+      );
+    }
+    if (lote.progreso) {
+      throw new ConflictException(
+        `El lote ${lote.numero} tiene una operación en curso (consolidación o cancelación); esperá a que termine antes de generar sus PDF.`,
+      );
+    }
+  }
+
+  /**
    * `solicitar-generacion` for the lote's invoice run — ONE combined PDF
    * (one page per invoice), anchored on the LOTE's own id via the shared
    * `GeneracionDocumentoService.solicitar` (same helper every other document
@@ -313,6 +338,7 @@ export class LotesController {
   ): Promise<SolicitudGeneracionFacturaLote> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
+    this.exigirConsolidadoSinReclamo(lote);
 
     const facturasLean = await this.facturas.findAllRawPorLote(id);
     if (facturasLean.length === 0) {
@@ -378,13 +404,26 @@ export class LotesController {
   ): Promise<{ objectPath: string }> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const lote = await this.lotes.findOneRaw(id);
+    this.exigirConsolidadoSinReclamo(lote);
+
+    // The lote's Facturas must still exist, and be exactly the ones it
+    // consolidated: an undo (`cancelar` / a failed consolidación's reversal)
+    // deletes them, and confirming a PDF of invoices that are gone would
+    // publish a document for nothing. Checked BEFORE anything is written or
+    // emitted.
+    const facturasLean = await this.facturas.findAllRawPorLote(id);
+    const esperadas = lote.facturaIds?.length ?? 0;
+    if (facturasLean.length === 0 || facturasLean.length !== esperadas) {
+      throw new ConflictException(
+        `El lote ${lote.numero} ya no tiene las facturas que consolidó (hay ${facturasLean.length}, se esperaban ${esperadas}); no se puede confirmar el PDF. Volvé a consolidar el lote.`,
+      );
+    }
+
     const resultado = await this.generacion.confirmar(
       'FV',
       lote,
       dto.objectPath,
     );
-
-    const facturasLean = await this.facturas.findAllRawPorLote(id);
 
     // Emitted here, before the snapshot block below, so a snapshot failure
     // can never suppress it — see LOTE_FACTURAS_PDF_CONFIRMADO's own
@@ -510,8 +549,12 @@ export class LotesController {
   @CheckAbility({ action: 'create', subject: 'Factura' })
   consolidar(
     @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
   ): Promise<{ lote: LoteFacturacion; errores: ErrorConsolidacion[] }> {
-    return this.lotes.consolidar(id);
+    return this.lotes.consolidar(id, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 
   /**
@@ -521,7 +564,13 @@ export class LotesController {
   @Delete(':id')
   @HttpCode(204)
   @CheckAbility({ action: 'manage', subject: 'Factura' })
-  cancelar(@Param('id') id: string): Promise<void> {
-    return this.lotes.cancelar(id);
+  cancelar(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<void> {
+    return this.lotes.cancelar(id, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
   }
 }

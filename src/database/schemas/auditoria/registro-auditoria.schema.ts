@@ -29,15 +29,21 @@ export class RegistroAuditoria {
   @Prop({ required: true, trim: true })
   actorNombre: string;
 
-  @Prop({ required: true, enum: ['crear', 'actualizar'] })
-  accion: 'crear' | 'actualizar';
+  @Prop({ required: true, enum: ['crear', 'actualizar', 'revertir'] })
+  accion: 'crear' | 'actualizar' | 'revertir';
 
   @Prop({
     required: true,
-    enum: ['entidad-administradora', 'copropiedad', 'usuario'],
+    enum: [
+      'entidad-administradora',
+      'copropiedad',
+      'usuario',
+      'lote-facturacion',
+    ],
     index: true,
   })
-  entidadTipo: 'entidad-administradora' | 'copropiedad' | 'usuario';
+  entidadTipo:
+    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
 
   @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;
