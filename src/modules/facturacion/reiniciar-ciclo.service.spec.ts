@@ -1,15 +1,8 @@
-import { ForbiddenException } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 const COP = new Types.ObjectId();
-
-const copropiedad = (over: Record<string, unknown> = {}) => ({
-  _id: COP,
-  codigo: '0001',
-  ...over,
-});
 
 const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
   ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
@@ -24,7 +17,6 @@ const deleteManyMock = (deletedCount: number) => ({
  *  Each field can be overridden per test; unset ones return the harmless
  *  default a happy path needs (0 deleted, no active resolución). */
 const makeModelos = (over: {
-  copropiedad?: unknown;
   resolucionActiva?: Record<string, unknown> | null;
   deletedCounts?: Partial<{
     lotes: number;
@@ -69,15 +61,6 @@ const makeModelos = (over: {
     saldosInicialesAnticipo: 0,
     lotesSaldoInicialAnticipo: 0,
     ...over.deletedCounts,
-  };
-
-  const copropiedades = {
-    findById: jest.fn(() => ({
-      exec: () =>
-        Promise.resolve(
-          'copropiedad' in over ? over.copropiedad : copropiedad(),
-        ),
-    })),
   };
 
   const facturas = deleteManyMock(counts.facturas);
@@ -130,7 +113,6 @@ const makeModelos = (over: {
   };
 
   return {
-    copropiedades,
     facturas,
     lotes,
     asientos,
@@ -165,7 +147,6 @@ const makeService = (
   copropiedadId: Types.ObjectId = COP,
 ) =>
   new ReiniciarCicloService(
-    modelos.copropiedades as never,
     modelos.facturas as never,
     modelos.lotes as never,
     modelos.asientos as never,
@@ -196,53 +177,14 @@ const makeService = (
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
-  it('rechaza cuando la copropiedad activa no está en la lista de pruebas (0001-0003)', async () => {
-    const modelos = makeModelos({
-      copropiedad: copropiedad({ codigo: 'COP-002' }),
+  it('opera sobre la copropiedad activa del tenant, sin lista de códigos permitidos', async () => {
+    const modelos = makeModelos({ deletedCounts: { facturas: 1 } });
+    const service = makeService(modelos);
+
+    await expect(service.reiniciar()).resolves.toBeDefined();
+    expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
+      copropiedadId: COP,
     });
-    const service = makeService(modelos);
-
-    await expect(service.reiniciar()).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-    expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it.each(['0001', '0002', '0003'])(
-    'acepta la copropiedad de pruebas %s',
-    async (codigo) => {
-      const modelos = makeModelos({
-        copropiedad: copropiedad({ codigo }),
-        deletedCounts: { facturas: 1 },
-      });
-      const service = makeService(modelos);
-
-      await expect(service.reiniciar()).resolves.toBeDefined();
-      expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
-        copropiedadId: COP,
-      });
-    },
-  );
-
-  it('rechaza la copropiedad 0004 — es un cliente real, no de pruebas', async () => {
-    const modelos = makeModelos({
-      copropiedad: copropiedad({ codigo: '0004' }),
-    });
-    const service = makeService(modelos);
-
-    await expect(service.reiniciar()).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-    expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('rechaza cuando la copropiedad no existe', async () => {
-    const modelos = makeModelos({ copropiedad: null });
-    const service = makeService(modelos);
-
-    await expect(service.reiniciar()).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
   });
 
   it('borra TODO documento financiero de la copropiedad y devuelve los conteos', async () => {
