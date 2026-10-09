@@ -1,3 +1,4 @@
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -174,7 +175,10 @@ export class AuxiliarCarteraService {
       notasDebito.map((nd) => [nd._id.toString(), nd.numeroCompleto]),
     );
     const siMap = new Map(
-      saldosIniciales.map((si) => [si._id.toString(), si.numeroOriginal]),
+      saldosIniciales.map((si) => [
+        si._id.toString(),
+        numeroCompletoSaldoInicial(si),
+      ]),
     );
     // Each carries the source document's own business date — never
     // `AplicacionCartera.aplicadoEn`, which is always `new Date()` at cruce
@@ -237,7 +241,7 @@ export class AuxiliarCarteraService {
       rows.push({
         fecha: si.fecha,
         tipo: si.tipoDocumentoOriginal,
-        numeroCompleto: si.numeroOriginal,
+        numeroCompleto: numeroCompletoSaldoInicial(si),
         concepto: 'Saldo Inicial',
         refCruce: null,
         debito: si.monto,

@@ -1,3 +1,4 @@
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -339,7 +340,7 @@ export class EstadoCuentaService {
       rows.push({
         fecha: si.fecha,
         tipo: 'SI',
-        numeroCompleto: si.numeroOriginal,
+        numeroCompleto: numeroCompletoSaldoInicial(si),
         concepto: ETIQUETA_DOCUMENTO.SI,
         cargo: si.monto,
         abono: null,
@@ -483,7 +484,7 @@ export class EstadoCuentaService {
       ...saldosIniciales.map((si) => ({
         id: si._id,
         tipo: si.tipoDocumentoOriginal,
-        numeroCompleto: si.numeroOriginal,
+        numeroCompleto: numeroCompletoSaldoInicial(si),
         fecha: si.fecha,
         vence: si.fechaVencimiento,
         total: si.monto,

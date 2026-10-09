@@ -1,3 +1,4 @@
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -331,7 +332,7 @@ export class CarteraPorConceptosService {
         si.inmuebleId,
         si._id,
         si.tipoDocumentoOriginal,
-        si.numeroOriginal,
+        numeroCompletoSaldoInicial(si),
         si.numero,
         si.fecha,
         si.fechaVencimiento,

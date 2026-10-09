@@ -250,6 +250,35 @@ describe('EstadoCuentaService', () => {
       expect(result.ajusteSaldoAnterior).toBe(0);
     });
 
+    it('un Saldo Inicial se muestra como TIPO-NÚMERO original (FV-2941), igual que una factura del sistema', async () => {
+      const inmId = id();
+      const si = {
+        _id: id(),
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        tipoDocumentoOriginal: 'FV',
+        numeroOriginal: '2941',
+        fecha: new Date('2026-01-10'),
+        fechaVencimiento: new Date('2026-01-25'),
+        monto: 90000,
+        estado: 'activo',
+      };
+
+      const svc = servicio({
+        saldosIniciales: mockFind([si]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      const fila = result.movimientos.find((m) => m.cargo === 90000);
+      expect(fila?.numeroCompleto).toBe('FV-2941');
+    });
+
     it('el concepto de una Factura es su nombre de documento, no una oración con su número (que ya tiene columna propia)', async () => {
       const inmId = id();
       const f = facturaDoc({

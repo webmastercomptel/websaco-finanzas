@@ -1,3 +1,4 @@
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -215,7 +216,7 @@ export class VencimientosCarteraService {
       filasRaw.push({
         inmuebleId: si.inmuebleId,
         tipo: si.tipoDocumentoOriginal,
-        numeroCompleto: si.numeroOriginal,
+        numeroCompleto: numeroCompletoSaldoInicial(si),
         fecha: si.fecha,
         vence: si.fechaVencimiento,
         saldo,
