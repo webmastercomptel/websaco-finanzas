@@ -45,9 +45,23 @@ const construirServicio = () => {
       documentos.push(...creados);
       return Promise.resolve(creados);
     }),
-    find: jest.fn(() => ({
+    find: jest.fn((filtro: Record<string, unknown> = {}) => ({
       sort: jest.fn().mockReturnThis(),
-      exec: () => Promise.resolve(documentos),
+      exec: () => {
+        const ids = (filtro._id as { $in: unknown[] } | undefined)?.$in?.map(
+          String,
+        );
+        return Promise.resolve(
+          documentos.filter(
+            (d) =>
+              (!ids || ids.includes(String(d._id))) &&
+              (!filtro.estado || d.estado === filtro.estado) &&
+              (!filtro.inmuebleId ||
+                String(d.inmuebleId) ===
+                  (filtro.inmuebleId as Types.ObjectId).toString()),
+          ),
+        );
+      },
     })),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: jest.fn().mockReturnThis(),
@@ -87,14 +101,27 @@ const construirServicio = () => {
       saldosTotales.push(...creados);
       return Promise.resolve(creados);
     }),
-    find: jest.fn((filtro: { documentoId?: { $in: unknown[] } }) => ({
-      exec: () => {
-        const ids = (filtro.documentoId?.$in ?? []).map(String);
-        return Promise.resolve(
-          saldosTotales.filter((s) => ids.includes(String(s.documentoId))),
-        );
-      },
-    })),
+    find: jest.fn(
+      (filtro: {
+        documentoId?: { $in: unknown[] };
+        tipoDocumento?: string;
+        saldoPendiente?: { $gt: number };
+      }) => ({
+        exec: () => {
+          const ids = filtro.documentoId?.$in?.map(String);
+          return Promise.resolve(
+            saldosTotales.filter(
+              (s) =>
+                (!ids || ids.includes(String(s.documentoId))) &&
+                (!filtro.tipoDocumento ||
+                  s.tipoDocumento === filtro.tipoDocumento) &&
+                (!filtro.saldoPendiente ||
+                  (s.saldoPendiente as number) > filtro.saldoPendiente.$gt),
+            ),
+          );
+        },
+      }),
+    ),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: jest.fn().mockReturnThis(),
       exec: () =>
@@ -260,6 +287,7 @@ const construirServicio = () => {
 
   return {
     service,
+    saldoTotalDocumento,
     documentos,
     saldosTotales,
     carteraPorDocumentoFilas,
@@ -409,6 +437,59 @@ describe('SaldosInicialesService.listar', () => {
     expect(item.saldoPendiente).toBe(300000);
     expect(item.total).toBe(300000);
     expect(item.inmuebleCodigo).toBe('AP-101');
+  });
+});
+
+describe('SaldosInicialesService.listar filtros', () => {
+  it('conSaldoPendiente devuelve solo los saldos iniciales activos con saldo > 0', async () => {
+    const { service, saldosTotales } = construirServicio();
+    await service.importar(
+      CUENTA,
+      dtoValido([filaValida(), filaValida({ numero: '1002' })]),
+    );
+    const todos = await service.listar();
+    expect(todos).toHaveLength(2);
+    const pagado = saldosTotales.find(
+      (s) => String(s.documentoId) === todos[0].id,
+    )!;
+    pagado.saldoPendiente = 0;
+
+    const pendientes = await service.listar({ conSaldoPendiente: true });
+
+    expect(pendientes.map((p) => p.id)).toEqual([todos[1].id]);
+  });
+
+  it('conSaldoPendiente excluye los anulados', async () => {
+    const { service, documentos } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+    documentos[0].estado = 'anulado';
+
+    expect(await service.listar({ conSaldoPendiente: true })).toHaveLength(0);
+  });
+
+  it('inmuebleId filtra por inmueble', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    expect(
+      await service.listar({ inmuebleId: INMUEBLE.toString() }),
+    ).toHaveLength(1);
+    expect(
+      await service.listar({ inmuebleId: new Types.ObjectId().toString() }),
+    ).toHaveLength(0);
+  });
+
+  it('resuelve los candidatos con saldo dentro de la copropiedad activa y solo de tipo SI', async () => {
+    const { service, saldoTotalDocumento } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    await service.listar({ conSaldoPendiente: true });
+
+    expect(saldoTotalDocumento.find).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      tipoDocumento: 'SI',
+      saldoPendiente: { $gt: 0 },
+    });
   });
 });
 
