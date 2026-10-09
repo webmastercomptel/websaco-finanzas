@@ -2,6 +2,17 @@ import type { SaldoInicial as SaldoInicialContract } from '../../contracts';
 import type { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 
 /**
+ * The number a Saldo Inicial is shown under everywhere a document number is
+ * listed (cartera, estado de cuenta, auxiliares): the document it was in the
+ * client's previous system, in the same `TIPO-NÚMERO` shape as a system
+ * invoice (`FV-2941`, like `FV-1`). Never the internal `SI` tag.
+ */
+export const numeroCompletoSaldoInicial = (doc: {
+  tipoDocumentoOriginal: string;
+  numeroOriginal: string;
+}): string => `${doc.tipoDocumentoOriginal}-${doc.numeroOriginal}`;
+
+/**
  * Maps a Saldo Inicial document to the Spanish API contract — see "the
  * contract law" in CLAUDE.md. `saldoPendiente` is never a field on the
  * document itself (see `SaldoTotalDocumento`'s own docblock on why that

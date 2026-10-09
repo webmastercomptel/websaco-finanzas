@@ -53,6 +53,7 @@ import type {
   SaldoInicial as SaldoInicialContract,
 } from '../../contracts';
 import type { ImportarSaldosInicialesDto } from './dto/importar-saldos-iniciales.dto';
+import type { ListarSaldosInicialesDto } from './dto/listar-saldos-iniciales.dto';
 import type { AnularSaldoInicialDto } from './dto/anular-saldo-inicial.dto';
 
 /**
@@ -438,13 +439,30 @@ export class SaldosInicialesService {
     return this.progreso.obtener(copropiedadId, 'saldos-iniciales');
   }
 
-  async listar(): Promise<SaldoInicialContract[]> {
+  async listar(
+    query: ListarSaldosInicialesDto = {},
+  ): Promise<SaldoInicialContract[]> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
+    if (query.inmuebleId) {
+      filtro.inmuebleId = new Types.ObjectId(query.inmuebleId);
+    }
+    if (query.conSaldoPendiente) {
+      // The live balance is not a field on SaldoInicial itself — resolve
+      // candidate ids from `SaldoTotalDocumento` first (same as facturas /
+      // notas débito) and keep only documents still `activo`.
+      const conSaldo = await this.saldoTotalDocumento
+        .find({
+          copropiedadId,
+          tipoDocumento: 'SI',
+          saldoPendiente: { $gt: 0 },
+        })
+        .exec();
+      filtro._id = { $in: conSaldo.map((s) => s.documentoId) };
+      filtro.estado = 'activo';
+    }
     const [documentos, inmuebles] = await Promise.all([
-      this.saldosIniciales
-        .find({ copropiedadId })
-        .sort({ createdAt: -1 })
-        .exec(),
+      this.saldosIniciales.find(filtro).sort({ createdAt: -1 }).exec(),
       this.inmuebles.find({ copropiedadId }).exec(),
     ]);
     const inmuebleCodigoPorId = new Map(

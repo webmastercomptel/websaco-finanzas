@@ -1,3 +1,4 @@
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -388,7 +389,7 @@ export class CarteraPorInmuebleService {
         // previous system, never the literal "SI" — see
         // `SaldoInicial.tipoDocumentoOriginal`'s own schema docblock.
         tipo: si.tipoDocumentoOriginal,
-        numeroCompleto: si.numeroOriginal,
+        numeroCompleto: numeroCompletoSaldoInicial(si),
         fecha: si.fecha.toISOString(),
         vence: si.fechaVencimiento.toISOString(),
         saldo,
