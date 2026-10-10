@@ -2076,6 +2076,176 @@ describe('LotesFacturacionService.liquidar', () => {
     const actualizacion = actualizacionDe(m.lotes.findOneAndUpdate);
     expect(actualizacion.$set.previsualizacion).toEqual([]);
   });
+
+  describe('saldos informativos (conceptos con saldo pendiente sin cargo este período)', () => {
+    const conExtraordinaria = (over: Record<string, unknown> = {}) =>
+      concepto({
+        _id: { toString: () => 'con-extra' },
+        nombre: 'Extraordinaria',
+        tipo: 'otro',
+        liquidaMora: false,
+        orden: 5,
+        ...over,
+      });
+    const saldoDe = (conceptoId: string, saldoPendiente: number) => ({
+      inmuebleId: { toString: () => 'inm-1' },
+      conceptoId: { toString: () => conceptoId },
+      saldoPendiente,
+    });
+    const liquidarCon = async (
+      opts: Parameters<typeof construirModelos>[0],
+    ) => {
+      const m = construirModelos(opts);
+      const service = new LotesFacturacionService(
+        m.lotes as never,
+        {} as never,
+        m.saldos as never,
+        m.carteraPorDocumento as never,
+        m.saldoTotalDocumento as never,
+        {} as never,
+        m.conceptos as never,
+        m.valoresRecurrentes as never,
+        m.inmuebles as never,
+        m.terceros as never,
+        {} as never,
+        tenantQueDevuelve(COP),
+        {} as never,
+        numeracionCon(),
+        {} as never,
+      );
+      await service.liquidar('lote-1');
+      return actualizacionDe(m.lotes.findOneAndUpdate).$set
+        .previsualizacion as unknown as Array<{
+        lineas: Array<Record<string, unknown>>;
+        saldosInformativos: Array<Record<string, unknown>>;
+        total: number;
+        subtotal: number;
+        totalImpuestos: number;
+      }>;
+    };
+
+    it('agrega una fila informativa por cada concepto con saldo pendiente que no se cobra este período, sin tocar líneas ni totales', async () => {
+      const preview = await liquidarCon({
+        conceptos: [concepto(), conExtraordinaria()],
+        saldos: [saldoDe('con-extra', 150000)],
+      });
+
+      expect(preview[0].lineas).toHaveLength(1);
+      expect(preview[0].lineas[0]).toMatchObject({
+        nombreConcepto: 'Administración',
+      });
+      expect(preview[0].saldosInformativos).toEqual([
+        expect.objectContaining({
+          nombreConcepto: 'Extraordinaria',
+          saldoAnterior: 150000,
+        }),
+      ]);
+      expect(
+        (
+          preview[0].saldosInformativos[0].conceptoId as { toString(): string }
+        ).toString(),
+      ).toBe('con-extra');
+      expect(preview[0].subtotal).toBe(520000);
+      expect(preview[0].totalImpuestos).toBe(0);
+      expect(preview[0].total).toBe(520000);
+    });
+
+    it('si el concepto con saldo SÍ se cobra este período, queda una sola línea y ninguna fila informativa', async () => {
+      const preview = await liquidarCon({
+        conceptos: [concepto()],
+        saldos: [saldoDe('con-1', 300000)],
+      });
+
+      expect(preview[0].lineas).toHaveLength(1);
+      expect(preview[0].lineas[0]).toMatchObject({
+        saldoAnterior: 300000,
+        saldoNuevo: 820000,
+      });
+      expect(preview[0].saldosInformativos).toEqual([]);
+    });
+
+    it('no agrega fila para un concepto con saldo cero ni con saldo a favor (negativo)', async () => {
+      const preview = await liquidarCon({
+        conceptos: [
+          concepto(),
+          conExtraordinaria(),
+          conExtraordinaria({
+            _id: { toString: () => 'con-favor' },
+            nombre: 'Multas',
+          }),
+        ],
+        saldos: [saldoDe('con-extra', 0), saldoDe('con-favor', -40000)],
+      });
+
+      expect(preview[0].saldosInformativos).toEqual([]);
+    });
+
+    it('ordena las filas informativas por el orden del concepto, y el concepto sin catálogo se omite', async () => {
+      const preview = await liquidarCon({
+        conceptos: [
+          concepto(),
+          conExtraordinaria({ orden: 9 }),
+          conExtraordinaria({
+            _id: { toString: () => 'con-multas' },
+            nombre: 'Multas',
+            orden: 2,
+          }),
+        ],
+        saldos: [
+          saldoDe('con-extra', 100),
+          saldoDe('con-multas', 200),
+          saldoDe('con-borrado', 300),
+        ],
+      });
+
+      expect(
+        preview[0].saldosInformativos.map((s) => s.nombreConcepto),
+      ).toEqual(['Multas', 'Extraordinaria']);
+    });
+
+    it('una unidad sin cargos este período sigue sin generar fila de previsualización aunque tenga saldo pendiente', async () => {
+      const preview = await liquidarCon({
+        valoresRecurrentes: [],
+        conceptos: [concepto(), conExtraordinaria()],
+        saldos: [saldoDe('con-extra', 150000)],
+      });
+
+      expect(preview).toEqual([]);
+    });
+
+    it('no altera la base del interés de mora: el mismo cargo de mora con o sin concepto informativo', async () => {
+      const interes = concepto({
+        _id: { toString: () => 'con-intereses' },
+        nombre: 'Interés por mora',
+        tipo: 'intereses',
+        liquidaMora: true,
+      });
+      const base = {
+        conceptos: [
+          concepto(),
+          interes,
+          conExtraordinaria({ liquidaMora: true }),
+        ],
+        lote: { interesMora: 2, topeInteresMora: null },
+      };
+      const con = await liquidarCon({
+        ...base,
+        saldos: [saldoDe('con-1', 1000000), saldoDe('con-extra', 500000)],
+      });
+
+      // Mora = 2% de (1,000,000 + 500,000) — la base de mora ya incluía el
+      // saldo del concepto no cobrado antes de esta función.
+      const linea = con[0].lineas.find((l) => l.origen === 'interes');
+      expect(linea?.valorTotal).toBe(30000);
+      expect(con[0].saldosInformativos).toEqual([
+        expect.objectContaining({
+          nombreConcepto: 'Extraordinaria',
+          saldoAnterior: 500000,
+        }),
+      ]);
+      expect(con[0].total).toBe(520000 + 30000);
+    });
+  });
 });
 
 describe('LotesFacturacionService.consolidar', () => {
@@ -2133,6 +2303,7 @@ describe('LotesFacturacionService.consolidar', () => {
     facturasExistentes?: Record<string, unknown>[];
     asientosExistentes?: Record<string, unknown>[];
     cuentasContables?: Record<string, unknown>[];
+    saldosExistentes?: Record<string, unknown>[];
     lote?: Record<string, unknown>;
   }) => {
     const facturasCreadas: Record<string, unknown>[] = [];
@@ -2198,7 +2369,9 @@ describe('LotesFacturacionService.consolidar', () => {
       // Batched via `find({ inmuebleId: { $in }, conceptoId: { $in } })`
       // instead of a per-row-per-line `findOne` — same "nothing owed yet"
       // default as above, just as an empty array instead of null.
-      find: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
+      find: jest.fn(() => ({
+        exec: () => Promise.resolve(opts.saldosExistentes ?? []),
+      })),
       // One bulkWrite per row (was one findOneAndUpdate per line) — records
       // each op's filter, same shape tests already assert on.
       bulkWrite: jest.fn((ops: { updateOne: { filter: Filtro } }[]) => {
@@ -2357,6 +2530,156 @@ describe('LotesFacturacionService.consolidar', () => {
     });
     expect(m.asientosCreados[0].movimientos).toHaveLength(2);
     expect(resultado.errores).toEqual([]);
+  });
+
+  describe('saldos informativos', () => {
+    const informativo = {
+      conceptoId: 'con-extra',
+      nombreConcepto: 'Extraordinaria',
+      saldoAnterior: 150000,
+    };
+    const saldoExtra = (saldoPendiente: number) => ({
+      inmuebleId: 'inm-1',
+      conceptoId: 'con-extra',
+      saldoPendiente,
+    });
+
+    const consolidarCon = async (opts: {
+      previsualizacion: unknown[];
+      saldosExistentes?: Record<string, unknown>[];
+    }) => {
+      const m = construirModelos(opts);
+      const numeracion = {
+        siguienteLote: jest.fn().mockResolvedValue(1),
+        reservarBloqueFacturas: numeracionQueOtorgaTodo({
+          prefijo: 'CONJ-2026',
+          numero: 1041,
+        }),
+      } as unknown as NumeracionService;
+      const service = new LotesFacturacionService(
+        m.lotes as never,
+        m.facturas as never,
+        m.saldos as never,
+        m.carteraPorDocumento as never,
+        m.saldoTotalDocumento as never,
+        m.asientos as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        m.copropiedades as never,
+        tenantQueDevuelve(COP),
+        periodoAbierto(),
+        numeracion,
+        conexionCon(sesionFalsa()),
+      );
+      const resultado = await service.consolidar('lote-1');
+      return { m, resultado };
+    };
+
+    it('congela las filas informativas en la Factura sin crear cartera, saldos ni movimientos extra, y sin cambiar el total', async () => {
+      const sin = await consolidarCon({ previsualizacion: [preliminar()] });
+      const con = await consolidarCon({
+        previsualizacion: [preliminar({ saldosInformativos: [informativo] })],
+        saldosExistentes: [saldoExtra(150000)],
+      });
+
+      const factura = con.m.facturasCreadas[0] as {
+        lineas: unknown[];
+        saldosInformativos: Record<string, unknown>[];
+        total: number;
+        saldoPendiente: number;
+        subtotal: number;
+      };
+      expect(factura.lineas).toHaveLength(1);
+      expect(factura.saldosInformativos).toEqual([
+        {
+          conceptoId: 'con-extra',
+          nombreConcepto: 'Extraordinaria',
+          saldoAnterior: 150000,
+        },
+      ]);
+      expect(factura.total).toBe(520000);
+      expect(factura.saldoPendiente).toBe(520000);
+      expect(factura.subtotal).toBe(520000);
+
+      // Mismo efecto contable y de cartera que sin filas informativas.
+      expect(con.m.carteraPorDocumentoCreados).toHaveLength(1);
+      // `documentoId` is a fresh ObjectId per consolidation — compare
+      // everything else.
+      const sinIds = (docs: Record<string, unknown>[]) =>
+        docs.map(({ documentoId: _documentoId, ...resto }) => resto);
+      expect(sinIds(con.m.carteraPorDocumentoCreados)).toEqual(
+        sinIds(sin.m.carteraPorDocumentoCreados),
+      );
+      expect(con.m.saldosActualizados).toEqual(sin.m.saldosActualizados);
+      expect(con.m.saldosActualizados).toHaveLength(1);
+      expect(sinIds(con.m.saldoTotalDocumentoCreados)).toEqual(
+        sinIds(sin.m.saldoTotalDocumentoCreados),
+      );
+      expect(con.m.saldoTotalDocumentoCreados[0]).toMatchObject({
+        total: 520000,
+        saldoPendiente: 520000,
+      });
+      expect(con.m.asientosCreados[0].movimientos).toEqual(
+        sin.m.asientosCreados[0].movimientos,
+      );
+      const movimientos = con.m.asientosCreados[0].movimientos as {
+        tipo: string;
+        monto: number;
+      }[];
+      const debitos = movimientos
+        .filter((x) => x.tipo === 'debito')
+        .reduce((a, x) => a + x.monto, 0);
+      const creditos = movimientos
+        .filter((x) => x.tipo === 'credito')
+        .reduce((a, x) => a + x.monto, 0);
+      expect(debitos).toBe(creditos);
+      expect(con.resultado.errores).toEqual([]);
+    });
+
+    it('refresca el saldo anterior de la fila informativa con el SaldoCartera vigente al consolidar', async () => {
+      const { m } = await consolidarCon({
+        previsualizacion: [preliminar({ saldosInformativos: [informativo] })],
+        saldosExistentes: [saldoExtra(90000)],
+      });
+
+      const factura = m.facturasCreadas[0] as {
+        saldosInformativos: Record<string, unknown>[];
+      };
+      expect(factura.saldosInformativos).toEqual([
+        expect.objectContaining({ saldoAnterior: 90000 }),
+      ]);
+    });
+
+    it('descarta la fila informativa si el concepto ya se pagó (saldo <= 0) antes de consolidar', async () => {
+      const pagado = await consolidarCon({
+        previsualizacion: [preliminar({ saldosInformativos: [informativo] })],
+        saldosExistentes: [saldoExtra(0)],
+      });
+      const aFavor = await consolidarCon({
+        previsualizacion: [preliminar({ saldosInformativos: [informativo] })],
+        saldosExistentes: [saldoExtra(-5000)],
+      });
+
+      expect(
+        (pagado.m.facturasCreadas[0] as { saldosInformativos: unknown[] })
+          .saldosInformativos,
+      ).toEqual([]);
+      expect(
+        (aFavor.m.facturasCreadas[0] as { saldosInformativos: unknown[] })
+          .saldosInformativos,
+      ).toEqual([]);
+    });
+
+    it('una previsualización anterior a esta función (sin saldosInformativos) se consolida igual, con la lista vacía', async () => {
+      const { m } = await consolidarCon({ previsualizacion: [preliminar()] });
+
+      expect(
+        (m.facturasCreadas[0] as { saldosInformativos: unknown[] })
+          .saldosInformativos,
+      ).toEqual([]);
+    });
   });
 
   it('actualiza el progreso mientras procesa las filas, y lo limpia al terminar', async () => {

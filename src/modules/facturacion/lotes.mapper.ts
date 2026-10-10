@@ -5,7 +5,7 @@ import type {
 } from '../../contracts';
 import type { LoteFacturacionDocument } from '../../database/schemas/facturacion/lote-facturacion.schema';
 import type { FacturaPreliminar } from '../../database/schemas/facturacion/lote-facturacion.schema';
-import { titularDe, lineaDe } from './facturas.mapper';
+import { titularDe, lineaDe, saldoInformativoDe } from './facturas.mapper';
 
 /**
  * Maps a billing-run document to the Spanish API contract.
@@ -64,6 +64,7 @@ const preliminarDe = (p: FacturaPreliminar): FacturaPreliminarContract => ({
   // pending. NOT `p.lineas.map(lineaDe)`: `.map` would silently pass the
   // array INDEX as `lineaDe`'s second (`saldoPendiente`) argument instead.
   lineas: p.lineas.map((linea) => lineaDe(linea, linea.valorTotal)),
+  saldosInformativos: (p.saldosInformativos ?? []).map(saldoInformativoDe),
   subtotal: p.subtotal,
   totalImpuestos: p.totalImpuestos,
   total: p.total,

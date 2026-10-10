@@ -143,3 +143,37 @@ export class FacturaLinea {
 }
 
 export const FacturaLineaSchema = SchemaFactory.createForClass(FacturaLinea);
+
+/**
+ * A concept with a pending balance that this Factura does NOT charge this
+ * period — printed as an informational row ("Saldo anterior X / Valor del
+ * mes 0 / Nuevo saldo X") so the document shows the unit's full debt, not
+ * just what was billed this cycle.
+ *
+ * Deliberately NOT a `FacturaLinea`: every consumer of `lineas` (asiento,
+ * `SaldoCartera`/`CarteraPorDocumento` seeding, recibo/nota crédito
+ * application, descuento, anulación, "cargo duplicado" check) treats a línea
+ * as a real, postable charge. Keeping these rows in their own array makes it
+ * structurally impossible for them to move money. `saldoNuevo` is not
+ * stored: it always equals `saldoAnterior` (nothing is charged).
+ */
+@Schema({ _id: false })
+export class SaldoInformativo {
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: ConceptoCobro.name,
+    required: true,
+  })
+  conceptoId: Types.ObjectId;
+
+  /** Frozen concept name, same reasoning as `FacturaLinea.nombreConcepto`. */
+  @Prop({ required: true, trim: true })
+  nombreConcepto: string;
+
+  /** The concept's SaldoCartera balance for the unit (always > 0). */
+  @Prop({ required: true })
+  saldoAnterior: number;
+}
+
+export const SaldoInformativoSchema =
+  SchemaFactory.createForClass(SaldoInformativo);

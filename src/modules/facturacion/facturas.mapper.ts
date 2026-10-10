@@ -1,11 +1,15 @@
 import type {
   Factura as FacturaContract,
   FacturaLinea as FacturaLineaContract,
+  SaldoInformativo as SaldoInformativoContract,
   TitularFactura,
 } from '../../contracts';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { TitularCongelado } from '../../database/schemas/facturacion/factura-linea.schema';
-import type { FacturaLinea } from '../../database/schemas/facturacion/factura-linea.schema';
+import type {
+  FacturaLinea,
+  SaldoInformativo,
+} from '../../database/schemas/facturacion/factura-linea.schema';
 
 export const titularDe = (
   titular: TitularCongelado | null,
@@ -42,6 +46,16 @@ export const lineaDe = (
   // que son la foto congelada al emitir, este es cuánto le queda pendiente
   // hoy (lo que valida y muestra el reparto manual de un Recibo).
   saldoPendiente,
+});
+
+/** Informational row → contract; `nuevoSaldo` mirrors `saldoAnterior` (nothing is charged). */
+export const saldoInformativoDe = (
+  s: SaldoInformativo,
+): SaldoInformativoContract => ({
+  conceptoId: s.conceptoId.toString(),
+  nombreConcepto: s.nombreConcepto,
+  saldoAnterior: s.saldoAnterior,
+  nuevoSaldo: s.saldoAnterior,
 });
 
 /**
@@ -87,6 +101,8 @@ export const toFactura = (
   lineas: doc.lineas.map((linea) =>
     lineaDe(linea, saldoPorConcepto.get(linea.conceptoId.toString()) ?? 0),
   ),
+  // `?? []`: a document read before this field existed.
+  saldosInformativos: (doc.saldosInformativos ?? []).map(saldoInformativoDe),
   subtotal: doc.subtotal,
   totalImpuestos: doc.totalImpuestos,
   total: doc.total,

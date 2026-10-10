@@ -8,6 +8,8 @@ import { Tercero } from '../terceros/tercero.schema';
 import {
   FacturaLinea,
   FacturaLineaSchema,
+  SaldoInformativo,
+  SaldoInformativoSchema,
   TitularCongelado,
   TitularCongeladoSchema,
 } from './factura-linea.schema';
@@ -75,6 +77,12 @@ export class FacturaPreliminar {
 
   @Prop({ type: [FacturaLineaSchema], required: true, default: [] })
   lineas: FacturaLinea[];
+
+  /** Informational-only rows for concepts with pending balance but no
+   *  charge this cycle — see `SaldoInformativo`. Recomputed on every
+   *  `construirPreview`, refreshed at `consolidar`. */
+  @Prop({ type: [SaldoInformativoSchema], default: [] })
+  saldosInformativos: SaldoInformativo[];
 
   @Prop({ required: true })
   subtotal: number;

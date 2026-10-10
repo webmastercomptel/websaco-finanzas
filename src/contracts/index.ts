@@ -262,6 +262,20 @@ export interface FacturaLinea {
   saldoPendiente: Monto;
 }
 
+/**
+ * A concept with pending balance that a Factura/Prefactura does NOT charge
+ * this period — display-only ("Valor del mes" is always 0, "Nuevo saldo"
+ * equals "Saldo anterior"). Deliberately separate from `lineas`: it is not a
+ * charge, never reaches cartera, asiento or any application of payments.
+ */
+export interface SaldoInformativo {
+  conceptoId: string;
+  nombreConcepto: string;
+  saldoAnterior: Monto;
+  /** Always equal to `saldoAnterior` — nothing is charged. */
+  nuevoSaldo: Monto;
+}
+
 /** One row of the "Cargos del Mes" table inside `DatosPlantillaFactura` —
  *  one concept's saldo anterior / cargos del mes / nuevo saldo, mirroring
  *  the old react-pdf `CuerpoFactura`'s own row shape now that rendering
@@ -483,6 +497,9 @@ export interface Factura {
   periodoDesde: IsoDate;
   periodoHasta: IsoDate;
   lineas: FacturaLinea[];
+  /** Conceptos con saldo pendiente que esta factura no cobra — solo se
+   *  muestran; nunca suman al subtotal/total. Vacío en facturas anteriores. */
+  saldosInformativos: SaldoInformativo[];
   subtotal: Monto;
   totalImpuestos: Monto;
   total: Monto;
@@ -652,6 +669,8 @@ export interface FacturaPreliminar {
   terceroId: string | null;
   titular: TitularFactura | null;
   lineas: FacturaLinea[];
+  /** Ver `Factura.saldosInformativos`. */
+  saldosInformativos: SaldoInformativo[];
   subtotal: Monto;
   totalImpuestos: Monto;
   total: Monto;

@@ -7,6 +7,8 @@ import { ResolucionFacturacion } from '../numeracion/resolucion-facturacion.sche
 import {
   FacturaLinea,
   FacturaLineaSchema,
+  SaldoInformativo,
+  SaldoInformativoSchema,
   TitularCongelado,
   TitularCongeladoSchema,
 } from './factura-linea.schema';
@@ -102,6 +104,15 @@ export class Factura {
 
   @Prop({ type: [FacturaLineaSchema], required: true, default: [] })
   lineas: FacturaLinea[];
+
+  /**
+   * Concepts with a pending balance this invoice does not charge, frozen at
+   * emission for display only — see `SaldoInformativo`. Never part of
+   * `lineas`, `subtotal`, `total` or any ledger. Empty on every invoice
+   * issued before this field existed.
+   */
+  @Prop({ type: [SaldoInformativoSchema], default: [] })
+  saldosInformativos: SaldoInformativo[];
 
   @Prop({ required: true })
   subtotal: number;
