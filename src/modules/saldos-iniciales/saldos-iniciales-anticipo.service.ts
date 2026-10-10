@@ -41,6 +41,7 @@ import type {
 } from '../../contracts';
 import type { ImportarSaldosInicialesAnticipoDto } from './dto/importar-saldos-iniciales-anticipo.dto';
 import type { ListarSaldosInicialesAnticipoDto } from './dto/listar-saldos-iniciales-anticipo.dto';
+import type { ListarSaldosInicialesAnticipoDisponiblesDto } from './dto/listar-saldos-iniciales-anticipo-disponibles.dto';
 import type { AnularSaldoInicialAnticipoDto } from './dto/anular-saldo-inicial-anticipo.dto';
 
 /**
@@ -381,6 +382,22 @@ export class SaldosInicialesAnticipoService {
         saldoDisponiblePorId.get(doc._id.toString()) ?? 0,
       ),
     );
+  }
+
+  /**
+   * The consumer view behind `GET /saldos-iniciales-anticipo/disponibles`:
+   * active Saldos Iniciales de Anticipo whose LIVE saldo is above zero, i.e.
+   * what an Anticipo application can still draw from. It IS `listar` with the
+   * filter pinned (same contract, same tenant scoping), so the Anticipos
+   * flows never need the admin `read SaldoInicialAnticipo` permission.
+   */
+  listarDisponibles(
+    query: ListarSaldosInicialesAnticipoDisponiblesDto = {},
+  ): Promise<SaldoInicialAnticipoContract[]> {
+    return this.listar({
+      inmuebleId: query.inmuebleId,
+      conSaldoDisponible: true,
+    });
   }
 
   /**

@@ -9,11 +9,12 @@ import {
 } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
-import { CheckAbility } from '../casl/check-ability.decorator';
+import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SaldosInicialesAnticipoService } from './saldos-iniciales-anticipo.service';
 import { ImportarSaldosInicialesAnticipoDto } from './dto/importar-saldos-iniciales-anticipo.dto';
 import { ListarSaldosInicialesAnticipoDto } from './dto/listar-saldos-iniciales-anticipo.dto';
+import { ListarSaldosInicialesAnticipoDisponiblesDto } from './dto/listar-saldos-iniciales-anticipo-disponibles.dto';
 import { AnularSaldoInicialAnticipoDto } from './dto/anular-saldo-inicial-anticipo.dto';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type {
@@ -35,6 +36,23 @@ export class SaldosInicialesAnticipoController {
     @Query() query: ListarSaldosInicialesAnticipoDto,
   ): Promise<SaldoInicialAnticipo[]> {
     return this.saldosInicialesAnticipo.listar(query);
+  }
+
+  /**
+   * Read-only consumer route for the Anticipos flows: active Saldos
+   * Iniciales de Anticipo with a live saldo > 0. Gated by the write that
+   * consumes them (create NotaAnticipo) plus the admin read — NOT by the
+   * Saldos Iniciales permission. Declared before any param route.
+   */
+  @Get('disponibles')
+  @CheckAnyAbility(
+    { action: 'create', subject: 'NotaAnticipo' },
+    { action: 'read', subject: 'SaldoInicialAnticipo' },
+  )
+  listarDisponibles(
+    @Query() query: ListarSaldosInicialesAnticipoDisponiblesDto,
+  ): Promise<SaldoInicialAnticipo[]> {
+    return this.saldosInicialesAnticipo.listarDisponibles(query);
   }
 
   @Post('importar')

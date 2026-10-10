@@ -54,6 +54,7 @@ import type {
 } from '../../contracts';
 import type { ImportarSaldosInicialesDto } from './dto/importar-saldos-iniciales.dto';
 import type { ListarSaldosInicialesDto } from './dto/listar-saldos-iniciales.dto';
+import type { ListarSaldosInicialesAplicablesDto } from './dto/listar-saldos-iniciales-aplicables.dto';
 import type { AnularSaldoInicialDto } from './dto/anular-saldo-inicial.dto';
 
 /**
@@ -480,6 +481,22 @@ export class SaldosInicialesService {
         saldoPendientePorId.get(doc._id.toString()) ?? 0,
       ),
     );
+  }
+
+  /**
+   * The consumer view behind `GET /saldos-iniciales/aplicables`: one unit's
+   * active Saldos Iniciales that still owe something, i.e. what a Recibo /
+   * Nota Crédito / Anticipo can be applied against. Same contract and same
+   * tenant scoping as `listar` (it IS `listar` with the filters pinned), so
+   * the payment flows never need the admin `read SaldoInicial` permission.
+   */
+  listarAplicables(
+    query: ListarSaldosInicialesAplicablesDto,
+  ): Promise<SaldoInicialContract[]> {
+    return this.listar({
+      inmuebleId: query.inmuebleId,
+      conSaldoPendiente: true,
+    });
   }
 
   /**

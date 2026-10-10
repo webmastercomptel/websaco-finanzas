@@ -390,6 +390,35 @@ describe('SaldosInicialesAnticipoService.listar', () => {
   });
 });
 
+describe('SaldosInicialesAnticipoService.listarDisponibles', () => {
+  it('devuelve solo los activos con saldo disponible > 0', async () => {
+    const { service, saldosOrigen } = construirServicio();
+    await service.importar(
+      CUENTA,
+      dtoValido([filaValida({ numero: '1' }), filaValida({ numero: '2' })]),
+    );
+    saldosOrigen[0].saldoDisponible = 0;
+
+    const resultado = await service.listarDisponibles({});
+
+    expect(resultado.map((r) => r.numeroOriginal)).toEqual(['2']);
+  });
+
+  it('inmuebleId opcional acota a ese inmueble', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    expect(
+      await service.listarDisponibles({
+        inmuebleId: new Types.ObjectId().toString(),
+      }),
+    ).toHaveLength(0);
+    expect(
+      await service.listarDisponibles({ inmuebleId: INMUEBLE.toString() }),
+    ).toHaveLength(1);
+  });
+});
+
 describe('SaldosInicialesAnticipoService.anular', () => {
   it('pone en cero el saldo disponible restante y marca el documento anulado', async () => {
     const { service } = construirServicio();

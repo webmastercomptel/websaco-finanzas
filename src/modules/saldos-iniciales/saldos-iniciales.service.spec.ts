@@ -563,6 +563,40 @@ describe('SaldosInicialesService.listar filtros', () => {
   });
 });
 
+describe('SaldosInicialesService.listarAplicables', () => {
+  it('devuelve solo los activos con saldo > 0 del inmueble pedido', async () => {
+    const { service, saldosTotales, documentos } = construirServicio();
+    await service.importar(
+      CUENTA,
+      dtoValido([
+        filaValida(),
+        filaValida({ numero: '1002' }),
+        filaValida({ numero: '1003' }),
+      ]),
+    );
+    saldosTotales[0].saldoPendiente = 0; // pagado
+    documentos[1].estado = 'anulado'; // anulado
+
+    const aplicables = await service.listarAplicables({
+      inmuebleId: INMUEBLE.toString(),
+    });
+
+    expect(aplicables.map((a) => a.numeroOriginal)).toEqual(['1003']);
+    expect(aplicables[0].saldoPendiente).toBeGreaterThan(0);
+  });
+
+  it('no mezcla otros inmuebles', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    expect(
+      await service.listarAplicables({
+        inmuebleId: new Types.ObjectId().toString(),
+      }),
+    ).toHaveLength(0);
+  });
+});
+
 describe('SaldosInicialesService.anular', () => {
   it('pone en cero el saldo pendiente restante y marca el documento anulado', async () => {
     const { service } = construirServicio();
