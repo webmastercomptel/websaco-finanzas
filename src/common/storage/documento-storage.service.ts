@@ -2,6 +2,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Bucket } from '@google-cloud/storage';
 import { GCS_BUCKET } from './storage.constants';
+import { esPrefijoDocumentosGenerados } from '../documentos/prefijo-documentos-generados';
+
+/** How many object deletes `eliminarPrefijo` keeps in flight at once. */
+const CONCURRENCIA_BORRADO = 10;
 
 /**
  * Thin wrapper around one GCS bucket for what this backend does with a
@@ -90,5 +94,52 @@ export class DocumentoStorageService {
   async descargarBytes(objectPath: string): Promise<Buffer> {
     const [bytes] = await this.bucket.file(objectPath).download();
     return bytes;
+  }
+
+  /**
+   * Deletes every object under `prefijo` and reports what ACTUALLY happened:
+   * `eliminados` counts the deletes that succeeded, `fallidos` the ones that
+   * did not, so a partial failure never reads as "nothing was deleted". Only
+   * a failure to LIST throws (nothing was touched then). The one destructive
+   * method on this service: it exists for `ReiniciarCicloService`, which
+   * wipes a coproperty's generated PDFs.
+   *
+   * `prefijo` must have the exact shape `prefijoDocumentosGenerados` produces
+   * (`documentos-generados/<24-hex id>/`), checked with the validator that
+   * lives next to it: an empty string, `/`, the bare folder or a short id
+   * prefix is rejected, so a caller bug can never delete more than ONE
+   * coproperty's PDFs.
+   *
+   * Deletes run in bounded batches of `CONCURRENCIA_BORRADO` instead of the
+   * bucket's native `deleteFiles({ prefix })`: the native call gives no count
+   * of what it deleted (and aborts on the first error), and an unbounded
+   * `Promise.all` over thousands of objects would open that many sockets.
+   * `ignoreNotFound` makes an object removed between the listing and the
+   * delete count as done.
+   */
+  async eliminarPrefijo(
+    prefijo: string,
+  ): Promise<{ eliminados: number; fallidos: number }> {
+    if (!esPrefijoDocumentosGenerados(prefijo)) {
+      throw new Error(
+        'El prefijo a eliminar debe ser documentos-generados/<id de copropiedad>/ para no borrar más de lo previsto.',
+      );
+    }
+    const [archivos] = await this.bucket.getFiles({ prefix: prefijo });
+
+    let eliminados = 0;
+    let fallidos = 0;
+    for (let i = 0; i < archivos.length; i += CONCURRENCIA_BORRADO) {
+      const resultados = await Promise.allSettled(
+        archivos
+          .slice(i, i + CONCURRENCIA_BORRADO)
+          .map((archivo) => archivo.delete({ ignoreNotFound: true })),
+      );
+      for (const resultado of resultados) {
+        if (resultado.status === 'fulfilled') eliminados++;
+        else fallidos++;
+      }
+    }
+    return { eliminados, fallidos };
   }
 }

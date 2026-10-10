@@ -26,7 +26,6 @@ import {
 import {
   ConsecutivoDocumento,
   ConsecutivoDocumentoDocument,
-  type CategoriaDocumento,
 } from '../../database/schemas/numeracion/consecutivo-documento.schema';
 import {
   CuentaContable,
@@ -42,6 +41,7 @@ import type {
   Paginado,
 } from '../../contracts';
 import { toCopropiedad } from './copropiedades.mapper';
+import { DOCUMENTOS_SISTEMA } from './documentos-sistema';
 import type { ListarCopropiedadesDto } from './dto/listar-copropiedades.dto';
 import type {
   ActualizarCopropiedadDto,
@@ -332,60 +332,14 @@ export class CopropiedadesService {
    * it is the LAST number issued, so 0 means "none yet" and the first
    * document gets 1, never 0.
    *
-   * NA (Nota de Anticipo) is filed under category NT, same as NT itself —
-   * see the schema comment on `ConsecutivoDocumento.categoria` and
-   * `DocumentosService.getHighestIssuedNumber`'s note on why NA's real
-   * documents still live in their own collection despite the shared category.
+   * The list itself lives in `DOCUMENTOS_SISTEMA`, shared with the backfill
+   * script for coproperties created before this seeding existed.
    */
   private async crearDocumentosSistema(
     copropiedadId: Types.ObjectId,
   ): Promise<void> {
-    const documentos: {
-      categoria: CategoriaDocumento;
-      codigo: string;
-      nombreDocumento: string;
-      comprobanteContable: string | null;
-    }[] = [
-      {
-        categoria: 'FV',
-        codigo: 'FV',
-        nombreDocumento: 'Cobro Expensas Comunes',
-        comprobanteContable: '01',
-      },
-      {
-        categoria: 'IN',
-        codigo: 'RC',
-        nombreDocumento: 'Recibo de Caja',
-        comprobanteContable: null,
-      },
-      {
-        categoria: 'NC',
-        codigo: 'NC',
-        nombreDocumento: 'Nota Credito',
-        comprobanteContable: null,
-      },
-      {
-        categoria: 'ND',
-        codigo: 'ND',
-        nombreDocumento: 'Nota Debito',
-        comprobanteContable: null,
-      },
-      {
-        categoria: 'NT',
-        codigo: 'NA',
-        nombreDocumento: 'Nota de Anticipo',
-        comprobanteContable: null,
-      },
-      {
-        categoria: 'NT',
-        codigo: 'NT',
-        nombreDocumento: 'Nota Contable',
-        comprobanteContable: null,
-      },
-    ];
-
     await this.consecutivos.insertMany(
-      documentos.map((doc) => ({
+      DOCUMENTOS_SISTEMA.map((doc) => ({
         copropiedadId,
         categoria: doc.categoria,
         codigo: doc.codigo,

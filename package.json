@@ -23,7 +23,9 @@
     "seed:admin": "ts-node src/seed/seed-admin.ts",
     "seed:demo": "ts-node src/seed/seed-demo.ts",
     "clear:demo": "ts-node src/seed/clear-demo.ts",
-    "migrar:nombre-propio": "ts-node src/seed/migrar-nombre-propio.ts"
+    "migrar:nombre-propio": "ts-node src/seed/migrar-nombre-propio.ts",
+    "limpiar:indices-ingles": "ts-node src/seed/limpiar-indices-ingles.ts",
+    "sembrar:consecutivos": "ts-node src/seed/sembrar-consecutivos.ts"
   },
   "dependencies": {
     "@casl/ability": "^7.0.1",

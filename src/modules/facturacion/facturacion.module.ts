@@ -7,6 +7,7 @@ import { FacturasService } from './facturas.service';
 import { LotesController } from './lotes.controller';
 import { LotesFacturacionService } from './lotes.service';
 import { ConsultaFacturacionService } from './consulta-facturacion.service';
+import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { ReiniciarCicloController } from './reiniciar-ciclo.controller';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import { ConsolidacionProcessor } from './colas/consolidacion.processor';
@@ -14,9 +15,20 @@ import {
   EVENTOS_COLA_CONSOLIDACION,
   NOMBRE_COLA_CONSOLIDACION,
 } from './colas/consolidacion.constants';
+import { NOMBRE_COLA_APLICACION_LOTE_RECIBOS } from '../recibos/colas/aplicacion-lote-recibos.constants';
 
 @Module({
-  imports: [BullModule.registerQueue({ name: NOMBRE_COLA_CONSOLIDACION })],
+  imports: [
+    // Exports AuditoriaService, which LotesFacturacionService uses to record
+    // a lote reversal. AuditoriaModule imports only Mongoose, so no cycle.
+    AuditoriaModule,
+    BullModule.registerQueue({ name: NOMBRE_COLA_CONSOLIDACION }),
+    // Producer-side handle on the recibos-por-lote aplicación queue, used ONLY
+    // by ReiniciarCicloService to refuse a reset while one of those jobs is
+    // unfinished (LoteRecibos has no persisted in-progress marker). The
+    // processor and QueueEvents stay in RecibosModule; no cycle introduced.
+    BullModule.registerQueue({ name: NOMBRE_COLA_APLICACION_LOTE_RECIBOS }),
+  ],
   controllers: [FacturasController, LotesController, ReiniciarCicloController],
   providers: [
     FacturasService,

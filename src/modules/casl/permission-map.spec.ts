@@ -262,28 +262,16 @@ describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos
   });
 });
 
-describe('permisos de CicloFacturacionPrueba (reinicio de datos de prueba)', () => {
-  it('ciclo-facturacion-prueba.reiniciar concede solo esa acción sobre ese subject', () => {
-    const ability = abilityFor(['ciclo-facturacion-prueba.reiniciar']);
+describe('reinicio del ciclo de facturación', () => {
+  it('ya no existe como permiso CASL: la llave heredada se ignora y no concede nada', () => {
+    // Quedó detrás de PlatformAdminGuard. Un rol que aún guarde la clave
+    // vieja `ciclo-facturacion-prueba.*` no gana poder alguno por ella.
+    const ability = abilityFor([
+      'ciclo-facturacion-prueba.reiniciar',
+      'ciclo-facturacion-prueba.gestionar',
+    ]);
 
-    expect(ability.can('reiniciar', 'CicloFacturacionPrueba')).toBe(true);
-    expect(ability.can('manage', 'CicloFacturacionPrueba')).toBe(false);
-  });
-
-  it('tener el permiso no concede ningún poder sobre Factura', () => {
-    // El punto entero de aislar este subject: nadie gana capacidad de borrado
-    // sobre datos financieros reales por tener esta llave.
-    const ability = abilityFor(['ciclo-facturacion-prueba.reiniciar']);
-
-    expect(ability.can('read', 'Factura')).toBe(false);
-    expect(ability.can('update', 'Factura')).toBe(false);
-    expect(ability.can('annul', 'Factura')).toBe(false);
-  });
-
-  it('facturas.gestionar no concede reiniciar sobre CicloFacturacionPrueba', () => {
-    const ability = abilityFor(['facturas.gestionar']);
-
-    expect(ability.can('reiniciar', 'CicloFacturacionPrueba')).toBe(false);
+    expect(ability.rules).toHaveLength(0);
   });
 });
 
