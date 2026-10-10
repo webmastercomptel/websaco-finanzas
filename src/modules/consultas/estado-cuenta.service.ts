@@ -1,4 +1,9 @@
 import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
+import { buscarSaldosInicialesAnticipoVigentes } from '../saldos-iniciales/saldos-iniciales-anticipo.util';
+import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -136,6 +141,8 @@ export class EstadoCuentaService {
     private readonly tenant: TenantContextService,
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo: Model<SaldoInicialAnticipoDocument>,
   ) {}
 
   /**
@@ -575,7 +582,8 @@ export class EstadoCuentaService {
       descuentosAjustes;
 
     // Step 8b: anticipos pendientes — a live snapshot of this inmueble's own
-    // Recibos still carrying a pending balance, same "pending anticipo"
+    // Recibos (and active Saldos Iniciales de Anticipo) still carrying a
+    // pending balance, same "pending anticipo"
     // definition the Anticipos bandeja uses. Never period-filtered: an
     // anticipo is a CURRENT balance, not a movement that happened during
     // the period being printed, so it stays visible regardless of which
@@ -596,16 +604,33 @@ export class EstadoCuentaService {
         s.saldoDisponible,
       ]),
     );
-    const anticipos = recibosActivos
-      .map((r) => ({
-        r,
-        monto: saldoDisponiblePorRecibo.get(r._id.toString()) ?? 0,
-      }))
-      .filter(({ monto }) => monto > 0)
-      .sort((a, b) => a.r.fechaRecibo.getTime() - b.r.fechaRecibo.getTime())
-      .map(({ r, monto }) => ({
+    // A Saldo Inicial de Anticipo is an anticipo exactly like a Recibo's
+    // unapplied balance (it is drawn down by the same Nota de Anticipo), so
+    // it lists alongside them — under its previous system's own number
+    // (`RC-1234`), never the internal `SI` tag.
+    const saldosInicialesAnticipo = await buscarSaldosInicialesAnticipoVigentes(
+      this.saldosInicialesAnticipo,
+      this.saldoDocumentoOrigen,
+      copropiedadId,
+      [inmuebleId],
+    );
+    const anticipos = [
+      ...recibosActivos.map((r) => ({
         numeroCompleto: r.numeroCompleto,
-        fecha: r.fechaRecibo.toISOString(),
+        fecha: r.fechaRecibo,
+        monto: saldoDisponiblePorRecibo.get(r._id.toString()) ?? 0,
+      })),
+      ...saldosInicialesAnticipo.map(({ doc, saldoDisponible }) => ({
+        numeroCompleto: numeroCompletoSaldoInicial(doc),
+        fecha: doc.fechaRecibo,
+        monto: saldoDisponible,
+      })),
+    ]
+      .filter(({ monto }) => monto > 0)
+      .sort((a, b) => a.fecha.getTime() - b.fecha.getTime())
+      .map(({ numeroCompleto, fecha, monto }) => ({
+        numeroCompleto,
+        fecha: fecha.toISOString(),
         monto,
       }));
 

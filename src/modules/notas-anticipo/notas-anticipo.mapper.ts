@@ -23,6 +23,9 @@ export const toNotaAnticipo = (
   // exists on this document, same reasoning as `NotaCredito.inmuebleCodigo`.
   inmuebleCodigo: string,
   presentacion: { objectPath: string; generatedAt: Date } | null = null,
+  // Resolved by the caller from the origin document (a Recibo, or a Saldo
+  // Inicial de Anticipo shown as `RC-1234`) — not a field of this document.
+  origenNumeroCompleto: string | null = null,
 ): NotaAnticipoContract => ({
   id: doc._id.toString(),
   inmuebleId: doc.inmuebleId.toString(),
@@ -30,6 +33,7 @@ export const toNotaAnticipo = (
   terceroId: doc.terceroId ? doc.terceroId.toString() : null,
   origenTipo: doc.origenTipo,
   reciboOrigenId: doc.reciboOrigenId.toString(),
+  origenNumeroCompleto,
   prefijo: doc.prefijo,
   numero: doc.numero,
   numeroCompleto: doc.numeroCompleto,
@@ -55,8 +59,9 @@ export const toNotaAnticipoDetalle = (
   inmuebleCodigo: string,
   numerosPorDocumento: Map<string, string> = new Map(),
   presentacion: { objectPath: string; generatedAt: Date } | null = null,
+  origenNumeroCompleto: string | null = null,
 ): NotaAnticipoDetalle => ({
-  ...toNotaAnticipo(doc, inmuebleCodigo, presentacion),
+  ...toNotaAnticipo(doc, inmuebleCodigo, presentacion, origenNumeroCompleto),
   // Self-sourced: every `aplicacion` here was made BY this Nota de
   // Anticipo, so its own `issueDate` — never `appliedAt` — is what a person
   // means by "the date of this movement".

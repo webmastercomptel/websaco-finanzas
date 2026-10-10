@@ -187,6 +187,7 @@ const servicio = (
     saldosCartera?: Doc[];
     inmuebles?: Doc[];
     saldosIniciales?: Doc[];
+    saldosInicialesAnticipo?: Doc[];
   } = {},
 ) =>
   new ConciliacionCarteraService(
@@ -201,6 +202,7 @@ const servicio = (
     coleccion(data.inmuebles ?? []) as never,
     { resolveCoPropertyId: () => COP } as never,
     coleccion(data.saldosIniciales ?? []) as never,
+    coleccion(data.saldosInicialesAnticipo ?? []) as never,
   );
 
 const PERIODO = {
@@ -647,6 +649,101 @@ describe('ConciliacionCarteraService', () => {
         expect(result.anticiposPendientes).toEqual([
           expect.objectContaining({ valor: 30000 }),
         ]);
+      });
+
+      describe('Saldos Iniciales de Anticipo', () => {
+        const siaDoc = (over: Doc = {}): Doc => ({
+          _id: id(),
+          copropiedadId: COP,
+          inmuebleId: id(),
+          tipoDocumentoOriginal: 'RC',
+          numeroOriginal: '1234',
+          numeroCompleto: 'RC 1234',
+          montoOriginal: 90000,
+          fechaRecibo: new Date('2026-09-02'),
+          estado: 'activo',
+          fechaAnulacion: null,
+          ...over,
+        });
+
+        it('incluye uno sin aplicar, rotulado "RC-1234" (nunca "SI")', async () => {
+          const inm = inmuebleDoc({ codigo: '502' });
+          const sia = siaDoc({ inmuebleId: inm._id });
+
+          const result = await servicio({
+            saldosInicialesAnticipo: [sia],
+            inmuebles: [inm],
+          }).findAll(PERIODO);
+
+          expect(result.anticiposPendientes).toEqual([
+            {
+              inmuebleCodigo: '502',
+              fecha: '2026-09-02T00:00:00.000Z',
+              numeroRecibo: 'RC-1234',
+              valor: 90000,
+            },
+          ]);
+          expect(result.totalAnticiposPendientes).toBe(90000);
+        });
+
+        it('descuenta lo que una Nota de Anticipo ya le aplicó al corte', async () => {
+          const inm = inmuebleDoc();
+          const sia = siaDoc({ inmuebleId: inm._id });
+          const na = notaAnticipoDoc({
+            origenTipo: 'SI',
+            reciboOrigenId: sia._id,
+            fechaEmision: new Date('2026-09-20'),
+          });
+          const app = appDoc(na._id as Types.ObjectId, 'NA', {
+            documentoId: id(),
+            montoAplicado: 20000,
+            fechaOrigen: new Date('2026-09-20'),
+          });
+
+          const result = await servicio({
+            saldosInicialesAnticipo: [sia],
+            notasAnticipo: [na],
+            aplicaciones: [app],
+            inmuebles: [inm],
+          }).findAll(PERIODO);
+
+          expect(result.anticiposPendientes).toEqual([
+            expect.objectContaining({ valor: 70000 }),
+          ]);
+        });
+
+        it('omite uno posterior al corte, uno anulado y uno ya totalmente aplicado', async () => {
+          const inm = inmuebleDoc();
+          const posterior = siaDoc({
+            inmuebleId: inm._id,
+            fechaRecibo: new Date('2026-10-05'),
+          });
+          const anulado = siaDoc({
+            inmuebleId: inm._id,
+            estado: 'anulado',
+            fechaAnulacion: new Date('2026-09-10'),
+          });
+          const completo = siaDoc({ inmuebleId: inm._id });
+          const na = notaAnticipoDoc({
+            origenTipo: 'SI',
+            reciboOrigenId: completo._id,
+            fechaEmision: new Date('2026-09-15'),
+          });
+          const app = appDoc(na._id as Types.ObjectId, 'NA', {
+            documentoId: id(),
+            montoAplicado: 90000,
+            fechaOrigen: new Date('2026-09-15'),
+          });
+
+          const result = await servicio({
+            saldosInicialesAnticipo: [posterior, anulado, completo],
+            notasAnticipo: [na],
+            aplicaciones: [app],
+            inmuebles: [inm],
+          }).findAll(PERIODO);
+
+          expect(result.anticiposPendientes).toEqual([]);
+        });
       });
 
       it('no incluye un Recibo ya totalmente aplicado', async () => {

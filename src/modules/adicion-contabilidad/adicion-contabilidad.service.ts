@@ -43,6 +43,10 @@ import {
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
 import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
+import {
   NotaAnticipo,
   NotaAnticipoDocument,
 } from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
@@ -137,6 +141,13 @@ export class AdicionContabilidadService {
     private readonly tenant: TenantContextService,
     private readonly lotesFacturacion: LotesFacturacionService,
     @InjectConnection() private readonly connection: Connection,
+    // APPENDED LAST, optional, same convention as the sibling services: only
+    // the Nota de Anticipo concept reads it (an anticipo drawn from an
+    // opening balance has no Recibo to compose its detail from), and the
+    // positional-mock tests that predate Saldos Iniciales de Anticipo stop
+    // their argument list before it.
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
   ) {}
 
   private async transaccion<T>(
@@ -451,19 +462,47 @@ export class AdicionContabilidadService {
     }
 
     // NA: no free-text field either — composed from the Recibo it draws its
-    // anticipo from, per the accountant's own request.
+    // anticipo from, per the accountant's own request. When the origin is a
+    // Saldo Inicial de Anticipo (`origenTipo: 'SI'`) there is no Recibo: it
+    // is composed from the document it was in the previous system instead
+    // (`RC # 1234`), same shape.
     const notaAnticipoIds = idsByType.get('NA');
     if (notaAnticipoIds && notaAnticipoIds.length > 0) {
       const notasAnticipo = await this.notasAnticipo
         .find(
           { _id: { $in: notaAnticipoIds }, copropiedadId },
-          { reciboOrigenId: 1 },
+          { reciboOrigenId: 1, origenTipo: 1 },
         )
         .session(session)
         .exec();
-      const reciboOrigenIds = [
-        ...new Set(notasAnticipo.map((n) => n.reciboOrigenId.toString())),
-      ].map((id) => new Types.ObjectId(id));
+      const esSaldoInicial = (n: (typeof notasAnticipo)[number]): boolean =>
+        n.origenTipo === 'SI';
+      const idsDeOrigen = (si: boolean): Types.ObjectId[] =>
+        [
+          ...new Set(
+            notasAnticipo
+              .filter((n) => esSaldoInicial(n) === si)
+              .map((n) => n.reciboOrigenId.toString()),
+          ),
+        ].map((id) => new Types.ObjectId(id));
+      const reciboOrigenIds = idsDeOrigen(false);
+      const saldoInicialOrigenIds = idsDeOrigen(true);
+      const saldosIniciales =
+        this.saldosInicialesAnticipo && saldoInicialOrigenIds.length > 0
+          ? await this.saldosInicialesAnticipo
+              .find(
+                { _id: { $in: saldoInicialOrigenIds }, copropiedadId },
+                { tipoDocumentoOriginal: 1, numeroOriginal: 1 },
+              )
+              .session(session)
+              .exec()
+          : [];
+      const etiquetaPorSaldoInicial = new Map(
+        saldosIniciales.map((si) => [
+          si._id.toString(),
+          `${si.tipoDocumentoOriginal} # ${si.numeroOriginal}`,
+        ]),
+      );
       const recibos = await this.recibos
         .find({ _id: { $in: reciboOrigenIds }, copropiedadId }, { numero: 1 })
         .session(session)
@@ -472,6 +511,15 @@ export class AdicionContabilidadService {
         recibos.map((r) => [r._id.toString(), r.numero]),
       );
       for (const n of notasAnticipo) {
+        if (esSaldoInicial(n)) {
+          const etiqueta = etiquetaPorSaldoInicial.get(
+            n.reciboOrigenId.toString(),
+          );
+          if (etiqueta !== undefined) {
+            map.set(n._id.toString(), `Aplicación de Anticipo ${etiqueta}`);
+          }
+          continue;
+        }
         const numero = numeroPorRecibo.get(n.reciboOrigenId.toString());
         if (numero !== undefined) {
           map.set(n._id.toString(), `Aplicación de Anticipo RC # ${numero}`);

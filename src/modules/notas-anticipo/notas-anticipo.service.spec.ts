@@ -87,7 +87,11 @@ const saldoInicialAnticipoDoc = (
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   terceroId: TERCERO,
+  // Frozen display string keeps the import's space; the API must NOT expose
+  // it — it shows `tipoDocumentoOriginal-numeroOriginal` instead.
   numeroCompleto: 'RC 4152',
+  tipoDocumentoOriginal: 'RC',
+  numeroOriginal: '4152',
   estado: 'activo',
   unappliedAmount: 300000,
   appliedAmount: 0,
@@ -220,6 +224,8 @@ const construirServicio = (
     findOne: jest.fn(() => ({
       session: () => ({ exec: () => Promise.resolve(recibo) }),
     })),
+    // Batched origin-number lookup (listing / detail / anular).
+    find: jest.fn(() => ({ exec: () => Promise.resolve([recibo]) })),
   };
 
   const saldosInicialesAnticipo = {
@@ -227,6 +233,10 @@ const construirServicio = (
       session: () => ({
         exec: () => Promise.resolve(saldoInicialAnticipo ?? null),
       }),
+    })),
+    find: jest.fn(() => ({
+      exec: () =>
+        Promise.resolve(saldoInicialAnticipo ? [saldoInicialAnticipo] : []),
     })),
   };
 
@@ -769,6 +779,87 @@ describe('NotasAnticipoService.crear (origenTipo: SI — Saldo Inicial de Antici
         aplicacionAutomatica: true,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('NotasAnticipoService — número del documento de origen', () => {
+  it('crear sobre un Recibo expone su número completo', async () => {
+    const { service, recibo } = construirServicio();
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      reciboOrigenId: recibo._id.toString(),
+      fechaEmision: '2026-09-01',
+      aplicacionAutomatica: true,
+    });
+
+    expect(resultado.origenNumeroCompleto).toBe('RC-1');
+  });
+
+  it('crear sobre un Saldo Inicial de Anticipo expone "RC-4152" (tipo-número original, con guion), nunca "SI" ni el texto con espacio', async () => {
+    const saldoInicialAnticipo = saldoInicialAnticipoDoc();
+    const { service } = construirServicio({ saldoInicialAnticipo });
+
+    const resultado = await service.crear(CUENTA.toString(), {
+      codigo: 'NA',
+      origenTipo: 'SI',
+      reciboOrigenId: saldoInicialAnticipo._id.toString(),
+      fechaEmision: '2026-09-01',
+      aplicacionAutomatica: true,
+    });
+
+    expect(resultado.origenNumeroCompleto).toBe('RC-4152');
+  });
+
+  it('el listado resuelve el número de origen de una nota sobre un Saldo Inicial de Anticipo', async () => {
+    const saldoInicialAnticipo = saldoInicialAnticipoDoc();
+    const { service } = construirServicio({
+      saldoInicialAnticipo,
+      notaAnticipo: {
+        _id: new Types.ObjectId(),
+        copropiedadId: COP,
+        inmuebleId: INMUEBLE,
+        terceroId: TERCERO,
+        origenTipo: 'SI',
+        reciboOrigenId: saldoInicialAnticipo._id,
+        prefijo: 'NA',
+        numero: 1,
+        numeroCompleto: 'NA-1',
+        fechaEmision: new Date('2026-09-01'),
+        montoAplicado: 200000,
+        estado: 'activo',
+      },
+    });
+
+    const { items } = await service.findAll({});
+
+    expect(items[0].origenTipo).toBe('SI');
+    expect(items[0].origenNumeroCompleto).toBe('RC-4152');
+  });
+
+  it('el listado resuelve el número de origen de una nota sobre un Recibo', async () => {
+    const recibo = reciboDoc({ numeroCompleto: 'RC-77' });
+    const { service } = construirServicio({
+      recibo,
+      notaAnticipo: {
+        _id: new Types.ObjectId(),
+        copropiedadId: COP,
+        inmuebleId: INMUEBLE,
+        terceroId: TERCERO,
+        origenTipo: 'RC',
+        reciboOrigenId: recibo._id,
+        prefijo: 'NA',
+        numero: 1,
+        numeroCompleto: 'NA-1',
+        fechaEmision: new Date('2026-09-01'),
+        montoAplicado: 200000,
+        estado: 'activo',
+      },
+    });
+
+    const { items } = await service.findAll({});
+
+    expect(items[0].origenNumeroCompleto).toBe('RC-77');
   });
 });
 

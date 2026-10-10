@@ -5,6 +5,7 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import type { SaldoInicialAnticipoDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
@@ -52,7 +53,9 @@ export interface ModelosDatosImpresionNotaAnticipo {
  * `aplicaciones` must be exactly what `NotasAnticipoService.findAplicaciones`
  * returns — every application THIS Nota de Anticipo made, active only.
  * `concepto` names the origin document (`reciboOrigen.fullNumber`, or
- * `saldoInicialAnticipoOrigen.fullNumber` when `nota.origenTipo` is `'SI'`),
+ * `saldoInicialAnticipoOrigen` shown as `RC-1234` — its previous system's
+ * `tipoDocumentoOriginal-numeroOriginal`, never the frozen `numeroCompleto`
+ * nor the internal `SI` tag — when `nota.origenTipo` is `'SI'`),
  * the same thing this document's own "Origen" link shows in the JSON detail
  * view — a Nota de Anticipo has no `notes`/`reason` field of its own to draw
  * from, unlike a Recibo or a Nota Crédito.
@@ -191,7 +194,7 @@ export async function construirDatosImpresionNotaAnticipo(
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
     concepto: saldoInicialAnticipoOrigen
-      ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.numeroCompleto}`
+      ? `Aplicación de anticipo — anticipo ${numeroCompletoSaldoInicial(saldoInicialAnticipoOrigen)}`
       : reciboOrigen
         ? `Aplicación de anticipo — recibo ${reciboOrigen.numeroCompleto}`
         : 'Aplicación de anticipo',

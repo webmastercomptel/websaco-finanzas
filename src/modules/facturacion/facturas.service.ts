@@ -44,6 +44,11 @@ import type {
   ResolucionFilaFactura,
 } from '../../contracts';
 import { toFactura, titularDe } from './facturas.mapper';
+import { buscarSaldosInicialesAnticipoVigentes } from '../saldos-iniciales/saldos-iniciales-anticipo.util';
+import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import type { ListarFacturasDto } from './dto/listar-facturas.dto';
 import { calcularDescuentoProntoPago } from '../../common/facturacion/descuento-pronto-pago.util';
 import { emisorDe } from '../../common/documentos/emisor.util';
@@ -82,6 +87,13 @@ export class FacturasService {
     // argument list before this one keep compiling. Backs `datosPlantilla`'s
     // own `resolverFactura` call; real requests always get it from Nest's DI.
     private readonly tituloDocumento?: TituloDocumentoService,
+    // APPENDED AFTER `tituloDocumento`, optional, for the same reason:
+    // only `datosVisualesPdf` reads it (opening anticipos count toward the
+    // printed amount to pay), and the positional-mock tests that never reach
+    // that method stop their argument list before it. Absent = no opening
+    // anticipos to add, never a crash.
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
   ) {}
 
   /** Batch-resolves each document's own live per-concepto breakdown from
@@ -251,10 +263,13 @@ export class FacturasService {
    * from that unit's own currently pending Recibo balances.
    *
    * `totalAnticipos` reuses the exact "anticipos pendientes" definition
-   * `EstadoCuentaService` already established: the sum of `saldoDisponible`
-   * (`SaldoDocumentoOrigen`, `tipoDocumento: 'RC'`) across this unit's
-   * `activo` Recibos — never Notas de Anticipo or Saldos Iniciales de
-   * Anticipo, which that same precedent excludes too.
+   * `EstadoCuentaService` establishes: the sum of live `saldoDisponible`
+   * (`SaldoDocumentoOrigen`) across this unit's `activo` Recibos
+   * (`tipoDocumento: 'RC'`) AND its active Saldos Iniciales de Anticipo
+   * (`'SI'`) — an opening anticipo is an anticipo like any other, so
+   * leaving it out would overstate the amount to pay printed on the
+   * invoice. Notas de Anticipo are still excluded: one is the APPLICATION of
+   * an anticipo, already deducted from cartera, never a pending balance.
    */
   async datosVisualesPdf(
     inmuebleIds: Types.ObjectId[],
@@ -292,6 +307,22 @@ export class FacturasService {
       if (monto <= 0) continue;
       const key = recibo.inmuebleId.toString();
       anticipoPorInmueble.set(key, (anticipoPorInmueble.get(key) ?? 0) + monto);
+    }
+
+    const saldosInicialesAnticipo = this.saldosInicialesAnticipo
+      ? await buscarSaldosInicialesAnticipoVigentes(
+          this.saldosInicialesAnticipo,
+          this.saldoDocumentoOrigen,
+          copropiedadId,
+          ids,
+        )
+      : [];
+    for (const { doc, saldoDisponible } of saldosInicialesAnticipo) {
+      const key = doc.inmuebleId.toString();
+      anticipoPorInmueble.set(
+        key,
+        (anticipoPorInmueble.get(key) ?? 0) + saldoDisponible,
+      );
     }
 
     for (const inmueble of inmuebles) {

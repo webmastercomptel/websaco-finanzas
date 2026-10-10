@@ -380,6 +380,11 @@ describe('FacturasService.datosVisualesPdf', () => {
       estado: 'activo' | 'anulado';
     }[];
     saldos: { documentoId: Types.ObjectId; saldoDisponible: number }[];
+    saldosInicialesAnticipo?: {
+      _id: Types.ObjectId;
+      inmuebleId: Types.ObjectId;
+      estado: 'activo' | 'anulado';
+    }[];
   }) => {
     const inmuebles = {
       find: jest.fn(() => ({ exec: () => Promise.resolve(config.inmuebles) })),
@@ -395,6 +400,16 @@ describe('FacturasService.datosVisualesPdf', () => {
     const saldoDocumentoOrigen = {
       find: jest.fn(() => ({ exec: () => Promise.resolve(config.saldos) })),
     };
+    const saldosInicialesAnticipo = {
+      find: jest.fn((filtro: Filtro) => ({
+        exec: () =>
+          Promise.resolve(
+            (config.saldosInicialesAnticipo ?? []).filter(
+              (d) => d.estado === filtro.estado,
+            ),
+          ),
+      })),
+    };
     const service = new FacturasService(
       modeloCon([]) as never,
       modeloSaldoTotalDocumento([]) as never,
@@ -403,6 +418,8 @@ describe('FacturasService.datosVisualesPdf', () => {
       recibos as never,
       saldoDocumentoOrigen as never,
       tenantQueDevuelve(COP),
+      undefined,
+      saldosInicialesAnticipo as never,
     );
     return { service, inmuebles, recibos, saldoDocumentoOrigen };
   };
@@ -429,6 +446,30 @@ describe('FacturasService.datosVisualesPdf', () => {
       referencia: 'REF-301',
       totalAnticipos: 50000,
     });
+  });
+
+  it('suma también el saldo vivo de los Saldos Iniciales de Anticipo activos del inmueble', async () => {
+    const inmuebleId = new Types.ObjectId();
+    const recibo = new Types.ObjectId();
+    const sia = new Types.ObjectId();
+    const siaConsumido = new Types.ObjectId();
+    const { service } = construirServicioAnticipos({
+      inmuebles: [{ _id: inmuebleId, referencia: null }],
+      recibos: [{ _id: recibo, inmuebleId, estado: 'activo' }],
+      saldosInicialesAnticipo: [
+        { _id: sia, inmuebleId, estado: 'activo' },
+        { _id: siaConsumido, inmuebleId, estado: 'activo' },
+      ],
+      saldos: [
+        { documentoId: recibo, saldoDisponible: 30000 },
+        { documentoId: sia, saldoDisponible: 70000 },
+        { documentoId: siaConsumido, saldoDisponible: 0 },
+      ],
+    });
+
+    const resultado = await service.datosVisualesPdf([inmuebleId]);
+
+    expect(resultado.get(inmuebleId.toString())?.totalAnticipos).toBe(100000);
   });
 
   it('devuelve totalAnticipos en 0 cuando el inmueble no tiene anticipo pendiente', async () => {

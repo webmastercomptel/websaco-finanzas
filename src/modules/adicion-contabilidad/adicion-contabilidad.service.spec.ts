@@ -296,3 +296,77 @@ describe('AdicionContabilidadService.generar', () => {
     expect(resultado.movmes).toContain('Recaudo recibido — recibo de caja');
   });
 });
+
+describe('AdicionContabilidadService.generar — Nota de Anticipo sobre un Saldo Inicial de Anticipo', () => {
+  it('compone el detalle desde el documento original del saldo inicial ("RC # 1234"), no cae al texto fijo', async () => {
+    const siaId = new Types.ObjectId();
+    const asientos = [asientoFixture({ notaAnticipoId })];
+    const asientosModel = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve(asientos) }),
+        }),
+      })),
+      updateMany: jest.fn().mockResolvedValue({}),
+    };
+    const lotesModel = {
+      create: jest.fn((docs: Record<string, unknown>[]) =>
+        Promise.resolve(
+          docs.map((d) => ({
+            ...d,
+            _id: new Types.ObjectId(),
+            createdAt: new Date('2026-09-10'),
+          })),
+        ),
+      ),
+    };
+    const consecutivosLoteModel = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve({ nextNumber: 1 }),
+      })),
+    };
+    const notasAnticipoModel = modeloCon([
+      {
+        _id: notaAnticipoId,
+        prefijo: 'NA',
+        numero: 50,
+        origenTipo: 'SI',
+        reciboOrigenId: siaId,
+      },
+    ]);
+    const saldosInicialesAnticipoModel = modeloCon([
+      { _id: siaId, tipoDocumentoOriginal: 'RC', numeroOriginal: '1234' },
+    ]);
+    const service = new AdicionContabilidadService(
+      asientosModel as never,
+      lotesModel as never,
+      consecutivosLoteModel as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      notasAnticipoModel as never,
+      { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+      {
+        obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
+          periodoDesde: new Date('2026-09-01'),
+          periodoHasta: new Date('2026-09-30'),
+        }),
+      } as unknown as LotesFacturacionService,
+      {
+        startSession: () =>
+          Promise.resolve({
+            withTransaction: (fn: () => Promise<void>) => fn(),
+            endSession: () => Promise.resolve(undefined),
+          }),
+      } as never,
+      saldosInicialesAnticipoModel as never,
+    );
+
+    const resultado = await service.generar(CUENTA);
+
+    expect(resultado.movmes).toContain('Aplicación de Anticipo RC # 1234');
+  });
+});

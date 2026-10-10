@@ -122,6 +122,33 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     expect(datos.concepto).toBe('Aplicación de anticipo — recibo RC-0009');
   });
 
+  it('con origen Saldo Inicial de Anticipo, el concepto nombra el anticipo como "RC-1234" (tipo-número original con guion), nunca "SI" ni el texto congelado con espacio', async () => {
+    const modelos = {
+      ...modelosVacios(),
+      saldosInicialesAnticipo: {
+        findOne: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              numeroCompleto: 'RC 1234',
+              tipoDocumentoOriginal: 'RC',
+              numeroOriginal: '1234',
+            }),
+        })),
+      },
+    };
+
+    const datos = await construirDatosImpresionNotaAnticipo(
+      notaBase({ origenTipo: 'SI' }),
+      [],
+      copropiedadBase(),
+      COP,
+      modelos as never,
+      'Nota de Anticipo',
+    );
+
+    expect(datos.concepto).toBe('Aplicación de anticipo — anticipo RC-1234');
+  });
+
   it('el débito es SIEMPRE una sola línea a cuentaAnticipos por el total aplicado — nunca partido, nunca una cuenta de banco', async () => {
     const datos = await construirDatosImpresionNotaAnticipo(
       notaBase({ montoAplicado: 200000 }),

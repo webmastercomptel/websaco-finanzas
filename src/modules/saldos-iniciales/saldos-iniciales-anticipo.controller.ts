@@ -1,10 +1,19 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SaldosInicialesAnticipoService } from './saldos-iniciales-anticipo.service';
 import { ImportarSaldosInicialesAnticipoDto } from './dto/importar-saldos-iniciales-anticipo.dto';
+import { ListarSaldosInicialesAnticipoDto } from './dto/listar-saldos-iniciales-anticipo.dto';
 import { AnularSaldoInicialAnticipoDto } from './dto/anular-saldo-inicial-anticipo.dto';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type {
@@ -22,8 +31,10 @@ export class SaldosInicialesAnticipoController {
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'SaldoInicialAnticipo' })
-  listar(): Promise<SaldoInicialAnticipo[]> {
-    return this.saldosInicialesAnticipo.listar();
+  listar(
+    @Query() query: ListarSaldosInicialesAnticipoDto,
+  ): Promise<SaldoInicialAnticipo[]> {
+    return this.saldosInicialesAnticipo.listar(query);
   }
 
   @Post('importar')

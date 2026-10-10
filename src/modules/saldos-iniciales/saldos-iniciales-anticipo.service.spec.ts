@@ -42,9 +42,16 @@ const construirServicio = () => {
       documentos.push(...creados);
       return Promise.resolve(creados);
     }),
-    find: jest.fn(() => ({
+    find: jest.fn((filtro: { inmuebleId?: Types.ObjectId } = {}) => ({
       sort: jest.fn().mockReturnThis(),
-      exec: () => Promise.resolve(documentos),
+      exec: () =>
+        Promise.resolve(
+          documentos.filter((d) =>
+            filtro.inmuebleId
+              ? String(d.inmuebleId) === filtro.inmuebleId.toString()
+              : true,
+          ),
+        ),
     })),
     findOne: jest.fn((filtro: Record<string, unknown>) => ({
       session: jest.fn().mockReturnThis(),
@@ -331,6 +338,55 @@ describe('SaldosInicialesAnticipoService.listar', () => {
     expect(item.saldoDisponible).toBe(300000);
     expect(item.monto).toBe(300000);
     expect(item.inmuebleCodigo).toBe('AP-101');
+  });
+
+  it('refleja el saldo vivo (lo que ya consumió una Nota de Anticipo), no el monto original', async () => {
+    const { service, saldosOrigen } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+    saldosOrigen[0].saldoDisponible = 120000;
+
+    const [item] = await service.listar();
+
+    expect(item.monto).toBe(300000);
+    expect(item.saldoDisponible).toBe(120000);
+  });
+
+  it('conSaldoDisponible deja solo los activos con saldo vivo mayor a cero', async () => {
+    const { service, saldosOrigen } = construirServicio();
+    await service.importar(
+      CUENTA,
+      dtoValido([
+        filaValida({ numero: '1' }),
+        filaValida({ numero: '2' }),
+        filaValida({ numero: '3' }),
+      ]),
+    );
+    // #1 fully consumed, #2 untouched, #3 voided afterwards.
+    saldosOrigen[0].saldoDisponible = 0;
+    const todos = await service.listar();
+    const tercero = todos.find((t) => t.numeroOriginal === '3')!;
+    await service.anular(
+      tercero.id,
+      { motivo: 'duplicado', detalle: 'Fila duplicada del mismo archivo' },
+      CUENTA,
+    );
+
+    const resultado = await service.listar({ conSaldoDisponible: true });
+
+    expect(resultado.map((r) => r.numeroOriginal)).toEqual(['2']);
+  });
+
+  it('inmuebleId acota el listado a ese inmueble', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    const otro = await service.listar({
+      inmuebleId: new Types.ObjectId().toString(),
+    });
+    const propio = await service.listar({ inmuebleId: INMUEBLE.toString() });
+
+    expect(otro).toHaveLength(0);
+    expect(propio).toHaveLength(1);
   });
 });
 
