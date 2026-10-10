@@ -11,6 +11,7 @@ import {
   TipoDocumentoPresentacion,
 } from '../../database/schemas/documentos/presentacion-documento.schema';
 import { DocumentoStorageService } from '../storage/documento-storage.service';
+import { prefijoDocumentosGenerados } from './prefijo-documentos-generados';
 
 /**
  * Reads/writes `presentacion_documento` — the write-once pointer to one
@@ -60,7 +61,7 @@ export class PresentacionDocumentoService {
       );
     }
 
-    const objectPath = `documentos-generados/${copropiedadId.toString()}/${tipoDocumento}/${documentoId.toString()}.pdf`;
+    const objectPath = `${prefijoDocumentosGenerados(copropiedadId)}${tipoDocumento}/${documentoId.toString()}.pdf`;
 
     await this.model
       .findOneAndUpdate(
