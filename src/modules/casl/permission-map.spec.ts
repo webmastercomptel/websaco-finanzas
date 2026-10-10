@@ -358,12 +358,69 @@ describe('permisos de SaldoInicialAnticipo (saldos iniciales de anticipo)', () =
 
   it('permisos de otros documentos no conceden acceso a SaldoInicialAnticipo', () => {
     const ability = abilityFor([
-      'saldos-iniciales.ver',
-      'saldos-iniciales.crear',
+      'notas-anticipo.ver',
       'notas-anticipo.crear',
+      'facturas.gestionar',
     ]);
 
     expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
     expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+  });
+});
+
+describe('saldos-iniciales gobierna cartera y anticipos (un solo permiso)', () => {
+  it('saldos-iniciales.ver concede lectura sobre SaldoInicial y SaldoInicialAnticipo', () => {
+    const ability = abilityFor(['saldos-iniciales.ver']);
+
+    expect(ability.can('read', 'SaldoInicial')).toBe(true);
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('saldos-iniciales.crear concede creación sobre ambos subjects', () => {
+    const ability = abilityFor(['saldos-iniciales.crear']);
+
+    expect(ability.can('create', 'SaldoInicial')).toBe(true);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('saldos-iniciales.anular concede anulación sobre ambos subjects', () => {
+    const ability = abilityFor(['saldos-iniciales.anular']);
+
+    expect(ability.can('annul', 'SaldoInicial')).toBe(true);
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('sin la clave no hay acceso a SaldoInicialAnticipo', () => {
+    const ability = abilityFor(['recibos.ver', 'notas-anticipo.ver']);
+
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('create', 'SaldoInicialAnticipo')).toBe(false);
+    expect(ability.can('annul', 'SaldoInicialAnticipo')).toBe(false);
+  });
+
+  it('la clave heredada saldos-iniciales-anticipo.ver sigue funcionando', () => {
+    // Roles ya guardados pueden traerla: no se rompe, y sigue siendo solo
+    // anticipos (no concede SaldoInicial).
+    const ability = abilityFor(['saldos-iniciales-anticipo.ver']);
+
+    expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(true);
+    expect(ability.can('read', 'SaldoInicial')).toBe(false);
+  });
+
+  it('el permiso no se extiende a otros subjects', () => {
+    const ability = abilityFor([
+      'saldos-iniciales.ver',
+      'saldos-iniciales.crear',
+      'saldos-iniciales.anular',
+    ]);
+
+    expect(ability.can('read', 'NotaAnticipo')).toBe(false);
+    expect(ability.can('read', 'Factura')).toBe(false);
   });
 });
