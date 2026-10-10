@@ -106,6 +106,7 @@ const servicio = (overrides: Record<string, unknown> = {}) =>
     (overrides.copropiedades ?? mockFindById()) as never,
     { resolveCoPropertyId: () => COP } as never,
     (overrides.saldosIniciales ?? mockFind()) as never,
+    (overrides.saldosInicialesAnticipo ?? mockFind()) as never,
   );
 
 const svcDefaults = (overrides: Record<string, unknown> = {}) => ({
@@ -1157,6 +1158,80 @@ describe('EstadoCuentaService', () => {
           monto: 180200,
         },
       ]);
+    });
+
+    it('anticipos incluye los Saldos Iniciales de Anticipo activos con saldo vivo, como "RC-1234", junto a los Recibos y por fecha', async () => {
+      const inmId = id();
+      const recibo = reciboDoc({
+        numeroCompleto: 'RC-0011',
+        estado: 'activo',
+        fechaRecibo: new Date('2026-06-02'),
+      });
+      const sia = {
+        _id: id(),
+        tipoDocumentoOriginal: 'RC',
+        numeroOriginal: '1234',
+        // Frozen display string uses a space — the statement must NOT print it.
+        numeroCompleto: 'RC 1234',
+        fechaRecibo: new Date('2026-01-15'),
+        estado: 'activo',
+      };
+
+      const svc = servicio({
+        recibos: mockFind([recibo]),
+        saldoDocumentoOrigen: mockFind([
+          { documentoId: recibo._id, saldoDisponible: 180200 },
+          { documentoId: sia._id, saldoDisponible: 75000 },
+        ]),
+        saldosInicialesAnticipo: mockFind([sia]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.anticipos).toEqual([
+        {
+          numeroCompleto: 'RC-1234',
+          fecha: '2026-01-15T00:00:00.000Z',
+          monto: 75000,
+        },
+        {
+          numeroCompleto: 'RC-0011',
+          fecha: '2026-06-02T00:00:00.000Z',
+          monto: 180200,
+        },
+      ]);
+    });
+
+    it('anticipos omite un Saldo Inicial de Anticipo ya consumido por completo', async () => {
+      const inmId = id();
+      const sia = {
+        _id: id(),
+        tipoDocumentoOriginal: 'RC',
+        numeroOriginal: '1234',
+        fechaRecibo: new Date('2026-01-15'),
+        estado: 'activo',
+      };
+
+      const svc = servicio({
+        saldoDocumentoOrigen: mockFind([
+          { documentoId: sia._id, saldoDisponible: 0 },
+        ]),
+        saldosInicialesAnticipo: mockFind([sia]),
+        ...svcDefaults(),
+      });
+
+      const result = await svc.findAll({
+        inmuebleId: inmId.toString(),
+        periodStart: '2026-01-01T00:00:00.000Z',
+        periodEnd: '2026-01-31T23:59:59.999Z',
+      });
+
+      expect(result.anticipos).toEqual([]);
     });
   });
 });

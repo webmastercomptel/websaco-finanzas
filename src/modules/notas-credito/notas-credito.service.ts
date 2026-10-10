@@ -124,7 +124,7 @@ import type { DatosReciboImpresion } from '../../common/documentos/datos-impresi
 
 /** One credit-side line `aplicarManual`/`aplicarFifo` produce, per concepto
  *  of the Factura they just settled — `cuenta: null` means the line's
- *  concepto has no `accountingReceivableAccount` configured, resolved to
+ *  concepto has no `cuentaDebitoId` configured, resolved to
  *  the coproperty's shared `cuentaCartera` only once `postearAsientoAplicacion`
  *  knows it (same "resolve the fallback account at the last possible
  *  moment" pattern `crear()`'s own `desglose` already uses).
@@ -314,7 +314,7 @@ export class NotasCreditoService {
     if (tipoDocumento === 'SI') {
       // Already frozen at import time, same fields a Factura line freezes —
       // see `SaldoInicialLinea`'s own schema docblock on why
-      // `accountingIncomeAccount` is deliberately `null` here (nothing was
+      // `cuentaIngreso` is deliberately `null` here (nothing was
       // ever posted as income in THIS system for an opening balance).
       const saldoInicial = documento as SaldoInicialDocument;
       return saldoInicial.filas.map((linea) => ({
@@ -625,7 +625,7 @@ export class NotasCreditoService {
       const esAplicacionCompleta = montoAAplicar === dto.montoTotal;
 
       // The débito side of the creation entry, per concepto's own
-      // `accountingIncomeAccount` — the SAME account originally credited
+      // `cuentaIngreso` — the SAME account originally credited
       // when this concept was billed (a Factura line's own frozen account,
       // or a Nota Débito's own `ConceptoCobro.cuentaCreditoId`, resolved
       // above into `lineasAncla`), so a credit note correctly reverses
@@ -640,7 +640,7 @@ export class NotasCreditoService {
       // An `intereses` línea is the one exception: its ORIGINAL charge never
       // credited a real Ingreso account either — `construirMovimientos`
       // posts it through cuentasOrden instead (memo accounts) — so
-      // reversing it through `accountingIncomeAccount` here would post a
+      // reversing it through `cuentaIngreso` here would post a
       // real movement that was never really posted. `montoAplicadoMora`
       // below is what correctly reverses it, through cuentasOrden; skipped
       // only when `esAplicacionCompleta` (see that constant's own comment).
@@ -670,7 +670,7 @@ export class NotasCreditoService {
       const desglose: DesgloseCarteraAplicacion[] = [];
       if (montoAAplicar > 0) {
         // Needed now (unlike before per-concepto coding): each distribution
-        // line's own accountingReceivableAccount comes off `lineasAncla`,
+        // line's own cuentaCartera comes off `lineasAncla`,
         // matched by conceptoId.
         if (dto.tipoDocumento === 'FV') {
           await decrementarSaldoFactura(
@@ -1091,6 +1091,7 @@ export class NotasCreditoService {
     const datosImpresion: ModelosDatosImpresionNotaCredito = {
       facturas: this.facturas,
       notasDebito: this.notasDebito,
+      saldosIniciales: this.saldosIniciales,
       conceptosCobro: this.conceptosCobro,
       inmuebles: this.inmuebles!,
       terceros: this.terceros!,
@@ -2127,7 +2128,7 @@ export class NotasCreditoService {
     // Per-concepto income accounts for the débito side — see
     // `construirAsientoCruce`'s own `desgloseOrigen` docblock. Falls back to
     // `cuentaDevoluciones` (never a bare `null` account) for a concept with
-    // no `accountingIncomeAccount` configured, same fallback role
+    // no `cuentaIngreso` configured, same fallback role
     // `cuentaCartera` plays for `desgloseCartera` above.
     const desgloseOrigenCuentas = desgloseOrigen.map((d) => ({
       cuenta: d.cuenta ?? cuentaDevoluciones,

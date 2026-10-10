@@ -12,6 +12,7 @@ import type { CuentaContableDocument } from '../../database/schemas/contabilidad
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
 import { codigoDeCuentaContable } from '../../common/utils/mapper.utils';
 import { emisorDe } from '../../common/documentos/emisor.util';
+import { cuentaCarteraDeLinea } from '../recibos/cruce.util';
 import type {
   DatosReciboImpresion,
   LineaAsientoImpresion,
@@ -52,7 +53,7 @@ export interface ModelosDatosImpresionNotaCredito {
  * closely; the differences are real, not cosmetic:
  *
  *  - The débito side is one line PER CONCEPTO in `nota.distribution`, each
- *    debiting that concept's own `accountingIncomeAccount` — the SAME
+ *    debiting that concept's own `cuentaIngreso` — the SAME
  *    account originally credited when the concept was billed (a Factura
  *    line's own frozen account, or a Nota Débito's own
  *    `ConceptoCobro.cuentaCreditoId`, resolved fresh here since a Nota
@@ -191,7 +192,7 @@ export async function construirDatosImpresionNotaCredito(
     : [];
   const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
   /** This Nota Débito's own single concepto's cuenta de ingreso — the same
-   *  fallback role `lineaFactura?.accountingIncomeAccount` plays for a
+   *  fallback role `lineaFactura?.cuentaIngreso` plays for a
    *  Factura line below. */
   const cuentaIngresoDe = (n: NotaDebitoDocument): string | null => {
     const concepto = conceptoPorId.get(n.conceptoId.toString());
@@ -251,18 +252,24 @@ export async function construirDatosImpresionNotaCredito(
               l.conceptoId.equals(detalle.conceptoId),
             )
           : undefined;
-        const codigo = lineaSI?.cuentaCartera ?? cuentaCartera;
+        // Same rule the real posting uses (`cuentaCarteraDeLinea`, incl. the
+        // intereses + usaCuentasOrden case). The printed document is the
+        // one from the client's previous system (tipoDocumentoOriginal /
+        // numeroOriginal), never the internal `SI` tag nor ordinal.
+        const codigo =
+          cuentaCarteraDeLinea(lineaSI, copropiedad.usaCuentasOrden ?? false) ??
+          cuentaCartera;
         codigosUsados.add(codigo);
         lineas.push({
           cuentaCodigo: codigo,
           cuentaNombre: '',
-          tipoDocumento: 'SI',
-          numeroDocumento: saldoInicial?.numero ?? null,
+          tipoDocumento: saldoInicial?.tipoDocumentoOriginal ?? null,
+          numeroDocumento: saldoInicial?.numeroOriginal ?? null,
           debito: 0,
           credito: detalle.monto,
         });
       }
-    } else {
+    } else if (aplicacion.tipoDocumento === 'ND') {
       // Only ever reachable when THIS aplicación is the note's own anchor
       // (the deferred `aplicar()` path never targets a Nota Débito — see
       // this function's own docblock).

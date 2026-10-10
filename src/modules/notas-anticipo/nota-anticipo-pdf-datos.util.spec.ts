@@ -122,6 +122,33 @@ describe('construirDatosImpresionNotaAnticipo', () => {
     expect(datos.concepto).toBe('Aplicación de anticipo — recibo RC-0009');
   });
 
+  it('con origen Saldo Inicial de Anticipo, el concepto nombra el anticipo como "RC-1234" (tipo-número original con guion), nunca "SI" ni el texto congelado con espacio', async () => {
+    const modelos = {
+      ...modelosVacios(),
+      saldosInicialesAnticipo: {
+        findOne: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve({
+              numeroCompleto: 'RC 1234',
+              tipoDocumentoOriginal: 'RC',
+              numeroOriginal: '1234',
+            }),
+        })),
+      },
+    };
+
+    const datos = await construirDatosImpresionNotaAnticipo(
+      notaBase({ origenTipo: 'SI' }),
+      [],
+      copropiedadBase(),
+      COP,
+      modelos as never,
+      'Nota de Anticipo',
+    );
+
+    expect(datos.concepto).toBe('Aplicación de anticipo — anticipo RC-1234');
+  });
+
   it('el débito es SIEMPRE una sola línea a cuentaAnticipos por el total aplicado — nunca partido, nunca una cuenta de banco', async () => {
     const datos = await construirDatosImpresionNotaAnticipo(
       notaBase({ montoAplicado: 200000 }),
@@ -262,6 +289,77 @@ describe('construirDatosImpresionNotaAnticipo', () => {
       numeroDocumento: 12,
       credito: 150000,
     });
+  });
+
+  it('una aplicación sobre un Saldo Inicial credita la cuentaCartera de cada fila y muestra el documento original (FV / 2941), nunca ND ni SI', async () => {
+    const SI_ID = new Types.ObjectId();
+    const C1 = new Types.ObjectId();
+    const C2 = new Types.ObjectId();
+    const modelos = {
+      ...modelosVacios(),
+      saldosIniciales: {
+        find: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve([
+              {
+                _id: SI_ID,
+                numero: 2,
+                tipoDocumentoOriginal: 'FV',
+                numeroOriginal: '2941',
+                filas: [
+                  {
+                    conceptoId: C1,
+                    tipoConcepto: 'administracion',
+                    cuentaCartera: '13050501',
+                    cuentaIngreso: null,
+                  },
+                  {
+                    conceptoId: C2,
+                    tipoConcepto: 'intereses',
+                    cuentaCartera: '13050503',
+                    cuentaIngreso: '42100501',
+                  },
+                ],
+              },
+            ]),
+        })),
+      },
+    };
+    const aplicacion = {
+      tipoDocumento: 'SI',
+      documentoId: SI_ID,
+      montoAplicado: 200000,
+      detalleConceptos: [
+        { conceptoId: C1, nombreConcepto: 'Administración', monto: 150000 },
+        { conceptoId: C2, nombreConcepto: 'Intereses', monto: 50000 },
+      ],
+    } as unknown as AplicacionCarteraDocument;
+
+    const datos = await construirDatosImpresionNotaAnticipo(
+      notaBase(),
+      [aplicacion],
+      copropiedadBase({ usaCuentasOrden: true }),
+      COP,
+      modelos as never,
+      'Nota de Anticipo',
+    );
+
+    const creditos = datos.lineas.filter((l) => l.credito > 0);
+    expect(creditos).toEqual([
+      expect.objectContaining({
+        cuentaCodigo: '13050501',
+        tipoDocumento: 'FV',
+        numeroDocumento: '2941',
+        credito: 150000,
+      }),
+      expect.objectContaining({
+        cuentaCodigo: '42100501',
+        tipoDocumento: 'FV',
+        numeroDocumento: '2941',
+        credito: 50000,
+      }),
+    ]);
+    expect(datos.totalDebito).toBe(datos.totalCredito);
   });
 
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicación anterior a ese campo)', async () => {

@@ -22,6 +22,11 @@ import {
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import {
+  SaldoInicialAnticipo,
+  SaldoInicialAnticipoDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
+import {
   NotaContable,
   NotaContableDocument,
 } from '../../database/schemas/notas-contables/nota-contable.schema';
@@ -109,6 +114,8 @@ export class ConciliacionCarteraService {
     private readonly tenant: TenantContextService,
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    @InjectModel(SaldoInicialAnticipo.name)
+    private readonly saldosInicialesAnticipo: Model<SaldoInicialAnticipoDocument>,
   ) {}
 
   /**
@@ -415,32 +422,53 @@ export class ConciliacionCarteraService {
   }
 
   /**
-   * Every Recibo still carrying an unapplied anticipo AS OF `hasta` — a
+   * Every Recibo — and every Saldo Inicial de Anticipo, which is an anticipo
+   * like any other — still carrying an unapplied balance AS OF `hasta`: a
    * historical snapshot, not `EstadoCuentaService`'s live-today one (see
-   * `AnticipoPendienteConciliacion`'s own docblock). A Recibo's leftover is
-   * drawn down by two kinds of applications: the initial one at its own
-   * creation (`sourceType: 'RC'`, `sourceId` the Recibo itself) and any later
-   * Nota de Anticipo (`sourceType: 'NA'`, `sourceId` the NOTE's own id, not
-   * the Recibo's — resolved here via `NotaAnticipo.reciboOrigenId`). Both are
-   * judged "already happened by `hasta`" via `activeAsOf`, now keyed by
-   * `sourceDate` (the real fix this report needed — see that field's own
-   * schema docblock).
+   * `AnticipoPendienteConciliacion`'s own docblock). An origin's leftover is
+   * drawn down by two kinds of applications: the initial one at a Recibo's
+   * own creation (`sourceType: 'RC'`, `sourceId` the Recibo itself — a Saldo
+   * Inicial de Anticipo has none, it is imported already unapplied) and any
+   * later Nota de Anticipo (`sourceType: 'NA'`, `sourceId` the NOTE's own id,
+   * not the origin's — resolved here via `NotaAnticipo.reciboOrigenId`, which
+   * holds a Recibo's OR a Saldo Inicial de Anticipo's id depending on
+   * `origenTipo`). Both are judged "already happened by `hasta`" via
+   * `activeAsOf`, now keyed by `sourceDate` (the real fix this report needed
+   * — see that field's own schema docblock).
+   *
+   * A Saldo Inicial de Anticipo is listed under its previous system's own
+   * number (`RC-1234`), never the internal `SI` tag, and one voided on or
+   * before `hasta` is no longer an anticipo as of that date.
    */
   private async anticiposPendientesAlCorte(
     copropiedadId: Types.ObjectId,
     hasta: Date,
   ): Promise<AnticipoPendienteConciliacion[]> {
-    const recibos = await this.recibos
-      .find({ copropiedadId, fechaRecibo: { $lte: hasta } })
-      .sort({ numero: 1 })
-      .exec();
-    if (recibos.length === 0) return [];
+    const [recibos, saldosInicialesAnticipo] = await Promise.all([
+      this.recibos
+        .find({ copropiedadId, fechaRecibo: { $lte: hasta } })
+        .sort({ numero: 1 })
+        .exec(),
+      this.saldosInicialesAnticipo
+        .find({ copropiedadId, fechaRecibo: { $lte: hasta } })
+        .sort({ numero: 1 })
+        .exec(),
+    ]);
+    const siaVigentes = saldosInicialesAnticipo.filter(
+      (sia) =>
+        sia.estado === 'activo' ||
+        (sia.fechaAnulacion !== null && sia.fechaAnulacion > hasta),
+    );
+    if (recibos.length === 0 && siaVigentes.length === 0) return [];
 
-    const reciboIds = recibos.map((r) => r._id);
+    const origenIds = [
+      ...recibos.map((r) => r._id),
+      ...siaVigentes.map((s) => s._id),
+    ];
     const notasAnticipo = await this.notasAnticipo
-      .find({ copropiedadId, reciboOrigenId: { $in: reciboIds } })
+      .find({ copropiedadId, reciboOrigenId: { $in: origenIds } })
       .exec();
-    const reciboIdPorNotaAnticipoId = new Map(
+    const origenIdPorNotaAnticipoId = new Map(
       notasAnticipo.map((n) => [n._id.toString(), n.reciboOrigenId.toString()]),
     );
 
@@ -448,7 +476,7 @@ export class ConciliacionCarteraService {
       .find({
         copropiedadId,
         $or: [
-          { sourceType: 'RC', sourceId: { $in: reciboIds } },
+          { sourceType: 'RC', sourceId: { $in: origenIds } },
           {
             sourceType: 'NA',
             sourceId: { $in: notasAnticipo.map((n) => n._id) },
@@ -457,22 +485,45 @@ export class ConciliacionCarteraService {
       })
       .exec();
 
-    const aplicadoActivoPorRecibo = new Map<string, number>();
+    const aplicadoActivoPorOrigen = new Map<string, number>();
     for (const app of apps) {
       if (!activeAsOf(app, hasta)) continue;
-      const reciboId =
+      const origenId =
         app.sourceType === 'RC'
           ? app.sourceId.toString()
-          : reciboIdPorNotaAnticipoId.get(app.sourceId.toString());
-      if (!reciboId) continue;
-      aplicadoActivoPorRecibo.set(
-        reciboId,
-        (aplicadoActivoPorRecibo.get(reciboId) ?? 0) + app.montoAplicado,
+          : origenIdPorNotaAnticipoId.get(app.sourceId.toString());
+      if (!origenId) continue;
+      aplicadoActivoPorOrigen.set(
+        origenId,
+        (aplicadoActivoPorOrigen.get(origenId) ?? 0) + app.montoAplicado,
       );
     }
 
+    const candidatos = [
+      ...recibos.map((r) => ({
+        inmuebleId: r.inmuebleId,
+        fecha: r.fechaRecibo,
+        numero: r.numeroCompleto,
+        pendiente: Math.max(
+          0,
+          r.montoRecibido -
+            (aplicadoActivoPorOrigen.get(r._id.toString()) ?? 0),
+        ),
+      })),
+      ...siaVigentes.map((s) => ({
+        inmuebleId: s.inmuebleId,
+        fecha: s.fechaRecibo,
+        numero: numeroCompletoSaldoInicial(s),
+        pendiente: Math.max(
+          0,
+          s.montoOriginal -
+            (aplicadoActivoPorOrigen.get(s._id.toString()) ?? 0),
+        ),
+      })),
+    ].filter(({ pendiente }) => pendiente > 0);
+
     const inmuebleIds = [
-      ...new Set(recibos.map((r) => r.inmuebleId.toString())),
+      ...new Set(candidatos.map((c) => c.inmuebleId.toString())),
     ];
     const inmueblesDoc = inmuebleIds.length
       ? await this.inmuebles
@@ -483,22 +534,12 @@ export class ConciliacionCarteraService {
       inmueblesDoc.map((i) => [i._id.toString(), i.codigo]),
     );
 
-    return recibos
-      .map((r) => ({
-        r,
-        pendiente: Math.max(
-          0,
-          r.montoRecibido -
-            (aplicadoActivoPorRecibo.get(r._id.toString()) ?? 0),
-        ),
-      }))
-      .filter(({ pendiente }) => pendiente > 0)
-      .map(({ r, pendiente }) => ({
-        inmuebleCodigo: codigoPorInmueble.get(r.inmuebleId.toString()) ?? '—',
-        fecha: r.fechaRecibo.toISOString(),
-        numeroRecibo: r.numeroCompleto,
-        valor: pendiente,
-      }));
+    return candidatos.map((c) => ({
+      inmuebleCodigo: codigoPorInmueble.get(c.inmuebleId.toString()) ?? '—',
+      fecha: c.fecha.toISOString(),
+      numeroRecibo: c.numero,
+      valor: c.pendiente,
+    }));
   }
 
   /**

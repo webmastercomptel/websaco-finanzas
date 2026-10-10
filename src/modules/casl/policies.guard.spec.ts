@@ -2,12 +2,26 @@ import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { CaslAbilityFactory } from './casl-ability.factory';
 import { PoliciesGuard } from './policies.guard';
+import {
+  CHECK_ABILITY_KEY,
+  CHECK_ANY_ABILITY_KEY,
+} from './check-ability.decorator';
 import type { RequiredRule } from './check-ability.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-/** Reflector stub returning a fixed rule set. */
-const reflectorWith = (rules?: RequiredRule[]): Reflector =>
-  ({ getAllAndOverride: () => rules }) as unknown as Reflector;
+/** Reflector stub returning a fixed AND rule set and/or any-of rule set. */
+const reflectorWith = (
+  rules?: RequiredRule[],
+  anyRules?: RequiredRule[],
+): Reflector =>
+  ({
+    getAllAndOverride: (key: string) =>
+      key === CHECK_ABILITY_KEY
+        ? rules
+        : key === CHECK_ANY_ABILITY_KEY
+          ? anyRules
+          : undefined,
+  }) as unknown as Reflector;
 
 /** ExecutionContext stub exposing a request with (or without) a user. */
 const contextWith = (user?: IRequestUser): ExecutionContext =>
@@ -17,8 +31,8 @@ const contextWith = (user?: IRequestUser): ExecutionContext =>
     getClass: () => undefined,
   }) as unknown as ExecutionContext;
 
-const guardFor = (rules?: RequiredRule[]) =>
-  new PoliciesGuard(reflectorWith(rules), new CaslAbilityFactory());
+const guardFor = (rules?: RequiredRule[], anyRules?: RequiredRule[]) =>
+  new PoliciesGuard(reflectorWith(rules, anyRules), new CaslAbilityFactory());
 
 const userWith = (permissions: string[]): IRequestUser => ({
   uid: 'uid-1',
@@ -85,5 +99,83 @@ describe('PoliciesGuard', () => {
     };
 
     expect(guard.canActivate(contextWith(root))).toBe(true);
+  });
+
+  describe('@CheckAnyAbility (alguna de las reglas)', () => {
+    const anyRules: RequiredRule[] = [
+      { action: 'create', subject: 'Recibo' },
+      { action: 'create', subject: 'NotaCredito' },
+    ];
+
+    it('pasa con que el usuario cumpla UNA de las reglas', () => {
+      const guard = guardFor(undefined, anyRules);
+
+      expect(guard.canActivate(contextWith(userWith(['recibos.crear'])))).toBe(
+        true,
+      );
+      expect(
+        guard.canActivate(contextWith(userWith(['notas-credito.crear']))),
+      ).toBe(true);
+    });
+
+    it('deniega cuando el usuario no cumple NINGUNA', () => {
+      const guard = guardFor(undefined, anyRules);
+
+      expect(() =>
+        guard.canActivate(contextWith(userWith(['recibos.ver']))),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('deniega sin usuario autenticado', () => {
+      expect(() =>
+        guardFor(undefined, anyRules).canActivate(contextWith()),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('una lista any-of vacía no gatea la ruta', () => {
+      expect(guardFor(undefined, []).canActivate(contextWith())).toBe(true);
+    });
+
+    it('el administrador de plataforma pasa', () => {
+      const root: IRequestUser = {
+        uid: 'uid-root',
+        email: 'root@ejemplo.com',
+        isPlatformAdmin: true,
+      };
+
+      expect(guardFor(undefined, anyRules).canActivate(contextWith(root))).toBe(
+        true,
+      );
+    });
+
+    it('combinado con @CheckAbility: exige TODAS las AND y además alguna any-of', () => {
+      const guard = guardFor(
+        [{ action: 'read', subject: 'Factura' }],
+        anyRules,
+      );
+
+      expect(() =>
+        guard.canActivate(contextWith(userWith(['recibos.crear']))),
+      ).toThrow(ForbiddenException);
+      expect(() =>
+        guard.canActivate(contextWith(userWith(['facturas.ver']))),
+      ).toThrow(ForbiddenException);
+      expect(
+        guard.canActivate(
+          contextWith(userWith(['facturas.ver', 'recibos.crear'])),
+        ),
+      ).toBe(true);
+    });
+
+    it('no debilita el AND: @CheckAbility sigue exigiendo todas', () => {
+      const guard = guardFor([
+        { action: 'create', subject: 'Recibo' },
+        { action: 'create', subject: 'NotaCredito' },
+      ]);
+
+      expect(() =>
+        guard.canActivate(contextWith(userWith(['recibos.crear']))),
+      ).toThrow(ForbiddenException);
+    });
   });
 });

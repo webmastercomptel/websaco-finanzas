@@ -31,8 +31,14 @@ export type FilaMarcadorImpresion = Record<string, never>;
 export interface LineaAsientoImpresion {
   cuentaCodigo: string;
   cuentaNombre: string;
-  tipoDocumento: 'FV' | 'ND' | 'SI' | null;
-  numeroDocumento: number | null;
+  /** 'FV' / 'ND' for system documents. For a Saldo Inicial it is the
+   *  document's ORIGINAL tipo from the client's previous system (free text,
+   *  e.g. 'FV') — never the internal 'SI' tag. */
+  tipoDocumento: string | null;
+  /** System documents carry their numeric consecutivo; a Saldo Inicial
+   *  carries its ORIGINAL número (free text, e.g. '2941'), never the
+   *  internal ordinal. */
+  numeroDocumento: string | number | null;
   debito: number;
   credito: number;
 }

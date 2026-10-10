@@ -8,7 +8,10 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { CaslAbilityFactory } from './casl-ability.factory';
-import { CHECK_ABILITY_KEY } from './check-ability.decorator';
+import {
+  CHECK_ABILITY_KEY,
+  CHECK_ANY_ABILITY_KEY,
+} from './check-ability.decorator';
 import type { RequiredRule } from './check-ability.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
@@ -17,7 +20,8 @@ interface AuthenticatedRequest extends Request {
 }
 
 /**
- * Enforces the abilities declared with the CheckAbility decorator.
+ * Enforces the abilities declared with the CheckAbility (all required) and
+ * CheckAnyAbility (at least one required) decorators.
  *
  * Runs AFTER the auth guard, since it reads `request.user` — which is why it is
  * applied per controller in the same UseGuards list, never as a global
@@ -39,8 +43,14 @@ export class PoliciesGuard implements CanActivate {
       CHECK_ABILITY_KEY,
       [context.getHandler(), context.getClass()],
     );
-    // Opt-in: routes without the decorator are not gated here.
-    if (!rules || rules.length === 0) return true;
+    const anyRules = this.reflector.getAllAndOverride<RequiredRule[]>(
+      CHECK_ANY_ABILITY_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    const hasAll = !!rules && rules.length > 0;
+    const hasAny = !!anyRules && anyRules.length > 0;
+    // Opt-in: routes without either decorator are not gated here.
+    if (!hasAll && !hasAny) return true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
@@ -49,7 +59,11 @@ export class PoliciesGuard implements CanActivate {
     }
 
     const ability = this.abilityFactory.createForUser(user);
-    const allowed = rules.every((r) => ability.can(r.action, r.subject));
+    // CheckAbility: every rule (AND). CheckAnyAbility: at least one (OR).
+    // Both present: both conditions must hold.
+    const allowed =
+      (!hasAll || rules.every((r) => ability.can(r.action, r.subject))) &&
+      (!hasAny || anyRules.some((r) => ability.can(r.action, r.subject)));
     if (!allowed) {
       throw new ForbiddenException('No tenés permiso para esta acción');
     }

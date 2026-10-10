@@ -39,6 +39,11 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import { resolverSaldosInicialesPorNumero } from '../saldos-iniciales/saldo-inicial-cruce.util';
+import {
   CuentaContable,
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
@@ -87,6 +92,11 @@ export class MovimientoContableService {
     @InjectModel(CuentaContable.name)
     private readonly cuentasContables: Model<CuentaContableDocument>,
     private readonly tenant: TenantContextService,
+    // APPENDED LAST, optional, same convention as the sibling services:
+    // resolves a Saldo Inicial movimiento's documento cruce to its original
+    // document at read time (see `resolverSaldosInicialesPorNumero`).
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   /**
@@ -126,6 +136,12 @@ export class MovimientoContableService {
       copropiedadId,
     );
 
+    const saldosInicialesPorNumero = await resolverSaldosInicialesPorNumero(
+      this.saldosIniciales,
+      copropiedadId,
+      asientos,
+    );
+
     const movimientos = asientos.map((a) => {
       const anchorId = resolveAnchorId(a).toString();
       const anchorInfo = anchorMap.get(anchorId);
@@ -137,6 +153,7 @@ export class MovimientoContableService {
         a,
         { ...meta, numeroDocumento },
         nombrePorCuenta,
+        saldosInicialesPorNumero,
       );
     });
 

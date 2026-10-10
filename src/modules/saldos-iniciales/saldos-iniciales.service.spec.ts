@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Types } from 'mongoose';
+import { model, Types } from 'mongoose';
+import { SaldoInicialSchema } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { SaldosInicialesService } from './saldos-iniciales.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ProgresoImportacionService } from '../inmuebles/progreso-importacion.service';
@@ -33,7 +34,17 @@ const progresoFalso = (): ProgresoImportacionService =>
  * actually accumulate across rows for the ledger-side assertions to mean
  * anything.
  */
-const construirServicio = () => {
+const construirServicio = (
+  conceptos: Record<string, unknown>[] = [
+    {
+      _id: CONCEPTO,
+      nombre: 'Administración',
+      tipo: 'administracion',
+      cuentaDebitoId: null,
+      cuentaCreditoId: null,
+    },
+  ],
+) => {
   const documentos: Record<string, unknown>[] = [];
   const saldosTotales: Record<string, unknown>[] = [];
   const carteraPorDocumentoFilas: Record<string, unknown>[] = [];
@@ -256,16 +267,7 @@ const construirServicio = () => {
   const conceptosCobro = {
     find: jest.fn(() => ({
       populate: jest.fn().mockReturnThis(),
-      exec: () =>
-        Promise.resolve([
-          {
-            _id: CONCEPTO,
-            nombre: 'Administración',
-            tipo: 'administracion',
-            cuentaDebitoId: null,
-            cuentaCreditoId: null,
-          },
-        ]),
+      exec: () => Promise.resolve(conceptos),
     })),
   };
 
@@ -342,6 +344,74 @@ describe('SaldosInicialesService.importar', () => {
     });
     expect(carteraPorDocumentoFilas).toHaveLength(1);
     expect(saldosCarteraFilas[0]).toMatchObject({ saldoPendiente: 300000 });
+  });
+
+  it('congela cuentaCartera/cuentaIngreso/tipoConcepto en cada línea, con los nombres reales del esquema', async () => {
+    const INTERESES = new Types.ObjectId();
+    const SIN_CUENTAS = new Types.ObjectId();
+    const { service, documentos } = construirServicio([
+      {
+        _id: CONCEPTO,
+        nombre: 'Administración',
+        tipo: 'administracion',
+        cuentaDebitoId: { codigo: '130505' },
+        cuentaCreditoId: { codigo: '413505' },
+      },
+      {
+        _id: INTERESES,
+        nombre: 'Intereses de mora',
+        tipo: 'intereses',
+        cuentaDebitoId: { codigo: '130510' },
+        cuentaCreditoId: { codigo: '421005' },
+      },
+      {
+        _id: SIN_CUENTAS,
+        nombre: 'Otro',
+        tipo: 'otro',
+        cuentaDebitoId: null,
+        cuentaCreditoId: null,
+      },
+    ]);
+
+    const resultado = await service.importar(
+      CUENTA,
+      dtoValido([
+        filaValida({
+          cargos: [
+            { conceptoId: CONCEPTO.toString(), monto: 100 },
+            { conceptoId: INTERESES.toString(), monto: 20 },
+            { conceptoId: SIN_CUENTAS.toString(), monto: 5 },
+          ],
+        }),
+      ]),
+    );
+    expect(resultado.errores).toHaveLength(0);
+
+    // Run the written document through the REAL schema: Mongoose strict mode
+    // silently drops unknown keys, so a writer using stale field names would
+    // surface here as null / 'otro' defaults instead of the frozen values.
+    const Modelo = model('SaldoInicialSpecSchemaCheck', SaldoInicialSchema);
+    const persistido = new Modelo(documentos[0]).toObject();
+
+    expect(
+      persistido.filas.map((l) => ({
+        cuentaCartera: l.cuentaCartera,
+        cuentaIngreso: l.cuentaIngreso,
+        tipoConcepto: l.tipoConcepto,
+      })),
+    ).toEqual([
+      {
+        cuentaCartera: '130505',
+        cuentaIngreso: '413505',
+        tipoConcepto: 'administracion',
+      },
+      {
+        cuentaCartera: '130510',
+        cuentaIngreso: '421005',
+        tipoConcepto: 'intereses',
+      },
+      { cuentaCartera: null, cuentaIngreso: null, tipoConcepto: 'otro' },
+    ]);
   });
 
   it('rechaza el archivo completo sin persistir nada si un inmueble no existe', async () => {
@@ -490,6 +560,40 @@ describe('SaldosInicialesService.listar filtros', () => {
       tipoDocumento: 'SI',
       saldoPendiente: { $gt: 0 },
     });
+  });
+});
+
+describe('SaldosInicialesService.listarAplicables', () => {
+  it('devuelve solo los activos con saldo > 0 del inmueble pedido', async () => {
+    const { service, saldosTotales, documentos } = construirServicio();
+    await service.importar(
+      CUENTA,
+      dtoValido([
+        filaValida(),
+        filaValida({ numero: '1002' }),
+        filaValida({ numero: '1003' }),
+      ]),
+    );
+    saldosTotales[0].saldoPendiente = 0; // pagado
+    documentos[1].estado = 'anulado'; // anulado
+
+    const aplicables = await service.listarAplicables({
+      inmuebleId: INMUEBLE.toString(),
+    });
+
+    expect(aplicables.map((a) => a.numeroOriginal)).toEqual(['1003']);
+    expect(aplicables[0].saldoPendiente).toBeGreaterThan(0);
+  });
+
+  it('no mezcla otros inmuebles', async () => {
+    const { service } = construirServicio();
+    await service.importar(CUENTA, dtoValido([filaValida()]));
+
+    expect(
+      await service.listarAplicables({
+        inmuebleId: new Types.ObjectId().toString(),
+      }),
+    ).toHaveLength(0);
   });
 });
 

@@ -4,10 +4,12 @@ import type { AplicacionCarteraDocument } from '../../database/schemas/recibos/a
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
+import type { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
+import { cuentaCarteraDeLinea } from './cruce.util';
 import { emisorDe } from '../../common/documentos/emisor.util';
 import type {
   DatosReciboImpresion,
@@ -17,6 +19,9 @@ import type {
 export interface ModelosDatosImpresionRecibo {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
+  /** Optional like every dependency added after the fact (positional-mock
+   *  tests predate it) — only a Recibo that paid a Saldo Inicial reads it. */
+  saldosIniciales?: Model<SaldoInicialDocument>;
   inmuebles: Model<InmuebleDocument>;
   terceros: Model<TerceroDocument>;
   cuentasContables: Model<CuentaContableDocument>;
@@ -79,23 +84,38 @@ export async function construirDatosImpresionRecibo(
     .filter((a) => a.tipoDocumento === 'ND')
     .map((a) => a.documentoId);
 
-  const [facturas, notas, inmueble, tercero] = await Promise.all([
-    facturaIds.length > 0
-      ? modelos.facturas
-          .find({ _id: { $in: facturaIds }, copropiedadId })
-          .exec()
-      : Promise.resolve([]),
-    notaIds.length > 0
-      ? modelos.notasDebito
-          .find({ _id: { $in: notaIds }, copropiedadId })
-          .exec()
-      : Promise.resolve([]),
-    modelos.inmuebles.findOne({ _id: recibo.inmuebleId, copropiedadId }).exec(),
-    modelos.terceros.findOne({ _id: recibo.terceroId, copropiedadId }).exec(),
-  ]);
+  const saldoInicialIds = aplicaciones
+    .filter((a) => a.tipoDocumento === 'SI')
+    .map((a) => a.documentoId);
+
+  const [facturas, notas, saldosIniciales, inmueble, tercero] =
+    await Promise.all([
+      facturaIds.length > 0
+        ? modelos.facturas
+            .find({ _id: { $in: facturaIds }, copropiedadId })
+            .exec()
+        : Promise.resolve([]),
+      notaIds.length > 0
+        ? modelos.notasDebito
+            .find({ _id: { $in: notaIds }, copropiedadId })
+            .exec()
+        : Promise.resolve([]),
+      saldoInicialIds.length > 0 && modelos.saldosIniciales
+        ? modelos.saldosIniciales
+            .find({ _id: { $in: saldoInicialIds }, copropiedadId })
+            .exec()
+        : Promise.resolve([]),
+      modelos.inmuebles
+        .findOne({ _id: recibo.inmuebleId, copropiedadId })
+        .exec(),
+      modelos.terceros.findOne({ _id: recibo.terceroId, copropiedadId }).exec(),
+    ]);
 
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
   const notaPorId = new Map(notas.map((n) => [n._id.toString(), n]));
+  const saldoInicialPorId = new Map(
+    saldosIniciales.map((s) => [s._id.toString(), s]),
+  );
 
   const lineas: LineaAsientoImpresion[] = [];
   const codigosUsados = new Set<string>([recibo.cuentaDestino]);
@@ -132,7 +152,35 @@ export async function construirDatosImpresionRecibo(
           credito: detalle.monto,
         });
       }
-    } else {
+    } else if (aplicacion.tipoDocumento === 'SI') {
+      // A Saldo Inicial is shown under the document it was in the client's
+      // previous system (tipoDocumentoOriginal / numeroOriginal, e.g. FV /
+      // 2941), never the internal `SI` tag nor its internal ordinal. Account
+      // = the SAME rule the real posting uses (`cuentaCarteraDeLinea`,
+      // including the intereses + usaCuentasOrden case).
+      const saldoInicial = saldoInicialPorId.get(
+        aplicacion.documentoId.toString(),
+      );
+      for (const detalle of detalles) {
+        const lineaSI = detalle.conceptoId
+          ? saldoInicial?.filas.find((l) =>
+              l.conceptoId.equals(detalle.conceptoId),
+            )
+          : undefined;
+        const codigo =
+          cuentaCarteraDeLinea(lineaSI, copropiedad.usaCuentasOrden ?? false) ??
+          cuentaCartera;
+        codigosUsados.add(codigo);
+        lineas.push({
+          cuentaCodigo: codigo,
+          cuentaNombre: '',
+          tipoDocumento: saldoInicial?.tipoDocumentoOriginal ?? null,
+          numeroDocumento: saldoInicial?.numeroOriginal ?? null,
+          debito: 0,
+          credito: detalle.monto,
+        });
+      }
+    } else if (aplicacion.tipoDocumento === 'ND') {
       const nota = notaPorId.get(aplicacion.documentoId.toString());
       codigosUsados.add(cuentaCartera);
       for (const detalle of detalles) {

@@ -11,7 +11,11 @@ import type {
   Subject,
 } from './casl-ability.constants';
 
-/** `modulo` segment of a permission key -> CASL subject. */
+/**
+ * `modulo` segment of a permission key -> CASL subject, or a list of subjects
+ * when one catalog row deliberately governs several (every verb granted on the
+ * key applies to each subject in the list).
+ */
 export const MODULE_TO_SUBJECT = {
   inmuebles: 'Inmueble',
   terceros: 'Tercero',
@@ -22,7 +26,11 @@ export const MODULE_TO_SUBJECT = {
   'notas-contables': 'NotaContable',
   'otras-notas': 'OtraNota',
   'notas-anticipo': 'NotaAnticipo',
-  'saldos-iniciales': 'SaldoInicial',
+  // One catalog row ("Saldos Iniciales (cartera y anticipos)") governs both
+  // opening-balance documents with the same verbs.
+  'saldos-iniciales': ['SaldoInicial', 'SaldoInicialAnticipo'],
+  // Legacy key: no longer offered in the UI catalog, but roles saved earlier may
+  // still store it. Keep it working (anticipo only, never SaldoInicial).
   'saldos-iniciales-anticipo': 'SaldoInicialAnticipo',
   anulaciones: 'Anulacion',
   consultas: 'Consulta',
@@ -30,7 +38,7 @@ export const MODULE_TO_SUBJECT = {
   'parametros-facturacion': 'Configuracion',
   documentos: 'Configuracion',
   'adicion-contabilidad': 'Configuracion',
-} satisfies Record<string, Subject>;
+} satisfies Record<string, Subject | readonly Subject[]>;
 
 /**
  * `accion` segment of a permission key -> CASL action.
@@ -67,9 +75,13 @@ export function rulesFromPermissionKeys(
 
   for (const key of keys) {
     const [modulo, verbo] = key.split('.');
-    const subject = MODULE_TO_SUBJECT[modulo as keyof typeof MODULE_TO_SUBJECT];
+    const mapped = MODULE_TO_SUBJECT[
+      modulo as keyof typeof MODULE_TO_SUBJECT
+    ] as Subject | readonly Subject[] | undefined;
     const action = VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION];
-    if (subject && action) can(action, subject);
+    if (!mapped || !action) continue;
+    const subjects = typeof mapped === 'string' ? [mapped] : mapped;
+    for (const subject of subjects) can(action, subject);
   }
 
   return rules;

@@ -98,6 +98,7 @@ import {
   type MarcasCuentaContable,
 } from '../facturacion/asiento.builder';
 import { toNotaAnticipo, toNotaAnticipoDetalle } from './notas-anticipo.mapper';
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import { construirDatosImpresionNotaAnticipo } from './nota-anticipo-pdf-datos.util';
 import { TituloDocumentoService } from '../../common/documentos/titulo-documento.service';
 import type {
@@ -130,6 +131,26 @@ import type { SessionFindOneModel } from '../../common/interfaces/mongoose-narro
  * `objectPath`/`generatedAt` lookup; every existing positional test keeps
  * compiling with both left `undefined`.
  */
+/**
+ * How the origin of a Nota de Anticipo is named to a person: a Recibo by its
+ * own number, a Saldo Inicial de Anticipo by the document it was in the
+ * previous system in the hyphenated `TIPO-NÚMERO` shape (`RC-1234`) — the
+ * frozen `numeroCompleto` on that document keeps the import's space and
+ * must not leak into the UI, and the internal `SI` tag never does.
+ */
+const etiquetaOrigen = (
+  origenTipo: 'RC' | 'SI',
+  origen: { numeroCompleto: string },
+): string =>
+  origenTipo === 'SI'
+    ? numeroCompletoSaldoInicial(
+        origen as unknown as Pick<
+          SaldoInicialAnticipoDocument,
+          'tipoDocumentoOriginal' | 'numeroOriginal'
+        >,
+      )
+    : origen.numeroCompleto;
+
 @Injectable()
 export class NotasAnticipoService {
   constructor(
@@ -372,7 +393,7 @@ export class NotasAnticipoService {
     });
     if (origen.unappliedAmount <= 0) {
       throw new ConflictException(
-        `El documento ${origen.numeroCompleto} no tiene anticipo pendiente por aplicar`,
+        `El documento ${etiquetaOrigen(origenTipo, origen)} no tiene anticipo pendiente por aplicar`,
       );
     }
 
@@ -467,7 +488,7 @@ export class NotasAnticipoService {
     // ledger with no effect.
     if (totalAplicado === 0) {
       throw new ConflictException(
-        `No hay cartera abierta contra la cual aplicar el anticipo del documento ${origen.numeroCompleto}`,
+        `No hay cartera abierta contra la cual aplicar el anticipo del documento ${etiquetaOrigen(origenTipo, origen)}`,
       );
     }
 
@@ -496,6 +517,8 @@ export class NotasAnticipoService {
     return toNotaAnticipo(
       final!,
       await this.resolverInmuebleCodigo(final!.inmuebleId),
+      null,
+      etiquetaOrigen(origenTipo, origen),
     );
   }
 
@@ -530,6 +553,7 @@ export class NotasAnticipoService {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
         recibos: this.recibos,
+        saldosIniciales: this.saldosIniciales,
         inmuebles: this.inmuebles!,
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,
@@ -578,11 +602,17 @@ export class NotasAnticipoService {
     // Never a bare `.map(toNotaAnticipo)` — `Array.map` would leak its own
     // `index` into `toNotaAnticipo`'s second (`inmuebleCodigo`) param, same
     // gotcha `toAplicacionCartera`'s own docblock already warns about.
+    const numeroOrigenPorId = await this.numerosDeOrigen(
+      copropiedadId,
+      documentos,
+    );
     return {
       items: documentos.map((doc) =>
         toNotaAnticipo(
           doc,
           codigoPorInmueble.get(doc.inmuebleId.toString()) ?? '',
+          null,
+          numeroOrigenPorId.get(doc.reciboOrigenId.toString()) ?? null,
         ),
       ),
       total,
@@ -647,12 +677,15 @@ export class NotasAnticipoService {
       ? await this.presentacionDocumento.buscar('NA', nota._id)
       : null;
 
+    const numeroOrigenPorId = await this.numerosDeOrigen(copropiedadId, [nota]);
+
     return toNotaAnticipoDetalle(
       nota,
       aplicaciones,
       await this.resolverInmuebleCodigo(nota.inmuebleId),
       numerosPorDocumento,
       presentacion,
+      numeroOrigenPorId.get(nota.reciboOrigenId.toString()) ?? null,
     );
   }
 
@@ -958,11 +991,55 @@ export class NotasAnticipoService {
         .findOne({ _id: id, copropiedadId })
         .session(session)
         .exec();
+      const numeroOrigenPorId = await this.numerosDeOrigen(copropiedadId, [
+        final!,
+      ]);
       return toNotaAnticipo(
         final!,
         await this.resolverInmuebleCodigo(final!.inmuebleId),
+        null,
+        numeroOrigenPorId.get(final!.reciboOrigenId.toString()) ?? null,
       );
     });
+  }
+
+  /**
+   * Batch-resolves, for a set of Notas de Anticipo, the number of the
+   * document each one drew from, keyed by `reciboOrigenId`. The id points at
+   * a Recibo or — when `origenTipo` is `'SI'` — at a Saldo Inicial de
+   * Anticipo, so each group is looked up in its own collection (an id never
+   * collides across the two). Tenant-scoped like every other lookup here.
+   */
+  private async numerosDeOrigen(
+    copropiedadId: Types.ObjectId,
+    notas: NotaAnticipoDocument[],
+  ): Promise<Map<string, string>> {
+    const idsDe = (tipo: 'RC' | 'SI'): Types.ObjectId[] =>
+      [
+        ...new Set(
+          notas
+            .filter((n) => (n.origenTipo ?? 'RC') === tipo)
+            .map((n) => n.reciboOrigenId.toString()),
+        ),
+      ].map((id) => new Types.ObjectId(id));
+    const reciboIds = idsDe('RC');
+    const saldoInicialIds = idsDe('SI');
+    const [recibos, saldosIniciales] = await Promise.all([
+      reciboIds.length
+        ? this.recibos.find({ copropiedadId, _id: { $in: reciboIds } }).exec()
+        : [],
+      saldoInicialIds.length && this.saldosInicialesAnticipo
+        ? this.saldosInicialesAnticipo
+            .find({ copropiedadId, _id: { $in: saldoInicialIds } })
+            .exec()
+        : [],
+    ]);
+    const mapa = new Map<string, string>();
+    for (const r of recibos) mapa.set(r._id.toString(), r.numeroCompleto);
+    for (const si of saldosIniciales) {
+      mapa.set(si._id.toString(), numeroCompletoSaldoInicial(si));
+    }
+    return mapa;
   }
 
   /**

@@ -1147,6 +1147,12 @@ export interface NotaAnticipo {
   terceroId: string | null;
   origenTipo: 'RC' | 'SI';
   reciboOrigenId: string;
+  /** The origin document's number as a person knows it: the Recibo's own
+   *  `numeroCompleto`, or — for `'SI'` — the previous system's document in
+   *  the same hyphenated shape (`RC-1234`, `tipoDocumentoOriginal-numeroOriginal`).
+   *  Never the internal `SI` tag. Resolved live; `null` only if the origin
+   *  document can no longer be found. */
+  origenNumeroCompleto: string | null;
   prefijo: string;
   numero: number;
   numeroCompleto: string;
@@ -1593,12 +1599,16 @@ export interface MovimientoEstadoCuenta {
   categoria: 'pago' | 'descuento' | null;
 }
 
-/** One Recibo of this inmueble still carrying a pending anticipo
- *  (`unappliedAmount > 0`) — same "pending anticipo" definition the
- *  Anticipos bandeja uses (`GET /recibos?conAnticipoDisponible=true`), here
- *  scoped to just this inmueble and shown alongside its statement. `monto`
- *  is the Recibo's LIVE `unappliedAmount`, not what it printed at creation
- *  — a later Nota de Anticipo may have already consumed part of it. */
+/** One Recibo — or one active Saldo Inicial de Anticipo, which is an
+ *  anticipo like any other — of this inmueble still carrying a pending
+ *  balance. Same "pending anticipo" definition the Anticipos bandeja uses
+ *  (`GET /recibos?conAnticipoDisponible=true` plus
+ *  `GET /saldos-iniciales-anticipo?conSaldoDisponible=true`), here scoped to
+ *  just this inmueble and shown alongside its statement. `numeroCompleto` is
+ *  the Recibo's own number, or `RC-1234` for a Saldo Inicial de Anticipo
+ *  (never the internal `SI` tag). `monto` is the LIVE unapplied balance
+ *  (`SaldoDocumentoOrigen`), not what it printed at creation — a later Nota
+ *  de Anticipo may have already consumed part of it. */
 export interface AnticipoPendienteEstadoCuenta {
   numeroCompleto: string;
   fecha: string;
@@ -1715,8 +1725,9 @@ export interface FilaConciliacionCartera {
   valorCredito: number;
 }
 
-/** One Recibo still carrying an unapplied anticipo AS OF `periodEnd` — a
- *  historical snapshot (unlike `AnticipoPendienteEstadoCuenta`'s live-today
+/** One Recibo — or Saldo Inicial de Anticipo, listed as `RC-1234` in
+ *  `numeroRecibo` — still carrying an unapplied anticipo AS OF
+ *  `periodEnd` — a historical snapshot (unlike `AnticipoPendienteEstadoCuenta`'s live-today
  *  one), matching this report's own point-in-time reasoning: what a
  *  reconciler closing out that period actually saw. */
 export interface AnticipoPendienteConciliacion {
@@ -2050,7 +2061,7 @@ export interface LineaMovimientoContable {
   /** The FV/ND document this line settles (Recibo, Nota Crédito) or creates
    *  a receivable against (Factura, Nota Débito) — present only when this
    *  line's account is flagged `requiereDocumentoCruce`. */
-  documentoCruce: { tipo: 'FV' | 'ND' | 'SI'; numero: number } | null;
+  documentoCruce: { tipo: string; numero: string | number } | null;
 }
 
 /** One journal entry card in the accounting journal view. */

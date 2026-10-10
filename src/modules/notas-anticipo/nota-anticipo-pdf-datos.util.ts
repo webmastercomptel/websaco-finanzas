@@ -5,11 +5,14 @@ import type { CopropiedadDocument } from '../../database/schemas/copropiedades/c
 import type { FacturaDocument } from '../../database/schemas/facturacion/factura.schema';
 import type { NotaDebitoDocument } from '../../database/schemas/notas-debito/nota-debito.schema';
 import type { ReciboDocument } from '../../database/schemas/recibos/recibo.schema';
+import { numeroCompletoSaldoInicial } from '../saldos-iniciales/saldos-iniciales.mapper';
 import type { SaldoInicialAnticipoDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial-anticipo.schema';
 import type { InmuebleDocument } from '../../database/schemas/copropiedades/inmueble.schema';
 import type { TerceroDocument } from '../../database/schemas/terceros/tercero.schema';
 import type { CuentaContableDocument } from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import type { SaldoInicialDocument } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { CUENTA_SIN_ASIGNAR } from '../facturacion/asiento.builder';
+import { cuentaCarteraDeLinea } from '../recibos/cruce.util';
 import { emisorDe } from '../../common/documentos/emisor.util';
 import type {
   DatosReciboImpresion,
@@ -20,6 +23,7 @@ export interface ModelosDatosImpresionNotaAnticipo {
   facturas: Model<FacturaDocument>;
   notasDebito: Model<NotaDebitoDocument>;
   recibos: Model<ReciboDocument>;
+  saldosIniciales?: Model<SaldoInicialDocument>;
   saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>;
   inmuebles: Model<InmuebleDocument>;
   terceros: Model<TerceroDocument>;
@@ -52,7 +56,9 @@ export interface ModelosDatosImpresionNotaAnticipo {
  * `aplicaciones` must be exactly what `NotasAnticipoService.findAplicaciones`
  * returns — every application THIS Nota de Anticipo made, active only.
  * `concepto` names the origin document (`reciboOrigen.fullNumber`, or
- * `saldoInicialAnticipoOrigen.fullNumber` when `nota.origenTipo` is `'SI'`),
+ * `saldoInicialAnticipoOrigen` shown as `RC-1234` — its previous system's
+ * `tipoDocumentoOriginal-numeroOriginal`, never the frozen `numeroCompleto`
+ * nor the internal `SI` tag — when `nota.origenTipo` is `'SI'`),
  * the same thing this document's own "Origen" link shows in the JSON detail
  * view — a Nota de Anticipo has no `notes`/`reason` field of its own to draw
  * from, unlike a Recibo or a Nota Crédito.
@@ -78,9 +84,14 @@ export async function construirDatosImpresionNotaAnticipo(
     .filter((a) => a.tipoDocumento === 'ND')
     .map((a) => a.documentoId);
 
+  const saldoInicialIds = aplicaciones
+    .filter((a) => a.tipoDocumento === 'SI')
+    .map((a) => a.documentoId);
+
   const [
     facturas,
     notas,
+    saldosIniciales,
     reciboOrigen,
     saldoInicialAnticipoOrigen,
     inmueble,
@@ -94,6 +105,11 @@ export async function construirDatosImpresionNotaAnticipo(
     notaIds.length > 0
       ? modelos.notasDebito
           .find({ _id: { $in: notaIds }, copropiedadId })
+          .exec()
+      : Promise.resolve([]),
+    saldoInicialIds.length > 0 && modelos.saldosIniciales
+      ? modelos.saldosIniciales
+          .find({ _id: { $in: saldoInicialIds }, copropiedadId })
           .exec()
       : Promise.resolve([]),
     nota.origenTipo === 'SI'
@@ -114,6 +130,9 @@ export async function construirDatosImpresionNotaAnticipo(
 
   const facturaPorId = new Map(facturas.map((f) => [f._id.toString(), f]));
   const notaPorId = new Map(notas.map((n) => [n._id.toString(), n]));
+  const saldoInicialPorId = new Map(
+    saldosIniciales.map((s) => [s._id.toString(), s]),
+  );
 
   const lineas: LineaAsientoImpresion[] = [
     {
@@ -159,7 +178,34 @@ export async function construirDatosImpresionNotaAnticipo(
           credito: detalle.monto,
         });
       }
-    } else {
+    } else if (aplicacion.tipoDocumento === 'SI') {
+      // Shown under the document it was in the client's previous system
+      // (tipoDocumentoOriginal / numeroOriginal), never `SI` nor the
+      // internal ordinal; account = the real posting's own rule
+      // (`cuentaCarteraDeLinea`, incl. intereses + usaCuentasOrden).
+      const saldoInicial = saldoInicialPorId.get(
+        aplicacion.documentoId.toString(),
+      );
+      for (const detalle of detalles) {
+        const lineaSI = detalle.conceptoId
+          ? saldoInicial?.filas.find((l) =>
+              l.conceptoId.equals(detalle.conceptoId),
+            )
+          : undefined;
+        const codigo =
+          cuentaCarteraDeLinea(lineaSI, copropiedad.usaCuentasOrden ?? false) ??
+          cuentaCartera;
+        codigosUsados.add(codigo);
+        lineas.push({
+          cuentaCodigo: codigo,
+          cuentaNombre: '',
+          tipoDocumento: saldoInicial?.tipoDocumentoOriginal ?? null,
+          numeroDocumento: saldoInicial?.numeroOriginal ?? null,
+          debito: 0,
+          credito: detalle.monto,
+        });
+      }
+    } else if (aplicacion.tipoDocumento === 'ND') {
       const notaDebito = notaPorId.get(aplicacion.documentoId.toString());
       codigosUsados.add(cuentaCartera);
       for (const detalle of detalles) {
@@ -191,7 +237,7 @@ export async function construirDatosImpresionNotaAnticipo(
     inmuebleCodigo: inmueble?.codigo ?? '—',
     titularNombre: tercero?.nombre ?? '—',
     concepto: saldoInicialAnticipoOrigen
-      ? `Aplicación de anticipo — saldo inicial ${saldoInicialAnticipoOrigen.numeroCompleto}`
+      ? `Aplicación de anticipo — anticipo ${numeroCompletoSaldoInicial(saldoInicialAnticipoOrigen)}`
       : reciboOrigen
         ? `Aplicación de anticipo — recibo ${reciboOrigen.numeroCompleto}`
         : 'Aplicación de anticipo',

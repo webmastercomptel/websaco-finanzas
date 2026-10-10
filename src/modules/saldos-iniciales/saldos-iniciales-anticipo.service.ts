@@ -40,6 +40,8 @@ import type {
   SaldoInicialAnticipo as SaldoInicialAnticipoContract,
 } from '../../contracts';
 import type { ImportarSaldosInicialesAnticipoDto } from './dto/importar-saldos-iniciales-anticipo.dto';
+import type { ListarSaldosInicialesAnticipoDto } from './dto/listar-saldos-iniciales-anticipo.dto';
+import type { ListarSaldosInicialesAnticipoDisponiblesDto } from './dto/listar-saldos-iniciales-anticipo-disponibles.dto';
 import type { AnularSaldoInicialAnticipoDto } from './dto/anular-saldo-inicial-anticipo.dto';
 
 /**
@@ -333,13 +335,24 @@ export class SaldosInicialesAnticipoService {
     return this.progreso.obtener(copropiedadId, 'saldos-iniciales-anticipo');
   }
 
-  async listar(): Promise<SaldoInicialAnticipoContract[]> {
+  /**
+   * `saldoDisponible` is always the LIVE balance from `SaldoDocumentoOrigen`
+   * — the same row a Nota de Anticipo decrements — never the original
+   * `montoOriginal`. `conSaldoDisponible` is therefore resolved AFTER that
+   * lookup (an opening import is bounded per coproperty, so filtering in
+   * memory is cheaper than a second collection round trip) and keeps only
+   * `activo` documents that still have something to apply.
+   */
+  async listar(
+    query: ListarSaldosInicialesAnticipoDto = {},
+  ): Promise<SaldoInicialAnticipoContract[]> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro: Record<string, unknown> = { copropiedadId };
+    if (query.inmuebleId) {
+      filtro.inmuebleId = new Types.ObjectId(query.inmuebleId);
+    }
     const [documentos, inmuebles] = await Promise.all([
-      this.saldosInicialesAnticipo
-        .find({ copropiedadId })
-        .sort({ createdAt: -1 })
-        .exec(),
+      this.saldosInicialesAnticipo.find(filtro).sort({ createdAt: -1 }).exec(),
       this.inmuebles.find({ copropiedadId }).exec(),
     ]);
     const inmuebleCodigoPorId = new Map(
@@ -354,13 +367,37 @@ export class SaldosInicialesAnticipoService {
       saldos.map((s) => [s.documentoId.toString(), s.saldoDisponible]),
     );
 
-    return documentos.map((doc) =>
+    const vigentes = query.conSaldoDisponible
+      ? documentos.filter(
+          (doc) =>
+            doc.estado === 'activo' &&
+            (saldoDisponiblePorId.get(doc._id.toString()) ?? 0) > 0,
+        )
+      : documentos;
+
+    return vigentes.map((doc) =>
       toSaldoInicialAnticipo(
         doc,
         inmuebleCodigoPorId.get(doc.inmuebleId.toString()) ?? '',
         saldoDisponiblePorId.get(doc._id.toString()) ?? 0,
       ),
     );
+  }
+
+  /**
+   * The consumer view behind `GET /saldos-iniciales-anticipo/disponibles`:
+   * active Saldos Iniciales de Anticipo whose LIVE saldo is above zero, i.e.
+   * what an Anticipo application can still draw from. It IS `listar` with the
+   * filter pinned (same contract, same tenant scoping), so the Anticipos
+   * flows never need the admin `read SaldoInicialAnticipo` permission.
+   */
+  listarDisponibles(
+    query: ListarSaldosInicialesAnticipoDisponiblesDto = {},
+  ): Promise<SaldoInicialAnticipoContract[]> {
+    return this.listar({
+      inmuebleId: query.inmuebleId,
+      conSaldoDisponible: true,
+    });
   }
 
   /**

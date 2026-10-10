@@ -118,7 +118,7 @@ export class Copropiedad {
 
   /**
    * Free-text receivables account every consolidated invoice for this
-   * building debits — same reasoning as ConceptoCobro.accountingIncomeAccount.
+   * building debits — same reasoning as ConceptoCobro.cuentaCreditoId.
    */
   @Prop({ type: String, default: null, trim: true })
   cuentaContableCartera: string | null;
@@ -245,7 +245,7 @@ export class Copropiedad {
    * Administración/Intereses/Multas trio) to the "cuentas de orden" above
    * INSTEAD of that concept's own Cargos accounts — every other concept kept
    * coding normally. `construirMovimientos` (asiento.builder.ts) reads this
-   * to decide, per line, whether the `conceptKind === 'intereses'` line
+   * to decide, per line, whether the `tipoConcepto === 'intereses'` line
    * takes its accounts from here instead of from its ConceptoCobro. Default
    * false — most coproperties never used it.
    */
