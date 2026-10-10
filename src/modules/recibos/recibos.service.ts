@@ -1805,6 +1805,7 @@ export class RecibosService {
       {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
+        saldosIniciales: this.saldosIniciales,
         inmuebles: this.inmuebles!,
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,

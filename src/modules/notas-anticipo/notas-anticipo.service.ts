@@ -553,6 +553,7 @@ export class NotasAnticipoService {
         facturas: this.facturas,
         notasDebito: this.notasDebito,
         recibos: this.recibos,
+        saldosIniciales: this.saldosIniciales,
         inmuebles: this.inmuebles!,
         terceros: this.terceros!,
         cuentasContables: this.cuentasContables!,

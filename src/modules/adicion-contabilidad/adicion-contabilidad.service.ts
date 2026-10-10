@@ -50,7 +50,15 @@ import {
   NotaAnticipo,
   NotaAnticipoDocument,
 } from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
+import {
+  SaldoInicial,
+  SaldoInicialDocument,
+} from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  documentoCruceDeMovimiento,
+  resolverSaldosInicialesPorNumero,
+} from '../saldos-iniciales/saldo-inicial-cruce.util';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import { resolveAnchorId } from '../consultas/movimiento-contable.util';
 import { toLoteContabilidad } from './adicion-contabilidad.mapper';
@@ -148,6 +156,11 @@ export class AdicionContabilidadService {
     // their argument list before it.
     @InjectModel(SaldoInicialAnticipo.name)
     private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
+    // APPENDED after `saldosInicialesAnticipo` for the same reason: the
+    // "número doc cruce" column of a payment applied to a Saldo Inicial must
+    // be the original document number, resolved at export time.
+    @InjectModel(SaldoInicial.name)
+    private readonly saldosIniciales?: Model<SaldoInicialDocument>,
   ) {}
 
   private async transaccion<T>(
@@ -232,6 +245,13 @@ export class AdicionContabilidadService {
         session,
       );
 
+      const saldosInicialesPorNumero = await resolverSaldosInicialesPorNumero(
+        this.saldosIniciales,
+        copropiedadId,
+        asientos,
+        session,
+      );
+
       const consecutivo = await this.consecutivosLote
         .findOneAndUpdate(
           { copropiedadId },
@@ -282,7 +302,12 @@ export class AdicionContabilidadService {
             valorDebito: entry.tipo === 'debito' ? entry.monto : null,
             valorCredito: entry.tipo === 'credito' ? entry.monto : null,
             comprobante,
-            numeroDocCruce: entry.numeroDocumento ?? null,
+            // A Saldo Inicial movimiento stores only the internal ordinal;
+            // export the original document number (e.g. 2941). Free text
+            // there, so the column carries a string.
+            numeroDocCruce:
+              documentoCruceDeMovimiento(entry, saldosInicialesPorNumero)
+                ?.numero ?? null,
           });
         }
       }

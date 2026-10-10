@@ -370,3 +370,112 @@ describe('AdicionContabilidadService.generar — Nota de Anticipo sobre un Saldo
     expect(resultado.movmes).toContain('Aplicación de Anticipo RC # 1234');
   });
 });
+
+describe('AdicionContabilidadService.generar — documento cruce de Saldo Inicial', () => {
+  it('exporta el número ORIGINAL del Saldo Inicial (2941) en "número doc cruce", no el ordinal interno almacenado (2); FV conserva el suyo', async () => {
+    const asientos = [
+      asientoFixture({
+        reciboId: reciboIdRC,
+        movimientos: [
+          {
+            cuenta: '13050501',
+            tipo: 'credito' as const,
+            monto: 100,
+            descripcion: 'x',
+            tipoDocumento: 'SI',
+            numeroDocumento: 2,
+          },
+          {
+            cuenta: '13050502',
+            tipo: 'credito' as const,
+            monto: 50,
+            descripcion: 'y',
+            tipoDocumento: 'FV',
+            numeroDocumento: 7,
+          },
+          {
+            cuenta: '11100502',
+            tipo: 'debito' as const,
+            monto: 150,
+            descripcion: 'z',
+          },
+        ],
+      }),
+    ];
+    const asientosModel = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve(asientos) }),
+        }),
+      })),
+      updateMany: jest.fn().mockResolvedValue({}),
+    };
+    const lotesModel = {
+      create: jest.fn((docs: Record<string, unknown>[]) =>
+        Promise.resolve(
+          docs.map((d) => ({
+            ...d,
+            _id: new Types.ObjectId(),
+            createdAt: new Date('2026-09-10'),
+          })),
+        ),
+      ),
+    };
+    const consecutivosLoteModel = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve({ nextNumber: 1 }),
+      })),
+    };
+    const recibosModel = modeloCon([
+      { _id: reciboIdRC, prefijo: 'RC', numero: 1, observaciones: 'Pago' },
+    ]);
+    const saldosInicialesModel = modeloCon([
+      {
+        numero: 2,
+        tipoDocumentoOriginal: 'FV',
+        numeroOriginal: '2941',
+      },
+    ]);
+    const service = new AdicionContabilidadService(
+      asientosModel as never,
+      lotesModel as never,
+      consecutivosLoteModel as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      recibosModel as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+      {
+        obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
+          periodoDesde: new Date('2026-09-01'),
+          periodoHasta: new Date('2026-09-30'),
+        }),
+      } as unknown as LotesFacturacionService,
+      {
+        startSession: () =>
+          Promise.resolve({
+            withTransaction: (fn: () => Promise<void>) => fn(),
+            endSession: () => Promise.resolve(undefined),
+          }),
+      } as never,
+      undefined,
+      saldosInicialesModel as never,
+    );
+
+    const resultado = await service.generar(CUENTA);
+
+    const filas = resultado.movmesdo
+      .split('\r\n')
+      .filter((l) => l !== '')
+      .map((l) => l.split(','));
+    // column 14 (index 13) = número doc cruce
+    expect(filas.map((f) => f[13])).toEqual(['2941', '7', '']);
+    expect(saldosInicialesModel.find).toHaveBeenCalledWith(
+      { copropiedadId: COP, numero: { $in: [2] } },
+      expect.any(Object),
+    );
+  });
+});

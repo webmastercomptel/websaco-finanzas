@@ -120,7 +120,9 @@ export interface FilaMovmesdo {
   valorDebito: number | null;
   valorCredito: number | null;
   comprobante: string | null;
-  numeroDocCruce: number | null;
+  /** Plain number for FV/ND; the ORIGINAL (free-text) número for a Saldo
+   *  Inicial, hence `string` too. Written as-is by `campo`. */
+  numeroDocCruce: string | number | null;
 }
 
 /**

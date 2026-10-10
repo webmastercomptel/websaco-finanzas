@@ -226,6 +226,48 @@ describe('resolverMovimientoContable', () => {
     expect(result.lineas[1].nombreCuenta).toBe('9999-99');
   });
 
+  it('documentoCruce de un movimiento SI muestra el documento original (FV / 2941), no el ordinal interno; FV/ND no cambian', () => {
+    const asiento = asientoBase({
+      reciboId: id(),
+      movimientos: [
+        {
+          cuenta: '13050501',
+          tipo: 'credito',
+          monto: 100,
+          descripcion: 'x',
+          tipoDocumento: 'SI',
+          numeroDocumento: 2,
+        },
+        {
+          cuenta: '13050502',
+          tipo: 'credito',
+          monto: 50,
+          descripcion: 'y',
+          tipoDocumento: 'FV',
+          numeroDocumento: 7,
+        },
+      ],
+    });
+
+    const result = resolverMovimientoContable(
+      asiento,
+      {
+        inmuebleCodigo: '301',
+        propietario: null,
+        nit: null,
+        numeroDocumento: 'RC-1',
+      },
+      new Map(),
+      new Map([[2, { tipo: 'FV', numero: '2941' }]]),
+    );
+
+    expect(result.lineas[0].documentoCruce).toEqual({
+      tipo: 'FV',
+      numero: '2941',
+    });
+    expect(result.lineas[1].documentoCruce).toEqual({ tipo: 'FV', numero: 7 });
+  });
+
   it('inmuebleCodigo is null when inmueble was deleted', () => {
     const asiento = asientoBase({ facturaId: id() });
 

@@ -1,6 +1,10 @@
 import type { Types } from 'mongoose';
 import type { AsientoContableDocument } from '../../database/schemas/facturacion/asiento-contable.schema';
 import type { MovimientoContable } from '../../contracts';
+import {
+  documentoCruceDeMovimiento,
+  type DocumentoCruceSaldoInicial,
+} from '../saldos-iniciales/saldo-inicial-cruce.util';
 
 /**
  * Derive `tipoDocumento` from whichever anchor field is non-null on the
@@ -66,6 +70,10 @@ export function resolverMovimientoContable(
     numeroDocumento: string;
   },
   nombrePorCuenta: Map<string, string> = new Map(),
+  // Internal Saldo Inicial ordinal -> its original document; a movimiento
+  // posted against a Saldo Inicial stores only the ordinal, so the document
+  // the user knows (FV 2941) is resolved here at read time.
+  saldosInicialesPorNumero: Map<number, DocumentoCruceSaldoInicial> = new Map(),
 ): MovimientoContable {
   const tipoDocumento = deriveTipoDocumento(asiento);
   const documentoId = resolveAnchorId(asiento).toString();
@@ -80,10 +88,7 @@ export function resolverMovimientoContable(
     centroCosto: e.centroCosto ?? null,
     flujoCaja: e.flujoCaja ?? null,
     baseGravable: e.baseGravable ?? null,
-    documentoCruce:
-      e.tipoDocumento && e.numeroDocumento != null
-        ? { tipo: e.tipoDocumento, numero: e.numeroDocumento }
-        : null,
+    documentoCruce: documentoCruceDeMovimiento(e, saldosInicialesPorNumero),
   }));
 
   const totalDebito = asiento.movimientos

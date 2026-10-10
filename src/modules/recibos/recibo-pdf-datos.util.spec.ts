@@ -373,6 +373,151 @@ describe('construirDatosImpresionRecibo', () => {
     });
   });
 
+  describe('aplicación sobre un Saldo Inicial (tipoDocumento SI)', () => {
+    const SI_ID = new Types.ObjectId();
+    const C1 = new Types.ObjectId();
+    const C2 = new Types.ObjectId();
+    const C3 = new Types.ObjectId();
+
+    const saldoInicial = () => ({
+      _id: SI_ID,
+      numero: 2,
+      tipoDocumentoOriginal: 'FV',
+      numeroOriginal: '2941',
+      filas: [
+        {
+          conceptoId: C1,
+          tipoConcepto: 'administracion',
+          cuentaCartera: '13050501',
+          cuentaIngreso: null,
+        },
+        {
+          conceptoId: C2,
+          tipoConcepto: 'otro',
+          cuentaCartera: '13050502',
+          cuentaIngreso: null,
+        },
+        {
+          conceptoId: C3,
+          tipoConcepto: 'intereses',
+          cuentaCartera: '13050503',
+          cuentaIngreso: '42100501',
+        },
+      ],
+    });
+
+    const aplicacionSI = (): AplicacionCarteraDocument =>
+      ({
+        tipoDocumento: 'SI',
+        documentoId: SI_ID,
+        montoAplicado: 600000,
+        detalleConceptos: [
+          { conceptoId: C1, nombreConcepto: 'Administración', monto: 300000 },
+          { conceptoId: C2, nombreConcepto: 'Parqueadero', monto: 200000 },
+          { conceptoId: C3, nombreConcepto: 'Intereses', monto: 100000 },
+        ],
+      }) as unknown as AplicacionCarteraDocument;
+
+    const modelosConSI = (si: Record<string, unknown> | null) => ({
+      ...modelosVacios(),
+      saldosIniciales: {
+        find: jest.fn(() => ({
+          exec: () => Promise.resolve(si ? [si] : []),
+        })),
+      },
+    });
+
+    it('credita la cuentaCartera de cada fila del Saldo Inicial y muestra el documento original (FV / 2941), nunca SI ni ND ni el número interno', async () => {
+      const datos = await construirDatosImpresionRecibo(
+        reciboBase({ montoRecibido: 600000 }),
+        [aplicacionSI()],
+        copropiedadBase(),
+        COP,
+        modelosConSI(saldoInicial()) as never,
+        'Recibo de Caja',
+      );
+
+      const creditos = datos.lineas.filter((l) => l.credito > 0);
+      expect(creditos).toEqual([
+        expect.objectContaining({
+          cuentaCodigo: '13050501',
+          tipoDocumento: 'FV',
+          numeroDocumento: '2941',
+          credito: 300000,
+        }),
+        expect.objectContaining({
+          cuentaCodigo: '13050502',
+          tipoDocumento: 'FV',
+          numeroDocumento: '2941',
+          credito: 200000,
+        }),
+        expect.objectContaining({
+          cuentaCodigo: '13050503',
+          tipoDocumento: 'FV',
+          numeroDocumento: '2941',
+          credito: 100000,
+        }),
+      ]);
+      expect(
+        datos.lineas.some((l) => l.cuentaCodigo === 'SIN-CUENTA-ASIGNADA'),
+      ).toBe(false);
+      expect(datos.totalDebito).toBe(datos.totalCredito);
+    });
+
+    it('con usaCuentasOrden, la fila de intereses credita su cuentaIngreso (misma regla que el asiento real)', async () => {
+      const datos = await construirDatosImpresionRecibo(
+        reciboBase({ montoRecibido: 600000 }),
+        [aplicacionSI()],
+        copropiedadBase({ usaCuentasOrden: true }),
+        COP,
+        modelosConSI(saldoInicial()) as never,
+        'Recibo de Caja',
+      );
+
+      const creditos = datos.lineas.filter((l) => l.credito > 0);
+      expect(creditos.map((l) => l.cuentaCodigo)).toEqual([
+        '13050501',
+        '13050502',
+        '42100501',
+      ]);
+    });
+
+    it('cae a la cartera compartida y nunca a "ND" cuando el Saldo Inicial no se resuelve', async () => {
+      const datos = await construirDatosImpresionRecibo(
+        reciboBase({ montoRecibido: 600000 }),
+        [aplicacionSI()],
+        copropiedadBase(),
+        COP,
+        modelosConSI(null) as never,
+        'Recibo de Caja',
+      );
+
+      const creditos = datos.lineas.filter((l) => l.credito > 0);
+      expect(creditos.map((l) => l.cuentaCodigo)).toEqual([
+        '130500',
+        '130500',
+        '130500',
+      ]);
+      expect(creditos.every((l) => l.tipoDocumento !== 'ND')).toBe(true);
+    });
+
+    it('consulta los Saldos Iniciales acotados a la copropiedad', async () => {
+      const modelos = modelosConSI(saldoInicial());
+      await construirDatosImpresionRecibo(
+        reciboBase({ montoRecibido: 600000 }),
+        [aplicacionSI()],
+        copropiedadBase(),
+        COP,
+        modelos as never,
+        'Recibo de Caja',
+      );
+      expect(modelos.saldosIniciales.find).toHaveBeenCalledWith({
+        _id: { $in: [SI_ID] },
+        copropiedadId: COP,
+      });
+    });
+  });
+
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicaciones anteriores a ese campo)', async () => {
     const aplicacion = aplicacionFV({
       montoAplicado: 400000,

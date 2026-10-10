@@ -203,6 +203,84 @@ describe('construirDatosImpresionNotaCredito', () => {
     ]);
   });
 
+  it('con ancla Saldo Inicial, credita la cuentaCartera de cada fila y muestra el documento original (FV / 2941), nunca SI ni el número interno', async () => {
+    const SI_ID = new Types.ObjectId();
+    const C1 = new Types.ObjectId();
+    const C2 = new Types.ObjectId();
+    const modelos = {
+      ...modelosVacios(),
+      saldosIniciales: {
+        find: jest.fn(() => ({
+          exec: () =>
+            Promise.resolve([
+              {
+                _id: SI_ID,
+                numero: 2,
+                tipoDocumentoOriginal: 'FV',
+                numeroOriginal: '2941',
+                filas: [
+                  {
+                    conceptoId: C1,
+                    tipoConcepto: 'administracion',
+                    cuentaCartera: '13050501',
+                    cuentaIngreso: null,
+                  },
+                  {
+                    conceptoId: C2,
+                    tipoConcepto: 'intereses',
+                    cuentaCartera: '13050503',
+                    cuentaIngreso: '42100501',
+                  },
+                ],
+              },
+            ]),
+        })),
+      },
+    };
+    const aplicacion = {
+      tipoDocumento: 'SI',
+      documentoId: SI_ID,
+      montoAplicado: 100000,
+      detalleConceptos: [
+        { conceptoId: C1, nombreConcepto: 'Administración', monto: 60000 },
+        { conceptoId: C2, nombreConcepto: 'Intereses', monto: 40000 },
+      ],
+    } as unknown as AplicacionCarteraDocument;
+
+    const datos = await construirDatosImpresionNotaCredito(
+      notaBase({
+        tipoDocumentoAncla: 'SI',
+        facturaId: null,
+        saldoInicialId: SI_ID,
+        distribucion: [{ conceptoId: C1, monto: 100000 }],
+      }),
+      0,
+      [aplicacion],
+      copropiedadBase({ usaCuentasOrden: true }),
+      COP,
+      modelos as never,
+      'Nota de Crédito',
+    );
+
+    const creditos = datos.lineas.filter((l) => l.credito > 0);
+    expect(creditos).toEqual([
+      expect.objectContaining({
+        cuentaCodigo: '13050501',
+        tipoDocumento: 'FV',
+        numeroDocumento: '2941',
+        credito: 60000,
+      }),
+      // intereses + usaCuentasOrden → cuentaIngreso, same rule as the real
+      // posting (cuentaCarteraDeLinea)
+      expect.objectContaining({
+        cuentaCodigo: '42100501',
+        tipoDocumento: 'FV',
+        numeroDocumento: '2941',
+        credito: 40000,
+      }),
+    ]);
+  });
+
   it('cae en una sola fila genérica cuando detalleConceptos está vacío (aplicación anterior a ese campo)', async () => {
     const aplicacion = aplicacionFV({
       montoAplicado: 100000,

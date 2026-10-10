@@ -1091,6 +1091,7 @@ export class NotasCreditoService {
     const datosImpresion: ModelosDatosImpresionNotaCredito = {
       facturas: this.facturas,
       notasDebito: this.notasDebito,
+      saldosIniciales: this.saldosIniciales,
       conceptosCobro: this.conceptosCobro,
       inmuebles: this.inmuebles!,
       terceros: this.terceros!,

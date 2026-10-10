@@ -111,11 +111,65 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.terceros as never,
     m.cuentasContables as never,
     m.tenant as never,
+    m.saldosIniciales as never,
   );
 };
 
 describe('MovimientoContableService', () => {
   describe('findAll', () => {
+    it('resuelve en lectura el documento cruce de un movimiento SI al documento original (FV / 2941), incluso en asientos ya posteados con el ordinal interno', async () => {
+      const rec = reciboDoc({ numeroCompleto: 'RC-1' });
+      const asiento = asientoDoc('reciboId', rec._id, {
+        movimientos: [
+          {
+            cuenta: '13050501',
+            tipo: 'credito',
+            monto: 100,
+            descripcion: 'x',
+            tipoDocumento: 'SI',
+            numeroDocumento: 2,
+          },
+        ],
+      });
+      const saldosIniciales = {
+        find: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([
+          {
+            numero: 2,
+            tipoDocumentoOriginal: 'FV',
+            numeroOriginal: '2941',
+          },
+        ]),
+      };
+
+      const svc = servicio({
+        saldosIniciales,
+        recibos: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([rec]),
+        },
+        asientos: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asiento]),
+        },
+      });
+
+      const result = await svc.findAll({
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      expect(saldosIniciales.find).toHaveBeenCalledWith(
+        { copropiedadId: COP, numero: { $in: [2] } },
+        expect.any(Object),
+      );
+      expect(result.movimientos[0].lineas[0].documentoCruce).toEqual({
+        tipo: 'FV',
+        numero: '2941',
+      });
+    });
+
     it('returns every asiento in the coproperty within a date range, regardless of inmueble', async () => {
       const f1 = facturaDoc({ numeroCompleto: 'FV-001' });
       const f2 = facturaDoc({ numeroCompleto: 'FV-002' });
