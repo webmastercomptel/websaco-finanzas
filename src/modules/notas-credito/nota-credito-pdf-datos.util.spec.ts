@@ -256,7 +256,7 @@ describe('construirDatosImpresionNotaCredito', () => {
     expect(datos.lineas.some((l) => l.cuentaCodigo === '210505')).toBe(false);
   });
 
-  it('cae a cuentaDevoluciones cuando el concepto no tiene accountingIncomeAccount configurado (nunca una cuenta de banco)', async () => {
+  it('cae a cuentaDevoluciones cuando el concepto no tiene cuentaIngreso configurado (nunca una cuenta de banco)', async () => {
     const datos = await construirDatosImpresionNotaCredito(
       notaBase({ montoTotal: 100000 }),
       0,
@@ -274,7 +274,7 @@ describe('construirDatosImpresionNotaCredito', () => {
     });
   });
 
-  it('el débito se reparte por concepto según nota.distribution, tomando accountingIncomeAccount de la factura ancla — nunca una sola cuenta de devoluciones para todo', async () => {
+  it('el débito se reparte por concepto según nota.distribution, tomando cuentaIngreso de la factura ancla — nunca una sola cuenta de devoluciones para todo', async () => {
     const conceptoAdmin = new Types.ObjectId();
     const conceptoMora = new Types.ObjectId();
     const modelos = modelosVacios();

@@ -65,7 +65,6 @@ async function run() {
       tipo: c.tipo,
       tasaImpuesto: 0,
       orden: c.orden,
-      accountingIncomeAccount: null,
       cargaXls: false,
       active: true,
       sistema: true,

@@ -897,8 +897,8 @@ export class NotasDebitoService {
    * total, credit `cuentaIngreso` for the total. Reuses `construirMovimientos`
    * with a single-line shape built from the conceptoId.
    *
-   * `conceptoKind` sets that synthetic line's own `conceptKind` — without it,
-   * `construirMovimientos`'s own `usaCuentasOrden` check (`linea.conceptKind
+   * `conceptoKind` sets that synthetic line's own `tipoConcepto` — without it,
+   * `construirMovimientos`'s own `usaCuentasOrden` check (`linea.tipoConcepto
    * === 'intereses'`) always reads `undefined`, so `cuentasOrden` NEVER
    * moved even for a Nota Débito genuinely charging mora (the opposite
    * failure from Notas Contables/Crédito, which moved it unconditionally —

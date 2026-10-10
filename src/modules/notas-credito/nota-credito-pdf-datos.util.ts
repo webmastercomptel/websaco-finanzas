@@ -52,7 +52,7 @@ export interface ModelosDatosImpresionNotaCredito {
  * closely; the differences are real, not cosmetic:
  *
  *  - The débito side is one line PER CONCEPTO in `nota.distribution`, each
- *    debiting that concept's own `accountingIncomeAccount` — the SAME
+ *    debiting that concept's own `cuentaIngreso` — the SAME
  *    account originally credited when the concept was billed (a Factura
  *    line's own frozen account, or a Nota Débito's own
  *    `ConceptoCobro.cuentaCreditoId`, resolved fresh here since a Nota
@@ -191,7 +191,7 @@ export async function construirDatosImpresionNotaCredito(
     : [];
   const conceptoPorId = new Map(conceptos.map((c) => [c._id.toString(), c]));
   /** This Nota Débito's own single concepto's cuenta de ingreso — the same
-   *  fallback role `lineaFactura?.accountingIncomeAccount` plays for a
+   *  fallback role `lineaFactura?.cuentaIngreso` plays for a
    *  Factura line below. */
   const cuentaIngresoDe = (n: NotaDebitoDocument): string | null => {
     const concepto = conceptoPorId.get(n.conceptoId.toString());

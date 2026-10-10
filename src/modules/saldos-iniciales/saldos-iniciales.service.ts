@@ -304,13 +304,9 @@ export class SaldosInicialesService {
             return {
               conceptoId: concepto._id,
               nombreConcepto: concepto.nombre,
-              accountingReceivableAccount: codigoDeCuentaContable(
-                concepto.cuentaDebitoId,
-              ),
-              accountingIncomeAccount: codigoDeCuentaContable(
-                concepto.cuentaCreditoId,
-              ),
-              conceptKind: concepto.tipo,
+              cuentaCartera: codigoDeCuentaContable(concepto.cuentaDebitoId),
+              cuentaIngreso: codigoDeCuentaContable(concepto.cuentaCreditoId),
+              tipoConcepto: concepto.tipo,
               montoOriginal: cargo.monto,
             };
           });
