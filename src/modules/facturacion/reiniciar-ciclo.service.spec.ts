@@ -296,7 +296,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     expect(modelos.consecutivoSaldoInicial.updateOne).toHaveBeenCalledWith(
       { copropiedadId: COP },
-      { $set: { nextNumber: 0 } },
+      { $set: { siguienteNumero: 0 } },
     );
     expect(resultado.saldosInicialesEliminados).toBe(5);
     expect(resultado.lotesSaldoInicialEliminados).toBe(2);
@@ -325,7 +325,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     expect(
       modelos.consecutivoSaldoInicialAnticipo.updateOne,
-    ).toHaveBeenCalledWith({ copropiedadId: COP }, { $set: { nextNumber: 0 } });
+    ).toHaveBeenCalledWith(
+      { copropiedadId: COP },
+      { $set: { siguienteNumero: 0 } },
+    );
     expect(resultado.saldosInicialesAnticipoEliminados).toBe(3);
     expect(resultado.lotesSaldoInicialAnticipoEliminados).toBe(1);
   });
@@ -387,7 +390,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     // próximo número emitido fuera 2, no 1.
     expect(modelos.consecutivoLote.updateOne).toHaveBeenCalledWith(
       { copropiedadId: COP },
-      { $set: { nextNumber: 0 } },
+      { $set: { siguienteNumero: 0 } },
     );
     // updateMany sin filtro de categoria/codigo — todo código configurado
     // (RC, NC, ND, NA, ...) reinicia junto, porque todo tipo de documento
@@ -413,7 +416,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     expect(modelos.consecutivoLoteRecibos.updateOne).toHaveBeenCalledWith(
       { copropiedadId: COP },
-      { $set: { nextNumber: 0 } },
+      { $set: { siguienteNumero: 0 } },
     );
     expect(resultado.loteRecibosEliminados).toBe(1);
   });

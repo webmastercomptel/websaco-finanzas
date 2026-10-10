@@ -265,7 +265,7 @@ export class ReiniciarCicloService {
     // number after reset. 0 is what a brand-new row starts at (missing
     // field + $inc on upsert), so the next call returns 1.
     await this.consecutivoLote
-      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { siguienteNumero: 0 } })
       .exec();
     // Every code this coproperty has configured (RC, NC, ND, NA, ...), not
     // just one — every document type is wiped above, so every counter must
@@ -276,7 +276,7 @@ export class ReiniciarCicloService {
     // LoteRecibos has its own consecutivo, separate from consecutivoDocumento
     // (its numbers are internal to the batch, never a document type code).
     await this.consecutivoLoteRecibos
-      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { siguienteNumero: 0 } })
       .exec();
     // Same reasoning as consecutivoLoteRecibos above — "Adición a
     // Contabilidad" has its own independent batch sequence.
@@ -286,13 +286,13 @@ export class ReiniciarCicloService {
     // Same reasoning again — Saldos Iniciales numbers off its own internal
     // ordinal (ConsecutivoSaldoInicial), never ConsecutivoDocumento.
     await this.consecutivoSaldoInicial
-      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { siguienteNumero: 0 } })
       .exec();
     // Same reasoning again — Saldos Iniciales de Anticipo has its own
     // independent ordinal, separate from ConsecutivoSaldoInicial (cargos and
     // anticipos are two different document collections).
     await this.consecutivoSaldoInicialAnticipo
-      .updateOne({ copropiedadId }, { $set: { nextNumber: 0 } })
+      .updateOne({ copropiedadId }, { $set: { siguienteNumero: 0 } })
       .exec();
     const resolucionActiva = await this.resoluciones
       .findOne({ copropiedadId, estado: 'active' })
