@@ -2071,7 +2071,7 @@ export interface RespuestaAdicionContabilidad {
 export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir';
+  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar';
   entidadTipo:
     'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
   entidadEtiqueta: string;

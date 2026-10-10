@@ -14,8 +14,8 @@ export class FiltrosAuditoriaDto {
     'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
 
   @IsOptional()
-  @IsIn(['crear', 'actualizar', 'revertir'])
-  accion?: 'crear' | 'actualizar' | 'revertir';
+  @IsIn(['crear', 'actualizar', 'revertir', 'reiniciar'])
+  accion?: 'crear' | 'actualizar' | 'revertir' | 'reiniciar';
 
   @IsOptional()
   @IsDateString()
