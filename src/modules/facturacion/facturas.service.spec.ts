@@ -1062,3 +1062,104 @@ describe('FacturasService.guardarPrintSnapshot', () => {
     );
   });
 });
+
+describe('FacturasService — saldos informativos en la plantilla', () => {
+  const informativo = (over: Record<string, unknown> = {}) => ({
+    conceptoId: { toString: () => 'con-extra' },
+    nombreConcepto: 'Extraordinaria',
+    saldoAnterior: 150000,
+    ...over,
+  });
+  const visuales = { referencia: null, totalAnticipos: 0, usage: null };
+
+  it('agrega una fila por concepto no cobrado al final de "cargos", con cargosDelMes 0 y nuevoSaldo igual al saldo anterior', async () => {
+    const { service } = construirServicioConTitulo();
+    const factura = facturaParaPlantilla({
+      saldosInformativos: [informativo()],
+    });
+
+    const datos = await service.datosPlantilla(
+      factura as never,
+      copropiedadBase() as never,
+      visuales,
+    );
+
+    expect(datos.cargos).toEqual([
+      {
+        nombre: 'Administración',
+        saldoAnterior: 0,
+        cargosDelMes: 520000,
+        nuevoSaldo: 520000,
+      },
+      {
+        nombre: 'Extraordinaria',
+        saldoAnterior: 150000,
+        cargosDelMes: 0,
+        nuevoSaldo: 150000,
+      },
+    ]);
+  });
+
+  it('los totales de la tabla cuadran: el saldo anterior suma la fila informativa, los cargos del mes y el IVA no cambian', async () => {
+    const { service } = construirServicioConTitulo();
+    const sin = await service.datosPlantilla(
+      facturaParaPlantilla() as never,
+      copropiedadBase() as never,
+      visuales,
+    );
+    const con = await service.datosPlantilla(
+      facturaParaPlantilla({ saldosInformativos: [informativo()] }) as never,
+      copropiedadBase() as never,
+      visuales,
+    );
+
+    expect(con.totalSaldoAnterior).toBe(sin.totalSaldoAnterior + 150000);
+    expect(con.totalCargosDelMes).toBe(sin.totalCargosDelMes);
+    expect(con.totalIva).toBe(sin.totalIva);
+    expect(con.totalNuevoSaldo).toBe(sin.totalNuevoSaldo + 150000);
+    expect(con.totalAPagar).toBe(sin.totalAPagar + 150000);
+  });
+
+  it('una factura emitida antes de existir el campo (sin saldosInformativos) se imprime igual que siempre', async () => {
+    const { service } = construirServicioConTitulo();
+
+    const datos = await service.datosPlantilla(
+      facturaParaPlantilla() as never,
+      copropiedadBase() as never,
+      visuales,
+    );
+
+    expect(datos.cargos).toHaveLength(1);
+    expect(datos.totalSaldoAnterior).toBe(0);
+  });
+
+  it('la prefactura trae las mismas filas informativas que la factura emitida', () => {
+    const { service } = construirServicioConTitulo();
+    const preliminar = {
+      ...facturaParaPlantilla({ saldosInformativos: [informativo()] }),
+      titular: null,
+    };
+    const lote = {
+      descuentoProntoPago: 0,
+      valorFijoDescuentoProntoPago: 0,
+      fechaLimiteDescuento: new Date('2026-08-27'),
+    };
+
+    const datos = service.datosPlantillaPreliminar(
+      preliminar as never,
+      lote as never,
+      copropiedadBase() as never,
+      visuales,
+    );
+
+    expect(datos.cargos.map((c) => c.nombre)).toEqual([
+      'Administración',
+      'Extraordinaria',
+    ]);
+    expect(datos.cargos[1]).toMatchObject({
+      saldoAnterior: 150000,
+      cargosDelMes: 0,
+      nuevoSaldo: 150000,
+    });
+  });
+});

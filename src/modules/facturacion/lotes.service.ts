@@ -1374,6 +1374,20 @@ export class LotesFacturacionService {
         return ordenA - ordenB;
       });
 
+      // Concepts the unit still owes but that earn no line this cycle —
+      // shown on the document as informational rows (valor del mes 0), kept
+      // OUT of `lines` so they can never reach the asiento, the cartera
+      // ledgers, the descuento or the mora base (see `SaldoInformativo`).
+      // Computed from `saldosUnidad` (the pre-cycle snapshot), never from
+      // the running map mutated by `aLinea`. Placed AFTER the
+      // `lines.length === 0` guard on purpose: a unit with saldo but no
+      // charge this period still generates no Factura, exactly as before.
+      const saldosInformativos = this.calcularSaldosInformativos(
+        saldosUnidad,
+        lines,
+        conceptoPorId,
+      );
+
       const subtotal = lines.reduce(
         (acc, l) => acc + (l.valorBase as number),
         0,
@@ -1402,6 +1416,7 @@ export class LotesFacturacionService {
             }
           : null,
         lineas: lines,
+        saldosInformativos,
         subtotal,
         totalImpuestos: totalTax,
         total: subtotal + totalTax,
@@ -1776,10 +1791,14 @@ export class LotesFacturacionService {
           !unidadesYaFacturadas.has(preliminar.inmuebleId.toString()),
       );
     const filasPendientes = filasPendientesConIndice.map((f) => f.preliminar);
+    // Includes the informational rows' concepts: their saldo anterior is
+    // refreshed from the same bulk read as the real lines'.
     const conceptoIdsPendientes = Array.from(
       new Map(
         filasPendientes.flatMap((p) =>
-          p.lineas.map((l) => [l.conceptoId.toString(), l.conceptoId] as const),
+          [...p.lineas, ...(p.saldosInformativos ?? [])].map(
+            (l) => [l.conceptoId.toString(), l.conceptoId] as const,
+          ),
         ),
       ).values(),
     );
@@ -2237,6 +2256,32 @@ export class LotesFacturacionService {
       saldoCorrientePorConcepto.set(key, balanceAfter);
     }
 
+    // Informational rows: the saldo anterior is re-read fresh like the real
+    // lines' above (a payment may have landed since liquidar()), and a row
+    // whose concept is no longer strictly positive — or that somehow gained a
+    // real line — is dropped. Display-only: nothing below this point reads
+    // `saldosInformativos` except the Factura document itself.
+    const conceptosConLinea = new Set(
+      preliminar.lineas.map((l) => l.conceptoId.toString()),
+    );
+    const saldosInformativos = (preliminar.saldosInformativos ?? []).flatMap(
+      (s) => {
+        const key = s.conceptoId.toString();
+        const saldo =
+          ctx.saldoPorClave.get(`${preliminar.inmuebleId.toString()}:${key}`) ??
+          0;
+        return saldo > 0 && !conceptosConLinea.has(key)
+          ? [
+              {
+                conceptoId: s.conceptoId,
+                nombreConcepto: s.nombreConcepto,
+                saldoAnterior: saldo,
+              },
+            ]
+          : [];
+      },
+    );
+
     const { discountAmount, discountDeadline } = calcularDescuentoProntoPago(
       preliminar.lineas,
       ctx.lote.descuentoProntoPago,
@@ -2266,6 +2311,7 @@ export class LotesFacturacionService {
       periodoDesde: ctx.lote.periodoDesde,
       periodoHasta: ctx.lote.periodoHasta,
       lineas: preliminar.lineas,
+      saldosInformativos,
       subtotal: preliminar.subtotal,
       totalImpuestos: preliminar.totalImpuestos,
       total: preliminar.total,
@@ -3096,6 +3142,47 @@ export class LotesFacturacionService {
         await this.liberarReclamo(loteId, copropiedadId, token);
       }
     }
+  }
+
+  /**
+   * One informational row per concept with a strictly positive pending
+   * balance that has no line in `lines`. Zero and negative (saldo a favor)
+   * balances are skipped: a saldo a favor is not debt, and showing it as
+   * "Saldo anterior -X" in a charges table would read as a credit nobody
+   * applied. A concept missing from the catalog is skipped (nothing to name
+   * it by). Order: the concept's own `orden`, then name — and the whole
+   * block prints AFTER the charged lines.
+   */
+  private calcularSaldosInformativos(
+    saldosUnidad: { conceptoId: Types.ObjectId; saldoPendiente: number }[],
+    lines: Record<string, unknown>[],
+    conceptoPorId: Map<string, { nombre: string; orden?: number }>,
+  ): {
+    conceptoId: Types.ObjectId;
+    nombreConcepto: string;
+    saldoAnterior: number;
+  }[] {
+    const cobrados = new Set(
+      lines.map((l) => (l.conceptoId as Types.ObjectId).toString()),
+    );
+    return saldosUnidad
+      .filter(
+        (s) => s.saldoPendiente > 0 && !cobrados.has(s.conceptoId.toString()),
+      )
+      .flatMap((s) => {
+        const concepto = conceptoPorId.get(s.conceptoId.toString());
+        return concepto ? [{ s, concepto }] : [];
+      })
+      .sort(
+        (a, b) =>
+          (a.concepto.orden ?? 0) - (b.concepto.orden ?? 0) ||
+          a.concepto.nombre.localeCompare(b.concepto.nombre),
+      )
+      .map(({ s, concepto }) => ({
+        conceptoId: s.conceptoId,
+        nombreConcepto: concepto.nombre,
+        saldoAnterior: s.saldoPendiente,
+      }));
   }
 
   /** Builds one frozen invoice line from a concept and a base amount —

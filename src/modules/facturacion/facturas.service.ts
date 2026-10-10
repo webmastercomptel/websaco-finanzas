@@ -52,7 +52,10 @@ import type {
   FacturaPreliminar,
   LoteFacturacionDocument,
 } from '../../database/schemas/facturacion/lote-facturacion.schema';
-import type { FacturaLinea } from '../../database/schemas/facturacion/factura-linea.schema';
+import type {
+  FacturaLinea,
+  SaldoInformativo,
+} from '../../database/schemas/facturacion/factura-linea.schema';
 
 export type { FacturaDocument };
 
@@ -314,6 +317,7 @@ export class FacturasService {
    */
   private construirDatosPlantilla(
     lines: FacturaLinea[],
+    saldosInformativos: SaldoInformativo[],
     descuento: { monto: number; fechaLimite: Date } | null,
     totalAnticipos: number,
     referenciaPago: string | null,
@@ -324,24 +328,40 @@ export class FacturasService {
     titular: TitularFactura | null,
     uso: string | null,
   ): DatosPlantillaFactura {
-    const totalSaldoAnterior = lines.reduce(
-      (acc, l) => acc + l.saldoAnterior,
+    // Informational rows (concepts owed but not charged this period) add
+    // their saldo anterior to the columns that carry it — the table must
+    // foot — but contribute 0 to "cargos del mes" and to IVA.
+    const totalSaldoInformativo = saldosInformativos.reduce(
+      (acc, s) => acc + s.saldoAnterior,
       0,
     );
+    const totalSaldoAnterior =
+      lines.reduce((acc, l) => acc + l.saldoAnterior, 0) +
+      totalSaldoInformativo;
     const totalCargosDelMes = lines.reduce((acc, l) => acc + l.valorBase, 0);
     const totalNuevoSaldo = totalSaldoAnterior + totalCargosDelMes;
     const totalIva = lines.reduce((acc, l) => acc + l.valorImpuesto, 0);
-    const totalAPagar = lines.reduce((acc, l) => acc + l.saldoNuevo, 0);
+    const totalAPagar =
+      lines.reduce((acc, l) => acc + l.saldoNuevo, 0) + totalSaldoInformativo;
 
-    const cargos = lines.map((l) => ({
-      nombre:
-        l.valorImpuesto > 0
-          ? `${l.nombreConcepto} (${l.tasaImpuesto}%)`
-          : l.nombreConcepto,
-      saldoAnterior: l.saldoAnterior,
-      cargosDelMes: l.valorBase,
-      nuevoSaldo: l.saldoAnterior + l.valorBase,
-    }));
+    const cargos = [
+      ...lines.map((l) => ({
+        nombre:
+          l.valorImpuesto > 0
+            ? `${l.nombreConcepto} (${l.tasaImpuesto}%)`
+            : l.nombreConcepto,
+        saldoAnterior: l.saldoAnterior,
+        cargosDelMes: l.valorBase,
+        nuevoSaldo: l.saldoAnterior + l.valorBase,
+      })),
+      // Printed AFTER the charged lines, "Valor del mes" 0 shown as 0.
+      ...saldosInformativos.map((s) => ({
+        nombre: s.nombreConcepto,
+        saldoAnterior: s.saldoAnterior,
+        cargosDelMes: 0,
+        nuevoSaldo: s.saldoAnterior,
+      })),
+    ];
 
     const tasasIva = new Set(
       lines.filter((l) => l.valorImpuesto > 0).map((l) => l.tasaImpuesto),
@@ -475,6 +495,9 @@ export class FacturasService {
     );
     return this.construirDatosPlantilla(
       factura.lineas,
+      // Lean documents skip schema defaults: invoices issued before the
+      // field existed have no `saldosInformativos` at all.
+      factura.saldosInformativos ?? [],
       descuento,
       visuales?.totalAnticipos ?? 0,
       visuales?.referencia ?? null,
@@ -531,6 +554,7 @@ export class FacturasService {
         : null;
     return this.construirDatosPlantilla(
       preliminar.lineas,
+      preliminar.saldosInformativos ?? [],
       descuento,
       datosVisuales?.totalAnticipos ?? 0,
       datosVisuales?.referencia ?? null,
