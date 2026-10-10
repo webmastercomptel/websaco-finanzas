@@ -677,10 +677,17 @@ export interface ErrorConsolidacion {
 
 /**
  * Result of wiping every financial document (Lotes/Facturas, Recibos, Notas
- * Crédito/Débito/Anticipo/Contables, Saldos Iniciales, and their derived
- * asientos/saldos) of the one hardcoded test coproperty, so its billing
- * cycle can be replayed from a blank slate. See `ReiniciarCicloService` for
- * the safety checks.
+ * Crédito/Débito/Anticipo/Contables, Saldos Iniciales, their derived
+ * asientos/saldos, Adición a Contabilidad exports, generated-PDF records and
+ * files, and in-progress saldos-iniciales import progress) of the ACTIVE
+ * coproperty, so its billing cycle can be replayed from a blank slate.
+ *
+ * Platform-administrator only, with no coproperty whitelist (it can run on a
+ * real client). It refuses with a 409 while a consolidación or a recibos
+ * application is in flight, and writes an audit entry (`accion:
+ * 'reiniciar'`). Every field is a count of what was deleted;
+ * `archivosPdfEliminados` is storage objects, and is 0 when the best-effort
+ * storage cleanup failed. See `ReiniciarCicloService`.
  */
 export interface ResultadoReinicioCiclo {
   lotesEliminados: number;
@@ -702,6 +709,12 @@ export interface ResultadoReinicioCiclo {
   saldoTotalDocumentoEliminado: number;
   saldosInicialesAnticipoEliminados: number;
   lotesSaldoInicialAnticipoEliminados: number;
+  /** `PresentacionDocumento` rows (generated-PDF pointers). */
+  presentacionesEliminadas: number;
+  /** `ProgresoImportacion` rows of the two saldos-iniciales imports. */
+  progresosImportacionEliminados: number;
+  /** Generated PDF objects deleted from storage (0 if cleanup failed). */
+  archivosPdfEliminados: number;
 }
 
 /* ── Consulta de Facturación (reporte de lote) ────────────────────── */

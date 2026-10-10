@@ -1,8 +1,19 @@
+import { ConflictException, Logger } from '@nestjs/common';
+import { SchemaFactory } from '@nestjs/mongoose';
 import { Types } from 'mongoose';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { ConsecutivoLote } from '../../database/schemas/facturacion/consecutivo-lote.schema';
+import { ConsecutivoLoteRecibos } from '../../database/schemas/recibos/consecutivo-lote-recibos.schema';
+import { ConsecutivoSaldoInicial } from '../../database/schemas/saldos-iniciales/consecutivo-saldo-inicial.schema';
+import { ConsecutivoSaldoInicialAnticipo } from '../../database/schemas/saldos-iniciales/consecutivo-saldo-inicial-anticipo.schema';
+import { ConsecutivoDocumento } from '../../database/schemas/numeracion/consecutivo-documento.schema';
+import { ConsecutivoLoteContabilidad } from '../../database/schemas/contabilidad/consecutivo-lote-contabilidad.schema';
+import { ResolucionFacturacion } from '../../database/schemas/numeracion/resolucion-facturacion.schema';
 
 const COP = new Types.ObjectId();
+const CUENTA = new Types.ObjectId().toString();
+const PREFIJO_PDFS = `documentos-generados/${COP.toString()}/`;
 
 const tenantQueDevuelve = (id: Types.ObjectId): TenantContextService =>
   ({ resolveCoPropertyId: () => id }) as unknown as TenantContextService;
@@ -18,7 +29,21 @@ const deleteManyMock = (deletedCount: number) => ({
  *  default a happy path needs (0 deleted, no active resolución). */
 const makeModelos = (over: {
   resolucionActiva?: Record<string, unknown> | null;
+  /** A LoteFacturacion with `progreso` non-null (consolidación running). */
+  loteConsolidando?: Record<string, unknown> | null;
+  /** Jobs the aplicación-de-lotes-de-recibos queue reports as unfinished. */
+  trabajosAplicacion?: { data: { copropiedadId: string } }[];
+  /** Makes `getJobs` reject (queue/Redis unreachable). */
+  colaFalla?: boolean;
+  storageFalla?: boolean;
+  auditoriaFalla?: boolean;
+  archivosPdf?: number;
+  archivosFallidos?: number;
+  /** The single `ProgresoImportacion` row present in the collection. */
+  importacion?: { tipo: string; updatedAt: Date };
   deletedCounts?: Partial<{
+    presentaciones: number;
+    progresosImportacion: number;
     lotes: number;
     facturas: number;
     asientos: number;
@@ -41,6 +66,8 @@ const makeModelos = (over: {
   }>;
 }) => {
   const counts = {
+    presentaciones: 0,
+    progresosImportacion: 0,
     lotes: 0,
     facturas: 0,
     asientos: 0,
@@ -64,7 +91,64 @@ const makeModelos = (over: {
   };
 
   const facturas = deleteManyMock(counts.facturas);
-  const lotes = deleteManyMock(counts.lotes);
+  const lotes = {
+    ...deleteManyMock(counts.lotes),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(over.loteConsolidando ?? null),
+    })),
+  };
+  const presentaciones = deleteManyMock(counts.presentaciones);
+  const progresosImportacion = {
+    ...deleteManyMock(counts.progresosImportacion),
+    // Mimics Mongo applying the guard's filter to the one row the test seeds:
+    // it matches only when the tipo is in `$in` and `updatedAt >= $gte`.
+    findOne: jest.fn(
+      (filtro: { tipo: { $in: string[] }; updatedAt: { $gte: Date } }) => ({
+        exec: () => {
+          const fila = over.importacion;
+          const coincide =
+            !!fila &&
+            filtro.tipo.$in.includes(fila.tipo) &&
+            fila.updatedAt >= filtro.updatedAt.$gte;
+          return Promise.resolve(coincide ? fila : null);
+        },
+      }),
+    ),
+  };
+  const cuentas = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ nombreCompleto: 'Admin Plataforma' }),
+    })),
+  };
+  const copropiedades = {
+    findById: jest.fn(() => ({
+      exec: () => Promise.resolve({ codigo: '0001', nombre: 'Edificio Sol' }),
+    })),
+  };
+  const storage = {
+    eliminarPrefijo: jest.fn(() =>
+      over.storageFalla
+        ? Promise.reject(new Error('bucket caído'))
+        : Promise.resolve({
+            eliminados: over.archivosPdf ?? 0,
+            fallidos: over.archivosFallidos ?? 0,
+          }),
+    ),
+  };
+  const auditoria = {
+    registrar: jest.fn(() =>
+      over.auditoriaFalla
+        ? Promise.reject(new Error('audit caída'))
+        : Promise.resolve(),
+    ),
+  };
+  const colaAplicacionLoteRecibos = {
+    getJobs: jest.fn(() =>
+      over.colaFalla
+        ? Promise.reject(new Error('redis caído'))
+        : Promise.resolve(over.trabajosAplicacion ?? []),
+    ),
+  };
   const asientos = deleteManyMock(counts.asientos);
   const saldos = deleteManyMock(counts.saldos);
   const recibos = deleteManyMock(counts.recibos);
@@ -113,6 +197,13 @@ const makeModelos = (over: {
   };
 
   return {
+    presentaciones,
+    progresosImportacion,
+    cuentas,
+    copropiedades,
+    storage,
+    auditoria,
+    colaAplicacionLoteRecibos,
     facturas,
     lotes,
     asientos,
@@ -173,15 +264,29 @@ const makeService = (
     modelos.saldosInicialesAnticipo as never,
     modelos.lotesSaldoInicialAnticipo as never,
     modelos.consecutivoSaldoInicialAnticipo as never,
+    modelos.presentaciones as never,
+    modelos.progresosImportacion as never,
+    modelos.cuentas as never,
+    modelos.copropiedades as never,
+    modelos.storage as never,
+    modelos.auditoria as never,
+    modelos.colaAplicacionLoteRecibos as never,
     tenantQueDevuelve(copropiedadId),
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
+  // The best-effort paths log on purpose; keep the test output clean.
+  beforeEach(() => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
   it('opera sobre la copropiedad activa del tenant, sin lista de códigos permitidos', async () => {
     const modelos = makeModelos({ deletedCounts: { facturas: 1 } });
     const service = makeService(modelos);
 
-    await expect(service.reiniciar()).resolves.toBeDefined();
+    await expect(service.reiniciar(CUENTA)).resolves.toBeDefined();
     expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
     });
@@ -189,23 +294,34 @@ describe('ReiniciarCicloService.reiniciar', () => {
 
   it('borra TODO documento financiero de la copropiedad y devuelve los conteos', async () => {
     const modelos = makeModelos({
+      archivosPdf: 22,
       deletedCounts: {
-        lotes: 2,
-        facturas: 5,
-        asientos: 12,
-        saldos: 8,
-        recibos: 3,
-        loteRecibos: 7,
-        notasCredito: 1,
-        notasDebito: 2,
-        notasAnticipo: 1,
-        notasContables: 4,
-        aplicaciones: 6,
+        lotes: 1,
+        facturas: 2,
+        asientos: 3,
+        saldos: 4,
+        recibos: 5,
+        loteRecibos: 6,
+        notasCredito: 7,
+        notasDebito: 8,
+        notasAnticipo: 9,
+        notasContables: 10,
+        aplicaciones: 11,
+        carteraPorDocumento: 12,
+        saldosDocumentoOrigen: 13,
+        lotesContabilidad: 14,
+        saldosIniciales: 15,
+        lotesSaldoInicial: 16,
+        saldoTotalDocumento: 17,
+        saldosInicialesAnticipo: 18,
+        lotesSaldoInicialAnticipo: 19,
+        presentaciones: 20,
+        progresosImportacion: 21,
       },
     });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.facturas.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -234,26 +350,31 @@ describe('ReiniciarCicloService.reiniciar', () => {
     expect(modelos.aplicaciones.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
     });
+    // Cada campo con un valor DISTINTO: un cruce en el orden de la
+    // desestructuración del servicio haría fallar este test.
     expect(resultado).toEqual({
-      lotesEliminados: 2,
-      facturasEliminadas: 5,
-      recibosEliminados: 3,
-      loteRecibosEliminados: 7,
-      notasCreditoEliminadas: 1,
-      notasDebitoEliminadas: 2,
-      notasAnticipoEliminadas: 1,
-      notasContablesEliminadas: 4,
-      aplicacionesEliminadas: 6,
-      asientosEliminados: 12,
-      saldosEliminados: 8,
-      carteraPorDocumentoEliminada: 0,
-      saldosDocumentoOrigenEliminados: 0,
-      lotesContabilidadEliminados: 0,
-      saldosInicialesEliminados: 0,
-      lotesSaldoInicialEliminados: 0,
-      saldoTotalDocumentoEliminado: 0,
-      saldosInicialesAnticipoEliminados: 0,
-      lotesSaldoInicialAnticipoEliminados: 0,
+      lotesEliminados: 1,
+      facturasEliminadas: 2,
+      asientosEliminados: 3,
+      saldosEliminados: 4,
+      recibosEliminados: 5,
+      loteRecibosEliminados: 6,
+      notasCreditoEliminadas: 7,
+      notasDebitoEliminadas: 8,
+      notasAnticipoEliminadas: 9,
+      notasContablesEliminadas: 10,
+      aplicacionesEliminadas: 11,
+      carteraPorDocumentoEliminada: 12,
+      saldosDocumentoOrigenEliminados: 13,
+      lotesContabilidadEliminados: 14,
+      saldosInicialesEliminados: 15,
+      lotesSaldoInicialEliminados: 16,
+      saldoTotalDocumentoEliminado: 17,
+      saldosInicialesAnticipoEliminados: 18,
+      lotesSaldoInicialAnticipoEliminados: 19,
+      presentacionesEliminadas: 20,
+      progresosImportacionEliminados: 21,
+      archivosPdfEliminados: 22,
     });
   });
 
@@ -264,7 +385,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({ deletedCounts: { lotesContabilidad: 3 } });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.lotesContabilidad.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -286,7 +407,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.saldosIniciales.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -315,7 +436,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.saldosInicialesAnticipo.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -339,7 +460,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.saldoTotalDocumento.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -351,7 +472,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({});
     const service = makeService(modelos);
 
-    await service.reiniciar();
+    await service.reiniciar(CUENTA);
 
     // Antes solo se borraban los asientos anclados a Factura
     // (facturaId: {$ne: null}) — ahora se borra todo, porque Recibos/Notas
@@ -367,7 +488,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.carteraPorDocumento.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -383,7 +504,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({});
     const service = makeService(modelos);
 
-    await service.reiniciar();
+    await service.reiniciar(CUENTA);
 
     // 0, no 1: siguienteLote/siguienteDocumento incrementan antes de leer
     // (`{ returnDocument: 'after' }`), así que dejar el consecutivo en 1 haría que el
@@ -409,7 +530,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({ deletedCounts: { loteRecibos: 1 } });
     const service = makeService(modelos);
 
-    const resultado = await service.reiniciar();
+    const resultado = await service.reiniciar(CUENTA);
 
     expect(modelos.loteRecibos.deleteMany).toHaveBeenCalledWith({
       copropiedadId: COP,
@@ -427,7 +548,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     });
     const service = makeService(modelos);
 
-    await service.reiniciar();
+    await service.reiniciar(CUENTA);
 
     expect(modelos.resoluciones.updateOne).toHaveBeenCalledWith(
       { _id: 'res-1' },
@@ -439,7 +560,7 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({ resolucionActiva: null });
     const service = makeService(modelos);
 
-    await service.reiniciar();
+    await service.reiniciar(CUENTA);
 
     expect(modelos.resoluciones.updateOne).not.toHaveBeenCalled();
   });
@@ -448,6 +569,401 @@ describe('ReiniciarCicloService.reiniciar', () => {
     const modelos = makeModelos({});
     const service = makeService(modelos);
 
-    await expect(service.reiniciar()).resolves.toBeDefined();
+    await expect(service.reiniciar(CUENTA)).resolves.toBeDefined();
+  });
+
+  describe('guarda de concurrencia', () => {
+    /** Every collection the service can delete from or rewind. */
+    const todoLoQueEscribe = (m: ReturnType<typeof makeModelos>) => [
+      m.facturas.deleteMany,
+      m.lotes.deleteMany,
+      m.asientos.deleteMany,
+      m.saldos.deleteMany,
+      m.recibos.deleteMany,
+      m.loteRecibos.deleteMany,
+      m.notasCredito.deleteMany,
+      m.notasDebito.deleteMany,
+      m.notasAnticipo.deleteMany,
+      m.notasContables.deleteMany,
+      m.aplicaciones.deleteMany,
+      m.carteraPorDocumento.deleteMany,
+      m.saldosDocumentoOrigen.deleteMany,
+      m.lotesContabilidad.deleteMany,
+      m.saldosIniciales.deleteMany,
+      m.lotesSaldoInicial.deleteMany,
+      m.saldoTotalDocumento.deleteMany,
+      m.saldosInicialesAnticipo.deleteMany,
+      m.lotesSaldoInicialAnticipo.deleteMany,
+      m.presentaciones.deleteMany,
+      m.progresosImportacion.deleteMany,
+      m.consecutivoLote.updateOne,
+      m.consecutivoDocumento.updateMany,
+      m.consecutivoLoteRecibos.updateOne,
+      m.consecutivoLoteContabilidad.updateOne,
+      m.consecutivoSaldoInicial.updateOne,
+      m.consecutivoSaldoInicialAnticipo.updateOne,
+      m.resoluciones.updateOne,
+      m.storage.eliminarPrefijo,
+      m.auditoria.registrar,
+    ];
+
+    it('rechaza con ConflictException y no borra nada si hay una consolidación en curso (progreso no nulo)', async () => {
+      const modelos = makeModelos({
+        loteConsolidando: { progreso: { actual: 3, total: 10 } },
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+
+      // Tenant-scoped, nunca findById, y pregunta por progreso no nulo.
+      expect(modelos.lotes.findOne).toHaveBeenCalledWith({
+        copropiedadId: COP,
+        progreso: { $ne: null },
+      });
+      for (const escritura of todoLoQueEscribe(modelos)) {
+        expect(escritura).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rechaza con ConflictException y no borra nada si hay un lote de recibos aplicándose en esta copropiedad', async () => {
+      const modelos = makeModelos({
+        trabajosAplicacion: [{ data: { copropiedadId: COP.toString() } }],
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+
+      expect(modelos.colaAplicacionLoteRecibos.getJobs).toHaveBeenCalledWith(
+        expect.arrayContaining(['active', 'waiting']),
+      );
+      for (const escritura of todoLoQueEscribe(modelos)) {
+        expect(escritura).not.toHaveBeenCalled();
+      }
+    });
+
+    it('un trabajo de aplicación de OTRA copropiedad no bloquea el reinicio', async () => {
+      const modelos = makeModelos({
+        trabajosAplicacion: [
+          { data: { copropiedadId: new Types.ObjectId().toString() } },
+        ],
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).resolves.toBeDefined();
+    });
+
+    it('el mensaje del rechazo está en español', async () => {
+      const modelos = makeModelos({
+        loteConsolidando: { progreso: { actual: 0, total: 0 } },
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow(/consolidación/);
+    });
+
+    it('falla cerrado: si la cola no responde, rechaza y no escribió nada', async () => {
+      const modelos = makeModelos({ colaFalla: true });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow('redis caído');
+
+      for (const escritura of todoLoQueEscribe(modelos)) {
+        expect(escritura).not.toHaveBeenCalled();
+      }
+    });
+
+    it.each(['saldos-iniciales', 'saldos-iniciales-anticipo'])(
+      'una importación de %s en curso (progreso reciente) rechaza con ConflictException y no borra nada',
+      async (tipo) => {
+        const modelos = makeModelos({
+          importacion: { tipo, updatedAt: new Date() },
+        });
+        const service = makeService(modelos);
+
+        const intento = service.reiniciar(CUENTA);
+
+        await expect(intento).rejects.toBeInstanceOf(ConflictException);
+        await expect(intento).rejects.toThrow(
+          /importación de Saldos Iniciales/,
+        );
+        for (const escritura of todoLoQueEscribe(modelos)) {
+          expect(escritura).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it('una fila de progreso VIEJA (importación caída) no bloquea y se borra como antes', async () => {
+      const modelos = makeModelos({
+        importacion: {
+          tipo: 'saldos-iniciales',
+          updatedAt: new Date(Date.now() - 16 * 60 * 1000),
+        },
+        deletedCounts: { progresosImportacion: 1 },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(resultado.progresosImportacionEliminados).toBe(1);
+      expect(modelos.progresosImportacion.deleteMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('el filtro de la guarda es por copropiedad, solo los dos tipos de saldos iniciales y una ventana de 15 minutos', async () => {
+      const modelos = makeModelos({});
+      const service = makeService(modelos);
+      const antes = Date.now();
+
+      await service.reiniciar(CUENTA);
+
+      const [filtro] = modelos.progresosImportacion.findOne.mock
+        .calls[0] as unknown as [
+        {
+          copropiedadId: Types.ObjectId;
+          tipo: { $in: string[] };
+          updatedAt: { $gte: Date };
+        },
+      ];
+      expect(filtro.copropiedadId).toBe(COP);
+      expect(filtro.tipo.$in).toEqual([
+        'saldos-iniciales',
+        'saldos-iniciales-anticipo',
+      ]);
+      const limite = filtro.updatedAt.$gte.getTime();
+      expect(limite).toBeLessThanOrEqual(antes - 15 * 60 * 1000 + 1000);
+      expect(limite).toBeGreaterThan(antes - 15 * 60 * 1000 - 5000);
+    });
+  });
+
+  describe('fallo a mitad del borrado', () => {
+    it('rechaza con el error ORIGINAL, no reinicia contadores ni toca el almacenamiento y registra UNA auditoría parcial', async () => {
+      const modelos = makeModelos({ deletedCounts: { recibos: 3 } });
+      // The second group of deletes fails: the first group (recibos, notas…)
+      // is already gone by then.
+      modelos.saldos.deleteMany.mockImplementation(() => ({
+        exec: () => Promise.reject(new Error('mongo cayó')),
+      }));
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow('mongo cayó');
+
+      expect(modelos.recibos.deleteMany).toHaveBeenCalled();
+      expect(modelos.consecutivoLote.updateOne).not.toHaveBeenCalled();
+      expect(modelos.consecutivoDocumento.updateMany).not.toHaveBeenCalled();
+      expect(modelos.consecutivoLoteRecibos.updateOne).not.toHaveBeenCalled();
+      expect(
+        modelos.consecutivoLoteContabilidad.updateOne,
+      ).not.toHaveBeenCalled();
+      expect(modelos.consecutivoSaldoInicial.updateOne).not.toHaveBeenCalled();
+      expect(
+        modelos.consecutivoSaldoInicialAnticipo.updateOne,
+      ).not.toHaveBeenCalled();
+      expect(modelos.resoluciones.updateOne).not.toHaveBeenCalled();
+      expect(modelos.storage.eliminarPrefijo).not.toHaveBeenCalled();
+
+      expect(modelos.auditoria.registrar).toHaveBeenCalledTimes(1);
+      const [entrada] = modelos.auditoria.registrar.mock
+        .calls[0] as unknown as [Record<string, string>];
+      expect(entrada).toMatchObject({
+        actorAccountId: CUENTA,
+        accion: 'reiniciar',
+        entidadTipo: 'copropiedad',
+        entidadId: COP.toString(),
+      });
+      expect(entrada.entidadEtiqueta).toContain('PARCIAL');
+      expect(entrada.entidadEtiqueta).toContain('mongo cayó');
+    });
+
+    it('si además falla la auditoría parcial, igual se relanza el error original', async () => {
+      const modelos = makeModelos({ auditoriaFalla: true });
+      modelos.lotes.deleteMany.mockImplementation(() => ({
+        exec: () => Promise.reject(new Error('mongo cayó')),
+      }));
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow('mongo cayó');
+      expect(modelos.auditoria.registrar).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('PresentacionDocumento', () => {
+    it('se borra por prefijo anclado de objectPath y NO por copropiedadId (el esquema no lo tiene)', async () => {
+      const modelos = makeModelos({ deletedCounts: { presentaciones: 4 } });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.presentaciones.deleteMany).toHaveBeenCalledTimes(1);
+      const [filtro] = modelos.presentaciones.deleteMany.mock
+        .calls[0] as unknown as [Record<string, unknown>];
+      expect(filtro).not.toHaveProperty('copropiedadId');
+      const { $regex } = filtro.objectPath as { $regex: string };
+      expect($regex).toBe(`^${PREFIJO_PDFS.replace(/\./g, '\\.')}`);
+      const regex = new RegExp($regex);
+      expect(
+        regex.test(`${PREFIJO_PDFS}FV/${new Types.ObjectId().toString()}.pdf`),
+      ).toBe(true);
+      // Anclado: ni otra copropiedad ni el mismo id como subcadena.
+      expect(
+        regex.test(
+          `documentos-generados/${new Types.ObjectId().toString()}/FV/x.pdf`,
+        ),
+      ).toBe(false);
+      expect(regex.test(`otro/${PREFIJO_PDFS}FV/x.pdf`)).toBe(false);
+      expect(resultado.presentacionesEliminadas).toBe(4);
+    });
+  });
+
+  describe('ProgresoImportacion', () => {
+    it('borra solo los dos tipos de saldos iniciales de la copropiedad', async () => {
+      const modelos = makeModelos({
+        deletedCounts: { progresosImportacion: 2 },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.progresosImportacion.deleteMany).toHaveBeenCalledWith({
+        copropiedadId: COP,
+        tipo: { $in: ['saldos-iniciales', 'saldos-iniciales-anticipo'] },
+      });
+      expect(resultado.progresosImportacionEliminados).toBe(2);
+    });
+  });
+
+  describe('limpieza del almacenamiento', () => {
+    it('borra el prefijo de la copropiedad DESPUÉS de todo el borrado en Mongo y devuelve cuántos archivos eliminó', async () => {
+      const modelos = makeModelos({ archivosPdf: 7 });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.storage.eliminarPrefijo).toHaveBeenCalledWith(
+        PREFIJO_PDFS,
+      );
+      const delStorage =
+        modelos.storage.eliminarPrefijo.mock.invocationCallOrder[0];
+      const ultimasEscrituras = [
+        modelos.facturas.deleteMany,
+        modelos.lotes.deleteMany,
+        modelos.presentaciones.deleteMany,
+        modelos.consecutivoSaldoInicialAnticipo.updateOne,
+        modelos.resoluciones.findOne,
+      ];
+      for (const escritura of ultimasEscrituras) {
+        expect(escritura.mock.invocationCallOrder[0]).toBeLessThan(delStorage);
+      }
+      expect(resultado.archivosPdfEliminados).toBe(7);
+    });
+
+    it('si algunos archivos no se pudieron borrar, informa los que sí y lo deja en la auditoría', async () => {
+      const modelos = makeModelos({ archivosPdf: 8, archivosFallidos: 2 });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(resultado.archivosPdfEliminados).toBe(8);
+      const [entrada] = modelos.auditoria.registrar.mock
+        .calls[0] as unknown as [{ entidadEtiqueta: string }];
+      expect(entrada.entidadEtiqueta).toContain('NO se pudieron borrar');
+    });
+
+    it('si el almacenamiento falla, el reinicio NO falla: devuelve archivosPdfEliminados 0 y lo deja en la auditoría', async () => {
+      const modelos = makeModelos({
+        storageFalla: true,
+        deletedCounts: { facturas: 5 },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(resultado.archivosPdfEliminados).toBe(0);
+      expect(resultado.facturasEliminadas).toBe(5);
+      const [entrada] = modelos.auditoria.registrar.mock
+        .calls[0] as unknown as [{ entidadEtiqueta: string }];
+      expect(entrada.entidadEtiqueta).toContain('NO se pudieron borrar');
+    });
+  });
+
+  describe('auditoría', () => {
+    it('registra UNA entrada accion "reiniciar" sobre la copropiedad, con el actor y los conteos', async () => {
+      const modelos = makeModelos({
+        deletedCounts: { facturas: 5, recibos: 3 },
+        archivosPdf: 2,
+      });
+      const service = makeService(modelos);
+
+      await service.reiniciar(CUENTA);
+
+      expect(modelos.auditoria.registrar).toHaveBeenCalledTimes(1);
+      const [entrada] = modelos.auditoria.registrar.mock
+        .calls[0] as unknown as [Record<string, string>];
+      expect(entrada).toMatchObject({
+        actorAccountId: CUENTA,
+        actorNombre: 'Admin Plataforma',
+        accion: 'reiniciar',
+        entidadTipo: 'copropiedad',
+        entidadId: COP.toString(),
+      });
+      expect(entrada.entidadEtiqueta).toContain('facturasEliminadas: 5');
+      expect(entrada.entidadEtiqueta).toContain('recibosEliminados: 3');
+      expect(entrada.entidadEtiqueta).toContain('archivosPdfEliminados: 2');
+      expect(entrada.entidadEtiqueta).toContain('0001 Edificio Sol');
+    });
+
+    it('si falla el registro de auditoría, el reinicio NO falla ni se deshace', async () => {
+      const modelos = makeModelos({
+        auditoriaFalla: true,
+        deletedCounts: { facturas: 5 },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(resultado.facturasEliminadas).toBe(5);
+    });
+
+    it('no registra auditoría si el reinicio fue rechazado por la guarda', async () => {
+      const modelos = makeModelos({
+        loteConsolidando: { progreso: { actual: 1, total: 2 } },
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+
+      expect(modelos.auditoria.registrar).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('Campos de contador que reiniciar() reescribe (regresión de renombrado)', () => {
+  // Un `$set` sobre un campo que ya no existe en el esquema no falla: con
+  // `strict` Mongoose lo descarta y el reinicio queda en un no-op silencioso.
+  // Estos tests atan los nombres que usa el servicio a los esquemas reales.
+  it.each([
+    ['ConsecutivoLote', ConsecutivoLote],
+    ['ConsecutivoLoteRecibos', ConsecutivoLoteRecibos],
+    ['ConsecutivoSaldoInicial', ConsecutivoSaldoInicial],
+    ['ConsecutivoSaldoInicialAnticipo', ConsecutivoSaldoInicialAnticipo],
+    ['ConsecutivoDocumento', ConsecutivoDocumento],
+  ])('%s tiene el campo siguienteNumero', (_nombre, clase) => {
+    const schema = SchemaFactory.createForClass(clase);
+    expect(schema.path('siguienteNumero')).toBeDefined();
+  });
+
+  it('ConsecutivoLoteContabilidad conserva legítimamente nextNumber', () => {
+    const schema = SchemaFactory.createForClass(ConsecutivoLoteContabilidad);
+    expect(schema.path('nextNumber')).toBeDefined();
+  });
+
+  it('ResolucionFacturacion tiene siguienteNumero y rangoDesde', () => {
+    const schema = SchemaFactory.createForClass(ResolucionFacturacion);
+    expect(schema.path('siguienteNumero')).toBeDefined();
+    expect(schema.path('rangoDesde')).toBeDefined();
   });
 });

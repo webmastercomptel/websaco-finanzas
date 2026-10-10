@@ -1,6 +1,8 @@
 import { Controller, Post, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PlatformAdminGuard } from '../../common/guards/platform-admin.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { ReiniciarCicloService } from './reiniciar-ciclo.service';
 import type { ResultadoReinicioCiclo } from '../../contracts';
 
@@ -17,7 +19,9 @@ export class ReiniciarCicloController {
   constructor(private readonly reiniciarCiclo: ReiniciarCicloService) {}
 
   @Post('reiniciar-ciclo')
-  reiniciar(): Promise<ResultadoReinicioCiclo> {
-    return this.reiniciarCiclo.reiniciar();
+  reiniciar(
+    @CurrentUser() user: IRequestUser,
+  ): Promise<ResultadoReinicioCiclo> {
+    return this.reiniciarCiclo.reiniciar(user.accountId!);
   }
 }

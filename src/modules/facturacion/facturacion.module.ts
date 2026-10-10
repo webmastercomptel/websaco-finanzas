@@ -15,6 +15,7 @@ import {
   EVENTOS_COLA_CONSOLIDACION,
   NOMBRE_COLA_CONSOLIDACION,
 } from './colas/consolidacion.constants';
+import { NOMBRE_COLA_APLICACION_LOTE_RECIBOS } from '../recibos/colas/aplicacion-lote-recibos.constants';
 
 @Module({
   imports: [
@@ -22,6 +23,11 @@ import {
     // a lote reversal. AuditoriaModule imports only Mongoose, so no cycle.
     AuditoriaModule,
     BullModule.registerQueue({ name: NOMBRE_COLA_CONSOLIDACION }),
+    // Producer-side handle on the recibos-por-lote aplicación queue, used ONLY
+    // by ReiniciarCicloService to refuse a reset while one of those jobs is
+    // unfinished (LoteRecibos has no persisted in-progress marker). The
+    // processor and QueueEvents stay in RecibosModule; no cycle introduced.
+    BullModule.registerQueue({ name: NOMBRE_COLA_APLICACION_LOTE_RECIBOS }),
   ],
   controllers: [FacturasController, LotesController, ReiniciarCicloController],
   providers: [
