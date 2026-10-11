@@ -16,12 +16,14 @@ import {
 import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
-import { CheckAbility } from '../casl/check-ability.decorator';
+import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
 import { InmueblesService } from './inmuebles.service';
 import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { InmueblesReporteService } from './inmuebles-reporte.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
+import { InmueblesSaldosService } from './inmuebles-saldos.service';
 import { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
+import { ConsultarSaldosInmueblesDto } from './dto/consultar-saldos-inmuebles.dto';
 import {
   ActualizarInmuebleDto,
   CrearInmuebleDto,
@@ -36,6 +38,7 @@ import type {
   ResultadoImportacionInmuebles,
   ResultadoImportacionValoresRecurrentes,
   RespuestaListadoInmuebles,
+  SaldoInmueble,
   ValorRecurrente,
   ValorRecurrenteMasivo,
 } from '../../contracts';
@@ -66,12 +69,34 @@ export class InmueblesController {
     private readonly valoresRecurrentes: ValoresRecurrentesService,
     private readonly reporte: InmueblesReporteService,
     private readonly eliminacion: InmueblesEliminacionService,
+    private readonly saldos: InmueblesSaldosService,
   ) {}
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Inmueble' })
   findAll(@Query() query: ListarInmueblesDto): Promise<Paginado<Inmueble>> {
     return this.inmuebles.findAll(query);
+  }
+
+  /**
+   * Outstanding balance of up to 50 units in one call (`?ids=a,b,c`) — what
+   * the "Nueva factura" unit picker shows beside each candidate. Gated by
+   * EITHER reading cartera OR creating invoices (OR semantics), because
+   * whoever can issue an invoice must see what the unit already owes without
+   * also being entitled to the full arrears report, and whoever reads cartera
+   * already sees these numbers there. Only units of the active coproperty are
+   * answered. Route sits before `:id`, same reasoning as `listado.pdf` below:
+   * otherwise "saldos" is read as an id.
+   */
+  @Get('saldos')
+  @CheckAnyAbility(
+    { action: 'read', subject: 'Consulta' },
+    { action: 'create', subject: 'Factura' },
+  )
+  consultarSaldos(
+    @Query() query: ConsultarSaldosInmueblesDto,
+  ): Promise<SaldoInmueble[]> {
+    return this.saldos.consultar(query);
   }
 
   /**

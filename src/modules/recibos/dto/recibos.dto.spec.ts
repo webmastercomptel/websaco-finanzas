@@ -114,4 +114,20 @@ describe('ListarRecibosDto', () => {
     });
     expect(dto.conAnticipoDisponible).toBe(false);
   });
+
+  it('transforma incluirTotales=true (string de query) a boolean', async () => {
+    const dto = plainToInstance(ListarRecibosDto, { incluirTotales: 'true' });
+    expect(dto.incluirTotales).toBe(true);
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it('transforma incluirTotales=false (string de query) a boolean, no truthy por default de JS', () => {
+    const dto = plainToInstance(ListarRecibosDto, { incluirTotales: 'false' });
+    expect(dto.incluirTotales).toBe(false);
+  });
+
+  it('deja incluirTotales indefinido cuando no viene', () => {
+    const dto = plainToInstance(ListarRecibosDto, {});
+    expect(dto.incluirTotales).toBeUndefined();
+  });
 });

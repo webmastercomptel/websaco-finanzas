@@ -34,7 +34,8 @@ import type {
   EmisorPlantillaFactura,
   ResolucionPlantillaFactura,
   TitularFactura,
-  Paginado,
+  PaginadoConTotales,
+  TotalesFacturas,
   FilaMarcadorFactura,
   ReferenciaPagoFilaFactura,
   IvaFilaFactura,
@@ -63,6 +64,10 @@ import type {
 } from '../../database/schemas/facturacion/factura-linea.schema';
 
 export type { FacturaDocument };
+
+/** Rounds a money sum to 2 decimals so float noise never reaches the wire. */
+const redondear2 = (valor: number): number =>
+  Math.round((valor + Number.EPSILON) * 100) / 100;
 
 @Injectable()
 export class FacturasService {
@@ -117,8 +122,17 @@ export class FacturasService {
     return porDocumento;
   }
 
-  async findAll(query: ListarFacturasDto): Promise<Paginado<FacturaContract>> {
-    const copropiedadId = this.tenant.resolveCoPropertyId();
+  /**
+   * The ONE place a listing's filter is built, shared by the page query and
+   * the opt-in grand totals so both always describe the same set of
+   * documents (a totals row that disagrees with its own table is worse than
+   * none). Async because `conSaldoPendiente` pre-resolves candidate ids from
+   * `SaldoTotalDocumento`.
+   */
+  private async construirFiltro(
+    query: ListarFacturasDto,
+    copropiedadId: Types.ObjectId,
+  ): Promise<Record<string, unknown>> {
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.buscar) {
@@ -153,11 +167,80 @@ export class FacturasService {
         ...(query.fechaHasta ? { $lte: new Date(query.fechaHasta) } : {}),
       };
     }
+    return filtro;
+  }
+
+  /**
+   * Grand totals over the WHOLE filtered set (not the page), anuladas
+   * excluded: `estado` is forced to `'emitida'`, so an explicit
+   * `estado: 'anulada'` from the caller yields zeros (nothing voided is ever
+   * part of a total). `total` comes from the frozen Factura; the outstanding
+   * balance comes from `SaldoTotalDocumento` — `Factura.saldoPendiente` is a
+   * stale legacy field and must never be summed. Each document's balance is
+   * floored at 0 before summing: an overpaid document (negative balance) does
+   * not offset what other documents owe, matching the per-row display and
+   * `InmueblesSaldosService`. No `.aggregate()` by house style: lean `find`
+   * with a projection, summed in memory.
+   */
+  private async calcularTotales(
+    filtro: Record<string, unknown>,
+    copropiedadId: Types.ObjectId,
+  ): Promise<TotalesFacturas> {
+    if (filtro.estado === 'anulada') return { total: 0, saldoPendiente: 0 };
+
+    const emitidas = await this.facturas
+      .find({ ...filtro, estado: 'emitida' }, { total: 1 })
+      .lean()
+      .exec();
+    if (emitidas.length === 0) return { total: 0, saldoPendiente: 0 };
+
+    const saldos = await this.saldoTotalDocumento
+      .find(
+        {
+          copropiedadId,
+          tipoDocumento: 'FV',
+          documentoId: { $in: emitidas.map((f) => f._id) },
+        },
+        { documentoId: 1, saldoPendiente: 1 },
+      )
+      .lean()
+      .exec();
+    const saldoPorDocumento = new Map(
+      saldos.map((s) => [s.documentoId.toString(), s.saldoPendiente]),
+    );
+
+    let total = 0;
+    let saldoPendiente = 0;
+    for (const f of emitidas) {
+      total += f.total;
+      // A document without a saldo row owes nothing (same `?? 0` the page uses).
+      saldoPendiente += Math.max(
+        0,
+        saldoPorDocumento.get(f._id.toString()) ?? 0,
+      );
+    }
+    return {
+      total: redondear2(total),
+      saldoPendiente: redondear2(saldoPendiente),
+    };
+  }
+
+  /**
+   * Paged listing. With `incluirTotales: true` the response also carries a
+   * `totales` block (`{ total, saldoPendiente }`) over the full filtered set,
+   * anuladas excluded — see `calcularTotales`. Without the flag no extra query
+   * runs and `totales` is absent.
+   */
+  async findAll(
+    query: ListarFacturasDto,
+  ): Promise<PaginadoConTotales<FacturaContract, TotalesFacturas>> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro = await this.construirFiltro(query, copropiedadId);
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
 
-    const [documentos, total] = await Promise.all([
+    const [documentos, total, totales] = await Promise.all([
       this.facturas
         .find(filtro)
         .sort({ fechaEmision: -1, _id: -1 })
@@ -165,6 +248,9 @@ export class FacturasService {
         .limit(porPagina)
         .exec(),
       this.facturas.countDocuments(filtro).exec(),
+      query.incluirTotales
+        ? this.calcularTotales(filtro, copropiedadId)
+        : undefined,
     ]);
 
     const ids = documentos.map((d) => d._id);
@@ -189,6 +275,7 @@ export class FacturasService {
       total,
       pagina,
       porPagina,
+      ...(totales ? { totales } : {}),
     };
   }
 

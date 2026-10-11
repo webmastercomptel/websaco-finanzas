@@ -50,17 +50,23 @@ const documento = (over: Record<string, unknown> = {}) => ({
 
 const modeloCon = (filas: unknown[], total = filas.length) => {
   const filtros: Filtro[] = [];
+  // Honours an `estado` in the filter so the totals query (which forces
+  // `'emitida'`) really excludes voided fixtures, like Mongo would.
+  let vigentes = filas;
   const cadena = {
     sort: () => cadena,
     skip: () => cadena,
     limit: () => cadena,
     lean: () => cadena,
-    exec: () => Promise.resolve(filas),
+    exec: () => Promise.resolve(vigentes),
   };
   return {
     filtros,
     find: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
+      vigentes = filtro.estado
+        ? filas.filter((f) => (f as Filtro).estado === filtro.estado)
+        : filas;
       return cadena;
     }),
     findOne: jest.fn((filtro: Filtro) => {
@@ -91,7 +97,10 @@ const modeloSaldoTotalDocumento = (
       const resultado = idsFiltro
         ? filas.filter((f) => idsFiltro.map(String).includes(f._id.toString()))
         : filas.filter((f) => (f.outstandingBalance ?? 0) > 0);
-      return {
+      // `lean` is chainable because the opt-in totals query reads this model
+      // lean; the page queries call `.exec()` directly.
+      const cadena = {
+        lean: () => cadena,
         exec: () =>
           Promise.resolve(
             resultado.map((f) => ({
@@ -100,6 +109,7 @@ const modeloSaldoTotalDocumento = (
             })),
           ),
       };
+      return cadena;
     }),
     findOne: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
@@ -206,6 +216,103 @@ describe('FacturasService.findAll', () => {
       titular: { nombre: 'Ana Pérez', numeroIdentificacion: '123456' },
       lineas: [expect.objectContaining({ nombreConcepto: 'Administración' })],
     });
+  });
+});
+
+describe('FacturasService.findAll — incluirTotales', () => {
+  const facturaDe = (id: string, over: Record<string, unknown> = {}) =>
+    documento({
+      _id: { toString: () => id },
+      // Stale legacy field: the totals must never read it.
+      saldoPendiente: 999999,
+      ...over,
+    });
+
+  it('no incluye totales (ni consultas extra) cuando el flag está ausente', async () => {
+    const { service, facturas } = construirServicio([documento()]);
+
+    const resultado = await service.findAll({});
+
+    expect(resultado.totales).toBeUndefined();
+    expect(facturas.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('suma sobre todo el set, excluye anuladas y toma el saldo de SaldoTotalDocumento', async () => {
+    const { service, facturas } = construirServicio([
+      facturaDe('f-1', { total: 100000.1, outstandingBalance: 40000.05 }),
+      facturaDe('f-2', { total: 200000.2, outstandingBalance: 0 }),
+      facturaDe('f-3', {
+        total: 5000,
+        outstandingBalance: 5000,
+        estado: 'anulada',
+      }),
+    ]);
+
+    const resultado = await service.findAll({
+      incluirTotales: true,
+      porPagina: 1,
+    });
+
+    expect(resultado.totales).toEqual({
+      total: 300000.3,
+      saldoPendiente: 40000.05,
+    });
+    expect(facturas.filtros[1]).toMatchObject({
+      copropiedadId: COP,
+      estado: 'emitida',
+    });
+  });
+
+  it('no deja que un saldo negativo (documento sobrepagado) compense lo que deben los demás', async () => {
+    const { service, saldoTotalDocumento } = construirServicio([
+      facturaDe('FV-1', { total: 100000, outstandingBalance: 100000 }),
+      facturaDe('FV-2', { total: 50000, outstandingBalance: -50000 }),
+    ]);
+
+    const resultado = await service.findAll({ incluirTotales: true });
+
+    expect(resultado.totales).toEqual({
+      total: 150000,
+      saldoPendiente: 100000,
+    });
+    // The secondary lookup is tenant-scoped and limited to invoices.
+    expect(saldoTotalDocumento.filtros[0]).toMatchObject({
+      copropiedadId: COP,
+      tipoDocumento: 'FV',
+    });
+  });
+
+  it('comparte el filtro de la página (incluida la preconsulta de conSaldoPendiente)', async () => {
+    const doc = facturaDe('f-1', { outstandingBalance: 520000 });
+    const { service, facturas } = construirServicio([doc]);
+
+    const resultado = await service.findAll({
+      conSaldoPendiente: true,
+      inmuebleId: 'inm-1',
+      incluirTotales: true,
+    });
+
+    expect(facturas.filtros[1]).toMatchObject({
+      inmuebleId: 'inm-1',
+      _id: { $in: [doc._id] },
+    });
+    expect(resultado.totales).toEqual({
+      total: 520000,
+      saldoPendiente: 520000,
+    });
+  });
+
+  it('devuelve ceros si el llamador pide explícitamente las anuladas', async () => {
+    const { service } = construirServicio([
+      facturaDe('f-1', { estado: 'anulada' }),
+    ]);
+
+    const resultado = await service.findAll({
+      estado: 'anulada',
+      incluirTotales: true,
+    });
+
+    expect(resultado.totales).toEqual({ total: 0, saldoPendiente: 0 });
   });
 });
 
