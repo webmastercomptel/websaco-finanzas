@@ -1521,12 +1521,25 @@ export interface FilaConsecutivo {
   numeroCompleto: string;
   inmuebleCodigo: string;
   fecha: string;
+  /** For a Recibo (`esRecibo`) this is its Valor Recibido. */
   valorTotal: number;
+  /** Recibo only, 0 on every other type: the payment surplus sent to Otros
+   *  Ingresos (`Recibo.montoOtrosIngresos`). */
+  montoOtrosIngresos: number;
+  /** Recibo only, 0 on every other type: early-payment discount across its
+   *  active applications (`AplicacionCartera.montoDescuento`). Already part
+   *  of `cargosPorConcepto`, which is why a Recibo's concepts can add up to
+   *  more than the cash it received. */
+  montoDescuento: number;
   cargosPorConcepto: Record<string, number>;
 }
 
 /** Response shape for GET /consultas/consecutivos. */
 export interface RespuestaConsecutivos {
+  /** True when the código is a Recibo de Caja (categoría IN): the report then
+   *  labels `valorTotal` "Valor Recibido" and adds the Otros Ingresos and
+   *  Descuento columns. */
+  esRecibo: boolean;
   conceptos: ConceptoColumnaConsecutivos[];
   filas: FilaConsecutivo[];
 }

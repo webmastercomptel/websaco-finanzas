@@ -230,6 +230,7 @@ export class ConsecutivosService {
     );
 
     return {
+      esRecibo: consecutivo.categoria === 'IN',
       conceptos: conceptosDocs.map((c) => ({
         conceptoId: c._id.toString(),
         nombre: c.nombre,
@@ -265,6 +266,7 @@ export class ConsecutivosService {
       .exec();
 
     const cargosPorRecibo = new Map<string, Record<string, number>>();
+    const descuentoPorRecibo = new Map<string, number>();
     for (const app of aplicaciones) {
       const key = app.sourceId.toString();
       const cargos = cargosPorRecibo.get(key) ?? {};
@@ -272,6 +274,10 @@ export class ConsecutivosService {
         sumarCargo(cargos, detalle.conceptoId.toString(), detalle.monto);
       }
       cargosPorRecibo.set(key, cargos);
+      descuentoPorRecibo.set(
+        key,
+        (descuentoPorRecibo.get(key) ?? 0) + (app.montoDescuento ?? 0),
+      );
     }
 
     return recibos.map((r) => ({
@@ -282,6 +288,8 @@ export class ConsecutivosService {
       inmuebleId: r.inmuebleId,
       fecha: r.fechaRecibo.toISOString(),
       valorTotal: r.montoRecibido,
+      montoOtrosIngresos: r.montoOtrosIngresos ?? 0,
+      montoDescuento: descuentoPorRecibo.get(r._id.toString()) ?? 0,
       cargosPorConcepto: cargosPorRecibo.get(r._id.toString()) ?? {},
     }));
   }
@@ -320,6 +328,8 @@ export class ConsecutivosService {
           inmuebleId: n.inmuebleId,
           fecha: fecha.toISOString(),
           valorTotal: n.montoTotal,
+          montoOtrosIngresos: 0,
+          montoDescuento: 0,
           cargosPorConcepto,
         };
       });
@@ -349,6 +359,8 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
+      montoOtrosIngresos: 0,
+      montoDescuento: 0,
       cargosPorConcepto: { [n.conceptoId.toString()]: n.total },
     }));
   }
@@ -375,6 +387,8 @@ export class ConsecutivosService {
         inmuebleId: n.inmuebleId,
         fecha: fecha.toISOString(),
         valorTotal: n.monto,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto: {
           [n.conceptoOrigenId.toString()]: -n.monto,
           [n.conceptoDestinoId.toString()]: n.monto,
@@ -427,6 +441,8 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.montoAplicado,
+      montoOtrosIngresos: 0,
+      montoDescuento: 0,
       cargosPorConcepto: cargosPorNota.get(n._id.toString()) ?? {},
     }));
   }
@@ -464,6 +480,8 @@ export class ConsecutivosService {
         inmuebleId: f.inmuebleId,
         fecha: f.fechaEmision.toISOString(),
         valorTotal: f.total,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto,
       };
     });

@@ -65,13 +65,26 @@ export async function generarPdfConsecutivos(
   );
   const conceptosAgrupados = reporte.conceptos.slice(MAX_CARGOS_INDIVIDUALES);
   const hayOtros = conceptosAgrupados.length > 0;
+  // Recibo only: its Valor Total is the cash received, followed by the two
+  // amounts that explain why it can differ from the concept columns.
+  const esRecibo = reporte.esRecibo;
 
   const COLUMNAS: ColumnaTabla[] = [
     { titulo: 'Tipo Doc.', peso: 0.7, numerica: false },
     { titulo: 'Número', peso: 1.3, numerica: false },
     { titulo: 'Inmueble', peso: 0.9, numerica: false },
     { titulo: 'Fecha', peso: 0.9, numerica: false },
-    { titulo: 'Valor Total', peso: 1.2, numerica: true },
+    {
+      titulo: esRecibo ? 'Valor Recibido' : 'Valor Total',
+      peso: 1.2,
+      numerica: true,
+    },
+    ...(esRecibo
+      ? [
+          { titulo: 'Otros Ingresos', peso: 1.1, numerica: true },
+          { titulo: 'Descuento', peso: 1.1, numerica: true },
+        ]
+      : []),
     ...conceptosIndividuales.map((c) => ({
       titulo: c.nombre,
       peso: 1.1,
@@ -183,6 +196,8 @@ export async function generarPdfConsecutivos(
 
   const totalesPorConcepto = new Map<string, number>();
   let totalGeneral = 0;
+  let totalOtrosIngresos = 0;
+  let totalDescuento = 0;
   for (const f of reporte.filas) {
     for (const c of reporte.conceptos) {
       const monto = f.cargosPorConcepto[c.conceptoId] ?? 0;
@@ -192,6 +207,8 @@ export async function generarPdfConsecutivos(
       );
     }
     totalGeneral += f.valorTotal;
+    totalOtrosIngresos += f.montoOtrosIngresos;
+    totalDescuento += f.montoDescuento;
   }
   const totalOtros = conceptosAgrupados.reduce(
     (acc, c) => acc + (totalesPorConcepto.get(c.conceptoId) ?? 0),
@@ -220,6 +237,12 @@ export async function generarPdfConsecutivos(
           f.inmuebleCodigo,
           formatoFecha(f.fecha),
           formatoPesoCompacto(f.valorTotal),
+          ...(esRecibo
+            ? [
+                formatoPesoCompacto(f.montoOtrosIngresos),
+                formatoPesoCompacto(f.montoDescuento),
+              ]
+            : []),
           ...conceptosIndividuales.map((c) =>
             formatoPesoCompacto(f.cargosPorConcepto[c.conceptoId] ?? 0),
           ),
@@ -246,6 +269,12 @@ export async function generarPdfConsecutivos(
               '',
               '',
               formatoPesoCompacto(totalGeneral),
+              ...(esRecibo
+                ? [
+                    formatoPesoCompacto(totalOtrosIngresos),
+                    formatoPesoCompacto(totalDescuento),
+                  ]
+                : []),
               ...conceptosIndividuales.map((c) =>
                 formatoPesoCompacto(totalesPorConcepto.get(c.conceptoId) ?? 0),
               ),

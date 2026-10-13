@@ -162,6 +162,52 @@ describe('ConsecutivosService', () => {
       expect(result.filas[0].cargosPorConcepto).toEqual({});
       expect(result.filas[0].valorTotal).toBe(50000);
     });
+
+    it('trae otros ingresos del recibo y suma el descuento de sus aplicaciones activas', async () => {
+      const inmId = id();
+      const reciboId = id();
+      const conceptoId = id();
+      const recibo = {
+        _id: reciboId,
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        numero: 7,
+        numeroCompleto: 'RC-7',
+        montoRecibido: 120000,
+        montoOtrosIngresos: 15000,
+        fechaRecibo: new Date('2026-01-18'),
+      };
+      const app = (montoDescuento: number) => ({
+        _id: id(),
+        sourceType: 'RC',
+        sourceId: reciboId,
+        estado: 'activa',
+        montoDescuento,
+        detalleConceptos: [
+          { conceptoId, nombreConcepto: 'Administracion', monto: 60000 },
+        ],
+      });
+
+      const svc = servicio({
+        recibos: find([recibo]),
+        aplicaciones: find([app(3000), app(2000)]),
+        inmuebles: find([inmuebleDoc({ _id: inmId })]),
+        conceptosCobro: find([conceptoDoc({ _id: conceptoId })]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'RC',
+        desde: '2026-01-01',
+        hasta: '2026-01-31',
+      });
+
+      expect(result.esRecibo).toBe(true);
+      expect(result.filas[0]).toMatchObject({
+        valorTotal: 120000,
+        montoOtrosIngresos: 15000,
+        montoDescuento: 5000,
+      });
+    });
   });
 
   describe('categoria ND (Nota Debito)', () => {
@@ -202,8 +248,11 @@ describe('ConsecutivosService', () => {
         numeroCompleto: 'ND-3',
         inmuebleCodigo: '302',
         valorTotal: 20000,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto: { [conceptoId.toString()]: 20000 },
       });
+      expect(result.esRecibo).toBe(false);
     });
   });
 
