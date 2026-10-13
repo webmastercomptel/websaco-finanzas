@@ -92,6 +92,15 @@ export class NotaDebito {
   @Prop({ required: true })
   total: number;
 
+  /** Every motivo except "Cambio del valor": the account the creation entry
+   *  credited — the coproperty's `otrosIngresosCuentaCredito` (Parámetros de
+   *  Facturación), frozen so voiding reverses the SAME account even if the
+   *  parameter changes later. Null for "Cambio del valor" (credits the
+   *  concepto's own `cuentaCreditoId`) and on notes created before this
+   *  field existed, which were all posted that per-concepto way. */
+  @Prop({ type: String, default: null })
+  cuentaOtrosIngresos: string | null;
+
   /** Mutable cache: starts equal to `total`; a future Recibo decreases it. */
   @Prop({ required: true })
   saldoPendiente: number;

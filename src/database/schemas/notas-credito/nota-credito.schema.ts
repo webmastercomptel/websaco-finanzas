@@ -160,6 +160,15 @@ export class NotaCredito {
   @Prop({ required: true })
   montoSinAplicar: number;
 
+  /** Motivo `descuento` only: the account the creation entry debited —
+   *  the coproperty's `descuentosCuentaDebito` (Parámetros de Facturación),
+   *  frozen at creation so voiding reverses the SAME account even if the
+   *  parameter changes later. Null on every other motivo (those debit each
+   *  concepto's own `cuentaIngreso`) and on discount notes created before
+   *  this field existed, which were posted that per-concepto way too. */
+  @Prop({ type: String, default: null })
+  cuentaDescuento: string | null;
+
   @Prop({ type: String, default: null, trim: true })
   observaciones: string | null;
 

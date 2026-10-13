@@ -286,6 +286,19 @@ export class NotasDebitoService {
         session,
       );
 
+      // Only "Cambio del valor" adjusts the charge itself (credits the
+      // concepto's own account); every other motivo is income outside the
+      // charge, credited to the coproperty's Otros Ingresos account.
+      const cuentaOtrosIngresos =
+        dto.motivo === 'cambio_valor'
+          ? null
+          : ((
+              await this.copropiedades
+                .findById(copropiedadId)
+                .session(session)
+                .exec()
+            )?.otrosIngresosCuentaCredito ?? CUENTA_SIN_ASIGNAR);
+
       const [creada] = await this.notasDebito.create(
         [
           {
@@ -302,6 +315,7 @@ export class NotasDebitoService {
             fechaVencimiento: new Date(dto.fechaVencimiento),
             total: dto.total,
             saldoPendiente: dto.total,
+            cuentaOtrosIngresos,
             estado: 'emitida',
             generadoPor: accountId,
           },
@@ -379,7 +393,7 @@ export class NotasDebitoService {
         copropiedadId,
         creada,
         codigoDeCuentaContable(concepto.cuentaDebitoId),
-        codigoDeCuentaContable(concepto.cuentaCreditoId),
+        cuentaOtrosIngresos ?? codigoDeCuentaContable(concepto.cuentaCreditoId),
         concepto.tipo,
       );
 
@@ -708,8 +722,11 @@ export class NotasDebitoService {
       // `CUENTA_SIN_ASIGNAR` whenever it was unset regardless of the
       // concepto's real account. Same class of bug `NotasCreditoService`'s
       // own `resolverLineasAncla` already guards against for NC.
+      // A note credited to Otros Ingresos reverses that frozen account.
       const cuentaIngreso =
-        codigoDeCuentaContable(concepto?.cuentaCreditoId) ?? CUENTA_SIN_ASIGNAR;
+        nota.cuentaOtrosIngresos ??
+        codigoDeCuentaContable(concepto?.cuentaCreditoId) ??
+        CUENTA_SIN_ASIGNAR;
       // `cuentasOrden` tracks `intereses` (mora) only — a Nota Débito has
       // exactly one concepto for its whole amount, so this is all-or-
       // nothing (never a partial `montoCuentasOrden` like NC/NT need):
