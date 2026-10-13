@@ -288,9 +288,11 @@ export class NotasDebitoService {
 
       // Only "Cambio del valor" adjusts the charge itself (credits the
       // concepto's own account); every other motivo is income outside the
-      // charge, credited to the coproperty's Otros Ingresos account.
+      // charge, credited to the coproperty's Otros Ingresos account. An
+      // intereses (mora) concepto is the exception: it always goes through
+      // cuentas de orden, whatever the motivo (confirmed by accounting).
       const cuentaOtrosIngresos =
-        dto.motivo === 'cambio_valor'
+        dto.motivo === 'cambio_valor' || concepto.tipo === 'intereses'
           ? null
           : ((
               await this.copropiedades

@@ -357,6 +357,23 @@ export class ConsecutivosService {
       })
       .exec();
 
+    // Same rule as the note's own journal entry: "Cambio del valor" adjusts
+    // the charge and an intereses concepto goes through cuentas de orden —
+    // neither is Otros Ingresos.
+    const conceptoIds = [
+      ...new Set(notas.map((n) => n.conceptoId.toString())),
+    ].map((id) => new Types.ObjectId(id));
+    const conceptos = conceptoIds.length
+      ? await this.conceptosCobro
+          .find({ copropiedadId, _id: { $in: conceptoIds } })
+          .exec()
+      : [];
+    const esIntereses = new Set(
+      conceptos
+        .filter((c) => c.tipo === 'intereses')
+        .map((c) => c._id.toString()),
+    );
+
     return notas.map((n) => ({
       documentoId: n._id.toString(),
       tipoDocumento: codigo,
@@ -365,7 +382,10 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
-      montoOtrosIngresos: n.motivo === 'cambio_valor' ? 0 : n.total,
+      montoOtrosIngresos:
+        n.motivo === 'cambio_valor' || esIntereses.has(n.conceptoId.toString())
+          ? 0
+          : n.total,
       montoDescuento: 0,
       cargosPorConcepto: { [n.conceptoId.toString()]: n.total },
     }));

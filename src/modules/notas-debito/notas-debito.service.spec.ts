@@ -705,6 +705,46 @@ describe('NotasDebitoService', () => {
       expect(credito?.cuenta).toBe('4105');
     });
 
+    it('un concepto de intereses no va a otros ingresos aunque el motivo no sea cambio de valor', async () => {
+      // Sin cuentas de orden configuradas en el mock, el crédito cae en la
+      // cuenta de ingreso que recibe el asiento: la del concepto, no 4210.
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        copropiedades: copropiedadesConOtrosIngresos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                copropiedadId: COP,
+                tipo: 'intereses',
+                cuentaCreditoId: { codigo: '4105' },
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        motivo: 'intereses',
+        total: 50000,
+        fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
+      ];
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
+      expect(cuentas).not.toContain('4210');
+    });
+
     it('cualquier otro motivo acredita la cuenta de otros ingresos y la congela en la nota', async () => {
       const credito = await crearCon('gastos_por_cobrar');
       expect(credito?.cuenta).toBe('4210');
