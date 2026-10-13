@@ -202,6 +202,7 @@ describe('ConsecutivosService', () => {
       });
 
       expect(result.esRecibo).toBe(true);
+      expect(result.columnas).toEqual({ otrosIngresos: true, descuento: true });
       expect(result.filas[0]).toMatchObject({
         valorTotal: 120000,
         montoOtrosIngresos: 15000,
@@ -224,6 +225,7 @@ describe('ConsecutivosService', () => {
         fechaEmision: new Date('2026-01-10'),
         total: 20000,
         estado: 'emitida',
+        motivo: 'cambio_valor',
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '302' });
       const concepto = conceptoDoc({ _id: conceptoId, nombre: 'Multas' });
@@ -253,6 +255,10 @@ describe('ConsecutivosService', () => {
         cargosPorConcepto: { [conceptoId.toString()]: 20000 },
       });
       expect(result.esRecibo).toBe(false);
+      expect(result.columnas).toEqual({
+        otrosIngresos: true,
+        descuento: false,
+      });
     });
   });
 
@@ -295,6 +301,42 @@ describe('ConsecutivosService', () => {
         [conceptoAdmin.toString()]: 20000,
         [conceptoMultas.toString()]: 10000,
       });
+    });
+
+    it('motivo descuento: todo su valor va en Descuento; otro motivo queda en 0', async () => {
+      const inmId = id();
+      const nota = (numero: number, motivo: string) => ({
+        _id: id(),
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        numero,
+        numeroCompleto: `NC-${numero}`,
+        fecha: new Date('2026-01-12'),
+        motivo,
+        montoTotal: 30000,
+        estado: 'activo',
+        distribucion: [],
+      });
+
+      const svc = servicio({
+        consecutivos: findOneStub(
+          consecutivoDoc({ categoria: 'NC', codigo: 'NC', prefijo: 'NC' }),
+        ),
+        notasCredito: find([nota(1, 'descuento'), nota(2, 'ajuste_precio')]),
+        inmuebles: find([inmuebleDoc({ _id: inmId })]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'NC',
+        desde: '2026-01-01',
+        hasta: '2026-01-31',
+      });
+
+      expect(result.columnas).toEqual({
+        otrosIngresos: false,
+        descuento: true,
+      });
+      expect(result.filas.map((f) => f.montoDescuento)).toEqual([30000, 0]);
     });
 
     it('una nota sin issueDate cae al createdAt (fallback fechaNotaCredito), fuera de rango se excluye', async () => {

@@ -65,9 +65,11 @@ export async function generarPdfConsecutivos(
   );
   const conceptosAgrupados = reporte.conceptos.slice(MAX_CARGOS_INDIVIDUALES);
   const hayOtros = conceptosAgrupados.length > 0;
-  // Recibo only: its Valor Total is the cash received, followed by the two
-  // amounts that explain why it can differ from the concept columns.
+  // Recibo: its Valor Total is the cash received. Optional amount columns
+  // per document type (Otros Ingresos: RC and ND; Descuento: RC and NC).
   const esRecibo = reporte.esRecibo;
+  const { otrosIngresos: conOtrosIngresos, descuento: conDescuento } =
+    reporte.columnas;
 
   const COLUMNAS: ColumnaTabla[] = [
     { titulo: 'Tipo Doc.', peso: 0.7, numerica: false },
@@ -79,11 +81,11 @@ export async function generarPdfConsecutivos(
       peso: 1.2,
       numerica: true,
     },
-    ...(esRecibo
-      ? [
-          { titulo: 'Otros Ingresos', peso: 1.1, numerica: true },
-          { titulo: 'Descuento', peso: 1.1, numerica: true },
-        ]
+    ...(conOtrosIngresos
+      ? [{ titulo: 'Otros Ingresos', peso: 1.1, numerica: true }]
+      : []),
+    ...(conDescuento
+      ? [{ titulo: 'Descuento', peso: 1.1, numerica: true }]
       : []),
     ...conceptosIndividuales.map((c) => ({
       titulo: c.nombre,
@@ -237,12 +239,10 @@ export async function generarPdfConsecutivos(
           f.inmuebleCodigo,
           formatoFecha(f.fecha),
           formatoPesoCompacto(f.valorTotal),
-          ...(esRecibo
-            ? [
-                formatoPesoCompacto(f.montoOtrosIngresos),
-                formatoPesoCompacto(f.montoDescuento),
-              ]
+          ...(conOtrosIngresos
+            ? [formatoPesoCompacto(f.montoOtrosIngresos)]
             : []),
+          ...(conDescuento ? [formatoPesoCompacto(f.montoDescuento)] : []),
           ...conceptosIndividuales.map((c) =>
             formatoPesoCompacto(f.cargosPorConcepto[c.conceptoId] ?? 0),
           ),
@@ -269,12 +269,10 @@ export async function generarPdfConsecutivos(
               '',
               '',
               formatoPesoCompacto(totalGeneral),
-              ...(esRecibo
-                ? [
-                    formatoPesoCompacto(totalOtrosIngresos),
-                    formatoPesoCompacto(totalDescuento),
-                  ]
+              ...(conOtrosIngresos
+                ? [formatoPesoCompacto(totalOtrosIngresos)]
                 : []),
+              ...(conDescuento ? [formatoPesoCompacto(totalDescuento)] : []),
               ...conceptosIndividuales.map((c) =>
                 formatoPesoCompacto(totalesPorConcepto.get(c.conceptoId) ?? 0),
               ),

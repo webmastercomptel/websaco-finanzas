@@ -5,6 +5,7 @@ import type { LotesFacturacionService } from '../facturacion/lotes.service';
 
 const COP = new Types.ObjectId();
 const CUENTA = new Types.ObjectId().toString();
+const ACTOR = { accountId: CUENTA, nombre: 'Contadora Pérez' };
 
 const reciboIdRC = new Types.ObjectId();
 const reciboIdOrigenNA = new Types.ObjectId();
@@ -182,7 +183,7 @@ describe('AdicionContabilidadService.generar', () => {
       connection as never,
     );
 
-    const resultado = await service.generar(CUENTA);
+    const resultado = await service.generar(ACTOR);
 
     // RC/NC/ND/NT: el propio concepto del documento, no el texto fijo del asiento.
     expect(resultado.movmes).toContain('Pago cuota administración enero');
@@ -291,7 +292,7 @@ describe('AdicionContabilidadService.generar', () => {
       connection as never,
     );
 
-    const resultado = await service.generar(CUENTA);
+    const resultado = await service.generar(ACTOR);
 
     expect(resultado.movmes).toContain('Recaudo recibido — recibo de caja');
   });
@@ -365,7 +366,7 @@ describe('AdicionContabilidadService.generar — Nota de Anticipo sobre un Saldo
       saldosInicialesAnticipoModel as never,
     );
 
-    const resultado = await service.generar(CUENTA);
+    const resultado = await service.generar(ACTOR);
 
     expect(resultado.movmes).toContain('Aplicación de Anticipo RC # 1234');
   });
@@ -465,7 +466,7 @@ describe('AdicionContabilidadService.generar — documento cruce de Saldo Inicia
       saldosInicialesModel as never,
     );
 
-    const resultado = await service.generar(CUENTA);
+    const resultado = await service.generar(ACTOR);
 
     const filas = resultado.movmesdo
       .split('\r\n')
@@ -477,5 +478,253 @@ describe('AdicionContabilidadService.generar — documento cruce de Saldo Inicia
       { copropiedadId: COP, numero: { $in: [2] } },
       expect.any(Object),
     );
+  });
+});
+
+describe('AdicionContabilidadService — desmarcar y volver a descargar un lote', () => {
+  const LOTE_ID = new Types.ObjectId();
+
+  const loteDoc = (over: Record<string, unknown> = {}) => ({
+    _id: LOTE_ID,
+    copropiedadId: COP,
+    number: 3,
+    periodStart: new Date('2026-09-01'),
+    periodEnd: new Date('2026-09-30'),
+    totalAsientos: 1,
+    estado: 'generado',
+    fechaDesmarcado: null,
+    createdAt: new Date('2026-09-10'),
+    ...over,
+  });
+
+  const armar = (
+    lote: Record<string, unknown> | null,
+    conAuditoria = false,
+  ) => {
+    const asientos = [asientoFixture({ reciboId: reciboIdRC })];
+    const asientosModel = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          exec: () => Promise.resolve(asientos),
+          session: () => ({ exec: () => Promise.resolve(asientos) }),
+        }),
+      })),
+      updateMany: jest.fn().mockResolvedValue({}),
+    };
+    const lotesModel = {
+      findOne: jest.fn(() => ({ exec: () => Promise.resolve(lote) })),
+      findOneAndUpdate: jest.fn(
+        (_filtro: unknown, cambio: { $set: Record<string, unknown> }) => ({
+          exec: () => Promise.resolve(lote && { ...lote, ...cambio.$set }),
+        }),
+      ),
+      create: jest.fn(),
+    };
+    const vacio = modeloCon([]);
+    const recibosModel = modeloCon([
+      { _id: reciboIdRC, prefijo: 'RC', numero: 10, observaciones: 'Pago' },
+    ]);
+    const connection = {
+      startSession: () =>
+        Promise.resolve({
+          withTransaction: (fn: () => Promise<void>) => fn(),
+          endSession: () => Promise.resolve(undefined),
+        }),
+    };
+    const service = new AdicionContabilidadService(
+      asientosModel as never,
+      lotesModel as never,
+      vacio as never,
+      vacio as never,
+      vacio as never,
+      recibosModel as never,
+      vacio as never,
+      vacio as never,
+      vacio as never,
+      vacio as never,
+      { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+      {
+        obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
+          periodoDesde: new Date('2026-09-01'),
+          periodoHasta: new Date('2026-09-30'),
+        }),
+      } as unknown as LotesFacturacionService,
+      connection as never,
+      undefined,
+      undefined,
+      conAuditoria ? (copropiedadesModel as never) : undefined,
+      conAuditoria ? (auditoria as never) : undefined,
+    );
+    return { service, asientosModel, lotesModel, auditoria };
+  };
+
+  const copropiedadesModel = {
+    findById: jest.fn(() => ({
+      session: () => ({
+        exec: () => Promise.resolve({ codigo: '0001', nombre: 'Edificio Uno' }),
+      }),
+    })),
+  };
+  const auditoria = { registrar: jest.fn().mockResolvedValue(undefined) };
+  beforeEach(() => auditoria.registrar.mockClear());
+
+  it('desmarcar libera los movimientos del lote y lo deja como historial desmarcado', async () => {
+    const { service, asientosModel, lotesModel } = armar(loteDoc());
+
+    const resultado = await service.desmarcar(LOTE_ID.toString(), ACTOR);
+
+    expect(resultado).toMatchObject({ numero: 3, estado: 'desmarcado' });
+    expect(resultado.fechaDesmarcado).not.toBeNull();
+    expect(lotesModel.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: LOTE_ID, copropiedadId: COP, estado: { $ne: 'desmarcado' } },
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(asientosModel.updateMany).toHaveBeenCalledWith(
+      { copropiedadId: COP, contabilidadLoteId: LOTE_ID },
+      {
+        $set: {
+          contabilidadLoteId: null,
+          contabilidadLoteDesmarcadoId: LOTE_ID,
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it('desmarcar queda en el registro de auditoría, dentro de la misma transacción', async () => {
+    const { service } = armar(loteDoc({ totalAsientos: 12 }), true);
+
+    await service.desmarcar(LOTE_ID.toString(), ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      {
+        actorAccountId: CUENTA,
+        actorNombre: 'Contadora Pérez',
+        accion: 'desmarcar',
+        entidadTipo: 'lote-contabilidad',
+        entidadId: LOTE_ID.toString(),
+        entidadEtiqueta:
+          'Lote 3 de Adición a Contabilidad de 0001 Edificio Uno desmarcado: 12 documentos vuelven a pendientes',
+      },
+      expect.anything(),
+    );
+  });
+
+  it('generar un lote queda en el registro de auditoría', async () => {
+    const { service, lotesModel } = armar(null, true);
+    lotesModel.create.mockImplementation((docs: Record<string, unknown>[]) =>
+      Promise.resolve(
+        docs.map((d) => ({
+          ...d,
+          _id: LOTE_ID,
+          createdAt: new Date('2026-09-10'),
+        })),
+      ),
+    );
+    (service as unknown as { consecutivosLote: unknown }).consecutivosLote = {
+      findOneAndUpdate: () => ({
+        exec: () => Promise.resolve({ nextNumber: 4 }),
+      }),
+    };
+
+    await service.generar(ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'crear',
+        entidadTipo: 'lote-contabilidad',
+        entidadId: LOTE_ID.toString(),
+        entidadEtiqueta:
+          'Lote 4 de Adición a Contabilidad de 0001 Edificio Uno generado: 1 documento',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('si el registro de auditoría falla, el desmarque no se confirma', async () => {
+    const { service } = armar(loteDoc(), true);
+    auditoria.registrar.mockRejectedValueOnce(new Error('sin auditoría'));
+
+    await expect(service.desmarcar(LOTE_ID.toString(), ACTOR)).rejects.toThrow(
+      'sin auditoría',
+    );
+  });
+
+  it('no desmarca dos veces el mismo lote', async () => {
+    const { service, asientosModel } = armar(loteDoc({ estado: 'desmarcado' }));
+
+    await expect(service.desmarcar(LOTE_ID.toString(), ACTOR)).rejects.toThrow(
+      'El lote 3 ya fue desmarcado.',
+    );
+    expect(asientosModel.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('un lote que no es de esta copropiedad responde como inexistente', async () => {
+    const { service, lotesModel } = armar(null);
+
+    await expect(service.desmarcar(LOTE_ID.toString(), ACTOR)).rejects.toThrow(
+      'No existe ese lote de contabilidad.',
+    );
+    expect(lotesModel.findOne).toHaveBeenCalledWith({
+      _id: LOTE_ID,
+      copropiedadId: COP,
+    });
+  });
+
+  it('volver a descargar reconstruye los dos archivos con el número del lote', async () => {
+    const { service, asientosModel } = armar(loteDoc());
+
+    const archivos = await service.archivos(LOTE_ID.toString());
+
+    expect(asientosModel.find).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      contabilidadLoteId: LOTE_ID,
+    });
+    expect(archivos.movmes).toContain('Pago');
+    expect(archivos.movmesdo).toContain('1305');
+    expect(archivos.movmesdo).toContain('4135');
+  });
+
+  it('un lote desmarcado ya no se puede volver a descargar', async () => {
+    const { service } = armar(loteDoc({ estado: 'desmarcado' }));
+
+    await expect(service.archivos(LOTE_ID.toString())).rejects.toThrow(
+      'fue desmarcado',
+    );
+  });
+
+  it('generar también toma los movimientos desmarcados aunque sean de otro período', async () => {
+    const { service, asientosModel, lotesModel } = armar(null);
+    lotesModel.create.mockImplementation((docs: Record<string, unknown>[]) =>
+      Promise.resolve(
+        docs.map((d) => ({
+          ...d,
+          _id: new Types.ObjectId(),
+          createdAt: new Date('2026-09-10'),
+        })),
+      ),
+    );
+    (service as unknown as { consecutivosLote: unknown }).consecutivosLote = {
+      findOneAndUpdate: () => ({
+        exec: () => Promise.resolve({ nextNumber: 4 }),
+      }),
+    };
+
+    await service.generar(ACTOR);
+
+    expect(asientosModel.find).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      contabilidadLoteId: null,
+      $or: [
+        {
+          fecha: {
+            $gte: new Date('2026-09-01'),
+            $lte: new Date('2026-09-30'),
+          },
+        },
+        { contabilidadLoteDesmarcadoId: { $ne: null } },
+      ],
+    });
   });
 });

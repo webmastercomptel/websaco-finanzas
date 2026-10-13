@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { ClientSession, Model } from 'mongoose';
 import {
   RegistroAuditoria,
   RegistroAuditoriaDocument,
@@ -17,9 +17,13 @@ import { FiltrosAuditoriaDto } from './dto/filtros-auditoria.dto';
 export interface EntradaAuditoria {
   actorAccountId: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar';
+  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
   entidadTipo:
-    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
+    | 'entidad-administradora'
+    | 'copropiedad'
+    | 'usuario'
+    | 'lote-facturacion'
+    | 'lote-contabilidad';
   entidadId: string;
   entidadEtiqueta: string;
 }
@@ -47,16 +51,26 @@ export class AuditoriaService {
   /**
    * Write a single audit entry. Called after (not before) the originating
    * mutation has succeeded — a log-write failure rejects the whole request.
+   * Pass the caller's `session` to write it inside that same transaction,
+   * so the operation and its log entry commit or roll back together.
    */
-  async registrar(entrada: EntradaAuditoria): Promise<void> {
-    await this.registros.create({
+  async registrar(
+    entrada: EntradaAuditoria,
+    session?: ClientSession,
+  ): Promise<void> {
+    const registro = {
       actorAccountId: entrada.actorAccountId,
       actorNombre: entrada.actorNombre,
       accion: entrada.accion,
       entidadTipo: entrada.entidadTipo,
       entidadId: entrada.entidadId,
       entidadEtiqueta: entrada.entidadEtiqueta,
-    });
+    };
+    if (session) {
+      await this.registros.create([registro], { session });
+    } else {
+      await this.registros.create(registro);
+    }
   }
 
   /**

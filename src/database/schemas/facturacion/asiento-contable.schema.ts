@@ -135,16 +135,29 @@ export class AsientoContable {
   movimientos: Movimiento[];
 
   /** Which "Adición a Contabilidad" export (MOVMES.csv/MOVMESDO.csv)
-   *  already carried this entry — null means "not exported yet". Stamped
-   *  once, never cleared: re-generating only picks up rows still null,
-   *  which is the whole "no se vuelvan a adicionar" point of that feature.
-   *  See `AdicionContabilidadService`. */
+   *  already carried this entry — null means "not exported yet". Re-
+   *  generating only picks up rows still null, which is the whole "no se
+   *  vuelvan a adicionar" point of that feature. The one way back to null is
+   *  the accountant explicitly "desmarcando" the lote (see
+   *  `contabilidadLoteDesmarcadoId`). See `AdicionContabilidadService`. */
   @Prop({
     type: SchemaTypes.ObjectId,
     ref: LoteContabilidad.name,
     default: null,
   })
   contabilidadLoteId: Types.ObjectId | null;
+
+  /** The last lote this entry was released from when the accountant
+   *  "desmarcó" it. Lets the next generation pick it up again even when it
+   *  falls outside the current billing period (generation otherwise only
+   *  looks at the current period). Kept after it is re-stamped — harmless,
+   *  since `contabilidadLoteId` being set already excludes it. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: LoteContabilidad.name,
+    default: null,
+  })
+  contabilidadLoteDesmarcadoId: Types.ObjectId | null;
 }
 
 export const AsientoContableSchema =

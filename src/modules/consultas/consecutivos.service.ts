@@ -231,6 +231,12 @@ export class ConsecutivosService {
 
     return {
       esRecibo: consecutivo.categoria === 'IN',
+      columnas: {
+        otrosIngresos:
+          consecutivo.categoria === 'IN' || consecutivo.categoria === 'ND',
+        descuento:
+          consecutivo.categoria === 'IN' || consecutivo.categoria === 'NC',
+      },
       conceptos: conceptosDocs.map((c) => ({
         conceptoId: c._id.toString(),
         nombre: c.nombre,
@@ -329,7 +335,7 @@ export class ConsecutivosService {
           fecha: fecha.toISOString(),
           valorTotal: n.montoTotal,
           montoOtrosIngresos: 0,
-          montoDescuento: 0,
+          montoDescuento: n.motivo === 'descuento' ? n.montoTotal : 0,
           cargosPorConcepto,
         };
       });
@@ -359,7 +365,7 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
-      montoOtrosIngresos: 0,
+      montoOtrosIngresos: n.motivo === 'cambio_valor' ? 0 : n.total,
       montoDescuento: 0,
       cargosPorConcepto: { [n.conceptoId.toString()]: n.total },
     }));

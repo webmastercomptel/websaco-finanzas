@@ -9,13 +9,18 @@ export class FiltrosAuditoriaDto {
     'copropiedad',
     'usuario',
     'lote-facturacion',
+    'lote-contabilidad',
   ])
   entidadTipo?:
-    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
+    | 'entidad-administradora'
+    | 'copropiedad'
+    | 'usuario'
+    | 'lote-facturacion'
+    | 'lote-contabilidad';
 
   @IsOptional()
-  @IsIn(['crear', 'actualizar', 'revertir', 'reiniciar'])
-  accion?: 'crear' | 'actualizar' | 'revertir' | 'reiniciar';
+  @IsIn(['crear', 'actualizar', 'revertir', 'reiniciar', 'desmarcar'])
+  accion?: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
 
   @IsOptional()
   @IsDateString()
