@@ -28,6 +28,21 @@ describe('firmar', () => {
     expect(firma1).not.toBe(firma2);
   });
 
+  // Golden vector shared with WebSaco3 (its firma.spec holds the same values);
+  // the body has non-ASCII characters on purpose, since the signature is over
+  // the raw UTF-8 bytes. Keep identical to the WebSaco3-side test.
+  it('coincide con el vector de referencia compartido con WebSaco3', () => {
+    const firma = firmar(
+      'golden-vector-secret-0123456789abcdef',
+      '1790000000',
+      '{"loteId":"lote-golden-1","nombre":"Peña — 😀","facturas":[{"numeroFactura":"FV-1"}]}',
+    );
+
+    expect(`sha256=${firma}`).toBe(
+      'sha256=8ed93fed4c6b1b779ff2295cdd3ff7a117736b3e53ec3550db27299a09d1c9cc',
+    );
+  });
+
   it('un secreto distinto produce una firma distinta', () => {
     const firma1 = firmar(SECRET, TIMESTAMP, BODY);
     const firma2 = firmar(
