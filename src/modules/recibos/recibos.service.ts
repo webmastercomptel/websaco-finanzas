@@ -103,13 +103,18 @@ import type { DatosReciboImpresion } from '../../common/documentos/datos-impresi
 import type {
   Recibo as ReciboContract,
   ErrorAplicacion,
-  Paginado,
+  PaginadoConTotales,
   ReciboDetalle,
+  TotalesRecibos,
 } from '../../contracts';
 import type { CrearReciboDto } from './dto/crear-recibo.dto';
 import type { AplicacionSolicitadaDto } from './dto/aplicacion-solicitada.dto';
 import type { AnularReciboDto } from './dto/anular-recibo.dto';
 import type { ListarRecibosDto } from './dto/listar-recibos.dto';
+
+/** Rounds a money sum to 2 decimals so float noise never reaches the wire. */
+const redondear2 = (valor: number): number =>
+  Math.round((valor + Number.EPSILON) * 100) / 100;
 
 export interface ContextoCreacionRecibo {
   copropiedadId: Types.ObjectId;
@@ -1543,15 +1548,15 @@ export class RecibosService {
   }
 
   /**
-   * Lean listing (design §5, `GET /recibos`) — always scoped to the active
-   * copropiedad, honoring `ListarRecibosDto`'s filters (`inmuebleId`,
-   * `estado`, date range, and `conAnticipoDisponible` as
-   * `unappliedAmount > 0`, Task 5). Uses `toRecibo`, never
-   * `toReciboDetalle` — no per-row `AplicacionRecibo` lookup here, unlike
-   * `findOne` below.
+   * The ONE place a listing's filter is built, shared by the page query and
+   * the opt-in grand totals so both always describe the same set of
+   * documents. Async because `conAnticipoDisponible` pre-resolves candidate
+   * ids from `SaldoDocumentoOrigen`.
    */
-  async findAll(query: ListarRecibosDto): Promise<Paginado<ReciboContract>> {
-    const copropiedadId = this.tenant.resolveCoPropertyId();
+  private async construirFiltro(
+    query: ListarRecibosDto,
+    copropiedadId: Types.ObjectId,
+  ): Promise<Record<string, unknown>> {
     const filtro: Record<string, unknown> = { copropiedadId };
     if (query.inmuebleId) filtro.inmuebleId = query.inmuebleId;
     if (query.estado) filtro.estado = query.estado;
@@ -1574,11 +1579,77 @@ export class RecibosService {
         ...(query.hasta ? { $lte: new Date(query.hasta) } : {}),
       };
     }
+    return filtro;
+  }
+
+  /**
+   * Grand totals over the WHOLE filtered set (not the page), anulados
+   * excluded: `estado` is forced to `'activo'`, so an explicit
+   * `estado: 'anulado'` from the caller yields zeros. `montoRecibido` is the
+   * frozen cash received; `montoSinAplicar` comes from
+   * `SaldoDocumentoOrigen.saldoDisponible` (tipoDocumento `'RC'`) —
+   * `Recibo.montoSinAplicar`/`montoAplicado` are stale legacy fields and must
+   * never be summed. `saldoDisponible` cannot go negative (every decrement is
+   * guarded by `$gte`), so no per-document floor is needed here. No
+   * `.aggregate()` by house style: lean `find` with a projection, summed in
+   * memory.
+   */
+  private async calcularTotales(
+    filtro: Record<string, unknown>,
+    copropiedadId: Types.ObjectId,
+  ): Promise<TotalesRecibos> {
+    if (filtro.estado === 'anulado') {
+      return { montoRecibido: 0, montoSinAplicar: 0 };
+    }
+
+    const activos = await this.recibos
+      .find({ ...filtro, estado: 'activo' }, { montoRecibido: 1 })
+      .lean()
+      .exec();
+    if (activos.length === 0) return { montoRecibido: 0, montoSinAplicar: 0 };
+
+    const saldos = await this.saldoDocumentoOrigen
+      .find(
+        {
+          copropiedadId,
+          tipoDocumento: 'RC',
+          documentoId: { $in: activos.map((r) => r._id) },
+        },
+        { saldoDisponible: 1 },
+      )
+      .lean()
+      .exec();
+
+    let montoRecibido = 0;
+    for (const r of activos) montoRecibido += r.montoRecibido;
+    let montoSinAplicar = 0;
+    for (const s of saldos) montoSinAplicar += s.saldoDisponible;
+    return {
+      montoRecibido: redondear2(montoRecibido),
+      montoSinAplicar: redondear2(montoSinAplicar),
+    };
+  }
+
+  /**
+   * Lean listing (design §5, `GET /recibos`) — always scoped to the active
+   * copropiedad, honoring `ListarRecibosDto`'s filters (`inmuebleId`,
+   * `estado`, date range, and `conAnticipoDisponible` as
+   * `unappliedAmount > 0`, Task 5). Uses `toRecibo`, never
+   * `toReciboDetalle` — no per-row `AplicacionRecibo` lookup here, unlike
+   * `findOne` below. With `incluirTotales: true` the response also carries a
+   * `totales` block (see `calcularTotales`); otherwise no extra query runs and
+   * `totales` is absent.
+   */
+  async findAll(
+    query: ListarRecibosDto,
+  ): Promise<PaginadoConTotales<ReciboContract, TotalesRecibos>> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const filtro = await this.construirFiltro(query, copropiedadId);
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
 
-    const [documentos, total] = await Promise.all([
+    const [documentos, total, totales] = await Promise.all([
       this.recibos
         .find(filtro)
         .sort({ numero: -1, _id: -1 })
@@ -1586,6 +1657,9 @@ export class RecibosService {
         .limit(porPagina)
         .exec(),
       this.recibos.countDocuments(filtro).exec(),
+      query.incluirTotales
+        ? this.calcularTotales(filtro, copropiedadId)
+        : undefined,
     ]);
 
     const ids = documentos.map((d) => d._id);
@@ -1660,6 +1734,7 @@ export class RecibosService {
       total,
       pagina,
       porPagina,
+      ...(totales ? { totales } : {}),
     };
   }
 

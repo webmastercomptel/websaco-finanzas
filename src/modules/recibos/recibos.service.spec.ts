@@ -274,24 +274,31 @@ const modeloSaldoDocumentoOrigen = (documentos: Record<string, unknown>[]) => ({
   // 0}`) and the post-page batch lookup (`documentoId: {$in: [...]}`,
   // unfiltered by balance) — same dual shape `FacturasService`'s own
   // `SaldoTotalDocumento` test mock handles.
-  find: jest.fn((filtro: Record<string, unknown>) => ({
-    exec: () => {
-      const idsFiltro = (filtro.documentoId as { $in?: unknown[] } | undefined)
-        ?.$in;
-      const resultado = idsFiltro
-        ? documentos.filter((d) =>
-            idsFiltro.map(String).includes(String(d._id)),
-          )
-        : documentos.filter((d) => (d.montoSinAplicar as number) > 0);
-      return Promise.resolve(
-        resultado.map((d) => ({
-          documentoId: d._id,
-          montoOriginal: d.montoRecibido,
-          saldoDisponible: d.montoSinAplicar,
-        })),
-      );
-    },
-  })),
+  find: jest.fn((filtro: Record<string, unknown>) => {
+    // `lean` is chainable because the opt-in totals query reads this model
+    // lean; the page queries call `.exec()` directly.
+    const cadena = {
+      lean: () => cadena,
+      exec: () => {
+        const idsFiltro = (
+          filtro.documentoId as { $in?: unknown[] } | undefined
+        )?.$in;
+        const resultado = idsFiltro
+          ? documentos.filter((d) =>
+              idsFiltro.map(String).includes(String(d._id)),
+            )
+          : documentos.filter((d) => (d.montoSinAplicar as number) > 0);
+        return Promise.resolve(
+          resultado.map((d) => ({
+            documentoId: d._id,
+            montoOriginal: d.montoRecibido,
+            saldoDisponible: d.montoSinAplicar,
+          })),
+        );
+      },
+    };
+    return cadena;
+  }),
 });
 
 const modeloAplicaciones = () => ({
@@ -3579,22 +3586,30 @@ describe('RecibosService.findAll', () => {
       sort: (orden: Record<string, unknown>) => Cadena;
       skip: () => Cadena;
       limit: () => Cadena;
+      lean: () => Cadena;
       exec: () => Promise<Record<string, unknown>[]>;
     };
+    // Honours an `estado` in the filter so the totals query (which forces
+    // `'activo'`) really excludes voided fixtures, like Mongo would.
+    let vigentes = filas;
     const cadena: Cadena = {
+      lean: () => cadena,
       sort: jest.fn((orden: Record<string, unknown>) => {
         ordenes.push(orden);
         return cadena;
       }),
       skip: () => cadena,
       limit: () => cadena,
-      exec: () => Promise.resolve(filas),
+      exec: () => Promise.resolve(vigentes),
     };
     return {
       filtros,
       ordenes,
       find: jest.fn((f: Record<string, unknown>) => {
         filtros.push(f);
+        vigentes = f.estado
+          ? filas.filter((x) => x.estado === f.estado)
+          : filas;
         return cadena;
       }),
       countDocuments: jest.fn(() => ({ exec: () => Promise.resolve(total) })),
@@ -3604,6 +3619,7 @@ describe('RecibosService.findAll', () => {
   const construirParaListado = (
     recibos: ReturnType<typeof modeloListado>,
     saldoDocumentoOrigen: Record<string, unknown>[] = [],
+    modeloSaldo = modeloSaldoDocumentoOrigen(saldoDocumentoOrigen),
   ) =>
     new RecibosService(
       recibos as never,
@@ -3620,7 +3636,7 @@ describe('RecibosService.findAll', () => {
       periodoAbierto(),
       modeloNotasDebito() as never,
       lotesFacturacionFalso(),
-      modeloSaldoDocumentoOrigen(saldoDocumentoOrigen) as never,
+      modeloSaldo as never,
     );
 
   function modeloAplicacionesGenerico() {
@@ -3729,6 +3745,114 @@ describe('RecibosService.findAll', () => {
     const resultado = await service.findAll({});
 
     expect(resultado.items[0].montoAplicado).toBe(849000);
+  });
+
+  describe('incluirTotales', () => {
+    const reciboListado = (over: Record<string, unknown> = {}) => ({
+      _id: new Types.ObjectId(),
+      inmuebleId: INMUEBLE,
+      terceroId: TERCERO,
+      prefijo: 'RC',
+      numero: 1,
+      numeroCompleto: 'RC-1',
+      montoRecibido: 100000,
+      fechaRecibo: new Date('2026-09-06'),
+      medioPago: 'transferencia',
+      cuentaDestino: '111005',
+      referencia: null,
+      observaciones: null,
+      // Stale legacy fields: the totals must never read these.
+      montoAplicado: 999999,
+      montoSinAplicar: 999999,
+      estado: 'activo',
+      motivoAnulacion: null,
+      detalleAnulacion: null,
+      fechaAnulacion: null,
+      ...over,
+    });
+
+    it('no incluye totales (ni consultas extra) cuando el flag está ausente', async () => {
+      const recibos = modeloListado([reciboListado()]);
+      const service = construirParaListado(recibos);
+
+      const resultado = await service.findAll({});
+
+      expect(resultado.totales).toBeUndefined();
+      expect(recibos.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('suma sobre todo el set filtrado, excluye anulados y toma lo sin aplicar de SaldoDocumentoOrigen', async () => {
+      const a = reciboListado({ montoRecibido: 100000.1 });
+      const b = reciboListado({ montoRecibido: 200000.2 });
+      const anulado = reciboListado({ montoRecibido: 5000, estado: 'anulado' });
+      const recibos = modeloListado([a, b, anulado]);
+      const service = construirParaListado(recibos, [
+        { _id: a._id, montoRecibido: 100000.1, montoSinAplicar: 40000.05 },
+        { _id: b._id, montoRecibido: 200000.2, montoSinAplicar: 0 },
+        { _id: anulado._id, montoRecibido: 5000, montoSinAplicar: 5000 },
+      ]);
+
+      const resultado = await service.findAll({
+        incluirTotales: true,
+        porPagina: 1,
+      });
+
+      // Totals ignore pagination and the stale `montoSinAplicar` (999999).
+      expect(resultado.totales).toEqual({
+        montoRecibido: 300000.3,
+        montoSinAplicar: 40000.05,
+      });
+      expect(recibos.filtros[1]).toMatchObject({
+        copropiedadId: COP,
+        estado: 'activo',
+      });
+    });
+
+    it('comparte el filtro de la página (incluida la preconsulta de conAnticipoDisponible) y acota el saldo por copropiedad', async () => {
+      const a = reciboListado({ montoRecibido: 100000 });
+      const recibos = modeloListado([a]);
+      const modeloSaldo = modeloSaldoDocumentoOrigen([
+        { _id: a._id, montoRecibido: 100000, montoSinAplicar: 40000 },
+      ]);
+      const service = construirParaListado(recibos, [], modeloSaldo);
+
+      const resultado = await service.findAll({
+        conAnticipoDisponible: true,
+        inmuebleId: 'inm-1',
+        incluirTotales: true,
+      });
+
+      expect(recibos.filtros[1]).toMatchObject({
+        copropiedadId: COP,
+        inmuebleId: 'inm-1',
+        estado: 'activo',
+        _id: { $in: [a._id] },
+      });
+      // Call 0 is the pre-query, call 1 the totals lookup.
+      expect(modeloSaldo.find.mock.calls[1][0]).toMatchObject({
+        copropiedadId: COP,
+        tipoDocumento: 'RC',
+      });
+      expect(resultado.totales).toEqual({
+        montoRecibido: 100000,
+        montoSinAplicar: 40000,
+      });
+    });
+
+    it('devuelve ceros si el llamador pide explícitamente los anulados', async () => {
+      const recibos = modeloListado([reciboListado({ estado: 'anulado' })]);
+      const service = construirParaListado(recibos);
+
+      const resultado = await service.findAll({
+        estado: 'anulado',
+        incluirTotales: true,
+      });
+
+      expect(resultado.totales).toEqual({
+        montoRecibido: 0,
+        montoSinAplicar: 0,
+      });
+    });
   });
 });
 

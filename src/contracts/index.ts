@@ -50,6 +50,40 @@ export interface Paginado<T> {
   porPagina: number;
 }
 
+/**
+ * A `Paginado` listing that can also carry grand totals over the FULL
+ * filtered set. `totales` is present only when the caller opted in
+ * (`incluirTotales=true`) — the extra queries are never paid by default.
+ * Kept apart from `Paginado` so listings that never offer totals keep their
+ * exact shape.
+ */
+export interface PaginadoConTotales<T, Tot> extends Paginado<T> {
+  totales?: Tot;
+}
+
+/** Grand totals of a Factura listing (anuladas excluded). */
+export interface TotalesFacturas {
+  /** Σ Factura.total over the filtered set. */
+  total: Monto;
+  /** Σ live `SaldoTotalDocumento.saldoPendiente` over the same set. */
+  saldoPendiente: Monto;
+}
+
+/** Grand totals of a Recibo listing (anulados excluded). */
+export interface TotalesRecibos {
+  /** Σ Recibo.montoRecibido over the filtered set. */
+  montoRecibido: Monto;
+  /** Σ live `SaldoDocumentoOrigen.saldoDisponible` over the same set. */
+  montoSinAplicar: Monto;
+}
+
+/** One unit's outstanding balance, as answered by `GET /inmuebles/saldos`. */
+export interface SaldoInmueble {
+  inmuebleId: string;
+  /** Σ max(0, saldoPendiente) of its emitted FV/ND and active opening balances. */
+  saldoPendiente: Monto;
+}
+
 /* ── Plantillas de Documento ───────────────────────────────────── */
 
 /**
@@ -2329,4 +2363,49 @@ export interface RespuestaPistaAuditoria {
    *  filters were applied to `items`, so the dropdown never shrinks as
    *  the user filters. */
   usuarios: { accountId: string; nombre: string }[];
+}
+
+/* ── Búsqueda global ───────────────────────────────────────────── */
+
+/** Document kinds the global search can return (the Nota family included). */
+export type TipoDocumentoBusqueda = 'FV' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+
+/**
+ * Slim hit of the global search. Deliberately NOT the heavy document
+ * contract: the search box only needs enough to recognise the document and
+ * link to its detail, so none of the lines/applications/PDF state is read.
+ */
+export interface ResultadoBusquedaDocumento {
+  id: string;
+  tipo: TipoDocumentoBusqueda;
+  numeroCompleto: string;
+  /** The document's own business date (see the mapper for each type's field). */
+  fecha: IsoDate;
+  inmuebleId: string;
+  inmuebleCodigo: string;
+  titularNombre: string | null;
+  monto: Monto;
+  /** Raw document state (`emitida`/`anulada`, `activo`/`anulado`) — anuladas
+   *  are returned on purpose so the UI can mark them. */
+  estado: string;
+}
+
+/** Unit hit of the global search. */
+export interface ResultadoBusquedaInmueble {
+  id: string;
+  codigo: string;
+  titularNombre: string | null;
+  estado: 'activo' | 'inactivo';
+}
+
+/**
+ * Response of `GET /busqueda`. A group the caller may not read is ABSENT
+ * (key missing), never `[]` — so the client can tell "no permission" from
+ * "no matches".
+ */
+export interface RespuestaBusqueda {
+  facturas?: ResultadoBusquedaDocumento[];
+  recibos?: ResultadoBusquedaDocumento[];
+  notas?: ResultadoBusquedaDocumento[];
+  inmuebles?: ResultadoBusquedaInmueble[];
 }
