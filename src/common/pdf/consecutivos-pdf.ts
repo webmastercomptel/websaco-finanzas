@@ -68,8 +68,11 @@ export async function generarPdfConsecutivos(
   // Recibo: its Valor Total is the cash received. Optional amount columns
   // per document type (Otros Ingresos: RC and ND; Descuento: RC and NC).
   const esRecibo = reporte.esRecibo;
-  const { otrosIngresos: conOtrosIngresos, descuento: conDescuento } =
-    reporte.columnas;
+  const {
+    anticipos: conAnticipos,
+    otrosIngresos: conOtrosIngresos,
+    descuento: conDescuento,
+  } = reporte.columnas;
 
   const COLUMNAS: ColumnaTabla[] = [
     { titulo: 'Tipo Doc.', peso: 0.7, numerica: false },
@@ -81,6 +84,9 @@ export async function generarPdfConsecutivos(
       peso: 1.2,
       numerica: true,
     },
+    ...(conAnticipos
+      ? [{ titulo: 'Anticipos', peso: 1.1, numerica: true }]
+      : []),
     ...(conOtrosIngresos
       ? [{ titulo: 'Otros Ingresos', peso: 1.1, numerica: true }]
       : []),
@@ -198,6 +204,7 @@ export async function generarPdfConsecutivos(
 
   const totalesPorConcepto = new Map<string, number>();
   let totalGeneral = 0;
+  let totalAnticipos = 0;
   let totalOtrosIngresos = 0;
   let totalDescuento = 0;
   for (const f of reporte.filas) {
@@ -209,6 +216,7 @@ export async function generarPdfConsecutivos(
       );
     }
     totalGeneral += f.valorTotal;
+    totalAnticipos += f.montoAnticipo;
     totalOtrosIngresos += f.montoOtrosIngresos;
     totalDescuento += f.montoDescuento;
   }
@@ -239,6 +247,7 @@ export async function generarPdfConsecutivos(
           f.inmuebleCodigo,
           formatoFecha(f.fecha),
           formatoPesoCompacto(f.valorTotal),
+          ...(conAnticipos ? [formatoPesoCompacto(f.montoAnticipo)] : []),
           ...(conOtrosIngresos
             ? [formatoPesoCompacto(f.montoOtrosIngresos)]
             : []),
@@ -269,6 +278,7 @@ export async function generarPdfConsecutivos(
               '',
               '',
               formatoPesoCompacto(totalGeneral),
+              ...(conAnticipos ? [formatoPesoCompacto(totalAnticipos)] : []),
               ...(conOtrosIngresos
                 ? [formatoPesoCompacto(totalOtrosIngresos)]
                 : []),

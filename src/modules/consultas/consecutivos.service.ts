@@ -232,6 +232,7 @@ export class ConsecutivosService {
     return {
       esRecibo: consecutivo.categoria === 'IN',
       columnas: {
+        anticipos: filas.some((f) => f.montoAnticipo !== 0),
         otrosIngresos:
           consecutivo.categoria === 'IN' || consecutivo.categoria === 'ND',
         descuento:
@@ -273,6 +274,8 @@ export class ConsecutivosService {
 
     const cargosPorRecibo = new Map<string, Record<string, number>>();
     const descuentoPorRecibo = new Map<string, number>();
+    // Real cash each receipt's active applications drew (discount excluded).
+    const efectivoAplicadoPorRecibo = new Map<string, number>();
     for (const app of aplicaciones) {
       const key = app.sourceId.toString();
       const cargos = cargosPorRecibo.get(key) ?? {};
@@ -284,6 +287,12 @@ export class ConsecutivosService {
         key,
         (descuentoPorRecibo.get(key) ?? 0) + (app.montoDescuento ?? 0),
       );
+      efectivoAplicadoPorRecibo.set(
+        key,
+        (efectivoAplicadoPorRecibo.get(key) ?? 0) +
+          (app.montoAplicado ?? 0) -
+          (app.montoDescuento ?? 0),
+      );
     }
 
     return recibos.map((r) => ({
@@ -294,6 +303,12 @@ export class ConsecutivosService {
       inmuebleId: r.inmuebleId,
       fecha: r.fechaRecibo.toISOString(),
       valorTotal: r.montoRecibido,
+      // Whatever of the cash is neither applied to cartera nor Otros
+      // Ingresos sits as anticipo — so the row reconciles exactly.
+      montoAnticipo:
+        r.montoRecibido -
+        (r.montoOtrosIngresos ?? 0) -
+        (efectivoAplicadoPorRecibo.get(r._id.toString()) ?? 0),
       montoOtrosIngresos: r.montoOtrosIngresos ?? 0,
       montoDescuento: descuentoPorRecibo.get(r._id.toString()) ?? 0,
       cargosPorConcepto: cargosPorRecibo.get(r._id.toString()) ?? {},
@@ -334,6 +349,7 @@ export class ConsecutivosService {
           inmuebleId: n.inmuebleId,
           fecha: fecha.toISOString(),
           valorTotal: n.montoTotal,
+          montoAnticipo: 0,
           montoOtrosIngresos: 0,
           montoDescuento: n.motivo === 'descuento' ? n.montoTotal : 0,
           cargosPorConcepto,
@@ -382,6 +398,7 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
+      montoAnticipo: 0,
       montoOtrosIngresos:
         n.motivo === 'cambio_valor' || esIntereses.has(n.conceptoId.toString())
           ? 0
@@ -413,6 +430,7 @@ export class ConsecutivosService {
         inmuebleId: n.inmuebleId,
         fecha: fecha.toISOString(),
         valorTotal: n.monto,
+        montoAnticipo: 0,
         montoOtrosIngresos: 0,
         montoDescuento: 0,
         cargosPorConcepto: {
@@ -467,6 +485,7 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.montoAplicado,
+      montoAnticipo: 0,
       montoOtrosIngresos: 0,
       montoDescuento: 0,
       cargosPorConcepto: cargosPorNota.get(n._id.toString()) ?? {},
@@ -506,6 +525,7 @@ export class ConsecutivosService {
         inmuebleId: f.inmuebleId,
         fecha: f.fechaEmision.toISOString(),
         valorTotal: f.total,
+        montoAnticipo: 0,
         montoOtrosIngresos: 0,
         montoDescuento: 0,
         cargosPorConcepto,
