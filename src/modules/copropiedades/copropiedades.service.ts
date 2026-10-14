@@ -42,6 +42,7 @@ import type {
 } from '../../contracts';
 import { toCopropiedad } from './copropiedades.mapper';
 import { DOCUMENTOS_SISTEMA } from './documentos-sistema';
+import { WEBSACO3_COPROPIEDAD_ID_REGEX } from './websaco3-copropiedad-id';
 import type { ListarCopropiedadesDto } from './dto/listar-copropiedades.dto';
 import type {
   ActualizarCopropiedadDto,
@@ -283,7 +284,7 @@ export class CopropiedadesService {
     actor: { accountId: string; nombre: string },
   ): Promise<CopropiedadContract> {
     const cambios = this.aDocumento(dto);
-    this.validarActivacionGestionEdificios(cambios, null);
+    this.aplicarReglaGestionEdificios(cambios, null);
 
     const codigo = await this.siguienteCodigo();
     const creada = await this.copropiedades.create({
@@ -365,13 +366,13 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     const actual = await this.copropiedades
       .findById(id)
-      .select('usaGestionEdificios nit digitoVerificacion')
+      .select('usaGestionEdificios websaco3CopropiedadId')
       .lean()
       .exec();
     if (!actual) {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
     }
-    this.validarActivacionGestionEdificios(cambios, actual);
+    this.aplicarReglaGestionEdificios(cambios, actual);
 
     const actualizada = await this.copropiedades
       .findByIdAndUpdate(id, { $set: cambios }, { returnDocument: 'after' })
@@ -597,43 +598,41 @@ export class CopropiedadesService {
   }
 
   /**
-   * Gates `usaGestionEdificios: true` behind a complete NIT — see spec
+   * Keeps the building-management link coherent — see spec
    * `building-management-activation`. Evaluated against the RESULTING
-   * document (incoming `cambios` merged onto `actual`), not the DTO alone,
-   * so activating the flag while relying on a NIT already on file is
-   * accepted, and clearing the NIT while the flag stays on is rejected.
+   * document (incoming `cambios` merged onto `actual`), not the DTO alone:
    *
-   * A no-op whenever the request doesn't touch any of the three keys —
-   * this validation must never block an unrelated edit.
+   * - flag on: a valid `websaco3CopropiedadId` must exist after the merge
+   *   (sent now or already on file), else 400. The NIT plays no part.
+   * - flag off: any id is dropped and the stored one cleared, so the invariant
+   *   "id is non-null if and only if the flag is on" holds.
+   *
+   * A no-op whenever the request touches neither key — this rule must never
+   * block an unrelated edit, even on a legacy row that is flagged without an
+   * id. Mutates `cambios` (it only ever adds the clearing `null`).
    */
-  private validarActivacionGestionEdificios(
+  private aplicarReglaGestionEdificios(
     cambios: Record<string, unknown>,
     actual: Pick<
       Copropiedad,
-      'usaGestionEdificios' | 'nit' | 'digitoVerificacion'
+      'usaGestionEdificios' | 'websaco3CopropiedadId'
     > | null,
   ): void {
-    const claves = [
-      'usaGestionEdificios',
-      'nit',
-      'digitoVerificacion',
-    ] as const;
+    const claves = ['usaGestionEdificios', 'websaco3CopropiedadId'] as const;
     if (!claves.some((clave) => clave in cambios)) return;
 
     const efectivo = (clave: (typeof claves)[number]): unknown =>
       clave in cambios ? cambios[clave] : (actual?.[clave] ?? null);
 
-    if (efectivo('usaGestionEdificios') !== true) return;
+    if (efectivo('usaGestionEdificios') !== true) {
+      cambios.websaco3CopropiedadId = null;
+      return;
+    }
 
-    const completo = (valor: unknown): boolean =>
-      typeof valor === 'string' && valor.trim() !== '';
-
-    if (
-      !completo(efectivo('nit')) ||
-      !completo(efectivo('digitoVerificacion'))
-    ) {
+    const id = efectivo('websaco3CopropiedadId');
+    if (typeof id !== 'string' || !WEBSACO3_COPROPIEDAD_ID_REGEX.test(id)) {
       throw new BadRequestException(
-        'Para activar la gestión de edificios la copropiedad debe tener NIT y dígito de verificación.',
+        'Para activar la gestión de edificios la copropiedad debe tener el ID de WebSaco3 (24 caracteres hexadecimales).',
       );
     }
   }
@@ -667,6 +666,7 @@ export class CopropiedadesService {
     set('email', dto.email);
     set('mostrarLogo', dto.mostrarLogo);
     set('usaGestionEdificios', dto.usaGestionEdificios);
+    set('websaco3CopropiedadId', dto.websaco3CopropiedadId);
     set('cuentaContableCartera', dto.cuentaContableCartera);
     set('cuentaAnticipos', dto.cuentaAnticipos);
     set('cuentaDevoluciones', dto.cuentaDevoluciones);

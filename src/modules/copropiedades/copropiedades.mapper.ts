@@ -50,6 +50,8 @@ export const toCopropiedad = (
   usuarioAdministrador,
   estado: doc.estado === 'active' ? 'activo' : 'inactivo',
   usaGestionEdificios: doc.usaGestionEdificios,
+  // `?? null`: documents written before this field existed lack the key.
+  websaco3CopropiedadId: doc.websaco3CopropiedadId ?? null,
   cuentaContableCartera: doc.cuentaContableCartera,
   cuentaAnticipos: doc.cuentaAnticipos,
   cuentaDevoluciones: doc.cuentaDevoluciones,

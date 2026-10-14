@@ -117,6 +117,18 @@ export class Copropiedad {
   usaGestionEdificios: boolean;
 
   /**
+   * This coproperty's `_id` in the building-management system (24-hex
+   * ObjectId string, stored trimmed and lowercase). The only identity sent
+   * when publishing to that system — the NIT is ambiguous on its side.
+   *
+   * Invariant kept by `CopropiedadesService`: non-null if and only if
+   * `usaGestionEdificios` is true. Legacy documents lack the key entirely;
+   * the mapper reads those as null. Deliberately not unique or indexed.
+   */
+  @Prop({ type: String, default: null, trim: true, lowercase: true })
+  websaco3CopropiedadId: string | null;
+
+  /**
    * Free-text receivables account every consolidated invoice for this
    * building debits — same reasoning as ConceptoCobro.cuentaCreditoId.
    */

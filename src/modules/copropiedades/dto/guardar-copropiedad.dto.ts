@@ -5,8 +5,10 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
+import { WEBSACO3_COPROPIEDAD_ID_REGEX } from '../websaco3-copropiedad-id';
 
 /**
  * Everything about a coproperty except its code, all optional. Split the same
@@ -75,6 +77,20 @@ class CamposCopropiedadDto {
   @IsOptional()
   @IsBoolean()
   usaGestionEdificios?: boolean;
+
+  /**
+   * The coproperty's `_id` in the building-management system. Format only is
+   * checked here (24 hex, either case, via `@Matches` — `@IsMongoId` would
+   * accept a `0x`/`0h` prefix, see `WEBSACO3_COPROPIEDAD_ID_REGEX`); whether it
+   * is REQUIRED depends on the resulting `usaGestionEdificios`, which needs the
+   * stored document, so `CopropiedadesService` decides that.
+   */
+  @IsOptional()
+  @Matches(WEBSACO3_COPROPIEDAD_ID_REGEX, {
+    message:
+      'El ID de WebSaco3 debe tener 24 caracteres hexadecimales (por ejemplo, 64b7f0c2a1d4e5f6a7b8c9d0)',
+  })
+  websaco3CopropiedadId?: string;
 
   @IsOptional()
   @IsString()

@@ -1912,6 +1912,9 @@ export interface Copropiedad {
   estado: 'activo' | 'inactivo';
   /** Whether this building ALSO uses the building-management system. */
   usaGestionEdificios: boolean;
+  /** The coproperty's id in the building-management system; non-null only
+   *  while `usaGestionEdificios` is true. Legacy documents read as null. */
+  websaco3CopropiedadId: string | null;
   cuentaContableCartera: string | null;
   /** Cuenta de pasivo para dinero recibido pero aún no aplicado a ningún
    *  documento — el anticipo de un Recibo de Caja. */

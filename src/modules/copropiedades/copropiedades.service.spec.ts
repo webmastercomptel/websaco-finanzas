@@ -74,6 +74,7 @@ const documento = (over: Record<string, unknown> = {}) => ({
 const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
   const filtros: Filtro[] = [];
   const escrituras: Record<string, unknown>[] = [];
+  const selecciones: string[] = [];
   const cadenaLista = {
     populate: () => cadenaLista,
     sort: () => cadenaLista,
@@ -86,6 +87,7 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
   return {
     filtros,
     escrituras,
+    selecciones,
     find: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
       return cadenaLista;
@@ -93,9 +95,12 @@ const modeloCon = (filas: unknown[], opts: { duplicado?: boolean } = {}) => {
     findById: jest.fn(() => ({
       populate: () => ({ exec: () => Promise.resolve(filas[0] ?? null) }),
       exec: () => Promise.resolve(filas[0] ?? null),
-      select: () => ({
-        lean: () => ({ exec: () => Promise.resolve(filas[0] ?? null) }),
-      }),
+      select: (campos: string) => {
+        selecciones.push(campos);
+        return {
+          lean: () => ({ exec: () => Promise.resolve(filas[0] ?? null) }),
+        };
+      },
     })),
     countDocuments: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
@@ -605,10 +610,11 @@ describe('CopropiedadesService.update', () => {
   });
 });
 
-// spec `building-management-activation` → "NIT completeness on activation":
-// las 7 escenas exactas descriptas en
-// openspec/changes/publicar-facturas-websaco/specs/building-management-activation/spec.md
-describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
+// spec `building-management-activation` → "WebSaco3 coproperty id required on
+// activation" and "Id is cleared when the flag is turned off".
+describe('CopropiedadesService — aplicarReglaGestionEdificios', () => {
+  const ID = '64b7f0c2a1d4e5f6a7b8c9d0';
+
   const construirService = (documentos: unknown[]) => {
     const modelo = modeloCon(documentos);
     const service = new CopropiedadesService(
@@ -625,125 +631,246 @@ describe('CopropiedadesService — validarActivacionGestionEdificios', () => {
     return { modelo, service };
   };
 
-  it('crear con el flag en true y sin NIT: rechaza', async () => {
-    const { service } = construirService([documento({ nombre: 'X' })]);
+  describe('activación', () => {
+    it('crear con el flag en true y un id válido, sin NIT: acepta', async () => {
+      const { modelo, service } = construirService([documento()]);
 
-    await expect(
-      service.create({ nombre: 'X', usaGestionEdificios: true }, ACTOR),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
+      await service.create(
+        {
+          nombre: 'X',
+          usaGestionEdificios: true,
+          websaco3CopropiedadId: ID,
+        },
+        ACTOR,
+      );
 
-  it('crear con el flag en true y NIT completo: acepta', async () => {
-    const { modelo, service } = construirService([documento({ nombre: 'X' })]);
-
-    await service.create(
-      {
-        nombre: 'X',
+      expect(modelo.escrituras[0]).toMatchObject({
         usaGestionEdificios: true,
-        nit: '900123456',
-        digitoVerificacion: '7',
-      },
-      ACTOR,
-    );
+        websaco3CopropiedadId: ID,
+      });
+    });
 
-    expect(modelo.escrituras[0]).toMatchObject({
-      usaGestionEdificios: true,
-      nit: '900123456',
-      digitoVerificacion: '7',
+    it('crear con el flag en true y sin id: rechaza', async () => {
+      const { service } = construirService([documento()]);
+
+      await expect(
+        service.create({ nombre: 'X', usaGestionEdificios: true }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('crear con el flag en true y un NIT completo pero sin id: rechaza — el NIT ya no habilita', async () => {
+      const { service } = construirService([documento()]);
+
+      await expect(
+        service.create(
+          {
+            nombre: 'X',
+            usaGestionEdificios: true,
+            nit: '900123456',
+            digitoVerificacion: '7',
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('el servicio revalida el formato aunque el DTO ya lo haya hecho', async () => {
+      const { service } = construirService([documento()]);
+
+      await expect(
+        service.create(
+          {
+            nombre: 'X',
+            usaGestionEdificios: true,
+            websaco3CopropiedadId: 'zzzzzzzzzzzzzzzzzzzzzzzz',
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it.each([
+      ['con prefijo 0x', `0x${'a'.repeat(22)}`],
+      ['con prefijo 0h', `0h${'a'.repeat(22)}`],
+      ['de 23 caracteres', ID.slice(0, 23)],
+      ['de 25 caracteres', `${ID}0`],
+    ])('rechaza un id %s', async (_caso, id) => {
+      const { service } = construirService([documento()]);
+
+      await expect(
+        service.create(
+          { nombre: 'X', usaGestionEdificios: true, websaco3CopropiedadId: id },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('acepta el id en mayúsculas', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.create(
+        {
+          nombre: 'X',
+          usaGestionEdificios: true,
+          websaco3CopropiedadId: ID.toUpperCase(),
+        },
+        ACTOR,
+      );
+
+      expect(modelo.escrituras[0]).toMatchObject({
+        websaco3CopropiedadId: ID.toUpperCase(),
+      });
+    });
+
+    it('actualizar activa el flag y manda el id en el mismo request: acepta', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.update(
+        'cop-1',
+        { usaGestionEdificios: true, websaco3CopropiedadId: ID },
+        ACTOR,
+      );
+
+      expect(modelo.escrituras[0]).toEqual({
+        usaGestionEdificios: true,
+        websaco3CopropiedadId: ID,
+      });
+    });
+
+    it('actualizar activa el flag y reutiliza el id ya guardado', async () => {
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: false, websaco3CopropiedadId: ID }),
+      ]);
+
+      await service.update('cop-1', { usaGestionEdificios: true }, ACTOR);
+
+      expect(modelo.escrituras[0]).toEqual({ usaGestionEdificios: true });
+    });
+
+    it('actualizar activa el flag sin id en ningún lado: rechaza', async () => {
+      const { service } = construirService([
+        documento({ usaGestionEdificios: false, websaco3CopropiedadId: null }),
+      ]);
+
+      await expect(
+        service.update('cop-1', { usaGestionEdificios: true }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('un documento legacy (sin la clave) con el flag apagado tampoco puede activarse sin id', async () => {
+      const { service } = construirService([
+        documento({ usaGestionEdificios: false }),
+      ]);
+
+      await expect(
+        service.update('cop-1', { usaGestionEdificios: true }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('actualizar sin tocar flag ni id: acepta — la regla no corre (ni con el flag en true y sin id)', async () => {
+      // Fixture deliberada: un estado legacy real (flag en true, sin id). Si
+      // la regla corriera por error, esta fila la rechazaría; que el update
+      // pase demuestra que NO se ejecuta, no que pasaría de todos modos.
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: true, websaco3CopropiedadId: null }),
+      ]);
+
+      await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
+
+      expect(modelo.escrituras[0]).toEqual({ ciudad: 'Cali' });
+    });
+
+    it('corregir el id con el flag en true: acepta y escribe el nuevo', async () => {
+      const otro = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: true, websaco3CopropiedadId: ID }),
+      ]);
+
+      await service.update('cop-1', { websaco3CopropiedadId: otro }, ACTOR);
+
+      expect(modelo.escrituras[0]).toEqual({ websaco3CopropiedadId: otro });
+    });
+
+    it('un NIT incompleto ya no bloquea la activación ni la edición', async () => {
+      const { modelo, service } = construirService([
+        documento({
+          usaGestionEdificios: true,
+          websaco3CopropiedadId: ID,
+          nit: null,
+          digitoVerificacion: null,
+        }),
+      ]);
+
+      await service.update('cop-1', { nit: '900123456' }, ACTOR);
+
+      expect(modelo.escrituras[0]).toEqual({ nit: '900123456' });
+    });
+
+    it('update lee del documento guardado tanto el flag como el id', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.update('cop-1', { usaGestionEdificios: false }, ACTOR);
+
+      expect(modelo.selecciones[0]).toContain('usaGestionEdificios');
+      expect(modelo.selecciones[0]).toContain('websaco3CopropiedadId');
     });
   });
 
-  it('actualizar activa el flag y provee el NIT en el mismo request: acepta', async () => {
-    const { modelo, service } = construirService([
-      documento({
+  describe('flag apagado', () => {
+    it('desactivar limpia el id guardado', async () => {
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: true, websaco3CopropiedadId: ID }),
+      ]);
+
+      await service.update('cop-1', { usaGestionEdificios: false }, ACTOR);
+
+      expect(modelo.escrituras[0]).toEqual({
         usaGestionEdificios: false,
-        nit: null,
-        digitoVerificacion: null,
-      }),
-    ]);
-
-    await service.update(
-      'cop-1',
-      {
-        usaGestionEdificios: true,
-        nit: '900123456',
-        digitoVerificacion: '7',
-      },
-      ACTOR,
-    );
-
-    expect(modelo.escrituras[0]).toEqual({
-      usaGestionEdificios: true,
-      nit: '900123456',
-      digitoVerificacion: '7',
+        websaco3CopropiedadId: null,
+      });
     });
-  });
 
-  it('actualizar activa el flag pero el NIT ya está en el archivo: acepta, usa el NIT existente', async () => {
-    const { modelo, service } = construirService([
-      documento({
+    it('un id enviado con el flag apagado se descarta y el request se acepta', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.update(
+        'cop-1',
+        { usaGestionEdificios: false, websaco3CopropiedadId: ID },
+        ACTOR,
+      );
+
+      expect(modelo.escrituras[0]).toEqual({
         usaGestionEdificios: false,
-        nit: '900123456',
-        digitoVerificacion: '7',
-      }),
-    ]);
+        websaco3CopropiedadId: null,
+      });
+    });
 
-    await service.update('cop-1', { usaGestionEdificios: true }, ACTOR);
+    it('un id enviado sin tocar el flag, que ya está apagado, se descarta', async () => {
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: false }),
+      ]);
 
-    expect(modelo.escrituras[0]).toEqual({ usaGestionEdificios: true });
-  });
+      await service.update('cop-1', { websaco3CopropiedadId: ID }, ACTOR);
 
-  it('actualizar activa el flag sin NIT en ningún lado: rechaza', async () => {
-    const { service } = construirService([
-      documento({
+      expect(modelo.escrituras[0]).toEqual({ websaco3CopropiedadId: null });
+    });
+
+    it('crear con el flag apagado y un id: lo descarta', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.create(
+        {
+          nombre: 'X',
+          usaGestionEdificios: false,
+          websaco3CopropiedadId: ID,
+        },
+        ACTOR,
+      );
+
+      expect(modelo.escrituras[0]).toMatchObject({
         usaGestionEdificios: false,
-        nit: null,
-        digitoVerificacion: null,
-      }),
-    ]);
-
-    await expect(
-      service.update('cop-1', { usaGestionEdificios: true }, ACTOR),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('actualizar sin tocar el flag: acepta — la validación no corre (ni con el NIT incompleto)', async () => {
-    // Fixture deliberada con NIT incompleto (ambos campos null) mientras el
-    // flag ya está en true — un estado legacy real. Si
-    // validarActivacionGestionEdificios corriera por error, esta fila la
-    // rechazaría. Que el update pase demuestra que la validación
-    // efectivamente NO se ejecuta cuando el request no toca ninguna de sus
-    // tres claves — no sólo que pasaría de todos modos con un NIT completo.
-    const { modelo, service } = construirService([
-      documento({
-        usaGestionEdificios: true,
-        nit: null,
-        digitoVerificacion: null,
-      }),
-    ]);
-
-    await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
-
-    expect(modelo.escrituras[0]).toEqual({ ciudad: 'Cali' });
-  });
-
-  it('dígito de verificación "0" cuenta como presente, no como faltante', async () => {
-    const { modelo, service } = construirService([
-      documento({
-        usaGestionEdificios: false,
-        nit: null,
-        digitoVerificacion: null,
-      }),
-    ]);
-
-    await service.update(
-      'cop-1',
-      { usaGestionEdificios: true, nit: '900123456', digitoVerificacion: '0' },
-      ACTOR,
-    );
-
-    expect(modelo.escrituras[0]).toMatchObject({
-      digitoVerificacion: '0',
+        websaco3CopropiedadId: null,
+      });
     });
   });
 });
