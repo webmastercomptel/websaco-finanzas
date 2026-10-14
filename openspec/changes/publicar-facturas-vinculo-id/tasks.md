@@ -67,11 +67,11 @@ Tests are written test-first per task (`tdd: false` in `openspec/config.yaml`: r
 
 ## Phase 3: Frontend, PR 4 (`../frontend`; verify: typecheck, lint, Vitest, delegated; rollback: revert, backend ignores the missing field)
 
-- [ ] 3.1 RED/GREEN `src/lib/websaco3.ts` + `.test.ts`: `esIdWebsaco3` (valid, uppercase, 23/25 chars, non-hex, `0x`/`0h`-prefixed). It MUST use the same strict regex as the backend, `/^[0-9a-f]{24}$/i` (`WEBSACO3_COPROPIEDAD_ID_REGEX`), and must not rely on any `isMongoId`-style helper, which accepts a `0x`/`0h` prefix (Req: Frontend id input)
-- [ ] 3.2 `src/lib/api/copropiedades.ts`: add the field to `Copropiedad` and `GuardarCopropiedad`
-- [ ] 3.3 `src/components/ui/field.tsx`: optional `ayuda`, merged into `aria-describedby` with `error`
-- [ ] 3.4 RED `src/pages/copropiedad-form.test.tsx`: hidden when off; helper text when on; empty/invalid blocks the mutation with inline error; valid id sent trimmed; flag off = no id in payload (Req: Frontend id input)
-- [ ] 3.5 GREEN `src/pages/copropiedad-form.tsx` per the design (error, focus, clear on change, keeps state when off)
+- [x] 3.1 RED/GREEN `src/lib/websaco3.ts` + `.test.ts`: `esIdWebsaco3` (valid, uppercase, 23/25 chars, non-hex, `0x`/`0h`-prefixed). It MUST use the same strict regex as the backend, `/^[0-9a-f]{24}$/i` (`WEBSACO3_COPROPIEDAD_ID_REGEX`), and must not rely on any `isMongoId`-style helper, which accepts a `0x`/`0h` prefix (Req: Frontend id input)
+- [x] 3.2 `src/lib/api/copropiedades.ts`: add the field to `Copropiedad` and `GuardarCopropiedad`
+- [x] 3.3 `src/components/ui/field.tsx`: optional `ayuda`, merged into `aria-describedby` with `error`
+- [x] 3.4 RED `src/pages/copropiedad-form.test.tsx`: hidden when off; helper text when on; empty/invalid blocks the mutation with inline error; valid id sent trimmed; flag off = no id in payload (Req: Frontend id input)
+- [x] 3.5 GREEN `src/pages/copropiedad-form.tsx` per the design (error, focus, clear on change, keeps state when off)
 
 ## Phase 4: Release validation (manual, no code)
 
