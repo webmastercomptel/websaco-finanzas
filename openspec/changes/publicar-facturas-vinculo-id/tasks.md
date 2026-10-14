@@ -55,12 +55,15 @@ Tests are written test-first per task (`tdd: false` in `openspec/config.yaml`: r
 
 ## Phase 2: Docs and cleanup, PR 3 (verify: links resolve, `curl` reviewed against the guard; rollback: revert)
 
-- [ ] 2.1 Create `docs/runbooks/publicacion-websaco3.md`: 4 env vars, immediate-dispatch behaviour, Mongo query for rows `pendiente`/retryable `fallido`/stale `enviando`, manual `curl -X POST` with `X-Scheduler-Secret` and `--max-time 150` (no `gcloud scheduler`), re-arming terminal rows, rollout order (Req: Manual sweep safety net documented)
+- [x] 2.1 Create `docs/runbooks/publicacion-websaco3.md`: 4 env vars, immediate-dispatch behaviour, Mongo query for rows `pendiente`/retryable `fallido`/stale `enviando`, manual `curl -X POST` with `X-Scheduler-Secret` and `--max-time 150` (no `gcloud scheduler`), re-arming terminal rows, rollout order (Req: Manual sweep safety net documented)
   - The runbook MUST also document the scenario "`liberar` fails after a successful POST": the row stays `enviando` until `CLAIM_TTL_MS`; if `intentos >= max`, `barrerAgotados` can mark it terminal `reclamo-expirado` even though WebSaco3 already received it. The operator MUST check WebSaco3 before re-sending. The receiver dedupes by `loteId` and answers 409, which counts as success.
   - PR 3 MUST reword the stale docblock of `publicacion-facturas.controller.ts` ("Cloud Scheduler trigger") to "manual safety-net trigger" (the controller is intentionally NOT edited in PR 2).
-- [ ] 2.2 `INSTALACION-REFERENCE.md`: Copropiedad field row; `README.md`: link to the runbook
+  - Done in PR 3: controller docblock reworded (comment-only). Other stale "Cloud Scheduler" mentions in `src/` fixed too (comment-only): controller method docblock, `publicacion-facturas.guard.ts` docblock, `env.validation.ts` comment, and the secret fixture string in `publicacion-facturas.guard.spec.ts`.
+- [x] 2.2 `INSTALACION-REFERENCE.md`: Copropiedad field row; `README.md`: link to the runbook
 - [ ] 2.3 `.env.example`: add the 4 `WEBSACO3_*` keys, commented out. **Apply could not read this file (permission denied): ask the user for permission first** (Req: same)
+  - BLOCKED (permission denied again in PR 3 apply; no workaround attempted). The exact lines to add are in `docs/runbooks/publicacion-websaco3.md`, section "Lines to add to .env.example". A human must append them; then tick this task.
 - [ ] 2.4 Separate deletion-only commit: remove `openspec/changes/publicar-facturas-websaco/` (stale copy of `archive/2026-09-24-publicar-facturas-websaco`)
+  - NOT DONE: verified in PR 3 apply that the directory is NOT a pure duplicate. `design.md`, `proposal.md` and both `specs/*/spec.md` are identical to the archive, but `tasks.md` and `verify-report.md` differ: the stale copies are the longer originals (the archive holds condensed rewrites). Only in the stale `tasks.md`: the "SESSION STOPPED HERE" block, Phase 10 follow-up note, the detailed Phase 11 notes, the dependency summary and the original Review Workload Forecast. Only in the stale `verify-report.md`: the original PARTIAL compliance rows, the detailed "Findings" analysis 1-7, the full W1-W4 / S1-S4 text. (The archive has `ARCHIVE-REPORT.md`, which the stale dir lacks.) A human must decide whether that detail is disposable before deleting.
 
 ## Phase 3: Frontend, PR 4 (`../frontend`; verify: typecheck, lint, Vitest, delegated; rollback: revert, backend ignores the missing field)
 
