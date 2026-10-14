@@ -63,3 +63,7 @@ npm run test:cov
   runner de Jest estándar, sin el flag `--experimental-vm-modules`.
 - `pdfjs-dist` (extracción de texto de PDF) NO se incluye: en este dominio los
   PDF se generan, no se leen.
+- **Publicación de lotes a WebSaco3** (opcional, por copropiedad): variables
+  `WEBSACO3_*`, orden de despliegue, el `curl` manual de barrido y cómo
+  recuperar filas fallidas están en
+  [`docs/runbooks/publicacion-websaco3.md`](docs/runbooks/publicacion-websaco3.md).

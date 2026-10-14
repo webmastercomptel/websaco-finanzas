@@ -105,9 +105,10 @@ export const envValidationSchema = Joi.object({
     })
     .optional(),
   WEBSACO3_HMAC_SECRET: Joi.string().min(32).optional(),
-  // Shared with the Cloud Scheduler job's `X-Scheduler-Secret` header, not
-  // with WebSaco3 — a distinct party from WEBSACO3_HMAC_SECRET, so one can
-  // rotate or leak without the other.
+  // Sent by the operator as the `X-Scheduler-Secret` header of the manual
+  // sweep `curl` (see docs/runbooks/publicacion-websaco3.md), not shared with
+  // WebSaco3 — a distinct party from WEBSACO3_HMAC_SECRET, so one can rotate
+  // or leak without the other.
   WEBSACO3_PUBLICACION_TRIGGER_SECRET: Joi.string().min(32).optional(),
   WEBSACO3_PUBLICACION_MAX_INTENTOS: Joi.number()
     .integer()

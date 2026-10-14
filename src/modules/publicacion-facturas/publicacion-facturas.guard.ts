@@ -15,8 +15,8 @@ const HEADER = 'x-scheduler-secret';
 /**
  * Protects `POST /interno/publicacion-facturas/procesar-pendientes` — the
  * ONLY guard this route has (see design.md's "Trigger controller" section
- * for why `FirebaseAuthGuard`/`PoliciesGuard` do not apply: the caller is
- * Cloud Scheduler, machine-to-machine, with no user and no tenant).
+ * for why `FirebaseAuthGuard`/`PoliciesGuard` do not apply: the caller is an
+ * operator's `curl`, machine-to-machine, with no user and no tenant).
  *
  * Fails CLOSED: a missing configured secret is treated the same as a wrong
  * header, never as "open". Every failure returns the same opaque 401 — same

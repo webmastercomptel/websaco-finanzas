@@ -2,7 +2,7 @@ import { Logger, UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { SecretoProgramadorGuard } from './publicacion-facturas.guard';
 
-const SECRET = 'un-secreto-de-cloud-scheduler-de-al-menos-32-chars';
+const SECRET = 'un-secreto-del-operador-de-al-menos-32-chars';
 
 const mockConfig = (secreto: string | undefined) => ({
   get: jest.fn(() => secreto),

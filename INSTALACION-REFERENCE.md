@@ -91,12 +91,14 @@
 | `nombreAdministrador` | string | nullable, trim | null | Administrador interno (si no tiene entidad) |
 | `estado` | enum | required | 'active' | `'active'` \| `'inactive'` |
 | `usaGestionEdificios` | boolean | required | false | Usa sistema de gestión edificios |
+| `websaco3CopropiedadId` | string | nullable, 24 hex (`/^[0-9a-f]{24}$/i`) | null | `_id` de la misma copropiedad en WebSaco3. Obligatorio mientras `usaGestionEdificios` es `true`; se limpia (`null`) al apagar el flag |
 | `cuentaContableCartera` | string | nullable, trim | null | Cuenta contable cartera |
 | `cuentaAnticipos` | string | nullable, trim | null | Cuenta anticipos |
 | `cuentaDevoluciones` | string | nullable, trim | null | Cuenta notas crédito |
 | `cuentaNotasDebito` | string | nullable, trim | null | Cuenta notas débito |
 
 **Regla de negocio**: Si se asigna `entidadId` → se limpia `nombreAdministrador` y viceversa.
+**Regla de negocio (WebSaco3)**: activar `usaGestionEdificios` exige un `websaco3CopropiedadId` válido (400 si falta o tiene formato inválido); apagar el flag lo limpia. La publicación de lotes lee ese ID de la copropiedad en cada envío. Operación y configuración: [`docs/runbooks/publicacion-websaco3.md`](docs/runbooks/publicacion-websaco3.md).
 **Índices únicos**: `codigo` (global)
 
 ---
@@ -408,6 +410,7 @@ Account (Cuenta)
   entidadAdministradoraId?: MongoId
   nombreAdministrador?: string      // max:120
   usaGestionEdificios?: boolean
+  websaco3CopropiedadId?: string    // 24 hex chars; required while usaGestionEdificios is true
   cuentaContableCartera?: string    // max:20
   cuentaAnticipos?: string          // max:20
   cuentaDevoluciones?: string       // max:20
@@ -727,6 +730,7 @@ type Copropiedad = {
   nombreAdministrador: string | null;
   estado: "activo" | "inactivo";
   usaGestionEdificios: boolean;
+  websaco3CopropiedadId: string | null;
 };
 
 type GuardarCopropiedad = {
@@ -741,6 +745,7 @@ type GuardarCopropiedad = {
   entidadAdministradoraId?: string;
   nombreAdministrador?: string;
   usaGestionEdificios?: boolean;
+  websaco3CopropiedadId?: string;
   estado?: "activo" | "inactivo";
 };
 ```
