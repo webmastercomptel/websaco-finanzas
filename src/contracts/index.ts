@@ -1557,6 +1557,11 @@ export interface FilaConsecutivo {
   fecha: string;
   /** For a Recibo (`esRecibo`) this is its Valor Recibido. */
   valorTotal: number;
+  /** Recibo only, 0 otherwise: the part of the cash received that was not
+   *  applied to cartera (nor sent to Otros Ingresos) — what went to
+   *  anticipos. Lets the accountant reconcile a receipt: Valor Recibido =
+   *  conceptos − Descuento + Otros Ingresos + Anticipos. */
+  montoAnticipo: number;
   /** Recibo: the payment surplus sent to Otros Ingresos
    *  (`Recibo.montoOtrosIngresos`). Nota Débito: its whole `total` unless
    *  its motivo is "Cambio del valor". 0 otherwise. */
@@ -1576,10 +1581,11 @@ export interface RespuestaConsecutivos {
    *  labels `valorTotal` "Valor Recibido" and adds the Otros Ingresos and
    *  Descuento columns. */
   esRecibo: boolean;
-  /** Which optional amount columns this document type shows: Otros
+  /** Which optional amount columns this document type shows: Anticipos
+   *  for Recibos when at least one row has one; Otros
    *  Ingresos for Recibos and Notas Débito; Descuento for Recibos and Notas
    *  Crédito. */
-  columnas: { otrosIngresos: boolean; descuento: boolean };
+  columnas: { anticipos: boolean; otrosIngresos: boolean; descuento: boolean };
   conceptos: ConceptoColumnaConsecutivos[];
   filas: FilaConsecutivo[];
 }

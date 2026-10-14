@@ -173,7 +173,7 @@ describe('ConsecutivosService', () => {
         inmuebleId: inmId,
         numero: 7,
         numeroCompleto: 'RC-7',
-        montoRecibido: 120000,
+        montoRecibido: 150000,
         montoOtrosIngresos: 15000,
         fechaRecibo: new Date('2026-01-18'),
       };
@@ -183,6 +183,7 @@ describe('ConsecutivosService', () => {
         sourceId: reciboId,
         estado: 'activa',
         montoDescuento,
+        montoAplicado: 60000,
         detalleConceptos: [
           { conceptoId, nombreConcepto: 'Administracion', monto: 60000 },
         ],
@@ -202,11 +203,19 @@ describe('ConsecutivosService', () => {
       });
 
       expect(result.esRecibo).toBe(true);
-      expect(result.columnas).toEqual({ otrosIngresos: true, descuento: true });
+      expect(result.columnas).toEqual({
+        anticipos: true,
+        otrosIngresos: true,
+        descuento: true,
+      });
       expect(result.filas[0]).toMatchObject({
-        valorTotal: 120000,
+        valorTotal: 150000,
         montoOtrosIngresos: 15000,
         montoDescuento: 5000,
+        // 150000 recibido − 15000 otros ingresos − (120000 aplicado − 5000
+        // descuento) en efectivo = 20000 a anticipos. Cuadra:
+        // 120000 conceptos − 5000 + 15000 + 20000 = 150000.
+        montoAnticipo: 20000,
       });
     });
   });
@@ -256,6 +265,7 @@ describe('ConsecutivosService', () => {
       });
       expect(result.esRecibo).toBe(false);
       expect(result.columnas).toEqual({
+        anticipos: false,
         otrosIngresos: true,
         descuento: false,
       });
@@ -387,6 +397,7 @@ describe('ConsecutivosService', () => {
       });
 
       expect(result.columnas).toEqual({
+        anticipos: false,
         otrosIngresos: false,
         descuento: true,
       });
