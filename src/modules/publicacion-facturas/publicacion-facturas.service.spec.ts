@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { createHmac } from 'node:crypto';
 import {
   PublicacionFacturasService,
   type Desenlace,
@@ -7,6 +8,7 @@ import {
 } from './publicacion-facturas.service';
 import {
   CLAIM_TTL_MS,
+  FETCH_TIMEOUT_MS,
   LOTE_MAXIMO_POR_CICLO,
   URL_LECTURA_TTL_MS,
 } from './publicacion-facturas.politica';
@@ -30,10 +32,26 @@ const mockConfig = (valores: Record<string, unknown> = CONFIG_COMPLETA) => ({
   get: jest.fn((clave: string) => valores[clave]),
 });
 
-const mockCopropiedades = (documento: Record<string, unknown> | null) => ({
+const WEBSACO3_ID = '507f1f77bcf86cd799439099';
+
+/** A coproperty that publishes: flag on and the WebSaco3 id on file. */
+const COPROPIEDAD_HABILITADA = {
+  usaGestionEdificios: true,
+  websaco3CopropiedadId: WEBSACO3_ID,
+};
+
+const mockCopropiedades = (documento: Record<string, unknown> | null) => {
+  const select = jest.fn(() => ({
+    lean: () => ({ exec: () => Promise.resolve(documento) }),
+  }));
+  return { select, findById: jest.fn(() => ({ select })) };
+};
+
+/** `findById(...).select(...).lean().exec()` rejects — Mongo unreachable. */
+const mockCopropiedadesQueRompe = (error: Error = new Error('mongo down')) => ({
   findById: jest.fn(() => ({
     select: () => ({
-      lean: () => ({ exec: () => Promise.resolve(documento) }),
+      lean: () => ({ exec: () => Promise.reject(error) }),
     }),
   })),
 });
@@ -62,7 +80,6 @@ const FILA_BASE: FilaReclamada = {
   _id: new Types.ObjectId('507f1f77bcf86cd799439013'),
   copropiedadId: new Types.ObjectId('507f1f77bcf86cd799439011'),
   loteId: new Types.ObjectId('507f1f77bcf86cd799439012'),
-  nit: '900123456',
   numerosFactura: ['FV-1', 'FV-2'],
   objectPath: 'coproprietats/cop-1/lotes/lote-1.pdf',
   estado: 'enviando',
@@ -87,56 +104,81 @@ const EVENTO: LoteFacturasPdfConfirmadoEvent = {
 };
 
 describe('PublicacionFacturasService.encolar', () => {
-  it('la copropiedad con el flag apagado no escribe ninguna fila', async () => {
-    const copropiedades = mockCopropiedades({
-      usaGestionEdificios: false,
-      nit: null,
-    });
-    const filas = mockFilas();
-    const service = new PublicacionFacturasService(
+  const crearServicio = (
+    copropiedad: Record<string, unknown> | null,
+    filas = mockFilas(),
+  ) =>
+    new PublicacionFacturasService(
       filas as never,
-      copropiedades as never,
+      mockCopropiedades(copropiedad) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
 
-    await service.encolar(EVENTO);
+  it('la copropiedad con el flag apagado no escribe ninguna fila y devuelve false', async () => {
+    const filas = mockFilas();
+    const service = crearServicio(
+      { usaGestionEdificios: false, websaco3CopropiedadId: null },
+      filas,
+    );
+
+    await expect(service.encolar(EVENTO)).resolves.toBe(false);
 
     expect(filas.updateOne).not.toHaveBeenCalled();
   });
 
-  it('el flag activo sin NIT tampoco escribe (fila legacy, se omite con warning)', async () => {
-    const copropiedades = mockCopropiedades({
-      usaGestionEdificios: true,
-      nit: null,
-    });
+  it('una copropiedad inexistente no escribe ninguna fila y devuelve false', async () => {
     const filas = mockFilas();
-    const service = new PublicacionFacturasService(
-      filas as never,
-      copropiedades as never,
-      mockStorage() as never,
-      mockConfig() as never,
-    );
+    const service = crearServicio(null, filas);
 
-    await service.encolar(EVENTO);
+    await expect(service.encolar(EVENTO)).resolves.toBe(false);
 
     expect(filas.updateOne).not.toHaveBeenCalled();
   });
 
-  it('hace upsert con $setOnInsert cuando el flag y el NIT están completos', async () => {
+  it('el flag activo sin websaco3CopropiedadId no escribe, advierte y devuelve false', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const filas = mockFilas();
+    const service = crearServicio(
+      { usaGestionEdificios: true, websaco3CopropiedadId: null },
+      filas,
+    );
+
+    await expect(service.encolar(EVENTO)).resolves.toBe(false);
+
+    expect(filas.updateOne).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(String(warnSpy.mock.calls[0][0])).toContain(LOTE_ID);
+    warnSpy.mockRestore();
+  });
+
+  it('lee solo el flag y el id de la copropiedad (sin nit)', async () => {
     const copropiedades = mockCopropiedades({
       usaGestionEdificios: true,
-      nit: '900123456',
+      websaco3CopropiedadId: WEBSACO3_ID,
     });
-    const filas = mockFilas();
     const service = new PublicacionFacturasService(
-      filas as never,
+      mockFilas() as never,
       copropiedades as never,
       mockStorage() as never,
       mockConfig() as never,
     );
 
     await service.encolar(EVENTO);
+
+    expect(copropiedades.select).toHaveBeenCalledWith(
+      'usaGestionEdificios websaco3CopropiedadId',
+    );
+  });
+
+  it('hace upsert con $setOnInsert (sin nit) y devuelve true cuando el flag y el id están completos', async () => {
+    const filas = mockFilas();
+    const service = crearServicio(
+      { usaGestionEdificios: true, websaco3CopropiedadId: WEBSACO3_ID },
+      filas,
+    );
+
+    await expect(service.encolar(EVENTO)).resolves.toBe(true);
 
     expect(filas.updateOne).toHaveBeenCalledTimes(1);
     const [filtro, update, opciones] = filas.updateOne.mock
@@ -147,50 +189,39 @@ describe('PublicacionFacturasService.encolar', () => {
     ];
     expect(opciones).toEqual({ upsert: true });
     expect(update.$setOnInsert).toMatchObject({
-      nit: '900123456',
       numerosFactura: ['FV-1', 'FV-2'],
       objectPath: EVENTO.objectPath,
       estado: 'pendiente',
       reintentable: true,
       intentos: 0,
     });
+    expect(update.$setOnInsert).not.toHaveProperty('nit');
+    expect(update.$setOnInsert).not.toHaveProperty('websaco3CopropiedadId');
     expect(filtro).toHaveProperty('loteId');
   });
 
-  it('un E11000 (carrera de upserts concurrentes) se traga como no-op', async () => {
-    const copropiedades = mockCopropiedades({
-      usaGestionEdificios: true,
-      nit: '900123456',
-    });
+  it('un E11000 (carrera de upserts concurrentes) se traga como no-op y devuelve true (la fila existe)', async () => {
     const error = Object.assign(new Error('duplicate key'), { code: 11000 });
     const filas = mockFilas({
       updateOne: jest.fn(() => ({ exec: () => Promise.reject(error) })),
     });
-    const service = new PublicacionFacturasService(
-      filas as never,
-      copropiedades as never,
-      mockStorage() as never,
-      mockConfig() as never,
+    const service = crearServicio(
+      { usaGestionEdificios: true, websaco3CopropiedadId: WEBSACO3_ID },
+      filas,
     );
 
-    await expect(service.encolar(EVENTO)).resolves.toBeUndefined();
+    await expect(service.encolar(EVENTO)).resolves.toBe(true);
   });
 
   it('un error que NO es E11000 se propaga', async () => {
-    const copropiedades = mockCopropiedades({
-      usaGestionEdificios: true,
-      nit: '900123456',
-    });
     const filas = mockFilas({
       updateOne: jest.fn(() => ({
         exec: () => Promise.reject(new Error('mongo down')),
       })),
     });
-    const service = new PublicacionFacturasService(
-      filas as never,
-      copropiedades as never,
-      mockStorage() as never,
-      mockConfig() as never,
+    const service = crearServicio(
+      { usaGestionEdificios: true, websaco3CopropiedadId: WEBSACO3_ID },
+      filas,
     );
 
     await expect(service.encolar(EVENTO)).rejects.toThrow('mongo down');
@@ -234,6 +265,52 @@ describe('PublicacionFacturasService.reclamar', () => {
       sort: { proximoIntentoEn: 1 },
       returnDocument: 'after',
     });
+  });
+
+  it('sin loteId, el filtro no restringe por lote (el barrido reclama cualquier fila elegible)', async () => {
+    const filas = mockFilas();
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await service.reclamar(6);
+
+    const [filtro] = filas.findOneAndUpdate.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+    ];
+    expect(filtro).not.toHaveProperty('loteId');
+  });
+
+  it('con loteId, agrega el filtro por ese lote y conserva el mismo reclamo atómico', async () => {
+    const filas = mockFilas();
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(null) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await service.reclamar(6, LOTE_ID);
+
+    expect(filas.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    const [filtro, update, opciones] = filas.findOneAndUpdate.mock
+      .calls[0] as unknown as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+
+    expect(filtro.loteId).toEqual(new Types.ObjectId(LOTE_ID));
+    // Same eligibility predicate as the sweep: the filter narrows, it never
+    // replaces it, so an exhausted or already-claimed row is still skipped.
+    expect(filtro.intentos).toEqual({ $lt: 6 });
+    expect(filtro.$or as unknown[]).toHaveLength(2);
+    expect((update.$set as Record<string, unknown>).estado).toBe('enviando');
+    expect(update.$inc).toEqual({ intentos: 1 });
+    expect(opciones).toMatchObject({ returnDocument: 'after' });
   });
 });
 
@@ -411,7 +488,7 @@ describe('PublicacionFacturasService.procesar', () => {
       global.fetch = jest.fn().mockResolvedValue({ status });
       const service = new PublicacionFacturasService(
         mockFilas() as never,
-        mockCopropiedades(null) as never,
+        mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
       );
@@ -433,7 +510,7 @@ describe('PublicacionFacturasService.procesar', () => {
       global.fetch = jest.fn().mockResolvedValue({ status });
       const service = new PublicacionFacturasService(
         mockFilas() as never,
-        mockCopropiedades(null) as never,
+        mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
       );
@@ -453,7 +530,7 @@ describe('PublicacionFacturasService.procesar', () => {
     global.fetch = jest.fn().mockResolvedValue({ status: 502 });
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
@@ -473,7 +550,7 @@ describe('PublicacionFacturasService.procesar', () => {
       global.fetch = jest.fn().mockResolvedValue({ status });
       const service = new PublicacionFacturasService(
         mockFilas() as never,
-        mockCopropiedades(null) as never,
+        mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
       );
@@ -495,7 +572,7 @@ describe('PublicacionFacturasService.procesar', () => {
     global.fetch = jest.fn().mockRejectedValue(abortError);
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
@@ -513,7 +590,7 @@ describe('PublicacionFacturasService.procesar', () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('ECONNRESET'));
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
@@ -536,7 +613,7 @@ describe('PublicacionFacturasService.procesar', () => {
     };
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storageQueRompe as never,
       mockConfig() as never,
     );
@@ -558,7 +635,7 @@ describe('PublicacionFacturasService.procesar', () => {
     const url = 'https://storage.googleapis.com/bucket/secreto-no-loguear.pdf';
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
     );
@@ -590,7 +667,7 @@ describe('PublicacionFacturasService.procesar', () => {
       'https://storage.googleapis.com/bucket/secreto-no-loguear-exito.pdf';
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
     );
@@ -616,7 +693,7 @@ describe('PublicacionFacturasService.procesar', () => {
       'https://storage.googleapis.com/bucket/secreto-no-loguear-timeout.pdf';
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
     );
@@ -638,7 +715,7 @@ describe('PublicacionFacturasService.procesar', () => {
       'https://storage.googleapis.com/bucket/secreto-no-loguear-red.pdf';
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
     );
@@ -663,7 +740,7 @@ describe('PublicacionFacturasService.procesar', () => {
     const storage = mockStorage();
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storage as never,
       mockConfig() as never,
     );
@@ -693,7 +770,7 @@ describe('PublicacionFacturasService.procesar', () => {
     global.fetch = jest.fn().mockResolvedValue({ status: 201 });
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
@@ -716,7 +793,7 @@ describe('PublicacionFacturasService.procesar', () => {
       .mockResolvedValue({ status: 201, body: { cancel: cancelar } });
     const service = new PublicacionFacturasService(
       mockFilas() as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );
@@ -724,6 +801,470 @@ describe('PublicacionFacturasService.procesar', () => {
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
 
     expect(cancelar).toHaveBeenCalledTimes(1);
+  });
+});
+
+// `id-resolved-from-current-coproperty`: `procesar` lee el id de la
+// `Copropiedad` ACTUAL en cada intento (la fila no lo congela), antes de
+// firmar nada. Sin id no hay forma de enviar: terminal, sin URL firmada y sin
+// `fetch`. Si la lectura misma falla, es transitorio y se reintenta.
+describe('PublicacionFacturasService.procesar — id resuelto desde la copropiedad actual', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  const crear = (
+    copropiedades: unknown,
+    storage: ReturnType<typeof mockStorage> = mockStorage(),
+  ) =>
+    new PublicacionFacturasService(
+      mockFilas() as never,
+      copropiedades as never,
+      storage as never,
+      mockConfig() as never,
+    );
+
+  const procesar = (
+    service: PublicacionFacturasService,
+    fila: FilaReclamada = FILA_BASE,
+    max = 6,
+  ) => (service as unknown as ServicioConPrivados).procesar(fila, max);
+
+  const cuerpoEnviado = (): Record<string, unknown> => {
+    const [, opciones] = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    return JSON.parse(opciones.body) as Record<string, unknown>;
+  };
+
+  it('lee la copropiedad de la fila, con flag e id, antes de firmar', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const copropiedades = mockCopropiedades(COPROPIEDAD_HABILITADA);
+    const service = crear(copropiedades);
+
+    await procesar(service);
+
+    expect(copropiedades.findById).toHaveBeenCalledWith(
+      FILA_BASE.copropiedadId,
+    );
+    expect(copropiedades.select).toHaveBeenCalledWith(
+      'usaGestionEdificios websaco3CopropiedadId',
+    );
+  });
+
+  it('el payload lleva el id actual de la copropiedad (una corrección alcanza filas ya encoladas)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const idCorregido = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+    const service = crear(
+      mockCopropiedades({
+        usaGestionEdificios: true,
+        websaco3CopropiedadId: idCorregido,
+      }),
+    );
+
+    await procesar(service);
+
+    expect(cuerpoEnviado()).toMatchObject({
+      websaco3CopropiedadId: idCorregido,
+      loteId: LOTE_ID,
+    });
+  });
+
+  it('una fila legacy con nit y sin id: se envía el id de la copropiedad y ningún nit', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const filaLegacy = { ...FILA_BASE, nit: '900123456' } as FilaReclamada;
+    const service = crear(mockCopropiedades(COPROPIEDAD_HABILITADA));
+
+    const desenlace = await procesar(service, filaLegacy);
+
+    expect(desenlace.estado).toBe('enviado');
+    const cuerpo = cuerpoEnviado();
+    expect(cuerpo.websaco3CopropiedadId).toBe(WEBSACO3_ID);
+    expect(cuerpo).not.toHaveProperty('nit');
+    const [, opciones] = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    expect(opciones.body).not.toContain('900123456');
+  });
+
+  it.each([
+    ['sin id', { usaGestionEdificios: true, websaco3CopropiedadId: null }],
+    [
+      'con flag apagado (aunque conserve un id)',
+      { usaGestionEdificios: false, websaco3CopropiedadId: WEBSACO3_ID },
+    ],
+    ['inexistente', null],
+  ])(
+    'copropiedad %s: fallido terminal sin-websaco3-id, sin URL firmada y sin fetch',
+    async (_caso, copropiedad) => {
+      global.fetch = jest.fn();
+      const storage = mockStorage();
+      const service = crear(mockCopropiedades(copropiedad), storage);
+
+      // intentos 1 < max 6: NO es agotamiento, es terminal por falta de dato.
+      const desenlace = await procesar(service, { ...FILA_BASE, intentos: 1 });
+
+      expect(desenlace).toMatchObject({
+        estado: 'fallido',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado: null,
+        ultimoError: 'sin-websaco3-id',
+        enviadoEn: null,
+      });
+      expect(storage.generarUrlLectura).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('si la lectura de la copropiedad lanza: fallido reintentable copropiedad-lectura, sin URL ni fetch', async () => {
+    global.fetch = jest.fn();
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const storage = mockStorage();
+    const service = crear(mockCopropiedadesQueRompe(), storage);
+
+    const desenlace = await procesar(service, { ...FILA_BASE, intentos: 1 });
+
+    expect(desenlace).toMatchObject({
+      estado: 'fallido',
+      reintentable: true,
+      ultimoCodigoEstado: null,
+      ultimoError: 'copropiedad-lectura',
+    });
+    expect(desenlace.proximoIntentoEn).toBeInstanceOf(Date);
+    expect(storage.generarUrlLectura).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('si la lectura lanza y ya se agotó max, queda terminal (no se atasca en enviando)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const service = crear(mockCopropiedadesQueRompe());
+
+    const desenlace = await procesar(service, { ...FILA_BASE, intentos: 6 });
+
+    expect(desenlace).toMatchObject({
+      estado: 'fallido',
+      reintentable: false,
+      proximoIntentoEn: null,
+      ultimoError: 'copropiedad-lectura',
+    });
+  });
+
+  it.each([400, 404])(
+    'HTTP %i (id inválido / desconocido en WebSaco3) es fallido terminal, no se reintenta',
+    async (status) => {
+      global.fetch = jest.fn().mockResolvedValue({ status });
+      const service = crear(mockCopropiedades(COPROPIEDAD_HABILITADA));
+
+      const desenlace = await procesar(service, { ...FILA_BASE, intentos: 1 });
+
+      expect(desenlace).toMatchObject({
+        estado: 'fallido',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado: status,
+        ultimoError: `HTTP ${status}`,
+      });
+    },
+  );
+
+  // El fetch debe recibir un `AbortSignal` y ABORTARSE tras FETCH_TIMEOUT_MS.
+  // El mock respeta la señal igual que undici: rechaza cuando se aborta. Si
+  // `signal: controller.signal` se quita de la llamada, el mock nunca se
+  // entera del abort y la promesa queda colgada (el test falla por timeout).
+  it('el fetch recibe un AbortSignal y se aborta tras FETCH_TIMEOUT_MS: desenlace reintentable por timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      let signalRecibida: AbortSignal | undefined;
+      global.fetch = jest.fn(
+        (_url: string, opciones: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            signalRecibida = opciones.signal;
+            opciones.signal?.addEventListener('abort', () =>
+              reject(opciones.signal?.reason as Error),
+            );
+          }),
+      ) as unknown as typeof fetch;
+      const service = crear(mockCopropiedades(COPROPIEDAD_HABILITADA));
+
+      let desenlace: Desenlace | undefined;
+      const pendiente = procesar(service, { ...FILA_BASE, intentos: 1 }).then(
+        (d) => {
+          desenlace = d;
+        },
+      );
+      // Let `procesar` reach the (never-resolving) fetch.
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(signalRecibida).toBeInstanceOf(AbortSignal);
+      expect(signalRecibida?.aborted).toBe(false);
+
+      await jest.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
+      expect(signalRecibida?.aborted).toBe(false);
+      expect(desenlace).toBeUndefined();
+
+      await jest.advanceTimersByTimeAsync(1);
+      await pendiente;
+
+      expect(signalRecibida?.aborted).toBe(true);
+      expect(desenlace).toMatchObject({
+        estado: 'fallido',
+        reintentable: true,
+        ultimoError: 'timeout',
+      });
+      expect(desenlace?.proximoIntentoEn).toBeInstanceOf(Date);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // La firma se recalcula AQUÍ con node:crypto, de forma independiente a
+  // `firmar`, sobre el string EXACTO que recibió fetch. Si el servicio
+  // re-serializara el body (p. ej. `body: JSON.stringify(payload)` por
+  // segunda vez, con otro orden de claves o espacios) o firmara otra cosa,
+  // el HMAC calculado sobre `opciones.body` dejaría de coincidir.
+  it('envía X-Websaco-Timestamp y X-Websaco-Signature = HMAC-SHA256(secreto, `${timestamp}.${body}`) sobre el body exacto', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const service = crear(mockCopropiedades(COPROPIEDAD_HABILITADA));
+
+    await procesar(service);
+
+    const [, opciones] = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string; headers: Record<string, string> },
+    ];
+    const timestamp = opciones.headers['X-Websaco-Timestamp'];
+    const firma = opciones.headers['X-Websaco-Signature'];
+
+    expect(timestamp).toMatch(/^\d+$/);
+    expect(firma).toMatch(/^sha256=[0-9a-f]{64}$/);
+
+    const esperada = createHmac(
+      'sha256',
+      String(CONFIG_COMPLETA['app.websaco3HmacSecret']),
+    )
+      .update(`${timestamp}.${opciones.body}`, 'utf8')
+      .digest('hex');
+    expect(firma).toBe(`sha256=${esperada}`);
+
+    const cuerpo = JSON.parse(opciones.body) as Record<string, unknown>;
+    expect(cuerpo.websaco3CopropiedadId).toBe(WEBSACO3_ID);
+    expect(cuerpo).not.toHaveProperty('nit');
+    expect(opciones.body).not.toContain('"nit"');
+  });
+
+  it('el id de la copropiedad nunca llega al logger de los caminos terminales', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn().mockResolvedValue({ status: 404 });
+    const service = crear(mockCopropiedades(COPROPIEDAD_HABILITADA));
+
+    await procesar(service);
+
+    // Not a secret like `urlSigned`, but there is no reason to log it either:
+    // the loteId identifies the row, and the id lives on the Copropiedad.
+    for (const llamada of warnSpy.mock.calls.flat()) {
+      expect(String(llamada)).not.toContain(WEBSACO3_ID);
+    }
+  });
+});
+
+// `immediate-dispatch-on-confirmation`: `publicarAhora` envía LA fila de un
+// lote dentro del request de confirmación. Reutiliza el reclamo atómico, así
+// que la exclusividad frente al barrido manual es la de `reclamar`.
+describe('PublicacionFacturasService.publicarAhora', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  /** `findOneAndUpdate` que entrega `fila` (o null) como reclamo. */
+  const filasQueReclaman = (fila: FilaReclamada | null) =>
+    mockFilas({
+      findOneAndUpdate: jest.fn(() => ({
+        lean: () => ({ exec: () => Promise.resolve(fila) }),
+      })),
+    });
+
+  const crear = (
+    filas: ReturnType<typeof mockFilas>,
+    config: Record<string, unknown> = CONFIG_COMPLETA,
+    storage: ReturnType<typeof mockStorage> = mockStorage(),
+  ) =>
+    new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
+      storage as never,
+      mockConfig(config) as never,
+    );
+
+  it.each([
+    ['sin URL', { ...CONFIG_COMPLETA, 'app.websaco3FacturasEndpointUrl': '' }],
+    [
+      'sin secreto HMAC',
+      { ...CONFIG_COMPLETA, 'app.websaco3HmacSecret': undefined },
+    ],
+  ])(
+    'transporte no configurado (%s): no reclama, no firma y no envía; la fila queda pendiente',
+    async (_caso, config) => {
+      global.fetch = jest.fn();
+      const filas = filasQueReclaman(FILA_BASE);
+      const storage = mockStorage();
+      const service = crear(filas, config, storage);
+
+      await service.publicarAhora(LOTE_ID);
+
+      expect(filas.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(filas.updateOne).not.toHaveBeenCalled();
+      expect(storage.generarUrlLectura).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reclama con el loteId recibido y el max configurado', async () => {
+    global.fetch = jest.fn();
+    const filas = filasQueReclaman(null);
+    const service = crear(filas);
+
+    await service.publicarAhora(LOTE_ID);
+
+    expect(filas.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    const [filtro] = filas.findOneAndUpdate.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+    ];
+    expect(filtro.loteId).toEqual(new Types.ObjectId(LOTE_ID));
+    expect(filtro.intentos).toEqual({ $lt: 6 });
+  });
+
+  it('un reclamo null (ya enviada, ya reclamada, agotada o no vencida) no firma, no envía y no libera nada', async () => {
+    global.fetch = jest.fn();
+    const filas = filasQueReclaman(null);
+    const storage = mockStorage();
+    const service = crear(filas, CONFIG_COMPLETA, storage);
+
+    await expect(service.publicarAhora(LOTE_ID)).resolves.toBeUndefined();
+
+    expect(storage.generarUrlLectura).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(filas.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('éxito: envía una vez y libera la fila reclamada como enviado', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const filas = filasQueReclaman(FILA_BASE);
+    const service = crear(filas);
+
+    await service.publicarAhora(LOTE_ID);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(filas.updateOne).toHaveBeenCalledTimes(1);
+    const [filtro, update] = filas.updateOne.mock.calls[0] as unknown as [
+      Record<string, unknown>,
+      { $set: Record<string, unknown> },
+    ];
+    // `liberar` is conditional on the claim token, as in the sweep.
+    expect(filtro).toEqual({
+      _id: FILA_BASE._id,
+      tokenReclamo: FILA_BASE.tokenReclamo,
+    });
+    expect(update.$set).toMatchObject({
+      estado: 'enviado',
+      reintentable: false,
+      ultimoCodigoEstado: 201,
+      reclamadoEn: null,
+      tokenReclamo: null,
+    });
+  });
+
+  it('un timeout del fetch libera la fila como fallido reintentable (no lanza)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const abortError = Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError',
+    });
+    global.fetch = jest.fn().mockRejectedValue(abortError);
+    const filas = filasQueReclaman({ ...FILA_BASE, intentos: 1 });
+    const service = crear(filas);
+
+    await expect(service.publicarAhora(LOTE_ID)).resolves.toBeUndefined();
+
+    const [, update] = filas.updateOne.mock.calls[0] as unknown as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(update.$set).toMatchObject({
+      estado: 'fallido',
+      reintentable: true,
+      ultimoError: 'timeout',
+    });
+    expect(update.$set.proximoIntentoEn).toBeInstanceOf(Date);
+  });
+
+  it('un id faltante libera la fila como fallido terminal sin-websaco3-id y no envía', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn();
+    const filas = filasQueReclaman({ ...FILA_BASE, intentos: 1 });
+    const service = new PublicacionFacturasService(
+      filas as never,
+      mockCopropiedades({
+        usaGestionEdificios: true,
+        websaco3CopropiedadId: null,
+      }) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+    );
+
+    await service.publicarAhora(LOTE_ID);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const [, update] = filas.updateOne.mock.calls[0] as unknown as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(update.$set).toMatchObject({
+      estado: 'fallido',
+      reintentable: false,
+      ultimoError: 'sin-websaco3-id',
+    });
+  });
+
+  it('no usa el candado enEjecucion: corre aunque un barrido manual esté en curso en la misma instancia', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const filas = filasQueReclaman(FILA_BASE);
+    const service = crear(filas);
+    (service as unknown as { enEjecucion: boolean }).enEjecucion = true;
+
+    await service.publicarAhora(LOTE_ID);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(filas.updateOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('si liberar falla, el error se propaga (el listener lo traga y el barrido manual recupera la fila vencida)', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const filas = mockFilas({
+      findOneAndUpdate: jest.fn(() => ({
+        lean: () => ({ exec: () => Promise.resolve(FILA_BASE) }),
+      })),
+      updateOne: jest.fn(() => ({
+        exec: () => Promise.reject(new Error('mongo down')),
+      })),
+    });
+    const service = crear(filas);
+
+    // Documented behaviour: nothing is swallowed here (the listener's
+    // catch-all owns that). The row stays `enviando` until CLAIM_TTL_MS and
+    // the manual sweep recovers it.
+    await expect(service.publicarAhora(LOTE_ID)).rejects.toThrow('mongo down');
   });
 });
 
@@ -987,7 +1528,7 @@ describe('PublicacionFacturasService.procesarPendientes — presupuesto de ciclo
 
     const service = new PublicacionFacturasService(
       filas as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storage as never,
       mockConfig() as never,
     );
@@ -1040,7 +1581,7 @@ describe('PublicacionFacturasService.procesarPendientes — contadores del resum
 
     const service = new PublicacionFacturasService(
       filas as never,
-      mockCopropiedades(null) as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
     );

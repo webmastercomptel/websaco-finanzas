@@ -430,6 +430,9 @@ export class LotesController {
     // docblock. Awaited: the outbox row must exist before this request
     // returns 200, with no crash window in between. The listener swallows
     // every error itself, so publishing can never fail this confirmation.
+    // The same awaited emit now also covers the SEND to WebSaco3 (Cloud Run
+    // throttles CPU after the response, so it cannot run afterwards): this
+    // request can take up to the receiver's cold-start timeout (45 s) longer.
     await this.eventos.emitAsync(LOTE_FACTURAS_PDF_CONFIRMADO, {
       copropiedadId: copropiedadId.toString(),
       loteId: lote._id.toString(),

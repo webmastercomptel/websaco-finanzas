@@ -17,7 +17,9 @@
  * design.md).
  */
 export interface PayloadPublicacionLote {
-  nit: string;
+  /** WebSaco3's Mongo `_id` of the coproperty, read from the current
+   *  `Copropiedad` at send time (never snapshotted on the outbox row). */
+  websaco3CopropiedadId: string;
   loteId: string;
   facturas: { numeroFactura: string }[];
   urlSigned: string;

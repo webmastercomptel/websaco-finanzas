@@ -20,10 +20,17 @@ export type EstadoPublicacionLote = (typeof ESTADOS_PUBLICACION_LOTE)[number];
  * → `procesar` → `liberar`) and `design.md`'s "State Machine" section for the
  * full transition diagram.
  *
- * `nit`/`numerosFactura`/`objectPath` are snapshotted at enqueue time and
- * never re-read on retry — only the signed read URL is fresh on every
- * attempt (`presentacion_documento`'s FV row is write-once, so `objectPath`
- * cannot drift underneath a pending retry).
+ * `numerosFactura`/`objectPath` are snapshotted at enqueue time and never
+ * re-read on retry — only the signed read URL is fresh on every attempt
+ * (`presentacion_documento`'s FV row is write-once, so `objectPath` cannot
+ * drift underneath a pending retry).
+ *
+ * The row snapshots NO identity of the coproperty: the WebSaco3 id
+ * (`Copropiedad.websaco3CopropiedadId`) is read from the CURRENT
+ * `Copropiedad` on every send attempt, so correcting a mistyped id also fixes
+ * rows already queued. Legacy rows may still carry an inert `nit` key from
+ * before that change; nothing reads it, no index includes it, and strict
+ * mode ignores it.
  */
 @Schema({ timestamps: true, collection: 'publicaciones_lote' })
 export class PublicacionLote {
@@ -42,11 +49,6 @@ export class PublicacionLote {
     required: true,
   })
   loteId: Types.ObjectId;
-
-  /** Snapshot of `Copropiedad.nit` at enqueue time — WITHOUT the
-   *  verification digit, same convention as the schema it is copied from. */
-  @Prop({ type: String, required: true, trim: true })
-  nit: string;
 
   /** Snapshot of `numerosFactura` from the triggering event, in PDF page
    *  order — see `LoteFacturasPdfConfirmadoEvent.numerosFactura`. */
@@ -98,7 +100,8 @@ export class PublicacionLote {
   @Prop({ type: Number, default: null })
   ultimoCodigoEstado: number | null;
 
-  /** A SHORT CODE only (e.g. `"HTTP 422"`, `"timeout"`, `"url-firmada"`) —
+  /** A SHORT CODE only (e.g. `"HTTP 422"`, `"timeout"`, `"url-firmada"`,
+   *  `"copropiedad-lectura"`, or the terminal `"sin-websaco3-id"`) —
    *  NEVER a URL or a response body. `urlSigned` must never reach this field
    *  or any log line. */
   @Prop({ type: String, default: null })

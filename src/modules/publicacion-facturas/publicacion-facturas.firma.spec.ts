@@ -2,7 +2,8 @@ import { firmar } from './publicacion-facturas.firma';
 
 const SECRET = 'un-secreto-compartido-de-al-menos-32-caracteres';
 const TIMESTAMP = '1700000000';
-const BODY = '{"nit":"900123456","loteId":"lote-1"}';
+const BODY =
+  '{"websaco3CopropiedadId":"507f1f77bcf86cd799439099","loteId":"lote-1"}';
 
 describe('firmar', () => {
   it('es determinística: mismos timestamp/secret/body producen la misma firma', () => {

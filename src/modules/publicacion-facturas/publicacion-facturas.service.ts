@@ -20,6 +20,7 @@ import {
   CLAIM_TTL_MS,
   FETCH_TIMEOUT_MS,
   LOTE_MAXIMO_POR_CICLO,
+  MARGEN_CICLO_MS,
   PRESUPUESTO_CICLO_MS,
   URL_LECTURA_TTL_MS,
   clasificarRespuesta,
@@ -42,11 +43,6 @@ export interface Desenlace {
   ultimoError: string | null;
   enviadoEn: Date | null;
 }
-
-/** Margin added to FETCH_TIMEOUT_MS when deciding whether the cycle has
- *  room left to claim one more row — covers URL signing plus the claim's
- *  own round trip, which aren't captured by FETCH_TIMEOUT_MS alone. */
-const MARGEN_CICLO_MS = 5_000;
 
 const CICLO_VACIO: ResumenCiclo = {
   omitido: false,
@@ -85,25 +81,31 @@ export class PublicacionFacturasService {
 
   /**
    * Creates an idempotent outbox row for `evento.loteId`, only when the
-   * batch's coproperty has the flag on AND a NIT on file. A flag-on
-   * coproperty with no NIT is a legacy state `building-management-activation`
-   * cannot retroactively fix — it is skipped with a warning rather than
-   * enqueuing a row this service could never actually send.
+   * batch's coproperty has the flag on AND a `websaco3CopropiedadId` on file.
+   * A flag-on coproperty with no id is a legacy state nothing can fix
+   * retroactively — it is skipped with a warning rather than enqueuing a row
+   * this service could never actually send.
+   *
+   * Returns whether the row EXISTS after the call (`true` on a fresh upsert
+   * AND on an 11000 race, where a concurrent call already inserted it), so
+   * the listener can dispatch it right away; `false` means there is nothing
+   * to send. The id is only checked here, never copied onto the row — `procesar`
+   * resolves it from the live `Copropiedad` on every attempt.
    */
-  async encolar(evento: LoteFacturasPdfConfirmadoEvent): Promise<void> {
+  async encolar(evento: LoteFacturasPdfConfirmadoEvent): Promise<boolean> {
     const copropiedad = await this.copropiedades
       .findById(evento.copropiedadId)
-      .select('usaGestionEdificios nit')
+      .select('usaGestionEdificios websaco3CopropiedadId')
       .lean()
       .exec();
 
-    if (!copropiedad?.usaGestionEdificios) return;
+    if (!copropiedad?.usaGestionEdificios) return false;
 
-    if (!copropiedad.nit) {
+    if (!copropiedad.websaco3CopropiedadId) {
       this.logger.warn(
-        `La copropiedad ${evento.copropiedadId} tiene la gestión de edificios activa pero sin NIT; se omite la publicación del lote ${evento.loteId}.`,
+        `La copropiedad ${evento.copropiedadId} tiene la gestión de edificios activa pero sin ID de WebSaco3; se omite la publicación del lote ${evento.loteId}.`,
       );
-      return;
+      return false;
     }
 
     try {
@@ -114,7 +116,6 @@ export class PublicacionFacturasService {
             $setOnInsert: {
               copropiedadId: new Types.ObjectId(evento.copropiedadId),
               loteId: new Types.ObjectId(evento.loteId),
-              nit: copropiedad.nit,
               numerosFactura: evento.numerosFactura,
               objectPath: evento.objectPath,
               estado: 'pendiente',
@@ -136,6 +137,7 @@ export class PublicacionFacturasService {
       // — the row exists either way, so this is a no-op, not a failure.
       if ((err as { code?: number }).code !== 11000) throw err;
     }
+    return true;
   }
 
   /**
@@ -144,14 +146,20 @@ export class PublicacionFacturasService {
    * (crash recovery). `intentos` is incremented as part of the SAME atomic
    * update, so a crash loop that never reaches `liberar` still counts
    * toward `max`.
+   *
+   * With `loteId`, only THAT lote's row can be claimed (immediate dispatch
+   * from the confirm request). It narrows the sweep's predicate, never
+   * replaces it, so it is the same atomic claim: a row that is already
+   * claimed, sent, exhausted or not yet due yields `null`.
    */
-  async reclamar(max: number): Promise<FilaReclamada | null> {
+  async reclamar(max: number, loteId?: string): Promise<FilaReclamada | null> {
     const ahora = new Date();
     const vencido = new Date(ahora.getTime() - CLAIM_TTL_MS);
 
     return this.filas
       .findOneAndUpdate(
         {
+          ...(loteId ? { loteId: new Types.ObjectId(loteId) } : {}),
           intentos: { $lt: max },
           $or: [
             {
@@ -177,12 +185,55 @@ export class PublicacionFacturasService {
   }
 
   /**
-   * Sends one claimed row: a fresh signed read URL (never reused across
+   * Sends one claimed row: resolves the WebSaco3 id from the CURRENT
+   * `Copropiedad`, then a fresh signed read URL (never reused across
    * attempts), the pure payload/HMAC, then `fetch` with a hard timeout.
    * Returns the outcome for `liberar` to persist — never logs `urlSigned`
    * or any response body, only short codes.
+   *
+   * The id is read here, on every attempt, instead of being snapshotted at
+   * enqueue: a corrected id then reaches rows already queued. It is read
+   * BEFORE signing anything, so a coproperty with no id costs no signed URL
+   * and no request. `Copropiedad` IS the tenant, so `findById` is the right
+   * lookup here (the tenancy law's `findById` warning is about other
+   * collections).
    */
   private async procesar(fila: FilaReclamada, max: number): Promise<Desenlace> {
+    let websaco3CopropiedadId: string | null;
+    try {
+      const copropiedad = await this.copropiedades
+        .findById(fila.copropiedadId)
+        .select('usaGestionEdificios websaco3CopropiedadId')
+        .lean()
+        .exec();
+      // Flag off, unknown coproperty and flag on with no id are the same
+      // dead end: there is nothing to send and no retry can create it.
+      websaco3CopropiedadId = copropiedad?.usaGestionEdificios
+        ? (copropiedad.websaco3CopropiedadId ?? null)
+        : null;
+    } catch (err) {
+      // Must be caught: a throw would leave the row `enviando` until
+      // CLAIM_TTL_MS expires. Transient, so it follows the retry policy.
+      this.logger.warn(
+        `No se pudo leer la copropiedad del lote ${fila.loteId.toString()}: ${(err as Error).message}`,
+      );
+      return this.desenlaceReintentar(fila, max, null, 'copropiedad-lectura');
+    }
+
+    if (!websaco3CopropiedadId) {
+      this.logger.warn(
+        `El lote ${fila.loteId.toString()} no se puede publicar: la copropiedad no tiene gestión de edificios activa o carece de ID de WebSaco3.`,
+      );
+      return {
+        estado: 'fallido',
+        reintentable: false,
+        proximoIntentoEn: null,
+        ultimoCodigoEstado: null,
+        ultimoError: 'sin-websaco3-id',
+        enviadoEn: null,
+      };
+    }
+
     let urlSigned: string;
     let expiresAt: Date;
     try {
@@ -199,7 +250,12 @@ export class PublicacionFacturasService {
       return this.desenlaceReintentar(fila, max, null, 'url-firmada');
     }
 
-    const payload = construirPayload(fila, urlSigned, expiresAt);
+    const payload = construirPayload(
+      fila,
+      websaco3CopropiedadId,
+      urlSigned,
+      expiresAt,
+    );
     const rawBody = JSON.stringify(payload);
     const timestamp = String(Math.floor(Date.now() / 1000));
     const firma = firmar(this.hmacSecret(), timestamp, rawBody);
@@ -414,6 +470,34 @@ export class PublicacionFacturasService {
     } finally {
       this.enEjecucion = false;
     }
+  }
+
+  /**
+   * Immediate dispatch for ONE lote, awaited by the listener inside the
+   * confirm-PDF request (Cloud Run throttles CPU once the response is sent,
+   * so a fire-and-forget send would stall). No-op when the transport is not
+   * configured: the row stays `pendiente` for the manual sweep.
+   *
+   * It claims that lote's row through the same atomic `reclamar` the sweep
+   * uses, then `procesar` + `liberar`. There is deliberately NO `enEjecucion`
+   * lock: that flag serialises whole sweep cycles on one instance, and a
+   * confirm request must never be refused (or refuse a sweep) because of it.
+   * The atomic claim alone prevents a double send: a `null` claim means the
+   * row is already sent, being sent by someone else, exhausted or not due.
+   *
+   * It does not catch: the listener owns the catch-all. If `liberar` throws
+   * after the send, the row stays `enviando` until `CLAIM_TTL_MS` and the
+   * sweep re-claims it (a re-send the receiver dedupes by `loteId`, 409).
+   */
+  async publicarAhora(loteId: string): Promise<void> {
+    if (!this.transporteConfigurado()) return;
+
+    const max = this.maxIntentos();
+    const fila = await this.reclamar(max, loteId);
+    if (!fila) return;
+
+    const desenlace = await this.procesar(fila, max);
+    await this.liberar(fila, desenlace);
   }
 
   private transporteConfigurado(): boolean {
