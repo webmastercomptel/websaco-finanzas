@@ -36,6 +36,7 @@ import { HealthModule } from './modules/health/health.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicion-contabilidad.module';
 import { PublicacionFacturasModule } from './modules/publicacion-facturas/publicacion-facturas.module';
+import { BusquedaModule } from './modules/busqueda/busqueda.module';
 
 /**
  * Bootstrap module: config, the database connection and its schemas, the
@@ -98,6 +99,7 @@ import { PublicacionFacturasModule } from './modules/publicacion-facturas/public
     CatalogosModule,
     AdicionContabilidadModule,
     PublicacionFacturasModule,
+    BusquedaModule,
   ],
 })
 export class AppModule {}

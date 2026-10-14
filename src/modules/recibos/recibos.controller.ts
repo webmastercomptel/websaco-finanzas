@@ -23,7 +23,12 @@ import {
 } from '../../common/documentos/generacion-documento.service';
 import { ConfirmarGeneracionDocumentoDto } from '../../common/documentos/dto/confirmar-generacion-documento.dto';
 import type { DatosReciboImpresion } from '../../common/documentos/datos-impresion.types';
-import type { Paginado, Recibo, ReciboDetalle } from '../../contracts';
+import type {
+  PaginadoConTotales,
+  Recibo,
+  ReciboDetalle,
+  TotalesRecibos,
+} from '../../contracts';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
 /**
@@ -44,7 +49,9 @@ export class RecibosController {
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Recibo' })
-  findAll(@Query() query: ListarRecibosDto): Promise<Paginado<Recibo>> {
+  findAll(
+    @Query() query: ListarRecibosDto,
+  ): Promise<PaginadoConTotales<Recibo, TotalesRecibos>> {
     return this.recibos.findAll(query);
   }
 

@@ -34,7 +34,8 @@ import type {
   DatosPlantillaFactura,
   DocumentoFactura,
   Factura,
-  Paginado,
+  PaginadoConTotales,
+  TotalesFacturas,
 } from '../../contracts';
 
 /**
@@ -62,7 +63,9 @@ export class FacturasController {
 
   @Get()
   @CheckAbility({ action: 'read', subject: 'Factura' })
-  findAll(@Query() query: ListarFacturasDto): Promise<Paginado<Factura>> {
+  findAll(
+    @Query() query: ListarFacturasDto,
+  ): Promise<PaginadoConTotales<Factura, TotalesFacturas>> {
     return this.facturas.findAll(query);
   }
 

@@ -40,6 +40,13 @@ export class ListarFacturasDto {
   @IsBoolean()
   conSaldoPendiente?: boolean;
 
+  /** Opt-in: adds a `totales` block computed over the whole filtered set
+   *  (not just the page). Costs extra queries, so it is never the default. */
+  @IsOptional()
+  @Transform(aBooleano)
+  @IsBoolean()
+  incluirTotales?: boolean;
+
   @IsOptional()
   @IsDateString()
   fechaDesde?: string;
