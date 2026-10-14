@@ -458,7 +458,7 @@ describe('NotasDebitoService', () => {
         codigo: 'ND',
         inmuebleId: INMUEBLE.toString(),
         conceptoId: CONCEPTO.toString(),
-        motivo: 'otro',
+        motivo: 'cambio_valor',
         total: 50000,
         fechaCargo: '2026-09-01',
         fechaVencimiento: '2026-09-30',
@@ -667,7 +667,125 @@ describe('NotasDebitoService', () => {
     });
   });
 
+  describe('crear — cuenta crédito según el motivo', () => {
+    const copropiedadesConOtrosIngresos = {
+      findById: jest.fn(() => ({
+        session: jest.fn().mockReturnThis(),
+        exec: jest.fn(() =>
+          Promise.resolve({
+            cuentaContableCartera: '1305',
+            otrosIngresosCuentaCredito: '4210',
+          }),
+        ),
+      })),
+    };
+    const crearCon = async (motivo: 'cambio_valor' | 'gastos_por_cobrar') => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        copropiedades: copropiedadesConOtrosIngresos,
+      });
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        motivo,
+        total: 50000,
+        fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
+      });
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
+      ];
+      return documentos[0].movimientos.find((e) => e.tipo === 'credito');
+    };
+
+    it('"Cambio del valor" acredita la cuenta crédito del cargo', async () => {
+      const credito = await crearCon('cambio_valor');
+      expect(credito?.cuenta).toBe('4105');
+    });
+
+    it('un concepto de intereses no va a otros ingresos aunque el motivo no sea cambio de valor', async () => {
+      // Sin cuentas de orden configuradas en el mock, el crédito cae en la
+      // cuenta de ingreso que recibe el asiento: la del concepto, no 4210.
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const svc = servicio({
+        asientos,
+        copropiedades: copropiedadesConOtrosIngresos,
+        conceptos: {
+          findOne: jest.fn(() => ({
+            populate: jest.fn().mockReturnThis(),
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() =>
+              Promise.resolve({
+                _id: CONCEPTO,
+                copropiedadId: COP,
+                tipo: 'intereses',
+                cuentaCreditoId: { codigo: '4105' },
+              }),
+            ),
+          })),
+        },
+      });
+
+      await svc.crear(CUENTA.toString(), {
+        codigo: 'ND',
+        inmuebleId: INMUEBLE.toString(),
+        conceptoId: CONCEPTO.toString(),
+        motivo: 'intereses',
+        total: 50000,
+        fechaCargo: '2026-09-01',
+        fechaVencimiento: '2026-09-30',
+      });
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
+      ];
+      const cuentas = documentos[0].movimientos.map((e) => e.cuenta);
+      expect(cuentas).not.toContain('4210');
+    });
+
+    it('cualquier otro motivo acredita la cuenta de otros ingresos y la congela en la nota', async () => {
+      const credito = await crearCon('gastos_por_cobrar');
+      expect(credito?.cuenta).toBe('4210');
+    });
+  });
+
   describe('anular', () => {
+    it('una nota acreditada a otros ingresos revierte esa misma cuenta congelada', async () => {
+      const asientos = { create: jest.fn(() => Promise.resolve([{}])) };
+      const notaOtros = notaDebitoDoc({ cuentaOtrosIngresos: '4210' });
+      const svc = servicio({
+        asientos,
+        notasDebito: {
+          findOne: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: jest.fn(() => Promise.resolve(notaOtros)),
+          })),
+          findOneAndUpdate: jest.fn(() => ({
+            session: jest.fn().mockReturnThis(),
+            exec: () => Promise.resolve(null),
+          })),
+        },
+      });
+
+      await svc.anular(
+        'test-id',
+        {
+          motivo: 'error_digitacion',
+          detalle: 'Se anula por error en digitación del cargo',
+          fecha: '2026-09-05',
+        },
+        CUENTA.toString(),
+      );
+
+      const [[documentos]] = asientos.create.mock.calls as unknown as [
+        [{ movimientos: Array<{ cuenta: string; tipo: string }> }[]],
+      ];
+      const debito = documentos[0].movimientos.find((e) => e.tipo === 'debito');
+      expect(debito?.cuenta).toBe('4210');
+    });
+
     it('anula nota débito sin aplicaciones previas', async () => {
       const svc = servicio();
       const resultado = await svc.anular(

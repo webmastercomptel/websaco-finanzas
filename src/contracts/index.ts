@@ -1521,12 +1521,31 @@ export interface FilaConsecutivo {
   numeroCompleto: string;
   inmuebleCodigo: string;
   fecha: string;
+  /** For a Recibo (`esRecibo`) this is its Valor Recibido. */
   valorTotal: number;
+  /** Recibo: the payment surplus sent to Otros Ingresos
+   *  (`Recibo.montoOtrosIngresos`). Nota Débito: its whole `total` unless
+   *  its motivo is "Cambio del valor". 0 otherwise. */
+  montoOtrosIngresos: number;
+  /** Recibo: early-payment discount across its active applications
+   *  (`AplicacionCartera.montoDescuento`) — already part of
+   *  `cargosPorConcepto`, which is why a Recibo's concepts can add up to
+   *  more than the cash it received. Nota Crédito: its whole `montoTotal`
+   *  when its motivo is "Rebaja o descuento". 0 otherwise. */
+  montoDescuento: number;
   cargosPorConcepto: Record<string, number>;
 }
 
 /** Response shape for GET /consultas/consecutivos. */
 export interface RespuestaConsecutivos {
+  /** True when the código is a Recibo de Caja (categoría IN): the report then
+   *  labels `valorTotal` "Valor Recibido" and adds the Otros Ingresos and
+   *  Descuento columns. */
+  esRecibo: boolean;
+  /** Which optional amount columns this document type shows: Otros
+   *  Ingresos for Recibos and Notas Débito; Descuento for Recibos and Notas
+   *  Crédito. */
+  columnas: { otrosIngresos: boolean; descuento: boolean };
   conceptos: ConceptoColumnaConsecutivos[];
   filas: FilaConsecutivo[];
 }
@@ -2097,6 +2116,17 @@ export interface LoteContabilidad {
   periodoHasta: IsoDate;
   totalAsientos: number;
   fechaGeneracion: IsoDate;
+  /** `desmarcado`: its entries were released and go into the next
+   *  generation; its files can no longer be downloaded. */
+  estado: 'generado' | 'desmarcado';
+  fechaDesmarcado: IsoDate | null;
+}
+
+/** Response shape for `GET /adicion-contabilidad/lotes/:id/archivos` — a
+ *  past lote's two files, rebuilt from the entries it stamped. */
+export interface ArchivosLoteContabilidad {
+  movmes: string;
+  movmesdo: string;
 }
 
 /** Response shape for `POST /adicion-contabilidad/generar` — the two CSV
@@ -2114,9 +2144,13 @@ export interface RespuestaAdicionContabilidad {
 export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar';
+  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
   entidadTipo:
-    'entidad-administradora' | 'copropiedad' | 'usuario' | 'lote-facturacion';
+    | 'entidad-administradora'
+    | 'copropiedad'
+    | 'usuario'
+    | 'lote-facturacion'
+    | 'lote-contabilidad';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;

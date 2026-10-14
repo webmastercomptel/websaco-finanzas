@@ -12,4 +12,6 @@ export const toLoteContabilidad = (
   fechaGeneracion: (
     doc as unknown as { createdAt: Date }
   ).createdAt.toISOString(),
+  estado: doc.estado ?? 'generado',
+  fechaDesmarcado: doc.fechaDesmarcado?.toISOString() ?? null,
 });

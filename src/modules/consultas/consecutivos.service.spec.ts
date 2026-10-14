@@ -162,6 +162,53 @@ describe('ConsecutivosService', () => {
       expect(result.filas[0].cargosPorConcepto).toEqual({});
       expect(result.filas[0].valorTotal).toBe(50000);
     });
+
+    it('trae otros ingresos del recibo y suma el descuento de sus aplicaciones activas', async () => {
+      const inmId = id();
+      const reciboId = id();
+      const conceptoId = id();
+      const recibo = {
+        _id: reciboId,
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        numero: 7,
+        numeroCompleto: 'RC-7',
+        montoRecibido: 120000,
+        montoOtrosIngresos: 15000,
+        fechaRecibo: new Date('2026-01-18'),
+      };
+      const app = (montoDescuento: number) => ({
+        _id: id(),
+        sourceType: 'RC',
+        sourceId: reciboId,
+        estado: 'activa',
+        montoDescuento,
+        detalleConceptos: [
+          { conceptoId, nombreConcepto: 'Administracion', monto: 60000 },
+        ],
+      });
+
+      const svc = servicio({
+        recibos: find([recibo]),
+        aplicaciones: find([app(3000), app(2000)]),
+        inmuebles: find([inmuebleDoc({ _id: inmId })]),
+        conceptosCobro: find([conceptoDoc({ _id: conceptoId })]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'RC',
+        desde: '2026-01-01',
+        hasta: '2026-01-31',
+      });
+
+      expect(result.esRecibo).toBe(true);
+      expect(result.columnas).toEqual({ otrosIngresos: true, descuento: true });
+      expect(result.filas[0]).toMatchObject({
+        valorTotal: 120000,
+        montoOtrosIngresos: 15000,
+        montoDescuento: 5000,
+      });
+    });
   });
 
   describe('categoria ND (Nota Debito)', () => {
@@ -178,6 +225,7 @@ describe('ConsecutivosService', () => {
         fechaEmision: new Date('2026-01-10'),
         total: 20000,
         estado: 'emitida',
+        motivo: 'cambio_valor',
       };
       const inm = inmuebleDoc({ _id: inmId, codigo: '302' });
       const concepto = conceptoDoc({ _id: conceptoId, nombre: 'Multas' });
@@ -202,8 +250,69 @@ describe('ConsecutivosService', () => {
         numeroCompleto: 'ND-3',
         inmuebleCodigo: '302',
         valorTotal: 20000,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto: { [conceptoId.toString()]: 20000 },
       });
+      expect(result.esRecibo).toBe(false);
+      expect(result.columnas).toEqual({
+        otrosIngresos: true,
+        descuento: false,
+      });
+    });
+  });
+
+  describe('categoria ND — columna Otros Ingresos', () => {
+    it('va el total salvo con motivo cambio de valor o concepto de intereses', async () => {
+      const inmId = id();
+      const conceptoMultas = id();
+      const conceptoMora = id();
+      const nd = (
+        numero: number,
+        motivo: string,
+        conceptoId: Types.ObjectId,
+      ) => ({
+        _id: id(),
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        conceptoId,
+        numero,
+        numeroCompleto: `ND-${numero}`,
+        fechaEmision: new Date('2026-01-10'),
+        total: 20000,
+        estado: 'emitida',
+        motivo,
+      });
+
+      const svc = servicio({
+        consecutivos: findOneStub(
+          consecutivoDoc({ categoria: 'ND', codigo: 'ND', prefijo: 'ND' }),
+        ),
+        notasDebito: find([
+          nd(1, 'gastos_por_cobrar', conceptoMultas),
+          nd(2, 'cambio_valor', conceptoMultas),
+          nd(3, 'intereses', conceptoMora),
+        ]),
+        inmuebles: find([inmuebleDoc({ _id: inmId })]),
+        conceptosCobro: find([
+          conceptoDoc({ _id: conceptoMultas, nombre: 'Multas', tipo: 'otro' }),
+          conceptoDoc({
+            _id: conceptoMora,
+            nombre: 'Intereses',
+            tipo: 'intereses',
+          }),
+        ]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'ND',
+        desde: '2026-01-01',
+        hasta: '2026-01-31',
+      });
+
+      expect(result.filas.map((f) => f.montoOtrosIngresos)).toEqual([
+        20000, 0, 0,
+      ]);
     });
   });
 
@@ -246,6 +355,42 @@ describe('ConsecutivosService', () => {
         [conceptoAdmin.toString()]: 20000,
         [conceptoMultas.toString()]: 10000,
       });
+    });
+
+    it('motivo descuento: todo su valor va en Descuento; otro motivo queda en 0', async () => {
+      const inmId = id();
+      const nota = (numero: number, motivo: string) => ({
+        _id: id(),
+        copropiedadId: COP,
+        inmuebleId: inmId,
+        numero,
+        numeroCompleto: `NC-${numero}`,
+        fecha: new Date('2026-01-12'),
+        motivo,
+        montoTotal: 30000,
+        estado: 'activo',
+        distribucion: [],
+      });
+
+      const svc = servicio({
+        consecutivos: findOneStub(
+          consecutivoDoc({ categoria: 'NC', codigo: 'NC', prefijo: 'NC' }),
+        ),
+        notasCredito: find([nota(1, 'descuento'), nota(2, 'ajuste_precio')]),
+        inmuebles: find([inmuebleDoc({ _id: inmId })]),
+      });
+
+      const result = await svc.findAll({
+        codigo: 'NC',
+        desde: '2026-01-01',
+        hasta: '2026-01-31',
+      });
+
+      expect(result.columnas).toEqual({
+        otrosIngresos: false,
+        descuento: true,
+      });
+      expect(result.filas.map((f) => f.montoDescuento)).toEqual([30000, 0]);
     });
 
     it('una nota sin issueDate cae al createdAt (fallback fechaNotaCredito), fuera de rango se excluye', async () => {

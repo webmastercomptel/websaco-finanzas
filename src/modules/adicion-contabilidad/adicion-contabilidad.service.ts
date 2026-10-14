@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
@@ -54,7 +55,12 @@ import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
+import {
+  Copropiedad,
+  CopropiedadDocument,
+} from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
   documentoCruceDeMovimiento,
   resolverSaldosInicialesPorNumero,
@@ -70,6 +76,7 @@ import {
   type FilaMovmesdo,
 } from './movmes.util';
 import type {
+  ArchivosLoteContabilidad,
   LoteContabilidad as LoteContabilidadContract,
   RespuestaAdicionContabilidad,
 } from '../../contracts';
@@ -123,6 +130,9 @@ const categoriaDe = (tipo: TipoDocumentoExport): CategoriaDocumento | null => {
 
 type AnchorInfo = { prefix: string; number: number };
 
+/** Who is acting, for the audit log. */
+export type ActorAdicion = { accountId: string; nombre: string };
+
 @Injectable()
 export class AdicionContabilidadService {
   constructor(
@@ -161,6 +171,12 @@ export class AdicionContabilidadService {
     // be the original document number, resolved at export time.
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // APPENDED last, optional, same convention: generating and desmarcando a
+    // lote are written to the platform audit log, labelled with the
+    // coproperty (the log spans every building).
+    @InjectModel(Copropiedad.name)
+    private readonly copropiedades?: Model<CopropiedadDocument>,
+    private readonly auditoria?: AuditoriaService,
   ) {}
 
   private async transaccion<T>(
@@ -195,8 +211,9 @@ export class AdicionContabilidadService {
    * stamps them so a later call — however many times this is run within the
    * same period — never re-exports the same rows (the one hard requirement
    * driving this whole feature: "para que no se vuelvan a adicionar").
+   * Entries released by `desmarcar` are picked up too, whatever their date.
    */
-  async generar(accountId: string): Promise<RespuestaAdicionContabilidad> {
+  async generar(actor: ActorAdicion): Promise<RespuestaAdicionContabilidad> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
 
     const ultimoLote = await this.lotesFacturacion.obtenerUltimoConsolidado(
@@ -213,10 +230,15 @@ export class AdicionContabilidadService {
         .find({
           copropiedadId,
           contabilidadLoteId: null,
-          fecha: {
-            $gte: ultimoLote.periodoDesde,
-            $lte: ultimoLote.periodoHasta,
-          },
+          $or: [
+            {
+              fecha: {
+                $gte: ultimoLote.periodoDesde,
+                $lte: ultimoLote.periodoHasta,
+              },
+            },
+            { contabilidadLoteDesmarcadoId: { $ne: null } },
+          ],
         })
         .sort({ fecha: 1, _id: 1 })
         .session(session)
@@ -228,30 +250,6 @@ export class AdicionContabilidadService {
         );
       }
 
-      const anchorMap = await this.buildAnchorMap(
-        asientos,
-        copropiedadId,
-        session,
-      );
-      const conceptoMap = await this.resolveConceptos(
-        asientos,
-        copropiedadId,
-        session,
-      );
-      const comprobantePorClave = await this.resolveComprobantes(
-        asientos,
-        anchorMap,
-        copropiedadId,
-        session,
-      );
-
-      const saldosInicialesPorNumero = await resolverSaldosInicialesPorNumero(
-        this.saldosIniciales,
-        copropiedadId,
-        asientos,
-        session,
-      );
-
       const consecutivo = await this.consecutivosLote
         .findOneAndUpdate(
           { copropiedadId },
@@ -261,56 +259,12 @@ export class AdicionContabilidadService {
         .exec();
       const numeroLote = consecutivo.nextNumber;
 
-      const filasMovmes: FilaMovmes[] = [];
-      const filasMovmesdo: FilaMovmesdo[] = [];
-
-      for (const asiento of asientos) {
-        const tipoDocumento = tipoDocumentoDe(asiento);
-        const anchorIdStr = resolveAnchorId(asiento).toString();
-        const anchor = anchorMap.get(anchorIdStr);
-        // The document's own concepto (Observaciones/Detalle/Descripción, or
-        // the NA/FV composed text) — the accountant reads THIS in the target
-        // system, never the internal ledger's fixed catalog wording. Falls
-        // back to that internal wording only when the source document left
-        // its own concepto empty (RC/NC/ND's optional field).
-        const detalle =
-          conceptoMap.get(anchorIdStr) ??
-          asiento.movimientos[0]?.descripcion ??
-          '';
-
-        filasMovmes.push({
-          tipoDocumento,
-          numero: anchor?.number ?? 0,
-          fecha: asiento.fecha,
-          numeroLote,
-          detalle,
-        });
-
-        const comprobante =
-          comprobantePorClave.get(`${tipoDocumento}:${anchor?.prefix ?? ''}`) ??
-          null;
-
-        for (const entry of asiento.movimientos) {
-          filasMovmesdo.push({
-            tipoDocumento,
-            numero: anchor?.number ?? 0,
-            cuenta: entry.cuenta,
-            centroCosto: entry.centroCosto ?? null,
-            tercero: entry.tercero ?? null,
-            detalle,
-            baseGravable: entry.baseGravable ?? null,
-            valorDebito: entry.tipo === 'debito' ? entry.monto : null,
-            valorCredito: entry.tipo === 'credito' ? entry.monto : null,
-            comprobante,
-            // A Saldo Inicial movimiento stores only the internal ordinal;
-            // export the original document number (e.g. 2941). Free text
-            // there, so the column carries a string.
-            numeroDocCruce:
-              documentoCruceDeMovimiento(entry, saldosInicialesPorNumero)
-                ?.numero ?? null,
-          });
-        }
-      }
+      const archivos = await this.construirArchivos(
+        asientos,
+        numeroLote,
+        copropiedadId,
+        session,
+      );
 
       const [loteCreado] = await this.lotes.create(
         [
@@ -320,7 +274,7 @@ export class AdicionContabilidadService {
             periodStart: ultimoLote.periodoDesde,
             periodEnd: ultimoLote.periodoHasta,
             totalAsientos: asientos.length,
-            generatedBy: accountId,
+            generatedBy: actor.accountId,
           },
         ],
         { session },
@@ -332,12 +286,243 @@ export class AdicionContabilidadService {
         { session },
       );
 
+      await this.registrarAuditoria(
+        actor,
+        'crear',
+        loteCreado._id,
+        `generado: ${asientos.length} ${asientos.length === 1 ? 'documento' : 'documentos'}`,
+        numeroLote,
+        copropiedadId,
+        session,
+      );
+
       return {
         lote: toLoteContabilidad(loteCreado),
-        movmes: construirMovmes(filasMovmes),
-        movmesdo: construirMovmesdo(filasMovmesdo),
+        ...archivos,
       };
     });
+  }
+
+  /**
+   * Rebuilds a past lote's two files from the entries it stamped — the way
+   * back when a download never reached the accountant (a browser can block
+   * the second of two automatic downloads). Built from each document's
+   * current data, so a concepto edited since then shows its new text.
+   */
+  async archivos(loteId: string): Promise<ArchivosLoteContabilidad> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.buscarLote(loteId, copropiedadId);
+    if (lote.estado === 'desmarcado') {
+      throw new ConflictException(
+        `El lote ${lote.number} fue desmarcado: sus movimientos se adicionan en el próximo lote que generes.`,
+      );
+    }
+
+    const asientos = await this.asientos
+      .find({ copropiedadId, contabilidadLoteId: lote._id })
+      .sort({ fecha: 1, _id: 1 })
+      .exec();
+    return this.construirArchivos(asientos, lote.number, copropiedadId, null);
+  }
+
+  /**
+   * "Desmarca" a lote: releases every entry it stamped so the next
+   * generation exports them again under a new lote number. The lote itself
+   * is kept as history (`estado: 'desmarcado'`, who and when), never
+   * deleted. Conditional on the lote still being `generado`, so two
+   * concurrent clicks release it once.
+   */
+  async desmarcar(
+    loteId: string,
+    actor: ActorAdicion,
+  ): Promise<LoteContabilidadContract> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const lote = await this.buscarLote(loteId, copropiedadId);
+    if (lote.estado === 'desmarcado') {
+      throw new ConflictException(`El lote ${lote.number} ya fue desmarcado.`);
+    }
+
+    return this.transaccion(async (session) => {
+      const actualizado = await this.lotes
+        .findOneAndUpdate(
+          { _id: lote._id, copropiedadId, estado: { $ne: 'desmarcado' } },
+          {
+            $set: {
+              estado: 'desmarcado',
+              fechaDesmarcado: new Date(),
+              desmarcadoPor: new Types.ObjectId(actor.accountId),
+            },
+          },
+          { returnDocument: 'after', session },
+        )
+        .exec();
+      if (!actualizado) {
+        throw new ConflictException(
+          `El lote ${lote.number} ya fue desmarcado.`,
+        );
+      }
+
+      await this.asientos.updateMany(
+        { copropiedadId, contabilidadLoteId: lote._id },
+        {
+          $set: {
+            contabilidadLoteId: null,
+            contabilidadLoteDesmarcadoId: lote._id,
+          },
+        },
+        { session },
+      );
+
+      await this.registrarAuditoria(
+        actor,
+        'desmarcar',
+        lote._id,
+        `desmarcado: ${lote.totalAsientos} ${lote.totalAsientos === 1 ? 'documento vuelve' : 'documentos vuelven'} a pendientes`,
+        lote.number,
+        copropiedadId,
+        session,
+      );
+
+      return toLoteContabilidad(actualizado);
+    });
+  }
+
+  /** Writes the platform audit entry inside the operation's own
+   *  transaction: if the log write fails, the generation/desmarque rolls
+   *  back too, so nothing happens unrecorded. */
+  private async registrarAuditoria(
+    actor: ActorAdicion,
+    accion: 'crear' | 'desmarcar',
+    loteId: Types.ObjectId,
+    detalle: string,
+    numeroLote: number,
+    copropiedadId: Types.ObjectId,
+    session: ClientSession,
+  ): Promise<void> {
+    if (!this.auditoria) return;
+    const copropiedad = this.copropiedades
+      ? await this.copropiedades.findById(copropiedadId).session(session).exec()
+      : null;
+    const etiquetaCopropiedad =
+      [copropiedad?.codigo, copropiedad?.nombre].filter(Boolean).join(' ') ||
+      copropiedadId.toString();
+    await this.auditoria.registrar(
+      {
+        actorAccountId: actor.accountId,
+        actorNombre: actor.nombre,
+        accion,
+        entidadTipo: 'lote-contabilidad',
+        entidadId: loteId.toString(),
+        entidadEtiqueta: `Lote ${numeroLote} de Adición a Contabilidad de ${etiquetaCopropiedad} ${detalle}`,
+      },
+      session,
+    );
+  }
+
+  /** Tenant-scoped lookup — never `findById` (see the tenancy law). */
+  private async buscarLote(
+    loteId: string,
+    copropiedadId: Types.ObjectId,
+  ): Promise<LoteContabilidadDocument> {
+    const lote = Types.ObjectId.isValid(loteId)
+      ? await this.lotes
+          .findOne({ _id: new Types.ObjectId(loteId), copropiedadId })
+          .exec()
+      : null;
+    if (!lote) {
+      throw new NotFoundException('No existe ese lote de contabilidad.');
+    }
+    return lote;
+  }
+
+  /** Builds both CSV files for a set of entries under one lote number —
+   *  shared by a new generation and a past lote's re-download. `session`
+   *  is null outside a transaction. */
+  private async construirArchivos(
+    asientos: AsientoContableDocument[],
+    numeroLote: number,
+    copropiedadId: Types.ObjectId,
+    session: ClientSession | null,
+  ): Promise<ArchivosLoteContabilidad> {
+    const anchorMap = await this.buildAnchorMap(
+      asientos,
+      copropiedadId,
+      session,
+    );
+    const conceptoMap = await this.resolveConceptos(
+      asientos,
+      copropiedadId,
+      session,
+    );
+    const comprobantePorClave = await this.resolveComprobantes(
+      asientos,
+      anchorMap,
+      copropiedadId,
+      session,
+    );
+
+    const saldosInicialesPorNumero = await resolverSaldosInicialesPorNumero(
+      this.saldosIniciales,
+      copropiedadId,
+      asientos,
+      session ?? undefined,
+    );
+
+    const filasMovmes: FilaMovmes[] = [];
+    const filasMovmesdo: FilaMovmesdo[] = [];
+
+    for (const asiento of asientos) {
+      const tipoDocumento = tipoDocumentoDe(asiento);
+      const anchorIdStr = resolveAnchorId(asiento).toString();
+      const anchor = anchorMap.get(anchorIdStr);
+      // The document's own concepto (Observaciones/Detalle/Descripción, or
+      // the NA/FV composed text) — the accountant reads THIS in the target
+      // system, never the internal ledger's fixed catalog wording. Falls
+      // back to that internal wording only when the source document left
+      // its own concepto empty (RC/NC/ND's optional field).
+      const detalle =
+        conceptoMap.get(anchorIdStr) ??
+        asiento.movimientos[0]?.descripcion ??
+        '';
+
+      filasMovmes.push({
+        tipoDocumento,
+        numero: anchor?.number ?? 0,
+        fecha: asiento.fecha,
+        numeroLote,
+        detalle,
+      });
+
+      const comprobante =
+        comprobantePorClave.get(`${tipoDocumento}:${anchor?.prefix ?? ''}`) ??
+        null;
+
+      for (const entry of asiento.movimientos) {
+        filasMovmesdo.push({
+          tipoDocumento,
+          numero: anchor?.number ?? 0,
+          cuenta: entry.cuenta,
+          centroCosto: entry.centroCosto ?? null,
+          tercero: entry.tercero ?? null,
+          detalle,
+          baseGravable: entry.baseGravable ?? null,
+          valorDebito: entry.tipo === 'debito' ? entry.monto : null,
+          valorCredito: entry.tipo === 'credito' ? entry.monto : null,
+          comprobante,
+          // A Saldo Inicial movimiento stores only the internal ordinal;
+          // export the original document number (e.g. 2941). Free text
+          // there, so the column carries a string.
+          numeroDocCruce:
+            documentoCruceDeMovimiento(entry, saldosInicialesPorNumero)
+              ?.numero ?? null,
+        });
+      }
+    }
+
+    return {
+      movmes: construirMovmes(filasMovmes),
+      movmesdo: construirMovmesdo(filasMovmesdo),
+    };
   }
 
   /** Batch-resolves `{prefix, number}` for every anchor document referenced
@@ -347,7 +532,7 @@ export class AdicionContabilidadService {
   private async buildAnchorMap(
     asientos: AsientoContableDocument[],
     copropiedadId: Types.ObjectId,
-    session: ClientSession,
+    session: ClientSession | null,
   ): Promise<Map<string, AnchorInfo>> {
     const map = new Map<string, AnchorInfo>();
 
@@ -402,7 +587,7 @@ export class AdicionContabilidadService {
   private async resolveConceptos(
     asientos: AsientoContableDocument[],
     copropiedadId: Types.ObjectId,
-    session: ClientSession,
+    session: ClientSession | null,
   ): Promise<Map<string, string>> {
     const map = new Map<string, string>();
 
@@ -565,7 +750,7 @@ export class AdicionContabilidadService {
     asientos: AsientoContableDocument[],
     anchorMap: Map<string, AnchorInfo>,
     copropiedadId: Types.ObjectId,
-    session: ClientSession,
+    session: ClientSession | null,
   ): Promise<Map<string, string | null>> {
     const map = new Map<string, string | null>();
     const claves = new Set<string>();

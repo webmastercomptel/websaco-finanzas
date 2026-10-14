@@ -44,6 +44,24 @@ export class LoteContabilidad {
 
   @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, required: true })
   generatedBy: Types.ObjectId;
+
+  /** `desmarcado`: the accountant released this lote's entries so a new
+   *  generation exports them again (e.g. a file never reached the target
+   *  system). The record stays as history, never deleted; its entries no
+   *  longer point at it. Documents created before this field read as
+   *  `generado`. */
+  @Prop({
+    type: String,
+    enum: ['generado', 'desmarcado'],
+    default: 'generado',
+  })
+  estado: 'generado' | 'desmarcado';
+
+  @Prop({ type: Date, default: null })
+  fechaDesmarcado: Date | null;
+
+  @Prop({ type: SchemaTypes.ObjectId, ref: Account.name, default: null })
+  desmarcadoPor: Types.ObjectId | null;
 }
 
 export const LoteContabilidadSchema =

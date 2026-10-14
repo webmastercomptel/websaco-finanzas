@@ -551,6 +551,19 @@ export class NotasCreditoService {
         session,
       );
 
+      // A "Rebaja o descuento" note is a discount granted, not a revenue
+      // correction: its débito goes to the coproperty's discount account,
+      // never back to each concepto's own income (or receivable) account.
+      const cuentaDescuento =
+        dto.motivo === 'descuento'
+          ? ((
+              await this.copropiedades
+                .findById(copropiedadId)
+                .session(session)
+                .exec()
+            )?.descuentosCuentaDebito ?? CUENTA_SIN_ASIGNAR)
+          : null;
+
       const [creada] = await this.notasCredito.create(
         [
           {
@@ -576,6 +589,7 @@ export class NotasCreditoService {
             // every application/reversal actually moves from now on.
             montoAplicado: 0,
             montoSinAplicar: dto.montoTotal,
+            cuentaDescuento,
             observaciones: dto.observaciones ?? null,
             estado: 'activo',
             generadoPor: accountId,
@@ -1679,12 +1693,16 @@ export class NotasCreditoService {
           l.conceptoId.equals(linea.conceptoId),
         );
         return {
-          cuenta: lineaAncla?.cuentaIngreso ?? cuentaDevoluciones,
+          // A discount note reverses the discount account it debited.
+          cuenta:
+            nota.cuentaDescuento ??
+            lineaAncla?.cuentaIngreso ??
+            cuentaDevoluciones,
           monto: linea.monto,
         };
       });
       let entries = construirContraAsientoCruce(
-        cuentaDevoluciones,
+        nota.cuentaDescuento ?? cuentaDevoluciones,
         cuentaCartera,
         cuentaAnticipos,
         nota.montoAplicado,
@@ -2130,14 +2148,17 @@ export class NotasCreditoService {
     // `cuentaDevoluciones` (never a bare `null` account) for a concept with
     // no `cuentaIngreso` configured, same fallback role
     // `cuentaCartera` plays for `desgloseCartera` above.
+    // A discount note debits its frozen discount account instead, for
+    // every concepto (see `NotaCredito.cuentaDescuento`).
+    const cuentaDescuento = nota.cuentaDescuento ?? null;
     const desgloseOrigenCuentas = desgloseOrigen.map((d) => ({
-      cuenta: d.cuenta ?? cuentaDevoluciones,
+      cuenta: cuentaDescuento ?? d.cuenta ?? cuentaDevoluciones,
       monto: d.monto,
       tipoDocumento: d.tipoDocumento,
       numeroDocumento: d.numeroDocumento,
     }));
     let entries = construirAsientoCruce(
-      cuentaDevoluciones,
+      cuentaDescuento ?? cuentaDevoluciones,
       cuentaCartera,
       cuentaAnticipos,
       montoAplicado,

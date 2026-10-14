@@ -230,6 +230,13 @@ export class ConsecutivosService {
     );
 
     return {
+      esRecibo: consecutivo.categoria === 'IN',
+      columnas: {
+        otrosIngresos:
+          consecutivo.categoria === 'IN' || consecutivo.categoria === 'ND',
+        descuento:
+          consecutivo.categoria === 'IN' || consecutivo.categoria === 'NC',
+      },
       conceptos: conceptosDocs.map((c) => ({
         conceptoId: c._id.toString(),
         nombre: c.nombre,
@@ -265,6 +272,7 @@ export class ConsecutivosService {
       .exec();
 
     const cargosPorRecibo = new Map<string, Record<string, number>>();
+    const descuentoPorRecibo = new Map<string, number>();
     for (const app of aplicaciones) {
       const key = app.sourceId.toString();
       const cargos = cargosPorRecibo.get(key) ?? {};
@@ -272,6 +280,10 @@ export class ConsecutivosService {
         sumarCargo(cargos, detalle.conceptoId.toString(), detalle.monto);
       }
       cargosPorRecibo.set(key, cargos);
+      descuentoPorRecibo.set(
+        key,
+        (descuentoPorRecibo.get(key) ?? 0) + (app.montoDescuento ?? 0),
+      );
     }
 
     return recibos.map((r) => ({
@@ -282,6 +294,8 @@ export class ConsecutivosService {
       inmuebleId: r.inmuebleId,
       fecha: r.fechaRecibo.toISOString(),
       valorTotal: r.montoRecibido,
+      montoOtrosIngresos: r.montoOtrosIngresos ?? 0,
+      montoDescuento: descuentoPorRecibo.get(r._id.toString()) ?? 0,
       cargosPorConcepto: cargosPorRecibo.get(r._id.toString()) ?? {},
     }));
   }
@@ -320,6 +334,8 @@ export class ConsecutivosService {
           inmuebleId: n.inmuebleId,
           fecha: fecha.toISOString(),
           valorTotal: n.montoTotal,
+          montoOtrosIngresos: 0,
+          montoDescuento: n.motivo === 'descuento' ? n.montoTotal : 0,
           cargosPorConcepto,
         };
       });
@@ -341,6 +357,23 @@ export class ConsecutivosService {
       })
       .exec();
 
+    // Same rule as the note's own journal entry: "Cambio del valor" adjusts
+    // the charge and an intereses concepto goes through cuentas de orden —
+    // neither is Otros Ingresos.
+    const conceptoIds = [
+      ...new Set(notas.map((n) => n.conceptoId.toString())),
+    ].map((id) => new Types.ObjectId(id));
+    const conceptos = conceptoIds.length
+      ? await this.conceptosCobro
+          .find({ copropiedadId, _id: { $in: conceptoIds } })
+          .exec()
+      : [];
+    const esIntereses = new Set(
+      conceptos
+        .filter((c) => c.tipo === 'intereses')
+        .map((c) => c._id.toString()),
+    );
+
     return notas.map((n) => ({
       documentoId: n._id.toString(),
       tipoDocumento: codigo,
@@ -349,6 +382,11 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.total,
+      montoOtrosIngresos:
+        n.motivo === 'cambio_valor' || esIntereses.has(n.conceptoId.toString())
+          ? 0
+          : n.total,
+      montoDescuento: 0,
       cargosPorConcepto: { [n.conceptoId.toString()]: n.total },
     }));
   }
@@ -375,6 +413,8 @@ export class ConsecutivosService {
         inmuebleId: n.inmuebleId,
         fecha: fecha.toISOString(),
         valorTotal: n.monto,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto: {
           [n.conceptoOrigenId.toString()]: -n.monto,
           [n.conceptoDestinoId.toString()]: n.monto,
@@ -427,6 +467,8 @@ export class ConsecutivosService {
       inmuebleId: n.inmuebleId,
       fecha: n.fechaEmision.toISOString(),
       valorTotal: n.montoAplicado,
+      montoOtrosIngresos: 0,
+      montoDescuento: 0,
       cargosPorConcepto: cargosPorNota.get(n._id.toString()) ?? {},
     }));
   }
@@ -464,6 +506,8 @@ export class ConsecutivosService {
         inmuebleId: f.inmuebleId,
         fecha: f.fechaEmision.toISOString(),
         valorTotal: f.total,
+        montoOtrosIngresos: 0,
+        montoDescuento: 0,
         cargosPorConcepto,
       };
     });

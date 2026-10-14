@@ -1213,6 +1213,80 @@ describe('NotasCreditoService.crear', () => {
   });
 });
 
+describe('NotasCreditoService.crear — motivo descuento', () => {
+  it('debita la cuenta de descuentos de la copropiedad, nunca la cuenta del concepto, y la congela en la nota', async () => {
+    // Reportado en producción: una NC por descuento llevó el débito a la
+    // cuenta del cargo en vez de a la cuenta de descuentos.
+    const conceptoAdmin = new Types.ObjectId();
+    const factura = facturaDoc({
+      saldoPendiente: 100000,
+      total: 100000,
+      lineas: [
+        {
+          conceptoId: conceptoAdmin,
+          valorTotal: 100000,
+          cuentaIngreso: '413501',
+        },
+      ],
+    });
+    const { service, asientos, notasCredito } = construirServicio({
+      notaCreada: notaCreditoCreada({
+        motivo: 'descuento',
+        montoTotal: 100000,
+        cuentaDescuento: '530535',
+      }),
+      factura,
+      copropiedades: {
+        findById: jest.fn(() => ({
+          session: () => ({
+            exec: () =>
+              Promise.resolve({
+                cuentaContableCartera: '130501',
+                cuentaAnticipos: '210505',
+                cuentaDevoluciones: '413595',
+                descuentosCuentaDebito: '530535',
+              }),
+          }),
+        })),
+      },
+    });
+
+    await service.crear(
+      'acc-1',
+      dtoBase({
+        motivo: 'descuento',
+        montoTotal: 100000,
+        distribucion: [{ conceptoId: conceptoAdmin.toString(), monto: 100000 }],
+      }),
+    );
+
+    const [[documentos]] = (notasCredito.create as jest.Mock).mock
+      .calls as Array<[Record<string, unknown>[]]>;
+    expect(documentos[0]).toMatchObject({ cuentaDescuento: '530535' });
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { movimientos: Record<string, unknown>[] },
+    ];
+    expect(entrada.movimientos.filter((e) => e.tipo === 'debito')).toEqual([
+      expect.objectContaining({ cuenta: '530535', monto: 100000 }),
+    ]);
+  });
+
+  it('con otro motivo no congela cuenta de descuento', async () => {
+    const { service, notasCredito } = construirServicio({
+      notaCreada: notaCreditoCreada(),
+    });
+
+    await service.crear('acc-1', dtoBase());
+
+    const [[documentos]] = (notasCredito.create as jest.Mock).mock
+      .calls as Array<[Record<string, unknown>[]]>;
+    expect(documentos[0]).toMatchObject({ cuentaDescuento: null });
+  });
+});
+
 describe('NotasCreditoService.crear — ancla Nota Débito', () => {
   const notaDebitoDoc = (over: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
@@ -2461,6 +2535,66 @@ describe('NotasCreditoService.anular', () => {
         cuenta: '413595',
         monto: 200000,
       },
+    );
+  });
+
+  it('una nota por descuento revierte el débito en su cuenta de descuento congelada', async () => {
+    const nota = notaActivaDoc({
+      motivo: 'descuento',
+      cuentaDescuento: '530535',
+      montoAplicado: 200000,
+      montoSinAplicar: 0,
+      montoTotal: 200000,
+    });
+    const notasCredito = {
+      findOne: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve(nota) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const aplicaciones = {
+      find: jest.fn(() => ({
+        session: () => ({ exec: () => Promise.resolve([]) }),
+      })),
+      findOneAndUpdate: jest.fn(() => ({ exec: () => Promise.resolve(null) })),
+    };
+    const asientos = modeloAsientos();
+    const service = new NotasCreditoService(
+      notasCredito as never,
+      aplicaciones as never,
+      modeloFacturas(facturaDoc()) as never,
+      modeloSaldos() as never,
+      modeloCarteraPorDocumento() as never,
+      modeloSaldoTotalDocumento([]) as never,
+      asientos as never,
+      modeloCopropiedades() as never,
+      tenantQueDevuelve(COP),
+      numeracionQueEntrega('NC-1'),
+      conexionCon(sesionFalsa()),
+      lotesFacturacionFalso(),
+      modeloSaldoDocumentoOrigen([]) as never,
+      modeloNotaDebitoVacio() as never,
+      modeloConceptoCobroVacio() as never,
+    );
+
+    await service.anular(
+      nota._id.toString(),
+      {
+        motivo: 'otro',
+        detalle: 'Detalle de más de veinte caracteres',
+        fecha: '2026-01-20',
+      },
+      'acc-1',
+    );
+
+    const [[creado]] = (asientos.create as jest.Mock).mock.calls as Array<
+      [Record<string, unknown>[]]
+    >;
+    const [entrada] = creado as unknown as [
+      { movimientos: Record<string, unknown>[] },
+    ];
+    expect(entrada.movimientos.find((m) => m.tipo === 'credito')).toMatchObject(
+      { cuenta: '530535', monto: 200000 },
     );
   });
 

@@ -322,7 +322,10 @@ export async function construirDatosImpresionNotaCredito(
     const lineaSaldoInicial = saldoInicialAncla?.filas.find((l) =>
       l.conceptoId.equals(linea.conceptoId),
     );
+    // A discount note debits its frozen discount account for every
+    // concepto — same rule as its journal entry (`NotaCredito.cuentaDescuento`).
     const codigo =
+      nota.cuentaDescuento ??
       lineaFactura?.cuentaIngreso ??
       lineaSaldoInicial?.cuentaIngreso ??
       (notaDebitoAncla ? cuentaIngresoDe(notaDebitoAncla) : null) ??
