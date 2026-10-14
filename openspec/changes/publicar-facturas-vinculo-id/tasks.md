@@ -42,20 +42,22 @@ Tests are written test-first per task (`tdd: false` in `openspec/config.yaml`: r
 
 ### PR 2: publication (depends on PR 1)
 
-- [ ] 1.7 RED/GREEN `publicacion-facturas.mapper.ts` + `.contrato.ts`: `construirPayload(fila, id, url, exp)`, `nit` replaced by `websaco3CopropiedadId`, order preserved (Req: Signed payload contract)
-- [ ] 1.8 Drop `nit` `@Prop` from `src/database/schemas/publicaciones/publicacion-lote.schema.ts`; update docblock (Req: Id resolved from the current coproperty at send time)
-- [ ] 1.9 RED/GREEN `publicacion-facturas.service.ts` `encolar`: returns `Promise<boolean>` (false on flag on without id = warn, no write; true on upsert and on 11000 race); no `nit` in `$setOnInsert` (Req: Event trigger scoped to enabled coproperties)
-- [ ] 1.10 RED/GREEN `procesar`: read `Copropiedad` before signing; missing id or flag off = terminal `sin-websaco3-id` with no `generarUrlLectura` or `fetch`; `findById` throws = retry `copropiedad-lectura`; corrected id used; legacy `nit` row sends no `nit` (Req: Id resolved...; Response code determines state)
-- [ ] 1.11 `publicacion-facturas.politica.ts`: `FETCH_TIMEOUT_MS = 45_000` with cold-start docblock; `PRESUPUESTO_CICLO_MS` docblock cites the operator `curl` (no Cloud Scheduler); drop `[spec-gap]`. Tests: invariants `FETCH_TIMEOUT_MS + MARGEN_CICLO_MS < PRESUPUESTO_CICLO_MS` and `< CLAIM_TTL_MS`; 400/404 terminal (Req: Response code determines state)
-- [ ] 1.12 RED/GREEN `reclamar(max, loteId?)`: optional `loteId` filter, same atomic claim; specs with and without filter (Req: Immediate dispatch on confirmation)
-- [ ] 1.13 RED/GREEN `publicarAhora(loteId)` (no `enEjecucion` lock): transport not configured = no claim; claims with `loteId`; null claim = no fetch; success = `liberar` `enviado`; fetch timeout = retryable `fallido` (Req: Immediate dispatch on confirmation)
-- [ ] 1.14 RED/GREEN `publicacion-facturas.listener.ts`: `if (await encolar(e)) await publicarAhora(e.loteId)`, all inside the catch-all; specs: only called when `encolar` is true, a throw from either is swallowed (Req: Immediate dispatch on confirmation)
-- [ ] 1.15 `lotes.controller.ts`: comment only at the `emitAsync` call, stating the awaited emit now also covers the send
-- [ ] 1.16 `CLAUDE.md`: replace the `PublicacionLote` `nit` canonical row with `websaco3CopropiedadId`
+- [x] 1.7 RED/GREEN `publicacion-facturas.mapper.ts` + `.contrato.ts`: `construirPayload(fila, id, url, exp)`, `nit` replaced by `websaco3CopropiedadId`, order preserved (Req: Signed payload contract)
+- [x] 1.8 Drop `nit` `@Prop` from `src/database/schemas/publicaciones/publicacion-lote.schema.ts`; update docblock (Req: Id resolved from the current coproperty at send time)
+- [x] 1.9 RED/GREEN `publicacion-facturas.service.ts` `encolar`: returns `Promise<boolean>` (false on flag on without id = warn, no write; true on upsert and on 11000 race); no `nit` in `$setOnInsert` (Req: Event trigger scoped to enabled coproperties)
+- [x] 1.10 RED/GREEN `procesar`: read `Copropiedad` before signing; missing id or flag off = terminal `sin-websaco3-id` with no `generarUrlLectura` or `fetch`; `findById` throws = retry `copropiedad-lectura`; corrected id used; legacy `nit` row sends no `nit` (Req: Id resolved...; Response code determines state)
+- [x] 1.11 `publicacion-facturas.politica.ts`: `FETCH_TIMEOUT_MS = 45_000` with cold-start docblock; `PRESUPUESTO_CICLO_MS` docblock cites the operator `curl` (no Cloud Scheduler); drop `[spec-gap]`. Tests: invariants `FETCH_TIMEOUT_MS + MARGEN_CICLO_MS < PRESUPUESTO_CICLO_MS` and `< CLAIM_TTL_MS`; 400/404 terminal (Req: Response code determines state)
+- [x] 1.12 RED/GREEN `reclamar(max, loteId?)`: optional `loteId` filter, same atomic claim; specs with and without filter (Req: Immediate dispatch on confirmation)
+- [x] 1.13 RED/GREEN `publicarAhora(loteId)` (no `enEjecucion` lock): transport not configured = no claim; claims with `loteId`; null claim = no fetch; success = `liberar` `enviado`; fetch timeout = retryable `fallido` (Req: Immediate dispatch on confirmation)
+- [x] 1.14 RED/GREEN `publicacion-facturas.listener.ts`: `if (await encolar(e)) await publicarAhora(e.loteId)`, all inside the catch-all; specs: only called when `encolar` is true, a throw from either is swallowed (Req: Immediate dispatch on confirmation)
+- [x] 1.15 `lotes.controller.ts`: comment only at the `emitAsync` call, stating the awaited emit now also covers the send
+- [x] 1.16 `CLAUDE.md`: replace the `PublicacionLote` `nit` canonical row with `websaco3CopropiedadId`
 
 ## Phase 2: Docs and cleanup, PR 3 (verify: links resolve, `curl` reviewed against the guard; rollback: revert)
 
 - [ ] 2.1 Create `docs/runbooks/publicacion-websaco3.md`: 4 env vars, immediate-dispatch behaviour, Mongo query for rows `pendiente`/retryable `fallido`/stale `enviando`, manual `curl -X POST` with `X-Scheduler-Secret` and `--max-time 150` (no `gcloud scheduler`), re-arming terminal rows, rollout order (Req: Manual sweep safety net documented)
+  - The runbook MUST also document the scenario "`liberar` fails after a successful POST": the row stays `enviando` until `CLAIM_TTL_MS`; if `intentos >= max`, `barrerAgotados` can mark it terminal `reclamo-expirado` even though WebSaco3 already received it. The operator MUST check WebSaco3 before re-sending. The receiver dedupes by `loteId` and answers 409, which counts as success.
+  - PR 3 MUST reword the stale docblock of `publicacion-facturas.controller.ts` ("Cloud Scheduler trigger") to "manual safety-net trigger" (the controller is intentionally NOT edited in PR 2).
 - [ ] 2.2 `INSTALACION-REFERENCE.md`: Copropiedad field row; `README.md`: link to the runbook
 - [ ] 2.3 `.env.example`: add the 4 `WEBSACO3_*` keys, commented out. **Apply could not read this file (permission denied): ask the user for permission first** (Req: same)
 - [ ] 2.4 Separate deletion-only commit: remove `openspec/changes/publicar-facturas-websaco/` (stale copy of `archive/2026-09-24-publicar-facturas-websaco`)
