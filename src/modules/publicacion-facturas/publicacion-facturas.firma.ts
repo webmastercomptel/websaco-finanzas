@@ -1,5 +1,5 @@
 // src/modules/publicacion-facturas/publicacion-facturas.firma.ts
-import { createHmac } from 'node:crypto';
+import { hmacSha256Hex } from '../../common/utils/hmac';
 
 /**
  * Signs `${timestamp}.${rawBody}` with HMAC-SHA256, hex-encoded.
@@ -16,7 +16,5 @@ export function firmar(
   timestamp: string,
   rawBody: string,
 ): string {
-  return createHmac('sha256', secret)
-    .update(`${timestamp}.${rawBody}`, 'utf8')
-    .digest('hex');
+  return hmacSha256Hex(secret, `${timestamp}.${rawBody}`);
 }

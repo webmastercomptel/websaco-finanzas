@@ -90,13 +90,21 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().optional().allow(''),
   }),
 
-  // Outbound publishing to WebSaco3 (see modules/publicacion-facturas/). All
-  // three are optional and travel TOGETHER: the listener always enqueues an
-  // outbox row regardless of config (the flag is the domain truth), but
-  // nothing ever drains without a URL+secret to send with AND a trigger
-  // secret to authorize the sweep — a partial set would silently leave rows
-  // stuck in `pendiente` forever with no boot-time signal. `.and(...)` fails
-  // loudly instead.
+  // WebSaco3 integration (see modules/publicacion-facturas/ and
+  // modules/integraciones-websaco3/).
+  //
+  // Outbound publication needs ALL THREE (URL, shared secret, trigger secret):
+  // the listener always enqueues an outbox row regardless of config (the flag
+  // is the domain truth), but nothing ever drains without a URL+secret to send
+  // with AND a trigger secret to authorize the sweep — a partial set would
+  // silently leave rows stuck in `pendiente` forever with no boot-time signal.
+  // `.and(URL, TRIGGER)` + `.with(URL, SECRET)` fails loudly instead.
+  //
+  // WEBSACO3_HMAC_SECRET is shared with WebSaco3 and ALSO authenticates the
+  // inbound holders pull (purpose-bound signature), so it may be set ALONE:
+  // a pull-only deployment must not be forced to configure an outbound URL
+  // and trigger secret nothing would read. Every combination that was valid
+  // before (none, or all three) stays valid.
   WEBSACO3_FACTURAS_ENDPOINT_URL: Joi.string()
     .when('NODE_ENV', {
       is: 'production',
@@ -115,8 +123,6 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(20)
     .default(6),
-}).and(
-  'WEBSACO3_FACTURAS_ENDPOINT_URL',
-  'WEBSACO3_HMAC_SECRET',
-  'WEBSACO3_PUBLICACION_TRIGGER_SECRET',
-);
+})
+  .and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')
+  .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET');

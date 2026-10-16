@@ -129,6 +129,79 @@ describe('envValidationSchema', () => {
     });
   });
 
+  describe('integración con WebSaco3', () => {
+    const URL = 'https://websaco3.ejemplo.com/api/facturas';
+    const SECRETO = 'un-secreto-compartido-de-al-menos-32-caracteres';
+    const TRIGGER = 'otro-secreto-del-operador-de-al-menos-32-chars';
+
+    it('arranca sin ninguna de las tres', () => {
+      expect(validate({}).error).toBeUndefined();
+    });
+
+    it('arranca con las tres juntas (publicación de facturas + pull)', () => {
+      const { error } = validate({
+        WEBSACO3_FACTURAS_ENDPOINT_URL: URL,
+        WEBSACO3_HMAC_SECRET: SECRETO,
+        WEBSACO3_PUBLICACION_TRIGGER_SECRET: TRIGGER,
+      });
+
+      expect(error).toBeUndefined();
+    });
+
+    it('arranca con SOLO el secreto compartido (endpoint de propietarios sin publicación)', () => {
+      const { error } = validate({ WEBSACO3_HMAC_SECRET: SECRETO });
+
+      expect(error).toBeUndefined();
+    });
+
+    it('rechaza la URL de publicación sin el secreto compartido', () => {
+      const { error } = validate({
+        WEBSACO3_FACTURAS_ENDPOINT_URL: URL,
+        WEBSACO3_PUBLICACION_TRIGGER_SECRET: TRIGGER,
+      });
+
+      expect(error?.message).toContain('WEBSACO3_HMAC_SECRET');
+    });
+
+    it('rechaza la URL sola', () => {
+      const { error } = validate({ WEBSACO3_FACTURAS_ENDPOINT_URL: URL });
+
+      expect(error).toBeDefined();
+    });
+
+    it('rechaza URL + secreto sin el secreto del trigger', () => {
+      const { error } = validate({
+        WEBSACO3_FACTURAS_ENDPOINT_URL: URL,
+        WEBSACO3_HMAC_SECRET: SECRETO,
+      });
+
+      expect(error?.message).toContain('WEBSACO3_PUBLICACION_TRIGGER_SECRET');
+    });
+
+    it('rechaza el secreto del trigger sin la URL (aunque haya secreto)', () => {
+      const { error } = validate({
+        WEBSACO3_HMAC_SECRET: SECRETO,
+        WEBSACO3_PUBLICACION_TRIGGER_SECRET: TRIGGER,
+      });
+
+      expect(error?.message).toContain('WEBSACO3_FACTURAS_ENDPOINT_URL');
+    });
+
+    it('rechaza el secreto del trigger solo', () => {
+      const { error } = validate({
+        WEBSACO3_PUBLICACION_TRIGGER_SECRET: TRIGGER,
+      });
+
+      expect(error).toBeDefined();
+    });
+
+    it('sigue exigiendo un secreto compartido de al menos 32 caracteres', () => {
+      const { error } = validate({ WEBSACO3_HMAC_SECRET: 'corto' });
+
+      expect(error?.message).toContain('WEBSACO3_HMAC_SECRET');
+    });
+  });
+
   describe('credenciales de Firebase', () => {
     it('exige la credencial de servicio', () => {
       // No existe un modo "sin autenticación": si falta, no arranca.
