@@ -60,17 +60,17 @@ Deploy order: gate A -> PR 1 -> PR 2a -> PR 2b -> PR 3 (backend AND `../frontend
 
 ## Phase 3: PR 2b, endpoint (verify: delegated incl. integration spec; rollback: unset secret or delete module)
 
-- [ ] 3.1 `src/contracts/index.ts`: `PropietariosWebsaco3`, `UnidadPropietarioWebsaco3`, `TitularWebsaco3`
-- [ ] 3.2 RED/GREEN `dto/consultar-propietarios.dto.ts` + spec: lowercase transform, `@IsString @Matches(WEBSACO3_COPROPIEDAD_ID_REGEX)`; rejects missing, 23 chars, non-hex, `0x` prefix, repeated, extra param (Req: Query validation)
-- [ ] 3.3 RED `propietarios.mapper.spec.ts`: active titular (first of two emails, phone), no titular, unresolved/foreign/inactive titular = null, no email/phone, inactive unit still present (Req: Snapshot content)
-- [ ] 3.4 GREEN `propietarios.mapper.ts` (pure, D11)
-- [ ] 3.5 RED `propietarios.service.spec.ts` (hand-rolled mocks): 0/1/2 coproperties -> 404/ok/409 with no unit read; flag filter; every filter carries `copropiedadId`; 2000 ok / 2001 -> 422 `demasiadas-unidades` with no tercero read; one `inmuebles.find` + one `terceros.find`; no `TenantContextService` (Req: Coproperty lookup and tenant resolution; Snapshot content; Unit cap)
-- [ ] 3.6 GREEN `propietarios.service.ts` (D9, D10; `find` + `limit`, never `findById`)
-- [ ] 3.7 `propietarios.controller.ts` (`@Controller('integraciones/websaco3')`, `@Get('propietarios')`, only `FirmaWebsaco3Guard`), `integraciones-websaco3.module.ts` (no imports), register in `src/app.module.ts` (Req: Read-only edge with no domain coupling)
-- [ ] 3.8 RED/GREEN integration spec via `configureApp`: envelope `{statusCode,data}`; 401 beats 400; 400 bad/extra/repeated; `X-CoProperty-Id` ignored; model throw = 500; HEAD/trailing-slash replay = 401 (Req: Response envelope and error shape; Tenant header ignored)
-- [ ] 3.9 Module removal check: delete the import locally, `npm run typecheck` and tests still pass, then restore (Req: Read-only edge scenario Module removal)
-- [ ] 3.10 Create `docs/runbooks/propietarios-websaco3.md`: signed-string layout, shared-vector test, 401/404/409/422 triage, dedup location, rollback, and the "Lines to add to .env.example" section for a human: keep `WEBSACO3_HMAC_SECRET=` and replace its comment with "Shared with WebSaco3. Signs the outbound invoice publication AND authenticates the inbound GET /integraciones/websaco3/propietarios (purpose-bound). May be set alone to enable only the holders endpoint; URL and trigger secret remain all-or-none with each other."
-- [ ] 3.11 `CLAUDE.md` (backend): one line on the inbound signed pull
+- [x] 3.1 `src/contracts/index.ts`: `PropietariosWebsaco3`, `UnidadPropietarioWebsaco3`, `TitularWebsaco3`
+- [x] 3.2 RED/GREEN `dto/consultar-propietarios.dto.ts` + spec: lowercase transform, `@IsString @Matches(WEBSACO3_COPROPIEDAD_ID_REGEX)`; rejects missing, 23 chars, non-hex, `0x` prefix, repeated, extra param (Req: Query validation)
+- [x] 3.3 RED `propietarios.mapper.spec.ts`: active titular (first of two emails, phone), no titular, unresolved/foreign/inactive titular = null, no email/phone, inactive unit still present (Req: Snapshot content)
+- [x] 3.4 GREEN `propietarios.mapper.ts` (pure, D11)
+- [x] 3.5 RED `propietarios.service.spec.ts` (hand-rolled mocks): 0/1/2 coproperties -> 404/ok/409 with no unit read; flag filter; every filter carries `copropiedadId`; 2000 ok / 2001 -> 422 `demasiadas-unidades` with no tercero read; one `inmuebles.find` + one `terceros.find`; no `TenantContextService` (Req: Coproperty lookup and tenant resolution; Snapshot content; Unit cap)
+- [x] 3.6 GREEN `propietarios.service.ts` (D9, D10; `find` + `limit`, never `findById`)
+- [x] 3.7 `propietarios.controller.ts` (`@Controller('integraciones/websaco3')`, `@Get('propietarios')`, only `FirmaWebsaco3Guard`), `integraciones-websaco3.module.ts` (no imports), register in `src/app.module.ts` (Req: Read-only edge with no domain coupling)
+- [x] 3.8 RED/GREEN integration spec via `configureApp`: envelope `{statusCode,data}`; 401 beats 400; 400 bad/extra/repeated; `X-CoProperty-Id` ignored; model throw = 500; HEAD/trailing-slash replay = 401 (Req: Response envelope and error shape; Tenant header ignored)
+- [x] 3.9 Module removal check: delete the import locally, `npm run typecheck` and tests still pass, then restore (Req: Read-only edge scenario Module removal)
+- [x] 3.10 Extend `docs/runbooks/publicacion-websaco3.md` (new section 8; done in place, no separate file): signed-string layout, shared-vector test, 401/404/409/422 triage, dedup location, rollback, and the "Lines to add to .env.example" section for a human: keep `WEBSACO3_HMAC_SECRET=` and replace its comment with "Shared with WebSaco3. Signs the outbound invoice publication AND authenticates the inbound GET /integraciones/websaco3/propietarios (purpose-bound). May be set alone to enable only the holders endpoint; URL and trigger secret remain all-or-none with each other."
+- [x] 3.11 `CLAUDE.md` (backend): one line on the inbound signed pull
 
 ## Phase 4: PR 3, immutable `codigo` (verify: delegated in backend and `../frontend`; rollback: revert both)
 
