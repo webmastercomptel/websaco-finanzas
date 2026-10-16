@@ -285,12 +285,17 @@ export class CopropiedadesService {
   ): Promise<CopropiedadContract> {
     const cambios = this.aDocumento(dto);
     this.aplicarReglaGestionEdificios(cambios, null);
+    await this.exigirIdWebsaco3Libre(cambios);
 
     const codigo = await this.siguienteCodigo();
-    const creada = await this.copropiedades.create({
-      ...cambios,
-      codigo,
-    });
+    const creada = await this.copropiedades
+      .create({
+        ...cambios,
+        codigo,
+      })
+      .catch((error: unknown) => {
+        throw this.traducirDuplicadoWebsaco3(error);
+      });
 
     await this.auditoria.registrar({
       actorAccountId: actor.accountId,
@@ -373,10 +378,14 @@ export class CopropiedadesService {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
     }
     this.aplicarReglaGestionEdificios(cambios, actual);
+    await this.exigirIdWebsaco3Libre(cambios, id);
 
     const actualizada = await this.copropiedades
       .findByIdAndUpdate(id, { $set: cambios }, { returnDocument: 'after' })
-      .exec();
+      .exec()
+      .catch((error: unknown) => {
+        throw this.traducirDuplicadoWebsaco3(error);
+      });
 
     if (!actualizada) {
       throw new NotFoundException(`No se encontró la copropiedad ${id}`);
@@ -635,6 +644,68 @@ export class CopropiedadesService {
         'Para activar la gestión de edificios la copropiedad debe tener el ID de WebSaco3 (24 caracteres hexadecimales).',
       );
     }
+  }
+
+  /**
+   * Write-time half of the "one WebSaco3 id per coproperty" rule (the unique
+   * index is the other half and the safety net). Runs after
+   * `aplicarReglaGestionEdificios`, so by now `cambios.websaco3CopropiedadId`
+   * is either a format-valid string, `null` (flag off) or absent.
+   *
+   * Normalizes (trim + lowercase) EXPLICITLY and writes the normalized value
+   * back into `cambios`: the check and the stored value must be the same
+   * string, and we don't rely on the schema setter running on a `$set`.
+   * `null`/absent ids never conflict — many coproperties legitimately have
+   * none. `excluirId` is the coproperty being edited, so resending its own id
+   * never collides with itself.
+   */
+  private async exigirIdWebsaco3Libre(
+    cambios: Record<string, unknown>,
+    excluirId?: string,
+  ): Promise<void> {
+    const valor = cambios.websaco3CopropiedadId;
+    if (typeof valor !== 'string') return;
+
+    const id = valor.trim().toLowerCase();
+    if (id === '') return;
+    cambios.websaco3CopropiedadId = id;
+
+    const ocupado = await this.copropiedades
+      .exists({
+        websaco3CopropiedadId: id,
+        ...(excluirId ? { _id: { $ne: excluirId } } : {}),
+      })
+      .exec();
+    if (ocupado) {
+      throw this.conflictoIdWebsaco3();
+    }
+  }
+
+  /**
+   * A concurrent writer can pass the check above and lose at the unique index
+   * (E11000 on `websaco3CopropiedadId`): that is the same business conflict,
+   * so it answers 409, not 500. Any other error — including an E11000 on
+   * another key such as `codigo` — is returned untouched for the caller to
+   * rethrow.
+   */
+  private traducirDuplicadoWebsaco3(error: unknown): unknown {
+    const e = error as {
+      code?: number;
+      keyPattern?: Record<string, unknown>;
+      message?: string;
+    } | null;
+    const esDuplicado = e?.code === 11000;
+    const esNuestraClave =
+      e?.keyPattern?.websaco3CopropiedadId !== undefined ||
+      (e?.keyPattern === undefined &&
+        /websaco3CopropiedadId/.test(e?.message ?? ''));
+    return esDuplicado && esNuestraClave ? this.conflictoIdWebsaco3() : error;
+  }
+
+  private conflictoIdWebsaco3(): ConflictException {
+    return new ConflictException(
+      'El ID de WebSaco3 ya está asignado a otra copropiedad. Cada copropiedad debe tener un ID de WebSaco3 distinto.',
+    );
   }
 
   /**

@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CopropiedadesService } from './copropiedades.service';
 
 type Filtro = Record<string, unknown>;
@@ -705,7 +709,10 @@ describe('CopropiedadesService — aplicarReglaGestionEdificios', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
-    it('acepta el id en mayúsculas', async () => {
+    // Changed on purpose (spec `copropiedad-websaco3-link`: the service MUST
+    // normalize with trim + lowercase before comparing OR storing). It used to
+    // assert the uppercase value reached the model untouched.
+    it('acepta el id en mayúsculas y lo guarda normalizado en minúsculas', async () => {
       const { modelo, service } = construirService([documento()]);
 
       await service.create(
@@ -718,7 +725,7 @@ describe('CopropiedadesService — aplicarReglaGestionEdificios', () => {
       );
 
       expect(modelo.escrituras[0]).toMatchObject({
-        websaco3CopropiedadId: ID.toUpperCase(),
+        websaco3CopropiedadId: ID,
       });
     });
 
@@ -871,6 +878,244 @@ describe('CopropiedadesService — aplicarReglaGestionEdificios', () => {
         usaGestionEdificios: false,
         websaco3CopropiedadId: null,
       });
+    });
+  });
+});
+
+// spec `copropiedad-websaco3-link` → "websaco3CopropiedadId is unique when set".
+describe('CopropiedadesService — unicidad de websaco3CopropiedadId', () => {
+  const ID = '64b7f0c2a1d4e5f6a7b8c9d0';
+
+  const construirService = (
+    documentos: unknown[],
+    opts: { duplicado?: boolean } = {},
+  ) => {
+    const modelo = modeloCon(documentos, opts);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockContador() as never,
+      mockAsignaciones() as never,
+      mockAccounts() as never,
+      mockAuditoria() as never,
+      mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
+    );
+    return { modelo, service };
+  };
+
+  const errorDuplicado = (clave: string) =>
+    Object.assign(new Error(`E11000 duplicate key error index: ${clave}_1`), {
+      code: 11000,
+      keyPattern: { [clave]: 1 },
+    });
+
+  describe('crear', () => {
+    it('un id libre se acepta y se consulta sin excluir ninguna copropiedad', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.create(
+        { nombre: 'X', usaGestionEdificios: true, websaco3CopropiedadId: ID },
+        ACTOR,
+      );
+
+      expect(modelo.exists).toHaveBeenCalledWith({
+        websaco3CopropiedadId: ID,
+      });
+      expect(modelo.escrituras[0]).toMatchObject({
+        websaco3CopropiedadId: ID,
+      });
+    });
+
+    it('un id ya usado responde 409 en español y no escribe nada', async () => {
+      const { modelo, service } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      const intento = service.create(
+        { nombre: 'X', usaGestionEdificios: true, websaco3CopropiedadId: ID },
+        ACTOR,
+      );
+
+      await expect(intento).rejects.toBeInstanceOf(ConflictException);
+      await expect(intento).rejects.toThrow(/ID de WebSaco3/);
+      expect(modelo.create).not.toHaveBeenCalled();
+    });
+
+    it('la misma id en mayúsculas colisiona: se compara en minúsculas', async () => {
+      const { modelo, service } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      await expect(
+        service.create(
+          {
+            nombre: 'X',
+            usaGestionEdificios: true,
+            websaco3CopropiedadId: ID.toUpperCase(),
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(modelo.exists).toHaveBeenCalledWith({
+        websaco3CopropiedadId: ID,
+      });
+    });
+
+    it('sin id (flag apagado o no enviado) nunca consulta ni choca', async () => {
+      const { modelo, service } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      await service.create({ nombre: 'X' }, ACTOR);
+      await service.create(
+        { nombre: 'Y', usaGestionEdificios: false, websaco3CopropiedadId: ID },
+        ACTOR,
+      );
+
+      expect(modelo.exists).not.toHaveBeenCalled();
+      expect(modelo.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('una carrera: E11000 sobre websaco3CopropiedadId se traduce a 409, no a 500', async () => {
+      const { modelo, service } = construirService([documento()]);
+      modelo.create.mockRejectedValueOnce(
+        errorDuplicado('websaco3CopropiedadId'),
+      );
+
+      await expect(
+        service.create(
+          { nombre: 'X', usaGestionEdificios: true, websaco3CopropiedadId: ID },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('un E11000 sobre otra clave no se disfraza: se relanza tal cual', async () => {
+      const { modelo, service } = construirService([documento()]);
+      const original = errorDuplicado('codigo');
+      modelo.create.mockRejectedValueOnce(original);
+
+      await expect(
+        service.create(
+          { nombre: 'X', usaGestionEdificios: true, websaco3CopropiedadId: ID },
+          ACTOR,
+        ),
+      ).rejects.toBe(original);
+    });
+  });
+
+  describe('actualizar', () => {
+    it('un id usado por OTRA copropiedad responde 409 y no escribe', async () => {
+      const { modelo, service } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      await expect(
+        service.update(
+          'cop-1',
+          { usaGestionEdificios: true, websaco3CopropiedadId: ID },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(modelo.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('la consulta excluye a la propia copropiedad: reenviar su id no choca consigo misma', async () => {
+      const { modelo, service } = construirService([
+        documento({ usaGestionEdificios: true, websaco3CopropiedadId: ID }),
+      ]);
+
+      await service.update('cop-1', { websaco3CopropiedadId: ID }, ACTOR);
+
+      expect(modelo.exists).toHaveBeenCalledWith({
+        websaco3CopropiedadId: ID,
+        _id: { $ne: 'cop-1' },
+      });
+      expect(modelo.escrituras[0]).toEqual({ websaco3CopropiedadId: ID });
+    });
+
+    it('la variante en mayúsculas también choca y se guarda en minúsculas', async () => {
+      const libre = construirService([documento()]);
+      await libre.service.update(
+        'cop-1',
+        { usaGestionEdificios: true, websaco3CopropiedadId: ID.toUpperCase() },
+        ACTOR,
+      );
+      expect(libre.modelo.exists).toHaveBeenCalledWith({
+        websaco3CopropiedadId: ID,
+        _id: { $ne: 'cop-1' },
+      });
+      expect(libre.modelo.escrituras[0]).toEqual({
+        usaGestionEdificios: true,
+        websaco3CopropiedadId: ID,
+      });
+
+      const ocupado = construirService([documento()], { duplicado: true });
+      await expect(
+        ocupado.service.update(
+          'cop-1',
+          {
+            usaGestionEdificios: true,
+            websaco3CopropiedadId: ID.toUpperCase(),
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('omitir el id (null contra null) no consulta ni choca aunque haya otras sin id', async () => {
+      const { modelo, service } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
+
+      expect(modelo.exists).not.toHaveBeenCalled();
+      expect(modelo.escrituras[0]).toEqual({ ciudad: 'Cali' });
+    });
+
+    it('apagar el flag limpia el id, no consulta y libera el id para otra copropiedad', async () => {
+      const { modelo, service } = construirService(
+        [documento({ usaGestionEdificios: true, websaco3CopropiedadId: ID })],
+        { duplicado: true },
+      );
+
+      await service.update('cop-1', { usaGestionEdificios: false }, ACTOR);
+
+      expect(modelo.exists).not.toHaveBeenCalled();
+      expect(modelo.escrituras[0]).toEqual({
+        usaGestionEdificios: false,
+        websaco3CopropiedadId: null,
+      });
+    });
+
+    it('una carrera: E11000 sobre websaco3CopropiedadId se traduce a 409, no a 500', async () => {
+      const { modelo, service } = construirService([documento()]);
+      modelo.findByIdAndUpdate.mockReturnValueOnce({
+        exec: () => Promise.reject(errorDuplicado('websaco3CopropiedadId')),
+      });
+
+      await expect(
+        service.update(
+          'cop-1',
+          { usaGestionEdificios: true, websaco3CopropiedadId: ID },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('un E11000 sobre otra clave no se disfraza: se relanza tal cual', async () => {
+      const { modelo, service } = construirService([documento()]);
+      const original = errorDuplicado('codigo');
+      modelo.findByIdAndUpdate.mockReturnValueOnce({
+        exec: () => Promise.reject(original),
+      });
+
+      await expect(
+        service.update('cop-1', { ciudad: 'Cali' }, ACTOR),
+      ).rejects.toBe(original);
     });
   });
 });

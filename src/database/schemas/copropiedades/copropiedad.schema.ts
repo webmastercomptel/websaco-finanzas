@@ -123,7 +123,17 @@ export class Copropiedad {
    *
    * Invariant kept by `CopropiedadesService`: non-null if and only if
    * `usaGestionEdificios` is true. Legacy documents lack the key entirely;
-   * the mapper reads those as null. Deliberately not unique or indexed.
+   * the mapper reads those as null.
+   *
+   * Unique when set: no two coproperties may hold the same id (the inbound
+   * holders pull resolves a coproperty BY this id, so a duplicate would make
+   * it ambiguous). Enforced twice — a write-time check in
+   * `CopropiedadesService` (409 with a sentence) and the partial unique index
+   * declared at the bottom of this file (closes the race). The index ignores
+   * `null`/absent values, so unlinked coproperties never collide. It is
+   * created by `scripts/migrate-copropiedad-websaco3-id-index.js`, which
+   * lists duplicates first: boot-time creation fails SILENTLY when
+   * duplicates exist, so the app must never depend on it being there.
    */
   @Prop({ type: String, default: null, trim: true, lowercase: true })
   websaco3CopropiedadId: string | null;
@@ -266,3 +276,19 @@ export class Copropiedad {
 }
 
 export const CopropiedadSchema = SchemaFactory.createForClass(Copropiedad);
+
+/**
+ * Default name `websaco3CopropiedadId_1`. `$type: 'string'` (not `$exists` or
+ * a sparse index) is what lets many coproperties hold `null` side by side: a
+ * partial filter cannot use `$ne: null`, but it can match "is a string".
+ * Keep name and options identical to the ones in
+ * `scripts/migrate-copropiedad-websaco3-id-index.js`, or Mongo reports an
+ * IndexOptionsConflict.
+ */
+CopropiedadSchema.index(
+  { websaco3CopropiedadId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { websaco3CopropiedadId: { $type: 'string' } },
+  },
+);
