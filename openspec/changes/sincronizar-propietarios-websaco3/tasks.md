@@ -74,12 +74,12 @@ Deploy order: gate A -> PR 1 -> PR 2a -> PR 2b -> PR 3 (backend AND `../frontend
 
 ## Phase 4: PR 3, immutable `codigo` (verify: delegated in backend and `../frontend`; rollback: revert both)
 
-- [ ] 4.1 RED `src/modules/inmuebles/inmuebles-escritura.service.spec.ts`: rewrite the two `update`-with-`codigo` duplicate tests (~lines 241, 265); different/case-only -> 400; equal/padded resend ignored and absent from `$set`; omitted ok; foreign unit 404; other fields editable; `create` duplicate still 409; `importar` unchanged (Req: Inmueble.codigo is immutable after creation; Creation and import of new units keep working)
-- [ ] 4.2 GREEN `inmuebles.service.ts` `update`: tenant-scoped `findOne({ _id, copropiedadId })` (null = 404), 400 with the Spanish message, drop `codigo` from `$set`, remove the dead duplicate check (D14)
-- [ ] 4.3 `dto/guardar-inmueble.dto.ts`: docblock only on `ActualizarInmuebleDto.codigo`
-- [ ] 4.4 RED `../frontend/src/pages/inmueble-form.test.tsx`: "Inmueble" disabled with help text on edit, payload carries the stored code; editable and required on create (Req: Frontend code field is read-only on edit)
-- [ ] 4.5 GREEN `../frontend/src/pages/inmueble-form.tsx`: `disabled` + `ayuda` when `esEdicion`; `datos.codigo = inmueble.codigo` on edit (D17)
-- [ ] 4.6 `CLAUDE.md` (backend): note `Inmueble.codigo` is immutable
+- [x] 4.1 RED `src/modules/inmuebles/inmuebles-escritura.service.spec.ts`: rewrite the two `update`-with-`codigo` duplicate tests (~lines 241, 265); different/case-only -> 400; equal/padded resend ignored and absent from `$set`; omitted ok; foreign unit 404; other fields editable; `create` duplicate still 409; `importar` unchanged (Req: Inmueble.codigo is immutable after creation; Creation and import of new units keep working)
+- [x] 4.2 GREEN `inmuebles.service.ts` `update`: tenant-scoped `findOne({ _id, copropiedadId })` (null = 404), 400 with the Spanish message, drop `codigo` from `$set`, remove the dead duplicate check (D14)
+- [x] 4.3 `dto/guardar-inmueble.dto.ts`: docblock only on `ActualizarInmuebleDto.codigo`
+- [x] 4.4 RED `../frontend/src/pages/inmueble-form.test.tsx`: "Inmueble" disabled with help text on edit, payload carries the stored code; editable and required on create (Req: Frontend code field is read-only on edit)
+- [x] 4.5 GREEN `../frontend/src/pages/inmueble-form.tsx`: `disabled` + `ayuda` when `esEdicion`; `datos.codigo = inmueble.codigo` on edit (D17)
+- [x] 4.6 `CLAUDE.md` (backend): note `Inmueble.codigo` is immutable
 
 ## Not planned
 
