@@ -17,9 +17,12 @@
 //   1. Groups the coproperties that hold a string `websaco3CopropiedadId` by
 //      its trimmed, lowercased value and prints every group with more than one
 //      member (id, codigo, nombre, raw stored value).
-//   2. Prints, as information, the stored values that are not normalized
-//      (surrounding spaces or uppercase). They are not blockers by themselves.
-//   3. If any duplicate group exists: creates NO index and exits with code 1.
+//   2. Prints the stored values that are not normalized (surrounding spaces or
+//      uppercase). They BLOCK the index: it is case-sensitive and the service
+//      always looks the id up lowercased, so such a value would let a duplicate
+//      through unnoticed.
+//   3. If any duplicate group or any non-normalized value exists: creates NO
+//      index and exits with code 1.
 //   4. Otherwise creates the index `websaco3CopropiedadId_1` — unique, partial
 //      on `{ websaco3CopropiedadId: { $type: 'string' } }`, the exact name and
 //      options declared in `copropiedad.schema.ts`. Idempotent: a second run
@@ -157,7 +160,8 @@ async function main() {
     if (noNormalizados.length > 0) {
       console.log(
         `[migrate] Valores guardados sin normalizar (espacios o mayúsculas): ${noNormalizados.length}. ` +
-          'No bloquean el índice por sí solos; se informan para que los corrijas.',
+          'BLOQUEAN el índice: es sensible a mayúsculas y el sistema busca siempre en minúsculas, ' +
+          'así que un valor así dejaría pasar un duplicado. Corregilos (minúsculas, sin espacios).',
       );
       for (const c of noNormalizados) {
         console.log(
@@ -181,6 +185,15 @@ async function main() {
       console.error(
         '[migrate] No se creó ningún índice. Corregí los duplicados (dejá cada ID en una sola ' +
           'copropiedad) y volvé a correr el script.',
+      );
+      process.exitCode = 1;
+      return;
+    }
+
+    if (noNormalizados.length > 0) {
+      console.error(
+        '[migrate] No se creó ningún índice: hay valores sin normalizar (ver arriba). ' +
+          'Dejalos en minúsculas y sin espacios, y volvé a correr el script.',
       );
       process.exitCode = 1;
       return;
