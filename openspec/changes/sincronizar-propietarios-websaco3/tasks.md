@@ -49,14 +49,14 @@ Deploy order: gate A -> PR 1 -> PR 2a -> PR 2b -> PR 3 (backend AND `../frontend
 
 ## Phase 2: PR 2a, signature primitives and guard (verify: delegated; rollback: revert)
 
-- [ ] 2.1 RED `src/common/utils/hmac.spec.ts`: known-answer vector; `hmacHexEquals` false on length mismatch/non-hex, never throws (Req: Signed request authentication)
-- [ ] 2.2 GREEN `src/common/utils/hmac.ts`: `hmacSha256Hex`, `hmacHexEquals` (D2)
-- [ ] 2.3 `publicacion-facturas.firma.ts`: `firmar` delegates to `hmacSha256Hex(secret, \`${ts}.${body}\`)`; existing spec stays green unchanged (regression proof)
-- [ ] 2.4 RED `integraciones-websaco3/propietarios.firma.spec.ts`: `consultaCanonica` order independence, encoding, empty; `cadenaFirmaPropietarios` byte-exact against a literal vector (shared with WebSaco3) (Req: Signed request authentication; scenario Uppercase id signed as sent)
-- [ ] 2.5 GREEN `propietarios.firma.ts`: `PROPOSITO`, `VENTANA_SEGUNDOS = 300`, `consultaCanonica`, `cadenaFirmaPropietarios` (D3)
-- [ ] 2.6 RED `firma-websaco3.guard.spec.ts`: valid; wrong secret; one digit altered; missing/duplicate/malformed headers; non-numeric ts; +/-300 pass, +/-301 fail; other query/path/trailing slash/HEAD; `${ts}.${body}` signature; secret unset reads nothing; no header values in logs (Req: Signed request authentication; Timestamp window; Fail closed without a secret)
-- [ ] 2.7 GREEN `firma-websaco3.guard.ts`: D4 order, single opaque `UnauthorizedException`, reason-only `logger.warn`
-- [ ] 2.8 RED/GREEN `src/config/env.validation.ts` + new `env.validation.spec.ts`: `.and(URL, TRIGGER).with(URL, SECRET)`; secret alone boots; URL without secret fails; URL+secret without trigger fails; all three boot; none boots; update the comment (Req: Fail closed without a secret, scenario Only the secret configured)
+- [x] 2.1 RED `src/common/utils/hmac.spec.ts`: known-answer vector; `hmacHexEquals` false on length mismatch/non-hex, never throws (Req: Signed request authentication)
+- [x] 2.2 GREEN `src/common/utils/hmac.ts`: `hmacSha256Hex`, `hmacHexEquals` (D2)
+- [x] 2.3 `publicacion-facturas.firma.ts`: `firmar` delegates to `hmacSha256Hex(secret, \`${ts}.${body}\`)`; existing spec stays green unchanged (regression proof)
+- [x] 2.4 RED `integraciones-websaco3/propietarios.firma.spec.ts`: `consultaCanonica` order independence, encoding, empty; `cadenaFirmaPropietarios` byte-exact against a literal vector (shared with WebSaco3) (Req: Signed request authentication; scenario Uppercase id signed as sent)
+- [x] 2.5 GREEN `propietarios.firma.ts`: `PROPOSITO`, `VENTANA_SEGUNDOS = 300`, `consultaCanonica`, `cadenaFirmaPropietarios` (D3)
+- [x] 2.6 RED `firma-websaco3.guard.spec.ts`: valid; wrong secret; one digit altered; missing/duplicate/malformed headers; non-numeric ts; +/-300 pass, +/-301 fail; other query/path/trailing slash/HEAD; `${ts}.${body}` signature; secret unset reads nothing; no header values in logs (Req: Signed request authentication; Timestamp window; Fail closed without a secret)
+- [x] 2.7 GREEN `firma-websaco3.guard.ts`: D4 order, single opaque `UnauthorizedException`, reason-only `logger.warn`
+- [x] 2.8 RED/GREEN `src/config/env.validation.ts` + new `env.validation.spec.ts`: `.and(URL, TRIGGER).with(URL, SECRET)`; secret alone boots; URL without secret fails; URL+secret without trigger fails; all three boot; none boots; update the comment (Req: Fail closed without a secret, scenario Only the secret configured)
 
 ## Phase 3: PR 2b, endpoint (verify: delegated incl. integration spec; rollback: unset secret or delete module)
 
