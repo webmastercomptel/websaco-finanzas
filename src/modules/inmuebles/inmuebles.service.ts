@@ -1,5 +1,6 @@
 // src/modules/inmuebles/inmuebles.service.ts
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -179,6 +180,12 @@ export class InmueblesService {
    * Only the fields present in the patch are touched. A unit is retired by
    * setting `estado` to `inactivo`; there is deliberately no delete, because
    * removing a unit orphans every document ever issued against it.
+   *
+   * The `codigo` is immutable after creation: the other system links units by
+   * it, so a change here would silently detach their holders. A different code
+   * is a 400; the same code (the form resends it on every edit, possibly
+   * padded) is ignored and never written. Because of that there is no
+   * duplicate check here — the code cannot change, so it cannot newly clash.
    */
   async update(
     id: string,
@@ -186,26 +193,32 @@ export class InmueblesService {
   ): Promise<InmuebleContract> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
 
-    if (dto.codigo) {
-      // Another unit in the same building already using the code. `$ne`
-      // excludes this one, so saving without changing the code is not a clash
-      // with itself.
-      const chocaConOtro = await this.inmuebles
-        .exists(this.filtroCodigoDuplicado(copropiedadId, dto.codigo, id))
-        .exec();
-      if (chocaConOtro) {
-        throw new ConflictException(
-          `Ya existe otro inmueble con el código ${dto.codigo} en esta copropiedad`,
-        );
-      }
+    // Tenant-scoped read first, so a unit of another building answers 404 even
+    // when the patch carries a different code (400 would confirm the id exists).
+    const guardado = await this.inmuebles
+      .findOne({ _id: id, copropiedadId })
+      .select('codigo')
+      .lean()
+      .exec();
+    if (!guardado) {
+      throw new NotFoundException(`No se encontró el inmueble ${id}`);
     }
+
+    if (dto.codigo !== undefined && dto.codigo.trim() !== guardado.codigo) {
+      throw new BadRequestException(
+        'El código de un inmueble no se puede modificar después de crearlo.',
+      );
+    }
+
+    const cambios = this.aDocumento(dto);
+    delete cambios.codigo;
 
     const actualizado = await this.inmuebles
       .findOneAndUpdate(
         // The tenant is part of the match, not a check afterwards: this is what
         // stops an id from another building being edited.
         { _id: id, copropiedadId },
-        { $set: this.aDocumento(dto) },
+        { $set: cambios },
         { returnDocument: 'after' },
       )
       .exec();
@@ -516,10 +529,10 @@ export class InmueblesService {
   }
 
   /**
-   * The filter behind every "does this code already exist" check — `create`,
-   * `update` and `importar` all use it, manual entry and bulk file alike, so
-   * a unit can never be duplicated by one path when the other would have
-   * caught it.
+   * The filter behind every "does this code already exist" check — `create`
+   * and `importar` use it, manual entry and bulk file alike, so a unit can
+   * never be duplicated by one path when the other would have caught it
+   * (`update` no longer needs it: the code is immutable).
    *
    * Case- and whitespace-insensitive on purpose: the unique index and the
    * schema's own `trim: true` only protect an EXACT string, so "301",

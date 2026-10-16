@@ -135,6 +135,7 @@ maintainer works.
 | Tenant reference (the tenancy-law field) | `copropiedadId` | `coPropertyId` — renamed globally in its own dedicated batch; only `resolveCoPropertyId()`/`activeCoPropertyIdOrNull()` (TS method names) and the `X-CoProperty-Id` HTTP header stay in English, both wire/API-level, not the schema field |
 | Electronic-invoicing identification (Tercero) | `tipoIdentificacionFe` / `numeroIdentificacionFe` / `digitoVerificacionFe` | `einvoiceIdentificationType` etc. |
 | Collections/arrears status (Inmueble) | `estadoCartera` | `collectionStatus` |
+| Unit code (Inmueble) | `codigo` | *(immutable after creation)* — `InmueblesService.update` answers 400 for a different code and ignores one equal to the stored value (padded or not), never writing it; WebSaco3 links units by it. Creation and `importar` of new rows still set it. Mirrored in the frontend by a disabled "Inmueble" field on edit |
 | Active/inactive record status (Account, Asignacion, Copropiedad, EntidadAdministradora, Inmueble, Tercero) | `estado` | `status` — enum VALUES stay English (`'active'`/`'inactive'`) even though the field name is Spanish; this is an established inconsistency from batch 1, not something to silently "fix" mid-batch |
 | Colombian tax id (Copropiedad, EntidadAdministradora — the entity's own NIT, not a party's identification) | `nit` | `taxId` — paired with the already-established `digitoVerificacion` |
 | Assignment target discriminator (Asignacion) | `alcance` | `scope` |

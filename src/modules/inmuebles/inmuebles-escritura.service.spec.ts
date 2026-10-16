@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -28,13 +29,17 @@ const documento = () => ({
 });
 
 /** Records what was written, and whether a duplicate was reported. */
-const modeloCon = (opts: { duplicado?: boolean } = {}) => {
+const modeloCon = (
+  opts: { duplicado?: boolean; sinInmueble?: boolean } = {},
+) => {
   const escrituras: Record<string, unknown>[] = [];
   const filtros: Filtro[] = [];
+  const lecturas: Filtro[] = [];
 
   return {
     escrituras,
     filtros,
+    lecturas,
     exists: jest.fn((filtro: Filtro) => {
       filtros.push(filtro);
       return {
@@ -52,11 +57,32 @@ const modeloCon = (opts: { duplicado?: boolean } = {}) => {
         return { exec: () => Promise.resolve(documento()) };
       },
     ),
-    findOne: jest.fn(() => ({
-      populate: () => ({ exec: () => Promise.resolve(documento()) }),
-    })),
+    findOne: jest.fn((filtro: Filtro) => {
+      lecturas.push(filtro);
+      return {
+        populate: () => ({ exec: () => Promise.resolve(documento()) }),
+        // The code check in `update` reads only the stored code, tenant-scoped.
+        select: () => ({
+          lean: () => ({
+            exec: () =>
+              Promise.resolve(opts.sinInmueble ? null : { codigo: '301' }),
+          }),
+        }),
+      };
+    }),
   };
 };
+
+const nuevoServicio = (modelo: ReturnType<typeof modeloCon>) =>
+  new InmueblesService(
+    modelo as never,
+    {} as never,
+    {} as never,
+    tenant,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
 
 const tenant = {
   resolveCoPropertyId: () => COP,
@@ -226,50 +252,88 @@ describe('InmueblesService.update', () => {
     expect(modelo.escrituras[0]).not.toHaveProperty('estado');
   });
 
-  it('no choca consigo mismo al guardar sin cambiar el código', async () => {
+  // The two tests that used to live here asserted the duplicate check inside
+  // `update` ("no choca consigo mismo" / "rechaza un código que ya existe con
+  // otra capitalización"). The code is immutable now, so that check is gone.
+  it('ignora el código reenviado igual al guardado y no lo escribe', async () => {
+    // El formulario reenvía el código en cada edición; no es un cambio.
     const modelo = modeloCon();
-    const service = new InmueblesService(
-      modelo as never,
-      {} as never,
-      {} as never,
-      tenant,
-      {} as never,
-      {} as never,
-      {} as never,
+    const service = nuevoServicio(modelo);
+
+    await service.update('inm-1', { codigo: '301', zona: 'Norte' });
+
+    expect(modelo.escrituras[0]).toEqual({ zona: 'Norte' });
+    expect(modelo.escrituras[0]).not.toHaveProperty('codigo');
+    expect(modelo.exists).not.toHaveBeenCalled();
+  });
+
+  it('ignora el código reenviado con espacios alrededor', async () => {
+    const modelo = modeloCon();
+    const service = nuevoServicio(modelo);
+
+    await service.update('inm-1', { codigo: '  301 ', zona: 'Norte' });
+
+    expect(modelo.escrituras[0]).toEqual({ zona: 'Norte' });
+  });
+
+  it('rechaza con 400 un código distinto al guardado, sin escribir', async () => {
+    const modelo = modeloCon();
+    const service = nuevoServicio(modelo);
+
+    const intento = service.update('inm-1', { codigo: '302' });
+
+    await expect(intento).rejects.toBeInstanceOf(BadRequestException);
+    await expect(intento).rejects.toThrow(
+      'El código de un inmueble no se puede modificar después de crearlo.',
     );
+    expect(modelo.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(modelo.exists).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con 400 un cambio solo de mayúsculas del código', async () => {
+    const modelo = modeloCon();
+    modelo.findOne = jest.fn(() => ({
+      select: () => ({
+        lean: () => ({
+          exec: () => Promise.resolve({ codigo: 'Torre A-301' }),
+        }),
+      }),
+    })) as never;
+    const service = nuevoServicio(modelo);
+
+    await expect(
+      service.update('inm-1', { codigo: 'torre a-301' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(modelo.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('lee el código guardado dentro de la copropiedad activa', async () => {
+    const modelo = modeloCon();
+    const service = nuevoServicio(modelo);
 
     await service.update('inm-1', { codigo: '301' });
 
-    expect(modelo.filtros[0]).toEqual({
-      copropiedadId: COP,
-      codigo: { $regex: '^301$', $options: 'i' },
-      _id: { $ne: 'inm-1' },
-    });
+    expect(modelo.lecturas[0]).toEqual({ _id: 'inm-1', copropiedadId: COP });
   });
 
-  it('rechaza un código que ya existe con otra capitalización o espacios', async () => {
-    // "301", " 301" y "Torre A-301"/"torre a-301" deben tratarse como el
-    // mismo código — ver `filtroCodigoDuplicado`.
-    const modelo = modeloCon({ duplicado: true });
-    const service = new InmueblesService(
-      modelo as never,
-      {} as never,
-      {} as never,
-      tenant,
-      {} as never,
-      {} as never,
-      {} as never,
-    );
+  it('acepta un patch sin código y sigue permitiendo editar otros campos', async () => {
+    const modelo = modeloCon();
+    const service = nuevoServicio(modelo);
+
+    await service.update('inm-1', { zona: 'Sur', bloque: 'B' });
+
+    expect(modelo.escrituras[0]).toEqual({ zona: 'Sur', bloque: 'B' });
+  });
+
+  it('responde "no existe" (404) si el inmueble es de otra copropiedad, aunque traiga otro código', async () => {
+    // Sin esto, un código distinto devolvería 400 y confirmaría que el id existe.
+    const modelo = modeloCon({ sinInmueble: true });
+    const service = nuevoServicio(modelo);
 
     await expect(
-      service.update('inm-1', { codigo: ' Torre A-301 ' }),
-    ).rejects.toBeInstanceOf(ConflictException);
-
-    expect(modelo.filtros[0]).toEqual({
-      copropiedadId: COP,
-      codigo: { $regex: '^Torre A-301$', $options: 'i' },
-      _id: { $ne: 'inm-1' },
-    });
+      service.update('inm-ajeno', { codigo: '999' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(modelo.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('responde "no existe" para un inmueble de otra copropiedad', async () => {

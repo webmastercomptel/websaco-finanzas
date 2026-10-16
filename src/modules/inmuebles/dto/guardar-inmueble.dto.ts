@@ -116,6 +116,11 @@ export class CrearInmuebleDto extends CamposInmuebleDto {
  * `InmueblesEliminacionService`'s hard delete (only for a unit that has
  * never been billed at all). Marking `inactivo` never touches a single past
  * Factura/Recibo/etc.
+ *
+ * `codigo` stays accepted but is IMMUTABLE after creation: the service answers
+ * 400 for a different code and ignores one equal to the stored value. It is not
+ * dropped from this DTO so the form (which resends it) gets that clear message
+ * instead of a generic "property should not exist".
  */
 export class ActualizarInmuebleDto extends CamposInmuebleDto {
   @IsOptional()
