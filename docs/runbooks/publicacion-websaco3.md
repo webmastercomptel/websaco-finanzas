@@ -53,24 +53,31 @@ All four live in `src/config/env.validation.ts` and `src/config/app.config.ts`.
 | Variable | Required | Validation | Notes |
 |---|---|---|---|
 | `WEBSACO3_FACTURAS_ENDPOINT_URL` | all-or-none | `https` only when `NODE_ENV=production`; `http` or `https` otherwise | URL of WebSaco3's receiver |
-| `WEBSACO3_HMAC_SECRET` | all-or-none | string, minimum 32 characters | **Same value as WebSaco3's `WEBSACO3_HMAC_SECRET`.** Signs `${timestamp}.${rawBody}` (HMAC-SHA256, hex) sent as `X-Websaco-Timestamp` and `X-Websaco-Signature: sha256=<hex>` |
+| `WEBSACO3_HMAC_SECRET` | required with the URL; may also be set alone (see below) | string, minimum 32 characters | **Same value as WebSaco3's `WEBSACO3_HMAC_SECRET`.** Signs `${timestamp}.${rawBody}` (HMAC-SHA256, hex) sent as `X-Websaco-Timestamp` and `X-Websaco-Signature: sha256=<hex>`, and also authenticates the inbound holders pull (section 8) |
 | `WEBSACO3_PUBLICACION_TRIGGER_SECRET` | all-or-none | string, minimum 32 characters | The value the operator sends as the `X-Scheduler-Secret` header of the manual sweep. Not shared with WebSaco3. MUST differ from the HMAC secret so either can rotate or leak on its own |
 | `WEBSACO3_PUBLICACION_MAX_INTENTOS` | optional | integer from 1 to 20, default `6` | Total attempts per row, **including the first one**. It is NOT part of the all-or-none group |
 
 ### All-or-none rule (exactly what `env.validation.ts` enforces)
 
-The Joi schema ends with
-`.and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')`.
-So the first three variables must be either **all present or all absent**:
+The Joi schema uses
+`.and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET').with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET')`.
+So the receiver URL and the trigger secret go together, and the URL also needs
+the HMAC secret. The HMAC secret alone is valid (it enables only the holders
+pull of section 8):
 
 - All three absent: the app boots and publication is switched off. Rows are
   still enqueued for enabled coproperties and stay `pendiente`; `publicarAhora`
   does nothing; the sweep endpoint answers `401` to every call, because the guard
-  fails closed when the trigger secret is not configured.
+  fails closed when the trigger secret is not configured. The holders pull
+  answers `401` too, because it also needs the HMAC secret.
+- Only `WEBSACO3_HMAC_SECRET` present: the app boots, publication stays off, and
+  the holders pull works (section 8). This is the only relaxation compared with
+  the previous rule; no variable was added.
 - All three present: publication is on.
-- One or two present: **the app refuses to boot** with a Joi error naming the
-  missing keys. This is deliberate; a partial set would leave rows stuck in
-  `pendiente` with no boot-time signal.
+- The URL without the secret, or the URL without the trigger secret (or the
+  trigger secret without the URL): **the app refuses to boot** with a Joi error
+  naming the missing keys. This is deliberate; a partial set would leave rows
+  stuck in `pendiente` with no boot-time signal.
 
 `WEBSACO3_PUBLICACION_MAX_INTENTOS` is validated on its own: unset means `6`, and
 a value outside 1-20 or a non-integer fails boot.
@@ -305,15 +312,123 @@ lines have NOT been added. Append them by hand. They stay commented out because
 the first three must be set together or not at all (an empty value also fails
 validation):
 
+Change `holders-endpoint` (PR 2b) adds NO variable. The only edit to the existing
+block is the comment above `WEBSACO3_HMAC_SECRET` (and the first comment line),
+because the secret may now be set alone. Replace the block with:
+
 ```
 # --- Outbound publication to WebSaco3 (optional) ---
-# The first three go together: set all of them or none, or the app will not boot.
+# The receiver URL and the trigger secret go together (set both or neither), and the URL also needs WEBSACO3_HMAC_SECRET; otherwise the app will not boot.
 # Receiver URL. https only when NODE_ENV=production; http or https otherwise.
 # WEBSACO3_FACTURAS_ENDPOINT_URL=
-# At least 32 characters. Same value as WebSaco3's WEBSACO3_HMAC_SECRET.
+# Shared with WebSaco3. Signs the outbound invoice publication AND authenticates the inbound GET /integraciones/websaco3/propietarios (purpose-bound). May be set alone to enable only the holders endpoint; URL and trigger secret remain all-or-none with each other. At least 32 characters.
 # WEBSACO3_HMAC_SECRET=
 # At least 32 characters. Sent by the operator as the X-Scheduler-Secret header of the manual sweep curl; distinct from WEBSACO3_HMAC_SECRET.
 # WEBSACO3_PUBLICACION_TRIGGER_SECRET=
 # Total attempts per row including the first (integer 1-20). Optional; defaults to 6.
 # WEBSACO3_PUBLICACION_MAX_INTENTOS=6
 ```
+
+## 8. Inbound holders pull (WebSaco3 reads unit holders)
+
+The opposite direction of everything above: WebSaco3 calls Finanzas to read who
+holds each unit of a coproperty. Read-only, no writes, no events. Code lives in
+`src/modules/integraciones-websaco3/` and is independent of
+`publicacion-facturas`: removing either leaves the other working.
+
+`GET /api/v1/integraciones/websaco3/propietarios?websaco3CopropiedadId=<24 hex>`
+
+### 8.1 How WebSaco3 calls it
+
+- No Firebase token, no `X-CoProperty-Id` (ignored if sent). The coproperty is the
+  one whose `websaco3CopropiedadId` equals the query value and that has
+  `usaGestionEdificios` on.
+- Two headers: `X-Websaco-Timestamp` (epoch seconds, decimal digits, within 300 s
+  of the server clock in either direction) and
+  `X-Websaco-Signature: sha256=<64 lowercase hex>`.
+- Signature = HMAC-SHA256 (key `WEBSACO3_HMAC_SECRET`) of this string, `\n` = LF,
+  no trailing newline:
+
+  ```
+  propietarios.v1\n${ts}\n${METHOD}\n${path}\n${sortedQuery}
+  ```
+
+  `METHOD` is the method as sent (`GET`; a `HEAD` replay fails). `path` is the
+  request path WITHOUT the query, INCLUDING `/api/v1`, exactly as sent (a
+  trailing slash makes it a different path). `sortedQuery` is the query pairs,
+  each side percent-encoded with `encodeURIComponent`, sorted by key then value
+  (UTF-16 code-unit order), joined `k=v` with `&`; empty string when there is
+  no query. An uppercase id is signed exactly as sent; the server lowercases it
+  only afterwards for the lookup.
+- The signature is purpose-bound by the `propietarios.v1` prefix: a
+  `${ts}.${body}` signature of the invoice publication never verifies here.
+- The golden vector both sides must reproduce byte for byte is
+  `src/modules/integraciones-websaco3/propietarios.vector.ts`
+  (`VECTOR_COMPARTIDO`); WebSaco3's test holds the same values. Change both
+  sides together or neither. No `curl` is needed to test: reproduce the vector.
+- Success is the project envelope: read the payload from `.data`.
+
+```
+{ "statusCode": 200,
+  "data": { "copropiedad": { "nombre": "..." },
+            "unidades": [ { "codigo": "101", "tipo": "propietario" | "arrendatario",
+                            "titular": { "nombre": "...", "email": "..." | null,
+                                         "telefono": "..." | null } | null } ] } }
+```
+
+One entry per unit (every `estado`), ordered by `codigo`. `titular` is `null`
+when the unit has no holder, the party does not resolve inside that coproperty,
+or the party is `inactive`. `email` is the first non-empty email of the party.
+
+### 8.2 Shared secret
+
+Reuses `WEBSACO3_HMAC_SECRET`, the same value on both sides; there is no new
+variable. It may be set alone (see section 2). When it is missing or blank the
+route answers `401` to every call and reads nothing. Anyone with that key can
+now also read holder personal data (names, emails, phones), so rotate it on both
+sides together; the in-flight window is 300 s.
+
+### 8.3 Errors
+
+| Status | Meaning | What to check |
+|---|---|---|
+| `401` | Always opaque (same body whatever failed). Reason is in the server log only (`Pull de propietarios rechazado: ...`), never header values | Secret unset or different from WebSaco3's; missing or duplicated header; timestamp outside 300 s (clock skew); signature computed over a different method, path (trailing slash, missing `/api/v1`) or query; see the Cloud Run check below |
+| `400` | Signature fine, query not: `websaco3CopropiedadId` missing, not exactly 24 hex (a `0x` prefix, spaces or 23 characters fail), repeated, or any extra parameter | The caller's query string |
+| `404` | No coproperty has that id with `usaGestionEdificios` on | The id stored in Finanzas, and the flag |
+| `409` | More than one coproperty has the id (legacy duplicates; new ones are blocked by the unique index) | Run `node scripts/migrate-copropiedad-websaco3-id-index.js --listar` and fix the duplicates |
+| `422` | `demasiadas-unidades`: more than 2000 units. No partial snapshot | Terminal for the caller; needs a design change, not a retry |
+| `5xx` | Database or unexpected failure | The caller retries; `400`, `401`, `404`, `409` and `422` are terminal for it |
+
+### 8.4 Cloud Run `originalUrl` check (before the first real sync)
+
+The guard signs `request.originalUrl` as received. If Cloud Run or any proxy in
+front rewrites the path (prefix stripped, slash added or removed), every call
+fails with `401` although both sides compute "the same" signature. After
+deploying, make one real signed call from WebSaco3 (or a script that reproduces
+the vector with the real secret) and confirm `200`. A persistent `401` with a
+correct secret and a fresh timestamp means the path seen by the app differs from
+the one signed.
+
+### 8.5 Lines to add to `.env.example`
+
+No new variable. A human must apply the comment change shown in section 7 (the
+agents that prepared this change cannot read or edit `backend/.env.example`):
+keep `WEBSACO3_HMAC_SECRET=` and replace the comment above it with
+
+```
+# Shared with WebSaco3. Signs the outbound invoice publication AND authenticates the inbound GET /integraciones/websaco3/propietarios (purpose-bound). May be set alone to enable only the holders endpoint; URL and trigger secret remain all-or-none with each other. At least 32 characters.
+```
+
+### 8.6 Rollout and rollback
+
+- Do not set `FINANZAS_API_URL` in WebSaco3 until the immutable-`codigo` change
+  (backend and frontend) is deployed, so a unit code cannot change between syncs.
+- Run `scripts/migrate-copropiedad-websaco3-id-index.js` (`--listar` first)
+  before deploying the unique-id change: boot-time index creation fails silently
+  when duplicate ids exist.
+- Disable at once by unsetting `WEBSACO3_HMAC_SECRET` (the route answers `401`;
+  this also switches off invoice publication if it was on) or by deleting
+  `IntegracionesWebsaco3Module` and its import in `src/app.module.ts`.
+- Where things live: the 401 reason is the log line of `FirmaWebsaco3Guard`; the
+  uniqueness of the id is enforced by `CopropiedadesService.exigirIdWebsaco3Libre`
+  and the `websaco3CopropiedadId_1` partial unique index.

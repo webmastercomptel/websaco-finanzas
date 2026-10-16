@@ -36,6 +36,7 @@ import { HealthModule } from './modules/health/health.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicion-contabilidad.module';
 import { PublicacionFacturasModule } from './modules/publicacion-facturas/publicacion-facturas.module';
+import { IntegracionesWebsaco3Module } from './modules/integraciones-websaco3/integraciones-websaco3.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
 
 /**
@@ -99,6 +100,7 @@ import { BusquedaModule } from './modules/busqueda/busqueda.module';
     CatalogosModule,
     AdicionContabilidadModule,
     PublicacionFacturasModule,
+    IntegracionesWebsaco3Module,
     BusquedaModule,
   ],
 })

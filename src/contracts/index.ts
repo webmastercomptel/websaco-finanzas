@@ -2418,3 +2418,33 @@ export interface RespuestaBusqueda {
   notas?: ResultadoBusquedaDocumento[];
   inmuebles?: ResultadoBusquedaInmueble[];
 }
+
+/**
+ * Current holder of a unit as exposed to the building-management system.
+ * `email`/`telefono` are `null` when the party has none; the system matches
+ * accounts by email on its own side, so nothing is normalized here.
+ */
+export interface TitularWebsaco3 {
+  nombre: string;
+  email: string | null;
+  telefono: string | null;
+}
+
+/** One unit of the holders snapshot. `titular` is `null` when the unit has no
+ *  current holder (none assigned, retired party, or unresolvable). */
+export interface UnidadPropietarioWebsaco3 {
+  codigo: string;
+  tipo: 'propietario' | 'arrendatario';
+  titular: TitularWebsaco3 | null;
+}
+
+/**
+ * Payload (`data` of the envelope) of
+ * `GET /integraciones/websaco3/propietarios`: the complete current snapshot
+ * of one coproperty, one entry per `Inmueble` (every `estado`), ordered by
+ * `codigo`.
+ */
+export interface PropietariosWebsaco3 {
+  copropiedad: { nombre: string };
+  unidades: UnidadPropietarioWebsaco3[];
+}

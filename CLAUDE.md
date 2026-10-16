@@ -42,6 +42,8 @@ No Docker, no local database — Mongo (Atlas) and Redis (Redis Cloud) are manag
 
 Two of three sale configurations involve zero integration with the building-management system, so Finanzas must be complete alone: it owns all its data and never reads a catalog out of the other system. Where both exist, the integration is outbound-only and optional — Finanzas feeds the other system, never the reverse — enabled per coproperty (the flag is "this coproperty *also* uses the other system", not the other way round). The domain code must not know the other system exists; publishing lives at the edge, reacting to what the domain already recorded. Deleting the publishing side entirely should leave every financial module compiling, tested, and correct — that's the test for whether it's separated properly. Absence of the integration needs no fallback or warning state; for most clients it's simply not part of the product.
 
+The one inbound exception is a signed pull: `GET /integraciones/websaco3/propietarios` (`modules/integraciones-websaco3/`) serves the other system a read-only snapshot of unit holders. Its only guard is `FirmaWebsaco3Guard` (purpose-bound HMAC with `WEBSACO3_HMAC_SECRET`, no Firebase/CASL), the tenant is the coproperty looked up by the signed `websaco3CopropiedadId` (never a header), and no domain module imports it. See `docs/runbooks/publicacion-websaco3.md` section 8.
+
 ## The tenancy law
 
 Every query on tenant-owned data resolves the tenant from the request context, never the payload:
