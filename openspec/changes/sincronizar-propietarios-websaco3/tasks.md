@@ -39,13 +39,13 @@ Deploy order: gate A -> PR 1 -> PR 2a -> PR 2b -> PR 3 (backend AND `../frontend
 
 ## Phase 1: PR 1, uniqueness (verify: delegated typecheck/lint/test + script run on a DB copy)
 
-- [ ] 1.1 RED `src/modules/copropiedades/copropiedades.service.spec.ts`: free id ok; taken id 409 on create and update; case variant 409; self-update ok; null vs null ok; flag off frees the id; `11000` on the key maps to 409 (Req: websaco3CopropiedadId is unique when set)
-- [ ] 1.2 GREEN `copropiedades.service.ts`: private `exigirIdWebsaco3Libre(id, excluirId?)` after `aplicarReglaGestionEdificios` in `create`/`update`, trim+lowercase, `exists` with `_id $ne`, Spanish `ConflictException`, map `11000` (D12)
-- [ ] 1.3 `src/database/schemas/copropiedades/copropiedad.schema.ts`: `index({ websaco3CopropiedadId: 1 }, { unique: true, partialFilterExpression: { websaco3CopropiedadId: { $type: 'string' } } })`; rewrite the "Deliberately not unique" docblock (Req: Index is a partial unique index managed by a script)
-- [ ] 1.4 Create `scripts/migrate-copropiedad-websaco3-id-index.js` (bootstrap as `migrate-asiento-contable-facturaid-index.js`): group duplicates by `$toLower($trim)`, print ids/codigo/nombre and non-normalized values, exit 1 and no index if any; else idempotent `createIndex` with the schema's name/options; `--listar` lists only (Req: same; scenarios Duplicates present, Clean data)
+- [x] 1.1 RED `src/modules/copropiedades/copropiedades.service.spec.ts`: free id ok; taken id 409 on create and update; case variant 409; self-update ok; null vs null ok; flag off frees the id; `11000` on the key maps to 409 (Req: websaco3CopropiedadId is unique when set)
+- [x] 1.2 GREEN `copropiedades.service.ts`: private `exigirIdWebsaco3Libre(id, excluirId?)` after `aplicarReglaGestionEdificios` in `create`/`update`, trim+lowercase, `exists` with `_id $ne`, Spanish `ConflictException`, map `11000` (D12)
+- [x] 1.3 `src/database/schemas/copropiedades/copropiedad.schema.ts`: `index({ websaco3CopropiedadId: 1 }, { unique: true, partialFilterExpression: { websaco3CopropiedadId: { $type: 'string' } } })`; rewrite the "Deliberately not unique" docblock (Req: Index is a partial unique index managed by a script)
+- [x] 1.4 Create `scripts/migrate-copropiedad-websaco3-id-index.js` (bootstrap as `migrate-asiento-contable-facturaid-index.js`): group duplicates by `$toLower($trim)`, print ids/codigo/nombre and non-normalized values, exit 1 and no index if any; else idempotent `createIndex` with the schema's name/options; `--listar` lists only (Req: same; scenarios Duplicates present, Clean data)
 - [ ] 1.5 Manual on a DB copy: duplicates path exits 1, clean path creates, second run is a no-op (Req: same)
-- [ ] 1.6 Confirm with a test or comment that boot with duplicates is not blocked and the holders endpoint will answer 409 (Req: same, scenario Application boots with duplicates)
-- [ ] 1.7 `CLAUDE.md` (backend): update the `websaco3CopropiedadId` row to say unique when set
+- [x] 1.6 Confirm with a test or comment that boot with duplicates is not blocked and the holders endpoint will answer 409 (Req: same, scenario Application boots with duplicates)
+- [x] 1.7 `CLAUDE.md` (backend): update the `websaco3CopropiedadId` row to say unique when set
 
 ## Phase 2: PR 2a, signature primitives and guard (verify: delegated; rollback: revert)
 
