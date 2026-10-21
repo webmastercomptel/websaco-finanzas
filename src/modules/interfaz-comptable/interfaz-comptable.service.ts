@@ -450,7 +450,11 @@ export class InterfazComptableService {
    * "Enviar" picks those entries up again, and the lote becomes `retirado`
    * (kept as history). When the accountant edited the lote in Comptable,
    * Comptable refuses (`LOTE_INTERVENIDO`): its sentence is stored and
-   * returned verbatim, and the lote stays `enviado` for good.
+   * returned verbatim, and the lote stays `enviado` for good. When Comptable
+   * says it already withdrew it (`LOTE_YA_RETIRADO`, e.g. an earlier call
+   * that succeeded there but whose answer never arrived here), that is a
+   * success too: withdrawing is idempotent. The actor travels in the signed
+   * body (`solicitadoPor`) so Comptable's lote and audit name them.
    */
   async retirar(
     loteId: string,
@@ -472,11 +476,14 @@ export class InterfazComptableService {
     const resultado = await this.comptable.retirarLote(
       empresaId,
       lote._id.toString(),
+      actor,
     );
 
     switch (resultado.tipo) {
       case 'ok':
-        return this.marcarRetirado(lote, copropiedadId, actor);
+        return this.marcarRetirado(lote, copropiedadId, actor, false);
+      case 'yaRetirado':
+        return this.marcarRetirado(lote, copropiedadId, actor, true);
       case 'intervenido': {
         const mensaje =
           resultado.mensaje ??
@@ -492,6 +499,12 @@ export class InterfazComptableService {
         throw new ConflictException(
           resultado.mensaje ??
             `Comptable no tiene el lote ${lote.numero}; no se cambió nada aquí.`,
+        );
+      case 'rechazado':
+        // Only a malformed request body gets here (a contract mismatch
+        // between the two systems, not something the user can fix).
+        throw new BadGatewayException(
+          `Comptable rechazó la solicitud de retiro${resultado.mensaje ? `: ${resultado.mensaje}` : ''}. El lote ${lote.numero} sigue enviado.`,
         );
       case 'noConfigurado':
         throw this.noConfigurado();
@@ -713,11 +726,12 @@ export class InterfazComptableService {
   }
 
   /** `enviado` → `retirado`, releasing the stamps, after Comptable deleted
-   *  the lote there. */
+   *  the lote there — now, or earlier (`yaRetirado`, said in the audit). */
   private async marcarRetirado(
     lote: LoteComptableDocument,
     copropiedadId: Types.ObjectId,
     actor: ActorComptable,
+    yaRetirado: boolean,
   ): Promise<LoteComptableContract> {
     return this.transaccion(async (session) => {
       const actualizado = await this.lotes
@@ -754,7 +768,7 @@ export class InterfazComptableService {
         'retirar',
         actualizado,
         copropiedadId,
-        `retirado de Comptable: ${plural(actualizado.totalAsientos, 'documento vuelve', 'documentos vuelven')} a pendientes`,
+        `${yaRetirado ? 'retirado (Comptable ya lo había retirado)' : 'retirado de Comptable'}: ${plural(actualizado.totalAsientos, 'documento vuelve', 'documentos vuelven')} a pendientes`,
         session,
       );
       return toLoteComptable(actualizado);

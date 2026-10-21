@@ -46,7 +46,9 @@ export interface ResumenLoteComptable {
  *   `loteOrigenId`; the caller reconciles with `loteId` as if it were a 201.
  * - `intervenido` (409 `LOTE_INTERVENIDO`): an accountant edited the lote in
  *   Comptable, so it can no longer be withdrawn; `mensaje` is shown verbatim.
- * - `conflicto` (any other 409: month closed, already withdrawn…).
+ * - `yaRetirado` (409 `LOTE_YA_RETIRADO`): Comptable already withdrew this
+ *   lote; withdrawing is idempotent, so the caller treats it as success.
+ * - `conflicto` (any other 409: month closed…).
  * - `noEncontrado` (404), `firma` (401/403: wrong secret or clock skew).
  * - `timeout` / `red`: outcome UNKNOWN — Comptable may have written it.
  * - `inesperado`: any other status (5xx, a proxy's 502…).
@@ -61,6 +63,7 @@ export type ResultadoComptable<T> =
     }
   | { tipo: 'duplicado'; loteId: string | null; mensaje: string | null }
   | { tipo: 'intervenido'; mensaje: string | null }
+  | { tipo: 'yaRetirado'; mensaje: string | null }
   | { tipo: 'conflicto'; mensaje: string | null }
   | { tipo: 'noEncontrado'; mensaje: string | null }
   | { tipo: 'firma' }
@@ -120,15 +123,27 @@ export class ComptableClient {
     );
   }
 
-  /** Withdraws a lote previously sent with `loteOrigenId` (bodyless POST). */
+  /**
+   * Withdraws a lote previously sent with `loteOrigenId`. The body names the
+   * user who asked (`{ solicitadoPor: { accountId, nombre } }`), so Comptable's
+   * lote and audit trail say who it was; it is serialized once here and that
+   * exact string is signed and sent, like a lote.
+   */
   retirarLote(
     empresaId: string,
     loteOrigenId: string,
+    solicitadoPor: { accountId: string; nombre: string },
   ): Promise<ResultadoComptable<unknown>> {
+    const rawBody = JSON.stringify({
+      solicitadoPor: {
+        accountId: solicitadoPor.accountId,
+        nombre: solicitadoPor.nombre,
+      },
+    });
     return this.llamar<unknown>(
       'POST',
       `integraciones/websaco/empresas/${encodeURIComponent(empresaId)}/lotes/${encodeURIComponent(loteOrigenId)}/retirar`,
-      '',
+      rawBody,
     );
   }
 
@@ -227,6 +242,9 @@ export class ComptableClient {
         }
         if (campos.codigo === 'LOTE_INTERVENIDO') {
           return { tipo: 'intervenido', mensaje: campos.mensaje };
+        }
+        if (campos.codigo === 'LOTE_YA_RETIRADO') {
+          return { tipo: 'yaRetirado', mensaje: campos.mensaje };
         }
         return { tipo: 'conflicto', mensaje: campos.mensaje };
       default:

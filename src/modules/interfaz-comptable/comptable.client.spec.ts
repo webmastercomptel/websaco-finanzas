@@ -6,6 +6,7 @@ const BASE = 'https://comptable.ejemplo.com/api/v1';
 const SECRETO = 'comptable-test-secret-0123456789abcdef';
 const EMPRESA = '670000000000000000000001';
 const AHORA_MS = 1_792_512_000_000;
+const ACTOR = { accountId: '672000000000000000000001', nombre: 'Ana Pérez' };
 
 const mockConfig = (valores: Record<string, unknown>) => ({
   get: jest.fn((clave: string) => valores[clave]),
@@ -105,26 +106,33 @@ describe('ComptableClient', () => {
       expect(llamada()[0]).toMatch(/lotes\?simular=true$/);
     });
 
-    it('retirar es un POST sin cuerpo, firmado con cuerpo vacío', async () => {
+    it('retirar es un POST con { solicitadoPor }, firmado sobre ese cuerpo exacto', async () => {
       fetchMock.mockResolvedValue(
         respuesta(200, { statusCode: 200, data: {} }),
       );
 
-      await crearCliente().retirarLote(EMPRESA, '671000000000000000000001');
+      await crearCliente().retirarLote(
+        EMPRESA,
+        '671000000000000000000001',
+        ACTOR,
+      );
 
       const [url, init] = llamada();
       expect(url).toBe(
         `${BASE}/integraciones/websaco/empresas/${EMPRESA}/lotes/671000000000000000000001/retirar`,
       );
-      expect(init.body).toBeUndefined();
-      expect(
-        (init.headers as Record<string, string>)['X-Websaco-Signature'],
-      ).toBe(
+      const rawBody =
+        '{"solicitadoPor":{"accountId":"672000000000000000000001","nombre":"Ana Pérez"}}';
+      expect(init.method).toBe('POST');
+      expect(init.body).toBe(rawBody);
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Content-Type']).toBe('application/json');
+      expect(headers['X-Websaco-Signature']).toBe(
         `sha256=${firmarComptable(SECRETO, {
           timestamp: '1792512000',
           metodo: 'POST',
           ruta: `/api/v1/integraciones/websaco/empresas/${EMPRESA}/lotes/671000000000000000000001/retirar`,
-          rawBody: '',
+          rawBody,
         })}`,
       );
     });
@@ -159,6 +167,21 @@ describe('ComptableClient', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
+    it('ok: el 200 del retiro desenvuelve { lote, eliminados }', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(200, {
+          statusCode: 200,
+          data: { lote: { id: 'L1', estado: 'retirado' }, eliminados: 2 },
+        }),
+      );
+
+      expect(await crearCliente().retirarLote(EMPRESA, 'x', ACTOR)).toEqual({
+        tipo: 'ok',
+        status: 200,
+        datos: { lote: { id: 'L1', estado: 'retirado' }, eliminados: 2 },
+      });
+    });
+
     it('ok: desenvuelve data', async () => {
       fetchMock.mockResolvedValue(
         respuesta(200, {
@@ -171,6 +194,26 @@ describe('ComptableClient', () => {
         tipo: 'ok',
         status: 200,
         datos: { id: EMPRESA, codigo: '0001', nombre: 'Empresa', nit: '900' },
+      });
+    });
+
+    it('rechazado: 400 de validación del DTO (message lista) une los mensajes con "; "', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(400, {
+          statusCode: 400,
+          message: [
+            'Solo se acepta la versión 1 del contrato',
+            'asientos must contain at least 1 elements',
+          ],
+          error: 'Bad Request',
+        }),
+      );
+
+      expect(await crearCliente().enviarLote(EMPRESA, '{}', false)).toEqual({
+        tipo: 'rechazado',
+        mensaje:
+          'Solo se acepta la versión 1 del contrato; asientos must contain at least 1 elements',
+        errores: [],
       });
     });
 
@@ -195,6 +238,7 @@ describe('ComptableClient', () => {
         respuesta(409, {
           statusCode: 409,
           codigo: 'LOTE_YA_RECIBIDO',
+          message: 'Este lote ya fue recibido en Comptable (lote L1).',
           loteId: 'L1',
         }),
       );
@@ -202,7 +246,7 @@ describe('ComptableClient', () => {
       expect(await crearCliente().enviarLote(EMPRESA, '{}', false)).toEqual({
         tipo: 'duplicado',
         loteId: 'L1',
-        mensaje: null,
+        mensaje: 'Este lote ya fue recibido en Comptable (lote L1).',
       });
     });
 
@@ -212,43 +256,69 @@ describe('ComptableClient', () => {
       fetchMock.mockResolvedValue(
         respuesta(409, {
           statusCode: 409,
-          data: { codigo: 'LOTE_INTERVENIDO', message: mensaje },
+          codigo: 'LOTE_INTERVENIDO',
+          message: mensaje,
         }),
       );
 
-      expect(await crearCliente().retirarLote(EMPRESA, 'x')).toEqual({
+      expect(await crearCliente().retirarLote(EMPRESA, 'x', ACTOR)).toEqual({
         tipo: 'intervenido',
         mensaje,
       });
     });
 
-    it('conflicto: otro 409 (mes cerrado, ya retirado)', async () => {
+    it('yaRetirado: 409 LOTE_YA_RETIRADO', async () => {
       fetchMock.mockResolvedValue(
         respuesta(409, {
           statusCode: 409,
-          message: 'El mes 10/2026 está cerrado',
+          codigo: 'LOTE_YA_RETIRADO',
+          message: 'Este lote ya fue retirado de Comptable',
         }),
       );
 
-      expect(await crearCliente().retirarLote(EMPRESA, 'x')).toEqual({
+      expect(await crearCliente().retirarLote(EMPRESA, 'x', ACTOR)).toEqual({
+        tipo: 'yaRetirado',
+        mensaje: 'Este lote ya fue retirado de Comptable',
+      });
+    });
+
+    it('conflicto: otro 409 sin código (mes no abierto)', async () => {
+      const mensaje =
+        'No se puede retirar el lote: tiene asientos en meses que no están abiertos: 2026-10 (cerrado)';
+      fetchMock.mockResolvedValue(
+        respuesta(409, {
+          statusCode: 409,
+          message: mensaje,
+          error: 'Conflict',
+        }),
+      );
+
+      expect(await crearCliente().retirarLote(EMPRESA, 'x', ACTOR)).toEqual({
         tipo: 'conflicto',
-        mensaje: 'El mes 10/2026 está cerrado',
+        mensaje,
       });
     });
 
     it('noEncontrado: 404', async () => {
       fetchMock.mockResolvedValue(
-        respuesta(404, { statusCode: 404, message: 'No existe' }),
+        respuesta(404, {
+          statusCode: 404,
+          message: 'No existe una empresa activa con ese identificador',
+          error: 'Not Found',
+        }),
       );
 
       expect(await crearCliente().consultarEmpresa(EMPRESA)).toEqual({
         tipo: 'noEncontrado',
-        mensaje: 'No existe',
+        mensaje: 'No existe una empresa activa con ese identificador',
       });
     });
 
-    it.each([401, 403])('firma: %i opaco', async (status) => {
-      fetchMock.mockResolvedValue(respuesta(status, ''));
+    it.each([
+      [401, { statusCode: 401, message: 'Unauthorized' }],
+      [403, ''],
+    ])('firma: %i opaco', async (status, cuerpo) => {
+      fetchMock.mockResolvedValue(respuesta(status, cuerpo));
 
       expect(await crearCliente().consultarEmpresa(EMPRESA)).toEqual({
         tipo: 'firma',

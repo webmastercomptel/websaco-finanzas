@@ -58,8 +58,10 @@ ${timestamp}.${METHOD}.${ruta}.${rawBody}
 
 - `ruta`: pathname + query of the exact URL fetched, including `/api/v1`
   (e.g. `/api/v1/integraciones/websaco/empresas/<id>/lotes?simular=false`).
-- `rawBody`: the exact string sent as body (`''` for the GET and for
-  `retirar`). The body is serialized once and never re-serialized.
+- `rawBody`: the exact string sent as body (`''` for the GET). The lote and
+  the `retirar` body (`{"solicitadoPor":{"accountId":"…","nombre":"…"}}`, the
+  user who asked) are serialized once, sent with `Content-Type:
+  application/json`, and never re-serialized.
 - Comptable accepts a ±300 s window: the Finanzas server clock must be right.
 
 `test/fixtures/comptable/vector-firma.json` and `payload-v1.json` are shared
@@ -125,7 +127,7 @@ Comptable stamps.
 |---|---|---|
 | 201 | `enviado` (+ `comptableLoteId`) | stamped |
 | 409 `LOTE_YA_RECIBIDO` | `enviado` with the returned `loteId` | stamped |
-| 400 (errors) / 401 / 404 | `fallido` + `motivoFallo` | untouched; next "Enviar" opens a new lote |
+| 400 (document errors, or DTO validation: its `message` list joined with "; ") / 401 / 404 | `fallido` + `motivoFallo` | untouched; next "Enviar" opens a new lote |
 | timeout / network / 5xx / unrecognized 409 | stays `pendiente` | untouched; only "Reintentar" |
 
 At most one `pendiente` lote per coproperty (partial unique index
@@ -142,10 +144,20 @@ in Comptable, Comptable answers 409 `LOTE_INTERVENIDO`: Finanzas shows that
 sentence verbatim, stores it (`intervenidoMensaje`) and keeps the lote
 `enviado` for good — it no longer calls Comptable for it.
 
-Known limitation: if a retiro times out AFTER Comptable deleted the lote, a
-second "Retirar" gets Comptable's "ya retirado" 409 and the local lote stays
-`enviado`. Check the lote in Comptable and, if it is withdrawn there, release
-it by hand (support), since no route forces it.
+The request body names the Finanzas user who asked (`solicitadoPor`), so
+Comptable's lote reads `retiradoPorNombre: "WebSACO Finanzas — <nombre>"`.
+
+Withdrawing is idempotent: if Comptable answers 409 `LOTE_YA_RETIRADO` (e.g. a
+first "Retirar" timed out AFTER Comptable deleted the lote), Finanzas treats it
+as success — releases the stamps, marks the lote `retirado` and the audit
+entry says Comptable had already withdrawn it. Any other 409 (a month not open)
+or a 404 changes nothing here and shows Comptable's sentence.
+
+| Comptable answer | Lote | Entries |
+|---|---|---|
+| 200 / 409 `LOTE_YA_RETIRADO` | `retirado` | released (back to pendientes) |
+| 409 `LOTE_INTERVENIDO` | stays `enviado` + `intervenidoMensaje`, for good | stamped |
+| other 409 / 404 / 400 / 401 / timeout / 5xx | stays `enviado` | stamped |
 
 ### Audit
 

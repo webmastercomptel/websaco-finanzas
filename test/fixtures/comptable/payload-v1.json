@@ -99,7 +99,7 @@
             "direccion": null,
             "ciudad": null
           },
-          "centroUtilidad": null,
+          "centroUtilidad": "01",
           "centroDestino": null,
           "flujoCaja": null,
           "baseGravable": null,

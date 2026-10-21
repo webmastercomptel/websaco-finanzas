@@ -8,7 +8,8 @@ export interface ErrorAsientoComptable {
 
 /** What this side needs out of any Comptable response body. */
 export interface CamposRespuestaComptable {
-  /** Machine code of a 409 (`LOTE_YA_RECIBIDO`, `LOTE_INTERVENIDO`…). */
+  /** Machine code of a 409 (`LOTE_YA_RECIBIDO`, `LOTE_INTERVENIDO`,
+   *  `LOTE_YA_RETIRADO`). */
   codigo: string | null;
   /** Comptable's own lote id, sent back on a duplicate (`LOTE_YA_RECIBIDO`). */
   loteId: string | null;
@@ -47,14 +48,18 @@ const aMensaje = (valor: unknown): string | null => {
 
 /**
  * Pulls `codigo`, `loteId`, `errores` and the human message out of a Comptable
- * response body, wherever they sit. Deliberately tolerant: Comptable's error
- * envelope was being built at the same time as this client, so the fields are
- * looked up at the top level, under `data`, and under `message`/`error` when
- * those are objects (a Nest `HttpException` thrown with an object puts it in
- * one of those places depending on the exception filter). First hit wins, in
- * that order. This is the ONE place to adjust if the envelope settles
- * differently; nothing else reads a Comptable body field by name except the
- * success payload (`data`).
+ * response body, wherever they sit. Comptable's real error bodies are the
+ * unwrapped exception response, fields at the top level (its runbook,
+ * "Respuestas"): `{ statusCode, message, errores: [{ asiento, motivo }] }` for
+ * a rejected lote, `{ statusCode, message: string[], error }` for a DTO
+ * validation 400 (joined with "; "), `{ statusCode, codigo, message, loteId? }`
+ * for a coded 409, `{ statusCode, message, error }` for a 404 or an uncoded
+ * 409, `{ statusCode: 401, message: 'Unauthorized' }`. Still tolerant on
+ * purpose: the fields are also looked up under `data`, and under
+ * `message`/`error` when those are objects, so a future exception filter
+ * that nests them does not break this side. First hit wins, in that order.
+ * This is the ONE place to adjust if the envelope changes; nothing else reads
+ * a Comptable body field by name except the success payload (`data`).
  *
  * Never throws: anything that is not an object (empty body, HTML from a proxy,
  * plain text) yields all-null fields.

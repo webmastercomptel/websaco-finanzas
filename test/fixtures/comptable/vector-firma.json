@@ -7,7 +7,7 @@
       "metodo": "POST",
       "ruta": "/api/v1/integraciones/websaco/empresas/670000000000000000000001/lotes?simular=false",
       "rawBody": "<JSON.stringify(payload-v1.json)>",
-      "firma": "61231c7fa328c0034b5c2de6e69691ddef0591d09867e1120cbb0bae50f923f4"
+      "firma": "debcef401a0f3da430cdeda68efe9fcbb89c4afb6b2cc52d70f8a496bc32e732"
     },
     {
       "timestamp": "1792512000",

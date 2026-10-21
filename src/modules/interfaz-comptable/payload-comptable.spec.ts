@@ -129,7 +129,7 @@ describe('construirPayloadComptable', () => {
           monto: 350000,
           descripcion: 'Cartera',
           tercero: '101-A',
-          centroCosto: null,
+          centroCosto: '01',
           flujoCaja: null,
           baseGravable: null,
           tipoDocumento: 'FV',

@@ -826,7 +826,10 @@ describe('InterfazComptableService.retirar', () => {
 
     const retirado = await service.retirar(lote.id, ACTOR);
 
-    expect(comptable.retirarLote).toHaveBeenCalledWith(EMPRESA, lote.id);
+    expect(comptable.retirarLote).toHaveBeenCalledWith(EMPRESA, lote.id, {
+      accountId: ACTOR.accountId,
+      nombre: ACTOR.nombre,
+    });
     expect(retirado).toMatchObject({
       estado: 'retirado',
       retiradoPorNombre: ACTOR.nombre,
@@ -841,6 +844,34 @@ describe('InterfazComptableService.retirar', () => {
         entidadTipo: 'lote-comptable',
         entidadEtiqueta: expect.stringContaining(
           'retirado de Comptable: 2 documentos vuelven a pendientes',
+        ) as unknown,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('ya retirado en Comptable (LOTE_YA_RETIRADO): es éxito, libera las marcas, deja el lote retirado y lo anota en la auditoría', async () => {
+    const { service, comptable, asientos, lote, auditoria } = await enviado();
+    comptable.retirarLote.mockResolvedValueOnce({
+      tipo: 'yaRetirado',
+      mensaje: 'Este lote ya fue retirado de Comptable',
+    });
+
+    const retirado = await service.retirar(lote.id, ACTOR);
+
+    expect(retirado).toMatchObject({
+      estado: 'retirado',
+      retiradoPorNombre: ACTOR.nombre,
+    });
+    for (const a of asientos.docs) {
+      expect(a.comptableLoteId).toBeNull();
+      expect(String(a.comptableLoteRetiradoId)).toBe(lote.id);
+    }
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'retirar',
+        entidadEtiqueta: expect.stringContaining(
+          'retirado (Comptable ya lo había retirado): 2 documentos vuelven a pendientes',
         ) as unknown,
       }),
       expect.anything(),
@@ -905,6 +936,16 @@ describe('InterfazComptableService.retirar', () => {
       /Comptable no tiene el lote 1/,
     ],
     ['timeout', { tipo: 'timeout' }, BadGatewayException, /sigue enviado/],
+    [
+      'cuerpo rechazado (400)',
+      {
+        tipo: 'rechazado',
+        mensaje: 'property otro should not exist',
+        errores: [],
+      },
+      BadGatewayException,
+      /rechazó la solicitud de retiro: property otro should not exist/,
+    ],
     ['firma', { tipo: 'firma' }, BadGatewayException, /COMPTABLE_HMAC_SECRET/],
   ])(
     '%s: no cambia nada aquí',

@@ -53,6 +53,65 @@ describe('leerRespuestaComptable', () => {
     });
   });
 
+  it.each([
+    [
+      '400 de documentos',
+      {
+        statusCode: 400,
+        message:
+          'El lote fue rechazado: hay errores en sus documentos. No se guardó ningún asiento.',
+        errores: [{ asiento: 'NA 1088', motivo: 'El documento NA no existe' }],
+      },
+      {
+        codigo: null,
+        loteId: null,
+        errores: [{ asiento: 'NA 1088', motivo: 'El documento NA no existe' }],
+        mensaje:
+          'El lote fue rechazado: hay errores en sus documentos. No se guardó ningún asiento.',
+      },
+    ],
+    [
+      '400 del DTO',
+      {
+        statusCode: 400,
+        message: ['Solo se acepta la versión 1 del contrato', 'otro'],
+        error: 'Bad Request',
+      },
+      {
+        codigo: null,
+        loteId: null,
+        errores: [],
+        mensaje: 'Solo se acepta la versión 1 del contrato; otro',
+      },
+    ],
+    [
+      '409 LOTE_YA_RETIRADO',
+      {
+        statusCode: 409,
+        codigo: 'LOTE_YA_RETIRADO',
+        message: 'Este lote ya fue retirado de Comptable',
+      },
+      {
+        codigo: 'LOTE_YA_RETIRADO',
+        loteId: null,
+        errores: [],
+        mensaje: 'Este lote ya fue retirado de Comptable',
+      },
+    ],
+    [
+      '404',
+      { statusCode: 404, message: 'No existe', error: 'Not Found' },
+      { codigo: null, loteId: null, errores: [], mensaje: 'No existe' },
+    ],
+    [
+      '401',
+      { statusCode: 401, message: 'Unauthorized' },
+      { codigo: null, loteId: null, errores: [], mensaje: 'Unauthorized' },
+    ],
+  ])('lee la forma real de Comptable: %s', (_caso, cuerpo, esperado) => {
+    expect(leerRespuestaComptable(cuerpo)).toEqual(esperado);
+  });
+
   it('une los mensajes de validación que vienen como lista', () => {
     expect(
       leerRespuestaComptable({ statusCode: 400, message: ['uno', 'dos'] })
