@@ -29,10 +29,16 @@ Single behavior, no mode switch: `POST /inmuebles/importar` is an **upsert by co
 
 Backend first, then frontend. A new frontend against an old backend would show no `actualizados` (and the old backend still wipes).
 
-## Deferred: phase 2 (not in this change)
+## Phase 2 (built)
 
-- Preview / dry run ("se crearán N, se actualizarán M") that writes nothing, not even new Terceros.
-- Explicit "dar de baja los ausentes": logical retirement (`estado: 'inactivo'`) behind a confirmation, never a delete.
+- `POST /inmuebles/importar/previsualizar`: same body and gate as `importar` (create AND update `Inmueble`), WRITES NOTHING (no unit, no Tercero, no progress row). It reuses the import's read-only half (`planificarFila`: `validarFila`, the tenant-scoped code lookup, `planificarTitular`), so rows are classified and rejected with the import's own messages. `data`: `{ total, aCrear, aActualizar, repetidasEnArchivo, titularesNuevos, errores[], codigosACrear[<=200] + codigosACrearTruncado, advertencias[], ausentes: { total, codigos[<=500], truncado }, abortaImport }`. A foreign `codigoCopropiedad` row gives `abortaImport: true`, zero counts and empty lists.
+- Repeated code in the file (trimmed, case-insensitive): the first valid occurrence counts, later ones go to `repetidasEnArchivo` with a `codigo-repetido-en-archivo` warning (the import patches the same unit, last row wins).
+- `codigo-parecido` warnings use `claveParecida` (lowercase, no spaces or `- _ . /`, leading zeros stripped from every digit run) between a file code and an existing unit (`origen: 'existente'`) or another file code (`origen: 'archivo'`). It only warns: "0301" and "301" stay DIFFERENT codes on purpose, and counts never change.
+- `ausentes`: ACTIVE units whose code is not in the file; rows with errors still count as present. Rule for the UI (a frontend rule, not enforced here): offer them for retirement only after a clean import.
+- `POST /inmuebles/dar-de-baja` `{ codigos[1..1000] }` (gate: update `Inmueble`) retires units logically (`estado` to inactive, one `updateMany`, never a delete, no invoice guard: nothing financial is orphaned, liquidation only takes active units, and editing the unit back to `activo` undoes it). `data`: `{ solicitados, dadosDeBaja, yaInactivos[], noEncontrados[] }`. One audit entry per request that retires something (`dar-de-baja` / `inmueble`, count and up to 50 codes).
+
+## Deferred
+
 - Optional: allow renaming `codigo` only for units without any financial document.
 - Follow-up, skipped on purpose: a non-numeric `area` still rejects the whole file (pre-existing DTO behavior, out of scope).
 - Follow-up, skipped on purpose: no audit entry for the roster export (not requested; revisit with the personal-data policy).
