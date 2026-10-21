@@ -7,6 +7,16 @@
 const PATRON_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
+ * Single source of truth for "is this a usable address" so the bulk import and
+ * the WebSaco3 holders snapshot can never disagree on what counts as valid.
+ * Deliberately lax and WITHOUT trimming: callers trim first, and a blank or
+ * whitespace-padded value is invalid by the pattern itself.
+ */
+export function esEmailValido(valor: string): boolean {
+  return PATRON_EMAIL.test(valor);
+}
+
+/**
  * Splits one spreadsheet cell into the list `Tercero.emails` stores.
  *
  * The bulk-import template has a single "Email" column, but a party often
@@ -25,7 +35,7 @@ export function parseEmails(valor: string | undefined): string[] {
     .map((c) => c.trim())
     .filter(Boolean);
 
-  const invalido = correos.find((c) => !PATRON_EMAIL.test(c));
+  const invalido = correos.find((c) => !esEmailValido(c));
   if (invalido) {
     throw new Error(`"${invalido}" no es un correo válido`);
   }
