@@ -1,6 +1,8 @@
 // src/modules/inmuebles/inmuebles.mapper.ts
 import { Types } from 'mongoose';
+import { formatEmails } from '../../common/utils/email.utils';
 import type {
+  FilaExportacionInmueble,
   Inmueble as InmuebleContract,
   TitularResumen,
 } from '../../contracts';
@@ -56,4 +58,90 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   estado: doc.estado === 'active' ? 'activo' : 'inactivo',
   observaciones: doc.observaciones,
   fechaActualizacion: doc.updatedAt.toISOString(),
+});
+
+/** The unit columns the export reads — a lean document, so any of them may be
+ *  absent on legacy rows. */
+export type UnidadParaExportar = Partial<
+  Pick<
+    InmuebleDocument,
+    | 'referencia'
+    | 'bloque'
+    | 'zona'
+    | 'uso'
+    | 'area'
+    | 'coeficiente'
+    | 'tipoTitular'
+    | 'resideEnElInmueble'
+    | 'estadoCartera'
+    | 'contacto'
+    | 'observaciones'
+  >
+> &
+  Pick<InmuebleDocument, 'codigo'>;
+
+/** The Tercero columns the export reads, same leniency as above. */
+export type TerceroParaExportar = Partial<
+  Pick<
+    TerceroDocument,
+    | 'primerNombre'
+    | 'segundoNombre'
+    | 'primerApellido'
+    | 'segundoApellido'
+    | 'razonSocial'
+    | 'tipoIdentificacion'
+    | 'numeroIdentificacion'
+    | 'digitoVerificacion'
+    | 'emails'
+    | 'telefono'
+    | 'direccion'
+    | 'ciudadCodigo'
+  >
+>;
+
+/**
+ * Maps a unit (and its joined titular) to one row of the import-shaped
+ * export. The key order here IS the column order of the import template, so
+ * an object spread or a reordering would silently shuffle the file's columns:
+ * keep the literal as is.
+ *
+ * Absent values become `""` (never null) because a spreadsheet cell has no
+ * null, and `area`/`coeficiente` keep their number so the sheet stays
+ * numeric. `ciudadTitular` carries the DANE CODE and `tipoIdentificacionTitular`
+ * the DIAN code — what the import validates against — not the display names.
+ * Emails go through `formatEmails`, the inverse of the import's parser.
+ *
+ * Pure on purpose: the service owns the queries and the tenant scoping, this
+ * only reshapes what it was handed.
+ */
+export const toFilaExportacion = (
+  copropiedadCodigo: string,
+  unidad: UnidadParaExportar,
+  titular?: TerceroParaExportar | null,
+): FilaExportacionInmueble => ({
+  codigoCopropiedad: copropiedadCodigo,
+  codigo: unidad.codigo,
+  referencia: unidad.referencia ?? '',
+  bloque: unidad.bloque ?? '',
+  zona: unidad.zona ?? '',
+  uso: unidad.uso ?? '',
+  area: unidad.area ?? '',
+  coeficiente: unidad.coeficiente ?? '',
+  tipoTitular: unidad.tipoTitular ?? '',
+  resideEnElInmueble: unidad.resideEnElInmueble ?? false,
+  estadoCartera: unidad.estadoCartera ?? '',
+  contacto: unidad.contacto ?? '',
+  observaciones: unidad.observaciones ?? '',
+  nom1Titular: titular?.primerNombre ?? '',
+  nom2Titular: titular?.segundoNombre ?? '',
+  ape1Titular: titular?.primerApellido ?? '',
+  ape2Titular: titular?.segundoApellido ?? '',
+  razonSocialTitular: titular?.razonSocial ?? '',
+  tipoIdentificacionTitular: titular?.tipoIdentificacion ?? '',
+  numeroIdentificacionTitular: titular?.numeroIdentificacion ?? '',
+  digitoVerificacionTitular: titular?.digitoVerificacion ?? '',
+  emailTitular: formatEmails(titular?.emails),
+  telefonoTitular: titular?.telefono ?? '',
+  direccionTitular: titular?.direccion ?? '',
+  ciudadTitular: titular?.ciudadCodigo ?? '',
 });

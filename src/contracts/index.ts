@@ -180,6 +180,60 @@ export interface ResultadoImportacionInmuebles {
   bloqueadosPorFactura: string[];
 }
 
+/**
+ * One row of `GET /inmuebles/exportar-importacion`: a unit and its titular in
+ * EXACTLY the column set and order `POST /inmuebles/importar` reads, so the
+ * file a person downloads, edits and uploads again round-trips without
+ * mapping. Strings are never null (absent → `""`), `area`/`coeficiente` are
+ * numbers (absent → `""`), `resideEnElInmueble` is a boolean. Titular columns
+ * come from the joined Tercero and are all `""` for a unit without titular.
+ *
+ * `estado` is deliberately not a column: the import cannot carry it and never
+ * touches it, so an inactive unit stays inactive when its exported row is
+ * loaded back.
+ */
+export interface FilaExportacionInmueble {
+  /** The coproperty's own code, repeated on every row — the import's
+   *  whole-file safety check. */
+  codigoCopropiedad: string;
+  codigo: string;
+  referencia: string;
+  bloque: string;
+  zona: string;
+  uso: string;
+  area: number | '';
+  coeficiente: number | '';
+  tipoTitular: string;
+  resideEnElInmueble: boolean;
+  estadoCartera: string;
+  contacto: string;
+  observaciones: string;
+  nom1Titular: string;
+  nom2Titular: string;
+  ape1Titular: string;
+  ape2Titular: string;
+  razonSocialTitular: string;
+  /** DIAN code, as the import expects it. */
+  tipoIdentificacionTitular: string;
+  numeroIdentificacionTitular: string;
+  digitoVerificacionTitular: string;
+  /** Every address of the Tercero joined with `, ` — a separator the
+   *  import's email parser splits on, so the round trip is lossless. */
+  emailTitular: string;
+  telefonoTitular: string;
+  direccionTitular: string;
+  /** DANE municipality CODE (not the name), as the import expects it. */
+  ciudadTitular: string;
+}
+
+/** Response of `GET /inmuebles/exportar-importacion`. */
+export interface ExportacionImportacionInmuebles {
+  /** The active coproperty's own code. */
+  copropiedadCodigo: string;
+  /** Every unit of the coproperty (active and inactive), sorted by `codigo`. */
+  filas: FilaExportacionInmueble[];
+}
+
 /** One column of the coproperty-wide "Listado de Inmuebles" roster — one
  *  recurring charge concept in the catalog. `intereses` is never included:
  *  it is computed from overdue balances, never a flat recurring amount. */

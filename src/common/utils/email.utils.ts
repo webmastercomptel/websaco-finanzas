@@ -42,3 +42,14 @@ export function parseEmails(valor: string | undefined): string[] {
 
   return correos;
 }
+
+/**
+ * Inverse of `parseEmails`: joins a party's addresses into one spreadsheet
+ * cell. Uses a comma — one of the separators `parseEmails` splits on, and one
+ * no stored address can contain (the import splits on it BEFORE validating, so
+ * an address with a comma never gets in) — so `parseEmails(formatEmails(x))`
+ * returns `x` and an exported file loads back unchanged.
+ */
+export function formatEmails(emails: readonly string[] | undefined): string {
+  return (emails ?? []).join(', ');
+}

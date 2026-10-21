@@ -32,6 +32,7 @@ import { ImportarInmueblesDto } from './dto/importar-inmuebles.dto';
 import { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
 import { ImportarValoresRecurrentesMasivoDto } from './dto/importar-valores-recurrentes.dto';
 import type {
+  ExportacionImportacionInmuebles,
   Inmueble,
   Paginado,
   ProgresoImportacion,
@@ -128,6 +129,24 @@ export class InmueblesController {
   @CheckAbility({ action: 'read', subject: 'Inmueble' })
   obtenerListado(): Promise<RespuestaListadoInmuebles> {
     return this.reporte.obtenerListado();
+  }
+
+  /**
+   * The roster in the import's exact shape (25 columns, every unit active or
+   * inactive, titular columns joined) — what the frontend's "Descargar
+   * inmuebles" builds the editable import workbook from. It exposes the
+   * titulares' personal data, so it needs BOTH read on `Inmueble` and read on
+   * `Tercero` (`CheckAbility` rules are AND-ed): the unit permission alone
+   * must not leak who owns what. Route sits before `:id`, same reasoning as
+   * `listado.pdf` above: otherwise "exportar-importacion" is read as an id.
+   */
+  @Get('exportar-importacion')
+  @CheckAbility(
+    { action: 'read', subject: 'Inmueble' },
+    { action: 'read', subject: 'Tercero' },
+  )
+  exportarImportacion(): Promise<ExportacionImportacionInmuebles> {
+    return this.inmuebles.exportarImportacion();
   }
 
   /**

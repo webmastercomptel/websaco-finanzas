@@ -1,4 +1,4 @@
-import { esEmailValido, parseEmails } from './email.utils';
+import { esEmailValido, formatEmails, parseEmails } from './email.utils';
 
 describe('esEmailValido', () => {
   it('acepta una dirección con forma usuario@dominio.tld', () => {
@@ -43,5 +43,19 @@ describe('parseEmails', () => {
     expect(() => parseEmails('a@x.co; bad ;worse')).toThrow(
       '"bad" no es un correo válido',
     );
+  });
+});
+
+describe('formatEmails', () => {
+  it('une las direcciones con coma y espacio, y devuelve "" sin direcciones', () => {
+    expect(formatEmails(['a@x.co', 'b@y.co'])).toBe('a@x.co, b@y.co');
+    expect(formatEmails([])).toBe('');
+    expect(formatEmails(undefined)).toBe('');
+  });
+
+  it('es la inversa de parseEmails: ida y vuelta sin pérdida', () => {
+    const correos = ['ana@ejemplo.com', 'gestor+tag@sub.ejemplo.co'];
+
+    expect(parseEmails(formatEmails(correos))).toEqual(correos);
   });
 });

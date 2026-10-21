@@ -4,6 +4,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -29,11 +30,12 @@ import {
   type ProgresoActual,
 } from './progreso-importacion.service';
 import type {
+  ExportacionImportacionInmuebles,
   Inmueble as InmuebleContract,
   Paginado,
   ResultadoImportacionInmuebles,
 } from '../../contracts';
-import { toInmueble } from './inmuebles.mapper';
+import { toFilaExportacion, toInmueble } from './inmuebles.mapper';
 import type { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import type {
   ActualizarInmuebleDto,
@@ -43,6 +45,14 @@ import type {
   FilaImportarInmuebleDto,
   ImportarInmueblesDto,
 } from './dto/importar-inmuebles.dto';
+
+/**
+ * Defensive ceiling for `exportarImportacion`, which is deliberately not
+ * paginated (the file is one unit per row and a partial roster would be a
+ * silently wrong spreadsheet). Far above any real building; past it the
+ * request fails loudly instead of loading an unbounded set into memory.
+ */
+export const MAX_INMUEBLES_EXPORTACION = 5000;
 
 @Injectable()
 export class InmueblesService {
@@ -443,6 +453,86 @@ export class InmueblesService {
       }
     }
     return limpia as unknown as FilaImportarInmuebleDto;
+  }
+
+  /**
+   * The roster in the import's own shape: every unit of the active
+   * coproperty (active AND inactive) with its titular's columns, so a person
+   * can download it, correct cells and upload it back through `importar` —
+   * which only patches what changed and never deletes.
+   *
+   * Tenant-scoped on both queries: the units by `copropiedadId`, and the
+   * titulares by `copropiedadId` AND the ids the units pointed at — never a
+   * bare `_id` lookup, so a stale or foreign `titularId` can't leak another
+   * building's party into this file. Both reads are `lean` with a minimal
+   * `select`: this returns personal data of every owner, so it carries no
+   * more columns than the file has.
+   *
+   * Not paginated by design (see `MAX_INMUEBLES_EXPORTACION`). Fetching one
+   * row past the ceiling is enough to know it was exceeded.
+   *
+   * Known limitation: `estado` is not exported because the import cannot
+   * carry it. That is the safe direction — an inactive unit stays inactive
+   * when its exported row is loaded back, since update never touches it.
+   */
+  async exportarImportacion(): Promise<ExportacionImportacionInmuebles> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap.
+    const copropiedad = await this.copropiedades
+      .findById(copropiedadId)
+      .select('codigo')
+      .lean()
+      .exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
+      );
+    }
+
+    const unidades = await this.inmuebles
+      .find({ copropiedadId })
+      .select(
+        'codigo referencia bloque zona uso area coeficiente titularId tipoTitular resideEnElInmueble estadoCartera contacto observaciones',
+      )
+      .sort({ codigo: 1 })
+      .limit(MAX_INMUEBLES_EXPORTACION + 1)
+      .lean()
+      .exec();
+    if (unidades.length > MAX_INMUEBLES_EXPORTACION) {
+      throw new UnprocessableEntityException(
+        `La copropiedad tiene más de ${MAX_INMUEBLES_EXPORTACION} inmuebles: la exportación no admite más de ese número.`,
+      );
+    }
+
+    const titularIds = [
+      ...new Set(
+        unidades
+          .map((u) => u.titularId?.toString())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ].map((id) => new Types.ObjectId(id));
+    const titulares = titularIds.length
+      ? await this.terceros
+          .find({ copropiedadId, _id: { $in: titularIds } })
+          .select(
+            'primerNombre segundoNombre primerApellido segundoApellido razonSocial tipoIdentificacion numeroIdentificacion digitoVerificacion emails telefono direccion ciudadCodigo',
+          )
+          .lean()
+          .exec()
+      : [];
+    const titularPorId = new Map(titulares.map((t) => [t._id.toString(), t]));
+
+    return {
+      copropiedadCodigo: copropiedad.codigo,
+      filas: unidades.map((u) =>
+        toFilaExportacion(
+          copropiedad.codigo,
+          u,
+          u.titularId ? titularPorId.get(u.titularId.toString()) : undefined,
+        ),
+      ),
+    };
   }
 
   /** Null while no import is currently running for the active coproperty —
