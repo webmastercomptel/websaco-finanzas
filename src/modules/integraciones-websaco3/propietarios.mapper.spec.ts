@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import {
   MAX_EMAILS_TITULAR_WEBSACO3,
+  MAX_LARGO_EMAIL_WEBSACO3,
   mapearPropietarios,
 } from './propietarios.mapper';
 
@@ -149,6 +150,20 @@ describe('mapearPropietarios', () => {
       expect(titular?.emails).toHaveLength(MAX_EMAILS_TITULAR_WEBSACO3);
       expect(titular?.emails).toEqual(muchos.slice(0, 50));
       expect(titular?.email).toBe('u0@x.com');
+    });
+
+    it('descarta un email de más de 254 caracteres y conserva el resto', () => {
+      const largo = `${'a'.repeat(250)}@x.com`;
+      const justo = `${'b'.repeat(248)}@x.com`;
+
+      const titular = titularCon([largo, justo, 'c@x.com']);
+
+      expect(largo.length).toBeGreaterThan(MAX_LARGO_EMAIL_WEBSACO3);
+      expect(justo.length).toBe(MAX_LARGO_EMAIL_WEBSACO3);
+      expect(titular).toMatchObject({
+        email: justo,
+        emails: [justo, 'c@x.com'],
+      });
     });
 
     it('email siempre coincide con emails[0]', () => {

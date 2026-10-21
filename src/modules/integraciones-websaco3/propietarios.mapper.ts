@@ -31,6 +31,14 @@ export interface TerceroParaPropietarios {
 export const MAX_EMAILS_TITULAR_WEBSACO3 = 50;
 
 /**
+ * Longest address the consumer accepts per item (RFC 5321 path limit). The
+ * consumer validates every item of `emails` and rejects the WHOLE snapshot on
+ * one violation, so an over-long legacy address must be dropped here instead
+ * of failing the sync of the entire coproperty.
+ */
+export const MAX_LARGO_EMAIL_WEBSACO3 = 254;
+
+/**
  * Valid addresses of a party: trimmed, deduped case-insensitively (the first
  * spelling is kept), original order preserved. Validity goes through the same
  * `esEmailValido` the bulk import uses so both agree on what is an address.
@@ -40,6 +48,7 @@ const emailsValidos = (emails: string[] | undefined): string[] => {
   const validos: string[] = [];
   for (const email of emails ?? []) {
     const limpio = typeof email === 'string' ? email.trim() : '';
+    if (limpio.length > MAX_LARGO_EMAIL_WEBSACO3) continue;
     if (!esEmailValido(limpio)) continue;
     const clave = limpio.toLowerCase();
     if (vistos.has(clave)) continue;
