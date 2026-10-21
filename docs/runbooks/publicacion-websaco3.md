@@ -373,12 +373,27 @@ holds each unit of a coproperty. Read-only, no writes, no events. Code lives in
   "data": { "copropiedad": { "nombre": "..." },
             "unidades": [ { "codigo": "101", "tipo": "propietario" | "arrendatario",
                             "titular": { "nombre": "...", "email": "..." | null,
+                                         "emails": ["..."],
                                          "telefono": "..." | null } | null } ] } }
 ```
 
 One entry per unit (every `estado`), ordered by `codigo`. `titular` is `null`
 when the unit has no holder, the party does not resolve inside that coproperty,
-or the party is `inactive`. `email` is the first non-empty email of the party.
+or the party is `inactive`.
+
+`emails` is the party's list of VALID addresses: trimmed, deduped
+case-insensitively (the first spelling is kept), in the party's original order
+and capped at 50. It is `[]` when the party has no valid address. `email` is
+always `emails[0]`, or `null` when `emails` is empty. This changes the meaning of
+`email`: it used to be the first non-blank address, now it is the first VALID one
+(an invalid first entry such as `bad` is skipped instead of being published as
+the identity).
+
+WebSaco3 uses `email` as the account identity and keeps `emails` minus that
+address as the holder's alternate recipients. A snapshot WITHOUT the `emails` key
+(older Finanzas) is treated by WebSaco3 as "leave alternates untouched", while
+`emails: []` clears them. The key is additive, so Finanzas can be deployed before
+WebSaco3 supports it.
 
 ### 8.2 Shared secret
 
