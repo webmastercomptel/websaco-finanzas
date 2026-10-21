@@ -44,7 +44,9 @@ Once an `Inmueble` exists, its `codigo` MUST NOT change through any edit path. T
 
 ### Requirement: Creation and import of new units keep working
 
-`create` MUST still accept a `codigo` and keep rejecting a duplicate (case- and whitespace-insensitive) with `409`. The Excel import (`importar`) MUST keep creating units from its rows, and MUST NOT contain an update path: it never renames an existing `Inmueble`. A unit with a Factura survives the import's wipe untouched, so a row repeating its code fails that row with the existing duplicate-code error. Units without a Factura are deleted and recreated by the import as before (existing "replace the roster" semantics); this is not a rename.
+`create` MUST still accept a `codigo` and keep rejecting a duplicate (case- and whitespace-insensitive) with `409`. The Excel import (`importar`) is an UPSERT BY CODE that NEVER deletes: a row whose code matches an existing unit of the active coproperty (case- and whitespace-insensitive) patches that unit with only the fields the row sent, a row of a new code creates a unit, and the import MUST NOT delete any unit. It MUST NOT write `codigo` of an existing unit (a case or whitespace difference between the row and the stored code is not a rename) and MUST NOT touch `estado`. Units keep their `_id` across imports, billed or not.
+
+> **[2026-10-21: this requirement was REVERSED by change `importar-inmuebles-upsert`.]** It used to say the import "MUST NOT contain an update path" and wiped every unit without a Factura before loading. Reason: the wipe is non-atomic, can orphan non-invoice financial records (Recibo, SaldoInicial, notas, SaldoCartera) and blocks correcting invoiced units. The immutability of `codigo` above is unaffected.
 
 #### Scenario: Create a new unit
 
@@ -64,11 +66,17 @@ Once an `Inmueble` exists, its `codigo` MUST NOT change through any edit path. T
 - WHEN it is imported
 - THEN the units are created as before
 
-#### Scenario: Import row repeats the code of a billed unit
+#### Scenario: Import row repeats the code of an existing unit (billed or not)
 
-- GIVEN unit `301` has a Factura and therefore survives the import wipe
-- WHEN the file contains a row with code `301`
-- THEN that row reports the duplicate-code error, `301` keeps its `_id` and data, and no other unit is renamed
+- GIVEN unit `301` exists (with or without a Factura)
+- WHEN the file contains a row with code `301` (or `' 301 '`) and `zona: 'Norte'`
+- THEN `301` keeps its `_id` and its `codigo`, `zona` changes, fields the row left blank keep their stored value, and no unit is deleted
+
+#### Scenario: Import never deletes
+
+- GIVEN units `301` and `302` exist and the file contains only a row for `301`
+- WHEN it is imported
+- THEN `302` is untouched
 
 ### Requirement: Frontend code field is read-only on edit
 
