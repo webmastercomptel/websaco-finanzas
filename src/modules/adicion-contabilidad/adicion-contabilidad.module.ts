@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AdicionContabilidadController } from './adicion-contabilidad.controller';
 import { AdicionContabilidadService } from './adicion-contabilidad.service';
+import { ResolucionDocumentosService } from './resolucion-documentos.service';
 import { FacturacionModule } from '../facturacion/facturacion.module';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
 
@@ -11,6 +12,9 @@ import { AuditoriaModule } from '../auditoria/auditoria.module';
   // circular require() risk (see FacturacionModule's own comment on that).
   imports: [FacturacionModule, AuditoriaModule],
   controllers: [AdicionContabilidadController],
-  providers: [AdicionContabilidadService],
+  providers: [AdicionContabilidadService, ResolucionDocumentosService],
+  // The Comptable push resolves anchors/conceptos/saldos iniciales exactly
+  // like the CSV export does.
+  exports: [ResolucionDocumentosService],
 })
 export class AdicionContabilidadModule {}

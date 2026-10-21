@@ -48,8 +48,8 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 
 ## Phase 2: PR 2 — shared resolution, no behavior change
 
-- [ ] 2.1 Move `buildAnchorMap`, `resolveConceptos`, `resolverSaldosInicialesPorNumero` usage and `tipoDocumentoDe` into `modules/adicion-contabilidad/resolucion-documentos.service.ts` (exported provider). `AdicionContabilidadService` delegates to it.
-- [ ] 2.2 The whole `adicion-contabilidad.service.spec.ts` passes with no assertion changed; the generated CSVs of a fixture lote are byte-identical before/after.
+- [x] 2.1 Move `buildAnchorMap`, `resolveConceptos`, `resolverSaldosInicialesPorNumero` usage and `tipoDocumentoDe` into `modules/adicion-contabilidad/resolucion-documentos.service.ts` (exported provider). `AdicionContabilidadService` delegates to it.
+- [x] 2.2 The whole `adicion-contabilidad.service.spec.ts` passes with no assertion changed; the generated CSVs of a fixture lote are byte-identical before/after.
 
 ## Phase 3: PR 3 — schemas and payload builder
 
