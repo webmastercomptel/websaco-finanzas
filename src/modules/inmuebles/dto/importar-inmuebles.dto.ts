@@ -159,7 +159,7 @@ export class FilaImportarInmuebleDto {
   nombreTitular?: string;
 
   /** DIAN código (e.g. "13", "31") — validated against the catalog in
-   *  `InmueblesService.resolverTitular`, same as the manual Titular form's
+   *  `InmueblesService.validarFila`, same as the manual Titular form's
    *  dropdown; a code that doesn't exist there fails only this row. */
   @IsOptional()
   @IsString()
@@ -192,7 +192,7 @@ export class FilaImportarInmuebleDto {
   direccionTitular?: string;
 
   /** DANE código de municipio — resolved to its name and department code by
-   *  `InmueblesService.resolverTitular`, same lookup the manual form's
+   *  `InmueblesService.validarFila`, same lookup the manual form's
    *  cascading Departamento/Ciudad selector does; nothing else in the row
    *  names the department, it always comes from this code. */
   @IsOptional()

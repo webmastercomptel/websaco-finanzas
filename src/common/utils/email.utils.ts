@@ -23,7 +23,7 @@ export function esEmailValido(valor: string): boolean {
  * answers to more than one inbox (owner and property manager, co-owners) —
  * comma or semicolon separated, whichever the file happens to use. Throws
  * on the first malformed address so the row fails with a clear message,
- * same pattern `InmueblesService.resolverTitular` already uses for a bad
+ * same pattern `InmueblesService.validarFila` already uses for a bad
  * DIAN/DANE catalog code — caught by that row's own try/catch, never the
  * whole import.
  */

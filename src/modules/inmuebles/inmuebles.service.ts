@@ -63,6 +63,8 @@ type TerceroLeido = Pick<
   | 'segundoNombre'
   | 'primerApellido'
   | 'segundoApellido'
+  | 'razonSocial'
+  | 'numeroIdentificacion'
 > & { _id: Types.ObjectId };
 
 /** Values derived from a row's titular columns by `validarFila`. */
@@ -75,7 +77,13 @@ interface DatosTitularFila {
 /** What an import row does about its titular — see `planificarTitular`. */
 type PlanTitular =
   | { tipo: 'ninguno' }
-  | { tipo: 'refrescar'; tercero: TerceroLeido }
+  | {
+      tipo: 'refrescar';
+      tercero: TerceroLeido;
+      /** Also write the row's identification onto that Tercero (filling in
+       *  missing papers of the same person). */
+      asignarIdentificacion?: boolean;
+    }
   | { tipo: 'crear' };
 
 /** Records created by the row being processed, so a failure later in the same
@@ -84,18 +92,45 @@ interface RastroFila {
   terceroId?: Types.ObjectId;
 }
 
-/** Same person by display name: trim and case-insensitive. */
-const mismoNombre = (a?: string | null, b?: string | null): boolean =>
-  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Same person by display name: trim, spaces collapsed, case-insensitive. */
+const mismoNombre = (a?: string | null, b?: string | null): boolean => {
+  const normalizar = (v: string): string =>
+    v.trim().replace(/s+/g, ' ').toLowerCase();
+  return !!a && !!b && normalizar(a) === normalizar(b);
+};
+
+/** The name a stored Tercero's own parts compose (its `razonSocial` for a
+ *  jurídica), which can differ from its stored `nombre` when that was typed
+ *  by hand — see `planificarTitular`. */
+const nombreDePartes = (t: TerceroLeido): string | null =>
+  t.razonSocial?.trim() ||
+  resolverNombreTercero({
+    tipoPersona: 'natural',
+    nom1: t.primerNombre ?? undefined,
+    nom2: t.segundoNombre ?? undefined,
+    ape1: t.primerApellido ?? undefined,
+    ape2: t.segundoApellido ?? undefined,
+  });
 
 /**
  * Turns whatever a row threw into a message safe for the client. A Mongo
- * duplicate-key error (`E11000`, a race on the unique code index) would
- * otherwise leak the collection and index names.
+ * duplicate-key error (`E11000`) would otherwise leak the collection and
+ * index names, and it can come from two unique indexes: the unit code and
+ * the Tercero identification, so the message is chosen by which key clashed.
  */
 const mensajeDeFila = (err: unknown): string => {
-  if ((err as { code?: number } | null)?.code === 11000) {
-    return 'Código duplicado: ya existe un inmueble con ese código en esta copropiedad';
+  const e = err as {
+    code?: number;
+    keyPattern?: Record<string, unknown>;
+    message?: string;
+  } | null;
+  if (e?.code === 11000) {
+    const porIdentificacion =
+      (e.keyPattern && 'numeroIdentificacion' in e.keyPattern) ||
+      (!e.keyPattern && e.message?.includes('numeroIdentificacion'));
+    return porIdentificacion
+      ? 'Identificación duplicada: ya existe un titular con esa identificación en esta copropiedad'
+      : 'Código duplicado: ya existe un inmueble con ese código en esta copropiedad';
   }
   return err instanceof Error ? err.message : 'Error desconocido';
 };
@@ -544,10 +579,20 @@ export class InmueblesService {
       return 'actualizado';
     } catch (err) {
       if (rastro.terceroId) {
-        await this.terceros
-          .deleteOne({ _id: rastro.terceroId, copropiedadId })
+        // The repoint may have been applied before the error surfaced: a
+        // Tercero a unit already points at must not be deleted (an orphan
+        // party is harmless, a dangling `titularId` is not). If even that
+        // check fails, keep the Tercero.
+        const referenciado = await this.inmuebles
+          .exists({ copropiedadId, titularId: rastro.terceroId })
           .exec()
-          .catch(() => undefined);
+          .catch(() => true);
+        if (!referenciado) {
+          await this.terceros
+            .deleteOne({ _id: rastro.terceroId, copropiedadId })
+            .exec()
+            .catch(() => undefined);
+        }
       }
       throw err;
     }
@@ -722,28 +767,49 @@ export class InmueblesService {
    *   fields the row sent and the unit is pointed at it.
    * - `crear`: a NEW Tercero is created from the row.
    *
+   * "Same person" below means the row's composed name equals (trim,
+   * case-insensitive, spaces collapsed) EITHER the stored `nombre` OR the
+   * composition of the stored name parts — a stored `nombre` that was typed
+   * by hand and no longer matches its own parts must not make an unedited
+   * export look like a different person.
+   *
    * Resolution order:
    * 1. The row carries `numeroIdentificacionTitular`: the party is the
    *    Tercero of this coproperty with that identification — refreshed, and
-   *    it is also how a unit changes hands. If NO Tercero has it, a new one
-   *    is created, ALWAYS — never the unit's current titular: the
-   *    identification is what says "this is somebody else", and refreshing
-   *    the old owner's Tercero with the new owner's name would rename a
-   *    person who still exists while keeping the old identification. A row
-   *    that names nobody there is a row error: the identification points at
-   *    nothing and there is no name to create it from.
+   *    it is also how a unit changes hands. If NO Tercero has it:
+   *    - the unit's current Tercero has NO identification yet and is the same
+   *      person: it is refreshed in place AND receives that identification
+   *      (filling in missing papers must not duplicate the owner). Safe
+   *      because the lookup just proved no other Tercero of the coproperty
+   *      has it, and the unique index only covers string values;
+   *    - otherwise a new Tercero is created, ALWAYS — never a rename of the
+   *      unit's current titular: the identification says "this is somebody
+   *      else", and renaming the old owner's Tercero would give a person who
+   *      still exists another person's name while keeping the old papers.
+   *    A row that names nobody there is a row error: the identification points
+   *    at nothing and there is no name to create it from.
    * 2. No identification, but the row names somebody (see `nombreDeFila`):
    *    - a new unit, a unit without titular or a dangling reference creates
    *      a new Tercero;
-   *    - otherwise the unit's current Tercero is compared by name. The SAME
-   *      name (trim, case-insensitive) is the same person — refreshed in
-   *      place even when shared, which is what makes re-importing an
-   *      unedited export a no-op for titulares. A DIFFERENT name is a typo
-   *      fix or a renamed single-unit owner and is refreshed in place only
-   *      if no OTHER unit of this coproperty points at that Tercero; if one
-   *      does, a new Tercero is created, because overwriting a shared
-   *      owner's name for one unit would silently corrupt their other units.
+   *    - the same person is refreshed in place even when shared, which is
+   *      what makes re-importing an unedited export a no-op for titulares;
+   *    - a DIFFERENT name on a Tercero that HAS an identification is a
+   *      different person without papers (a sale with the identification cell
+   *      left empty): a new Tercero, regardless of sharing;
+   *    - a different name on a name-only Tercero (no identification) is a typo
+   *      fix or a renamed owner: refreshed in place only if no OTHER unit of
+   *      this coproperty points at it; if one does, a new Tercero is created,
+   *      because overwriting a shared owner's name for one unit would
+   *      silently corrupt their other units.
    * 3. Neither identification nor name: `ninguno`.
+   *
+   * Known limitation: the "shared?" check reads the database, not the file.
+   * If the rows of ALL the units sharing one Tercero get the same NEW name
+   * without identification, the first rows each create a new Tercero while
+   * the Tercero is still shared, and the last row finds it unshared and
+   * renames it in place — the outcome depends on row order. Deferred: an
+   * in-file name-to-id reuse map (see the `importar-inmuebles-upsert`
+   * proposal).
    */
   private async planificarTitular(
     copropiedadId: Types.ObjectId,
@@ -754,6 +820,25 @@ export class InmueblesService {
     },
   ): Promise<PlanTitular> {
     const { nombre } = this.nombreDeFila(fila);
+
+    const cargarActual = async (): Promise<TerceroLeido | null> =>
+      unidad?.titularActualId
+        ? await this.terceros
+            .findOne({ _id: unidad.titularActualId, copropiedadId })
+            .select(
+              'nombre primerNombre segundoNombre primerApellido segundoApellido razonSocial numeroIdentificacion',
+            )
+            .lean()
+            .exec()
+        : null;
+    const esMismaPersona = (actual: TerceroLeido): boolean => {
+      const nombreFila =
+        this.datosNombreRefresco(fila, actual).nombre ?? nombre;
+      return (
+        mismoNombre(nombreFila, actual.nombre) ||
+        mismoNombre(nombreFila, nombreDePartes(actual))
+      );
+    };
 
     if (fila.numeroIdentificacionTitular) {
       const porIdentificacion = await this.terceros
@@ -770,30 +855,28 @@ export class InmueblesService {
           `El titular con identificación ${fila.numeroIdentificacionTitular} no existe y la fila no trae nombre para crearlo`,
         );
       }
+      const actual = await cargarActual();
+      if (actual && !actual.numeroIdentificacion && esMismaPersona(actual)) {
+        return {
+          tipo: 'refrescar',
+          tercero: actual,
+          asignarIdentificacion: true,
+        };
+      }
       return { tipo: 'crear' };
     }
 
     if (!nombre) return { tipo: 'ninguno' };
-    if (!unidad?.titularActualId) return { tipo: 'crear' };
+    const actual = await cargarActual();
+    if (!actual || !unidad) return { tipo: 'crear' };
 
-    const actual = await this.terceros
-      .findOne({ _id: unidad.titularActualId, copropiedadId })
-      .select(
-        'nombre primerNombre segundoNombre primerApellido segundoApellido',
-      )
-      .lean()
-      .exec();
-    if (!actual) return { tipo: 'crear' };
-
-    const nombreNuevo = this.datosNombreRefresco(fila, actual).nombre ?? nombre;
-    if (mismoNombre(nombreNuevo, actual.nombre)) {
-      return { tipo: 'refrescar', tercero: actual };
-    }
+    if (esMismaPersona(actual)) return { tipo: 'refrescar', tercero: actual };
+    if (actual.numeroIdentificacion) return { tipo: 'crear' };
 
     const compartido = await this.inmuebles
       .exists({
         copropiedadId,
-        titularId: unidad.titularActualId,
+        titularId: actual._id,
         _id: { $ne: unidad.unidadId },
       })
       .exec();
@@ -823,6 +906,9 @@ export class InmueblesService {
         plan.tercero,
         fila,
         datos,
+        plan.asignarIdentificacion
+          ? fila.numeroIdentificacionTitular
+          : undefined,
       );
       return plan.tercero._id;
     }
@@ -888,6 +974,7 @@ export class InmueblesService {
     existente: TerceroLeido,
     fila: FilaImportarInmuebleDto,
     datos: DatosTitularFila,
+    numeroIdentificacion?: string,
   ): Promise<void> {
     const cambios: Record<string, unknown> = {
       ...this.datosNombreRefresco(fila, existente).cambios,
@@ -896,6 +983,7 @@ export class InmueblesService {
       if (valor !== undefined) cambios[clave] = valor;
     };
 
+    set('numeroIdentificacion', numeroIdentificacion);
     set('tipoIdentificacion', fila.tipoIdentificacionTitular);
     set('digitoVerificacion', fila.digitoVerificacionTitular);
     set('emails', datos.emails);
