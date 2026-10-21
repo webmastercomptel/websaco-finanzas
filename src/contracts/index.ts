@@ -180,6 +180,68 @@ export interface ResultadoImportacionInmuebles {
   bloqueadosPorFactura: string[];
 }
 
+/** A non-blocking heads-up from the import preview. Never changes a count. */
+export interface AdvertenciaVistaPreviaImportacion {
+  /** `codigo-parecido`: a different code that reads the same once case,
+   *  separators and leading zeros are ignored (see `claveParecida`).
+   *  `codigo-repetido-en-archivo`: the code already appeared earlier in the
+   *  file — the import patches the same unit, so the last row wins. */
+  tipo: 'codigo-parecido' | 'codigo-repetido-en-archivo';
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string;
+  /** For `codigo-parecido`: the similar code. */
+  parecidoA?: string;
+  /** For `codigo-parecido`: where that similar code lives. */
+  origen?: 'existente' | 'archivo';
+}
+
+/**
+ * Response of `POST /inmuebles/importar/previsualizar`: what importing the
+ * same body would do, computed without writing anything. Rows are classified
+ * exactly like `importar` classifies them (same validators, same messages).
+ */
+export interface VistaPreviaImportacionInmuebles {
+  total: number;
+  /** Valid rows whose code is not in the coproperty yet. */
+  aCrear: number;
+  /** Valid rows whose code matches an existing unit. */
+  aActualizar: number;
+  /** Later occurrences of a code already seen in the file (compared trimmed,
+   *  case-insensitive); not counted in `aCrear`/`aActualizar`. */
+  repetidasEnArchivo: number;
+  /** Counted rows whose titular would be created as a NEW Tercero. */
+  titularesNuevos: number;
+  errores: ErrorImportacionInmueble[];
+  /** Codes of the rows counted in `aCrear`, capped at 200. */
+  codigosACrear: string[];
+  codigosACrearTruncado: boolean;
+  advertencias: AdvertenciaVistaPreviaImportacion[];
+  /** ACTIVE units of the coproperty whose code is not in the file. Rows with
+   *  errors still count as present. Empty when `abortaImport`. */
+  ausentes: {
+    total: number;
+    /** Capped at 500. */
+    codigos: string[];
+    truncado: boolean;
+  };
+  /** True when a row carries another coproperty's code: `importar` would
+   *  abort the WHOLE file with zero writes, so everything else is empty. */
+  abortaImport: boolean;
+}
+
+/** Response of `POST /inmuebles/dar-de-baja`. */
+export interface ResultadoDarDeBajaInmuebles {
+  /** Distinct codes requested (trimmed, case-insensitive). */
+  solicitados: number;
+  /** Units moved from active to inactive. */
+  dadosDeBaja: number;
+  /** Requested codes whose unit was already inactive. */
+  yaInactivos: string[];
+  /** Requested codes with no unit in the active coproperty. */
+  noEncontrados: string[];
+}
+
 /**
  * One row of `GET /inmuebles/exportar-importacion`: a unit and its titular in
  * EXACTLY the column set and order `POST /inmuebles/importar` reads, so the
@@ -2248,13 +2310,20 @@ export interface RespuestaAdicionContabilidad {
 export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
+  accion:
+    | 'crear'
+    | 'actualizar'
+    | 'revertir'
+    | 'reiniciar'
+    | 'desmarcar'
+    | 'dar-de-baja';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
-    | 'lote-contabilidad';
+    | 'lote-contabilidad'
+    | 'inmueble';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;

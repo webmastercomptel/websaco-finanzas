@@ -34,8 +34,16 @@ import type {
   Inmueble as InmuebleContract,
   Paginado,
   ResultadoImportacionInmuebles,
+  VistaPreviaImportacionInmuebles,
 } from '../../contracts';
-import { toFilaExportacion, toInmueble } from './inmuebles.mapper';
+import {
+  toFilaExportacion,
+  toInmueble,
+  toVistaPreviaAbortada,
+  toVistaPreviaImportacion,
+  type ClasificacionVistaPrevia,
+} from './inmuebles.mapper';
+import { claveParecida } from './codigo-parecido';
 import type { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import type {
   ActualizarInmuebleDto,
@@ -91,6 +99,16 @@ type PlanTitular =
 interface RastroFila {
   terceroId?: Types.ObjectId;
 }
+
+/** A unit as the import and its preview read it back. */
+interface ExistenteLeve {
+  _id: Types.ObjectId;
+  titularId?: Types.ObjectId | null;
+}
+
+/** The comparison form of a unit code: trimmed and case-folded, which is what
+ *  `filtroCodigoDuplicado` matches (anchored, case-insensitive). */
+const claveCodigo = (codigo: string): string => codigo.trim().toLowerCase();
 
 /** Same person by display name: trim, spaces collapsed, case-insensitive. */
 const mismoNombre = (a?: string | null, b?: string | null): boolean => {
@@ -388,16 +406,10 @@ export class InmueblesService {
       );
     }
 
-    const erroresCodigo: ResultadoImportacionInmuebles['errores'] = [];
-    dto.filas.forEach((fila, indice) => {
-      if (fila.codigoCopropiedad !== copropiedad.codigo) {
-        erroresCodigo.push({
-          fila: indice + 1,
-          codigo: fila.codigo ?? null,
-          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
-        });
-      }
-    });
+    const erroresCodigo = this.erroresDeCodigoCopropiedad(
+      dto,
+      copropiedad.codigo,
+    );
     if (erroresCodigo.length > 0) {
       return {
         total: dto.filas.length,
@@ -459,6 +471,247 @@ export class InmueblesService {
   }
 
   /**
+   * What `importar` WOULD do with this body, computed without writing
+   * anything: no unit created or patched, no Tercero created, refreshed or
+   * deleted, no progress row. It is safe to call as often as needed, which is
+   * the whole point — a person sees "se crearán N, se actualizarán M" and the
+   * units a file leaves out BEFORE committing to the load.
+   *
+   * It reuses the import's own read-only half (`planificarFila`: the same
+   * `validarFila` validators, the same code matching and the same
+   * `planificarTitular` decision), so a row is classified — and rejected with
+   * the same message — exactly as the import would. Nothing is copied.
+   *
+   * - The whole-file `codigoCopropiedad` check comes first, like the import:
+   *   one foreign row and `abortaImport` is true with zero counts, since the
+   *   import would write nothing.
+   * - The coproperty's units are loaded ONCE (tenant-scoped, lean) and rows are
+   *   matched against that map instead of one query per row; only
+   *   `planificarTitular` still reads per row, where it truly needs to.
+   * - A code that repeats inside the file (trimmed, case-insensitive) counts
+   *   once: the first valid occurrence is classified, later valid ones go to
+   *   `repetidasEnArchivo` with an advertencia, because the import would patch
+   *   the same unit again and the last row would win.
+   * - `codigo-parecido` warnings (see `claveParecida`) compare a file code with
+   *   the coproperty's existing codes and with the other file codes. They never
+   *   block and never change a count; "0301" and "301" stay different codes.
+   * - `ausentes` are the ACTIVE units whose code is not in the file. A row that
+   *   failed validation still counts as present: its unit is not absent, the
+   *   row is just wrong, and retiring it for that would punish a typo.
+   *
+   * Known limitation: rows are planned against the database as it is now, so
+   * effects of earlier rows on later ones (a Tercero a previous row would
+   * create) are not simulated.
+   */
+  async previsualizarImportacion(
+    dto: ImportarInmueblesDto,
+  ): Promise<VistaPreviaImportacionInmuebles> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap.
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
+      );
+    }
+
+    const erroresCodigo = this.erroresDeCodigoCopropiedad(
+      dto,
+      copropiedad.codigo,
+    );
+    if (erroresCodigo.length > 0) {
+      return toVistaPreviaAbortada(dto.filas.length, erroresCodigo);
+    }
+
+    const unidades = await this.inmuebles
+      .find({ copropiedadId })
+      .select('_id codigo titularId estado')
+      .sort({ codigo: 1 })
+      .lean()
+      .exec();
+    const existentes = new Map<string, ExistenteLeve>();
+    const codigosPorClaveParecida = new Map<string, string[]>();
+    for (const u of unidades) {
+      const clave = claveCodigo(u.codigo);
+      if (!existentes.has(clave)) {
+        existentes.set(clave, { _id: u._id, titularId: u.titularId });
+      }
+      const parecida = claveParecida(u.codigo);
+      if (parecida) {
+        codigosPorClaveParecida.set(parecida, [
+          ...(codigosPorClaveParecida.get(parecida) ?? []),
+          u.codigo,
+        ]);
+      }
+    }
+
+    const clasificacion: ClasificacionVistaPrevia = {
+      total: dto.filas.length,
+      codigosACrear: [],
+      aActualizar: 0,
+      repetidasEnArchivo: 0,
+      titularesNuevos: 0,
+      errores: [],
+      advertencias: [],
+      ausentes: [],
+    };
+    const codigosEnArchivo = new Set<string>();
+    const aplicados = new Set<string>();
+    const archivoPorClaveParecida = new Map<string, Map<string, string>>();
+
+    for (const [indice, filaCruda] of dto.filas.entries()) {
+      const numeroFila = indice + 1;
+      const codigo = filaCruda.codigo.trim();
+      const clave = claveCodigo(filaCruda.codigo);
+
+      if (!codigosEnArchivo.has(clave)) {
+        codigosEnArchivo.add(clave);
+        const parecida = claveParecida(codigo);
+        if (parecida) {
+          const delArchivo =
+            archivoPorClaveParecida.get(parecida) ?? new Map<string, string>();
+          const otroDelArchivo = [...delArchivo].find(
+            ([otraClave]) => otraClave !== clave,
+          );
+          if (otroDelArchivo) {
+            clasificacion.advertencias.push({
+              tipo: 'codigo-parecido',
+              fila: numeroFila,
+              codigo,
+              parecidoA: otroDelArchivo[1],
+              origen: 'archivo',
+            });
+          }
+          delArchivo.set(clave, codigo);
+          archivoPorClaveParecida.set(parecida, delArchivo);
+
+          const existenteParecido = (
+            codigosPorClaveParecida.get(parecida) ?? []
+          ).find((c) => claveCodigo(c) !== clave);
+          if (existenteParecido) {
+            clasificacion.advertencias.push({
+              tipo: 'codigo-parecido',
+              fila: numeroFila,
+              codigo,
+              parecidoA: existenteParecido,
+              origen: 'existente',
+            });
+          }
+        }
+      }
+
+      try {
+        const { existente, plan } = await this.planificarFila(
+          copropiedadId,
+          filaCruda,
+          existentes,
+        );
+
+        if (aplicados.has(clave)) {
+          clasificacion.repetidasEnArchivo += 1;
+          clasificacion.advertencias.push({
+            tipo: 'codigo-repetido-en-archivo',
+            fila: numeroFila,
+            codigo,
+          });
+          continue;
+        }
+        aplicados.add(clave);
+
+        if (existente) clasificacion.aActualizar += 1;
+        else clasificacion.codigosACrear.push(codigo);
+        if (plan.tipo === 'crear') clasificacion.titularesNuevos += 1;
+      } catch (err) {
+        clasificacion.errores.push({
+          fila: numeroFila,
+          codigo: filaCruda.codigo ?? null,
+          mensaje: mensajeDeFila(err),
+        });
+      }
+    }
+
+    clasificacion.ausentes = unidades
+      .filter(
+        (u) =>
+          u.estado === 'active' && !codigosEnArchivo.has(claveCodigo(u.codigo)),
+      )
+      .map((u) => u.codigo);
+
+    return toVistaPreviaImportacion(clasificacion);
+  }
+
+  /**
+   * The rows of a file that carry another coproperty's code, as row errors —
+   * the whole-file safety check shared by `importar` (which aborts with zero
+   * writes) and its preview (which reports `abortaImport`). One source for the
+   * message so the two can never disagree.
+   */
+  private erroresDeCodigoCopropiedad(
+    dto: ImportarInmueblesDto,
+    codigoActivo: string,
+  ): ResultadoImportacionInmuebles['errores'] {
+    const errores: ResultadoImportacionInmuebles['errores'] = [];
+    dto.filas.forEach((fila, indice) => {
+      if (fila.codigoCopropiedad !== codigoActivo) {
+        errores.push({
+          fila: indice + 1,
+          codigo: fila.codigo ?? null,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${codigoActivo})`,
+        });
+      }
+    });
+    return errores;
+  }
+
+  /**
+   * The READ-ONLY half of a row: normalizes it, validates everything that can
+   * be rejected without a write (`validarFila`), finds the unit its code
+   * points at, and decides what happens to its titular
+   * (`planificarTitular`). It performs only reads — `findOne`/`exists` — so
+   * the import preview reuses it verbatim and can promise it wrote nothing,
+   * while the import applies the result (`upsertFila`).
+   *
+   * `existentes` lets a caller that already loaded the coproperty's units
+   * (the preview) resolve the code from memory instead of one query per row;
+   * without it the unit is looked up with the tenant-scoped
+   * `filtroCodigoDuplicado`, exactly as before.
+   */
+  private async planificarFila(
+    copropiedadId: Types.ObjectId,
+    filaCruda: FilaImportarInmuebleDto,
+    existentes?: Map<string, ExistenteLeve>,
+  ): Promise<{
+    fila: FilaImportarInmuebleDto;
+    datos: DatosTitularFila;
+    existente: ExistenteLeve | null;
+    plan: PlanTitular;
+  }> {
+    const fila = this.sinCeldasVacias(filaCruda);
+    const datos = this.validarFila(fila);
+
+    const existente: ExistenteLeve | null = existentes
+      ? (existentes.get(claveCodigo(fila.codigo)) ?? null)
+      : await this.inmuebles
+          .findOne(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
+          .select('_id titularId')
+          .lean()
+          .exec();
+
+    const plan = await this.planificarTitular(
+      copropiedadId,
+      fila,
+      existente
+        ? {
+            unidadId: existente._id,
+            titularActualId: existente.titularId ?? null,
+          }
+        : undefined,
+    );
+    return { fila, datos, existente, plan };
+  }
+
+  /**
    * One row of an import: patch the unit when its code exists in the active
    * coproperty, create it otherwise.
    *
@@ -491,24 +744,9 @@ export class InmueblesService {
     copropiedadId: Types.ObjectId,
     filaCruda: FilaImportarInmuebleDto,
   ): Promise<'actualizado' | 'creado'> {
-    const fila = this.sinCeldasVacias(filaCruda);
-    const datos = this.validarFila(fila);
-
-    const existente = await this.inmuebles
-      .findOne(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
-      .select('_id titularId')
-      .lean()
-      .exec();
-
-    const plan = await this.planificarTitular(
+    const { fila, datos, existente, plan } = await this.planificarFila(
       copropiedadId,
-      fila,
-      existente
-        ? {
-            unidadId: existente._id,
-            titularActualId: existente.titularId ?? null,
-          }
-        : undefined,
+      filaCruda,
     );
     const rastro: RastroFila = {};
 

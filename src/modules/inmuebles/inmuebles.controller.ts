@@ -42,6 +42,7 @@ import type {
   SaldoInmueble,
   ValorRecurrente,
   ValorRecurrenteMasivo,
+  VistaPreviaImportacionInmuebles,
 } from '../../contracts';
 
 /**
@@ -222,6 +223,24 @@ export class InmueblesController {
     @Body() dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
     return this.inmuebles.importar(dto);
+  }
+
+  /**
+   * Dry run of `POST /importar`: same body, same gate (it exposes the
+   * roster's state and how the file would change it, so it needs what the
+   * import needs), but it WRITES NOTHING — no unit, no Tercero, no progress
+   * row. Answers what would be created, updated, rejected and left out, with
+   * the import's own validators. Declared next to `importar`, before `:id`.
+   */
+  @Post('importar/previsualizar')
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
+  previsualizarImportacion(
+    @Body() dto: ImportarInmueblesDto,
+  ): Promise<VistaPreviaImportacionInmuebles> {
+    return this.inmuebles.previsualizarImportacion(dto);
   }
 
   /**

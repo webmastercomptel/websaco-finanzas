@@ -33,53 +33,86 @@ const usuarioCon = (permissions: string[]): IRequestUser => ({
   permissions,
 });
 
-describe.each(['importar', 'obtenerProgresoImportacion'])(
-  'InmueblesController.%s',
-  (nombre) => {
-    it('exige crear Inmueble Y editar Inmueble (AND), sin reglas OR y sin Tercero', () => {
-      expect(Reflect.getMetadata(CHECK_ABILITY_KEY, handlerDe(nombre))).toEqual(
-        [
-          { action: 'create', subject: 'Inmueble' },
-          { action: 'update', subject: 'Inmueble' },
-        ],
-      );
+describe.each([
+  'importar',
+  'obtenerProgresoImportacion',
+  'previsualizarImportacion',
+])('InmueblesController.%s', (nombre) => {
+  it('exige crear Inmueble Y editar Inmueble (AND), sin reglas OR y sin Tercero', () => {
+    expect(Reflect.getMetadata(CHECK_ABILITY_KEY, handlerDe(nombre))).toEqual([
+      { action: 'create', subject: 'Inmueble' },
+      { action: 'update', subject: 'Inmueble' },
+    ]);
+    expect(
+      Reflect.getMetadata(CHECK_ANY_ABILITY_KEY, handlerDe(nombre)),
+    ).toBeUndefined();
+  });
+
+  describe('con el PoliciesGuard real', () => {
+    const guard = new PoliciesGuard(new Reflector(), new CaslAbilityFactory());
+
+    it('deniega (403) a quien solo puede crear inmuebles', () => {
+      expect(() =>
+        guard.canActivate(contextoDe(nombre, usuarioCon(['inmuebles.crear']))),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('deniega (403) a quien solo puede editar inmuebles', () => {
+      expect(() =>
+        guard.canActivate(contextoDe(nombre, usuarioCon(['inmuebles.editar']))),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('permite a quien puede crear y editar inmuebles, sin necesitar permisos de Tercero', () => {
       expect(
-        Reflect.getMetadata(CHECK_ANY_ABILITY_KEY, handlerDe(nombre)),
-      ).toBeUndefined();
+        guard.canActivate(
+          contextoDe(
+            nombre,
+            usuarioCon(['inmuebles.crear', 'inmuebles.editar']),
+          ),
+        ),
+      ).toBe(true);
     });
+  });
+});
 
-    describe('con el PoliciesGuard real', () => {
-      const guard = new PoliciesGuard(
-        new Reflector(),
-        new CaslAbilityFactory(),
-      );
+describe('InmueblesController.previsualizarImportacion — ruta', () => {
+  it('se sirve en POST importar/previsualizar y ninguna ruta POST con parámetro puede tragársela', () => {
+    const metodos = Object.getOwnPropertyNames(InmueblesController.prototype);
 
-      it('deniega (403) a quien solo puede crear inmuebles', () => {
-        expect(() =>
-          guard.canActivate(
-            contextoDe(nombre, usuarioCon(['inmuebles.crear'])),
-          ),
-        ).toThrow(ForbiddenException);
-      });
+    expect(
+      Reflect.getMetadata('path', handlerDe('previsualizarImportacion')),
+    ).toBe('importar/previsualizar');
+    expect(
+      Reflect.getMetadata('method', handlerDe('previsualizarImportacion')),
+    ).toBe(1); // RequestMethod.POST
+    // El `:id` de findOne es GET: no compite. Lo que importa es que no exista
+    // un POST `:id` (o similar) que capture "importar/previsualizar".
+    const postsConParametro = metodos.filter(
+      (m) =>
+        Reflect.getMetadata('method', handlerDe(m)) === 1 &&
+        String(Reflect.getMetadata('path', handlerDe(m))).startsWith(':'),
+    );
+    expect(postsConParametro).toEqual([]);
+  });
 
-      it('deniega (403) a quien solo puede editar inmuebles', () => {
-        expect(() =>
-          guard.canActivate(
-            contextoDe(nombre, usuarioCon(['inmuebles.editar'])),
-          ),
-        ).toThrow(ForbiddenException);
-      });
+  it('delega en el servicio con el mismo cuerpo que importar', async () => {
+    const respuesta = { total: 1 };
+    const servicio = {
+      previsualizarImportacion: jest.fn().mockResolvedValue(respuesta),
+    };
+    const controlador = new InmueblesController(
+      servicio as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const dto = { filas: [] };
 
-      it('permite a quien puede crear y editar inmuebles, sin necesitar permisos de Tercero', () => {
-        expect(
-          guard.canActivate(
-            contextoDe(
-              nombre,
-              usuarioCon(['inmuebles.crear', 'inmuebles.editar']),
-            ),
-          ),
-        ).toBe(true);
-      });
-    });
-  },
-);
+    await expect(controlador.previsualizarImportacion(dto)).resolves.toBe(
+      respuesta,
+    );
+    expect(servicio.previsualizarImportacion).toHaveBeenCalledWith(dto);
+  });
+});
