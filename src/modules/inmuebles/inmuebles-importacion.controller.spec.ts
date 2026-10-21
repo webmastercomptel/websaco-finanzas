@@ -107,6 +107,7 @@ describe('InmueblesController.previsualizarImportacion — ruta', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     const dto = { filas: [] };
 
@@ -114,5 +115,82 @@ describe('InmueblesController.previsualizarImportacion — ruta', () => {
       respuesta,
     );
     expect(servicio.previsualizarImportacion).toHaveBeenCalledWith(dto);
+  });
+});
+
+describe('InmueblesController.darDeBaja', () => {
+  const guard = new PoliciesGuard(new Reflector(), new CaslAbilityFactory());
+
+  it('exige solo editar Inmueble (update), sin reglas OR', () => {
+    expect(
+      Reflect.getMetadata(CHECK_ABILITY_KEY, handlerDe('darDeBaja')),
+    ).toEqual([{ action: 'update', subject: 'Inmueble' }]);
+    expect(
+      Reflect.getMetadata(CHECK_ANY_ABILITY_KEY, handlerDe('darDeBaja')),
+    ).toBeUndefined();
+  });
+
+  it('se sirve en POST dar-de-baja', () => {
+    expect(Reflect.getMetadata('path', handlerDe('darDeBaja'))).toBe(
+      'dar-de-baja',
+    );
+    expect(Reflect.getMetadata('method', handlerDe('darDeBaja'))).toBe(1);
+  });
+
+  it('deniega (403) a quien solo puede crear inmuebles', () => {
+    expect(() =>
+      guard.canActivate(
+        contextoDe('darDeBaja', usuarioCon(['inmuebles.crear'])),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('deniega (403) a quien solo puede ver inmuebles', () => {
+    expect(() =>
+      guard.canActivate(contextoDe('darDeBaja', usuarioCon(['inmuebles.ver']))),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('permite a quien puede editar inmuebles', () => {
+    expect(
+      guard.canActivate(
+        contextoDe('darDeBaja', usuarioCon(['inmuebles.editar'])),
+      ),
+    ).toBe(true);
+  });
+
+  it('delega en el servicio con el actor (cuenta y nombre, o el email si no hay nombre)', async () => {
+    const respuesta = { solicitados: 1 };
+    const baja = { darDeBaja: jest.fn().mockResolvedValue(respuesta) };
+    const controlador = new InmueblesController(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      baja as never,
+    );
+    const dto = { codigos: ['301'] };
+
+    await controlador.darDeBaja(dto, {
+      uid: 'u',
+      email: 'ana@ejemplo.com',
+      accountId: 'acc-1',
+      nombre: ' Ana ',
+    });
+    await controlador.darDeBaja(dto, {
+      uid: 'u',
+      email: 'ana@ejemplo.com',
+      accountId: 'acc-1',
+    });
+
+    expect(baja.darDeBaja).toHaveBeenNthCalledWith(1, dto, {
+      accountId: 'acc-1',
+      nombre: 'Ana',
+    });
+    expect(baja.darDeBaja).toHaveBeenNthCalledWith(2, dto, {
+      accountId: 'acc-1',
+      nombre: 'ana@ejemplo.com',
+    });
   });
 });

@@ -15,6 +15,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
 import { InmueblesService } from './inmuebles.service';
@@ -22,6 +24,7 @@ import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { InmueblesReporteService } from './inmuebles-reporte.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
 import { InmueblesSaldosService } from './inmuebles-saldos.service';
+import { InmueblesBajaService } from './inmuebles-baja.service';
 import { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import { ConsultarSaldosInmueblesDto } from './dto/consultar-saldos-inmuebles.dto';
 import {
@@ -29,12 +32,14 @@ import {
   CrearInmuebleDto,
 } from './dto/guardar-inmueble.dto';
 import { ImportarInmueblesDto } from './dto/importar-inmuebles.dto';
+import { DarDeBajaInmueblesDto } from './dto/dar-de-baja-inmuebles.dto';
 import { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
 import { ImportarValoresRecurrentesMasivoDto } from './dto/importar-valores-recurrentes.dto';
 import type {
   ExportacionImportacionInmuebles,
   Inmueble,
   Paginado,
+  ResultadoDarDeBajaInmuebles,
   ProgresoImportacion,
   ResultadoImportacionInmuebles,
   ResultadoImportacionValoresRecurrentes,
@@ -72,6 +77,7 @@ export class InmueblesController {
     private readonly reporte: InmueblesReporteService,
     private readonly eliminacion: InmueblesEliminacionService,
     private readonly saldos: InmueblesSaldosService,
+    private readonly baja: InmueblesBajaService,
   ) {}
 
   @Get()
@@ -241,6 +247,29 @@ export class InmueblesController {
     @Body() dto: ImportarInmueblesDto,
   ): Promise<VistaPreviaImportacionInmuebles> {
     return this.inmuebles.previsualizarImportacion(dto);
+  }
+
+  /**
+   * Retires units by code — the explicit, separate counterpart of the import's
+   * "absent from the file" report. LOGICAL only (`estado` to inactive,
+   * nothing deleted, reversible by editing the unit back to `activo`), so it
+   * needs `update` on `Inmueble` and nothing stronger than the edit form
+   * already asks for. One audit entry per request. Declared next to the import
+   * routes, before the `:id` ones.
+   */
+  @Post('dar-de-baja')
+  @CheckAbility({ action: 'update', subject: 'Inmueble' })
+  darDeBaja(
+    @Body() dto: DarDeBajaInmueblesDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<ResultadoDarDeBajaInmuebles> {
+    return this.baja.darDeBaja(dto, {
+      // PoliciesGuard already rejected callers without permissions, and only a
+      // provisioned local account has any — same assumption as the other
+      // audited controllers.
+      accountId: user.accountId!,
+      nombre: user.nombre?.trim() || user.email,
+    });
   }
 
   /**

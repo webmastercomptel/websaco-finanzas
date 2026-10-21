@@ -17,13 +17,20 @@ import { FiltrosAuditoriaDto } from './dto/filtros-auditoria.dto';
 export interface EntradaAuditoria {
   actorAccountId: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
+  accion:
+    | 'crear'
+    | 'actualizar'
+    | 'revertir'
+    | 'reiniciar'
+    | 'desmarcar'
+    | 'dar-de-baja';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
-    | 'lote-contabilidad';
+    | 'lote-contabilidad'
+    | 'inmueble';
   entidadId: string;
   entidadEtiqueta: string;
 }
