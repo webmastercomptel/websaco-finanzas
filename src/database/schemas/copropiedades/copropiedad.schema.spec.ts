@@ -31,3 +31,25 @@ describe('Copropiedad schema — índice de websaco3CopropiedadId', () => {
     expect(indice![1].name).toBeUndefined();
   });
 });
+
+// Same pin for the Comptable link: the script
+// (scripts/migrate-copropiedad-comptable-id-index.js) must mirror it.
+describe('Copropiedad schema — índice de comptableEmpresaId', () => {
+  const indice = () =>
+    indices().find(
+      ([clave]) => Object.keys(clave).join() === 'comptableEmpresaId',
+    );
+
+  it('declara un índice único y parcial solo sobre ids de tipo string', () => {
+    expect(indice()).toBeDefined();
+    expect(indice()![0]).toEqual({ comptableEmpresaId: 1 });
+    expect(indice()![1]).toMatchObject({
+      unique: true,
+      partialFilterExpression: { comptableEmpresaId: { $type: 'string' } },
+    });
+  });
+
+  it('no fija un nombre propio: queda el predeterminado comptableEmpresaId_1 que el script usa', () => {
+    expect(indice()![1].name).toBeUndefined();
+  });
+});

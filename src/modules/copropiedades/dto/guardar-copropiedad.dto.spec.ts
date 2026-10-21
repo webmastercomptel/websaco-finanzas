@@ -52,3 +52,34 @@ describe('CrearCopropiedadDto — websaco3CopropiedadId', () => {
     expect(errores).toHaveLength(1);
   });
 });
+
+describe('CamposCopropiedadDto — comptableEmpresaId', () => {
+  const validar = (plano: Record<string, unknown>) =>
+    validate(plainToInstance(ActualizarCopropiedadDto, plano));
+
+  it('acepta un ObjectId de 24 hex, en minúsculas o mayúsculas', async () => {
+    expect(await validar({ comptableEmpresaId: ID_VALIDO })).toHaveLength(0);
+    expect(
+      await validar({ comptableEmpresaId: ID_VALIDO.toUpperCase() }),
+    ).toHaveLength(0);
+  });
+
+  it('acepta null para desvincular la copropiedad de Comptable', async () => {
+    expect(await validar({ comptableEmpresaId: null })).toHaveLength(0);
+  });
+
+  it.each([
+    ['vacío', ''],
+    ['demasiado corto', '123'],
+    ['con prefijo 0x', `0x${'a'.repeat(22)}`],
+    ['no es texto', 12345],
+  ])('rechaza un id %s con un mensaje en español', async (_caso, valor) => {
+    const errores = await validar({ comptableEmpresaId: valor });
+
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('comptableEmpresaId');
+    expect(Object.values(errores[0].constraints ?? {})[0]).toContain(
+      'Empresa en Comptable',
+    );
+  });
+});

@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
+  BadGatewayException,
 } from '@nestjs/common';
 import { CopropiedadesService } from './copropiedades.service';
 
@@ -45,6 +47,12 @@ const mockConceptosCobro = () => ({
     sort: () => ({ exec: () => Promise.resolve([]) }),
     distinct: jest.fn(() => ({ exec: () => Promise.resolve([]) })),
   })),
+});
+
+const mockComptable = (
+  resultado: Record<string, unknown> = { tipo: 'ok', status: 200, datos: {} },
+) => ({
+  consultarEmpresa: jest.fn().mockResolvedValue(resultado),
 });
 
 const mockAsignaciones = (filas: Record<string, unknown>[] = []) => ({
@@ -145,6 +153,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await expect(service.findAll({})).resolves.toBeDefined();
@@ -166,6 +175,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -190,6 +200,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -219,6 +230,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -252,6 +264,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -276,6 +289,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -296,6 +310,7 @@ describe('CopropiedadesService.findAll', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     const { items } = await service.findAll({});
@@ -318,6 +333,7 @@ describe('CopropiedadesService.create', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.create({ nombre: 'Nueva Copro' }, ACTOR);
@@ -340,6 +356,7 @@ describe('CopropiedadesService.create', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.create({ nombre: 'Nueva Copro' }, ACTOR);
@@ -369,6 +386,7 @@ describe('CopropiedadesService.create', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await expect(
@@ -390,6 +408,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
@@ -409,6 +428,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { mostrarLogo: false }, ACTOR);
@@ -428,6 +448,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { entidadAdministradoraId: 'ent-9' }, ACTOR);
@@ -450,6 +471,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { nombreAdministrador: 'Portería' }, ACTOR);
@@ -472,6 +494,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { estado: 'inactivo' }, ACTOR);
@@ -494,6 +517,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await expect(
@@ -514,6 +538,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
@@ -543,6 +568,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await expect(
@@ -562,6 +588,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { cuentaContableCartera: '130501' }, ACTOR);
@@ -583,6 +610,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { cuentaAnticipos: '210505' }, ACTOR);
@@ -604,6 +632,7 @@ describe('CopropiedadesService.update', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
 
     await service.update('cop-1', { cuentaDevoluciones: '413595' }, ACTOR);
@@ -631,6 +660,7 @@ describe('CopropiedadesService — aplicarReglaGestionEdificios', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
     return { modelo, service };
   };
@@ -901,6 +931,7 @@ describe('CopropiedadesService — unicidad de websaco3CopropiedadId', () => {
       mockConsecutivos() as never,
       mockCuentasContables() as never,
       mockConceptosCobro() as never,
+      mockComptable() as never,
     );
     return { modelo, service };
   };
@@ -1116,6 +1147,220 @@ describe('CopropiedadesService — unicidad de websaco3CopropiedadId', () => {
       await expect(
         service.update('cop-1', { ciudad: 'Cali' }, ACTOR),
       ).rejects.toBe(original);
+    });
+  });
+});
+
+describe('CopropiedadesService — comptableEmpresaId', () => {
+  const ID = '670000000000000000000001';
+
+  const construirService = (
+    documentos: unknown[],
+    opts: {
+      duplicado?: boolean;
+      comptable?: Record<string, unknown>;
+    } = {},
+  ) => {
+    const modelo = modeloCon(documentos, opts);
+    const comptable = mockComptable(opts.comptable);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockContador() as never,
+      mockAsignaciones() as never,
+      mockAccounts() as never,
+      mockAuditoria() as never,
+      mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
+      comptable as never,
+    );
+    return { modelo, service, comptable };
+  };
+
+  describe('crear', () => {
+    it('una Empresa que existe en Comptable se valida y se guarda normalizada', async () => {
+      const { modelo, service, comptable } = construirService([documento()]);
+
+      await service.create(
+        { nombre: 'X', comptableEmpresaId: ID.toUpperCase() },
+        ACTOR,
+      );
+
+      expect(modelo.exists).toHaveBeenCalledWith({ comptableEmpresaId: ID });
+      expect(comptable.consultarEmpresa).toHaveBeenCalledWith(ID);
+      expect(modelo.escrituras[0]).toMatchObject({ comptableEmpresaId: ID });
+    });
+
+    it('sin Empresa no consulta a Comptable', async () => {
+      const { service, comptable } = construirService([documento()]);
+
+      await service.create({ nombre: 'X' }, ACTOR);
+
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+    });
+
+    it('formato inválido: 400 sin consultar a Comptable', async () => {
+      const { modelo, service, comptable } = construirService([documento()]);
+
+      await expect(
+        service.create({ nombre: 'X', comptableEmpresaId: '0x1234' }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+      expect(modelo.create).not.toHaveBeenCalled();
+    });
+
+    it('una Empresa de otra copropiedad: 409 sin consultar a Comptable', async () => {
+      const { modelo, service, comptable } = construirService([documento()], {
+        duplicado: true,
+      });
+
+      const intento = service.create(
+        { nombre: 'X', comptableEmpresaId: ID },
+        ACTOR,
+      );
+
+      await expect(intento).rejects.toBeInstanceOf(ConflictException);
+      await expect(intento).rejects.toThrow(/otra copropiedad/);
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+      expect(modelo.create).not.toHaveBeenCalled();
+    });
+
+    it('Comptable dice que no existe: 422 "No existe esa Empresa en Comptable" y nada se guarda', async () => {
+      const { modelo, service } = construirService([documento()], {
+        comptable: { tipo: 'noEncontrado', mensaje: null },
+      });
+
+      const intento = service.create(
+        { nombre: 'X', comptableEmpresaId: ID },
+        ACTOR,
+      );
+
+      await expect(intento).rejects.toBeInstanceOf(
+        UnprocessableEntityException,
+      );
+      await expect(intento).rejects.toThrow(
+        'No existe esa Empresa en Comptable.',
+      );
+      expect(modelo.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'inalcanzable (timeout)',
+        { tipo: 'timeout' },
+        /comunicar con Comptable/,
+      ],
+      ['sin red', { tipo: 'red' }, /comunicar con Comptable/],
+      ['con error 5xx', { tipo: 'inesperado', status: 503 }, /comunicar/],
+      ['no configurado', { tipo: 'noConfigurado' }, /no está configurada/],
+      ['rechazando la firma', { tipo: 'firma' }, /COMPTABLE_HMAC_SECRET/],
+    ])(
+      'Comptable %s: 502 y nada se guarda',
+      async (_caso, resultado, mensaje) => {
+        const { modelo, service } = construirService([documento()], {
+          comptable: resultado,
+        });
+
+        const intento = service.create(
+          { nombre: 'X', comptableEmpresaId: ID },
+          ACTOR,
+        );
+
+        await expect(intento).rejects.toBeInstanceOf(BadGatewayException);
+        await expect(intento).rejects.toThrow(mensaje);
+        expect(modelo.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it('una carrera: E11000 sobre comptableEmpresaId se traduce a 409', async () => {
+      const { modelo, service } = construirService([documento()]);
+      modelo.create.mockRejectedValueOnce(
+        Object.assign(new Error('E11000 comptableEmpresaId_1'), {
+          code: 11000,
+          keyPattern: { comptableEmpresaId: 1 },
+        }),
+      );
+
+      await expect(
+        service.create({ nombre: 'X', comptableEmpresaId: ID }, ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('actualizar', () => {
+    it('solo valida cuando el valor cambia: reenviar la Empresa guardada no consulta nada', async () => {
+      const { modelo, service, comptable } = construirService(
+        [documento({ comptableEmpresaId: ID })],
+        { duplicado: true },
+      );
+
+      await service.update(
+        'cop-1',
+        { comptableEmpresaId: ID.toUpperCase() },
+        ACTOR,
+      );
+
+      expect(modelo.exists).not.toHaveBeenCalled();
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+      expect(modelo.escrituras[0]).toEqual({ comptableEmpresaId: ID });
+    });
+
+    it('una edición que no toca la Empresa no depende de Comptable', async () => {
+      const { service, comptable } = construirService(
+        [documento({ comptableEmpresaId: ID })],
+        { comptable: { tipo: 'timeout' } },
+      );
+
+      await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
+
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+    });
+
+    it('null desvincula sin consultar a Comptable', async () => {
+      const { modelo, service, comptable } = construirService([
+        documento({ comptableEmpresaId: ID }),
+      ]);
+
+      await service.update('cop-1', { comptableEmpresaId: null }, ACTOR);
+
+      expect(comptable.consultarEmpresa).not.toHaveBeenCalled();
+      expect(modelo.escrituras[0]).toEqual({ comptableEmpresaId: null });
+    });
+
+    it('cambiar de Empresa excluye a la propia copropiedad y valida contra Comptable', async () => {
+      const otra = '670000000000000000000002';
+      const { modelo, service, comptable } = construirService([
+        documento({ comptableEmpresaId: ID }),
+      ]);
+
+      await service.update('cop-1', { comptableEmpresaId: otra }, ACTOR);
+
+      expect(modelo.exists).toHaveBeenCalledWith({
+        comptableEmpresaId: otra,
+        _id: { $ne: 'cop-1' },
+      });
+      expect(comptable.consultarEmpresa).toHaveBeenCalledWith(otra);
+      expect(modelo.escrituras[0]).toEqual({ comptableEmpresaId: otra });
+    });
+
+    it('Comptable caído al cambiar la Empresa: 502 y no escribe', async () => {
+      const { modelo, service } = construirService([documento()], {
+        comptable: { tipo: 'red' },
+      });
+
+      await expect(
+        service.update('cop-1', { comptableEmpresaId: ID }, ACTOR),
+      ).rejects.toBeInstanceOf(BadGatewayException);
+      expect(modelo.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('update lee del documento guardado la Empresa actual', async () => {
+      const { modelo, service } = construirService([documento()]);
+
+      await service.update('cop-1', { ciudad: 'Cali' }, ACTOR);
+
+      expect(modelo.selecciones[0]).toContain('comptableEmpresaId');
     });
   });
 });

@@ -1,0 +1,20 @@
+{
+  "descripcion": "HMAC-SHA256 hex de `${timestamp}.${METODO}.${ruta}.${rawBody}`. rawBody = JSON.stringify(payload-v1.json) compacto, sin espacios. ruta incluye el prefijo api/v1 y la query tal como viaja.",
+  "secreto": "comptable-test-secret-0123456789abcdef",
+  "casos": [
+    {
+      "timestamp": "1792512000",
+      "metodo": "POST",
+      "ruta": "/api/v1/integraciones/websaco/empresas/670000000000000000000001/lotes?simular=false",
+      "rawBody": "<JSON.stringify(payload-v1.json)>",
+      "firma": "61231c7fa328c0034b5c2de6e69691ddef0591d09867e1120cbb0bae50f923f4"
+    },
+    {
+      "timestamp": "1792512000",
+      "metodo": "GET",
+      "ruta": "/api/v1/integraciones/websaco/empresas/670000000000000000000001",
+      "rawBody": "",
+      "firma": "f48ad5c95606dead9e4909f3b5f4e4008af197db804961cf07531c1d15d067a1"
+    }
+  ]
+}

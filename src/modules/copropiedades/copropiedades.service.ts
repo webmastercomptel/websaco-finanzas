@@ -1,9 +1,11 @@
 // src/modules/copropiedades/copropiedades.service.ts
 import {
+  BadGatewayException,
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -43,6 +45,8 @@ import type {
 import { toCopropiedad } from './copropiedades.mapper';
 import { DOCUMENTOS_SISTEMA } from './documentos-sistema';
 import { WEBSACO3_COPROPIEDAD_ID_REGEX } from './websaco3-copropiedad-id';
+import { COMPTABLE_EMPRESA_ID_REGEX } from './comptable-empresa-id';
+import { ComptableClient } from '../interfaz-comptable/comptable.client';
 import type { ListarCopropiedadesDto } from './dto/listar-copropiedades.dto';
 import type {
   ActualizarCopropiedadDto,
@@ -80,6 +84,8 @@ export class CopropiedadesService {
     private readonly cuentasContables: Model<CuentaContableDocument>,
     @InjectModel(ConceptoCobro.name)
     private readonly conceptosCobro: Model<ConceptoCobroDocument>,
+    // Only to confirm a `comptableEmpresaId` exists before linking it.
+    private readonly comptable: ComptableClient,
   ) {}
 
   async findAll(
@@ -286,6 +292,7 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     this.aplicarReglaGestionEdificios(cambios, null);
     await this.exigirIdWebsaco3Libre(cambios);
+    await this.validarEmpresaComptable(cambios, null);
 
     const codigo = await this.siguienteCodigo();
     const creada = await this.copropiedades
@@ -294,7 +301,9 @@ export class CopropiedadesService {
         codigo,
       })
       .catch((error: unknown) => {
-        throw this.traducirDuplicadoWebsaco3(error);
+        throw this.traducirDuplicadoComptable(
+          this.traducirDuplicadoWebsaco3(error),
+        );
       });
 
     await this.auditoria.registrar({
@@ -371,7 +380,7 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     const actual = await this.copropiedades
       .findById(id)
-      .select('usaGestionEdificios websaco3CopropiedadId')
+      .select('usaGestionEdificios websaco3CopropiedadId comptableEmpresaId')
       .lean()
       .exec();
     if (!actual) {
@@ -379,12 +388,19 @@ export class CopropiedadesService {
     }
     this.aplicarReglaGestionEdificios(cambios, actual);
     await this.exigirIdWebsaco3Libre(cambios, id);
+    await this.validarEmpresaComptable(
+      cambios,
+      actual.comptableEmpresaId ?? null,
+      id,
+    );
 
     const actualizada = await this.copropiedades
       .findByIdAndUpdate(id, { $set: cambios }, { returnDocument: 'after' })
       .exec()
       .catch((error: unknown) => {
-        throw this.traducirDuplicadoWebsaco3(error);
+        throw this.traducirDuplicadoComptable(
+          this.traducirDuplicadoWebsaco3(error),
+        );
       });
 
     if (!actualizada) {
@@ -709,6 +725,94 @@ export class CopropiedadesService {
   }
 
   /**
+   * Checks a `comptableEmpresaId` being written, in this order, all before
+   * anything is saved: format (400), held by another coproperty (409), exists
+   * in Comptable through the signed GET (404 there → 422 here; Comptable
+   * unreachable, misconfigured or not configured → 502). Normalizes (trim +
+   * lowercase) and writes the value back into `cambios`, like the WebSaco3 id.
+   *
+   * Runs only when the value CHANGES: `null` (unlink) and resending the
+   * stored id skip every check, so an unrelated edit of a linked coproperty
+   * never depends on Comptable being up. `actualId` is the stored value
+   * (`null` on create); `excluirId` the coproperty being edited.
+   */
+  private async validarEmpresaComptable(
+    cambios: Record<string, unknown>,
+    actualId: string | null,
+    excluirId?: string,
+  ): Promise<void> {
+    if (!('comptableEmpresaId' in cambios)) return;
+    const valor = cambios.comptableEmpresaId;
+    if (valor === null) return;
+    if (
+      typeof valor !== 'string' ||
+      !COMPTABLE_EMPRESA_ID_REGEX.test(valor.trim())
+    ) {
+      throw new BadRequestException(
+        'El ID de la Empresa en Comptable debe tener 24 caracteres hexadecimales.',
+      );
+    }
+
+    const id = valor.trim().toLowerCase();
+    cambios.comptableEmpresaId = id;
+    if (id === actualId) return;
+
+    const ocupado = await this.copropiedades
+      .exists({
+        comptableEmpresaId: id,
+        ...(excluirId ? { _id: { $ne: excluirId } } : {}),
+      })
+      .exec();
+    if (ocupado) throw this.conflictoEmpresaComptable();
+
+    const resultado = await this.comptable.consultarEmpresa(id);
+    switch (resultado.tipo) {
+      case 'ok':
+        return;
+      case 'noEncontrado':
+        throw new UnprocessableEntityException(
+          'No existe esa Empresa en Comptable.',
+        );
+      case 'noConfigurado':
+        throw new BadGatewayException(
+          'La integración con Comptable no está configurada en este servidor, así que no se pudo validar la Empresa. No se guardó ningún cambio.',
+        );
+      case 'firma':
+        throw new BadGatewayException(
+          'Comptable rechazó la firma de WebSACO Finanzas (revisa COMPTABLE_HMAC_SECRET), así que no se pudo validar la Empresa. No se guardó ningún cambio.',
+        );
+      default:
+        throw new BadGatewayException(
+          'No se pudo comunicar con Comptable para validar la Empresa. Intenta de nuevo; no se guardó ningún cambio.',
+        );
+    }
+  }
+
+  /** Same E11000 translation as `traducirDuplicadoWebsaco3`, for the
+   *  `comptableEmpresaId_1` index. Anything else passes through untouched. */
+  private traducirDuplicadoComptable(error: unknown): unknown {
+    const e = error as {
+      code?: number;
+      keyPattern?: Record<string, unknown>;
+      message?: string;
+    } | null;
+    const esDuplicado = e?.code === 11000;
+    const esNuestraClave =
+      e?.keyPattern?.comptableEmpresaId !== undefined ||
+      (e?.keyPattern === undefined &&
+        /comptableEmpresaId/.test(e?.message ?? ''));
+    return esDuplicado && esNuestraClave
+      ? this.conflictoEmpresaComptable()
+      : error;
+  }
+
+  private conflictoEmpresaComptable(): ConflictException {
+    return new ConflictException(
+      'Esa Empresa de Comptable ya está asignada a otra copropiedad. Cada copropiedad debe tener su propia Empresa.',
+    );
+  }
+
+  /**
    * Translates the Spanish payload into the English document shape. Only keys
    * the caller actually sent are included — spreading the DTO whole would
    * write `undefined` over fields nobody meant to clear.
@@ -738,6 +842,7 @@ export class CopropiedadesService {
     set('mostrarLogo', dto.mostrarLogo);
     set('usaGestionEdificios', dto.usaGestionEdificios);
     set('websaco3CopropiedadId', dto.websaco3CopropiedadId);
+    set('comptableEmpresaId', dto.comptableEmpresaId);
     set('cuentaContableCartera', dto.cuentaContableCartera);
     set('cuentaAnticipos', dto.cuentaAnticipos);
     set('cuentaDevoluciones', dto.cuentaDevoluciones);

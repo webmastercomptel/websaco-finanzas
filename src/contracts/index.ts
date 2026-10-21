@@ -1915,6 +1915,10 @@ export interface Copropiedad {
   /** The coproperty's id in the building-management system; non-null only
    *  while `usaGestionEdificios` is true. Legacy documents read as null. */
   websaco3CopropiedadId: string | null;
+  /** The Empresa in Comptable that keeps this coproperty's books — enables
+   *  "Interfaz a Comptable". Validated against Comptable whenever it changes.
+   *  Legacy documents read as null. */
+  comptableEmpresaId: string | null;
   cuentaContableCartera: string | null;
   /** Cuenta de pasivo para dinero recibido pero aún no aplicado a ningún
    *  documento — el anticipo de un Recibo de Caja. */

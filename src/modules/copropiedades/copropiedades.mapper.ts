@@ -52,6 +52,7 @@ export const toCopropiedad = (
   usaGestionEdificios: doc.usaGestionEdificios,
   // `?? null`: documents written before this field existed lack the key.
   websaco3CopropiedadId: doc.websaco3CopropiedadId ?? null,
+  comptableEmpresaId: doc.comptableEmpresaId ?? null,
   cuentaContableCartera: doc.cuentaContableCartera,
   cuentaAnticipos: doc.cuentaAnticipos,
   cuentaDevoluciones: doc.cuentaDevoluciones,

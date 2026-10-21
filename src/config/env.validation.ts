@@ -123,6 +123,25 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(20)
     .default(6),
+
+  // Comptable integration ("Interfaz a Comptable", see
+  // modules/interfaz-comptable/ and docs/runbooks/interfaz-comptable.md).
+  // Both optional and paired with `.and()`: a URL with no secret could only
+  // send requests Comptable rejects, and a secret with no URL is a secret
+  // nothing reads. With neither, the screen says the integration is not
+  // configured. The URL is the API base INCLUDING Comptable's `/api/v1`
+  // prefix (e.g. https://comptable.ejemplo.com/api/v1) — the signed path is
+  // derived from it. The secret is shared with Comptable only, never
+  // WEBSACO3_HMAC_SECRET (a different relationship that rotates on its own).
+  COMPTABLE_API_URL: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().uri({ scheme: ['https'] }),
+      otherwise: Joi.string().uri({ scheme: ['http', 'https'] }),
+    })
+    .optional(),
+  COMPTABLE_HMAC_SECRET: Joi.string().min(32).optional(),
 })
   .and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')
-  .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET');
+  .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET')
+  .and('COMPTABLE_API_URL', 'COMPTABLE_HMAC_SECRET');

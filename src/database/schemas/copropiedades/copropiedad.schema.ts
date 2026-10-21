@@ -139,6 +139,23 @@ export class Copropiedad {
   websaco3CopropiedadId: string | null;
 
   /**
+   * The `_id` of the Empresa in Comptable that keeps this coproperty's books
+   * (24-hex ObjectId string, stored trimmed and lowercase). Having it is the
+   * whole authorization for "Interfaz a Comptable": no extra flag. Null for
+   * coproperties whose books live elsewhere (they keep the CSV export).
+   * Legacy documents lack the key; the mapper reads those as null.
+   *
+   * Validated against Comptable (signed GET) by `CopropiedadesService` every
+   * time it CHANGES, and unique when set — one Empresa per coproperty, same
+   * double enforcement as `websaco3CopropiedadId`: a write-time 409 plus the
+   * partial unique index at the bottom of this file, created by
+   * `scripts/migrate-copropiedad-comptable-id-index.js` (boot-time creation
+   * fails silently on duplicates).
+   */
+  @Prop({ type: String, default: null, trim: true, lowercase: true })
+  comptableEmpresaId: string | null;
+
+  /**
    * Free-text receivables account every consolidated invoice for this
    * building debits — same reasoning as ConceptoCobro.cuentaCreditoId.
    */
@@ -290,5 +307,18 @@ CopropiedadSchema.index(
   {
     unique: true,
     partialFilterExpression: { websaco3CopropiedadId: { $type: 'string' } },
+  },
+);
+
+/**
+ * Default name `comptableEmpresaId_1`, same `$type: 'string'` trick as the
+ * index above. Keep name and options identical to the ones in
+ * `scripts/migrate-copropiedad-comptable-id-index.js`.
+ */
+CopropiedadSchema.index(
+  { comptableEmpresaId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { comptableEmpresaId: { $type: 'string' } },
   },
 );

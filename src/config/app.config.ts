@@ -33,4 +33,9 @@ export default registerAs('app', () => ({
     process.env.WEBSACO3_PUBLICACION_MAX_INTENTOS!,
     10,
   ),
+  // Comptable integration — both optional, present together or not at all
+  // (`.and()` in env.validation.ts). Absent means "not configured", which the
+  // screen reports; never a boot error.
+  comptableApiUrl: process.env.COMPTABLE_API_URL,
+  comptableHmacSecret: process.env.COMPTABLE_HMAC_SECRET,
 }));

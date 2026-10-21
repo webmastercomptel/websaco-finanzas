@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "origen": {
+    "sistema": "websaco-finanzas",
+    "copropiedadId": "66f000000000000000000001",
+    "loteOrigenId": "671000000000000000000001",
+    "numeroLote": 12,
+    "periodoDesde": "2026-10-01",
+    "periodoHasta": "2026-10-31",
+    "generadoPor": { "accountId": "66f000000000000000000099", "nombre": "Ana Pérez" }
+  },
+  "asientos": [
+    {
+      "documento": "FV",
+      "prefijo": "FEVP",
+      "numero": 4152,
+      "fecha": "2026-10-01",
+      "descripcion": "Cargo del Periodo 01/10/2026 - 31/10/2026",
+      "movimientos": [
+        {
+          "cuenta": "13050501",
+          "debito": "350000.00",
+          "credito": "0",
+          "detalle": "Cargo del Periodo 01/10/2026 - 31/10/2026",
+          "tercero": {
+            "identificacion": "101-A",
+            "tipoPersona": "natural",
+            "nombre1": "Ana",
+            "nombre2": null,
+            "apellido1": "Pérez",
+            "apellido2": null,
+            "razonSocial": null,
+            "tipoIdentificacion": "13",
+            "digitoVerificacion": null,
+            "email": "ana@example.com",
+            "telefono": null,
+            "direccion": null,
+            "ciudad": null
+          },
+          "centroUtilidad": "01",
+          "centroDestino": null,
+          "flujoCaja": null,
+          "baseGravable": null,
+          "tipoDocCruce": "FV",
+          "numeroDocCruce": "4152"
+        },
+        {
+          "cuenta": "41709501",
+          "debito": "0",
+          "credito": "350000.00",
+          "detalle": "Cargo del Periodo 01/10/2026 - 31/10/2026",
+          "tercero": null,
+          "centroUtilidad": "01",
+          "centroDestino": null,
+          "flujoCaja": null,
+          "baseGravable": null,
+          "tipoDocCruce": null,
+          "numeroDocCruce": null
+        }
+      ]
+    },
+    {
+      "documento": "RC",
+      "prefijo": "",
+      "numero": 88,
+      "fecha": "2026-10-05",
+      "descripcion": "Pago administración octubre",
+      "movimientos": [
+        {
+          "cuenta": "11100501",
+          "debito": "350000.00",
+          "credito": "0",
+          "detalle": "Pago administración octubre",
+          "tercero": null,
+          "centroUtilidad": null,
+          "centroDestino": null,
+          "flujoCaja": "FC01",
+          "baseGravable": null,
+          "tipoDocCruce": null,
+          "numeroDocCruce": null
+        },
+        {
+          "cuenta": "13050501",
+          "debito": "0",
+          "credito": "350000.00",
+          "detalle": "Pago administración octubre",
+          "tercero": {
+            "identificacion": "101-A",
+            "tipoPersona": "natural",
+            "nombre1": "Ana",
+            "nombre2": null,
+            "apellido1": "Pérez",
+            "apellido2": null,
+            "razonSocial": null,
+            "tipoIdentificacion": "13",
+            "digitoVerificacion": null,
+            "email": "ana@example.com",
+            "telefono": null,
+            "direccion": null,
+            "ciudad": null
+          },
+          "centroUtilidad": null,
+          "centroDestino": null,
+          "flujoCaja": null,
+          "baseGravable": null,
+          "tipoDocCruce": "FV",
+          "numeroDocCruce": "4152"
+        }
+      ]
+    }
+  ]
+}

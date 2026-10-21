@@ -202,6 +202,56 @@ describe('envValidationSchema', () => {
     });
   });
 
+  describe('integración con Comptable', () => {
+    const URL = 'https://comptable.ejemplo.com/api/v1';
+    const SECRETO = 'comptable-secreto-compartido-de-32-caracteres';
+
+    it('arranca sin ninguna de las dos', () => {
+      expect(validate({}).error).toBeUndefined();
+    });
+
+    it('arranca con las dos juntas', () => {
+      const { error } = validate({
+        COMPTABLE_API_URL: URL,
+        COMPTABLE_HMAC_SECRET: SECRETO,
+      });
+
+      expect(error).toBeUndefined();
+    });
+
+    it('rechaza la URL sin el secreto', () => {
+      const { error } = validate({ COMPTABLE_API_URL: URL });
+
+      expect(error?.message).toContain('COMPTABLE_HMAC_SECRET');
+    });
+
+    it('rechaza el secreto sin la URL', () => {
+      const { error } = validate({ COMPTABLE_HMAC_SECRET: SECRETO });
+
+      expect(error?.message).toContain('COMPTABLE_API_URL');
+    });
+
+    it('exige un secreto de al menos 32 caracteres', () => {
+      const { error } = validate({
+        COMPTABLE_API_URL: URL,
+        COMPTABLE_HMAC_SECRET: 'corto',
+      });
+
+      expect(error?.message).toContain('COMPTABLE_HMAC_SECRET');
+    });
+
+    it('exige https en producción', () => {
+      const { error } = validate({
+        NODE_ENV: 'production',
+        CORS_ORIGINS: 'https://finanzas.ejemplo.com',
+        COMPTABLE_API_URL: 'http://comptable.ejemplo.com/api/v1',
+        COMPTABLE_HMAC_SECRET: SECRETO,
+      });
+
+      expect(error?.message).toContain('COMPTABLE_API_URL');
+    });
+  });
+
   describe('credenciales de Firebase', () => {
     it('exige la credencial de servicio', () => {
       // No existe un modo "sin autenticación": si falta, no arranca.

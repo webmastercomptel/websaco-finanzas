@@ -5,6 +5,7 @@ import { MiCopropiedadController } from './mi-copropiedad.controller';
 import { CopropiedadesService } from './copropiedades.service';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { ConceptosModule } from '../conceptos/conceptos.module';
+import { ComptableClientModule } from '../interfaz-comptable/comptable-client.module';
 
 /**
  * Models come from the @Global DatabaseModule and the guards from the @Global
@@ -14,7 +15,9 @@ import { ConceptosModule } from '../conceptos/conceptos.module';
  * coproperty creation.
  */
 @Module({
-  imports: [AuditoriaModule, ConceptosModule],
+  // ComptableClientModule: the signed GET that confirms a `comptableEmpresaId`
+  // exists in Comptable before it is saved.
+  imports: [AuditoriaModule, ConceptosModule, ComptableClientModule],
   controllers: [CopropiedadesController, MiCopropiedadController],
   providers: [CopropiedadesService],
 })

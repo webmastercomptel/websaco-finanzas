@@ -9,6 +9,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { WEBSACO3_COPROPIEDAD_ID_REGEX } from '../websaco3-copropiedad-id';
+import { COMPTABLE_EMPRESA_ID_REGEX } from '../comptable-empresa-id';
 
 /**
  * Everything about a coproperty except its code, all optional. Split the same
@@ -91,6 +92,19 @@ class CamposCopropiedadDto {
       'El ID de WebSaco3 debe tener 24 caracteres hexadecimales (por ejemplo, 64b7f0c2a1d4e5f6a7b8c9d0)',
   })
   websaco3CopropiedadId?: string;
+
+  /**
+   * The `_id` of the Empresa in Comptable that keeps this coproperty's books.
+   * `null` unlinks it (the integration screen then reports it as not
+   * configured). Format only here; uniqueness and existence in Comptable are
+   * checked by `CopropiedadesService`, only when the value changes.
+   */
+  @IsOptional()
+  @Matches(COMPTABLE_EMPRESA_ID_REGEX, {
+    message:
+      'El ID de la Empresa en Comptable debe tener 24 caracteres hexadecimales (por ejemplo, 670000000000000000000001)',
+  })
+  comptableEmpresaId?: string | null;
 
   @IsOptional()
   @IsString()
