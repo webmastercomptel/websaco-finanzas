@@ -12,9 +12,13 @@ import {
   Copropiedad,
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
+import {
+  LoteFacturacion,
+  LoteFacturacionDocument,
+} from '../../database/schemas/facturacion/lote-facturacion.schema';
 import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
 import type { LoteFacturasPdfConfirmadoEvent } from '../../common/eventos/lote-facturas-pdf-confirmado.event';
-import { construirPayload } from './publicacion-facturas.mapper';
+import { construirPayload, periodoDeLote } from './publicacion-facturas.mapper';
 import { firmar } from './publicacion-facturas.firma';
 import {
   CLAIM_TTL_MS,
@@ -77,6 +81,8 @@ export class PublicacionFacturasService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly storage: DocumentoStorageService,
     private readonly config: ConfigService,
+    @InjectModel(LoteFacturacion.name)
+    private readonly lotes: Model<LoteFacturacionDocument>,
   ) {}
 
   /**
@@ -196,7 +202,8 @@ export class PublicacionFacturasService {
    * BEFORE signing anything, so a coproperty with no id costs no signed URL
    * and no request. `Copropiedad` IS the tenant, so `findById` is the right
    * lookup here (the tenancy law's `findById` warning is about other
-   * collections).
+   * collections). The lote's `periodoDesde` is read the same way and for the
+   * same reason (see the `periodo` block below).
    */
   private async procesar(fila: FilaReclamada, max: number): Promise<Desenlace> {
     let websaco3CopropiedadId: string | null;
@@ -234,6 +241,26 @@ export class PublicacionFacturasService {
       };
     }
 
+    // Month the lote bills, read at send time like the coproperty id so rows
+    // already queued carry it too. Only a failed READ is an error; a lote that
+    // is gone or has no usable date just omits `periodo` (the receiver falls
+    // back on its month of receipt) — a cosmetic field never blocks a lote.
+    // Tenant-scoped `findOne`, never a bare `findById`, per the tenancy law.
+    let periodo: string | undefined;
+    try {
+      const lote = await this.lotes
+        .findOne({ _id: fila.loteId, copropiedadId: fila.copropiedadId })
+        .select('periodoDesde')
+        .lean()
+        .exec();
+      periodo = periodoDeLote(lote?.periodoDesde);
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo leer el lote ${fila.loteId.toString()}: ${(err as Error).message}`,
+      );
+      return this.desenlaceReintentar(fila, max, null, 'lote-lectura');
+    }
+
     let urlSigned: string;
     let expiresAt: Date;
     try {
@@ -255,6 +282,7 @@ export class PublicacionFacturasService {
       websaco3CopropiedadId,
       urlSigned,
       expiresAt,
+      periodo,
     );
     const rawBody = JSON.stringify(payload);
     const timestamp = String(Math.floor(Date.now() / 1000));

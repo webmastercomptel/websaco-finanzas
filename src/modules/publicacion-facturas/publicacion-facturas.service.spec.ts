@@ -56,6 +56,28 @@ const mockCopropiedadesQueRompe = (error: Error = new Error('mongo down')) => ({
   })),
 });
 
+/** `findOne(...).select(...).lean().exec()` of a lote; `periodoDesde` defaults to
+ *  a November lote (bare date, UTC midnight, as Finanzas stores it). */
+const mockLotes = (
+  documento: Record<string, unknown> | null = {
+    periodoDesde: new Date('2026-11-01T00:00:00.000Z'),
+  },
+) => {
+  const select = jest.fn(() => ({
+    lean: () => ({ exec: () => Promise.resolve(documento) }),
+  }));
+  return { select, findOne: jest.fn(() => ({ select })) };
+};
+
+/** The lote read rejects — Mongo unreachable. */
+const mockLotesQueRompe = (error: Error = new Error('mongo down')) => ({
+  findOne: jest.fn(() => ({
+    select: () => ({
+      lean: () => ({ exec: () => Promise.reject(error) }),
+    }),
+  })),
+});
+
 const mockFilas = (over: Partial<Record<string, jest.Mock>> = {}) => ({
   updateOne: jest.fn(() => ({
     exec: () => Promise.resolve({ modifiedCount: 1 }),
@@ -113,6 +135,7 @@ describe('PublicacionFacturasService.encolar', () => {
       mockCopropiedades(copropiedad) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
   it('la copropiedad con el flag apagado no escribe ninguna fila y devuelve false', async () => {
@@ -162,6 +185,7 @@ describe('PublicacionFacturasService.encolar', () => {
       copropiedades as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.encolar(EVENTO);
@@ -236,6 +260,7 @@ describe('PublicacionFacturasService.reclamar', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.reclamar(6);
@@ -274,6 +299,7 @@ describe('PublicacionFacturasService.reclamar', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.reclamar(6);
@@ -291,6 +317,7 @@ describe('PublicacionFacturasService.reclamar', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.reclamar(6, LOTE_ID);
@@ -393,6 +420,7 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const primeraReclamada = await service.reclamar(6);
@@ -422,6 +450,7 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const reclamada = await service.reclamar(6);
@@ -451,6 +480,7 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
     await expect(serviceEnLimite.reclamar(6)).resolves.not.toBeNull();
 
@@ -467,6 +497,7 @@ describe('PublicacionFacturasService.reclamar — exclusividad y ventana de recl
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
     await expect(serviceReciente.reclamar(6)).resolves.toBeNull();
 
@@ -491,6 +522,7 @@ describe('PublicacionFacturasService.procesar', () => {
         mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
+        mockLotes() as never,
       );
 
       const desenlace = await (
@@ -513,6 +545,7 @@ describe('PublicacionFacturasService.procesar', () => {
         mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
+        mockLotes() as never,
       );
 
       const desenlace = await (
@@ -533,6 +566,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const desenlace = await (
@@ -553,6 +587,7 @@ describe('PublicacionFacturasService.procesar', () => {
         mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
         mockStorage() as never,
         mockConfig() as never,
+        mockLotes() as never,
       );
 
       const desenlace = await (
@@ -575,6 +610,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const desenlace = await (
@@ -593,6 +629,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const desenlace = await (
@@ -616,6 +653,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storageQueRompe as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const desenlace = await (
@@ -638,6 +676,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
@@ -670,6 +709,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
@@ -696,6 +736,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
@@ -718,6 +759,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage({ url, expiresAt: new Date() }) as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(
@@ -743,6 +785,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storage as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
@@ -773,6 +816,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
@@ -796,6 +840,7 @@ describe('PublicacionFacturasService.procesar', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await (service as unknown as ServicioConPrivados).procesar(FILA_BASE, 6);
@@ -825,6 +870,7 @@ describe('PublicacionFacturasService.procesar — id resuelto desde la copropied
       copropiedades as never,
       storage as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
   const procesar = (
@@ -1079,6 +1125,127 @@ describe('PublicacionFacturasService.procesar — id resuelto desde la copropied
 // `immediate-dispatch-on-confirmation`: `publicarAhora` envía LA fila de un
 // lote dentro del request de confirmación. Reutiliza el reclamo atómico, así
 // que la exclusividad frente al barrido manual es la de `reclamar`.
+describe('PublicacionFacturasService.procesar — periodo del lote', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  const crear = (lotes: unknown, storage = mockStorage()) =>
+    new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
+      storage as never,
+      mockConfig() as never,
+      lotes as never,
+    );
+
+  const procesar = (service: PublicacionFacturasService, max = 6) =>
+    (service as unknown as ServicioConPrivados).procesar(FILA_BASE, max);
+
+  const cuerpoEnviado = (): Record<string, unknown> => {
+    const [, opciones] = (global.fetch as jest.Mock).mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    return JSON.parse(opciones.body) as Record<string, unknown>;
+  };
+
+  it('lee el lote acotado por la copropiedad de la fila (nunca un findById pelado)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const lotes = mockLotes();
+
+    await procesar(crear(lotes));
+
+    expect(lotes.findOne).toHaveBeenCalledWith({
+      _id: FILA_BASE.loteId,
+      copropiedadId: FILA_BASE.copropiedadId,
+    });
+    expect(lotes.select).toHaveBeenCalledWith('periodoDesde');
+  });
+
+  it('el payload lleva el periodo AAAA-MM del periodoDesde del lote', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+
+    const desenlace = await procesar(crear(mockLotes()));
+
+    expect(desenlace.estado).toBe('enviado');
+    expect(cuerpoEnviado().periodo).toBe('2026-11');
+  });
+
+  it('usa el mes UTC en el límite de mes (el día 1 UTC no retrocede por la zona de Bogotá)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+    const service = crear(
+      mockLotes({ periodoDesde: new Date('2026-12-01T00:00:00.000Z') }),
+    );
+
+    await procesar(service);
+
+    expect(cuerpoEnviado().periodo).toBe('2026-12');
+  });
+
+  it.each([
+    ['el lote no existe o es de otra copropiedad', null],
+    ['el lote no tiene fecha', {}],
+  ])('si %s, omite periodo y envía igual', async (_caso, lote) => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 201 });
+
+    const desenlace = await procesar(crear(mockLotes(lote)));
+
+    expect(desenlace.estado).toBe('enviado');
+    expect(cuerpoEnviado()).not.toHaveProperty('periodo');
+  });
+
+  it('un error al leer el lote es reintentable, sin firmar ni enviar', async () => {
+    global.fetch = jest.fn();
+    const storage = mockStorage();
+
+    const desenlace = await procesar(crear(mockLotesQueRompe(), storage), 6);
+
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(true);
+    expect(desenlace.ultimoError).toBe('lote-lectura');
+    expect(desenlace.proximoIntentoEn).toBeInstanceOf(Date);
+    expect(storage.generarUrlLectura).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('un error al leer el lote con intentos agotados queda terminal', async () => {
+    global.fetch = jest.fn();
+    const service = crear(mockLotesQueRompe());
+
+    const desenlace = await (
+      service as unknown as ServicioConPrivados
+    ).procesar({ ...FILA_BASE, intentos: 6 }, 6);
+
+    expect(desenlace.estado).toBe('fallido');
+    expect(desenlace.reintentable).toBe(false);
+    expect(desenlace.proximoIntentoEn).toBeNull();
+  });
+
+  it('una copropiedad sin id de WebSaco3 no lee el lote', async () => {
+    global.fetch = jest.fn();
+    const lotes = mockLotes();
+    const service = new PublicacionFacturasService(
+      mockFilas() as never,
+      mockCopropiedades({
+        usaGestionEdificios: true,
+        websaco3CopropiedadId: null,
+      }) as never,
+      mockStorage() as never,
+      mockConfig() as never,
+      lotes as never,
+    );
+
+    const desenlace = await procesar(service);
+
+    expect(desenlace.ultimoError).toBe('sin-websaco3-id');
+    expect(lotes.findOne).not.toHaveBeenCalled();
+  });
+});
+
 describe('PublicacionFacturasService.publicarAhora', () => {
   const originalFetch = global.fetch;
 
@@ -1105,6 +1272,7 @@ describe('PublicacionFacturasService.publicarAhora', () => {
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storage as never,
       mockConfig(config) as never,
+      mockLotes() as never,
     );
 
   it.each([
@@ -1220,6 +1388,7 @@ describe('PublicacionFacturasService.publicarAhora', () => {
       }) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.publicarAhora(LOTE_ID);
@@ -1341,6 +1510,7 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.barrerAgotados(6);
@@ -1377,6 +1547,7 @@ describe('PublicacionFacturasService.barrerAgotados', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     await service.barrerAgotados(6);
@@ -1406,6 +1577,7 @@ describe('PublicacionFacturasService.liberar', () => {
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
     const desenlace: Desenlace = {
       estado: 'enviado',
@@ -1446,6 +1618,7 @@ describe('PublicacionFacturasService.procesarPendientes — configuración', () 
       mockCopropiedades(null) as never,
       mockStorage() as never,
       config as never,
+      mockLotes() as never,
     );
 
     const resumen = await service.procesarPendientes();
@@ -1470,6 +1643,7 @@ describe('PublicacionFacturasService.procesarPendientes — solapamiento', () =>
       mockCopropiedades(null) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const primera = service.procesarPendientes();
@@ -1531,6 +1705,7 @@ describe('PublicacionFacturasService.procesarPendientes — presupuesto de ciclo
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       storage as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const resumen = await service.procesarPendientes();
@@ -1584,6 +1759,7 @@ describe('PublicacionFacturasService.procesarPendientes — contadores del resum
       mockCopropiedades(COPROPIEDAD_HABILITADA) as never,
       mockStorage() as never,
       mockConfig() as never,
+      mockLotes() as never,
     );
 
     const resumen = await service.procesarPendientes();

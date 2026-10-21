@@ -32,6 +32,34 @@ The WebSaco3 id is read from the CURRENT `Copropiedad.websaco3CopropiedadId` on
 every attempt and is not stored on the outbox row, so correcting a wrong id also
 fixes rows that are already queued.
 
+### Payload
+
+Body of the signed `POST` (JSON; the HMAC covers the raw bytes):
+
+| Field | Meaning |
+|---|---|
+| `websaco3CopropiedadId` | WebSaco3 `_id` of the coproperty (24 hex), from the current `Copropiedad` |
+| `loteId` | Finanzas lote id; the receiver deduplicates by it |
+| `facturas` | `[{ numeroFactura }]`, in the PDF's page order |
+| `urlSigned` | Fresh signed read URL of the FV PDF (bearer credential, never logged) |
+| `urlExpiresAt` | ISO-8601 expiry of `urlSigned` |
+| `periodo` | **Optional.** `AAAA-MM` = UTC month of the lote's `periodoDesde` |
+
+`periodo` is read from the lote on every attempt (like the id, it is not stored
+on the outbox row, so rows already queued carry it too). It is the same month
+the UI shows in "Lote Noviembre de 2026" (`formatoMesAnio` formats in UTC), so
+it is computed in UTC, not in Bogotá time: `periodoDesde` is a bare date stored
+as UTC midnight and a UTC-5 conversion would roll the 1st back a month. The
+read is scoped to the coproperty (`findOne({ _id, copropiedadId })`). If the
+lote is gone or has no date, `periodo` is omitted (not sent as `null`) and
+WebSaco3 files the document under its own month of receipt; a failed read is
+transient (`lote-lectura`) and follows the normal retry policy.
+
+WebSaco3 uses it as the document's period and names the document
+`facturas-<mes>-<año>.pdf` (e.g. `facturas-noviembre-2026.pdf`). The field is
+additive: a receiver that predates it ignores it. Deploy WebSaco3 first so it
+accepts the field before Finanzas starts sending it.
+
 ### Row states
 
 | `estado` | `reintentable` | Meaning | Picked up by the sweep |
@@ -39,7 +67,7 @@ fixes rows that are already queued.
 | `pendiente` | `true` | Enqueued, not sent yet (or transport not configured) | Yes, when `proximoIntentoEn <= now` |
 | `enviando` | n/a | Claimed by an attempt in flight | Only when `reclamadoEn` is older than 5 min (`CLAIM_TTL_MS`) |
 | `enviado` | `false` | Delivered (any 2xx, or 409 = receiver already has this `loteId`) | No, final |
-| `fallido` | `true` | Transient failure (422, 429, 5xx, network error, timeout, signed-URL error, `copropiedad-lectura`) | Yes, when `proximoIntentoEn <= now` and `intentos < max` |
+| `fallido` | `true` | Transient failure (422, 429, 5xx, network error, timeout, signed-URL error, `copropiedad-lectura`, `lote-lectura`) | Yes, when `proximoIntentoEn <= now` and `intentos < max` |
 | `fallido` | `false` | Terminal (400, 404, 401, 403, any other 4xx, `sin-websaco3-id`, `reclamo-expirado`, or attempts exhausted) | No. Needs a human, see section 5 |
 
 Backoff between automatic retry slots: 1 min, 5 min, 15 min, then 1 h

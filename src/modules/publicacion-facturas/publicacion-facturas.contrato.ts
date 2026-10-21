@@ -25,6 +25,11 @@ export interface PayloadPublicacionLote {
   urlSigned: string;
   /** ISO-8601. */
   urlExpiresAt: string;
+  /** Month the lote bills, `AAAA-MM`: the UTC month of the lote's
+   *  `periodoDesde`, read from the lote at send time. Additive and optional —
+   *  omitted when the lote or its date cannot be read, and the receiver then
+   *  falls back on its own month of receipt. */
+  periodo?: string;
 }
 
 /** Returned by `POST /interno/publicacion-facturas/procesar-pendientes` —
