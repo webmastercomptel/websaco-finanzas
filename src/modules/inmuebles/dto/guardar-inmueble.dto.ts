@@ -120,7 +120,9 @@ export class CrearInmuebleDto extends CamposInmuebleDto {
  * `codigo` stays accepted but is IMMUTABLE after creation: the service answers
  * 400 for a different code and ignores one equal to the stored value. It is not
  * dropped from this DTO so the form (which resends it) gets that clear message
- * instead of a generic "property should not exist".
+ * instead of a generic "property should not exist". The bulk import
+ * (`InmueblesService.importar`) follows the same rule: a row of an existing
+ * code patches that unit but never writes its `codigo`.
  */
 export class ActualizarInmuebleDto extends CamposInmuebleDto {
   @IsOptional()

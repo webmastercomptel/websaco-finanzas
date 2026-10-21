@@ -301,10 +301,11 @@ describe('ValoresRecurrentesService.importarMasivo', () => {
   });
 
   it('una fila con código de copropiedad que no coincide falla sola, el resto sigue', async () => {
-    // A diferencia de InmueblesService.importar (que borra el listado antes
-    // de escribir), este import nunca crea ni borra un inmueble — así que un
-    // código equivocado puede fallar fila por fila, sin necesidad de
-    // abortar el archivo entero primero.
+    // A diferencia de InmueblesService.importar (que crea y actualiza
+    // inmuebles, así que un archivo de otra copropiedad aborta entero), este
+    // import nunca crea ni borra un inmueble — así que un código equivocado
+    // puede fallar fila por fila, sin necesidad de abortar el archivo entero
+    // primero.
     const valoresRecurrentes = modeloValoresRecurrentes([]);
     const service = new ValoresRecurrentesService(
       modeloInmueblesPorCodigo(['301', '302']) as never,

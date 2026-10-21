@@ -184,9 +184,12 @@ export class InmueblesController {
    * that answers for it. Gated the same as a single `create` — importing is
    * bulk creation, not a separate capability.
    *
-   * REPLACES the roster: every call first wipes every existing unit of the
-   * active coproperty that has no Factura against it — see
-   * `InmueblesService.importar`. Not additive, by design.
+   * UPSERT BY CODE, never destructive: a row of an existing code patches that
+   * unit (only the fields the row sent, never its `codigo`), a row of a new
+   * code creates it, and nothing is ever deleted — see
+   * `InmueblesService.importar`. Still gated by `create` (no separate
+   * `update` check): the file can only fill in or correct data the same role
+   * could already enter one unit at a time.
    */
   @Post('importar')
   @CheckAbility({ action: 'create', subject: 'Inmueble' })

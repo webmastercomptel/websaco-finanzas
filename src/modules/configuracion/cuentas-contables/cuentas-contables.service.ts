@@ -125,7 +125,7 @@ export class CuentasContablesService {
    * `create` per row — same duplicate-code check, same field mapping — so
    * a bad row fails on its own without aborting the rest (mirrors
    * `InmueblesService.importar`'s per-row independence, though nothing here
-   * is destructive the way that import's roster wipe is — see
+   * touches an existing row the way that import's upsert patches units — see
    * `ValoresRecurrentesService.importarMasivo`'s own note on why a
    * `codigoCopropiedad` mismatch is checked per row instead of aborting the
    * whole file).

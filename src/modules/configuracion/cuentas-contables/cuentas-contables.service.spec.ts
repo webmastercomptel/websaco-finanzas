@@ -355,10 +355,11 @@ describe('CuentasContablesService.importar', () => {
   });
 
   it('una fila con código de copropiedad que no coincide falla sola, el resto sigue', async () => {
-    // A diferencia de InmueblesService.importar (que borra el listado antes
-    // de escribir), este import nunca borra nada — así que un código
-    // equivocado puede fallar fila por fila, igual que un código de cuenta
-    // repetido, sin necesidad de abortar el archivo entero primero.
+    // A diferencia de InmueblesService.importar (que escribe sobre el listado
+    // de inmuebles, así que un archivo de otra copropiedad aborta entero),
+    // este import nunca borra nada — así que un código equivocado puede
+    // fallar fila por fila, igual que un código de cuenta repetido, sin
+    // necesidad de abortar el archivo entero primero.
     const modelo = modeloImportarCon();
     const service = servicioImportar(modelo, CODIGO_COPROPIEDAD);
 

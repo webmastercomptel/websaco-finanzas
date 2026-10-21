@@ -158,18 +158,25 @@ export interface ErrorImportacionInmueble {
 
 /**
  * Result of importing a batch of units — and, inline, their titulares — at
- * once. Rows are independent: one bad row does not abort the rest, because a
- * 400-unit file with three typos should not have to be re-uploaded whole.
+ * once. The import is an UPSERT BY CODE that never deletes: a row of a known
+ * code patches that unit, a row of a new code creates it. Rows are
+ * independent: one bad row does not abort the rest, because a 400-unit file
+ * with three typos should not have to be re-uploaded whole.
  */
 export interface ResultadoImportacionInmuebles {
   total: number;
+  /** Rows that created a NEW unit. */
   creados: number;
+  /** Rows whose code already existed and patched that unit (also counts rows
+   *  that changed nothing: the unit was matched and left as it was). */
+  actualizados: number;
   errores: ErrorImportacionInmueble[];
-  /** Units of this coproperty erased right before this import — every
-   *  import replaces the whole roster, see `InmueblesService.importar`. */
+  /** @deprecated Always 0 — an import never deletes. Kept for one release so
+   *  a frontend deployed before this change keeps parsing the response. */
   eliminadosAntes: number;
-  /** Codes left untouched because they already have a Factura issued —
-   *  never deleted, only skipped. */
+  /** @deprecated Always empty — an import never deletes, so nothing is
+   *  skipped for having a Factura. Kept for one release, same reason as
+   *  `eliminadosAntes`. */
   bloqueadosPorFactura: string[];
 }
 
