@@ -212,7 +212,12 @@ describe('PropietariosService', () => {
           {
             codigo: '101',
             tipo: 'arrendatario',
-            titular: { nombre: 'Ana', email: 'a@x.co', telefono: '3001' },
+            titular: {
+              nombre: 'Ana',
+              email: 'a@x.co',
+              emails: ['a@x.co'],
+              telefono: '3001',
+            },
           },
           { codigo: '102', tipo: 'propietario', titular: null },
         ],

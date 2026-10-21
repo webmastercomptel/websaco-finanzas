@@ -1,5 +1,8 @@
 import { Types } from 'mongoose';
-import { mapearPropietarios } from './propietarios.mapper';
+import {
+  MAX_EMAILS_TITULAR_WEBSACO3,
+  mapearPropietarios,
+} from './propietarios.mapper';
 
 const oid = () => new Types.ObjectId();
 
@@ -43,7 +46,12 @@ describe('mapearPropietarios', () => {
     expect(u).toEqual({
       codigo: '101',
       tipo: 'arrendatario',
-      titular: { nombre: 'Ana Pérez', email: 'a@x.co', telefono: '3001' },
+      titular: {
+        nombre: 'Ana Pérez',
+        email: 'a@x.co',
+        emails: ['a@x.co', 'b@x.co'],
+        telefono: '3001',
+      },
     });
   });
 
@@ -70,7 +78,7 @@ describe('mapearPropietarios', () => {
     expect(u.titular).toBeNull();
   });
 
-  it('sin email ni teléfono: ambos null', () => {
+  it('sin email ni teléfono: email y teléfono null, emails vacío', () => {
     const id = oid();
 
     const [u] = mapear(
@@ -81,7 +89,72 @@ describe('mapearPropietarios', () => {
     expect(u.titular).toEqual({
       nombre: 'Ana Pérez',
       email: null,
+      emails: [],
       telefono: null,
+    });
+  });
+
+  describe('emails del titular', () => {
+    const titularCon = (emails: string[]) => {
+      const id = oid();
+      const [u] = mapear(
+        [inmueble({ titularId: id })],
+        [tercero(id, { emails })],
+      );
+      return u.titular;
+    };
+
+    it('tres emails válidos: email es el primero y emails los tres en orden', () => {
+      expect(titularCon(['a@x.com', 'b@x.com', 'c@x.com'])).toMatchObject({
+        email: 'a@x.com',
+        emails: ['a@x.com', 'b@x.com', 'c@x.com'],
+      });
+    });
+
+    it('primero inválido: email es el primero VÁLIDO y el inválido no se publica', () => {
+      expect(titularCon(['bad', 'b@x.com'])).toMatchObject({
+        email: 'b@x.com',
+        emails: ['b@x.com'],
+      });
+    });
+
+    it('recorta espacios y quita duplicados conservando el orden', () => {
+      expect(titularCon([' a@x.com ', 'a@x.com', 'b@x.com'])).toMatchObject({
+        email: 'a@x.com',
+        emails: ['a@x.com', 'b@x.com'],
+      });
+    });
+
+    it('deduplica sin distinguir mayúsculas y conserva la primera grafía', () => {
+      expect(
+        titularCon(['Ana@X.com', 'ana@x.com', 'b@x.com', 'B@X.COM']),
+      ).toMatchObject({
+        email: 'Ana@X.com',
+        emails: ['Ana@X.com', 'b@x.com'],
+      });
+    });
+
+    it('todos inválidos o vacíos: email null y emails []', () => {
+      expect(titularCon(['bad', '', '   '])).toMatchObject({
+        email: null,
+        emails: [],
+      });
+    });
+
+    it('trunca a 50 emails y email sigue siendo el primero', () => {
+      const muchos = Array.from({ length: 60 }, (_, i) => `u${i}@x.com`);
+
+      const titular = titularCon(muchos);
+
+      expect(titular?.emails).toHaveLength(MAX_EMAILS_TITULAR_WEBSACO3);
+      expect(titular?.emails).toEqual(muchos.slice(0, 50));
+      expect(titular?.email).toBe('u0@x.com');
+    });
+
+    it('email siempre coincide con emails[0]', () => {
+      const titular = titularCon(['  ', 'x', ' c@x.co ', 'd@x.co']);
+
+      expect(titular?.email).toBe(titular?.emails[0]);
     });
   });
 

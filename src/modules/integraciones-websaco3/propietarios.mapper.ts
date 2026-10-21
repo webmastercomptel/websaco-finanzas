@@ -5,6 +5,7 @@ import type {
   TitularWebsaco3,
   UnidadPropietarioWebsaco3,
 } from '../../contracts';
+import { esEmailValido } from '../../common/utils/email.utils';
 
 /** The only `Inmueble` fields the snapshot reads (`select` in the service). */
 export interface InmuebleParaPropietarios {
@@ -22,19 +23,44 @@ export interface TerceroParaPropietarios {
   estado: 'active' | 'inactive';
 }
 
-const primerEmail = (emails: string[] | undefined): string | null => {
+/**
+ * Upper bound of `titular.emails`. The consumer applies its own, smaller cap
+ * on what it stores; this one only keeps the snapshot payload bounded when a
+ * party has an absurd number of addresses.
+ */
+export const MAX_EMAILS_TITULAR_WEBSACO3 = 50;
+
+/**
+ * Valid addresses of a party: trimmed, deduped case-insensitively (the first
+ * spelling is kept), original order preserved. Validity goes through the same
+ * `esEmailValido` the bulk import uses so both agree on what is an address.
+ */
+const emailsValidos = (emails: string[] | undefined): string[] => {
+  const vistos = new Set<string>();
+  const validos: string[] = [];
   for (const email of emails ?? []) {
     const limpio = typeof email === 'string' ? email.trim() : '';
-    if (limpio.length > 0) return limpio;
+    if (!esEmailValido(limpio)) continue;
+    const clave = limpio.toLowerCase();
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    validos.push(limpio);
   }
-  return null;
+  return validos;
 };
 
-const aTitular = (tercero: TerceroParaPropietarios): TitularWebsaco3 => ({
-  nombre: tercero.nombre,
-  email: primerEmail(tercero.emails),
-  telefono: tercero.telefono?.trim() || null,
-});
+const aTitular = (tercero: TerceroParaPropietarios): TitularWebsaco3 => {
+  const emails = emailsValidos(tercero.emails).slice(
+    0,
+    MAX_EMAILS_TITULAR_WEBSACO3,
+  );
+  return {
+    nombre: tercero.nombre,
+    email: emails[0] ?? null,
+    emails,
+    telefono: tercero.telefono?.trim() || null,
+  };
+};
 
 /**
  * Pure builder of the holders snapshot. `terceros` is whatever the service

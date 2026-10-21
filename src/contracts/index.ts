@@ -2423,10 +2423,19 @@ export interface RespuestaBusqueda {
  * Current holder of a unit as exposed to the building-management system.
  * `email`/`telefono` are `null` when the party has none; the system matches
  * accounts by email on its own side, so nothing is normalized here.
+ *
+ * `emails` lets the other system keep the party's extra inboxes as alternate
+ * recipients. It holds only the VALID addresses, trimmed, deduped
+ * case-insensitively (first spelling wins), in the party's original order and
+ * capped at 50. `email` is always `emails[0] ?? null`, so the account identity
+ * is the first VALID address (not merely the first non-blank one). An empty
+ * list means "no valid address"; a consumer that does not see the key at all
+ * (older snapshot) must treat it as "leave alternates untouched".
  */
 export interface TitularWebsaco3 {
   nombre: string;
   email: string | null;
+  emails: string[];
   telefono: string | null;
 }
 

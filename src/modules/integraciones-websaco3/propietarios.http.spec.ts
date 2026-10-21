@@ -140,7 +140,12 @@ describe('GET /integraciones/websaco3/propietarios (HTTP)', () => {
           {
             codigo: '101',
             tipo: 'propietario',
-            titular: { nombre: 'Ana Pérez', email: 'a@x.co', telefono: '3001' },
+            titular: {
+              nombre: 'Ana Pérez',
+              email: 'a@x.co',
+              emails: ['a@x.co'],
+              telefono: '3001',
+            },
           },
           { codigo: '102', tipo: 'arrendatario', titular: null },
         ],
