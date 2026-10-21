@@ -53,16 +53,16 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 
 ## Phase 3: PR 3 — schemas and payload builder
 
-- [ ] 3.1 `LoteComptable` (`lotes_comptable`): copropiedadId, number (own `ConsecutivoLoteComptable`), periodStart/End, asientoIds, totals, estado `pendiente | enviado | fallido | retirado`, motivoFallo, comptableLoteId, intervenidoMensaje, sentBy/Nombre, retiradoPor/fecha. English persistence + mapper, as the rest of Finanzas.
-- [ ] 3.2 `AsientoContable.comptableLoteId` + `comptableLoteRetiradoId` (default null), index `{ copropiedadId, comptableLoteId }`. Independent from `contabilidadLoteId`: specs prove a CSV generation ignores Comptable stamps and vice versa.
-- [ ] 3.3 `construirPayloadComptable(asientos, resolucion, titulares, origen)` — pure, contract v1:
+- [x] 3.1 `LoteComptable` (`lotes_comptable`): copropiedadId, number (own `ConsecutivoLoteComptable`), periodStart/End, asientoIds, totals, estado `pendiente | enviado | fallido | retirado`, motivoFallo, comptableLoteId, intervenidoMensaje, sentBy/Nombre, retiradoPor/fecha. English persistence + mapper, as the rest of Finanzas. _(persisted with Spanish field names — numero, periodoDesde/Hasta, generadoPor/enviadoPor/retiradoPor + Nombre/En — per the contract law in backend/CLAUDE.md, which supersedes "English persistence")_
+- [x] 3.2 `AsientoContable.comptableLoteId` + `comptableLoteRetiradoId` (default null), index `{ copropiedadId, comptableLoteId }`. Independent from `contabilidadLoteId`: specs prove a CSV generation ignores Comptable stamps and vice versa.
+- [x] 3.3 `construirPayloadComptable(asientos, resolucion, titulares, origen)` — pure, contract v1:
   - documento = `tipoDocumentoDe`, `prefijo`/`numero` from the anchor's own fields (never `documentoCruce`).
   - `descripcion` = resolved concepto; line `detalle` = same as MOVMESDO's.
   - Montos as `toFixed(2)` strings from integer cents; débito/crédito exclusive.
   - `tercero`: identificación = `Movimiento.tercero` (inmueble code); data from the inmueble's titular `Tercero` (tipoPersona, nombres/apellidos or razón social, tipo/número id, DV, email, teléfono, dirección, ciudad).
   - `centroUtilidad` = `centroCosto`, `centroDestino` = null, `flujoCaja`, `baseGravable`, `tipoDocCruce`/`numeroDocCruce` (Saldo Inicial → original number, as the CSV).
-- [ ] 3.4 `inmueblesSinTitular(asientos)` — list of codes whose inmueble has no titular (blocks the send).
-- [ ] 3.5 Spec: builder output for the shared fixture equals Comptable's fixture JSON exactly; each document type; prefix "" vs "FEVP"; balance per asiento.
+- [x] 3.4 `inmueblesSinTitular(asientos)` — list of codes whose inmueble has no titular (blocks the send).
+- [x] 3.5 Spec: builder output for the shared fixture equals Comptable's fixture JSON exactly; each document type; prefix "" vs "FEVP"; balance per asiento.
 
 ## Phase 4: PR 4 — module, endpoints, flow
 

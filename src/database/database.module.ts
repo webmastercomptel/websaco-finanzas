@@ -118,6 +118,14 @@ import {
   ConsecutivoLoteContabilidadSchema,
 } from './schemas/contabilidad/consecutivo-lote-contabilidad.schema';
 import {
+  LoteComptable,
+  LoteComptableSchema,
+} from './schemas/contabilidad/lote-comptable.schema';
+import {
+  ConsecutivoLoteComptable,
+  ConsecutivoLoteComptableSchema,
+} from './schemas/contabilidad/consecutivo-lote-comptable.schema';
+import {
   SaldoInicial,
   SaldoInicialSchema,
 } from './schemas/saldos-iniciales/saldo-inicial.schema';
@@ -193,6 +201,11 @@ const models = [
   { name: SaldoDocumentoOrigen.name, schema: SaldoDocumentoOrigenSchema },
   { name: SaldoTotalDocumento.name, schema: SaldoTotalDocumentoSchema },
   { name: LoteContabilidad.name, schema: LoteContabilidadSchema },
+  { name: LoteComptable.name, schema: LoteComptableSchema },
+  {
+    name: ConsecutivoLoteComptable.name,
+    schema: ConsecutivoLoteComptableSchema,
+  },
   {
     name: ConsecutivoLoteContabilidad.name,
     schema: ConsecutivoLoteContabilidadSchema,

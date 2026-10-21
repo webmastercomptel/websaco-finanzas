@@ -9,6 +9,7 @@ import { NotaDebito } from '../notas-debito/nota-debito.schema';
 import { NotaContable } from '../notas-contables/nota-contable.schema';
 import { NotaAnticipo } from '../notas-anticipo/nota-anticipo.schema';
 import { LoteContabilidad } from '../contabilidad/lote-contabilidad.schema';
+import { LoteComptable } from '../contabilidad/lote-comptable.schema';
 
 export type AsientoContableDocument = HydratedDocument<AsientoContable>;
 
@@ -158,6 +159,29 @@ export class AsientoContable {
     default: null,
   })
   contabilidadLoteDesmarcadoId: Types.ObjectId | null;
+
+  /** Which "Interfaz a Comptable" lote already carried this entry to
+   *  Comptable — null means "not sent yet". The Comptable channel's own
+   *  stamp, independent from `contabilidadLoteId`: exporting the CSV and
+   *  sending to Comptable never affect each other. Set only once Comptable
+   *  answered 201 (or "already received"); released to null by a retiro.
+   *  See `InterfazComptableService`. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: LoteComptable.name,
+    default: null,
+  })
+  comptableLoteId: Types.ObjectId | null;
+
+  /** The last Comptable lote this entry was released from by a retiro —
+   *  mirror of `contabilidadLoteDesmarcadoId`: lets the next send pick it up
+   *  again even outside the current billing period. */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: LoteComptable.name,
+    default: null,
+  })
+  comptableLoteRetiradoId: Types.ObjectId | null;
 }
 
 export const AsientoContableSchema =
@@ -228,5 +252,13 @@ AsientoContableSchema.index({ notaAnticipoId: 1 });
 AsientoContableSchema.index({
   copropiedadId: 1,
   contabilidadLoteId: 1,
+  fecha: 1,
+});
+
+// InterfazComptableService's "not yet sent to Comptable" scan, and the
+// release of a lote's stamps on a retiro — same shape as the index above.
+AsientoContableSchema.index({
+  copropiedadId: 1,
+  comptableLoteId: 1,
   fecha: 1,
 });

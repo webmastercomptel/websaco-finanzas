@@ -2185,6 +2185,200 @@ export interface RespuestaAdicionContabilidad {
   movmesdo: string;
 }
 
+/* ── Interfaz a Comptable ──────────────────────────────────────
+ *
+ * Manual, signed push of the same asientos MOVMES exports, straight to
+ * Comptable's API (`modules/interfaz-comptable/`). The payload types below
+ * are contract v1, whose canonical copy lives in Comptable's integration
+ * design spec; key order matters (the shared fixture is compared as a
+ * string).
+ */
+
+export type DocumentoComptable = 'FV' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+
+/** The tercero of one line: the inmueble code as identification, the rest
+ *  from the inmueble's titular (all null when it has none — such a lote is
+ *  blocked before sending). */
+export interface TerceroPayloadComptable {
+  identificacion: string;
+  tipoPersona: 'natural' | 'juridica' | null;
+  nombre1: string | null;
+  nombre2: string | null;
+  apellido1: string | null;
+  apellido2: string | null;
+  razonSocial: string | null;
+  tipoIdentificacion: string | null;
+  digitoVerificacion: string | null;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+  ciudad: string | null;
+}
+
+export interface MovimientoPayloadComptable {
+  cuenta: string;
+  /** Decimal string, two decimals ("350000.00"); "0" on the unused side. */
+  debito: string;
+  credito: string;
+  detalle: string;
+  tercero: TerceroPayloadComptable | null;
+  /** Finanzas' centro de costo. */
+  centroUtilidad: string | null;
+  /** Always null. */
+  centroDestino: null;
+  flujoCaja: string | null;
+  baseGravable: string | null;
+  tipoDocCruce: 'FV' | 'ND' | 'SI' | null;
+  numeroDocCruce: string | null;
+}
+
+export interface AsientoPayloadComptable {
+  documento: DocumentoComptable;
+  /** The anchor document's own prefix; "" when it has none. */
+  prefijo: string;
+  numero: number;
+  /** yyyy-mm-dd */
+  fecha: string;
+  descripcion: string;
+  movimientos: MovimientoPayloadComptable[];
+}
+
+export interface PayloadComptable {
+  version: 1;
+  origen: {
+    sistema: 'websaco-finanzas';
+    copropiedadId: string;
+    /** The `LoteComptable` id — Comptable's idempotency key. `null` only in
+     *  the preview of a selection no lote holds yet (assigned on "Enviar"). */
+    loteOrigenId: string | null;
+    /** Same: the next number in the preview, the lote's own once created. */
+    numeroLote: number;
+    periodoDesde: string;
+    periodoHasta: string;
+    generadoPor: { accountId: string; nombre: string };
+  };
+  asientos: AsientoPayloadComptable[];
+}
+
+export type EstadoLoteComptable =
+  'pendiente' | 'enviado' | 'fallido' | 'retirado';
+
+/** One lote of the Comptable channel, for the history. */
+export interface LoteComptable {
+  id: string;
+  numero: number;
+  periodoDesde: IsoDate;
+  periodoHasta: IsoDate;
+  totalAsientos: number;
+  totalLineas: number;
+  /** Pesos. */
+  totalDebitos: number;
+  totalCreditos: number;
+  /**
+   * `pendiente`: outcome unknown (timeout/no answer) — only "Reintentar";
+   * `enviado`: in Comptable; `fallido`: rejected, nothing stamped (see
+   * `motivoFallo`); `retirado`: withdrawn from Comptable, kept as history.
+   */
+  estado: EstadoLoteComptable;
+  motivoFallo: string | null;
+  /** Comptable's own lote id, once sent. */
+  comptableLoteId: string | null;
+  /** True once Comptable refused a retiro because the lote was edited
+   *  there: it can no longer be withdrawn ("Modificado en Comptable"). */
+  intervenido: boolean;
+  /** Comptable's sentence, shown verbatim. */
+  intervenidoMensaje: string | null;
+  intervenidoEn: IsoDate | null;
+  generadoPorNombre: string;
+  fechaGeneracion: IsoDate;
+  enviadoPorNombre: string | null;
+  enviadoEn: IsoDate | null;
+  retiradoPorNombre: string | null;
+  retiradoEn: IsoDate | null;
+}
+
+/** `GET /interfaz-comptable/estado` — what the screen needs before anything
+ *  else; never throws for a missing configuration. */
+export interface EstadoInterfazComptable {
+  /** COMPTABLE_API_URL + COMPTABLE_HMAC_SECRET present on this server. */
+  configurado: boolean;
+  /** The active coproperty's Empresa in Comptable, null when not linked. */
+  comptableEmpresaId: string | null;
+  /** The lote waiting for "Reintentar", if any (at most one). */
+  lotePendiente: LoteComptable | null;
+}
+
+export interface ConteoDocumentoComptable {
+  documento: DocumentoComptable;
+  asientos: number;
+  lineas: number;
+}
+
+/** `GET /interfaz-comptable/pendientes` — what "Enviar" would send now. When
+ *  a lote is `pendiente`, this describes THAT lote (what "Reintentar" will
+ *  re-send), not a fresh selection. */
+export interface PendientesComptable {
+  comptableEmpresaId: string;
+  /** Bounds of the last consolidated billing period; null when there is
+   *  none yet (then only entries released by a retiro can be pending). */
+  periodoDesde: IsoDate | null;
+  periodoHasta: IsoDate | null;
+  totalAsientos: number;
+  totalLineas: number;
+  /** Pesos. */
+  totalDebitos: number;
+  totalCreditos: number;
+  porDocumento: ConteoDocumentoComptable[];
+  /** Inmueble codes with no titular: they block "Enviar". */
+  inmueblesSinTitular: string[];
+  lotePendiente: LoteComptable | null;
+  /** The exact JSON (debug aid); null when there is nothing to send. */
+  payload: PayloadComptable | null;
+}
+
+/** One rejected document, as Comptable reports it ("FV 4152"). */
+export interface ErrorAsientoComptable {
+  asiento: string;
+  motivo: string;
+}
+
+/** Comptable's summary of a lote (simulated or real). */
+export interface ResumenComptable {
+  simulado: boolean;
+  loteId: string | null;
+  totalAsientos: number;
+  totalLineas: number;
+  totalDebitos: number | string;
+  totalCreditos: number | string;
+  tercerosNuevos: unknown[];
+}
+
+/** `POST /interfaz-comptable/simular`. `valido: false` carries Comptable's
+ *  rejection verbatim; nothing is written on either side. */
+export interface ResultadoSimulacionComptable {
+  valido: boolean;
+  resumen: ResumenComptable | null;
+  mensaje: string | null;
+  errores: ErrorAsientoComptable[];
+}
+
+/**
+ * `POST /interfaz-comptable/enviar` and `…/lotes/:id/reintentar`.
+ * - `enviado`: in Comptable, entries stamped (`resumen` may be null when
+ *   Comptable answered "already received").
+ * - `fallido`: Comptable rejected it; nothing stamped, `mensaje`/`errores`
+ *   verbatim. The next "Enviar" opens a new lote.
+ * - `pendiente`: no usable answer (timeout, network, 5xx): the lote stays
+ *   pending and only "Reintentar" (same lote, same entries) applies.
+ */
+export interface ResultadoEnvioComptable {
+  resultado: 'enviado' | 'fallido' | 'pendiente';
+  lote: LoteComptable;
+  resumen: ResumenComptable | null;
+  mensaje: string | null;
+  errores: ErrorAsientoComptable[];
+}
+
 /* ── Panel de Control / Auditoría (§13) ──────────────────────── */
 
 /** A single audit log entry — the API shape, not the persistence model. */
