@@ -2385,13 +2385,15 @@ export interface ResultadoEnvioComptable {
 export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
+  accion:
+    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
-    | 'lote-contabilidad';
+    | 'lote-contabilidad'
+    | 'lote-comptable';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;

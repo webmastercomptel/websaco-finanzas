@@ -32,9 +32,17 @@ export class RegistroAuditoria {
 
   @Prop({
     required: true,
-    enum: ['crear', 'actualizar', 'revertir', 'reiniciar', 'desmarcar'],
+    enum: [
+      'crear',
+      'actualizar',
+      'revertir',
+      'reiniciar',
+      'desmarcar',
+      'retirar',
+    ],
   })
-  accion: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
+  accion:
+    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
 
   @Prop({
     required: true,
@@ -44,6 +52,7 @@ export class RegistroAuditoria {
       'usuario',
       'lote-facturacion',
       'lote-contabilidad',
+      'lote-comptable',
     ],
     index: true,
   })
@@ -52,7 +61,8 @@ export class RegistroAuditoria {
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
-    | 'lote-contabilidad';
+    | 'lote-contabilidad'
+    | 'lote-comptable';
 
   @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;

@@ -63,6 +63,10 @@ export const SUBJECTS = [
   'Anulacion',
   'Consulta',
   'Configuracion',
+  // "Interfaz a Comptable": its own subject, not `Configuracion` — whoever
+  // exports the CSV is not automatically allowed to push asientos into
+  // another company's books, nor to withdraw them (`annul` = retirar).
+  'InterfazComptable',
   'all', // CASL alias: every subject
 ] as const;
 export type Subject = (typeof SUBJECTS)[number];

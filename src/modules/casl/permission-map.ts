@@ -32,6 +32,9 @@ export const MODULE_TO_SUBJECT = {
   'parametros-facturacion': 'Configuracion',
   documentos: 'Configuracion',
   'adicion-contabilidad': 'Configuracion',
+  // ver = read (estado, pendientes, historial), crear = create (simular,
+  // enviar, reintentar), anular = annul (retirar un lote de Comptable).
+  'interfaz-comptable': 'InterfazComptable',
 } satisfies Record<string, Subject>;
 
 /**

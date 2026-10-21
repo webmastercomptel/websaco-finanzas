@@ -96,3 +96,68 @@ node scripts/migrate-copropiedad-comptable-id-index.js            # list + build
 It creates `comptableEmpresaId_1` (unique, partial on `$type: 'string'`) and
 refuses while duplicates or non-normalized values exist. Rollback:
 `db.copropiedades.dropIndex('comptableEmpresaId_1')`.
+
+## 4. Sending (screen "Interfaz a Comptable")
+
+Permission keys (module `interfaz-comptable`, CASL subject `InterfazComptable`):
+`interfaz-comptable.ver` (read), `.crear` (simular, enviar, reintentar),
+`.anular` (retirar). `adicion-contabilidad.*` grants nothing here.
+
+Selection = the MOVMES one on this channel's own stamp: entries of the last
+consolidated billing period with `comptableLoteId: null`, plus entries a
+retiro released (`comptableLoteRetiradoId`), whatever their date. The CSV
+stamp (`contabilidadLoteId`) plays no part, and the CSV export ignores the
+Comptable stamps.
+
+| Route (`/api/v1/interfaz-comptable/…`) | What it does |
+|---|---|
+| `GET estado` | `{ configurado, comptableEmpresaId, lotePendiente }`, never throws for missing config |
+| `GET pendientes` | counts, totals, `inmueblesSinTitular`, exact JSON preview |
+| `POST simular` | `simular=true` in Comptable; writes nothing on either side |
+| `POST enviar` | creates the lote (`pendiente`) and sends it |
+| `POST lotes/:id/reintentar` | re-sends a `pendiente` lote: same id, same entries |
+| `POST lotes/:id/retirar` | withdraws an `enviado` lote (Comptable first) |
+| `GET lotes` | history |
+
+### Outcomes of a send
+
+| Comptable answer | Lote | Entries |
+|---|---|---|
+| 201 | `enviado` (+ `comptableLoteId`) | stamped |
+| 409 `LOTE_YA_RECIBIDO` | `enviado` with the returned `loteId` | stamped |
+| 400 (errors) / 401 / 404 | `fallido` + `motivoFallo` | untouched; next "Enviar" opens a new lote |
+| timeout / network / 5xx / unrecognized 409 | stays `pendiente` | untouched; only "Reintentar" |
+
+At most one `pendiente` lote per coproperty (partial unique index
+`copropiedadId_pendiente_unico` on `lotes_comptable`); "Enviar" answers 409
+`LOTE_PENDIENTE` while one exists. An inmueble used as tercero without a
+titular blocks "Enviar" (409 `INMUEBLES_SIN_TITULAR`, with the list).
+
+### Retiro
+
+Comptable is called first; it hard-deletes that lote's asientos there (only if
+all its months are open). Only on success are the local stamps released and
+the lote marked `retirado` (kept as history). If the accountant edited the lote
+in Comptable, Comptable answers 409 `LOTE_INTERVENIDO`: Finanzas shows that
+sentence verbatim, stores it (`intervenidoMensaje`) and keeps the lote
+`enviado` for good — it no longer calls Comptable for it.
+
+Known limitation: if a retiro times out AFTER Comptable deleted the lote, a
+second "Retirar" gets Comptable's "ya retirado" 409 and the local lote stays
+`enviado`. Check the lote in Comptable and, if it is withdrawn there, release
+it by hand (support), since no route forces it.
+
+### Audit
+
+`registros_auditoria` with `entidadTipo: 'lote-comptable'`: `crear` (sent),
+`actualizar` (rejected, no clear answer, refused because edited in Comptable),
+`retirar`. Labelled `Lote N de Interfaz a Comptable de <código> <nombre> …`.
+
+## 5. Troubleshooting
+
+| Symptom | Cause / action |
+|---|---|
+| "no está configurada en este servidor" | `COMPTABLE_API_URL` / `COMPTABLE_HMAC_SECRET` missing |
+| "Comptable rechazó la firma…" | secrets differ, or the server clock is off by more than 300 s |
+| Lote stuck `pendiente` | "Reintentar"; Comptable deduplicates by `loteOrigenId` |
+| "Algunos movimientos de este lote ya no existen" on retry | a consolidación of that period was undone after the first attempt; support must resolve the lote by hand |

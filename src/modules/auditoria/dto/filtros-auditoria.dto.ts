@@ -10,17 +10,27 @@ export class FiltrosAuditoriaDto {
     'usuario',
     'lote-facturacion',
     'lote-contabilidad',
+    'lote-comptable',
   ])
   entidadTipo?:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
-    | 'lote-contabilidad';
+    | 'lote-contabilidad'
+    | 'lote-comptable';
 
   @IsOptional()
-  @IsIn(['crear', 'actualizar', 'revertir', 'reiniciar', 'desmarcar'])
-  accion?: 'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar';
+  @IsIn([
+    'crear',
+    'actualizar',
+    'revertir',
+    'reiniciar',
+    'desmarcar',
+    'retirar',
+  ])
+  accion?:
+    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
 
   @IsOptional()
   @IsDateString()

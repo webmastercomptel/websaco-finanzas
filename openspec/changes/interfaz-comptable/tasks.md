@@ -66,18 +66,18 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 
 ## Phase 4: PR 4 — module, endpoints, flow
 
-- [ ] 4.1 Permission: module key `interfaz-comptable` → new subject `InterfazComptable` in `permission-map.ts` (read/create/annul), frontend `permisos.ts`. Spec: `adicion-contabilidad` grants nothing here and vice versa.
-- [ ] 4.2 `GET interfaz-comptable/pendientes`: requires `comptableEmpresaId` (else 409 "Esta copropiedad no tiene Empresa de Comptable configurada"); counts per tipo, totals, `inmueblesSinTitular`, and the exact JSON (debug preview). Same selection as MOVMES: last consolidated period, `comptableLoteId: null`, or released by a retiro.
-- [ ] 4.3 `POST interfaz-comptable/simular`: builds and sends with `simular=true`; returns Comptable's summary or its `errores[]` verbatim; writes nothing locally.
-- [ ] 4.4 `POST interfaz-comptable/enviar`: 409 if a lote is `pendiente` (must "Reintentar") or there are inmuebles sin titular; transaction creates `LoteComptable` `pendiente` with its asientoIds; send outside it; then:
+- [ ] 4.1 Permission: module key `interfaz-comptable` → new subject `InterfazComptable` in `permission-map.ts` (read/create/annul), frontend `permisos.ts`. Spec: `adicion-contabilidad` grants nothing here and vice versa. _(backend done: subject + map + spec; frontend `permisos.ts` pending)_
+- [x] 4.2 `GET interfaz-comptable/pendientes`: requires `comptableEmpresaId` (else 409 "Esta copropiedad no tiene Empresa de Comptable configurada"); counts per tipo, totals, `inmueblesSinTitular`, and the exact JSON (debug preview). Same selection as MOVMES: last consolidated period, `comptableLoteId: null`, or released by a retiro.
+- [x] 4.3 `POST interfaz-comptable/simular`: builds and sends with `simular=true`; returns Comptable's summary or its `errores[]` verbatim; writes nothing locally.
+- [x] 4.4 `POST interfaz-comptable/enviar`: 409 if a lote is `pendiente` (must "Reintentar") or there are inmuebles sin titular; transaction creates `LoteComptable` `pendiente` with its asientoIds; send outside it; then:
   - ok / duplicado → stamp `comptableLoteId`, estado `enviado`, `comptableLoteId` saved, audit;
   - rechazado / firma → `fallido` + motivo, nothing stamped;
   - timeout / red → stays `pendiente`.
-- [ ] 4.5 `POST interfaz-comptable/lotes/:id/reintentar`: only `pendiente`; rebuilds the payload from the SAME asientoIds and SAME `loteOrigenId`; same outcome handling.
-- [ ] 4.6 `POST interfaz-comptable/lotes/:id/retirar`: only `enviado`; calls Comptable first; ok → release stamps (`comptableLoteId: null`, `comptableLoteRetiradoId: lote`), estado `retirado`, audit; `intervenido` → 409 with Comptable's message verbatim, saved in `intervenidoMensaje`, lote stays `enviado`.
-- [ ] 4.7 `GET interfaz-comptable/lotes`: history, tenant-scoped (`findOne({ _id, copropiedadId })`, never `findById`).
-- [ ] 4.8 Audit entries (`entidadTipo: 'lote-comptable'`) for enviar, retirar and failures, labelled with the coproperty as the CSV lotes.
-- [ ] 4.9 Specs: each endpoint × each client outcome; concurrency (two "Enviar" at once → one lote); tenancy; a CSV generation in between changes nothing.
+- [x] 4.5 `POST interfaz-comptable/lotes/:id/reintentar`: only `pendiente`; rebuilds the payload from the SAME asientoIds and SAME `loteOrigenId`; same outcome handling.
+- [x] 4.6 `POST interfaz-comptable/lotes/:id/retirar`: only `enviado`; calls Comptable first; ok → release stamps (`comptableLoteId: null`, `comptableLoteRetiradoId: lote`), estado `retirado`, audit; `intervenido` → 409 with Comptable's message verbatim, saved in `intervenidoMensaje`, lote stays `enviado`.
+- [x] 4.7 `GET interfaz-comptable/lotes`: history, tenant-scoped (`findOne({ _id, copropiedadId })`, never `findById`).
+- [x] 4.8 Audit entries (`entidadTipo: 'lote-comptable'`) for enviar, retirar and failures, labelled with the coproperty as the CSV lotes.
+- [x] 4.9 Specs: each endpoint × each client outcome; concurrency (two "Enviar" at once → one lote); tenancy; a CSV generation in between changes nothing.
 
 ## Phase 5: PR 5 — frontend (`../frontend`)
 

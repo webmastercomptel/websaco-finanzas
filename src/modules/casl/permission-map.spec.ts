@@ -397,3 +397,49 @@ describe('saldos-iniciales y saldos-iniciales-anticipo son permisos independient
     expect(ability.can('read', 'Factura')).toBe(false);
   });
 });
+
+describe('permisos de Interfaz a Comptable', () => {
+  it('el módulo interfaz-comptable resuelve a su propio subject', () => {
+    expect(MODULE_TO_SUBJECT['interfaz-comptable']).toBe('InterfazComptable');
+  });
+
+  it('ver, crear y anular conceden leer, enviar y retirar por separado', () => {
+    const ver = abilityFor(['interfaz-comptable.ver']);
+    expect(ver.can('read', 'InterfazComptable')).toBe(true);
+    expect(ver.can('create', 'InterfazComptable')).toBe(false);
+    expect(ver.can('annul', 'InterfazComptable')).toBe(false);
+
+    const crear = abilityFor(['interfaz-comptable.crear']);
+    expect(crear.can('create', 'InterfazComptable')).toBe(true);
+    expect(crear.can('annul', 'InterfazComptable')).toBe(false);
+
+    const anular = abilityFor(['interfaz-comptable.anular']);
+    expect(anular.can('annul', 'InterfazComptable')).toBe(true);
+    expect(anular.can('create', 'InterfazComptable')).toBe(false);
+  });
+
+  it('adicion-contabilidad no concede nada sobre Interfaz a Comptable', () => {
+    const ability = abilityFor([
+      'adicion-contabilidad.ver',
+      'adicion-contabilidad.crear',
+      'adicion-contabilidad.anular',
+      'adicion-contabilidad.gestionar',
+    ]);
+
+    expect(ability.can('read', 'InterfazComptable')).toBe(false);
+    expect(ability.can('create', 'InterfazComptable')).toBe(false);
+    expect(ability.can('annul', 'InterfazComptable')).toBe(false);
+  });
+
+  it('interfaz-comptable no concede nada sobre Adición a Contabilidad (Configuracion)', () => {
+    const ability = abilityFor([
+      'interfaz-comptable.ver',
+      'interfaz-comptable.crear',
+      'interfaz-comptable.anular',
+      'interfaz-comptable.gestionar',
+    ]);
+
+    expect(ability.can('read', 'Configuracion')).toBe(false);
+    expect(ability.can('create', 'Configuracion')).toBe(false);
+  });
+});

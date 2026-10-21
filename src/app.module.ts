@@ -38,6 +38,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
 import { PublicacionFacturasModule } from './modules/publicacion-facturas/publicacion-facturas.module';
 import { IntegracionesWebsaco3Module } from './modules/integraciones-websaco3/integraciones-websaco3.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
+import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-comptable.module';
 
 /**
  * Bootstrap module: config, the database connection and its schemas, the
@@ -102,6 +103,7 @@ import { BusquedaModule } from './modules/busqueda/busqueda.module';
     PublicacionFacturasModule,
     IntegracionesWebsaco3Module,
     BusquedaModule,
+    InterfazComptableModule,
   ],
 })
 export class AppModule {}
