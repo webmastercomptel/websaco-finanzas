@@ -200,18 +200,24 @@ export class InmueblesController {
 
   /**
    * Loads a building's roster in one file: a unit and, inline, the party
-   * that answers for it. Gated the same as a single `create` — importing is
-   * bulk creation, not a separate capability.
+   * that answers for it.
    *
    * UPSERT BY CODE, never destructive: a row of an existing code patches that
    * unit (only the fields the row sent, never its `codigo`), a row of a new
    * code creates it, and nothing is ever deleted — see
-   * `InmueblesService.importar`. Still gated by `create` (no separate
-   * `update` check): the file can only fill in or correct data the same role
-   * could already enter one unit at a time.
+   * `InmueblesService.importar`. Because it both creates AND edits units it
+   * needs `create` AND `update` on `Inmueble` (rules are AND-ed): a role that
+   * could only create must not be able to rewrite existing units through a
+   * file. It deliberately does NOT also require `update` on `Tercero`: the
+   * titular refresh on re-import already existed under the old `create`-only
+   * gate, and adding it now could lock the accountant role out of loading its
+   * own roster.
    */
   @Post('importar')
-  @CheckAbility({ action: 'create', subject: 'Inmueble' })
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
   importar(
     @Body() dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
@@ -221,10 +227,14 @@ export class InmueblesController {
   /**
    * Polled while `POST /importar` is in flight — null once nothing is
    * running (either it finished, or nothing was ever started). See
-   * `ProgresoImportacionService`.
+   * `ProgresoImportacionService`. Same gate as the import it reports on, so
+   * whoever may start it may watch it and nobody else can.
    */
   @Get('importar/progreso')
-  @CheckAbility({ action: 'create', subject: 'Inmueble' })
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
   obtenerProgresoImportacion(): Promise<ProgresoImportacion | null> {
     return this.inmuebles.obtenerProgresoImportacion();
   }

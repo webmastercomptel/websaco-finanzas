@@ -19,6 +19,23 @@ describe('FilaImportarInmuebleDto — celdas en blanco', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
+  it('un null (área, coeficiente, enums, residencia) también queda sin enviar', async () => {
+    const dto = fila({
+      area: null,
+      coeficiente: null,
+      tipoTitular: null,
+      estadoCartera: null,
+      resideEnElInmueble: null,
+    });
+
+    expect(dto.area).toBeUndefined();
+    expect(dto.coeficiente).toBeUndefined();
+    expect(dto.tipoTitular).toBeUndefined();
+    expect(dto.estadoCartera).toBeUndefined();
+    expect(dto.resideEnElInmueble).toBeUndefined();
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
   it('un 0 explícito sigue siendo un 0 enviado', async () => {
     const dto = fila({ area: 0, coeficiente: '0' });
 

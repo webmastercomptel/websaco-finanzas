@@ -16,8 +16,8 @@ import {
 } from 'class-validator';
 
 /**
- * Reads a blank or whitespace-only cell as "not sent" (`undefined`) BEFORE
- * the type rules run. Needed on the non-string optional columns because the
+ * Reads a blank or whitespace-only cell, or a JSON `null`, as "not sent"
+ * (`undefined`) BEFORE the type rules run. Needed on the non-string optional columns because the
  * pipeline would otherwise coerce `""` into `0` (`@Type(() => Number)`) or
  * reject the WHOLE file (`@IsIn`, `@IsBoolean`) over one empty cell — and on
  * an update a spurious `0` would overwrite the stored area. String columns
@@ -28,9 +28,9 @@ const CeldaVaciaComoAusente = () =>
   Transform(
     ({ obj, key, value }: { obj: object; key: string; value: unknown }) => {
       const cruda = (obj as Record<string, unknown>)[key];
-      return typeof cruda === 'string' && cruda.trim() === ''
-        ? undefined
-        : value;
+      const ausente =
+        cruda === null || (typeof cruda === 'string' && cruda.trim() === '');
+      return ausente ? undefined : value;
     },
   );
 

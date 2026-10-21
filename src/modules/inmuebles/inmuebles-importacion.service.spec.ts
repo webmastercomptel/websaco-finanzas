@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { InmueblesService } from './inmuebles.service';
+import { toFilaExportacion } from './inmuebles.mapper';
 import type { TenantContextService } from '../../common/tenant/tenant-context.service';
 
 const COP = new Types.ObjectId();
@@ -113,6 +114,7 @@ const progresoModeloCon = () => ({
 
 /** A stored party, as far as the service reads it back. */
 interface TerceroGuardado {
+  nombre?: string | null;
   primerNombre?: string | null;
   segundoNombre?: string | null;
   primerApellido?: string | null;
@@ -170,7 +172,9 @@ const tercerosModeloCon = (
         return { exec: () => Promise.resolve({ modifiedCount: 1 }) };
       },
     ),
-    deleteOne: jest.fn(),
+    deleteOne: jest.fn(() => ({
+      exec: () => Promise.resolve({ deletedCount: 1 }),
+    })),
     deleteMany: jest.fn(),
     findOneAndDelete: jest.fn(),
   };
@@ -505,6 +509,13 @@ describe('InmueblesService.importar — titular de un inmueble existente', () =>
       cambios: {
         tipoPersona: 'natural',
         nombre: 'Ana Pérez',
+        // El nombre llega en la columna vieja de un solo campo: redefine todo el
+        // nombre, así que no quedan partes ni razón social viejas.
+        razonSocial: null,
+        primerNombre: null,
+        segundoNombre: null,
+        primerApellido: null,
+        segundoApellido: null,
         tipoIdentificacion: '13',
         direccion: 'Calle 10 # 20-30',
         ciudad: 'Medellin',
@@ -620,9 +631,8 @@ describe('InmueblesService.importar — titular de un inmueble existente', () =>
         telefono: '3111111111',
       },
     });
-    expect(inmuebles.actualizaciones[0].cambios).toEqual({
-      titularId: 'ter-1',
-    });
+    // Es el mismo titular que ya tenía: no se reescribe titularId.
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
     // La pregunta "¿lo comparte otra unidad?" se hace con la copropiedad y
     // excluyendo la unidad que se está importando.
     expect(inmuebles.filtrosExists).toEqual([
@@ -1060,5 +1070,522 @@ describe('InmueblesService.importar — garantías', () => {
       expect(modelo.deleteMany).not.toHaveBeenCalled();
       expect(modelo.findOneAndDelete).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe('InmueblesService.importar — venta de un inmueble (identificación nueva)', () => {
+  it('una identificación sin coincidencia crea un tercero NUEVO y no renombra al dueño anterior', async () => {
+    // Unidad 301: titular María (id 111, no compartida). El archivo trae a
+    // Pedro con identificación 222, que no existe. Refrescar el tercero de
+    // María con el nombre de Pedro dejaría la identificación 111 con el
+    // nombre de otra persona, y se repetiría en cada importación.
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-111' },
+    ]);
+    const terceros = tercerosModeloCon(
+      { '111': 'ter-111' },
+      { 'ter-111': { nombre: 'María López' } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nom1Titular: 'Pedro',
+          ape1Titular: 'Gómez',
+          numeroIdentificacionTitular: '222',
+        }),
+      ],
+    });
+
+    expect(resultado.actualizados).toBe(1);
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+    expect(terceros.creados).toHaveLength(1);
+    expect(terceros.creados[0]).toMatchObject({
+      copropiedadId: COP,
+      nombre: 'Pedro Gómez',
+      numeroIdentificacion: '222',
+    });
+    expect(inmuebles.actualizaciones[0].cambios).toEqual({
+      titularId: 'ter-nuevo',
+    });
+  });
+
+  it('la misma venta repetida no cambia nada la segunda vez: ya existe el tercero de Pedro', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-222' },
+    ]);
+    const terceros = tercerosModeloCon(
+      { '222': 'ter-222' },
+      { 'ter-222': { nombre: 'Pedro Gómez' } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nom1Titular: 'Pedro',
+          ape1Titular: 'Gómez',
+          numeroIdentificacionTitular: '222',
+        }),
+      ],
+    });
+
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('una identificación que no existe y una fila sin nombre es un error de fila, y el inmueble nuevo no se crea', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({ codigo: '301', numeroIdentificacionTitular: '999' }),
+        fila({ codigo: '302' }),
+      ],
+    });
+
+    expect(resultado.creados).toBe(1);
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0]).toMatchObject({ fila: 1, codigo: '301' });
+    expect(resultado.errores[0].mensaje).toContain('999');
+    expect(resultado.errores[0].mensaje).toContain('no existe');
+    expect(inmuebles.escrituras.map((u) => u.codigo)).toEqual(['302']);
+    expect(terceros.create).not.toHaveBeenCalled();
+  });
+
+  it('una identificación que no existe y sin nombre en un inmueble existente tampoco se descarta en silencio y no escribe nada', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+    ]);
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          zona: 'Norte',
+          numeroIdentificacionTitular: '999',
+        }),
+      ],
+    });
+
+    expect(resultado.actualizados).toBe(0);
+    expect(resultado.errores).toHaveLength(1);
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('una identificación existente sin nombre en la fila sigue siendo válida', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon({ '123': 'ter-1' });
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301', numeroIdentificacionTitular: '123' })],
+    });
+
+    expect(resultado.creados).toBe(1);
+    expect(inmuebles.escrituras[0]).toMatchObject({ titularId: 'ter-1' });
+  });
+});
+
+describe('InmueblesService.importar — idempotencia al reimportar un archivo exportado', () => {
+  it('un titular compartido SIN identificación no se clona: reimportar el export sin editar no crea terceros ni cambia titularId', async () => {
+    const titular = {
+      nombre: 'Ana Pérez',
+      primerNombre: 'Ana',
+      segundoNombre: null,
+      primerApellido: 'Pérez',
+      segundoApellido: null,
+      razonSocial: null,
+      emails: ['ana@ejemplo.com'],
+      telefono: '3000000000',
+    };
+    const unidades = [
+      { codigo: '301', area: 50, resideEnElInmueble: false },
+      { codigo: '302', area: 60, resideEnElInmueble: true },
+    ];
+    const inmuebles = inmueblesModeloCon(
+      [
+        { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+        { id: 'inm-2', codigo: '302', titularId: 'ter-1' },
+      ],
+      ['ter-1'],
+    );
+    const terceros = tercerosModeloCon({}, { 'ter-1': titular });
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      // El export trae "" en las celdas vacías; el DTO real las lee como ausentes.
+      filas: unidades.map((u) =>
+        toFilaExportacion('0001', u, titular),
+      ) as never,
+    });
+
+    expect(resultado.actualizados).toBe(2);
+    expect(resultado.creados).toBe(0);
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.create).not.toHaveBeenCalled();
+    for (const { cambios } of inmuebles.actualizaciones) {
+      expect(cambios).not.toHaveProperty('titularId');
+    }
+    expect(terceros.actualizaciones.every((a) => a.id === 'ter-1')).toBe(true);
+  });
+
+  it('el mismo nombre con otra capitalización o espacios es la misma persona, aunque el titular sea compartido', async () => {
+    const inmuebles = inmueblesModeloCon(
+      [{ id: 'inm-1', codigo: '301', titularId: 'ter-1' }],
+      ['ter-1'],
+    );
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-1': { nombre: 'Ana Pérez' } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [fila({ codigo: '301', nombreTitular: '  ANA pérez ' })],
+    });
+
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('un nombre distinto en un titular NO compartido corrige el mismo tercero (typo o dueño renombrado)', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-1': { nombre: 'Ana Perez' } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [fila({ codigo: '301', nombreTitular: 'Ana Pérez' })],
+    });
+
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(terceros.actualizaciones[0].cambios).toMatchObject({
+      nombre: 'Ana Pérez',
+    });
+  });
+
+  it('un nombre distinto en un titular compartido crea uno nuevo para proteger sus otras unidades', async () => {
+    const inmuebles = inmueblesModeloCon(
+      [{ id: 'inm-1', codigo: '301', titularId: 'ter-1' }],
+      ['ter-1'],
+    );
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-1': { nombre: 'Ana Pérez' } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [fila({ codigo: '301', nombreTitular: 'Luis Gómez' })],
+    });
+
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+    expect(terceros.creados).toHaveLength(1);
+    expect(inmuebles.actualizaciones[0].cambios).toEqual({
+      titularId: 'ter-nuevo',
+    });
+  });
+});
+
+describe('InmueblesService.importar — atomicidad por fila', () => {
+  it('si crear el inmueble nuevo falla, borra el tercero que esa misma fila acababa de crear', async () => {
+    const inmuebles = inmueblesModeloCon();
+    inmuebles.create.mockRejectedValueOnce(new Error('falló la escritura'));
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301', nombreTitular: 'Ana Pérez' })],
+    });
+
+    expect(resultado.creados).toBe(0);
+    expect(resultado.errores[0].mensaje).toBe('falló la escritura');
+    expect(terceros.deleteOne).toHaveBeenCalledTimes(1);
+    expect(terceros.deleteOne).toHaveBeenCalledWith({
+      _id: 'ter-nuevo',
+      copropiedadId: COP,
+    });
+  });
+
+  it('no borra un tercero que ya existía cuando falla el inmueble nuevo', async () => {
+    const inmuebles = inmueblesModeloCon();
+    inmuebles.create.mockRejectedValueOnce(new Error('falló'));
+    const terceros = tercerosModeloCon({ '123': 'ter-1' });
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana',
+          numeroIdentificacionTitular: '123',
+        }),
+      ],
+    });
+
+    expect(terceros.deleteOne).not.toHaveBeenCalled();
+  });
+
+  it('en un inmueble existente, si falla el cambio de titular borra el tercero recién creado y reporta el error de la fila', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: null },
+    ]);
+    // Primer updateOne = parche de la unidad (pasa); segundo = titularId (falla).
+    inmuebles.updateOne
+      .mockImplementationOnce((filtro: Filtro, { $set }: { $set: Filtro }) => {
+        inmuebles.actualizaciones.push({ filtro, cambios: $set });
+        return { exec: () => Promise.resolve({ modifiedCount: 1 }) };
+      })
+      .mockImplementationOnce(() => ({
+        exec: () => Promise.reject(new Error('falló titularId')),
+      }));
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({ codigo: '301', zona: 'Norte', nombreTitular: 'Ana Pérez' }),
+      ],
+    });
+
+    expect(resultado.actualizados).toBe(0);
+    expect(resultado.errores[0].mensaje).toBe('falló titularId');
+    expect(terceros.deleteOne).toHaveBeenCalledWith({
+      _id: 'ter-nuevo',
+      copropiedadId: COP,
+    });
+    // El parche de la unidad NO se deshace: las actualizaciones no son
+    // transaccionales por fila.
+    expect(inmuebles.actualizaciones[0].cambios).toEqual({ zona: 'Norte' });
+  });
+
+  it('un error de clave duplicada de Mongo se reporta como "Código duplicado", sin nombres de índice', async () => {
+    const inmuebles = inmueblesModeloCon();
+    inmuebles.create.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'E11000 duplicate key error collection: db.inmuebles index: copropiedadId_1_codigo_1',
+        ),
+        { code: 11000 },
+      ),
+    );
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301' })],
+    });
+
+    expect(resultado.errores[0].mensaje).toContain('Código duplicado');
+    expect(resultado.errores[0].mensaje).not.toContain('E11000');
+    expect(resultado.errores[0].mensaje).not.toContain('copropiedadId_1');
+  });
+});
+
+describe('InmueblesService.importar — null se trata como celda en blanco', () => {
+  it('en un inmueble existente, los null (también números) no se escriben ni borran nada', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+    ]);
+    const terceros = tercerosModeloCon({}, { 'ter-1': {} });
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          zona: 'Norte',
+          area: null,
+          coeficiente: null,
+          referencia: null,
+          resideEnElInmueble: null,
+          nombreTitular: null,
+          numeroIdentificacionTitular: null,
+          emailTitular: null,
+        }),
+      ],
+    });
+
+    expect(inmuebles.actualizaciones[0].cambios).toEqual({ zona: 'Norte' });
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('en un inmueble nuevo, los null no se escriben', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    await service.importar({
+      filas: [
+        fila({ codigo: '301', area: null, coeficiente: null, bloque: null }),
+      ],
+    });
+
+    expect(inmuebles.escrituras[0].area).toBeUndefined();
+    expect(inmuebles.escrituras[0].coeficiente).toBeUndefined();
+    expect(inmuebles.escrituras[0].bloque).toBeUndefined();
+  });
+});
+
+describe('InmueblesService.importar — nombre del titular al refrescar un tercero existente', () => {
+  const conTercero = (guardado: TerceroGuardado) => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+    ]);
+    const terceros = tercerosModeloCon(
+      { '123': 'ter-1' },
+      { 'ter-1': guardado },
+    );
+    return { inmuebles, terceros, service: nuevoServicio(inmuebles, terceros) };
+  };
+
+  it('de jurídica a natural: escribe las partes con el nombre y limpia la razón social', async () => {
+    const { terceros, service } = conTercero({ nombre: 'Ferretería SAS' });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          nom1Titular: 'Ana',
+          ape1Titular: 'Pérez',
+        }),
+      ],
+    });
+
+    expect(terceros.actualizaciones[0].cambios).toEqual({
+      tipoPersona: 'natural',
+      nombre: 'Ana Pérez',
+      razonSocial: null,
+      primerNombre: 'Ana',
+      primerApellido: 'Pérez',
+    });
+  });
+
+  it('de natural a jurídica: escribe la razón social y limpia las cuatro partes del nombre', async () => {
+    const { terceros, service } = conTercero({
+      nombre: 'Ana Pérez',
+      primerNombre: 'Ana',
+      primerApellido: 'Pérez',
+    });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          razonSocialTitular: 'Ferretería SAS',
+        }),
+      ],
+    });
+
+    expect(terceros.actualizaciones[0].cambios).toEqual({
+      tipoPersona: 'juridica',
+      nombre: 'Ferretería SAS',
+      razonSocial: 'Ferretería SAS',
+      primerNombre: null,
+      segundoNombre: null,
+      primerApellido: null,
+      segundoApellido: null,
+    });
+  });
+
+  it('una fila con solo ape2Titular y un tercero sin partes guardadas no escribe ni el apellido ni el nombre', async () => {
+    const { terceros, service } = conTercero({ nombre: 'Ana Pérez' });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          ape2Titular: 'Gómez',
+        }),
+      ],
+    });
+
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('una fila con solo ape2Titular y un tercero con partes recompone el nombre con lo guardado', async () => {
+    const { terceros, service } = conTercero({
+      nombre: 'Juan Pérez',
+      primerNombre: 'Juan',
+      primerApellido: 'Pérez',
+    });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          ape2Titular: 'Gómez',
+        }),
+      ],
+    });
+
+    expect(terceros.actualizaciones[0].cambios).toEqual({
+      tipoPersona: 'natural',
+      nombre: 'Juan Pérez Gómez',
+      razonSocial: null,
+      segundoApellido: 'Gómez',
+    });
+  });
+
+  it('la columna vieja de nombre con otro nombre redefine todo: sin partes ni razón social viejas', async () => {
+    const { terceros, service } = conTercero({
+      nombre: 'Juan Pérez',
+      primerNombre: 'Juan',
+      primerApellido: 'Pérez',
+    });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          nombreTitular: 'Luis Gómez',
+        }),
+      ],
+    });
+
+    expect(terceros.actualizaciones[0].cambios).toEqual({
+      tipoPersona: 'natural',
+      nombre: 'Luis Gómez',
+      razonSocial: null,
+      primerNombre: null,
+      segundoNombre: null,
+      primerApellido: null,
+      segundoApellido: null,
+    });
+  });
+
+  it('la columna vieja de nombre con el mismo nombre no toca las partes guardadas', async () => {
+    const { terceros, service } = conTercero({
+      nombre: 'Juan Pérez',
+      primerNombre: 'Juan',
+      primerApellido: 'Pérez',
+    });
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          nombreTitular: 'juan pérez',
+        }),
+      ],
+    });
+
+    expect(terceros.updateOne).not.toHaveBeenCalled();
   });
 });
