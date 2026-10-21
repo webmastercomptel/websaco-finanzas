@@ -1,7 +1,7 @@
 // src/modules/inmuebles/inmuebles-baja.service.ts
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
   Inmueble,
   InmuebleDocument,
@@ -49,6 +49,7 @@ export class InmueblesBajaService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly tenant: TenantContextService,
     private readonly auditoria: AuditoriaService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -58,14 +59,22 @@ export class InmueblesBajaService {
    * `InmueblesService.filtroCodigoDuplicado` — against the coproperty's units
    * loaded ONCE with `copropiedadId` in the filter, so a code that only exists
    * in ANOTHER coproperty is simply `noEncontrados` and never touched. The
-   * same code repeated in the request counts once.
+   * same code repeated in the request counts once. A code can match SEVERAL
+   * legacy units that differ only by case (the preview treats them as one
+   * code too): every active one is retired, every inactive one is reported in
+   * `yaInactivos`.
    *
-   * One `updateMany` over the found ids AND `copropiedadId` does the retiring.
-   * Then ONE audit entry for the whole request (the audit law: a state change
-   * leaves a trace of who and when). The audit is written after the update
-   * and a failure to write it rejects the request, as `AuditoriaService`
-   * documents; the retirement is idempotent, so repeating the call just
-   * answers `yaInactivos`. A request that retires nothing writes no entry.
+   * The `updateMany` (by the found ids, `copropiedadId` AND `estado: 'active'`)
+   * and the ONE audit entry for the request run in the SAME transaction, so
+   * they commit or roll back together: an audit failure leaves every unit
+   * active, and a successful retirement can never lack its entry (the audit
+   * law). That is also what makes a retry safe — after a failure nothing
+   * changed, so repeating the call retires them for real instead of answering
+   * `yaInactivos` and losing the entry. `dadosDeBaja` and the audit count come
+   * from `modifiedCount`, so two concurrent calls over the same units never
+   * report the same unit twice (the codes listed in the label are the ones this
+   * call found active, which can include one a concurrent call retired first).
+   * A request that retires nothing writes no entry.
    */
   async darDeBaja(
     dto: DarDeBajaInmueblesDto,
@@ -85,79 +94,130 @@ export class InmueblesBajaService {
       .select('_id codigo estado')
       .lean()
       .exec();
-    const porClave = new Map<string, (typeof unidades)[number]>();
+    type Leida = (typeof unidades)[number];
+    const porClave = new Map<string, Leida[]>();
     for (const u of unidades) {
       const clave = u.codigo.trim().toLowerCase();
-      if (!porClave.has(clave)) porClave.set(clave, u);
+      porClave.set(clave, [...(porClave.get(clave) ?? []), u]);
     }
 
-    const aDarDeBaja: (typeof unidades)[number][] = [];
+    const aDarDeBaja: Leida[] = [];
     const yaInactivos: string[] = [];
     const noEncontrados: string[] = [];
     for (const [clave, codigo] of solicitados) {
-      const unidad = porClave.get(clave);
-      if (!unidad) noEncontrados.push(codigo);
-      else if (unidad.estado === 'active') aDarDeBaja.push(unidad);
-      else yaInactivos.push(unidad.codigo);
+      const coincidentes = porClave.get(clave);
+      if (!coincidentes) {
+        noEncontrados.push(codigo);
+        continue;
+      }
+      for (const unidad of coincidentes) {
+        if (unidad.estado === 'active') aDarDeBaja.push(unidad);
+        else yaInactivos.push(unidad.codigo);
+      }
     }
 
+    let dadosDeBaja = 0;
     if (aDarDeBaja.length > 0) {
-      await this.inmuebles
-        .updateMany(
-          { _id: { $in: aDarDeBaja.map((u) => u._id) }, copropiedadId },
-          { $set: { estado: 'inactive' } },
-        )
-        .exec();
-      await this.registrarAuditoria(
-        actor,
-        copropiedadId,
-        aDarDeBaja.map((u) => u.codigo),
-        aDarDeBaja[0]._id.toString(),
-      );
+      const etiquetaCopropiedad =
+        await this.etiquetaDeCopropiedad(copropiedadId);
+      dadosDeBaja = await this.transaccion(async (session) => {
+        const { modifiedCount } = await this.inmuebles
+          .updateMany(
+            {
+              _id: { $in: aDarDeBaja.map((u) => u._id) },
+              copropiedadId,
+              estado: 'active',
+            },
+            { $set: { estado: 'inactive' } },
+            { session },
+          )
+          .exec();
+        if (modifiedCount > 0) {
+          await this.registrarAuditoria(
+            actor,
+            etiquetaCopropiedad,
+            modifiedCount,
+            aDarDeBaja.map((u) => u.codigo),
+            aDarDeBaja[0]._id.toString(),
+            session,
+          );
+        }
+        return modifiedCount;
+      });
     }
 
     return {
       solicitados: solicitados.size,
-      dadosDeBaja: aDarDeBaja.length,
+      dadosDeBaja,
       yaInactivos,
       noEncontrados,
     };
   }
 
-  /**
-   * One entry per request. `EntradaAuditoria` has no payload field, so the
-   * count and (up to 50) codes travel in the label, as the cycle reset does
-   * with its counts. `entidadId` is the first retired unit: the entry is about
-   * a batch and the schema wants one id, and a unit id keeps it traceable to
-   * a real record.
-   */
-  private async registrarAuditoria(
-    actor: ActorBaja,
+  /** Same shape as the other transactional services: `withTransaction` may
+   *  re-run the callback on a transient error, so it must be safe to repeat
+   *  (the `estado: 'active'` filter makes the update so). */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /** "0001 Torres del Sol", read before the transaction to keep it short. */
+  private async etiquetaDeCopropiedad(
     copropiedadId: Types.ObjectId,
-    codigos: string[],
-    entidadId: string,
-  ): Promise<void> {
+  ): Promise<string> {
     const copropiedad = await this.copropiedades
       .findById(copropiedadId)
       .select('codigo nombre')
       .lean()
       .exec();
-    const donde =
+    return (
       [copropiedad?.codigo, copropiedad?.nombre].filter(Boolean).join(' ') ||
-      copropiedadId.toString();
+      copropiedadId.toString()
+    );
+  }
+
+  /**
+   * One entry per request, written inside the retirement's transaction.
+   * `EntradaAuditoria` has no payload field, so the count and (up to 50) codes
+   * travel in the label, as the cycle reset does with its counts. `entidadId`
+   * is the first retired unit: the entry is about a batch and the schema wants
+   * one id, and a unit id keeps it traceable to a real record.
+   */
+  private async registrarAuditoria(
+    actor: ActorBaja,
+    donde: string,
+    cantidad: number,
+    codigos: string[],
+    entidadId: string,
+    session: ClientSession,
+  ): Promise<void> {
     const listados = codigos.slice(0, MAX_CODIGOS_EN_AUDITORIA).join(', ');
     const resto =
       codigos.length > MAX_CODIGOS_EN_AUDITORIA
         ? ` y ${codigos.length - MAX_CODIGOS_EN_AUDITORIA} más`
         : '';
 
-    await this.auditoria.registrar({
-      actorAccountId: actor.accountId,
-      actorNombre: actor.nombre,
-      accion: 'dar-de-baja',
-      entidadTipo: 'inmueble',
-      entidadId,
-      entidadEtiqueta: `${codigos.length} inmueble(s) dados de baja en ${donde}: ${listados}${resto}`,
-    });
+    await this.auditoria.registrar(
+      {
+        actorAccountId: actor.accountId,
+        actorNombre: actor.nombre,
+        accion: 'dar-de-baja',
+        entidadTipo: 'inmueble',
+        entidadId,
+        entidadEtiqueta: `${cantidad} inmueble(s) dados de baja en ${donde}: ${listados}${resto}`,
+      },
+      session,
+    );
   }
 }

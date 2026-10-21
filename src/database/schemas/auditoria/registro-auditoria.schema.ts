@@ -8,8 +8,10 @@ export type RegistroAuditoriaDocument = HydratedDocument<RegistroAuditoria>;
 /**
  * Append-only audit log for platform-level mutations.
  *
- * Each entry records that a create, update, reversal (`revertir`) or cycle
- * reset (`reiniciar`) happened, by whom, on what
+ * Each entry records that a create, update, reversal (`revertir`), cycle
+ * reset (`reiniciar`) or unit retirement (`dar-de-baja`, entity type
+ * `inmueble`: one entry per batch, written in the same transaction as the
+ * retirement) happened, by whom, on what
  * entity — not what changed field by field. This is the first version:
  * field-level diffs are YAGNI until a concrete need surfaces.
  *

@@ -16,13 +16,13 @@ describe('claveParecida', () => {
   });
 
   it('quita espacios y los separadores - _ . /', () => {
-    expect(claveParecida(' Torre 2 - 0301 ')).toBe('torre2301');
+    expect(claveParecida(' Torre 2 - 0301 ')).toBe('torre2|301');
     expect(claveParecida('torre2301')).toBe('torre2301');
-    expect(claveParecida('T_2.03/01')).toBe('t231');
+    expect(claveParecida('T_2.03/01')).toBe('t2|3|1');
   });
 
   it('quita los ceros a la izquierda de CADA grupo de dígitos, no solo del primero', () => {
-    expect(claveParecida('A-01-002')).toBe('a12');
+    expect(claveParecida('A-01-002')).toBe('a1|2');
     expect(claveParecida('01A002')).toBe('1a2');
   });
 
@@ -44,6 +44,22 @@ describe('claveParecida', () => {
     expect(claveParecida(undefined)).toBe('');
     expect(claveParecida(null)).toBe('');
     expect(claveParecida(301)).toBe('');
+  });
+
+  it('un separador ENTRE dos dígitos se conserva como marcador: "1-23" y "12-3" no colisionan', () => {
+    expect(claveParecida('1-23')).toBe('1|23');
+    expect(claveParecida('12-3')).toBe('12|3');
+    expect(claveParecida('1-23')).not.toBe(claveParecida('12-3'));
+    expect(claveParecida('A-1-01')).toBe('a1|1');
+    expect(claveParecida('A-10-1')).toBe('a10|1');
+    expect(claveParecida('A-1-01')).not.toBe(claveParecida('A-10-1'));
+  });
+
+  it('un separador en cualquier otro lugar se descarta: "A-01" y "a1" siguen coincidiendo', () => {
+    expect(claveParecida('A-01')).toBe(claveParecida('a1'));
+    expect(claveParecida('A 1')).toBe('a1');
+    expect(claveParecida('-A1-')).toBe('a1');
+    expect(claveParecida('1 2')).toBe(claveParecida('1-2'));
   });
 
   it('letras distintas siguen siendo distintas', () => {

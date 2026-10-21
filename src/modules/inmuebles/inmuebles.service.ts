@@ -500,8 +500,11 @@ export class InmueblesService {
    *   row is just wrong, and retiring it for that would punish a typo.
    *
    * Known limitation: rows are planned against the database as it is now, so
-   * effects of earlier rows on later ones (a Tercero a previous row would
-   * create) are not simulated.
+   * effects of earlier rows on later ones are not simulated. The one exception
+   * is `titularesNuevos`, which counts a NEW identification once however many
+   * rows share it; titulares known only by name (no identification) are not
+   * deduplicated across rows, so that count can be higher than what the import
+   * ends up creating.
    */
   async previsualizarImportacion(
     dto: ImportarInmueblesDto,
@@ -558,6 +561,7 @@ export class InmueblesService {
     };
     const codigosEnArchivo = new Set<string>();
     const aplicados = new Set<string>();
+    const identificacionesNuevas = new Set<string>();
     const archivoPorClaveParecida = new Map<string, Map<string, string>>();
 
     for (const [indice, filaCruda] of dto.filas.entries()) {
@@ -602,7 +606,7 @@ export class InmueblesService {
       }
 
       try {
-        const { existente, plan } = await this.planificarFila(
+        const { fila, existente, plan } = await this.planificarFila(
           copropiedadId,
           filaCruda,
           existentes,
@@ -621,7 +625,15 @@ export class InmueblesService {
 
         if (existente) clasificacion.aActualizar += 1;
         else clasificacion.codigosACrear.push(codigo);
-        if (plan.tipo === 'crear') clasificacion.titularesNuevos += 1;
+        if (plan.tipo === 'crear') {
+          // The import creates ONE Tercero per identification and refreshes
+          // it for the next rows, so an owner of three units counts once.
+          const identificacion = fila.numeroIdentificacionTitular;
+          if (!identificacion || !identificacionesNuevas.has(identificacion)) {
+            clasificacion.titularesNuevos += 1;
+          }
+          if (identificacion) identificacionesNuevas.add(identificacion);
+        }
       } catch (err) {
         clasificacion.errores.push({
           fila: numeroFila,
@@ -949,6 +961,7 @@ export class InmueblesService {
 
   /**
    * Everything about a row that can be rejected WITHOUT touching the
+   * database: the unit code is not blank, the DIAN and DANE codes are checked against the static catalog
    * database: the DIAN and DANE codes are checked against the static catalog
    * (`CatalogosService`) rather than trusted as free text — a typo would
    * silently save a code no DIAN reader recognizes — and the email cell is
@@ -957,6 +970,13 @@ export class InmueblesService {
    * writers need, so nothing is parsed twice.
    */
   private validarFila(fila: FilaImportarInmuebleDto): DatosTitularFila {
+    // The DTO only demands MinLength(1) on the raw string, so "   " gets here;
+    // the schema would reject it at create (required + trim) AFTER the row was
+    // planned, and the preview would have called it a valid new unit.
+    if (!fila.codigo.trim()) {
+      throw new Error('El código no puede estar vacío');
+    }
+
     if (
       fila.tipoIdentificacionTitular &&
       !this.catalogos

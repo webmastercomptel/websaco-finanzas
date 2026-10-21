@@ -553,6 +553,8 @@ describe('InmueblesService.previsualizarImportacion — copropiedad equivocada',
       codigosACrear: [],
       codigosACrearTruncado: false,
       advertencias: [],
+      advertenciasTotal: 0,
+      advertenciasTruncado: false,
       ausentes: { total: 0, codigos: [], truncado: false },
       abortaImport: true,
     });
@@ -631,5 +633,101 @@ describe('InmueblesService.previsualizarImportacion — tenencia y rendimiento',
 
     expect(vista.codigosACrearTruncado).toBe(false);
     expect(vista.ausentes.truncado).toBe(false);
+  });
+});
+
+describe('InmueblesService.previsualizarImportacion — titulares nuevos sin sobrecontar', () => {
+  it('un dueño con tres inmuebles nuevos y la misma identificación nueva cuenta UN titular nuevo', async () => {
+    const { service } = montar();
+
+    const vista = await service.previsualizarImportacion({
+      filas: ['401', '402', '403'].map((codigo) =>
+        fila({
+          codigo,
+          nombreTitular: 'Pedro Gómez',
+          numeroIdentificacionTitular: '222',
+        }),
+      ),
+    });
+
+    expect(vista.aCrear).toBe(3);
+    expect(vista.titularesNuevos).toBe(1);
+  });
+
+  it('identificaciones nuevas distintas cuentan cada una, y los titulares solo por nombre no se deduplican', async () => {
+    const { service } = montar();
+
+    const vista = await service.previsualizarImportacion({
+      filas: [
+        fila({
+          codigo: '401',
+          nombreTitular: 'A',
+          numeroIdentificacionTitular: '1',
+        }),
+        fila({
+          codigo: '402',
+          nombreTitular: 'B',
+          numeroIdentificacionTitular: '2',
+        }),
+        fila({ codigo: '403', nombreTitular: 'Luis Gómez' }),
+        fila({ codigo: '404', nombreTitular: 'Luis Gómez' }),
+      ],
+    });
+
+    // 2 identificaciones nuevas + 2 filas solo con nombre (no simuladas).
+    expect(vista.titularesNuevos).toBe(4);
+  });
+});
+
+describe('InmueblesService.previsualizarImportacion — código en blanco', () => {
+  it('un código de solo espacios es un error de fila, no un alta, y es el mismo mensaje que da importar', async () => {
+    const filas = [fila({ codigo: '   ' }), fila({ codigo: '302' })];
+
+    const vista = await montar().service.previsualizarImportacion({ filas });
+    const real = await montar().service.importar({ filas });
+
+    expect(vista.errores).toEqual([
+      { fila: 1, codigo: '   ', mensaje: 'El código no puede estar vacío' },
+    ]);
+    expect(vista.aCrear).toBe(1);
+    expect(real.errores).toEqual(vista.errores);
+    expect(real.creados).toBe(1);
+  });
+});
+
+describe('InmueblesService.previsualizarImportacion — advertencias', () => {
+  it('se recortan a 500 con el total y la marca de truncado; los conteos no se recortan', async () => {
+    const { service } = montar();
+
+    // 600 repeticiones del código "301": 599 advertencias de repetido.
+    const vista = await service.previsualizarImportacion({
+      filas: Array.from({ length: 600 }, () => fila({ codigo: '301' })),
+    });
+
+    expect(vista.repetidasEnArchivo).toBe(599);
+    expect(vista.advertencias).toHaveLength(500);
+    expect(vista.advertenciasTotal).toBe(599);
+    expect(vista.advertenciasTruncado).toBe(true);
+  });
+
+  it('sin pasarse del tope informa el total y no marca truncado', async () => {
+    const { service } = montar();
+
+    const vista = await service.previsualizarImportacion({
+      filas: [fila({ codigo: '301' }), fila({ codigo: '301' })],
+    });
+
+    expect(vista.advertenciasTotal).toBe(1);
+    expect(vista.advertenciasTruncado).toBe(false);
+  });
+
+  it('"1-23" y "12-3" ya no se avisan como parecidos', async () => {
+    const { service } = montar([{ id: 'inm-1', codigo: '12-3' }]);
+
+    const vista = await service.previsualizarImportacion({
+      filas: [fila({ codigo: '1-23' })],
+    });
+
+    expect(vista.advertencias).toEqual([]);
   });
 });

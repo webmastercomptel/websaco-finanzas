@@ -200,6 +200,13 @@ export interface AdvertenciaVistaPreviaImportacion {
  * Response of `POST /inmuebles/importar/previsualizar`: what importing the
  * same body would do, computed without writing anything. Rows are classified
  * exactly like `importar` classifies them (same validators, same messages).
+ *
+ * Reconciling with the import's result: `importar` counts every later row of a
+ * repeated code as `actualizados` (it patches the unit the first row just
+ * created or patched), so a NEW code that appears twice gives `creados` 1 +
+ * `actualizados` 1, while the preview reports `aCrear` 1 + `repetidasEnArchivo`
+ * 1. `titularesNuevos` counts a NEW identification once however many rows share
+ * it; titulares known only by name are not simulated across rows.
  */
 export interface VistaPreviaImportacionInmuebles {
   total: number;
@@ -216,7 +223,11 @@ export interface VistaPreviaImportacionInmuebles {
   /** Codes of the rows counted in `aCrear`, capped at 200. */
   codigosACrear: string[];
   codigosACrearTruncado: boolean;
+  /** Capped at 500; see `advertenciasTotal`. */
   advertencias: AdvertenciaVistaPreviaImportacion[];
+  /** Every warning found, before the cap. */
+  advertenciasTotal: number;
+  advertenciasTruncado: boolean;
   /** ACTIVE units of the coproperty whose code is not in the file. Rows with
    *  errors still count as present. Empty when `abortaImport`. */
   ausentes: {

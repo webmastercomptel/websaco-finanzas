@@ -150,10 +150,12 @@ export const toFilaExportacion = (
 });
 
 /** Caps on the lists of the import preview: it answers in one JSON body, and
- *  a 3000-row file must not echo thousands of codes back. The COUNTS are never
- *  capped, only the lists, with a `truncado` flag beside each. */
+ *  a 3000-row file must not echo thousands of codes or warnings back. The
+ *  COUNTS are never capped, only the lists, with a `truncado` flag (and a
+ *  total) beside each. */
 export const MAX_CODIGOS_A_CREAR_VISTA_PREVIA = 200;
 export const MAX_AUSENTES_VISTA_PREVIA = 500;
+export const MAX_ADVERTENCIAS_VISTA_PREVIA = 500;
 
 /** What the service worked out about a file, before shaping the response. */
 export interface ClasificacionVistaPrevia {
@@ -185,7 +187,9 @@ export const toVistaPreviaImportacion = (
   codigosACrear: c.codigosACrear.slice(0, MAX_CODIGOS_A_CREAR_VISTA_PREVIA),
   codigosACrearTruncado:
     c.codigosACrear.length > MAX_CODIGOS_A_CREAR_VISTA_PREVIA,
-  advertencias: c.advertencias,
+  advertencias: c.advertencias.slice(0, MAX_ADVERTENCIAS_VISTA_PREVIA),
+  advertenciasTotal: c.advertencias.length,
+  advertenciasTruncado: c.advertencias.length > MAX_ADVERTENCIAS_VISTA_PREVIA,
   ausentes: {
     total: c.ausentes.length,
     codigos: c.ausentes.slice(0, MAX_AUSENTES_VISTA_PREVIA),
@@ -212,6 +216,8 @@ export const toVistaPreviaAbortada = (
   codigosACrear: [],
   codigosACrearTruncado: false,
   advertencias: [],
+  advertenciasTotal: 0,
+  advertenciasTruncado: false,
   ausentes: { total: 0, codigos: [], truncado: false },
   abortaImport: true,
 });
