@@ -62,6 +62,7 @@ const ANA: TitularComptable = {
   telefono: null,
   direccion: null,
   ciudad: null,
+  ciudadCodigo: null,
 };
 
 const ORIGEN = {
@@ -73,13 +74,41 @@ const ORIGEN = {
   generadoPor: { accountId: '66f000000000000000000099', nombre: 'Ana Pérez' },
 };
 
+/** Stands in for the Tabla de Documentos: each key's código is the key. */
+const codigoIgualALaClave = (clave: string): string => clave;
+
 const resolucionVacia = (): ResolucionPayload => ({
+  codigoDe: codigoIgualALaClave,
   anchorMap: new Map(),
   conceptoMap: new Map(),
   saldosInicialesPorNumero: new Map(),
 });
 
 describe('construirPayloadComptable', () => {
+  it('documento lleva el tipo de la Tabla de Documentos y prefijo el del documento, nunca la llave interna', () => {
+    const facturaId = new Types.ObjectId();
+    const resolucion = resolucionVacia();
+    resolucion.codigoDe = (clave, prefijo) =>
+      clave === 'FV' && prefijo === 'FEVP' ? 'FAC' : '?';
+    resolucion.anchorMap.set(facturaId.toString(), {
+      prefix: 'FEVP',
+      number: 4152,
+    });
+
+    const payload = construirPayloadComptable(
+      [asiento({ facturaId }, '2026-10-05', [])],
+      resolucion,
+      new Map(),
+      ORIGEN,
+    );
+
+    expect(payload.asientos[0]).toMatchObject({
+      documento: 'FAC',
+      prefijo: 'FEVP',
+      numero: 4152,
+    });
+  });
+
   it('reproduce exactamente el payload-v1.json compartido con Comptable', () => {
     const facturaId = new Types.ObjectId();
     const reciboId = new Types.ObjectId();
@@ -138,6 +167,7 @@ describe('construirPayloadComptable', () => {
       ]),
     ];
     const resolucion: ResolucionPayload = {
+      codigoDe: codigoIgualALaClave,
       anchorMap: new Map([
         [facturaId.toString(), { prefix: 'FEVP', number: 4152 }],
         [reciboId.toString(), { prefix: '', number: 88 }],
@@ -197,6 +227,37 @@ describe('construirPayloadComptable', () => {
       });
     },
   );
+
+  it('el tercero lleva el código DANE de la ciudad del titular, para que Comptable complete el departamento', () => {
+    const [primero] = construirPayloadComptable(
+      [
+        asiento(
+          { reciboId: new Types.ObjectId() },
+          '2026-10-02T00:00:00.000Z',
+          [
+            { cuenta: '1', tipo: 'debito', monto: 5, descripcion: 'x' },
+            {
+              cuenta: '2',
+              tipo: 'credito',
+              monto: 5,
+              descripcion: 'y',
+              tercero: '101-A',
+            },
+          ],
+        ),
+      ],
+      resolucionVacia(),
+      new Map([
+        ['101-A', { ...ANA, ciudad: 'Medellín', ciudadCodigo: '05001' }],
+      ]),
+      ORIGEN,
+    ).asientos;
+
+    expect(primero.movimientos[1].tercero).toMatchObject({
+      ciudad: 'Medellín',
+      ciudadCodigo: '05001',
+    });
+  });
 
   it('un documento sin prefijo viaja con prefijo "" y sin concepto usa el texto del primer movimiento', () => {
     const id = new Types.ObjectId();
@@ -438,6 +499,7 @@ describe('construirPayloadComptable', () => {
         telefono: null,
         direccion: null,
         ciudad: null,
+        ciudadCodigo: null,
       });
     });
   });

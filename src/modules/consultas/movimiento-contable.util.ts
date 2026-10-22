@@ -68,6 +68,8 @@ export function resolverMovimientoContable(
     propietario: string | null;
     nit: string | null;
     numeroDocumento: string;
+    /** Resolved from the Tabla de Documentos by the caller. */
+    codigoDocumento: string;
   },
   nombrePorCuenta: Map<string, string> = new Map(),
   // Internal Saldo Inicial ordinal -> its original document; a movimiento
@@ -103,6 +105,7 @@ export function resolverMovimientoContable(
     id: asiento._id.toString(),
     fecha: asiento.fecha.toISOString(),
     tipoDocumento,
+    codigoDocumento: meta.codigoDocumento,
     documentoId,
     numeroDocumento: meta.numeroDocumento,
     inmuebleCodigo: meta.inmuebleCodigo,

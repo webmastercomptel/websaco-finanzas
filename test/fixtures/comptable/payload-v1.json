@@ -35,7 +35,8 @@
             "email": "ana@example.com",
             "telefono": null,
             "direccion": null,
-            "ciudad": null
+            "ciudad": null,
+            "ciudadCodigo": null
           },
           "centroUtilidad": "01",
           "centroDestino": null,
@@ -97,7 +98,8 @@
             "email": "ana@example.com",
             "telefono": null,
             "direccion": null,
-            "ciudad": null
+            "ciudad": null,
+            "ciudadCodigo": null
           },
           "centroUtilidad": "01",
           "centroDestino": null,

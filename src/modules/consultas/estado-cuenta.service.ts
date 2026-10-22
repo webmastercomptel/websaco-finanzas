@@ -56,6 +56,10 @@ import {
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  codigoPorPrefijo,
+  TituloDocumentoService,
+} from '../../common/documentos/titulo-documento.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { fechaNotaContable } from '../notas-contables/notas-contables.mapper';
 import {
@@ -143,6 +147,9 @@ export class EstadoCuentaService {
     private readonly saldosIniciales: Model<SaldoInicialDocument>,
     @InjectModel(SaldoInicialAnticipo.name)
     private readonly saldosInicialesAnticipo: Model<SaldoInicialAnticipoDocument>,
+    // APPENDED last, optional: the document type shown is the coproperty's
+    // own código from the Tabla de Documentos.
+    private readonly titulos?: TituloDocumentoService,
   ) {}
 
   /**
@@ -471,10 +478,13 @@ export class EstadoCuentaService {
         (abonadoAntesPorDocumento.get(key) ?? 0) + app.montoAplicado,
       );
     }
+    const codigoDe = this.titulos
+      ? await this.titulos.resolverCodigos(copropiedadId)
+      : codigoPorPrefijo;
     const cargosAnteriores = [
       ...facturas.map((f) => ({
         id: f._id,
-        tipo: 'FV',
+        tipo: codigoDe('FV', f.prefijo),
         numeroCompleto: f.numeroCompleto,
         fecha: f.fechaEmision,
         vence: f.fechaVencimiento,
@@ -482,7 +492,7 @@ export class EstadoCuentaService {
       })),
       ...notasDebito.map((nd) => ({
         id: nd._id,
-        tipo: 'ND',
+        tipo: codigoDe('ND', nd.prefijo),
         numeroCompleto: nd.numeroCompleto,
         fecha: nd.fechaEmision,
         vence: nd.fechaEmision,

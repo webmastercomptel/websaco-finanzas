@@ -112,6 +112,7 @@ const servicio = (overrides: Record<string, unknown> = {}) => {
     m.cuentasContables as never,
     m.tenant as never,
     m.saldosIniciales as never,
+    m.titulos as never,
   );
 };
 
@@ -200,6 +201,39 @@ describe('MovimientoContableService', () => {
         'FV-001',
         'FV-002',
       ]);
+    });
+
+    it('muestra el tipo como lo llama la Tabla de Documentos, no la llave interna', async () => {
+      // Reportado en producción: la Tabla dice FV y el informe mostraba FC.
+      const f1 = facturaDoc({ numeroCompleto: 'FV-330', prefijo: 'FV' });
+      const resolverCodigos = jest.fn(() =>
+        Promise.resolve((clave: string, prefijo: string) =>
+          clave === 'FC' && prefijo === 'FV' ? 'FV' : '?',
+        ),
+      );
+      const svc = servicio({
+        facturas: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([f1]),
+        },
+        asientos: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asientoDoc('facturaId', f1._id)]),
+        },
+        titulos: { resolverCodigos },
+      });
+
+      const result = await svc.findAll({
+        desde: '2026-08-01',
+        hasta: '2026-08-31',
+      });
+
+      expect(resolverCodigos).toHaveBeenCalledWith(COP);
+      expect(result.movimientos[0]).toMatchObject({
+        codigoDocumento: 'FV',
+        numeroDocumento: 'FV-330',
+      });
     });
 
     it('passes a date range filter to AsientoContable.find, scoped only by copropiedadId', async () => {

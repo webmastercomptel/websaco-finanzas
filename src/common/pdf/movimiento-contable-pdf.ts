@@ -84,7 +84,10 @@ function formatoPesoCompacto(valor: number): string {
  *  ascending order and per-document subtotal bar the screen shows, not the
  *  movimientos-grouped shape `RespuestaMovimientoContable` returns. */
 interface FilaLinea {
+  /** Internal key — sorting/grouping only. */
   tipoDocumento: string;
+  /** What the row prints: the Tabla de Documentos código. */
+  codigoDocumento: string;
   numeroDocumento: string;
   cuenta: string;
   nombreCuenta: string;
@@ -121,6 +124,7 @@ function aFilas(reporte: RespuestaMovimientoContable): FilaLinea[] {
     for (const l of m.lineas) {
       filas.push({
         tipoDocumento: m.tipoDocumento,
+        codigoDocumento: m.codigoDocumento,
         numeroDocumento: m.numeroDocumento,
         cuenta: l.cuenta,
         nombreCuenta: l.nombreCuenta,
@@ -359,7 +363,7 @@ export async function generarPdfMovimientoContable(
         }
         const f = item.fila;
         const valores = [
-          f.tipoDocumento,
+          f.codigoDocumento,
           f.numeroDocumento,
           f.cuenta,
           f.nombreCuenta,

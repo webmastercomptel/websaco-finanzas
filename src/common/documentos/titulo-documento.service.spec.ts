@@ -245,3 +245,55 @@ describe('TituloDocumentoService.resolverFactura', () => {
     expect(resolucion).toBeNull();
   });
 });
+
+describe('TituloDocumentoService.resolverCodigos', () => {
+  const tabla = (
+    filas: { categoria: string; codigo: string; prefijo: string }[],
+  ) =>
+    new TituloDocumentoService(
+      {
+        find: jest.fn((filtro: Filtro) => ({
+          exec: () =>
+            Promise.resolve(filtro.copropiedadId === COP ? filas : []),
+        })),
+      } as never,
+      modeloResoluciones([]) as never,
+    );
+
+  it('muestra el código de la Tabla de Documentos, nunca la llave interna', async () => {
+    // Reportado en producción: Movimiento Contable mostraba la llave fija
+    // FC en vez del código que la copropiedad configuró.
+    const codigoDe = await tabla([
+      { categoria: 'FV', codigo: 'FV', prefijo: 'FV' },
+      { categoria: 'IN', codigo: 'RC', prefijo: 'RC' },
+      { categoria: 'IN', codigo: 'RT', prefijo: 'RT' },
+      { categoria: 'NT', codigo: 'NT', prefijo: 'NT' },
+      { categoria: 'NT', codigo: 'NA', prefijo: 'NA' },
+    ]).resolverCodigos(COP);
+
+    expect(codigoDe('FC', 'FV')).toBe('FV');
+    // Dos códigos en la misma categoría se distinguen por el prefijo.
+    expect(codigoDe('RC', 'RT')).toBe('RT');
+    expect(codigoDe('RC', 'RC')).toBe('RC');
+    // La Nota de Anticipo se numera bajo la categoría NT.
+    expect(codigoDe('NA', 'NA')).toBe('NA');
+  });
+
+  it('una factura numerada por resolución (otro prefijo) toma el único código de su categoría', async () => {
+    const codigoDe = await tabla([
+      { categoria: 'FV', codigo: 'FV', prefijo: 'FV' },
+    ]).resolverCodigos(COP);
+
+    expect(codigoDe('FC', 'CONJ-2026')).toBe('FV');
+  });
+
+  it('sin fila que corresponda muestra el prefijo propio del documento', async () => {
+    const codigoDe = await tabla([
+      { categoria: 'IN', codigo: 'RC', prefijo: 'RC' },
+      { categoria: 'IN', codigo: 'RT', prefijo: 'RT' },
+    ]).resolverCodigos(COP);
+
+    expect(codigoDe('RC', 'CI')).toBe('CI');
+    expect(codigoDe('ND', 'ND')).toBe('ND');
+  });
+});

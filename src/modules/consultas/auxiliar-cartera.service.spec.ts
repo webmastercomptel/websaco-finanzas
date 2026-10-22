@@ -11,6 +11,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   numeroCompleto: 'FV-001',
+  prefijo: 'FV',
   fechaEmision: new Date('2026-08-01'),
   total: 200000,
   estado: 'emitida',
@@ -22,6 +23,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   numeroCompleto: 'RC-001',
+  prefijo: 'RC',
   ...over,
 });
 
@@ -30,6 +32,7 @@ const ndDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   numeroCompleto: 'ND-001',
+  prefijo: 'ND',
   fechaEmision: new Date('2026-08-15'),
   total: 50000,
   descripcion: 'Cargo por mora',
@@ -42,6 +45,7 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   numeroCompleto: 'NT-001',
+  prefijo: 'NT',
   monto: 30000,
   descripcion: 'Reclasificación de intereses',
   estado: 'activo',
@@ -54,6 +58,7 @@ const notaAnticipoDoc = (over: Record<string, unknown> = {}) => ({
   copropiedadId: COP,
   inmuebleId: INMUEBLE,
   numeroCompleto: 'NA-001',
+  prefijo: 'NA',
   ...over,
 });
 
@@ -131,7 +136,7 @@ describe('AuxiliarCarteraService', () => {
 
       expect(result.movimientos).toHaveLength(1);
       expect(result.movimientos[0]).toMatchObject({
-        tipo: 'FC',
+        tipo: 'FV',
         numeroCompleto: 'FV-001',
         debito: 200000,
         credito: null,
@@ -155,7 +160,7 @@ describe('AuxiliarCarteraService', () => {
 
       expect(result.movimientos).toHaveLength(1);
       expect(result.movimientos[0]).toMatchObject({
-        tipo: 'FC',
+        tipo: 'FV',
         numeroCompleto: 'FV-001',
         debito: 200000,
         credito: null,
