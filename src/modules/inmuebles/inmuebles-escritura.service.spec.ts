@@ -81,7 +81,6 @@ const nuevoServicio = (modelo: ReturnType<typeof modeloCon>) =>
     tenant,
     {} as never,
     {} as never,
-    {} as never,
   );
 
 const tenant = {
@@ -106,7 +105,6 @@ describe('InmueblesService.create', () => {
       tenant,
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.create({ codigo: '401' });
@@ -128,7 +126,6 @@ describe('InmueblesService.create', () => {
       tenant,
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await expect(service.create({ codigo: '301' })).rejects.toBeInstanceOf(
@@ -144,7 +141,6 @@ describe('InmueblesService.create', () => {
       {} as never,
       {} as never,
       tenant,
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -168,7 +164,6 @@ describe('InmueblesService.create', () => {
       tenantSinCopropiedad,
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await expect(service.create({ codigo: '401' })).rejects.toBeInstanceOf(
@@ -189,7 +184,6 @@ describe('InmueblesService.update', () => {
       tenant,
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.update('inm-1', { zona: 'Norte' });
@@ -208,7 +202,6 @@ describe('InmueblesService.update', () => {
       tenant,
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.update('inm-1', { zona: 'Norte' });
@@ -223,7 +216,6 @@ describe('InmueblesService.update', () => {
       {} as never,
       {} as never,
       tenant,
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -242,7 +234,6 @@ describe('InmueblesService.update', () => {
       {} as never,
       {} as never,
       tenant,
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -346,7 +337,6 @@ describe('InmueblesService.update', () => {
       {} as never,
       {} as never,
       tenant,
-      {} as never,
       {} as never,
       {} as never,
     );

@@ -18,13 +18,20 @@ export interface EntradaAuditoria {
   actorAccountId: string;
   actorNombre: string;
   accion:
-    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
+    | 'crear'
+    | 'actualizar'
+    | 'revertir'
+    | 'reiniciar'
+    | 'desmarcar'
+    | 'dar-de-baja'
+    | 'retirar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
     | 'lote-contabilidad'
+    | 'inmueble'
     | 'lote-comptable';
   entidadId: string;
   entidadEtiqueta: string;

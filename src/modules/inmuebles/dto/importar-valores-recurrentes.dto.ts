@@ -15,7 +15,7 @@ import { ValorRecurrenteLineaDto } from './guardar-valores-recurrentes.dto';
  * whatever cargo amounts the file carried for it. Never creates or deletes an
  * inmueble — a code with no match in this coproperty fails only that row
  * (see `ValoresRecurrentesService.importarMasivo`), the same "rows are
- * independent" convention `InmueblesService.importar` uses for the full
+ * independent" convention `InmueblesService.importar` uses for the unit
  * roster import. Unlike that import, this one never touches the unit roster
  * itself, only `ValorRecurrente` rows — see the controller's own note on why
  * this is a separate endpoint.

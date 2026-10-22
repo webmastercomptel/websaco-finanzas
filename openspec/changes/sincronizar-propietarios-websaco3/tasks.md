@@ -83,4 +83,4 @@ Deploy order: gate A -> PR 1 -> PR 2a -> PR 2b -> PR 3 (backend AND `../frontend
 
 ## Not planned
 
-- Any change to `importar` or `InmueblesEliminacionService` (accepted by the user, D15). No data migration (D16).
+- Any change to `importar` or `InmueblesEliminacionService` (accepted by the user, D15). No data migration (D16). **[2026-10-21: REVERSED by `importar-inmuebles-upsert`: `importar` is now an upsert by code that never deletes, and `InmueblesEliminacionService.eliminarTodosEliminables` was removed. Reason: the wipe is non-atomic, can orphan non-invoice financial records and blocks correcting invoiced units.]**

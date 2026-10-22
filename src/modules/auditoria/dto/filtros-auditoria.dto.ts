@@ -10,6 +10,7 @@ export class FiltrosAuditoriaDto {
     'usuario',
     'lote-facturacion',
     'lote-contabilidad',
+    'inmueble',
     'lote-comptable',
   ])
   entidadTipo?:
@@ -18,6 +19,7 @@ export class FiltrosAuditoriaDto {
     | 'usuario'
     | 'lote-facturacion'
     | 'lote-contabilidad'
+    | 'inmueble'
     | 'lote-comptable';
 
   @IsOptional()
@@ -27,10 +29,17 @@ export class FiltrosAuditoriaDto {
     'revertir',
     'reiniciar',
     'desmarcar',
+    'dar-de-baja',
     'retirar',
   ])
   accion?:
-    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
+    | 'crear'
+    | 'actualizar'
+    | 'revertir'
+    | 'reiniciar'
+    | 'desmarcar'
+    | 'dar-de-baja'
+    | 'retirar';
 
   @IsOptional()
   @IsDateString()

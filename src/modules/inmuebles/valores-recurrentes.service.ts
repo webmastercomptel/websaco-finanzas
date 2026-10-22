@@ -214,10 +214,10 @@ export class ValoresRecurrentesService {
    *
    * Deliberately never creates, deletes or otherwise edits an `Inmueble` —
    * only the ones a code actually matches get their `ValorRecurrente` rows
-   * touched, unlike `InmueblesService.importar`'s full-roster replace. Since
-   * nothing here is destructive, `codigoCopropiedad` is checked per row
-   * (like every other row-level rule below) rather than aborting the whole
-   * file the way `InmueblesService.importar` does — see
+   * touched, unlike `InmueblesService.importar`, which creates and patches
+   * units. Since nothing here touches the unit roster, `codigoCopropiedad` is
+   * checked per row (like every other row-level rule below) rather than
+   * aborting the whole file the way `InmueblesService.importar` does — see
    * `FilaValorRecurrenteMasivoDto.codigoCopropiedad`'s own note.
    */
   async importarMasivo(

@@ -23,7 +23,7 @@ export function esEmailValido(valor: string): boolean {
  * answers to more than one inbox (owner and property manager, co-owners) —
  * comma or semicolon separated, whichever the file happens to use. Throws
  * on the first malformed address so the row fails with a clear message,
- * same pattern `InmueblesService.resolverTitular` already uses for a bad
+ * same pattern `InmueblesService.validarFila` already uses for a bad
  * DIAN/DANE catalog code — caught by that row's own try/catch, never the
  * whole import.
  */
@@ -41,4 +41,15 @@ export function parseEmails(valor: string | undefined): string[] {
   }
 
   return correos;
+}
+
+/**
+ * Inverse of `parseEmails`: joins a party's addresses into one spreadsheet
+ * cell. Uses a comma — one of the separators `parseEmails` splits on, and one
+ * no stored address can contain (the import splits on it BEFORE validating, so
+ * an address with a comma never gets in) — so `parseEmails(formatEmails(x))`
+ * returns `x` and an exported file loads back unchanged.
+ */
+export function formatEmails(emails: readonly string[] | undefined): string {
+  return (emails ?? []).join(', ');
 }

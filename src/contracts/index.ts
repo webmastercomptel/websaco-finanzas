@@ -158,19 +158,153 @@ export interface ErrorImportacionInmueble {
 
 /**
  * Result of importing a batch of units — and, inline, their titulares — at
- * once. Rows are independent: one bad row does not abort the rest, because a
- * 400-unit file with three typos should not have to be re-uploaded whole.
+ * once. The import is an UPSERT BY CODE that never deletes: a row of a known
+ * code patches that unit, a row of a new code creates it. Rows are
+ * independent: one bad row does not abort the rest, because a 400-unit file
+ * with three typos should not have to be re-uploaded whole.
  */
 export interface ResultadoImportacionInmuebles {
   total: number;
+  /** Rows that created a NEW unit. */
   creados: number;
+  /** Rows whose code already existed and patched that unit (also counts rows
+   *  that changed nothing: the unit was matched and left as it was). */
+  actualizados: number;
   errores: ErrorImportacionInmueble[];
-  /** Units of this coproperty erased right before this import — every
-   *  import replaces the whole roster, see `InmueblesService.importar`. */
+  /** @deprecated Always 0 — an import never deletes. Kept for one release so
+   *  a frontend deployed before this change keeps parsing the response. */
   eliminadosAntes: number;
-  /** Codes left untouched because they already have a Factura issued —
-   *  never deleted, only skipped. */
+  /** @deprecated Always empty — an import never deletes, so nothing is
+   *  skipped for having a Factura. Kept for one release, same reason as
+   *  `eliminadosAntes`. */
   bloqueadosPorFactura: string[];
+}
+
+/** A non-blocking heads-up from the import preview. Never changes a count. */
+export interface AdvertenciaVistaPreviaImportacion {
+  /** `codigo-parecido`: a different code that reads the same once case,
+   *  separators and leading zeros are ignored (see `claveParecida`).
+   *  `codigo-repetido-en-archivo`: the code already appeared earlier in the
+   *  file — the import patches the same unit, so the last row wins. */
+  tipo: 'codigo-parecido' | 'codigo-repetido-en-archivo';
+  /** 1-based, matching the row order the file was uploaded in. */
+  fila: number;
+  codigo: string;
+  /** For `codigo-parecido`: the similar code. */
+  parecidoA?: string;
+  /** For `codigo-parecido`: where that similar code lives. */
+  origen?: 'existente' | 'archivo';
+}
+
+/**
+ * Response of `POST /inmuebles/importar/previsualizar`: what importing the
+ * same body would do, computed without writing anything. Rows are classified
+ * exactly like `importar` classifies them (same validators, same messages).
+ *
+ * Reconciling with the import's result: `importar` counts every later row of a
+ * repeated code as `actualizados` (it patches the unit the first row just
+ * created or patched), so a NEW code that appears twice gives `creados` 1 +
+ * `actualizados` 1, while the preview reports `aCrear` 1 + `repetidasEnArchivo`
+ * 1. `titularesNuevos` counts a NEW identification once however many rows share
+ * it; titulares known only by name are not simulated across rows.
+ */
+export interface VistaPreviaImportacionInmuebles {
+  total: number;
+  /** Valid rows whose code is not in the coproperty yet. */
+  aCrear: number;
+  /** Valid rows whose code matches an existing unit. */
+  aActualizar: number;
+  /** Later occurrences of a code already seen in the file (compared trimmed,
+   *  case-insensitive); not counted in `aCrear`/`aActualizar`. */
+  repetidasEnArchivo: number;
+  /** Counted rows whose titular would be created as a NEW Tercero. */
+  titularesNuevos: number;
+  errores: ErrorImportacionInmueble[];
+  /** Codes of the rows counted in `aCrear`, capped at 200. */
+  codigosACrear: string[];
+  codigosACrearTruncado: boolean;
+  /** Capped at 500; see `advertenciasTotal`. */
+  advertencias: AdvertenciaVistaPreviaImportacion[];
+  /** Every warning found, before the cap. */
+  advertenciasTotal: number;
+  advertenciasTruncado: boolean;
+  /** ACTIVE units of the coproperty whose code is not in the file. Rows with
+   *  errors still count as present. Empty when `abortaImport`. */
+  ausentes: {
+    total: number;
+    /** Capped at 500. */
+    codigos: string[];
+    truncado: boolean;
+  };
+  /** True when a row carries another coproperty's code: `importar` would
+   *  abort the WHOLE file with zero writes, so everything else is empty. */
+  abortaImport: boolean;
+}
+
+/** Response of `POST /inmuebles/dar-de-baja`. */
+export interface ResultadoDarDeBajaInmuebles {
+  /** Distinct codes requested (trimmed, case-insensitive). */
+  solicitados: number;
+  /** Units moved from active to inactive. */
+  dadosDeBaja: number;
+  /** Requested codes whose unit was already inactive. */
+  yaInactivos: string[];
+  /** Requested codes with no unit in the active coproperty. */
+  noEncontrados: string[];
+}
+
+/**
+ * One row of `GET /inmuebles/exportar-importacion`: a unit and its titular in
+ * EXACTLY the column set and order `POST /inmuebles/importar` reads, so the
+ * file a person downloads, edits and uploads again round-trips without
+ * mapping. Strings are never null (absent → `""`), `area`/`coeficiente` are
+ * numbers (absent → `""`), `resideEnElInmueble` is a boolean. Titular columns
+ * come from the joined Tercero and are all `""` for a unit without titular.
+ *
+ * `estado` is deliberately not a column: the import cannot carry it and never
+ * touches it, so an inactive unit stays inactive when its exported row is
+ * loaded back.
+ */
+export interface FilaExportacionInmueble {
+  /** The coproperty's own code, repeated on every row — the import's
+   *  whole-file safety check. */
+  codigoCopropiedad: string;
+  codigo: string;
+  referencia: string;
+  bloque: string;
+  zona: string;
+  uso: string;
+  area: number | '';
+  coeficiente: number | '';
+  tipoTitular: string;
+  resideEnElInmueble: boolean;
+  estadoCartera: string;
+  contacto: string;
+  observaciones: string;
+  nom1Titular: string;
+  nom2Titular: string;
+  ape1Titular: string;
+  ape2Titular: string;
+  razonSocialTitular: string;
+  /** DIAN code, as the import expects it. */
+  tipoIdentificacionTitular: string;
+  numeroIdentificacionTitular: string;
+  digitoVerificacionTitular: string;
+  /** Every address of the Tercero joined with `, ` — a separator the
+   *  import's email parser splits on, so the round trip is lossless. */
+  emailTitular: string;
+  telefonoTitular: string;
+  direccionTitular: string;
+  /** DANE municipality CODE (not the name), as the import expects it. */
+  ciudadTitular: string;
+}
+
+/** Response of `GET /inmuebles/exportar-importacion`. */
+export interface ExportacionImportacionInmuebles {
+  /** The active coproperty's own code. */
+  copropiedadCodigo: string;
+  /** Every unit of the coproperty (active and inactive), sorted by `codigo`. */
+  filas: FilaExportacionInmueble[];
 }
 
 /** One column of the coproperty-wide "Listado de Inmuebles" roster — one
@@ -2386,13 +2520,20 @@ export interface RegistroAuditoriaContract {
   id: string;
   actorNombre: string;
   accion:
-    'crear' | 'actualizar' | 'revertir' | 'reiniciar' | 'desmarcar' | 'retirar';
+    | 'crear'
+    | 'actualizar'
+    | 'revertir'
+    | 'reiniciar'
+    | 'desmarcar'
+    | 'dar-de-baja'
+    | 'retirar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
     | 'usuario'
     | 'lote-facturacion'
     | 'lote-contabilidad'
+    | 'inmueble'
     | 'lote-comptable';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */

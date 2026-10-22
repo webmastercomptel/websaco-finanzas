@@ -4,6 +4,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -24,17 +25,25 @@ import { escapeRegex } from '../../common/utils/query.utils';
 import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
 import { parseEmails } from '../../common/utils/email.utils';
 import { CatalogosService } from '../catalogos/catalogos.service';
-import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
 import {
   ProgresoImportacionService,
   type ProgresoActual,
 } from './progreso-importacion.service';
 import type {
+  ExportacionImportacionInmuebles,
   Inmueble as InmuebleContract,
   Paginado,
   ResultadoImportacionInmuebles,
+  VistaPreviaImportacionInmuebles,
 } from '../../contracts';
-import { toInmueble } from './inmuebles.mapper';
+import {
+  toFilaExportacion,
+  toInmueble,
+  toVistaPreviaAbortada,
+  toVistaPreviaImportacion,
+  type ClasificacionVistaPrevia,
+} from './inmuebles.mapper';
+import { claveParecida } from './codigo-parecido';
 import type { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import type {
   ActualizarInmuebleDto,
@@ -44,6 +53,105 @@ import type {
   FilaImportarInmuebleDto,
   ImportarInmueblesDto,
 } from './dto/importar-inmuebles.dto';
+
+/**
+ * Defensive ceiling for `exportarImportacion`, which is deliberately not
+ * paginated (the file is one unit per row and a partial roster would be a
+ * silently wrong spreadsheet). Far above any real building; past it the
+ * request fails loudly instead of loading an unbounded set into memory.
+ */
+export const MAX_INMUEBLES_EXPORTACION = 5000;
+
+/** A Tercero as the importer reads it back: just what name recomposition and
+ *  the same-person comparison need. */
+type TerceroLeido = Pick<
+  Tercero,
+  | 'nombre'
+  | 'primerNombre'
+  | 'segundoNombre'
+  | 'primerApellido'
+  | 'segundoApellido'
+  | 'razonSocial'
+  | 'numeroIdentificacion'
+> & { _id: Types.ObjectId };
+
+/** Values derived from a row's titular columns by `validarFila`. */
+interface DatosTitularFila {
+  ciudad?: string;
+  ciudadDepartamento?: string;
+  emails?: string[];
+}
+
+/** What an import row does about its titular — see `planificarTitular`. */
+type PlanTitular =
+  | { tipo: 'ninguno' }
+  | {
+      tipo: 'refrescar';
+      tercero: TerceroLeido;
+      /** Also write the row's identification onto that Tercero (filling in
+       *  missing papers of the same person). */
+      asignarIdentificacion?: boolean;
+    }
+  | { tipo: 'crear' };
+
+/** Records created by the row being processed, so a failure later in the same
+ *  row can take back exactly those — see `upsertFila`. */
+interface RastroFila {
+  terceroId?: Types.ObjectId;
+}
+
+/** A unit as the import and its preview read it back. */
+interface ExistenteLeve {
+  _id: Types.ObjectId;
+  titularId?: Types.ObjectId | null;
+}
+
+/** The comparison form of a unit code: trimmed and case-folded, which is what
+ *  `filtroCodigoDuplicado` matches (anchored, case-insensitive). */
+const claveCodigo = (codigo: string): string => codigo.trim().toLowerCase();
+
+/** Same person by display name: trim, spaces collapsed, case-insensitive. */
+const mismoNombre = (a?: string | null, b?: string | null): boolean => {
+  const normalizar = (v: string): string =>
+    v.trim().replace(/s+/g, ' ').toLowerCase();
+  return !!a && !!b && normalizar(a) === normalizar(b);
+};
+
+/** The name a stored Tercero's own parts compose (its `razonSocial` for a
+ *  jurídica), which can differ from its stored `nombre` when that was typed
+ *  by hand — see `planificarTitular`. */
+const nombreDePartes = (t: TerceroLeido): string | null =>
+  t.razonSocial?.trim() ||
+  resolverNombreTercero({
+    tipoPersona: 'natural',
+    nom1: t.primerNombre ?? undefined,
+    nom2: t.segundoNombre ?? undefined,
+    ape1: t.primerApellido ?? undefined,
+    ape2: t.segundoApellido ?? undefined,
+  });
+
+/**
+ * Turns whatever a row threw into a message safe for the client. A Mongo
+ * duplicate-key error (`E11000`) would otherwise leak the collection and
+ * index names, and it can come from two unique indexes: the unit code and
+ * the Tercero identification, so the message is chosen by which key clashed.
+ */
+const mensajeDeFila = (err: unknown): string => {
+  const e = err as {
+    code?: number;
+    keyPattern?: Record<string, unknown>;
+    message?: string;
+  } | null;
+  if (e?.code === 11000) {
+    const porIdentificacion =
+      (e.keyPattern && 'numeroIdentificacion' in e.keyPattern) ||
+      (!e.keyPattern && e.message?.includes('numeroIdentificacion'));
+    return porIdentificacion
+      ? 'Identificación duplicada: ya existe un titular con esa identificación en esta copropiedad'
+      : 'Código duplicado: ya existe un inmueble con ese código en esta copropiedad';
+  }
+  return err instanceof Error ? err.message : 'Error desconocido';
+};
 
 @Injectable()
 export class InmueblesService {
@@ -56,7 +164,6 @@ export class InmueblesService {
     private readonly terceros: Model<TerceroDocument>,
     private readonly tenant: TenantContextService,
     private readonly catalogos: CatalogosService,
-    private readonly eliminacion: InmueblesEliminacionService,
     private readonly progreso: ProgresoImportacionService,
   ) {}
 
@@ -235,23 +342,54 @@ export class InmueblesService {
    * answers for it — the same "one concept, two tables" pair `findOne`
    * returns joined, just going in instead of coming out.
    *
-   * REPLACES the roster, on purpose: every import first wipes every unit of
-   * the active coproperty that can be wiped (see
-   * `InmueblesEliminacionService.eliminarTodosEliminables`), then loads the
-   * file as if into an empty building. A unit with a Factura survives the
-   * wipe untouched — the same guard `eliminar` applies one at a time — and
-   * its code is reported back in `bloqueadosPorFactura` rather than silently
-   * kept, since the file might otherwise expect to recreate it.
+   * An UPSERT BY CODE that NEVER deletes. A row whose code already exists
+   * (matched with the same tenant-scoped, case/whitespace-insensitive filter
+   * `create` uses) patches that unit; a row of an unknown code creates it.
+   * Loading a file is never destructive, because the previous design — wipe
+   * every unit, then reload — was not atomic (one bad row left its unit
+   * deleted and not recreated), guarded only against `Factura` although
+   * Recibo / SaldoInicial / SaldoInicialAnticipo / notas / SaldoCartera also
+   * reference `inmuebleId` (so a unit holding only opening balances could be
+   * hard-deleted and orphan them), minted new `_id`s on every import, and made
+   * an invoiced unit impossible to correct. Retiring units that are absent
+   * from a file is a separate, explicit act (deferred, see the
+   * `importar-inmuebles-upsert` change) — never a side effect of loading.
    *
-   * Rows are independent. One bad code or a repeated identification fails
-   * only that row and keeps going, because asking somebody to re-upload a
-   * 400-row file over three typos is not a serious answer.
+   * Update rules, in short:
+   * - Only the fields the row actually sent are written. A blank or
+   *   whitespace-only cell counts as NOT sent, for the unit AND the titular
+   *   (see `sinCeldasVacias`): the backend must not depend on the client
+   *   dropping blanks, and an empty cell means "nothing to say", never
+   *   "erase this".
+   * - `codigo` is never written (immutable, WebSaco3 links units by it) and
+   *   neither is `estado` (the row cannot carry it, and an inactive unit
+   *   must stay inactive across a re-import of an exported file).
+   * - There is no invoice guard: nothing is deleted, and the edit form edits
+   *   invoiced units too.
+   * - The titular follows `planificarTitular`: an identification that matches
+   *   a Tercero refreshes and assigns it; an identification that matches none
+   *   always creates a new one (never touches the unit's current owner); with
+   *   no identification the unit's own Tercero is refreshed when the name is
+   *   the same person's or the party is not shared, and a new one is created
+   *   otherwise. An identification with nobody to match and no name to create
+   *   from is a row error.
+   * - DIAN/DANE codes and emails are validated before anything of that row is
+   *   written. A row is best-effort atomic (see `upsertFila`): a Tercero it
+   *   created is taken back if the unit then fails, but an existing unit's
+   *   patch is NOT rolled back when the titular step fails — no Mongo
+   *   transactions here.
+   * - A duplicate-key error is reported as "Código duplicado", never with
+   *   index names.
+   *
+   * Rows are independent. One bad code or a malformed email fails only that
+   * row and keeps going, because asking somebody to re-upload a 400-row file
+   * over three typos is not a serious answer.
    *
    * The one exception: `codigoCopropiedad` is checked against the WHOLE file
-   * before anything is wiped — see `FilaImportarInmuebleDto.codigoCopropiedad`'s
+   * before anything is written — see `FilaImportarInmuebleDto.codigoCopropiedad`'s
    * own note. A file meant for a different building must never get the
-   * chance to erase this one's roster, so any row carrying the wrong code
-   * aborts the entire import with zero deletions, rather than being skipped
+   * chance to patch this one's roster, so any row carrying the wrong code
+   * aborts the entire import with zero writes, rather than being skipped
    * like an ordinary bad row.
    */
   async importar(
@@ -268,30 +406,24 @@ export class InmueblesService {
       );
     }
 
-    const erroresCodigo: ResultadoImportacionInmuebles['errores'] = [];
-    dto.filas.forEach((fila, indice) => {
-      if (fila.codigoCopropiedad !== copropiedad.codigo) {
-        erroresCodigo.push({
-          fila: indice + 1,
-          codigo: fila.codigo ?? null,
-          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${copropiedad.codigo})`,
-        });
-      }
-    });
+    const erroresCodigo = this.erroresDeCodigoCopropiedad(
+      dto,
+      copropiedad.codigo,
+    );
     if (erroresCodigo.length > 0) {
       return {
         total: dto.filas.length,
         creados: 0,
+        actualizados: 0,
         errores: erroresCodigo,
         eliminadosAntes: 0,
         bloqueadosPorFactura: [],
       };
     }
 
-    const { eliminados, bloqueados } =
-      await this.eliminacion.eliminarTodosEliminables();
     const errores: ResultadoImportacionInmuebles['errores'] = [];
     let creados = 0;
+    let actualizados = 0;
 
     // Coarse progress signal for the frontend to poll while this request is
     // in flight — see ProgresoImportacionService's own note. Cleared in
@@ -303,40 +435,14 @@ export class InmueblesService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
-          const yaExiste = await this.inmuebles
-            .exists(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
-            .exec();
-          if (yaExiste) {
-            throw new Error(
-              `Ya existe un inmueble con el código ${fila.codigo} en esta copropiedad`,
-            );
-          }
-
-          const titularId = await this.resolverTitular(copropiedadId, fila);
-
-          await this.inmuebles.create({
-            copropiedadId,
-            codigo: fila.codigo,
-            referencia: fila.referencia,
-            bloque: fila.bloque,
-            zona: fila.zona,
-            uso: fila.uso,
-            area: fila.area,
-            coeficiente: fila.coeficiente,
-            titularId,
-            tipoTitular: fila.tipoTitular ?? 'propietario',
-            resideEnElInmueble: fila.resideEnElInmueble ?? false,
-            estadoCartera: fila.estadoCartera ?? 'vigente',
-            contacto: fila.contacto,
-            observaciones: fila.observaciones,
-          });
-
-          creados += 1;
+          const resultado = await this.upsertFila(copropiedadId, fila);
+          if (resultado === 'actualizado') actualizados += 1;
+          else creados += 1;
         } catch (err) {
           errores.push({
             fila: indice + 1,
             codigo: fila.codigo ?? null,
-            mensaje: err instanceof Error ? err.message : 'Error desconocido',
+            mensaje: mensajeDeFila(err),
           });
         }
 
@@ -357,9 +463,492 @@ export class InmueblesService {
     return {
       total: dto.filas.length,
       creados,
+      actualizados,
       errores,
-      eliminadosAntes: eliminados,
-      bloqueadosPorFactura: bloqueados,
+      eliminadosAntes: 0,
+      bloqueadosPorFactura: [],
+    };
+  }
+
+  /**
+   * What `importar` WOULD do with this body, computed without writing
+   * anything: no unit created or patched, no Tercero created, refreshed or
+   * deleted, no progress row. It is safe to call as often as needed, which is
+   * the whole point — a person sees "se crearán N, se actualizarán M" and the
+   * units a file leaves out BEFORE committing to the load.
+   *
+   * It reuses the import's own read-only half (`planificarFila`: the same
+   * `validarFila` validators, the same code matching and the same
+   * `planificarTitular` decision), so a row is classified — and rejected with
+   * the same message — exactly as the import would. Nothing is copied.
+   *
+   * - The whole-file `codigoCopropiedad` check comes first, like the import:
+   *   one foreign row and `abortaImport` is true with zero counts, since the
+   *   import would write nothing.
+   * - The coproperty's units are loaded ONCE (tenant-scoped, lean) and rows are
+   *   matched against that map instead of one query per row; only
+   *   `planificarTitular` still reads per row, where it truly needs to.
+   * - A code that repeats inside the file (trimmed, case-insensitive) counts
+   *   once: the first valid occurrence is classified, later valid ones go to
+   *   `repetidasEnArchivo` with an advertencia, because the import would patch
+   *   the same unit again and the last row would win.
+   * - `codigo-parecido` warnings (see `claveParecida`) compare a file code with
+   *   the coproperty's existing codes and with the other file codes. They never
+   *   block and never change a count; "0301" and "301" stay different codes.
+   * - `ausentes` are the ACTIVE units whose code is not in the file. A row that
+   *   failed validation still counts as present: its unit is not absent, the
+   *   row is just wrong, and retiring it for that would punish a typo.
+   *
+   * Known limitation: rows are planned against the database as it is now, so
+   * effects of earlier rows on later ones are not simulated. The one exception
+   * is `titularesNuevos`, which counts a NEW identification once however many
+   * rows share it; titulares known only by name (no identification) are not
+   * deduplicated across rows, so that count can be higher than what the import
+   * ends up creating.
+   */
+  async previsualizarImportacion(
+    dto: ImportarInmueblesDto,
+  ): Promise<VistaPreviaImportacionInmuebles> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap.
+    const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
+      );
+    }
+
+    const erroresCodigo = this.erroresDeCodigoCopropiedad(
+      dto,
+      copropiedad.codigo,
+    );
+    if (erroresCodigo.length > 0) {
+      return toVistaPreviaAbortada(dto.filas.length, erroresCodigo);
+    }
+
+    const unidades = await this.inmuebles
+      .find({ copropiedadId })
+      .select('_id codigo titularId estado')
+      .sort({ codigo: 1 })
+      .lean()
+      .exec();
+    const existentes = new Map<string, ExistenteLeve>();
+    const codigosPorClaveParecida = new Map<string, string[]>();
+    for (const u of unidades) {
+      const clave = claveCodigo(u.codigo);
+      if (!existentes.has(clave)) {
+        existentes.set(clave, { _id: u._id, titularId: u.titularId });
+      }
+      const parecida = claveParecida(u.codigo);
+      if (parecida) {
+        codigosPorClaveParecida.set(parecida, [
+          ...(codigosPorClaveParecida.get(parecida) ?? []),
+          u.codigo,
+        ]);
+      }
+    }
+
+    const clasificacion: ClasificacionVistaPrevia = {
+      total: dto.filas.length,
+      codigosACrear: [],
+      aActualizar: 0,
+      repetidasEnArchivo: 0,
+      titularesNuevos: 0,
+      errores: [],
+      advertencias: [],
+      ausentes: [],
+    };
+    const codigosEnArchivo = new Set<string>();
+    const aplicados = new Set<string>();
+    const identificacionesNuevas = new Set<string>();
+    const archivoPorClaveParecida = new Map<string, Map<string, string>>();
+
+    for (const [indice, filaCruda] of dto.filas.entries()) {
+      const numeroFila = indice + 1;
+      const codigo = filaCruda.codigo.trim();
+      const clave = claveCodigo(filaCruda.codigo);
+
+      if (!codigosEnArchivo.has(clave)) {
+        codigosEnArchivo.add(clave);
+        const parecida = claveParecida(codigo);
+        if (parecida) {
+          const delArchivo =
+            archivoPorClaveParecida.get(parecida) ?? new Map<string, string>();
+          const otroDelArchivo = [...delArchivo].find(
+            ([otraClave]) => otraClave !== clave,
+          );
+          if (otroDelArchivo) {
+            clasificacion.advertencias.push({
+              tipo: 'codigo-parecido',
+              fila: numeroFila,
+              codigo,
+              parecidoA: otroDelArchivo[1],
+              origen: 'archivo',
+            });
+          }
+          delArchivo.set(clave, codigo);
+          archivoPorClaveParecida.set(parecida, delArchivo);
+
+          const existenteParecido = (
+            codigosPorClaveParecida.get(parecida) ?? []
+          ).find((c) => claveCodigo(c) !== clave);
+          if (existenteParecido) {
+            clasificacion.advertencias.push({
+              tipo: 'codigo-parecido',
+              fila: numeroFila,
+              codigo,
+              parecidoA: existenteParecido,
+              origen: 'existente',
+            });
+          }
+        }
+      }
+
+      try {
+        const { fila, existente, plan } = await this.planificarFila(
+          copropiedadId,
+          filaCruda,
+          existentes,
+        );
+
+        if (aplicados.has(clave)) {
+          clasificacion.repetidasEnArchivo += 1;
+          clasificacion.advertencias.push({
+            tipo: 'codigo-repetido-en-archivo',
+            fila: numeroFila,
+            codigo,
+          });
+          continue;
+        }
+        aplicados.add(clave);
+
+        if (existente) clasificacion.aActualizar += 1;
+        else clasificacion.codigosACrear.push(codigo);
+        if (plan.tipo === 'crear') {
+          // The import creates ONE Tercero per identification and refreshes
+          // it for the next rows, so an owner of three units counts once.
+          const identificacion = fila.numeroIdentificacionTitular;
+          if (!identificacion || !identificacionesNuevas.has(identificacion)) {
+            clasificacion.titularesNuevos += 1;
+          }
+          if (identificacion) identificacionesNuevas.add(identificacion);
+        }
+      } catch (err) {
+        clasificacion.errores.push({
+          fila: numeroFila,
+          codigo: filaCruda.codigo ?? null,
+          mensaje: mensajeDeFila(err),
+        });
+      }
+    }
+
+    clasificacion.ausentes = unidades
+      .filter(
+        (u) =>
+          u.estado === 'active' && !codigosEnArchivo.has(claveCodigo(u.codigo)),
+      )
+      .map((u) => u.codigo);
+
+    return toVistaPreviaImportacion(clasificacion);
+  }
+
+  /**
+   * The rows of a file that carry another coproperty's code, as row errors —
+   * the whole-file safety check shared by `importar` (which aborts with zero
+   * writes) and its preview (which reports `abortaImport`). One source for the
+   * message so the two can never disagree.
+   */
+  private erroresDeCodigoCopropiedad(
+    dto: ImportarInmueblesDto,
+    codigoActivo: string,
+  ): ResultadoImportacionInmuebles['errores'] {
+    const errores: ResultadoImportacionInmuebles['errores'] = [];
+    dto.filas.forEach((fila, indice) => {
+      if (fila.codigoCopropiedad !== codigoActivo) {
+        errores.push({
+          fila: indice + 1,
+          codigo: fila.codigo ?? null,
+          mensaje: `El código de copropiedad "${fila.codigoCopropiedad}" no coincide con el de la copropiedad activa (${codigoActivo})`,
+        });
+      }
+    });
+    return errores;
+  }
+
+  /**
+   * The READ-ONLY half of a row: normalizes it, validates everything that can
+   * be rejected without a write (`validarFila`), finds the unit its code
+   * points at, and decides what happens to its titular
+   * (`planificarTitular`). It performs only reads — `findOne`/`exists` — so
+   * the import preview reuses it verbatim and can promise it wrote nothing,
+   * while the import applies the result (`upsertFila`).
+   *
+   * `existentes` lets a caller that already loaded the coproperty's units
+   * (the preview) resolve the code from memory instead of one query per row;
+   * without it the unit is looked up with the tenant-scoped
+   * `filtroCodigoDuplicado`, exactly as before.
+   */
+  private async planificarFila(
+    copropiedadId: Types.ObjectId,
+    filaCruda: FilaImportarInmuebleDto,
+    existentes?: Map<string, ExistenteLeve>,
+  ): Promise<{
+    fila: FilaImportarInmuebleDto;
+    datos: DatosTitularFila;
+    existente: ExistenteLeve | null;
+    plan: PlanTitular;
+  }> {
+    const fila = this.sinCeldasVacias(filaCruda);
+    const datos = this.validarFila(fila);
+
+    const existente: ExistenteLeve | null = existentes
+      ? (existentes.get(claveCodigo(fila.codigo)) ?? null)
+      : await this.inmuebles
+          .findOne(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
+          .select('_id titularId')
+          .lean()
+          .exec();
+
+    const plan = await this.planificarTitular(
+      copropiedadId,
+      fila,
+      existente
+        ? {
+            unidadId: existente._id,
+            titularActualId: existente.titularId ?? null,
+          }
+        : undefined,
+    );
+    return { fila, datos, existente, plan };
+  }
+
+  /**
+   * One row of an import: patch the unit when its code exists in the active
+   * coproperty, create it otherwise.
+   *
+   * The lookup is tenant-scoped (`copropiedadId` is part of the filter —
+   * never a bare `findById`) and case/whitespace-insensitive, so
+   * " torre a-301 " finds the stored "Torre A-301" instead of creating a
+   * second unit. Writes then target the FOUND `_id` together with
+   * `copropiedadId`, never the row's code.
+   *
+   * Everything that can fail without writing — DIAN/DANE codes, emails, an
+   * identification that points at no party and has no name to create one
+   * (`validarFila`, `planificarTitular`) — is decided BEFORE the first write
+   * of the row, so a rejected row leaves the unit and the party untouched.
+   *
+   * Atomicity is per row but best-effort, because this codebase has no Mongo
+   * transactions:
+   * - NEW unit: the party (if any) is written first because the unit needs
+   *   its id. If creating the unit then fails, the Tercero THIS row just
+   *   created is deleted (tenant-scoped, by id), so a failing row — and each
+   *   retry of it — never leaves an orphan party behind. Refreshing a party
+   *   that already existed is not undone: it is an idempotent correction.
+   * - EXISTING unit: the unit patch goes first, then the titular step and the
+   *   `titularId` repoint. If the titular step fails, the Tercero created by
+   *   it is deleted, but the unit patch stays — updates are NOT transactional
+   *   per row, and the row is reported as an error (not counted as updated).
+   * These deletes only ever take back records created moments earlier by the
+   * same row; nothing pre-existing is ever deleted by an import.
+   */
+  private async upsertFila(
+    copropiedadId: Types.ObjectId,
+    filaCruda: FilaImportarInmuebleDto,
+  ): Promise<'actualizado' | 'creado'> {
+    const { fila, datos, existente, plan } = await this.planificarFila(
+      copropiedadId,
+      filaCruda,
+    );
+    const rastro: RastroFila = {};
+
+    try {
+      if (!existente) {
+        const titularId = await this.aplicarTitular(
+          copropiedadId,
+          fila,
+          datos,
+          plan,
+          rastro,
+        );
+
+        // Defaults (`propietario`, not resident, `vigente`) apply only here:
+        // they describe a unit that did not exist, never a patch.
+        await this.inmuebles.create({
+          copropiedadId,
+          codigo: fila.codigo,
+          referencia: fila.referencia,
+          bloque: fila.bloque,
+          zona: fila.zona,
+          uso: fila.uso,
+          area: fila.area,
+          coeficiente: fila.coeficiente,
+          titularId,
+          tipoTitular: fila.tipoTitular ?? 'propietario',
+          resideEnElInmueble: fila.resideEnElInmueble ?? false,
+          estadoCartera: fila.estadoCartera ?? 'vigente',
+          contacto: fila.contacto,
+          observaciones: fila.observaciones,
+        });
+        return 'creado';
+      }
+
+      const cambios = this.aDocumento(fila);
+      // Immutable / not carried by an import row: stripped even though the
+      // row type cannot hold `estado` today, so a future column cannot leak
+      // in.
+      delete cambios.codigo;
+      delete cambios.estado;
+      delete cambios.titularId;
+      if (Object.keys(cambios).length > 0) {
+        await this.inmuebles
+          .updateOne({ _id: existente._id, copropiedadId }, { $set: cambios })
+          .exec();
+      }
+
+      const titularId = await this.aplicarTitular(
+        copropiedadId,
+        fila,
+        datos,
+        plan,
+        rastro,
+      );
+      // Repoint only when it actually changes: an unedited re-import must not
+      // write anything for a titular that is already the right one.
+      if (
+        titularId &&
+        titularId.toString() !== existente.titularId?.toString()
+      ) {
+        await this.inmuebles
+          .updateOne(
+            { _id: existente._id, copropiedadId },
+            { $set: { titularId } },
+          )
+          .exec();
+      }
+      return 'actualizado';
+    } catch (err) {
+      if (rastro.terceroId) {
+        // The repoint may have been applied before the error surfaced: a
+        // Tercero a unit already points at must not be deleted (an orphan
+        // party is harmless, a dangling `titularId` is not). If even that
+        // check fails, keep the Tercero.
+        const referenciado = await this.inmuebles
+          .exists({ copropiedadId, titularId: rastro.terceroId })
+          .exec()
+          .catch(() => true);
+        if (!referenciado) {
+          await this.terceros
+            .deleteOne({ _id: rastro.terceroId, copropiedadId })
+            .exec()
+            .catch(() => undefined);
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Drops the keys whose value is `null`, `undefined` or an empty /
+   * whitespace-only string, so a blank cell (or a JSON `null`, which is what
+   * some clients send for "no value") reads as "not sent" everywhere
+   * downstream: unit patch, titular resolution and creation alike. `codigo`
+   * and `codigoCopropiedad` are kept: they are the row's identity and were
+   * validated as non-empty already.
+   */
+  private sinCeldasVacias(
+    fila: FilaImportarInmuebleDto,
+  ): FilaImportarInmuebleDto {
+    const limpia: Record<string, unknown> = {};
+    for (const [clave, valor] of Object.entries(fila)) {
+      const ausente =
+        valor === null ||
+        valor === undefined ||
+        (typeof valor === 'string' && valor.trim() === '');
+      if (!ausente || clave === 'codigo' || clave === 'codigoCopropiedad') {
+        limpia[clave] = valor;
+      }
+    }
+    return limpia as unknown as FilaImportarInmuebleDto;
+  }
+
+  /**
+   * The roster in the import's own shape: every unit of the active
+   * coproperty (active AND inactive) with its titular's columns, so a person
+   * can download it, correct cells and upload it back through `importar` —
+   * which only patches what changed and never deletes.
+   *
+   * Tenant-scoped on both queries: the units by `copropiedadId`, and the
+   * titulares by `copropiedadId` AND the ids the units pointed at — never a
+   * bare `_id` lookup, so a stale or foreign `titularId` can't leak another
+   * building's party into this file. Both reads are `lean` with a minimal
+   * `select`: this returns personal data of every owner, so it carries no
+   * more columns than the file has.
+   *
+   * Not paginated by design (see `MAX_INMUEBLES_EXPORTACION`). Fetching one
+   * row past the ceiling is enough to know it was exceeded.
+   *
+   * Known limitation: `estado` is not exported because the import cannot
+   * carry it. That is the safe direction — an inactive unit stays inactive
+   * when its exported row is loaded back, since update never touches it.
+   */
+  async exportarImportacion(): Promise<ExportacionImportacionInmuebles> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+
+    // `_id` IS the tenant id here — findById is correct, not the trap.
+    const copropiedad = await this.copropiedades
+      .findById(copropiedadId)
+      .select('codigo')
+      .lean()
+      .exec();
+    if (!copropiedad) {
+      throw new NotFoundException(
+        `No se encontró la copropiedad ${copropiedadId.toString()}`,
+      );
+    }
+
+    const unidades = await this.inmuebles
+      .find({ copropiedadId })
+      .select(
+        'codigo referencia bloque zona uso area coeficiente titularId tipoTitular resideEnElInmueble estadoCartera contacto observaciones',
+      )
+      .sort({ codigo: 1 })
+      .limit(MAX_INMUEBLES_EXPORTACION + 1)
+      .lean()
+      .exec();
+    if (unidades.length > MAX_INMUEBLES_EXPORTACION) {
+      throw new UnprocessableEntityException(
+        `La copropiedad tiene más de ${MAX_INMUEBLES_EXPORTACION} inmuebles: la exportación no admite más de ese número.`,
+      );
+    }
+
+    const titularIds = [
+      ...new Set(
+        unidades
+          .map((u) => u.titularId?.toString())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ].map((id) => new Types.ObjectId(id));
+    const titulares = titularIds.length
+      ? await this.terceros
+          .find({ copropiedadId, _id: { $in: titularIds } })
+          .select(
+            'primerNombre segundoNombre primerApellido segundoApellido razonSocial tipoIdentificacion numeroIdentificacion digitoVerificacion emails telefono direccion ciudadCodigo',
+          )
+          .lean()
+          .exec()
+      : [];
+    const titularPorId = new Map(titulares.map((t) => [t._id.toString(), t]));
+
+    return {
+      copropiedadCodigo: copropiedad.codigo,
+      filas: unidades.map((u) =>
+        toFilaExportacion(
+          copropiedad.codigo,
+          u,
+          u.titularId ? titularPorId.get(u.titularId.toString()) : undefined,
+        ),
+      ),
     };
   }
 
@@ -371,44 +960,22 @@ export class InmueblesService {
   }
 
   /**
-   * Reuses an existing party by identification when one matches, creates a
-   * new one when the row names somebody without a match, or leaves the unit
-   * without a titular when the row carries neither — a building loaded
-   * before its ownership papers is the ordinary case here, not an error.
-   *
-   * A reused party is also REFRESHED with whatever this row provides —
-   * never left as-is. Every import wipes the unit roster but never touches
-   * `Tercero` (see `InmueblesEliminacionService`), so a second import of the
-   * same building reuses the same parties every time; if that reuse only
-   * returned the id, a corrected file could never fix a party's own data
-   * (address, city, document type…) once it existed — exactly the bug a
-   * repeated import is supposed to be able to fix.
-   *
-   * `personType` is inferred from which name columns the row filled in
-   * (`razonSocialTitular` → jurídica, otherwise natural) — the template has
-   * no separate "tipo de persona" column, since a row that names nobody at
-   * all already leaves the unit without a titular above.
-   *
-   * `tipoIdentificacionTitular`/`ciudadTitular` are DIAN/DANE codes, the same
-   * ones the manual Titular form's dropdowns write — validated against the
-   * same static catalog (`CatalogosService`) rather than trusted as free
-   * text, since a typo here would silently save a code no DIAN reader
-   * recognizes. A bad code fails only this row, same as a repeated codigo.
+   * Everything about a row that can be rejected WITHOUT touching the
+   * database: the unit code is not blank, the DIAN and DANE codes are checked against the static catalog
+   * database: the DIAN and DANE codes are checked against the static catalog
+   * (`CatalogosService`) rather than trusted as free text — a typo would
+   * silently save a code no DIAN reader recognizes — and the email cell is
+   * parsed. Run before the first write of the row, so a bad row leaves the
+   * unit AND the party exactly as they were. Returns the derived values the
+   * writers need, so nothing is parsed twice.
    */
-  private async resolverTitular(
-    copropiedadId: Types.ObjectId,
-    fila: FilaImportarInmuebleDto,
-  ): Promise<Types.ObjectId | undefined> {
-    const personType = fila.razonSocialTitular ? 'juridica' : 'natural';
-    const nombre = resolverNombreTercero({
-      tipoPersona: personType,
-      nombre: fila.nombreTitular,
-      nom1: fila.nom1Titular,
-      nom2: fila.nom2Titular,
-      ape1: fila.ape1Titular,
-      ape2: fila.ape2Titular,
-      razonSocial: fila.razonSocialTitular,
-    });
+  private validarFila(fila: FilaImportarInmuebleDto): DatosTitularFila {
+    // The DTO only demands MinLength(1) on the raw string, so "   " gets here;
+    // the schema would reject it at create (required + trim) AFTER the row was
+    // planned, and the preview would have called it a valid new unit.
+    if (!fila.codigo.trim()) {
+      throw new Error('El código no puede estar vacío');
+    }
 
     if (
       fila.tipoIdentificacionTitular &&
@@ -436,31 +1003,179 @@ export class InmueblesService {
       ciudadDepartamento = encontrada.departamentoCodigo;
     }
 
+    return {
+      ciudad,
+      ciudadDepartamento,
+      emails:
+        fila.emailTitular === undefined
+          ? undefined
+          : parseEmails(fila.emailTitular),
+    };
+  }
+
+  /**
+   * Decides, with READS only, which party answers for the row's unit — the
+   * caller applies the decision with `aplicarTitular`, so every way a row can
+   * be rejected is known before its first write.
+   *
+   * - `ninguno`: the row carries nothing to identify or name anyone (a
+   *   building loaded before its ownership papers is the ordinary case, not
+   *   an error); the unit's `titularId` is left untouched.
+   * - `refrescar`: an existing Tercero of this coproperty is updated with the
+   *   fields the row sent and the unit is pointed at it.
+   * - `crear`: a NEW Tercero is created from the row.
+   *
+   * "Same person" below means the row's composed name equals (trim,
+   * case-insensitive, spaces collapsed) EITHER the stored `nombre` OR the
+   * composition of the stored name parts — a stored `nombre` that was typed
+   * by hand and no longer matches its own parts must not make an unedited
+   * export look like a different person.
+   *
+   * Resolution order:
+   * 1. The row carries `numeroIdentificacionTitular`: the party is the
+   *    Tercero of this coproperty with that identification — refreshed, and
+   *    it is also how a unit changes hands. If NO Tercero has it:
+   *    - the unit's current Tercero has NO identification yet and is the same
+   *      person: it is refreshed in place AND receives that identification
+   *      (filling in missing papers must not duplicate the owner). Safe
+   *      because the lookup just proved no other Tercero of the coproperty
+   *      has it, and the unique index only covers string values;
+   *    - otherwise a new Tercero is created, ALWAYS — never a rename of the
+   *      unit's current titular: the identification says "this is somebody
+   *      else", and renaming the old owner's Tercero would give a person who
+   *      still exists another person's name while keeping the old papers.
+   *    A row that names nobody there is a row error: the identification points
+   *    at nothing and there is no name to create it from.
+   * 2. No identification, but the row names somebody (see `nombreDeFila`):
+   *    - a new unit, a unit without titular or a dangling reference creates
+   *      a new Tercero;
+   *    - the same person is refreshed in place even when shared, which is
+   *      what makes re-importing an unedited export a no-op for titulares;
+   *    - a DIFFERENT name on a Tercero that HAS an identification is a
+   *      different person without papers (a sale with the identification cell
+   *      left empty): a new Tercero, regardless of sharing;
+   *    - a different name on a name-only Tercero (no identification) is a typo
+   *      fix or a renamed owner: refreshed in place only if no OTHER unit of
+   *      this coproperty points at it; if one does, a new Tercero is created,
+   *      because overwriting a shared owner's name for one unit would
+   *      silently corrupt their other units.
+   * 3. Neither identification nor name: `ninguno`.
+   *
+   * Known limitation: the "shared?" check reads the database, not the file.
+   * If the rows of ALL the units sharing one Tercero get the same NEW name
+   * without identification, the first rows each create a new Tercero while
+   * the Tercero is still shared, and the last row finds it unshared and
+   * renames it in place — the outcome depends on row order. Deferred: an
+   * in-file name-to-id reuse map (see the `importar-inmuebles-upsert`
+   * proposal).
+   */
+  private async planificarTitular(
+    copropiedadId: Types.ObjectId,
+    fila: FilaImportarInmuebleDto,
+    unidad?: {
+      unidadId: Types.ObjectId;
+      titularActualId: Types.ObjectId | null;
+    },
+  ): Promise<PlanTitular> {
+    const { nombre } = this.nombreDeFila(fila);
+
+    const cargarActual = async (): Promise<TerceroLeido | null> =>
+      unidad?.titularActualId
+        ? await this.terceros
+            .findOne({ _id: unidad.titularActualId, copropiedadId })
+            .select(
+              'nombre primerNombre segundoNombre primerApellido segundoApellido razonSocial numeroIdentificacion',
+            )
+            .lean()
+            .exec()
+        : null;
+    const esMismaPersona = (actual: TerceroLeido): boolean => {
+      const nombreFila =
+        this.datosNombreRefresco(fila, actual).nombre ?? nombre;
+      return (
+        mismoNombre(nombreFila, actual.nombre) ||
+        mismoNombre(nombreFila, nombreDePartes(actual))
+      );
+    };
+
     if (fila.numeroIdentificacionTitular) {
-      const existente = await this.terceros
+      const porIdentificacion = await this.terceros
         .findOne({
           copropiedadId,
           numeroIdentificacion: fila.numeroIdentificacionTitular,
         })
         .exec();
-      if (existente) {
-        await this.actualizarTitularExistente(existente._id, {
-          personType: nombre ? personType : undefined,
-          nombre,
-          fila,
-          ciudad,
-          ciudadDepartamento,
-        });
-        return existente._id;
+      if (porIdentificacion) {
+        return { tipo: 'refrescar', tercero: porIdentificacion };
       }
+      if (!nombre) {
+        throw new Error(
+          `El titular con identificación ${fila.numeroIdentificacionTitular} no existe y la fila no trae nombre para crearlo`,
+        );
+      }
+      const actual = await cargarActual();
+      if (actual && !actual.numeroIdentificacion && esMismaPersona(actual)) {
+        return {
+          tipo: 'refrescar',
+          tercero: actual,
+          asignarIdentificacion: true,
+        };
+      }
+      return { tipo: 'crear' };
     }
 
-    if (!nombre) return undefined;
+    if (!nombre) return { tipo: 'ninguno' };
+    const actual = await cargarActual();
+    if (!actual || !unidad) return { tipo: 'crear' };
 
+    if (esMismaPersona(actual)) return { tipo: 'refrescar', tercero: actual };
+    if (actual.numeroIdentificacion) return { tipo: 'crear' };
+
+    const compartido = await this.inmuebles
+      .exists({
+        copropiedadId,
+        titularId: actual._id,
+        _id: { $ne: unidad.unidadId },
+      })
+      .exec();
+    return compartido
+      ? { tipo: 'crear' }
+      : { tipo: 'refrescar', tercero: actual };
+  }
+
+  /**
+   * Carries out a `planificarTitular` decision and returns the Tercero the
+   * unit must point at (`undefined` leaves `titularId` alone). When it
+   * CREATES a Tercero the id is recorded in `rastro`, so the caller can take
+   * back exactly that record if a later step of the same row fails.
+   */
+  private async aplicarTitular(
+    copropiedadId: Types.ObjectId,
+    fila: FilaImportarInmuebleDto,
+    datos: DatosTitularFila,
+    plan: PlanTitular,
+    rastro: RastroFila,
+  ): Promise<Types.ObjectId | undefined> {
+    if (plan.tipo === 'ninguno') return undefined;
+
+    if (plan.tipo === 'refrescar') {
+      await this.actualizarTitularExistente(
+        copropiedadId,
+        plan.tercero,
+        fila,
+        datos,
+        plan.asignarIdentificacion
+          ? fila.numeroIdentificacionTitular
+          : undefined,
+      );
+      return plan.tercero._id;
+    }
+
+    const { personType, nombre } = this.nombreDeFila(fila);
     const creado = await this.terceros.create({
       copropiedadId,
       tipoPersona: personType,
-      nombre: nombre,
+      nombre: nombre ?? undefined,
       primerNombre: fila.nom1Titular,
       segundoNombre: fila.nom2Titular,
       primerApellido: fila.ape1Titular,
@@ -469,63 +1184,189 @@ export class InmueblesService {
       tipoIdentificacion: fila.tipoIdentificacionTitular,
       numeroIdentificacion: fila.numeroIdentificacionTitular,
       digitoVerificacion: fila.digitoVerificacionTitular,
-      emails: parseEmails(fila.emailTitular),
+      emails: datos.emails ?? [],
       telefono: fila.telefonoTitular,
       direccion: fila.direccionTitular,
-      ciudad: ciudad,
+      ciudad: datos.ciudad,
       ciudadCodigo: fila.ciudadTitular,
-      ciudadDepartamentoCodigo: ciudadDepartamento,
+      ciudadDepartamentoCodigo: datos.ciudadDepartamento,
     });
+    rastro.terceroId = creado._id;
     return creado._id;
+  }
+
+  /**
+   * The person type and display name a row describes on its OWN, ignoring
+   * what is stored: `razonSocialTitular` → jurídica, otherwise natural (the
+   * template has no separate "tipo de persona" column). `nombre` is null when
+   * the row names nobody — which is also what gates whether a row may create
+   * or replace a titular at all.
+   */
+  private nombreDeFila(fila: FilaImportarInmuebleDto): {
+    personType: 'natural' | 'juridica';
+    nombre: string | null;
+  } {
+    const personType = fila.razonSocialTitular ? 'juridica' : 'natural';
+    const nombre = resolverNombreTercero({
+      tipoPersona: personType,
+      nombre: fila.nombreTitular,
+      nom1: fila.nom1Titular,
+      nom2: fila.nom2Titular,
+      ape1: fila.ape1Titular,
+      ape2: fila.ape2Titular,
+      razonSocial: fila.razonSocialTitular,
+    });
+    return { personType, nombre };
   }
 
   /**
    * Merges a row's fields into an already-existing party — only the ones
    * this row actually sent, same "don't clear what wasn't touched" rule
-   * `aDocumento` follows for the unit itself. `nombre`/`personType` are
-   * skipped when the row named nobody (`resolverNombreTercero` returned
-   * null) — a row that only repeats a known identification number must not
-   * blank out a name it never mentioned.
+   * `aDocumento` follows for the unit itself. The write is scoped by
+   * `copropiedadId` as well as `_id`, so a stale or foreign id can never
+   * patch another building's party. The name columns are the delicate part
+   * and live in `datosNombreRefresco`.
    */
   private async actualizarTitularExistente(
-    id: Types.ObjectId,
-    datos: {
-      personType: 'natural' | 'juridica' | undefined;
-      nombre: string | null;
-      fila: FilaImportarInmuebleDto;
-      ciudad: string | undefined;
-      ciudadDepartamento: string | undefined;
-    },
+    copropiedadId: Types.ObjectId,
+    existente: TerceroLeido,
+    fila: FilaImportarInmuebleDto,
+    datos: DatosTitularFila,
+    numeroIdentificacion?: string,
   ): Promise<void> {
-    const { personType, nombre, fila, ciudad, ciudadDepartamento } = datos;
-    const cambios: Record<string, unknown> = {};
+    const cambios: Record<string, unknown> = {
+      ...this.datosNombreRefresco(fila, existente).cambios,
+    };
     const set = (clave: string, valor: unknown): void => {
       if (valor !== undefined) cambios[clave] = valor;
     };
 
-    set('tipoPersona', personType);
-    set('nombre', nombre ?? undefined);
-    set('primerNombre', fila.nom1Titular);
-    set('segundoNombre', fila.nom2Titular);
-    set('primerApellido', fila.ape1Titular);
-    set('segundoApellido', fila.ape2Titular);
-    set('razonSocial', fila.razonSocialTitular);
+    set('numeroIdentificacion', numeroIdentificacion);
     set('tipoIdentificacion', fila.tipoIdentificacionTitular);
     set('digitoVerificacion', fila.digitoVerificacionTitular);
-    set(
-      'emails',
-      fila.emailTitular === undefined
-        ? undefined
-        : parseEmails(fila.emailTitular),
-    );
+    set('emails', datos.emails);
     set('telefono', fila.telefonoTitular);
     set('direccion', fila.direccionTitular);
-    set('ciudad', ciudad);
+    set('ciudad', datos.ciudad);
     set('ciudadCodigo', fila.ciudadTitular);
-    set('ciudadDepartamentoCodigo', ciudadDepartamento);
+    set('ciudadDepartamentoCodigo', datos.ciudadDepartamento);
 
     if (Object.keys(cambios).length === 0) return;
-    await this.terceros.updateOne({ _id: id }, { $set: cambios }).exec();
+    await this.terceros
+      .updateOne({ _id: existente._id, copropiedadId }, { $set: cambios })
+      .exec();
+  }
+
+  /**
+   * The name-related fields a refresh may write, plus the `nombre` they add
+   * up to. Empty when the row carries no usable name data: a row that only
+   * repeats a known identification must not blank out a name it never
+   * mentioned.
+   *
+   * Name PARTS are written only together with a recomputed `nombre`, and the
+   * recomputation fills what the row left out from the stored party — so a
+   * row sending only `ape2Titular` never rebuilds "Juan Pérez" over a stored
+   * "Juan Carlos Pérez Gómez", and a stored party with no parts to fill from
+   * (nothing to compose a name with) is left alone entirely.
+   *
+   * When the row switches the person type the OPPOSITE set is cleared
+   * (`razonSocial` vs the four parts), so a party is never half natural,
+   * half jurídica: `razonSocialTitular` makes it jurídica and nulls the
+   * parts; name parts make it natural and null `razonSocial`; the legacy
+   * single `nombreTitular` column redefines the whole name, so it nulls the
+   * parts and `razonSocial` too — unless it already equals the stored name,
+   * in which case it is the same person and nothing is touched.
+   */
+  private datosNombreRefresco(
+    fila: FilaImportarInmuebleDto,
+    existente: Pick<
+      TerceroLeido,
+      | 'nombre'
+      | 'primerNombre'
+      | 'segundoNombre'
+      | 'primerApellido'
+      | 'segundoApellido'
+    >,
+  ): { cambios: Record<string, unknown>; nombre?: string } {
+    const sinCambio = { cambios: {} };
+
+    if (fila.razonSocialTitular) {
+      const nombre = resolverNombreTercero({
+        tipoPersona: 'juridica',
+        nombre: fila.nombreTitular,
+        razonSocial: fila.razonSocialTitular,
+      });
+      if (!nombre) return sinCambio;
+      return {
+        nombre,
+        cambios: {
+          tipoPersona: 'juridica',
+          nombre,
+          razonSocial: fila.razonSocialTitular,
+          primerNombre: null,
+          segundoNombre: null,
+          primerApellido: null,
+          segundoApellido: null,
+        },
+      };
+    }
+
+    const traePartes = [
+      fila.nom1Titular,
+      fila.nom2Titular,
+      fila.ape1Titular,
+      fila.ape2Titular,
+    ].some(Boolean);
+
+    if (!traePartes) {
+      if (!fila.nombreTitular) return sinCambio;
+      const nombre = resolverNombreTercero({
+        tipoPersona: 'natural',
+        nombre: fila.nombreTitular,
+      });
+      if (!nombre || mismoNombre(nombre, existente.nombre)) {
+        return nombre ? { nombre, cambios: {} } : sinCambio;
+      }
+      return {
+        nombre,
+        cambios: {
+          tipoPersona: 'natural',
+          nombre,
+          razonSocial: null,
+          primerNombre: null,
+          segundoNombre: null,
+          primerApellido: null,
+          segundoApellido: null,
+        },
+      };
+    }
+
+    const nombre = resolverNombreTercero({
+      tipoPersona: 'natural',
+      nombre: fila.nombreTitular,
+      nom1: fila.nom1Titular ?? existente.primerNombre ?? undefined,
+      nom2: fila.nom2Titular ?? existente.segundoNombre ?? undefined,
+      ape1: fila.ape1Titular ?? existente.primerApellido ?? undefined,
+      ape2: fila.ape2Titular ?? existente.segundoApellido ?? undefined,
+    });
+    if (!nombre) return sinCambio;
+
+    const cambios: Record<string, unknown> = {
+      tipoPersona: 'natural',
+      nombre,
+      razonSocial: null,
+    };
+    if (fila.nom1Titular !== undefined) cambios.primerNombre = fila.nom1Titular;
+    if (fila.nom2Titular !== undefined) {
+      cambios.segundoNombre = fila.nom2Titular;
+    }
+    if (fila.ape1Titular !== undefined) {
+      cambios.primerApellido = fila.ape1Titular;
+    }
+    if (fila.ape2Titular !== undefined) {
+      cambios.segundoApellido = fila.ape2Titular;
+    }
+    return { nombre, cambios };
   }
 
   /**

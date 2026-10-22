@@ -140,3 +140,38 @@ export const InmuebleSchema = SchemaFactory.createForClass(Inmueble);
 // reject the second building's 301; this compound one is what actually
 // models it.
 InmuebleSchema.index({ copropiedadId: 1, codigo: 1 }, { unique: true });
+
+/**
+ * The index above compares the code byte for byte, so for the database "A1"
+ * and "a1" are two different units. The application already refuses that
+ * (`InmueblesService.filtroCodigoDuplicado` is case-insensitive), but only
+ * for requests that go through it: two concurrent imports in the same
+ * coproperty, or any script, could still slip a case variant in.
+ *
+ * This second unique index closes that gap in the database itself with a
+ * case-insensitive collation (strength 2: case-insensitive, accent-sensitive,
+ * the same thing the `$options: 'i'` regex lookup does). It has its OWN name
+ * so Mongoose creates it on boot next to the existing one, with no drop and
+ * no migration script: changing the options of an index that already exists
+ * under the same name would be rejected instead. The old index stays, now
+ * redundant; it can be dropped later.
+ *
+ * Not "0301" vs "301": those are different codes on purpose, no collation
+ * equates them.
+ *
+ * If a coproperty ALREADY holds two units whose codes differ only by case,
+ * the build fails (the failure is logged, the app keeps running) and the
+ * index does not exist until they are fixed. To find them:
+ * `db.inmuebles.aggregate([{ $group: { _id: { c: '$copropiedadId',
+ * k: { $toLower: '$codigo' } }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }])`.
+ * An insert that hits it surfaces as the same duplicate-key error, which the
+ * import reports row by row as "Código duplicado".
+ */
+InmuebleSchema.index(
+  { copropiedadId: 1, codigo: 1 },
+  {
+    unique: true,
+    name: 'copropiedadId_1_codigo_1_ci',
+    collation: { locale: 'en', strength: 2 },
+  },
+);

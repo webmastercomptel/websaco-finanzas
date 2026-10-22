@@ -87,7 +87,6 @@ describe('InmueblesService.findAll', () => {
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.findAll({});
@@ -104,7 +103,6 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       {} as never,
       tenantQueDevuelve(null),
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -129,7 +127,6 @@ describe('InmueblesService.findAll', () => {
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.findAll({});
@@ -146,7 +143,6 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       terceroModeloCon() as never,
       tenantQueDevuelve(COP),
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -168,7 +164,6 @@ describe('InmueblesService.findAll', () => {
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
-      {} as never,
     );
 
     const resultado = await service.findAll({ buscar: '301' });
@@ -187,7 +182,6 @@ describe('InmueblesService.findAll', () => {
         {} as never,
         terceros as never,
         tenantQueDevuelve(COP),
-        {} as never,
         {} as never,
         {} as never,
       );
@@ -214,7 +208,6 @@ describe('InmueblesService.findAll', () => {
         tenantQueDevuelve(COP),
         {} as never,
         {} as never,
-        {} as never,
       );
 
       await service.findAll({ buscar: 'Nadie Así' });
@@ -231,7 +224,6 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       {} as never,
       tenantQueDevuelve(COP),
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -256,7 +248,6 @@ describe('InmueblesService.findAll', () => {
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
-      {} as never,
     );
 
     const { items } = await service.findAll({});
@@ -271,7 +262,6 @@ describe('InmueblesService.findAll', () => {
       {} as never,
       {} as never,
       tenantQueDevuelve(COP),
-      {} as never,
       {} as never,
       {} as never,
     );
@@ -294,7 +284,6 @@ describe('InmueblesService.findOne', () => {
       tenantQueDevuelve(COP),
       {} as never,
       {} as never,
-      {} as never,
     );
 
     await service.findOne('inm-1');
@@ -311,7 +300,6 @@ describe('InmueblesService.findOne', () => {
       {} as never,
       {} as never,
       tenantQueDevuelve(COP),
-      {} as never,
       {} as never,
       {} as never,
     );

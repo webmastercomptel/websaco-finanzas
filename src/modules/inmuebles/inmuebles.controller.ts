@@ -15,6 +15,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
 import { InmueblesService } from './inmuebles.service';
@@ -22,6 +24,7 @@ import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { InmueblesReporteService } from './inmuebles-reporte.service';
 import { InmueblesEliminacionService } from './inmuebles-eliminacion.service';
 import { InmueblesSaldosService } from './inmuebles-saldos.service';
+import { InmueblesBajaService } from './inmuebles-baja.service';
 import { ListarInmueblesDto } from './dto/listar-inmuebles.dto';
 import { ConsultarSaldosInmueblesDto } from './dto/consultar-saldos-inmuebles.dto';
 import {
@@ -29,11 +32,14 @@ import {
   CrearInmuebleDto,
 } from './dto/guardar-inmueble.dto';
 import { ImportarInmueblesDto } from './dto/importar-inmuebles.dto';
+import { DarDeBajaInmueblesDto } from './dto/dar-de-baja-inmuebles.dto';
 import { GuardarValoresRecurrentesDto } from './dto/guardar-valores-recurrentes.dto';
 import { ImportarValoresRecurrentesMasivoDto } from './dto/importar-valores-recurrentes.dto';
 import type {
+  ExportacionImportacionInmuebles,
   Inmueble,
   Paginado,
+  ResultadoDarDeBajaInmuebles,
   ProgresoImportacion,
   ResultadoImportacionInmuebles,
   ResultadoImportacionValoresRecurrentes,
@@ -41,6 +47,7 @@ import type {
   SaldoInmueble,
   ValorRecurrente,
   ValorRecurrenteMasivo,
+  VistaPreviaImportacionInmuebles,
 } from '../../contracts';
 
 /**
@@ -70,6 +77,7 @@ export class InmueblesController {
     private readonly reporte: InmueblesReporteService,
     private readonly eliminacion: InmueblesEliminacionService,
     private readonly saldos: InmueblesSaldosService,
+    private readonly baja: InmueblesBajaService,
   ) {}
 
   @Get()
@@ -131,6 +139,24 @@ export class InmueblesController {
   }
 
   /**
+   * The roster in the import's exact shape (25 columns, every unit active or
+   * inactive, titular columns joined) — what the frontend's "Descargar
+   * inmuebles" builds the editable import workbook from. It exposes the
+   * titulares' personal data, so it needs BOTH read on `Inmueble` and read on
+   * `Tercero` (`CheckAbility` rules are AND-ed): the unit permission alone
+   * must not leak who owns what. Route sits before `:id`, same reasoning as
+   * `listado.pdf` above: otherwise "exportar-importacion" is read as an id.
+   */
+  @Get('exportar-importacion')
+  @CheckAbility(
+    { action: 'read', subject: 'Inmueble' },
+    { action: 'read', subject: 'Tercero' },
+  )
+  exportarImportacion(): Promise<ExportacionImportacionInmuebles> {
+    return this.inmuebles.exportarImportacion();
+  }
+
+  /**
    * Every active unit's recurring amounts, coproperty-wide — what the bulk
    * "Valores Recurrentes" export builds its editable template from. Route
    * sits before `:id`, same reasoning as `listado.pdf` above: otherwise
@@ -181,15 +207,24 @@ export class InmueblesController {
 
   /**
    * Loads a building's roster in one file: a unit and, inline, the party
-   * that answers for it. Gated the same as a single `create` — importing is
-   * bulk creation, not a separate capability.
+   * that answers for it.
    *
-   * REPLACES the roster: every call first wipes every existing unit of the
-   * active coproperty that has no Factura against it — see
-   * `InmueblesService.importar`. Not additive, by design.
+   * UPSERT BY CODE, never destructive: a row of an existing code patches that
+   * unit (only the fields the row sent, never its `codigo`), a row of a new
+   * code creates it, and nothing is ever deleted — see
+   * `InmueblesService.importar`. Because it both creates AND edits units it
+   * needs `create` AND `update` on `Inmueble` (rules are AND-ed): a role that
+   * could only create must not be able to rewrite existing units through a
+   * file. It deliberately does NOT also require `update` on `Tercero`: the
+   * titular refresh on re-import already existed under the old `create`-only
+   * gate, and adding it now could lock the accountant role out of loading its
+   * own roster.
    */
   @Post('importar')
-  @CheckAbility({ action: 'create', subject: 'Inmueble' })
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
   importar(
     @Body() dto: ImportarInmueblesDto,
   ): Promise<ResultadoImportacionInmuebles> {
@@ -197,12 +232,57 @@ export class InmueblesController {
   }
 
   /**
+   * Dry run of `POST /importar`: same body, same gate (it exposes the
+   * roster's state and how the file would change it, so it needs what the
+   * import needs), but it WRITES NOTHING — no unit, no Tercero, no progress
+   * row. Answers what would be created, updated, rejected and left out, with
+   * the import's own validators. Declared next to `importar`, before `:id`.
+   */
+  @Post('importar/previsualizar')
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
+  previsualizarImportacion(
+    @Body() dto: ImportarInmueblesDto,
+  ): Promise<VistaPreviaImportacionInmuebles> {
+    return this.inmuebles.previsualizarImportacion(dto);
+  }
+
+  /**
+   * Retires units by code — the explicit, separate counterpart of the import's
+   * "absent from the file" report. LOGICAL only (`estado` to inactive,
+   * nothing deleted, reversible by editing the unit back to `activo`), so it
+   * needs `update` on `Inmueble` and nothing stronger than the edit form
+   * already asks for. One audit entry per request. Declared next to the import
+   * routes, before the `:id` ones.
+   */
+  @Post('dar-de-baja')
+  @CheckAbility({ action: 'update', subject: 'Inmueble' })
+  darDeBaja(
+    @Body() dto: DarDeBajaInmueblesDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<ResultadoDarDeBajaInmuebles> {
+    return this.baja.darDeBaja(dto, {
+      // PoliciesGuard already rejected callers without permissions, and only a
+      // provisioned local account has any — same assumption as the other
+      // audited controllers.
+      accountId: user.accountId!,
+      nombre: user.nombre?.trim() || user.email,
+    });
+  }
+
+  /**
    * Polled while `POST /importar` is in flight — null once nothing is
    * running (either it finished, or nothing was ever started). See
-   * `ProgresoImportacionService`.
+   * `ProgresoImportacionService`. Same gate as the import it reports on, so
+   * whoever may start it may watch it and nobody else can.
    */
   @Get('importar/progreso')
-  @CheckAbility({ action: 'create', subject: 'Inmueble' })
+  @CheckAbility(
+    { action: 'create', subject: 'Inmueble' },
+    { action: 'update', subject: 'Inmueble' },
+  )
   obtenerProgresoImportacion(): Promise<ProgresoImportacion | null> {
     return this.inmuebles.obtenerProgresoImportacion();
   }
