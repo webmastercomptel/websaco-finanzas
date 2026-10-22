@@ -44,7 +44,7 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 - [x] 1.3 `ComptableClient`: `consultarEmpresa(id)`, `enviarLote(empresaId, rawBody, simular)`, `retirarLote(empresaId, loteOrigenId)`. Body serialized ONCE and signed+sent unchanged; headers `X-Websaco-Timestamp`, `X-Websaco-Signature: sha256=<hex>`; `AbortController` 60 s. Typed outcomes: `ok | rechazado(errores) | duplicado(loteId) | intervenido(mensaje) | firma | timeout | red | noConfigurado`. Specs with mocked `fetch` for every outcome; never logs body, secret or signature.
 - [x] 1.4 `Copropiedad.comptableEmpresaId: string | null`, partial unique index (`$type: 'string'`), `scripts/migrate-copropiedad-comptable-id-index.js` (`--listar` mode), mirror of the websaco3 pair.
 - [x] 1.5 `CopropiedadesService` create/update: 24-hex format (400), duplicate in another copropiedad (409), `consultarEmpresa` 404 → 422 "No existe esa Empresa en Comptable", unreachable/not configured → 502 and nothing saved. Only checked when the value changes.
-- [ ] 1.6 `contracts/index.ts` + DTOs; `../frontend` `copropiedad-form.tsx`: field "Id de la Empresa en Comptable" with the error messages above. Tests on both sides. _(backend half done: contract + DTO + specs; frontend form pending)_
+- [x] 1.6 `contracts/index.ts` + DTOs; `../frontend` `copropiedad-form.tsx`: field "Id de la Empresa en Comptable" with the error messages above. Tests on both sides. _(backend: contract + DTO + specs; frontend: field on `copropiedad-form.tsx` + tests)_
 
 ## Phase 2: PR 2 — shared resolution, no behavior change
 
@@ -66,7 +66,7 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 
 ## Phase 4: PR 4 — module, endpoints, flow
 
-- [ ] 4.1 Permission: module key `interfaz-comptable` → new subject `InterfazComptable` in `permission-map.ts` (read/create/annul), frontend `permisos.ts`. Spec: `adicion-contabilidad` grants nothing here and vice versa. _(backend done: subject + map + spec; frontend `permisos.ts` pending)_
+- [x] 4.1 Permission: module key `interfaz-comptable` → new subject `InterfazComptable` in `permission-map.ts` (read/create/annul), frontend `permisos.ts`. Spec: `adicion-contabilidad` grants nothing here and vice versa. _(backend: subject + map + spec; frontend: `permisos.ts` module row)_
 - [x] 4.2 `GET interfaz-comptable/pendientes`: requires `comptableEmpresaId` (else 409 "Esta copropiedad no tiene Empresa de Comptable configurada"); counts per tipo, totals, `inmueblesSinTitular`, and the exact JSON (debug preview). Same selection as MOVMES: last consolidated period, `comptableLoteId: null`, or released by a retiro.
 - [x] 4.3 `POST interfaz-comptable/simular`: builds and sends with `simular=true`; returns Comptable's summary or its `errores[]` verbatim; writes nothing locally.
 - [x] 4.4 `POST interfaz-comptable/enviar`: 409 if a lote is `pendiente` (must "Reintentar") or there are inmuebles sin titular; transaction creates `LoteComptable` `pendiente` with its asientoIds; send outside it; then:
@@ -81,7 +81,7 @@ Deploy order: Comptable plan fully deployed (gate A) → PR 1 … PR 5 → gate 
 
 ## Phase 5: PR 5 — frontend (`../frontend`)
 
-- [ ] 5.1 `pages/interfaz-comptable.tsx` + `lib/api/interfaz-comptable.ts`, nav entry, lazy page, permission gate.
-- [ ] 5.2 States: not configured / no Empresa → message, no buttons; pending summary (values `1,500,000.25`); inmuebles sin titular listed and "Enviar" disabled; "Ver JSON" (collapsible, copy button — debug aid); "Simular" shows Comptable's summary or its errors table; "Enviar"; lote `pendiente` → only "Reintentar" with an explanation.
-- [ ] 5.3 History: número, período, documentos, totales, estado, fechas `dd/mm/yyyy hh:mm`; "Retirar" with confirmation ("Se eliminarán en Comptable los N asientos de este lote"); intervenido → its message, no button.
-- [ ] 5.4 Tests for every state above; Spanish (Colombia, tú) texts.
+- [x] 5.1 `pages/interfaz-comptable.tsx` + `lib/api/interfaz-comptable.ts`, nav entry, lazy page, permission gate.
+- [x] 5.2 States: not configured / no Empresa → message, no buttons; pending summary (values `1,500,000.25`); inmuebles sin titular listed and "Enviar" disabled; "Ver JSON" (collapsible, copy button — debug aid); "Simular" shows Comptable's summary or its errors table; "Enviar"; lote `pendiente` → only "Reintentar" with an explanation.
+- [x] 5.3 History: número, período, documentos, totales, estado, fechas `dd/mm/yyyy hh:mm`; "Retirar" with confirmation ("Se eliminarán en Comptable los N asientos de este lote"); intervenido → its message, no button.
+- [x] 5.4 Tests for every state above; Spanish (Colombia, tú) texts.
