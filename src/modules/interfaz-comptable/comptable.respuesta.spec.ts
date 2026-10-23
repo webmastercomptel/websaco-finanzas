@@ -1,6 +1,8 @@
 import {
   datosRespuestaComptable,
   leerRespuestaComptable,
+  MAX_MENSAJE_LOG,
+  mensajeParaLog,
   parsearCuerpo,
 } from './comptable.respuesta';
 
@@ -162,5 +164,65 @@ describe('parsearCuerpo', () => {
 
   it('parsea JSON válido', () => {
     expect(parsearCuerpo('{"a":1}')).toEqual({ a: 1 });
+  });
+});
+
+describe('mensajeParaLog', () => {
+  const SECRETO = 'secreto-compartido-0123456789abcdef0123';
+
+  it('devuelve null cuando no hay mensaje o solo queda espacio en blanco', () => {
+    expect(mensajeParaLog(null)).toBeNull();
+    expect(mensajeParaLog('')).toBeNull();
+    expect(mensajeParaLog(' \n\t ')).toBeNull();
+  });
+
+  it('deja intacto un mensaje corto y limpio', () => {
+    expect(mensajeParaLog('Falta la cuenta técnica')).toBe(
+      'Falta la cuenta técnica',
+    );
+  });
+
+  it('colapsa saltos de línea, tabuladores y caracteres de control en un espacio', () => {
+    expect(mensajeParaLog('a\nb\r\nc\td\u0000e\u001bf')).toBe('a b c d e f');
+  });
+
+  it('trunca a MAX_MENSAJE_LOG caracteres y marca el corte', () => {
+    const largo = 'x'.repeat(MAX_MENSAJE_LOG + 50);
+
+    const resultado = mensajeParaLog(largo);
+
+    expect(MAX_MENSAJE_LOG).toBe(300);
+    expect(resultado).toBe(`${'x'.repeat(MAX_MENSAJE_LOG)}…`);
+  });
+
+  it('no trunca un mensaje que mide exactamente el máximo', () => {
+    const justo = 'y'.repeat(MAX_MENSAJE_LOG);
+
+    expect(mensajeParaLog(justo)).toBe(justo);
+  });
+
+  it('no parte un carácter fuera del plano básico (emoji) al truncar', () => {
+    const resultado = mensajeParaLog('😀'.repeat(MAX_MENSAJE_LOG + 5));
+
+    expect(resultado).toBe(`${'😀'.repeat(MAX_MENSAJE_LOG)}…`);
+  });
+
+  it('enmascara el secreto repetido en el mensaje', () => {
+    const resultado = mensajeParaLog(`uno ${SECRETO} dos ${SECRETO}`, SECRETO);
+
+    expect(resultado).toBe('uno [redactado] dos [redactado]');
+  });
+
+  it('enmascara antes de truncar: un secreto que el corte habría partido no queda a medias', () => {
+    const mensaje = `${'z'.repeat(MAX_MENSAJE_LOG - 10)}${SECRETO}`;
+
+    const resultado = mensajeParaLog(mensaje, SECRETO);
+
+    expect(resultado).not.toContain(SECRETO);
+    expect(resultado).not.toContain(SECRETO.slice(0, 10));
+  });
+
+  it('sin secreto configurado no enmascara nada', () => {
+    expect(mensajeParaLog(`hola ${SECRETO}`)).toBe(`hola ${SECRETO}`);
   });
 });

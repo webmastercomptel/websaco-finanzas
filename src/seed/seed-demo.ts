@@ -2,6 +2,9 @@
 // MUST stay the first import: it sets the process DNS resolvers before the
 // Mongo driver performs its SRV lookup. See common/dns-setup.ts.
 import '../common/dns-setup';
+// MUST stay the second import, before `../app.module`: it loads `.env.<name>`
+// from `--env=<name>` before the config is validated. See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -40,7 +43,7 @@ import {
  * name somebody has since corrected, because re-running a seed must not undo
  * real work.
  *
- *   npm run seed:demo
+ *   npm run seed:demo -- --env=<ambiente>
  */
 
 /** Concepts every building starts with. The first two are not optional. */
@@ -96,6 +99,7 @@ const UNIDADES_PRIMER_EDIFICIO = 60;
 const UNIDADES_RESTO = 10;
 
 async function seedDemo(): Promise<void> {
+  await confirmScriptEnv();
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });

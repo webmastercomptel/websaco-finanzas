@@ -21,6 +21,38 @@ integration reports "no configurada".
 | `COMPTABLE_API_URL` | Comptable's API base **including** `/api/v1`, e.g. `https://comptable.ejemplo.com/api/v1`. `https` required in production. |
 | `COMPTABLE_HMAC_SECRET` | Shared secret, at least 32 characters. **The same value** must be set as `COMPTABLE_HMAC_SECRET` in Comptable. Never reuse `WEBSACO3_HMAC_SECRET`. |
 
+### How a mistake shows up: `GET /api/v1/health/ready`
+
+Joi already refuses to boot with one variable and not the other, and checks the
+scheme of the URL (`https` in production). It does not check the path, which is
+the easy mistake: a base URL **without `/api/v1`** boots fine and then every
+Comptable route answers 404. So `/health/ready` runs an indicator,
+`integracion-comptable`, over the two settings:
+
+| State | `/health/ready` |
+|---|---|
+| Neither variable set (integration off) | `up`, `"omitido": "integración deshabilitada"` |
+| Both set and consistent | `up` |
+| Only one of the two set | `503`, "Falta COMPTABLE_…" |
+| URL not `http(s)`, with user/password, query or fragment | `503`, names `COMPTABLE_API_URL` and the problem |
+| URL path does not end in `/api/v1` | `503`, "COMPTABLE_API_URL debe terminar en /api/v1" |
+
+It only reads configuration: it never calls Comptable (a readiness probe must
+not depend on, or hammer, another service), so it cannot tell whether the two
+secrets match — that still shows as a 401 on the first call (section 5). The
+messages name the setting and never print its value. It is **not** part of
+`GET /api/v1/health` (the Dockerfile `HEALTHCHECK`): a bad URL is fixed by
+correcting the variable and redeploying, never by restarting the instance.
+Check `/health/ready` after every deploy to a new environment.
+
+**Pasos por ambiente of this integration** (rule 10 of `backend/CLAUDE.md`):
+
+| Step | How it is done | How a miss is detected |
+|---|---|---|
+| `COMPTABLE_API_URL` including `/api/v1` | Variable in Finanzas | `/health/ready` (`integracion-comptable`) |
+| `COMPTABLE_HMAC_SECRET` (same value in Comptable) | Variable in Finanzas and in Comptable | Presence: `/health/ready`. Equality with Comptable's: NOT detectable without calling it; shows as a 401 and a `firma` outcome (section 5) |
+| Technical Account in Comptable (`seed:cuenta-integracion`) | Done on the Comptable side | Comptable's own `/health/ready`; from here, a 5xx whose `message` now appears in Finanzas' log (section 2) |
+
 ### Lines for `.env.example` (gate G.C — a human appends them)
 
 Agents do not read or edit `.env.example` in this repo. Append exactly:
@@ -70,6 +102,18 @@ vector. Never edit them on one side only.
 
 Timeout of every call: 60 s (`COMPTABLE_TIMEOUT_MS`). The log records only the
 route kind and the outcome, never a body, the secret or a signature.
+
+One addition, for 5xx answers only: the log line keeps its
+`Comptable POST lotes: HTTP 500 (inesperado)` prefix and appends
+`— mensaje de Comptable: "<message>"`, where `<message>` is ONLY the `message`
+field of Comptable's error body, with line breaks collapsed, the shared secret
+masked if it ever appears, and cut at 300 characters. The raw body, the request
+payload, headers and the signature are never logged. A 5xx with no usable
+`message` (an HTML page from a proxy, an empty body) keeps the old line. It is
+logged at `warn` level. The outcome returned to the user does not change: a 5xx
+is still `inesperado` (a send leaves the lote `pendiente` with "No hubo una
+respuesta clara de Comptable…"; Empresa validation and a retiro still answer
+502).
 
 ## 3. Linking a coproperty to its Empresa (`comptableEmpresaId`)
 
@@ -170,6 +214,9 @@ or a 404 changes nothing here and shows Comptable's sentence.
 | Symptom | Cause / action |
 |---|---|
 | "no está configurada en este servidor" | `COMPTABLE_API_URL` / `COMPTABLE_HMAC_SECRET` missing |
+| `/health/ready` is 503 with `integracion-comptable` down | Read its `message`: it names the variable (half-set pair, malformed URL, or no `/api/v1` suffix). Fix the variable and redeploy |
+| A lote stays `pendiente` with "No hubo una respuesta clara de Comptable…", or a 502 "No se pudo comunicar con Comptable…" | Search the Finanzas log for `Comptable POST lotes: HTTP 5xx`: since this change the line carries Comptable's own `message` after `mensaje de Comptable:`. Then follow it on the Comptable side |
+| Comptable answers 404 on every call, "No existe esa Empresa" even for a valid id | `COMPTABLE_API_URL` is missing `/api/v1` (`/health/ready` flags it) |
 | "Comptable rechazó la firma…" | secrets differ, or the server clock is off by more than 300 s |
 | Lote stuck `pendiente` | "Reintentar"; Comptable deduplicates by `loteOrigenId` |
 | "Algunos movimientos de este lote ya no existen" on retry | a consolidación of that period was undone after the first attempt; support must resolve the lote by hand |

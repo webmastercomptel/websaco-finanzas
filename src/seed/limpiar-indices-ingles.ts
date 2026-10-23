@@ -2,6 +2,10 @@
 // MUST stay the first import: it sets the process DNS resolvers before the
 // Mongo driver performs its SRV lookup. See common/dns-setup.ts.
 import '../common/dns-setup';
+// MUST stay the second import: it loads `.env.<name>` from `--env=<name>`
+// (this script does not boot `AppModule`, so it has nothing else to order
+// against). See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -145,17 +149,22 @@ function leerDeclarados(): Declarados {
  * Connects with Mongoose only (not `AppModule`) so it does not open a Redis
  * client: the Redis plan has a low connection cap.
  *
- *   npm run limpiar:indices-ingles -- --db=production
- *   npm run limpiar:indices-ingles -- --db=production --aplicar
+ * The environment is chosen with `--env=<ambiente>` (reads `.env.<ambiente>`,
+ * the only source of variables; the `--` is required or npm swallows the
+ * flag). `--db` still overrides the database named by that file's URI, and
+ * it is the one the guard reports and asks to type for non-allow-listed envs.
+ *
+ *   npm run limpiar:indices-ingles -- --env=production --db=production
+ *   npm run limpiar:indices-ingles -- --env=production --db=production --aplicar
  */
 async function limpiar(): Promise<void> {
+  await confirmScriptEnv();
   const aplicar = process.argv.includes('--aplicar');
   const declarados = leerDeclarados();
   console.log(`Schemas con colección propia: ${declarados.size}`);
 
-  process.loadEnvFile('.env');
   const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error('MONGODB_URI is not set in .env');
+  if (!uri) throw new Error('MONGODB_URI is not set in the selected env file');
 
   // The URI in `.env` names no database, so Mongo falls back to `test`.
   // Dropping is irreversible in practice, so `--aplicar` demands `--db=`.

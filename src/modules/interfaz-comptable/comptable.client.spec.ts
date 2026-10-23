@@ -353,6 +353,171 @@ describe('ComptableClient', () => {
     });
   });
 
+  describe('5xx: el log lleva el mensaje de Comptable', () => {
+    const RAW_BODY = '{"secretoDelCuerpo":"no-debe-aparecer"}';
+
+    it('agrega solo el campo message y conserva el prefijo "HTTP <status> (<categoria>)"', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, {
+          statusCode: 500,
+          message: 'Falta la cuenta técnica de la integración',
+        }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toContain('Comptable POST lotes: HTTP 500 (inesperado)');
+      expect(logs[0]).toContain('"Falta la cuenta técnica de la integración"');
+    });
+
+    it('no cambia lo que devuelve: un 5xx sigue siendo `inesperado` con su status', async () => {
+      fetchMock.mockResolvedValueOnce(
+        respuesta(500, { statusCode: 500, message: 'boom' }),
+      );
+      fetchMock.mockResolvedValueOnce(
+        respuesta(503, { statusCode: 503, message: 'down' }),
+      );
+      fetchMock.mockResolvedValueOnce(
+        respuesta(502, '<html>Bad gateway</html>'),
+      );
+
+      expect(await crearCliente().enviarLote(EMPRESA, RAW_BODY, false)).toEqual(
+        { tipo: 'inesperado', status: 500 },
+      );
+      expect(await crearCliente().consultarEmpresa(EMPRESA)).toEqual({
+        tipo: 'inesperado',
+        status: 503,
+      });
+      expect(
+        await crearCliente().retirarLote(EMPRESA, 'lote-1', ACTOR),
+      ).toEqual({ tipo: 'inesperado', status: 502 });
+    });
+
+    it('trunca el mensaje a 300 caracteres', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, { statusCode: 500, message: 'a'.repeat(1000) }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs[0]).toContain(`"${'a'.repeat(300)}…"`);
+      expect(logs[0]).not.toContain('a'.repeat(301));
+    });
+
+    it('colapsa saltos de línea y caracteres de control: el mensaje no puede falsificar otra línea de log', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, {
+          statusCode: 500,
+          message: 'primera\nLOG FALSO\r\n\u0000\tfin',
+        }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs[0]).toContain('"primera LOG FALSO fin"');
+      for (const control of ['\n', '\r', '\u0000', '\t']) {
+        expect(logs[0]).not.toContain(control);
+      }
+    });
+
+    it('une la lista de mensajes de una validación (message como arreglo)', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, { statusCode: 500, message: ['uno', 'dos'] }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs[0]).toContain('"uno; dos"');
+    });
+
+    it('nunca vuelca el resto del cuerpo, el payload enviado, el secreto ni la firma', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, {
+          statusCode: 500,
+          message: 'mensaje-visible',
+          stack: 'at Object.<anonymous> (pila-secreta.js:1:1)',
+          detalle: { token: 'token-del-cuerpo' },
+          errores: [{ asiento: 'FV 1', motivo: 'motivo-del-cuerpo' }],
+        }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      const firma = firmarComptable(SECRETO, {
+        timestamp: '1792512000',
+        metodo: 'POST',
+        ruta: `/api/v1/integraciones/websaco/empresas/${EMPRESA}/lotes?simular=false`,
+        rawBody: RAW_BODY,
+      });
+      const todo = logs.join('\n');
+      expect(todo).toContain('mensaje-visible');
+      for (const prohibido of [
+        'pila-secreta',
+        'token-del-cuerpo',
+        'motivo-del-cuerpo',
+        'statusCode',
+        'no-debe-aparecer',
+        SECRETO,
+        firma,
+        EMPRESA,
+      ]) {
+        expect(todo).not.toContain(prohibido);
+      }
+    });
+
+    it('enmascara el secreto compartido si Comptable lo repite en su mensaje', async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(500, {
+          statusCode: 500,
+          message: `firma inválida con ${SECRETO} recibida`,
+        }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs[0]).toContain('firma inválida con [redactado] recibida');
+      expect(logs[0]).not.toContain(SECRETO);
+    });
+
+    it('sin mensaje utilizable (HTML de un proxy, cuerpo vacío) deja la línea de siempre', async () => {
+      fetchMock.mockResolvedValueOnce(
+        respuesta(502, '<html>Bad gateway</html>'),
+      );
+      fetchMock.mockResolvedValueOnce(respuesta(500, ''));
+      fetchMock.mockResolvedValueOnce(
+        respuesta(500, { statusCode: 500, message: '   ' }),
+      );
+
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs).toEqual([
+        'Comptable POST lotes: HTTP 502 (inesperado).',
+        'Comptable POST lotes: HTTP 500 (inesperado).',
+        'Comptable POST lotes: HTTP 500 (inesperado).',
+      ]);
+    });
+
+    it('los estados que no son 5xx siguen sin loguear el mensaje', async () => {
+      fetchMock.mockResolvedValueOnce(
+        respuesta(404, { statusCode: 404, message: 'mensaje-del-404' }),
+      );
+      fetchMock.mockResolvedValueOnce(
+        respuesta(409, { statusCode: 409, message: 'mensaje-del-409' }),
+      );
+
+      await crearCliente().consultarEmpresa(EMPRESA);
+      await crearCliente().enviarLote(EMPRESA, RAW_BODY, false);
+
+      expect(logs).toEqual([
+        'Comptable GET empresa: HTTP 404 (noEncontrado).',
+        'Comptable POST lotes: HTTP 409 (conflicto).',
+      ]);
+    });
+  });
+
   it('nunca escribe en el log el cuerpo, el secreto ni la firma', async () => {
     const rawBody = '{"secretoDelCuerpo":"no-debe-aparecer"}';
     fetchMock.mockResolvedValueOnce(

@@ -2,6 +2,9 @@
 // MUST stay the first import: it sets the process DNS resolvers before the
 // Mongo driver performs its SRV lookup. See common/dns-setup.ts.
 import '../common/dns-setup';
+// MUST stay the second import, before `../app.module`: it loads `.env.<name>`
+// from `--env=<name>` before the config is validated. See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -56,10 +59,11 @@ const LOTE = 500;
  * law). A cargo whose new name would collide with another in the same
  * coproperty is skipped and listed, never merged. `--simular` only counts.
  *
- *   npm run migrar:nombre-propio -- --simular
- *   npm run migrar:nombre-propio
+ *   npm run migrar:nombre-propio -- --env=<ambiente> --simular
+ *   npm run migrar:nombre-propio -- --env=<ambiente>
  */
 async function migrar(): Promise<void> {
+  await confirmScriptEnv();
   const simular = process.argv.includes('--simular');
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],

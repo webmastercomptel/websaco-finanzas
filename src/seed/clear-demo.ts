@@ -2,6 +2,9 @@
 // MUST stay the first import: it sets the process DNS resolvers before the
 // Mongo driver performs its SRV lookup. See common/dns-setup.ts.
 import '../common/dns-setup';
+// MUST stay the second import, before `../app.module`: it loads `.env.<name>`
+// from `--env=<name>` before the config is validated. See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -104,9 +107,10 @@ import {
  * can occur mid-run.  Financial documents go first (they reference catalog
  * entities), then the catalog itself.
  *
- *   npm run clear:demo
+ *   npm run clear:demo -- --env=<ambiente>
  */
 async function clearDemo(): Promise<void> {
+  await confirmScriptEnv();
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });

@@ -2,6 +2,9 @@
 // MUST stay the first import: it sets the process DNS resolvers before the
 // Mongo driver performs its SRV lookup. See common/dns-setup.ts.
 import '../common/dns-setup';
+// MUST stay the second import, before `../app.module`: it loads `.env.<name>`
+// from `--env=<name>` before the config is validated. See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -28,9 +31,15 @@ import {
  * Idempotent: running it twice re-asserts the platform-admin flag and changes
  * nothing else. It never rewrites a name somebody has since corrected.
  *
- *   ROOT_ADMIN_EMAIL=alguien@ejemplo.com npm run seed:admin
+ * The environment is chosen with `--env=<ambiente>` (reads `.env.<ambiente>`;
+ * the `--` is required or npm swallows the flag). `ROOT_ADMIN_EMAIL` must be
+ * defined in that file: the file is the only source of variables in script
+ * mode, so one exported in the shell is discarded (and reported).
+ *
+ *   npm run seed:admin -- --env=<ambiente>
  */
 async function seedAdmin(): Promise<void> {
+  await confirmScriptEnv();
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });

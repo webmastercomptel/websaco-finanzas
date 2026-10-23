@@ -20,7 +20,10 @@ Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts,
 | `npm run lint` | ESLint with `--fix` |
 | `npm test` | Jest unit tests (`*.spec.ts`) |
 | `npm run test:cov` | Coverage |
-| `npm run seed:admin` | Creates the first platform-admin account from `ROOT_ADMIN_EMAIL` |
+| `npm run seed:admin -- --env=<name>` | Creates the first platform-admin account from `ROOT_ADMIN_EMAIL` |
+| `npm run <script> -- --env=<name> [flags]` | The other scripts in `src/seed/` that open Mongo (`seed:demo`, `clear:demo`, `migrar:nombre-propio`, `limpiar:indices-ingles`, `sembrar:consecutivos`; `seed-cargos.ts` has no npm alias). Their own flags (`--simular`, `--aplicar`, `--db=<name>`) go after `--env` |
+
+Every script that opens Mongo **requires** `--env=<name>`: `.env.<name>` (backend root) is then the ONLY source of the app's variables — the plain `.env` is not read, and an app variable the file omits is dropped even if the shell exported it (reported by name). The `--` before the flag is mandatory, or npm swallows it. Names outside `local`/`dev`/`development`/`test` print the target database and require typing its name in an interactive terminal (piped input is refused). See `src/common/scripts/`. The plain `node scripts/*.js` files in `scripts/` are NOT covered: they are run by hand with `node --env-file=<file>` and read their own `MONGODB_URI`.
 
 Before declaring a change done: `npm run typecheck && npm run lint && npm test` → delegate per your user-global `~/.claude/CLAUDE.md` routing rule (Test/Lint/Build Execution Routing, not this repo's `../CLAUDE.md`), do not run directly via Bash.
 
@@ -37,6 +40,7 @@ No Docker, no local database — Mongo (Atlas) and Redis (Redis Cloud) are manag
 7. **Responses use the `{ statusCode, data }` envelope** the frontend unwraps in `client.ts`. Never return a bare payload.
 8. **The tenant never comes from the client.** See "The tenancy law".
 9. **Nothing financial is ever deleted.** See "The audit law".
+10. **A manual step per environment is declared in one place and detected by readiness.** Any change that needs something done by hand in each environment — a seed, a migration, a new env var, a new secret — must (a) be listed under a "Pasos por ambiente" section in the commit/PR description AND in the relevant runbook (`docs/runbooks/`), and (b) wherever it can be checked, be detected by `GET /health/ready` (an indicator in `modules/health/` that fails naming the exact setting or command to fix, never echoes a value, answers fast instead of waiting on a dependency, makes no network call to a third service, and reports itself as skipped when the feature it guards is disabled in that environment), so a missed step is loud at deploy time instead of a silent failure later. Model: `integracion-comptable.health.ts`. If a step cannot be checked, say so in that same section. Born from a sibling service's production 500 on `POST .../lotes` (a seed nobody ran, no log, nothing in readiness) — Finanzas' own blind spot was that its call to Comptable logged only `HTTP 500 (inesperado)`, so `ComptableClient` now also logs Comptable's own `message` (5xx only, truncated, never the raw body).
 
 ## This system stands alone
 
@@ -176,7 +180,7 @@ src/
   config/              env.validation.ts (Joi), app.config.ts (typed, via ConfigService)
   contracts/index.ts   the Spanish API shapes — see "the contract law"
   common/              cross-cutting, @Global CommonModule
-    redis/ firebase/ guards/ decorators/ tenant/ interfaces/ utils/ pdf/
+    redis/ firebase/ guards/ decorators/ tenant/ interfaces/ utils/ pdf/ scripts/
   modules/
     casl/              authorization vocabulary, permission map, PoliciesGuard
     <feature>/         one folder per business domain
@@ -196,6 +200,10 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 ## Gotchas
 
 - **One connection string per service** — `MONGODB_URI`, `REDIS_URL`, never host/port/password split. Joi validates the scheme (pasting the web console URL instead of the connection string is the easy mistake).
+- `common/dns-setup.ts` must stay the **first import** of `main.ts` and of every script that opens Mongo (SRV lookup), and `common/scripts/load-script-env` the **second** (before `../app.module`, when the script boots the app): `ConfigModule.forRoot` validates `process.env` while `app.module.ts` is being evaluated, so `.env.<name>` has to be loaded before that import. A script's `main` starts with `await confirmScriptEnv()`. `seed/scripts-entorno.spec.ts` fails if a script that opens Mongo (`createApplicationContext` or `mongoose.connect`) breaks either rule.
+- Script env files: `--env=<name>` loads `.env.<name>` (all `.env.*` are git-ignored except `.env.example`) as the single source: its values replace the shell's, variables it omits are NOT taken from the shell or from the plain `.env`, and `AppModule` builds `ConfigModule` with `ignoreEnvFile` (`config/config-module-options.ts`, switched on by `load-script-env` via `common/scripts/script-mode.ts`; a server boot never imports it, so it is unchanged). Joi still fails loudly for a missing required variable; omitted optional ones are listed in a warning. `seed:admin` therefore needs `ROOT_ADMIN_EMAIL` inside the file, and absent `COMPTABLE_*` variables mean the integration is off. The guard trusts the env NAME, not the database behind it. For the two scripts that take their own `--db=<name>` (`sembrar:consecutivos`, `limpiar:indices-ingles`), that name overrides the URI's database and is the one the guard prints and asks to type.
+- `--` and PowerShell (reported, NOT verified here): on Windows PowerShell with npm >= 9 the `--` may be consumed before reaching the script, so `--env` is lost and the script stops with the usage message. Workarounds to try: `npm.cmd run <script> -- --env=<name>`, or quote it: `npm run <script> '--' --env=<name>`.
+- `/health/ready` also runs `integracion-comptable` (`modules/health/integracion-comptable.health.ts`): it reads `COMPTABLE_API_URL` / `COMPTABLE_HMAC_SECRET` and fails on a half-set pair, a URL that is not an `http(s)` URL, carries credentials/query/fragment, or does not end in `/api/v1` (the one thing Joi's scheme check misses; without the prefix every Comptable route 404s). Neither set = `up` with `omitido`. Config only, no call to Comptable; it is NOT in `GET /health` (the Dockerfile HEALTHCHECK), because a bad URL is fixed by a redeploy, not a restart.
 - Redis: one shared client (`common/redis/redis.provider.ts`) with an `error` listener and a capped `retryStrategy`. Don't open ad-hoc clients.
 - Redis has **no consumer yet beyond its own health check** — wired ahead of BullMQ. Don't invent uses for it, don't remove it either.
 - `pdf-lib` (writing PDFs) is core; `pdfjs-dist` (reading them) is deliberately absent — nothing in the domain reads PDFs.

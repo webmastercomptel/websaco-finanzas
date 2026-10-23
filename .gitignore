@@ -41,6 +41,10 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+# Per-environment files read by scripts (`--env=<name>` -> `.env.<name>`).
+# Only the template is committed.
+.env.*
+!.env.example
 
 # temp directory
 .temp

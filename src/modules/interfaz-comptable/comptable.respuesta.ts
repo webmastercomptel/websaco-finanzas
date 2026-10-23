@@ -101,6 +101,36 @@ export function datosRespuestaComptable(cuerpo: unknown): unknown {
   return cuerpo;
 }
 
+/** Longest Comptable message that reaches Finanzas's log, in characters. */
+export const MAX_MENSAJE_LOG = 300;
+
+/**
+ * Turns the `message` Comptable put in an error body into something safe to
+ * write to Finanzas's log, or `null` when there is nothing to write.
+ *
+ * Only ever called with the extracted `message` field, never with the raw body:
+ * the body of a 5xx can carry anything (a stack, an HTML error page, echoed
+ * input). Even the message is bounded: control characters and line breaks
+ * collapse to one space (a message cannot forge a log line), the shared
+ * `secreto` is masked if Comptable ever echoes it (before truncating, so a
+ * secret cut by the limit is not left half visible), and the result is cut at
+ * `MAX_MENSAJE_LOG` characters.
+ */
+export function mensajeParaLog(
+  mensaje: string | null,
+  secreto?: string,
+): string | null {
+  if (mensaje === null) return null;
+  let texto = mensaje;
+  if (secreto) texto = texto.split(secreto).join('[redactado]');
+  texto = texto.replace(/[\p{Cc}\s]+/gu, ' ').trim();
+  if (texto === '') return null;
+  const caracteres = [...texto];
+  return caracteres.length > MAX_MENSAJE_LOG
+    ? `${caracteres.slice(0, MAX_MENSAJE_LOG).join('')}…`
+    : texto;
+}
+
 /** Parses a raw response text as JSON; `null` for anything unparsable, so the
  *  caller classifies by status code alone. */
 export function parsearCuerpo(texto: string): unknown {

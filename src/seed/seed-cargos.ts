@@ -1,5 +1,8 @@
 // src/seed/seed-cargos.ts
 import '../common/dns-setup';
+// MUST stay the second import, before `../app.module`: it loads `.env.<name>`
+// from `--env=<name>` before the config is validated. See load-script-env.ts.
+import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import { getModelToken } from '@nestjs/mongoose';
@@ -24,6 +27,7 @@ const CARGOS_SISTEMA = [
 ];
 
 async function run() {
+  await confirmScriptEnv();
   const app = await NestFactory.createApplicationContext(AppModule);
   const copropiedades = app.get<Model<CopropiedadDocument>>(
     getModelToken(Copropiedad.name),

@@ -6,8 +6,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
 // Configuration
-import appConfig from './config/app.config';
-import { envValidationSchema } from './config/env.validation';
+import { buildConfigModuleOptions } from './config/config-module-options';
 
 // Core modules
 import { DatabaseModule } from './database/database.module';
@@ -55,11 +54,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
  */
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      load: [appConfig],
-      validationSchema: envValidationSchema,
-    }),
+    ConfigModule.forRoot(buildConfigModuleOptions()),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

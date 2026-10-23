@@ -5,6 +5,7 @@ import { firmarComptable } from './comptable.firma';
 import {
   datosRespuestaComptable,
   leerRespuestaComptable,
+  mensajeParaLog,
   parsearCuerpo,
   type ErrorAsientoComptable,
 } from './comptable.respuesta';
@@ -83,7 +84,8 @@ export type ResultadoComptable<T> =
  * caller and passed here as a string, signed and sent unchanged.
  *
  * Never logs a body, the secret or a signature: only the route kind and the
- * outcome.
+ * outcome — plus, for a 5xx only, the truncated `message` field Comptable
+ * answered with (see `lineaConMensaje`).
  */
 @Injectable()
 export class ComptableClient {
@@ -200,11 +202,36 @@ export class ComptableClient {
       clearTimeout(timeoutId);
     }
 
-    const resultado = this.clasificar<T>(status, parsearCuerpo(texto));
-    this.logger.log(
-      `Comptable ${metodo} ${this.tipoRuta(camino)}: HTTP ${status} (${resultado.tipo}).`,
-    );
+    const cuerpo = parsearCuerpo(texto);
+    const resultado = this.clasificar<T>(status, cuerpo);
+    const linea = `Comptable ${metodo} ${this.tipoRuta(camino)}: HTTP ${status} (${resultado.tipo})`;
+    if (status >= 500) {
+      this.logger.warn(this.lineaConMensaje(linea, cuerpo, secreto));
+    } else {
+      this.logger.log(`${linea}.`);
+    }
     return resultado;
+  }
+
+  /**
+   * The log line of a 5xx. A 5xx used to be logged as just `HTTP 500
+   * (inesperado)`, which hid the reason (an incident went undiagnosable from
+   * this side). It now adds Comptable's own `message` — and only that field,
+   * truncated and masked by `mensajeParaLog` — keeping the original prefix so
+   * existing log searches still match. The returned outcome is untouched.
+   */
+  private lineaConMensaje(
+    linea: string,
+    cuerpo: unknown,
+    secreto: string,
+  ): string {
+    const mensaje = mensajeParaLog(
+      leerRespuestaComptable(cuerpo).mensaje,
+      secreto,
+    );
+    return mensaje === null
+      ? `${linea}.`
+      : `${linea} — mensaje de Comptable: ${JSON.stringify(mensaje)}.`;
   }
 
   /** Status code first; the body only adds the details of each outcome. */
