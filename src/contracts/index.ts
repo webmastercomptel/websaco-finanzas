@@ -2268,7 +2268,12 @@ export interface LineaMovimientoContable {
 export interface MovimientoContable {
   id: string;
   fecha: string;
+  /** Internal key — for filtering and picking the PDF route only, never
+   *  shown. Display `codigoDocumento`. */
   tipoDocumento: 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+  /** The document type as the coproperty's Tabla de Documentos calls it
+   *  (e.g. "FV", "RC") — what the report shows. */
+  codigoDocumento: string;
   /** The anchor document's own _id — links to its detail page. */
   documentoId: string;
   numeroDocumento: string;
@@ -2328,7 +2333,10 @@ export interface RespuestaAdicionContabilidad {
  * string).
  */
 
-export type DocumentoComptable = 'FV' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+/** The document type as the coproperty's Tabla de Documentos names it
+ *  (Comptable has no categories — it creates documents by tipo and/or
+ *  prefijo). Free text, never a fixed internal key. */
+export type DocumentoComptable = string;
 
 /** The tercero of one line: the inmueble code as identification, the rest
  *  from the inmueble's titular (all null when it has none — such a lote is
@@ -2347,6 +2355,10 @@ export interface TerceroPayloadComptable {
   telefono: string | null;
   direccion: string | null;
   ciudad: string | null;
+  /** DANE municipio code; Comptable takes the department from its own DANE
+   *  catalog. Added 2026-10-22 (Comptable must be deployed first: it
+   *  rejects unknown fields). */
+  ciudadCodigo: string | null;
 }
 
 export interface MovimientoPayloadComptable {

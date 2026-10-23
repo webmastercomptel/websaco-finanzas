@@ -533,9 +533,13 @@ describe('InterfazComptableService.simular', () => {
 
   it.each([
     ['firma', { tipo: 'firma' }, /COMPTABLE_HMAC_SECRET/],
-    ['timeout', { tipo: 'timeout' }, /No hubo respuesta/],
-    ['red', { tipo: 'red' }, /No hubo respuesta/],
-    ['5xx', { tipo: 'inesperado', status: 503 }, /No hubo respuesta/],
+    ['timeout', { tipo: 'timeout' }, /no respondió en 60 segundos/],
+    ['red', { tipo: 'red' }, /No se pudo conectar con Comptable/],
+    [
+      '5xx',
+      { tipo: 'inesperado', status: 503 },
+      /respondió con un error \(HTTP 503\)/,
+    ],
   ])('%s: 502', async (_caso, respuesta, mensaje) => {
     const { service, comptable } = crear();
     comptable.enviarLote.mockResolvedValueOnce(respuesta as never);

@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import {
   ConsecutivoDocumento,
   ConsecutivoDocumentoDocument,
+  type CategoriaDocumento,
 } from '../../database/schemas/numeracion/consecutivo-documento.schema';
 import {
   ResolucionFacturacion,
@@ -33,6 +34,53 @@ const TITULOS_POR_DEFECTO: Record<CodigoDocumentoGenerico, string> = {
  *  `'FV'` `ConsecutivoDocumento` row carries a `nombreDocumento` — matches the
  *  Factura PDF template's own long-standing default. */
 const TITULO_FACTURA_POR_DEFECTO = 'Cobro Expensas Comunes';
+
+/** The fixed key a report uses internally for a document type ('FC' and
+ *  'FV' both mean Factura — reports grew different spellings). A KEY only:
+ *  to tell rows apart, filter and pick the right collection — never shown.
+ *  What the user sees is the coproperty's own código from the Tabla de
+ *  Documentos, via `TituloDocumentoService.resolverCodigos`. */
+export type ClaveTipoDocumento = 'FV' | 'FC' | 'RC' | 'NC' | 'ND' | 'NT' | 'NA';
+
+/** The Tabla de Documentos category each key is numbered under. A Nota de
+ *  Anticipo reuses category NT (see `CrearNotaAnticipoDto`). */
+const CATEGORIA_POR_CLAVE: Record<ClaveTipoDocumento, CategoriaDocumento> = {
+  FV: 'FV',
+  FC: 'FV',
+  RC: 'IN',
+  NC: 'NC',
+  ND: 'ND',
+  NT: 'NT',
+  NA: 'NT',
+};
+
+/** (internal key, the document's own frozen prefijo) → the código to show. */
+export type ResolverCodigoDocumento = (
+  clave: ClaveTipoDocumento,
+  prefijo: string,
+) => string;
+
+/** Used only where no `TituloDocumentoService` is wired (unit tests that
+ *  predate it): the document's own prefijo, which also comes from the Tabla
+ *  de Documentos — never the internal key. */
+export const codigoPorPrefijo: ResolverCodigoDocumento = (_clave, prefijo) =>
+  prefijo;
+
+/** Builds the resolver over rows the caller already loaded (inside its
+ *  own session, when it has one). See `TituloDocumentoService.resolverCodigos`
+ *  for the matching rule. */
+export const resolverCodigosDesdeTabla =
+  (
+    filas: Pick<ConsecutivoDocumento, 'categoria' | 'codigo' | 'prefijo'>[],
+  ): ResolverCodigoDocumento =>
+  (clave, prefijo) => {
+    const categoria = CATEGORIA_POR_CLAVE[clave];
+    const deCategoria = filas.filter((f) => f.categoria === categoria);
+    const fila =
+      deCategoria.find((f) => f.prefijo === prefijo) ??
+      (deCategoria.length === 1 ? deCategoria[0] : undefined);
+    return fila?.codigo ?? prefijo;
+  };
 
 /** A Factura's own frozen DIAN resolution, resolved into the shape its
  *  pdfmake template prints — see `DatosPlantillaFactura.resolucion`
@@ -70,6 +118,23 @@ export class TituloDocumentoService {
     @InjectModel(ResolucionFacturacion.name)
     private readonly resoluciones: Model<ResolucionFacturacionDocument>,
   ) {}
+
+  /**
+   * Loads the coproperty's Tabla de Documentos ONCE and returns a resolver
+   * from (internal key, document prefijo) to the código that coproperty
+   * configured — the only document-type code reports may show. Matches the
+   * row of the key's category with the document's own prefijo (one category
+   * can hold several códigos, e.g. RC and RT under IN, told apart by
+   * prefijo). A document whose prefijo matches no row — a Factura numbered
+   * by a resolución with its own prefix — takes its category's código when
+   * the category has exactly one; otherwise its own prefijo.
+   */
+  async resolverCodigos(
+    copropiedadId: Types.ObjectId,
+  ): Promise<ResolverCodigoDocumento> {
+    const filas = await this.consecutivos.find({ copropiedadId }).exec();
+    return resolverCodigosDesdeTabla(filas);
+  }
 
   /** The title for one of the five non-Factura document types. */
   async resolverGenerico(

@@ -83,6 +83,7 @@ import {
   type AnchorInfo,
   type TipoDocumentoExport,
 } from './resolucion-documentos.service';
+import { resolverCodigosDesdeTabla } from '../../common/documentos/titulo-documento.service';
 
 /** Maps this export's tipo documento back to `ConsecutivoDocumento`'s own
  *  fixed `category` — null for FV (Facturas number off a DIAN resolución,
@@ -460,13 +461,24 @@ export class AdicionContabilidadService {
         session,
       );
 
+    // The tipo exported is the coproperty's own código from its Tabla de
+    // Documentos — never the internal key (`tipoDocumentoDe`), which only
+    // picks the comprobante row below.
+    const codigoDe = resolverCodigosDesdeTabla(
+      await this.consecutivosDocumento
+        .find({ copropiedadId })
+        .session(session)
+        .exec(),
+    );
+
     const filasMovmes: FilaMovmes[] = [];
     const filasMovmesdo: FilaMovmesdo[] = [];
 
     for (const asiento of asientos) {
-      const tipoDocumento = tipoDocumentoDe(asiento);
+      const clave = tipoDocumentoDe(asiento);
       const anchorIdStr = resolveAnchorId(asiento).toString();
       const anchor = anchorMap.get(anchorIdStr);
+      const tipoDocumento = codigoDe(clave, anchor?.prefix ?? '');
       // The document's own concepto (see `detalleDeAsiento`).
       const detalle = detalleDeAsiento(asiento, conceptoMap);
 
@@ -479,8 +491,7 @@ export class AdicionContabilidadService {
       });
 
       const comprobante =
-        comprobantePorClave.get(`${tipoDocumento}:${anchor?.prefix ?? ''}`) ??
-        null;
+        comprobantePorClave.get(`${clave}:${anchor?.prefix ?? ''}`) ?? null;
 
       for (const entry of asiento.movimientos) {
         filasMovmesdo.push({

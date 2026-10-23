@@ -33,6 +33,12 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  codigoPorPrefijo,
+  TituloDocumentoService,
+  type ResolverCodigoDocumento,
+} from '../../common/documentos/titulo-documento.service';
+import { resolveAnchorId } from '../consultas/movimiento-contable.util';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { LotesFacturacionService } from '../facturacion/lotes.service';
 import {
@@ -41,6 +47,7 @@ import {
   type TipoDocumentoExport,
 } from '../adicion-contabilidad/resolucion-documentos.service';
 import {
+  COMPTABLE_TIMEOUT_MS,
   ComptableClient,
   type ResultadoComptable,
   type ResumenLoteComptable,
@@ -96,6 +103,26 @@ const conflicto = (
 ): ConflictException =>
   new ConflictException({ statusCode: 409, codigo, message, ...extra });
 
+/**
+ * Why Comptable gave no usable answer, in words the user can act on. The
+ * three cases looked identical on screen ("No hubo respuesta") but need
+ * different actions: no connection (is Comptable up? is the URL right?),
+ * a timeout (try again), or Comptable answering with a server error (look
+ * at Comptable's own logs).
+ */
+const causaSinRespuesta = (resultado: ResultadoComptable<unknown>): string => {
+  switch (resultado.tipo) {
+    case 'red':
+      return 'No se pudo conectar con Comptable: revisa que esté en servicio y que la dirección configurada en este servidor sea la correcta.';
+    case 'timeout':
+      return `Comptable no respondió en ${COMPTABLE_TIMEOUT_MS / 1000} segundos.`;
+    case 'inesperado':
+      return `Comptable respondió con un error (HTTP ${resultado.status}).`;
+    default:
+      return 'Comptable no dio una respuesta clara.';
+  }
+};
+
 const plural = (n: number, uno: string, varios: string): string =>
   `${n} ${n === 1 ? uno : varios}`;
 
@@ -141,7 +168,20 @@ export class InterfazComptableService {
     private readonly lotesFacturacion: LotesFacturacionService,
     @InjectConnection() private readonly connection: Connection,
     private readonly auditoria: AuditoriaService,
+    // APPENDED last, optional (positional-mock tests stop before it): the
+    // document type sent is the coproperty's Tabla de Documentos código.
+    private readonly titulos?: TituloDocumentoService,
   ) {}
+
+  /** Tabla de Documentos códigos for this coproperty; without the service
+   *  (tests only) the document's own prefijo, never the internal key. */
+  private async codigos(
+    copropiedadId: Types.ObjectId,
+  ): Promise<ResolverCodigoDocumento> {
+    return this.titulos
+      ? this.titulos.resolverCodigos(copropiedadId)
+      : codigoPorPrefijo;
+  }
 
   /** What the screen needs first: is the server configured, is the active
    *  coproperty linked, is a lote waiting for "Reintentar". Never throws for
@@ -229,7 +269,7 @@ export class InterfazComptableService {
       totalLineas: totales.totalLineas,
       totalDebitos: aPesos(totales.totalDebitosCentavos),
       totalCreditos: aPesos(totales.totalCreditosCentavos),
-      porDocumento: this.contarPorDocumento(asientos),
+      porDocumento: await this.contarPorDocumento(asientos, copropiedadId),
       inmueblesSinTitular: inmueblesSinTitular(asientos, titulares),
       lotePendiente: pendiente ? toLoteComptable(pendiente) : null,
       payload,
@@ -328,7 +368,7 @@ export class InterfazComptableService {
         throw new BadGatewayException(MENSAJE_FIRMA);
       default:
         throw new BadGatewayException(
-          'No hubo respuesta de Comptable. Intenta de nuevo en unos minutos.',
+          `${causaSinRespuesta(resultado)} Intenta de nuevo en unos minutos.`,
         );
     }
   }
@@ -512,7 +552,7 @@ export class InterfazComptableService {
         throw new BadGatewayException(MENSAJE_FIRMA);
       default:
         throw new BadGatewayException(
-          `No hubo respuesta de Comptable; el lote ${lote.numero} sigue enviado. Intenta de nuevo en unos minutos.`,
+          `${causaSinRespuesta(resultado)} El lote ${lote.numero} sigue enviado. Intenta de nuevo en unos minutos.`,
         );
     }
   }
@@ -622,7 +662,7 @@ export class InterfazComptableService {
           resultado.tipo === 'conflicto' && resultado.mensaje
             ? ` Comptable respondió: ${resultado.mensaje}`
             : '';
-        const mensaje = `No hubo una respuesta clara de Comptable. El lote ${lote.numero} quedó pendiente: usa "Reintentar"; Comptable no lo duplicará.${detalle}`;
+        const mensaje = `${causaSinRespuesta(resultado)} El lote ${lote.numero} quedó pendiente: usa "Reintentar"; Comptable no lo duplicará.${detalle}`;
         await this.registrarAuditoria(
           actor,
           'actualizar',
@@ -901,7 +941,12 @@ export class InterfazComptableService {
       );
     return construirPayloadComptable(
       asientos,
-      { anchorMap, conceptoMap, saldosInicialesPorNumero },
+      {
+        codigoDe: await this.codigos(copropiedadId),
+        anchorMap,
+        conceptoMap,
+        saldosInicialesPorNumero,
+      },
       titulares,
       origen,
     );
@@ -949,24 +994,42 @@ export class InterfazComptableService {
     return titulares;
   }
 
-  private contarPorDocumento(
+  /** Counts per document type as Comptable will see it — the Tabla de
+   *  Documentos código, so two códigos of one category (RC and RT) are two
+   *  rows. Ordered by the internal key's fixed order, then código. */
+  private async contarPorDocumento(
     asientos: AsientoContableDocument[],
-  ): ConteoDocumentoComptable[] {
-    const conteo = new Map<TipoDocumentoExport, ConteoDocumentoComptable>();
-    for (const asiento of asientos) {
-      const documento = tipoDocumentoDe(asiento);
-      const fila = conteo.get(documento) ?? {
-        documento,
-        asientos: 0,
-        lineas: 0,
-      };
-      fila.asientos += 1;
-      fila.lineas += asiento.movimientos.length;
-      conteo.set(documento, fila);
-    }
-    return ORDEN_DOCUMENTOS.filter((d) => conteo.has(d)).map((d) =>
-      conteo.get(d)!,
+    copropiedadId: Types.ObjectId,
+  ): Promise<ConteoDocumentoComptable[]> {
+    if (asientos.length === 0) return [];
+    const codigoDe = await this.codigos(copropiedadId);
+    const anchorMap = await this.resolucion.buildAnchorMap(
+      asientos,
+      copropiedadId,
+      null,
     );
+    const conteo = new Map<
+      string,
+      { orden: number; fila: ConteoDocumentoComptable }
+    >();
+    for (const asiento of asientos) {
+      const clave = tipoDocumentoDe(asiento);
+      const anchor = anchorMap.get(resolveAnchorId(asiento).toString());
+      const documento = codigoDe(clave, anchor?.prefix ?? '');
+      const actual = conteo.get(documento) ?? {
+        orden: ORDEN_DOCUMENTOS.indexOf(clave),
+        fila: { documento, asientos: 0, lineas: 0 },
+      };
+      actual.fila.asientos += 1;
+      actual.fila.lineas += asiento.movimientos.length;
+      conteo.set(documento, actual);
+    }
+    return [...conteo.values()]
+      .sort(
+        (a, b) =>
+          a.orden - b.orden || a.fila.documento.localeCompare(b.fila.documento),
+      )
+      .map((c) => c.fila);
   }
 
   /** The number a new lote would get — read only, never reserved. */

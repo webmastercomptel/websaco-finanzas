@@ -3,6 +3,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import {
+  codigoPorPrefijo,
+  TituloDocumentoService,
+} from '../../common/documentos/titulo-documento.service';
+import {
   AsientoContable,
   AsientoContableDocument,
 } from '../../database/schemas/facturacion/asiento-contable.schema';
@@ -48,6 +52,7 @@ import {
   CuentaContableDocument,
 } from '../../database/schemas/contabilidad/cuenta-contable.schema';
 import {
+  deriveTipoDocumento,
   resolveAnchorId,
   resolverMovimientoContable,
 } from './movimiento-contable.util';
@@ -55,7 +60,11 @@ import type { RespuestaMovimientoContable } from '../../contracts';
 
 /** One anchor document's identity — enough to resolve `numeroDocumento` and
  *  which inmueble it belongs to, across all six document types. */
-type AnchorInfo = { numeroCompleto: string; inmuebleId: Types.ObjectId };
+type AnchorInfo = {
+  numeroCompleto: string;
+  inmuebleId: Types.ObjectId;
+  prefijo: string;
+};
 
 type InmuebleMeta = {
   inmuebleCodigo: string | null;
@@ -97,6 +106,9 @@ export class MovimientoContableService {
     // document at read time (see `resolverSaldosInicialesPorNumero`).
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // APPENDED after it, optional, same convention: the document type shown
+    // is the coproperty's own código from the Tabla de Documentos.
+    private readonly titulos?: TituloDocumentoService,
   ) {}
 
   /**
@@ -142,16 +154,24 @@ export class MovimientoContableService {
       asientos,
     );
 
+    const codigoDe = this.titulos
+      ? await this.titulos.resolverCodigos(copropiedadId)
+      : codigoPorPrefijo;
+
     const movimientos = asientos.map((a) => {
       const anchorId = resolveAnchorId(a).toString();
       const anchorInfo = anchorMap.get(anchorId);
       const numeroDocumento = anchorInfo?.numeroCompleto ?? '—';
+      const codigoDocumento = codigoDe(
+        deriveTipoDocumento(a),
+        anchorInfo?.prefijo ?? '',
+      );
       const meta = anchorInfo
         ? (metaMap.get(anchorInfo.inmuebleId.toString()) ?? META_VACIA)
         : META_VACIA;
       return resolverMovimientoContable(
         a,
-        { ...meta, numeroDocumento },
+        { ...meta, numeroDocumento, codigoDocumento },
         nombrePorCuenta,
         saldosInicialesPorNumero,
       );
@@ -259,6 +279,7 @@ export class MovimientoContableService {
           _id: Types.ObjectId;
           numeroCompleto: string;
           inmuebleId: Types.ObjectId;
+          prefijo: string;
         }>,
       ]
     > = [
@@ -276,13 +297,14 @@ export class MovimientoContableService {
       const docs = await model
         .find(
           { _id: { $in: ids }, copropiedadId },
-          { numeroCompleto: 1, inmuebleId: 1 },
+          { numeroCompleto: 1, inmuebleId: 1, prefijo: 1 },
         )
         .exec();
       for (const doc of docs) {
         map.set(doc._id.toString(), {
           numeroCompleto: doc.numeroCompleto,
           inmuebleId: doc.inmuebleId,
+          prefijo: doc.prefijo ?? '',
         });
       }
     }

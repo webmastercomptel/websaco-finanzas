@@ -43,6 +43,10 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  codigoPorPrefijo,
+  TituloDocumentoService,
+} from '../../common/documentos/titulo-documento.service';
 import { fechaNotaCredito } from '../notas-credito/notas-credito.mapper';
 import { fechaNotaContable } from '../notas-contables/notas-contables.mapper';
 import { finDelDiaCorte } from './cartera-historica.util';
@@ -55,6 +59,8 @@ import type { ListarAuxiliarCarteraDto } from './dto/listar-auxiliar-cartera.dto
 
 type RowRaw = {
   fecha: Date;
+  /** What the row shows: the Tabla de Documentos código, or a Saldo
+   *  Inicial's original code from the previous system. */
   tipo: TipoDocumentoKardex;
   numeroCompleto: string;
   concepto: string;
@@ -92,6 +98,9 @@ export class AuxiliarCarteraService {
     private readonly tenant: TenantContextService,
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales: Model<SaldoInicialDocument>,
+    // APPENDED last, optional: the document type shown is the coproperty's
+    // own código from the Tabla de Documentos.
+    private readonly titulos?: TituloDocumentoService,
   ) {}
 
   async findAll(
@@ -189,30 +198,45 @@ export class AuxiliarCarteraService {
     const reciboMap = new Map(
       recibos.map((r) => [
         r._id.toString(),
-        { fullNumber: r.numeroCompleto, fecha: r.fechaRecibo },
+        {
+          fullNumber: r.numeroCompleto,
+          fecha: r.fechaRecibo,
+          prefijo: r.prefijo,
+        },
       ]),
     );
     const ncMap = new Map(
       notasCredito.map((nc) => [
         nc._id.toString(),
-        { fullNumber: nc.numeroCompleto, fecha: fechaNotaCredito(nc) },
+        {
+          fullNumber: nc.numeroCompleto,
+          fecha: fechaNotaCredito(nc),
+          prefijo: nc.prefijo,
+        },
       ]),
     );
     const naMap = new Map(
       notasAnticipo.map((na) => [
         na._id.toString(),
-        { fullNumber: na.numeroCompleto, fecha: na.fechaEmision },
+        {
+          fullNumber: na.numeroCompleto,
+          fecha: na.fechaEmision,
+          prefijo: na.prefijo,
+        },
       ]),
     );
 
     // Step 4: build raw rows
+    const codigoDe = this.titulos
+      ? await this.titulos.resolverCodigos(copropiedadId)
+      : codigoPorPrefijo;
     const rows: RowRaw[] = [];
 
     // Facturas → Débito
     for (const f of facturas) {
       rows.push({
         fecha: f.fechaEmision,
-        tipo: 'FC',
+        tipo: codigoDe('FV', f.prefijo),
         numeroCompleto: f.numeroCompleto,
         concepto: 'Factura de Venta',
         refCruce: null,
@@ -225,7 +249,7 @@ export class AuxiliarCarteraService {
     for (const nd of notasDebito) {
       rows.push({
         fecha: nd.fechaEmision,
-        tipo: 'ND',
+        tipo: codigoDe('ND', nd.prefijo),
         numeroCompleto: nd.numeroCompleto,
         concepto: nd.descripcion ?? 'Nota Débito',
         refCruce: null,
@@ -253,7 +277,7 @@ export class AuxiliarCarteraService {
     const mapaPorTipo: Record<
       'RC' | 'NC' | 'NA',
       {
-        mapa: Map<string, { fullNumber: string; fecha: Date }>;
+        mapa: Map<string, { fullNumber: string; fecha: Date; prefijo: string }>;
         etiqueta: string;
       }
     > = {
@@ -277,7 +301,7 @@ export class AuxiliarCarteraService {
 
       rows.push({
         fecha: origen?.fecha ?? app.aplicadoEn,
-        tipo: sourceType,
+        tipo: codigoDe(sourceType, origen?.prefijo ?? ''),
         numeroCompleto: sourceNumber,
         concepto: `${etiqueta} ${sourceNumber}`,
         refCruce,
@@ -294,9 +318,10 @@ export class AuxiliarCarteraService {
     // fecha de septiembre porque se guardó/editó ese día).
     for (const nc of notasContables) {
       const fecha = fechaNotaContable(nc);
+      const tipoNota = codigoDe('NT', nc.prefijo);
       rows.push({
         fecha,
-        tipo: 'NT',
+        tipo: tipoNota,
         numeroCompleto: nc.numeroCompleto,
         concepto: nc.descripcion,
         refCruce: null,
@@ -305,7 +330,7 @@ export class AuxiliarCarteraService {
       });
       rows.push({
         fecha,
-        tipo: 'NT',
+        tipo: tipoNota,
         numeroCompleto: nc.numeroCompleto,
         concepto: nc.descripcion,
         refCruce: null,

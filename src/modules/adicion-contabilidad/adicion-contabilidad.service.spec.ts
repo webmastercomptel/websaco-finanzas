@@ -500,6 +500,7 @@ describe('AdicionContabilidadService — desmarcar y volver a descargar un lote'
   const armar = (
     lote: Record<string, unknown> | null,
     conAuditoria = false,
+    tablaDocumentos: Record<string, unknown>[] = [],
   ) => {
     const asientos = [asientoFixture({ reciboId: reciboIdRC })];
     const asientosModel = {
@@ -535,7 +536,7 @@ describe('AdicionContabilidadService — desmarcar y volver a descargar un lote'
       asientosModel as never,
       lotesModel as never,
       vacio as never,
-      vacio as never,
+      modeloCon(tablaDocumentos) as never,
       vacio as never,
       recibosModel as never,
       vacio as never,
@@ -684,6 +685,24 @@ describe('AdicionContabilidadService — desmarcar y volver a descargar un lote'
     expect(archivos.movmes).toContain('Pago');
     expect(archivos.movmesdo).toContain('1305');
     expect(archivos.movmesdo).toContain('4135');
+  });
+
+  it('MOVMES y MOVMESDO exportan el tipo de la Tabla de Documentos, nunca la llave interna', async () => {
+    // La copropiedad llama "CI" a sus recibos de prefijo RC.
+    const { service } = armar(loteDoc(), false, [
+      {
+        categoria: 'IN',
+        codigo: 'CI',
+        prefijo: 'RC',
+        comprobanteContable: null,
+      },
+    ]);
+
+    const archivos = await service.archivos(LOTE_ID.toString());
+
+    expect(archivos.movmes.split(',')[0]).toBe('CI');
+    expect(archivos.movmesdo).toContain('CI ');
+    expect(archivos.movmes).not.toMatch(/^RC,/);
   });
 
   it('un lote desmarcado ya no se puede volver a descargar', async () => {

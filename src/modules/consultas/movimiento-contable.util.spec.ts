@@ -113,6 +113,7 @@ describe('resolverMovimientoContable', () => {
       propietario: 'Juan Perez',
       nit: '900123456-7',
       numeroDocumento: 'FV-0001',
+      codigoDocumento: 'FV',
     });
 
     expect(result.tipoDocumento).toBe('FC');
@@ -150,6 +151,7 @@ describe('resolverMovimientoContable', () => {
       propietario: null,
       nit: null,
       numeroDocumento: 'RC-0001',
+      codigoDocumento: 'FV',
     });
 
     expect(result.totalDebito).toBe(100000);
@@ -165,6 +167,7 @@ describe('resolverMovimientoContable', () => {
       propietario: null,
       nit: null,
       numeroDocumento: 'ND-0001',
+      codigoDocumento: 'FV',
     });
 
     expect(result.propietario).toBeNull();
@@ -185,6 +188,7 @@ describe('resolverMovimientoContable', () => {
       propietario: null,
       nit: null,
       numeroDocumento: 'NT-0001',
+      codigoDocumento: 'FV',
     });
 
     expect(result.documentoId).toBe(anchorId.toString());
@@ -217,6 +221,7 @@ describe('resolverMovimientoContable', () => {
         propietario: null,
         nit: null,
         numeroDocumento: 'FV-0001',
+        codigoDocumento: 'FV',
       },
       new Map([['1355-01', 'CxC Administracion']]),
     );
@@ -256,6 +261,7 @@ describe('resolverMovimientoContable', () => {
         propietario: null,
         nit: null,
         numeroDocumento: 'RC-1',
+        codigoDocumento: 'FV',
       },
       new Map(),
       new Map([[2, { tipo: 'FV', numero: '2941' }]]),
@@ -276,6 +282,7 @@ describe('resolverMovimientoContable', () => {
       propietario: 'Test',
       nit: null,
       numeroDocumento: 'FV-0002',
+      codigoDocumento: 'FV',
     });
 
     expect(result.inmuebleCodigo).toBeNull();

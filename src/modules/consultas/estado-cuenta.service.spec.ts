@@ -13,6 +13,7 @@ const facturaDoc = (over: Record<string, unknown> = {}) => ({
   periodoDesde: new Date('2026-01-01'),
   periodoHasta: new Date('2026-01-31'),
   numeroCompleto: 'FV-001-001',
+  prefijo: 'FV',
   total: 200000,
   estado: 'emitida',
   lineas: [{}],
@@ -23,6 +24,7 @@ const reciboDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   numeroCompleto: 'RC-001-001',
+  prefijo: 'RC',
   ...over,
 });
 
@@ -30,6 +32,7 @@ const ncDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   numeroCompleto: 'NC-001-001',
+  prefijo: 'NC',
   ...over,
 });
 
@@ -37,6 +40,7 @@ const ntDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   numeroCompleto: 'NT-001-001',
+  prefijo: 'NT',
   descripcion: 'Reclasificación',
   monto: 50000,
   estado: 'activo',
@@ -48,6 +52,7 @@ const naDoc = (over: Record<string, unknown> = {}) => ({
   _id: id(),
   copropiedadId: COP,
   numeroCompleto: 'NA-001-001',
+  prefijo: 'NA',
   fechaEmision: new Date('2026-01-25'),
   ...over,
 });
@@ -201,6 +206,7 @@ describe('EstadoCuentaService', () => {
         _id: fPagadaId,
         inmuebleId: inmId,
         numeroCompleto: 'FV-0010',
+        prefijo: 'FV',
         total: 100000,
         fechaEmision: new Date('2025-11-01'),
       });

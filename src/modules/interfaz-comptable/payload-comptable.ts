@@ -18,9 +18,14 @@ import {
   type DocumentoCruceSaldoInicial,
 } from '../saldos-iniciales/saldo-inicial-cruce.util';
 import { resolveAnchorId } from '../consultas/movimiento-contable.util';
+import type { ResolverCodigoDocumento } from '../../common/documentos/titulo-documento.service';
 
 /** What `ResolucionDocumentosService` resolved for the batch. */
 export interface ResolucionPayload {
+  /** Internal key + prefijo → the coproperty's Tabla de Documentos código,
+   *  which is what `documento` carries (Comptable has no categories: it
+   *  names documents by tipo and/or prefijo only). */
+  codigoDe: ResolverCodigoDocumento;
   anchorMap: Map<string, AnchorInfo>;
   conceptoMap: Map<string, string>;
   saldosInicialesPorNumero: Map<number, DocumentoCruceSaldoInicial>;
@@ -42,6 +47,7 @@ export type TitularComptable = Pick<
   | 'telefono'
   | 'direccion'
   | 'ciudad'
+  | 'ciudadCodigo'
 >;
 
 /** Inmueble code → its titular, or `null` when it has none (or the code
@@ -106,6 +112,7 @@ const terceroDe = (
       telefono: null,
       direccion: null,
       ciudad: null,
+      ciudadCodigo: null,
     };
   }
   const juridica = titular.tipoPersona === 'juridica';
@@ -134,6 +141,7 @@ const terceroDe = (
     telefono: textoONull(titular.telefono),
     direccion: textoONull(titular.direccion),
     ciudad: textoONull(titular.ciudad),
+    ciudadCodigo: textoONull(titular.ciudadCodigo),
   };
 };
 
@@ -143,7 +151,8 @@ const terceroDe = (
  * with the same `ResolucionDocumentosService` the CSV export uses, so both
  * channels name a document identically:
  *
- * - `documento` = `tipoDocumentoDe`; `prefijo`/`numero` = the anchor
+ * - `documento` = the Tabla de Documentos código of the anchor
+ *   (`resolucion.codigoDe`), never the internal key; `prefijo`/`numero` = the anchor
  *   document's own fields, sent separately (never the CSV's glued key).
  * - `descripcion` and every line's `detalle` = `detalleDeAsiento` (MOVMES's
  *   detalle and MOVMESDO's, which are the same text).
@@ -221,7 +230,10 @@ function asientoDe(
   );
 
   return {
-    documento: tipoDocumentoDe(asiento),
+    documento: resolucion.codigoDe(
+      tipoDocumentoDe(asiento),
+      anchor?.prefix ?? '',
+    ),
     prefijo: anchor?.prefix ?? '',
     numero: anchor?.number ?? 0,
     fecha: fechaIso(asiento.fecha),
