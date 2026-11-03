@@ -38,4 +38,9 @@ export default registerAs('app', () => ({
   // screen reports; never a boot error.
   comptableApiUrl: process.env.COMPTABLE_API_URL,
   comptableHmacSecret: process.env.COMPTABLE_HMAC_SECRET,
+  // Integrations panel — the secret is required by Joi only when the switch is
+  // on; the switch is off unless explicitly set (see env.validation.ts).
+  panelHmacSecret: process.env.PANEL_HMAC_SECRET,
+  integracionPanelHabilitada:
+    process.env.INTEGRACION_PANEL_HABILITADA?.toLowerCase() === 'true',
 }));

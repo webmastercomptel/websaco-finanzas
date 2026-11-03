@@ -2810,3 +2810,19 @@ export interface PropietariosWebsaco3 {
   copropiedad: { nombre: string };
   unidades: UnidadPropietarioWebsaco3[];
 }
+
+// ── Integrations panel ───────────────────────────────────────────────────
+
+/**
+ * One record as the integrations panel sees it (`GET integraciones/panel/
+ * registros`). Deliberately small: the panel only needs to recognise the
+ * record and know what it is already linked to. `nit` is `nit-dv` when the
+ * system keeps the check digit apart; `vinculos` lists only the set links,
+ * named with the panel's system names (`comptable`, `administracion`).
+ */
+export interface RegistroPanel {
+  id: string;
+  nombre: string;
+  nit: string | null;
+  vinculos: { sistema: 'comptable' | 'administracion'; registroId: string }[];
+}

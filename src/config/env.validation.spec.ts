@@ -252,6 +252,79 @@ describe('envValidationSchema', () => {
     });
   });
 
+  describe('panel de integraciones', () => {
+    const SECRETO = 'panel-secreto-compartido-de-32-caracteres-x';
+
+    it('arranca sin ninguna de las dos', () => {
+      expect(validate({}).error).toBeUndefined();
+    });
+
+    it('el interruptor apagado no exige el secreto', () => {
+      expect(
+        validate({ INTEGRACION_PANEL_HABILITADA: 'false' }).error,
+      ).toBeUndefined();
+    });
+
+    it('el interruptor encendido sin secreto falla nombrando la variable', () => {
+      const { error } = validate({ INTEGRACION_PANEL_HABILITADA: 'true' });
+
+      expect(error?.message).toContain('PANEL_HMAC_SECRET');
+    });
+
+    it('el interruptor encendido con secreto arranca', () => {
+      const { error } = validate({
+        INTEGRACION_PANEL_HABILITADA: 'true',
+        PANEL_HMAC_SECRET: SECRETO,
+      });
+
+      expect(error).toBeUndefined();
+    });
+
+    it('el secreto solo (interruptor apagado por defecto) es válido', () => {
+      expect(validate({ PANEL_HMAC_SECRET: SECRETO }).error).toBeUndefined();
+    });
+
+    it('un secreto de 31 caracteres falla', () => {
+      const { error } = validate({ PANEL_HMAC_SECRET: 'x'.repeat(31) });
+
+      expect(error?.message).toContain('PANEL_HMAC_SECRET');
+    });
+
+    it('un secreto vacío cuenta como ausente', () => {
+      expect(validate({ PANEL_HMAC_SECRET: '' }).error).toBeUndefined();
+      expect(
+        validate({
+          INTEGRACION_PANEL_HABILITADA: 'true',
+          PANEL_HMAC_SECRET: '',
+        }).error?.message,
+      ).toContain('PANEL_HMAC_SECRET');
+    });
+
+    it('el secreto del panel no puede ser el de Comptable ni el de WebSaco3', () => {
+      for (const clave of ['COMPTABLE_HMAC_SECRET', 'WEBSACO3_HMAC_SECRET']) {
+        const extra: Record<string, unknown> =
+          clave === 'COMPTABLE_HMAC_SECRET'
+            ? {
+                COMPTABLE_API_URL: 'https://comptable.ejemplo.com/api/v1',
+              }
+            : {};
+        const { error } = validate({
+          ...extra,
+          [clave]: SECRETO,
+          PANEL_HMAC_SECRET: SECRETO,
+        });
+
+        expect(error?.message).toContain('PANEL_HMAC_SECRET');
+      }
+    });
+
+    it('apagado por defecto', () => {
+      const value = validate({}).value as Record<string, unknown>;
+
+      expect(value.INTEGRACION_PANEL_HABILITADA).toBe(false);
+    });
+  });
+
   describe('credenciales de Firebase', () => {
     it('exige la credencial de servicio', () => {
       // No existe un modo "sin autenticación": si falta, no arranca.

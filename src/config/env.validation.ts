@@ -141,6 +141,25 @@ export const envValidationSchema = Joi.object({
     })
     .optional(),
   COMPTABLE_HMAC_SECRET: Joi.string().min(32).optional(),
+
+  // Integrations panel (see modules/integraciones-panel/ and
+  // docs/runbooks/integracion-panel.md). The switch is OFF by default: a
+  // deployment that never heard of the panel behaves exactly as before. With
+  // the switch on, the secret is mandatory — a module that answers with no way
+  // to authenticate its caller would be a hole, so boot fails naming it. The
+  // secret is shared with the panel and the other three systems and must be
+  // DIFFERENT from COMPTABLE_HMAC_SECRET and WEBSACO3_HMAC_SECRET (it rotates
+  // on its own). An empty value counts as absent.
+  INTEGRACION_PANEL_HABILITADA: Joi.boolean().default(false),
+  PANEL_HMAC_SECRET: Joi.string()
+    .min(32)
+    .empty('')
+    .invalid(Joi.ref('COMPTABLE_HMAC_SECRET'), Joi.ref('WEBSACO3_HMAC_SECRET'))
+    .when('INTEGRACION_PANEL_HABILITADA', {
+      is: true,
+      then: Joi.required(),
+      otherwise: Joi.optional(),
+    }),
 })
   .and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')
   .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET')

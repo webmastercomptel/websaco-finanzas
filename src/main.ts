@@ -17,7 +17,9 @@ import { configureApp } from './app-setup';
  * filter or interceptor here instead would put it outside that coverage.
  */
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `rawBody` keeps the exact bytes of every request body: the integrations
+  // panel signs its bodies and `FirmaPanelGuard` verifies over those bytes.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = app.get(ConfigService);
 
   configureApp(app, {
