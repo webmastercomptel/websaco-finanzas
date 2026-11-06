@@ -64,6 +64,6 @@ import { NOMBRE_COLA_APLICACION_LOTE_RECIBOS } from '../recibos/colas/aplicacion
   // anular-a-Factura feature (which needs NotasCreditoService) lives in
   // `NotasCreditoModule` instead, precisely to avoid this — see that
   // module's own comment.
-  exports: [LotesFacturacionService],
+  exports: [LotesFacturacionService, FacturasService],
 })
 export class FacturacionModule {}

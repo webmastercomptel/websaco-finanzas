@@ -16,6 +16,7 @@ import {
 } from './check-ability.decorator';
 import type { RequiredRule } from './check-ability.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { exigirModulo } from '../../common/licencia/exigir-modulo';
 
 interface AuthenticatedRequest extends Request {
   user?: IRequestUser;
@@ -71,11 +72,7 @@ export class PoliciesGuard implements CanActivate {
       MODULO_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (modulo && !(user.modulos as string[] | undefined)?.includes(modulo)) {
-      throw new ForbiddenException(
-        'Tu copropiedad no tiene contratado este módulo',
-      );
-    }
+    exigirModulo(modulo, user);
 
     // Default-deny: a route under this guard must declare what it needs. No
     // rules and no explicit `@AuthenticatedOnly()` means the route was forgotten,

@@ -20,11 +20,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
 import { PresentacionDocumentoService } from '../../common/documentos/presentacion-documento.service';
 import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
-import { extraerPaginaPdf } from '../../common/documentos/extraer-pagina-pdf.util';
-import {
-  esAnulado,
-  estamparAnulado,
-} from '../../common/documentos/estampar-anulado.util';
+import { paginaIndividualDeFactura } from './factura-pdf.util';
 import { toPlantilla } from '../plantillas-documento/plantillas-documento.mapper';
 import {
   Copropiedad,
@@ -175,37 +171,15 @@ export class FacturasController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     const factura = await this.facturas.findOneRaw(id);
-    if (!factura.printSnapshot || factura.paginaEnLote === null) {
-      throw new NotFoundException(
-        `La factura ${id} todavía no tiene una página individual disponible`,
-      );
-    }
-
-    const presentacionLote = await this.presentacionDocumento.buscar(
-      'FV',
-      factura.loteId,
+    // Extracted fresh per request (see this method's own docblock). The
+    // "ANULADA" read-time stamping lives in the shared helper, because a
+    // Factura can be voided AFTER its lote's PDF was already frozen.
+    const bytesRespuesta = await paginaIndividualDeFactura(
+      id,
+      factura,
+      this.presentacionDocumento,
+      this.storage,
     );
-    if (!presentacionLote) {
-      throw new NotFoundException(
-        `La factura ${id} todavía no tiene una página individual disponible`,
-      );
-    }
-
-    const bytesCombinado = await this.storage.descargarBytes(
-      presentacionLote.objectPath,
-    );
-    const bytesPagina = await extraerPaginaPdf(
-      bytesCombinado,
-      factura.paginaEnLote,
-    );
-    // Extracted fresh per request (see this method's own docblock) — this is
-    // also where `estado` gets checked, since a Factura can be voided AFTER
-    // its lote's PDF was already frozen. Same read-time-only stamping as
-    // `GeneracionDocumentoService.documentoPdf` uses for the other five
-    // document types; the frozen combined file in Storage is never touched.
-    const bytesRespuesta = esAnulado(factura.estado)
-      ? await estamparAnulado(Buffer.from(bytesPagina), factura.estado)
-      : bytesPagina;
 
     res.set({
       'Content-Type': 'application/pdf',

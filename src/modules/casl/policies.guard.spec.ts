@@ -277,3 +277,32 @@ describe('PoliciesGuard — licencia por módulo (@Modulo)', () => {
     ).toBe(true);
   });
 });
+
+describe('PoliciesGuard — aislamiento de residentes', () => {
+  const residente: IRequestUser = {
+    uid: 'uid-res',
+    email: 'ana@ejemplo.com',
+    accountId: 'acc-1',
+    copropiedadId: 'cop-1',
+    esResidente: true,
+    modulos: ['finanzas'],
+    permissions: [],
+  };
+  const rutasAdministrativas: RequiredRule[][] = [
+    [{ action: 'read', subject: 'Factura' }],
+    [{ action: 'read', subject: 'Recibo' }],
+    [{ action: 'read', subject: 'Consulta' }],
+    [{ action: 'read', subject: 'Inmueble' }],
+    [{ action: 'read', subject: 'Tercero' }],
+    [{ action: 'create', subject: 'Factura' }],
+  ];
+
+  it.each(rutasAdministrativas)(
+    'un residente recibe 403 en una ruta administrativa (%j)',
+    (...reglas) => {
+      expect(() =>
+        guardFor(reglas).canActivate(contextWith(residente)),
+      ).toThrow(ForbiddenException);
+    },
+  );
+});

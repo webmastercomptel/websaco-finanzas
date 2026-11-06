@@ -112,5 +112,7 @@ import {
     InicioResumenService,
     PistaAuditoriaService,
   ],
+  // The resident portal reads an owner's statement of account through this.
+  exports: [EstadoCuentaService],
 })
 export class ConsultasModule {}

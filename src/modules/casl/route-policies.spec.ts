@@ -93,6 +93,15 @@ export function routeProblem(
       ? null
       : 'PlatformAdminGuard runs before FirebaseAuthGuard';
   }
+  if (guards.includes('PortalGuard')) {
+    if (at('FirebaseAuthGuard') > at('PortalGuard')) {
+      return 'PortalGuard runs before FirebaseAuthGuard';
+    }
+    const modulo =
+      (Reflect.getMetadata(MODULO_KEY, handler) as string | undefined) ??
+      (Reflect.getMetadata(MODULO_KEY, controller) as string | undefined);
+    return modulo ? null : 'under PortalGuard without @Modulo';
+  }
   if (guards.includes('PoliciesGuard')) {
     if (at('FirebaseAuthGuard') > at('PoliciesGuard')) {
       return 'PoliciesGuard runs before FirebaseAuthGuard';
@@ -200,6 +209,18 @@ describe('routeProblem (classifier)', () => {
     expect(routeProblem(c, h)).toMatch(/AuthenticatedOnly/);
     Reflect.defineMetadata(AUTHENTICATED_ONLY_KEY, true, h);
     expect(routeProblem(c, h)).toBeNull();
+  });
+
+  it('acepta PortalGuard tras FirebaseAuthGuard con @Modulo, y rechaza sin @Modulo', () => {
+    const Portal = class PortalGuard {};
+    const [c, h] = make([Auth, Portal]);
+    expect(routeProblem(c, h)).toBe('under PortalGuard without @Modulo');
+    Reflect.defineMetadata(MODULO_KEY, 'finanzas', c);
+    expect(routeProblem(c, h)).toBeNull();
+    const [c2, h2] = make([Portal, Auth]);
+    expect(routeProblem(c2, h2)).toBe(
+      'PortalGuard runs before FirebaseAuthGuard',
+    );
   });
 
   it('rechaza PlatformAdminGuard antes que FirebaseAuthGuard', () => {
