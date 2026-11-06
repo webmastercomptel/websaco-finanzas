@@ -1,5 +1,6 @@
 // src/modules/usuarios/usuarios.service.ts
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -24,6 +25,35 @@ import type {
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import {
+  permisosDesconocidos,
+  permisosVetadosParaPerfil,
+  type PerfilAsignacion,
+} from '../casl/permisos-catalogo';
+
+/**
+ * Rejects a permission list that names keys outside the catalog, or that gives
+ * operational staff anything of Finanzas (the hard ceiling). Runs before any
+ * side effect, so a refused request leaves nothing half-created.
+ */
+const exigirPermisosValidos = (
+  perfil: PerfilAsignacion,
+  permisos: readonly string[] | undefined,
+): void => {
+  if (!permisos || permisos.length === 0) return;
+  const desconocidos = permisosDesconocidos(permisos);
+  if (desconocidos.length > 0) {
+    throw new BadRequestException(
+      `Permisos que no existen: ${desconocidos.join(', ')}`,
+    );
+  }
+  const vetados = permisosVetadosParaPerfil(perfil, permisos);
+  if (vetados.length > 0) {
+    throw new BadRequestException(
+      `El personal operativo no puede tener permisos de Finanzas: ${vetados.join(', ')}`,
+    );
+  }
+};
 
 /** A Firebase uid an administrator has not yet claimed — see seed-admin.ts. */
 const esIdentidadReal = (firebaseUid: string): boolean =>
@@ -114,6 +144,8 @@ export class UsuariosService {
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
+    const perfil = dto.perfil ?? 'administrativo';
+    exigirPermisosValidos(perfil, dto.permisos);
 
     const yaExiste = await this.accounts.exists({ email: correo }).exec();
     if (yaExiste) {
@@ -149,6 +181,7 @@ export class UsuariosService {
             ? new Types.ObjectId(dto.entidadId)
             : null,
         permisos: dto.permisos ?? [],
+        perfil,
         estado: 'active',
       });
     }
@@ -177,6 +210,14 @@ export class UsuariosService {
     dto: ActualizarUsuarioDto,
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
+    // Only what the request itself says is checkable here; the combination with
+    // the stored profile is checked when the assignment is written.
+    if (dto.perfil !== undefined) {
+      exigirPermisosValidos(dto.perfil, dto.permisos);
+    } else {
+      exigirPermisosValidos('administrativo', dto.permisos);
+    }
+
     const cuenta = await this.accounts.findById(id).exec();
     if (!cuenta) {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
@@ -250,10 +291,20 @@ export class UsuariosService {
         ? actual.copropiedadId?.toString() === dto.copropiedadId
         : actual.entidadId?.toString() === dto.entidadId);
 
+    // The profile that will apply, and the permissions it will hold: checked
+    // against the ceiling before anything is written.
+    const perfil: PerfilAsignacion =
+      dto.perfil ?? actual?.perfil ?? 'administrativo';
+    exigirPermisosValidos(
+      perfil,
+      dto.permisos ?? (mismoObjetivo ? actual.permisos : []),
+    );
+
     if (mismoObjetivo) {
       // Same target: changing what someone may do there is not the same
       // event as changing WHERE they may do it, and does not need a new row.
       actual.permisos = dto.permisos ?? actual.permisos;
+      actual.perfil = perfil;
       await actual.save();
       return;
     }
@@ -275,6 +326,7 @@ export class UsuariosService {
           ? new Types.ObjectId(dto.entidadId)
           : null,
       permisos: dto.permisos ?? [],
+      perfil,
       estado: 'active',
     });
   }

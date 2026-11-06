@@ -329,3 +329,59 @@ describe('AccesoService residentes (portal)', () => {
     });
   });
 });
+
+describe('AccesoService techo duro al leer', () => {
+  it('una asignación de perfil personal pierde las claves de finanzas aunque estén guardadas', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'recibos.crear'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([]);
+  });
+
+  it('el recorte también aplica a un grant por entidad', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          perfil: 'personal',
+          permisos: ['facturas.ver'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
+      copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([]);
+  });
+
+  it('una asignación sin perfil (legado) se trata como administrativa', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          permisos: ['facturas.ver'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['facturas.ver']);
+  });
+});

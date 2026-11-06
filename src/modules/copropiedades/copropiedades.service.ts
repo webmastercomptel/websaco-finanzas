@@ -253,6 +253,8 @@ export class CopropiedadesService {
         alcance: 'copropiedad',
         copropiedadId: { $in: coPropertyIds },
         estado: 'active',
+        // Operational staff are not the building's administrators.
+        perfil: { $ne: 'personal' },
       })
       .exec();
     if (asignaciones.length === 0) return new Map();

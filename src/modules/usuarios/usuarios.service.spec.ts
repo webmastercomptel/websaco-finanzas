@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import { UsuariosService } from './usuarios.service';
 import type { FirebaseUsuariosService } from '../../common/firebase/firebase-usuarios.service';
@@ -527,5 +531,72 @@ describe('UsuariosService.update', () => {
     await expect(
       service.update(cuenta._id.toString(), { estado: 'inactivo' }, ACTOR),
     ).rejects.toThrow('audit down');
+  });
+});
+
+describe('UsuariosService — techo duro del personal operativo', () => {
+  const COP = new Types.ObjectId().toString();
+  const base = {
+    nombre: 'Luis',
+    email: 'luis@ejemplo.com',
+    password: 'clave123',
+    alcance: 'copropiedad' as const,
+    copropiedadId: COP,
+  };
+
+  const servicio = () => {
+    const { accounts, asignacionesModel } = construirModelos();
+    const { firebase, crear } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+    return { service, crear, accounts, asignacionesModel };
+  };
+
+  it('rechaza con 400 permisos de finanzas para el personal, ANTES de tocar Firebase', async () => {
+    const { service, crear } = servicio();
+
+    await expect(
+      service.create(
+        { ...base, perfil: 'personal', permisos: ['facturas.ver'] },
+        ACTOR,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(crear).not.toHaveBeenCalled();
+  });
+
+  it('rechaza con 400 claves de permiso que no existen en el catálogo', async () => {
+    const { service, crear } = servicio();
+
+    await expect(
+      service.create({ ...base, permisos: ['facturas.eliminar'] }, ACTOR),
+    ).rejects.toThrow(/facturas\.eliminar/);
+    expect(crear).not.toHaveBeenCalled();
+  });
+
+  it('un perfil administrativo conserva sus permisos de finanzas', async () => {
+    const { service, asignacionesModel } = servicio();
+
+    await service.create({ ...base, permisos: ['facturas.ver'] }, ACTOR);
+
+    expect(asignacionesModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        perfil: 'administrativo',
+        permisos: ['facturas.ver'],
+      }),
+    );
+  });
+
+  it('el personal sin permisos de finanzas se crea con su perfil', async () => {
+    const { service, asignacionesModel } = servicio();
+
+    await service.create({ ...base, perfil: 'personal', permisos: [] }, ACTOR);
+
+    expect(asignacionesModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ perfil: 'personal', permisos: [] }),
+    );
   });
 });

@@ -11,6 +11,10 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  PERFILES_ASIGNACION,
+  type PerfilAsignacion,
+} from '../../casl/permisos-catalogo';
 
 /**
  * Creating a user provisions BOTH a Firebase sign-in identity and the local
@@ -60,6 +64,9 @@ export class CrearUsuarioDto {
   @IsArray()
   @IsString({ each: true })
   permisos?: string[];
+  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
+  @IsIn(PERFILES_ASIGNACION)
+  perfil?: PerfilAsignacion;
 }
 
 /**
@@ -103,6 +110,9 @@ export class ActualizarUsuarioDto {
   @IsArray()
   @IsString({ each: true })
   permisos?: string[];
+  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
+  @IsIn(PERFILES_ASIGNACION)
+  perfil?: PerfilAsignacion;
 
   @IsOptional()
   @IsIn(['activo', 'inactivo'])

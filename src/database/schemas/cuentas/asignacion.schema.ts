@@ -43,6 +43,19 @@ export class Asignacion {
   })
   accountId: Types.ObjectId;
 
+  /**
+   * What kind of user holds this grant. `administrativo` runs the coproperty;
+   * `personal` is operational staff and can NEVER hold Finanzas permissions
+   * (hard ceiling, enforced when writing and again when reading). Legacy rows
+   * lack the key and read as `administrativo`.
+   */
+  @Prop({
+    required: true,
+    enum: ['administrativo', 'personal'],
+    default: 'administrativo',
+  })
+  perfil: 'administrativo' | 'personal';
+
   /** Which of the two shapes this grant is. */
   @Prop({ required: true, enum: ['copropiedad', 'entidad'] })
   alcance: 'copropiedad' | 'entidad';

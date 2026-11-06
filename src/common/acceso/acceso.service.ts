@@ -19,6 +19,20 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
+import {
+  sinPermisosVetados,
+  type PerfilAsignacion,
+} from '../../modules/casl/permisos-catalogo';
+
+/**
+ * Permissions an assignment really grants: the hard ceiling is applied on
+ * read too, so a row written before the ceiling existed (or edited straight in
+ * the database) can never hand Finanzas to operational staff.
+ */
+const permisosEfectivosDe = (a: {
+  perfil?: PerfilAsignacion;
+  permisos: string[];
+}): string[] => sinPermisosVetados(a.perfil ?? 'administrativo', a.permisos);
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {
@@ -101,7 +115,8 @@ export class AccesoService {
 
     const directas = asignaciones.filter((a) => a.alcance === 'copropiedad');
     for (const a of directas) {
-      if (a.copropiedadId) acumular(a.copropiedadId.toString(), a.permisos);
+      if (a.copropiedadId)
+        acumular(a.copropiedadId.toString(), permisosEfectivosDe(a));
     }
 
     const porEntidad = asignaciones.filter((a) => a.alcance === 'entidad');
@@ -142,7 +157,10 @@ export class AccesoService {
         // permissions of that grant land on each of them.
         const permisosPorEntidad = new Map<string, string[]>();
         for (const a of deEntidadesActivas) {
-          permisosPorEntidad.set(a.entidadId!.toString(), a.permisos);
+          permisosPorEntidad.set(
+            a.entidadId!.toString(),
+            permisosEfectivosDe(a),
+          );
         }
 
         for (const c of administradas) {
