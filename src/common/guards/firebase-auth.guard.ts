@@ -178,6 +178,7 @@ export class FirebaseAuthGuard implements CanActivate {
       copropiedadId: acceso.copropiedadId,
       permissions: acceso.permissions,
       modulos: acceso.modulos,
+      esResidente: acceso.esResidente,
     };
   }
 }

@@ -38,6 +38,7 @@ const acceso = (over: Partial<AccesoCopropiedad> = {}): AccesoCopropiedad => ({
   nombre: 'Terrazas',
   permissions: ['facturas.ver'],
   modulos: ['finanzas'],
+  esResidente: false,
   ...over,
 });
 

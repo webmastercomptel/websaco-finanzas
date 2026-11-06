@@ -14,6 +14,10 @@ import {
   EntidadAdministradora,
   EntidadAdministradoraDocument,
 } from '../../database/schemas/entidades/entidad-administradora.schema';
+import {
+  Tercero,
+  TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
@@ -24,6 +28,12 @@ export interface AccesoCopropiedad {
   permissions: string[];
   /** Product modules this coproperty has contracted (see `modulosEfectivos`). */
   modulos: ModuloProducto[];
+  /**
+   * Whether this account holds a unit here as owner or tenant (it is linked to
+   * a Tercero). A resident-only account carries no permissions: it reaches the
+   * portal routes, never the administrative ones.
+   */
+  esResidente: boolean;
 }
 
 @Injectable()
@@ -35,7 +45,21 @@ export class AccesoService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     @InjectModel(EntidadAdministradora.name)
     private readonly entidades: Model<EntidadAdministradoraDocument>,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
   ) {}
+
+  /** Ids of the coproperties where this account is linked to an active Tercero. */
+  private async copropiedadesComoResidente(
+    accountId: string,
+  ): Promise<Set<string>> {
+    const vinculados = await this.terceros
+      .find({ accountId: new Types.ObjectId(accountId), estado: 'active' })
+      .select('copropiedadId')
+      .lean()
+      .exec();
+    return new Set(vinculados.map((t) => t.copropiedadId.toString()));
+  }
 
   /**
    * Every coproperty this account may operate, with effective permissions.
@@ -60,7 +84,11 @@ export class AccesoService {
       .lean()
       .exec();
 
-    if (asignaciones.length === 0) return [];
+    // Coproperties where this account is a unit holder (owner or tenant) are
+    // reachable too, with NO permissions: residents never pass CASL, they use
+    // the portal routes.
+    const residente = await this.copropiedadesComoResidente(accountId);
+    if (asignaciones.length === 0 && residente.size === 0) return [];
 
     // Permissions keyed by coproperty, accumulated across both routes.
     const permisosPorCopropiedad = new Map<string, Set<string>>();
@@ -125,9 +153,16 @@ export class AccesoService {
       }
     }
 
-    return this.describir([...permisosPorCopropiedad.keys()], (id) => [
-      ...(permisosPorCopropiedad.get(id) ?? []),
-    ]);
+    for (const id of residente) {
+      if (!permisosPorCopropiedad.has(id))
+        permisosPorCopropiedad.set(id, new Set());
+    }
+
+    return this.describir(
+      [...permisosPorCopropiedad.keys()],
+      (id) => [...(permisosPorCopropiedad.get(id) ?? [])],
+      residente,
+    );
   }
 
   /**
@@ -165,6 +200,7 @@ export class AccesoService {
       // Left empty deliberately: a platform admin is granted everything by the
       // ability factory, not by carrying a copy of every permission key.
       permissions: [],
+      esResidente: false,
     }));
   }
 
@@ -188,6 +224,7 @@ export class AccesoService {
   private async describir(
     ids: string[],
     permisosDe: (id: string) => string[],
+    residente: Set<string>,
   ): Promise<AccesoCopropiedad[]> {
     if (ids.length === 0) return [];
 
@@ -207,6 +244,7 @@ export class AccesoService {
       nombre: c.nombre,
       modulos: modulosEfectivos(c),
       permissions: permisosDe(c._id.toString()),
+      esResidente: residente.has(c._id.toString()),
     }));
   }
 }

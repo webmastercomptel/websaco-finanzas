@@ -34,11 +34,13 @@ const servicio = (opts: {
   asignaciones?: Fila[];
   copropiedades?: Fila[];
   entidades?: Fila[];
+  terceros?: Fila[];
 }) =>
   new AccesoService(
     consulta(opts.asignaciones ?? []) as never,
     consulta(opts.copropiedades ?? []) as never,
     consulta(opts.entidades ?? []) as never,
+    consulta(opts.terceros ?? []) as never,
   );
 
 const copropiedad = (
@@ -258,5 +260,72 @@ describe('AccesoService módulos contratados', () => {
     const [resultado] = await service.copropiedadesDe(cuenta.toString(), true);
 
     expect(resultado.modulos).toEqual(['administracion']);
+  });
+});
+
+describe('AccesoService residentes (portal)', () => {
+  const asignacionA = {
+    alcance: 'copropiedad',
+    copropiedadId: copA,
+    permisos: ['facturas.ver'],
+  };
+
+  it('una cuenta solo residente ve su copropiedad con permisos vacíos', async () => {
+    const service = servicio({
+      terceros: [{ copropiedadId: copA }],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado).toMatchObject({
+      copropiedadId: copA.toString(),
+      permissions: [],
+      esResidente: true,
+    });
+  });
+
+  it('administrativa y residente en el mismo edificio conserva sus permisos', async () => {
+    const service = servicio({
+      asignaciones: [asignacionA],
+      terceros: [{ copropiedadId: copA }],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const resultado = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0]).toMatchObject({
+      permissions: ['facturas.ver'],
+      esResidente: true,
+    });
+  });
+
+  it('una cuenta administrativa que no es residente queda con esResidente false', async () => {
+    const service = servicio({
+      asignaciones: [asignacionA],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.esResidente).toBe(false);
+  });
+
+  it('solo cuentan los terceros activos de ESA cuenta', async () => {
+    const terceros = consulta([{ copropiedadId: copA }]);
+    const service = new AccesoService(
+      consulta([]) as never,
+      consulta([copropiedad(copA, 'COP-A')]) as never,
+      consulta([]) as never,
+      terceros as never,
+    );
+
+    await service.copropiedadesDe(cuenta.toString());
+
+    expect(terceros.find).toHaveBeenCalledWith({
+      accountId: cuenta,
+      estado: 'active',
+    });
   });
 });

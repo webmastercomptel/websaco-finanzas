@@ -53,6 +53,7 @@ export class AuthController {
         codigo: c.codigo,
         nombre: c.nombre,
         modulos: c.modulos,
+        esResidente: c.esResidente,
       })),
       alcance,
     };

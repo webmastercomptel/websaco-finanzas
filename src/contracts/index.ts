@@ -1977,6 +1977,8 @@ export interface CopropiedadResumen {
 export interface CopropiedadAccesible extends CopropiedadResumen {
   /** Contracted modules (`finanzas`, `administracion`); drives the menu, never access. */
   modulos: string[];
+  /** The caller holds a unit here as owner or tenant (portal access). */
+  esResidente: boolean;
 }
 
 /** One row's outcome from a bulk upload of one-off charges that could not be processed. */

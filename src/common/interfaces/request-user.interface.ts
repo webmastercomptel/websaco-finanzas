@@ -29,6 +29,8 @@ export interface IRequestUser {
    * coproperty is active, which denies every route that declares a module.
    */
   modulos?: ModuloProducto[];
+  /** True when the account holds a unit in the active coproperty (portal access). */
+  esResidente?: boolean;
   /** Role ids backing the permissions below. */
   roleIds?: string[];
   /** Union of permission keys (`modulo.accion`) across the caller's roles. */

@@ -61,6 +61,7 @@ describe('AuthController.me', () => {
         nombre: 'Terrazas de Granada',
         permissions: ['facturas.ver'],
         modulos: ['finanzas', 'administracion'],
+        esResidente: false,
       },
     ]);
     const controller = new AuthController(servicio);
@@ -73,6 +74,7 @@ describe('AuthController.me', () => {
         codigo: 'COP-001',
         nombre: 'Terrazas de Granada',
         modulos: ['finanzas', 'administracion'],
+        esResidente: false,
       },
     ]);
   });
@@ -88,6 +90,7 @@ describe('AuthController.me', () => {
         nombre: 'Terrazas',
         permissions: ['facturas.anular'],
         modulos: ['finanzas'],
+        esResidente: false,
       },
     ]);
     const controller = new AuthController(servicio);
