@@ -19,12 +19,13 @@ export type TerceroDocument = HydratedDocument<Tercero>;
  * copy of the party they were made out to. Correcting a typo today must never
  * change what a receipt from two years ago says.
  *
- * A `Tercero` is DATA ABOUT a person, never a user of this system. Only the
- * administrator of a coproperty signs in here; unit owners and tenants never
- * do. So this record carries no identity, no credentials and no permissions,
- * and its `email` is where a document gets sent, not a way to log in. Anything
- * shaped like a resident portal — "my invoices", self-service payment, an owner
- * login — is outside this product.
+ * A `Tercero` is DATA ABOUT a person. It carries no credentials and no
+ * permissions, and its `emails` are where a document gets sent, not a way to
+ * log in. A unit's owner or tenant MAY have an account (`accountId`): that link
+ * is what lets them reach the portal ("my invoice") for the units they hold.
+ * It grants nothing by itself, never appears in the API contract, and a
+ * resident account holds no administrative permissions — see
+ * `PortalAccesoService`.
  */
 @Schema({ timestamps: true, collection: 'terceros' })
 export class Tercero {
@@ -109,6 +110,20 @@ export class Tercero {
    */
   @Prop({ type: [String], default: [] })
   emails: string[];
+
+  /**
+   * The login account of this person, when they have one (resident portal).
+   * Null for parties that only receive documents. One account maps to at most
+   * one Tercero per coproperty (partial unique index below). Internal: the
+   * mapper never exposes it, so no response can reveal which accounts are
+   * linked.
+   */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: 'Account',
+    default: null,
+  })
+  accountId: Types.ObjectId | null;
 
   @Prop({ type: String, default: null, trim: true })
   telefono: string | null;
@@ -203,5 +218,15 @@ TerceroSchema.index(
   {
     unique: true,
     partialFilterExpression: { numeroIdentificacion: { $type: 'string' } },
+  },
+);
+
+// One login account is one party per coproperty, so the portal can resolve
+// "my units" without ambiguity. Partial: most parties have no account.
+TerceroSchema.index(
+  { copropiedadId: 1, accountId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { accountId: { $type: 'objectId' } },
   },
 );
