@@ -5,27 +5,48 @@
 // `permission-map.ts` uses to build abilities, so the two can never disagree
 // about what a key means.
 import type { ModuloProducto } from '../../common/licencia/modulos';
-import { MODULE_TO_SUBJECT, VERB_TO_ACTION } from './permission-map';
+import {
+  MODULE_TO_SUBJECT,
+  MODULE_TO_SUBJECT_ADMINISTRACION,
+  VERB_TO_ACTION,
+  VERB_TO_ACTION_ADMINISTRACION,
+} from './permission-map';
 
 /** `administrativo` runs the coproperty; `personal` is operational staff. */
 export const PERFILES_ASIGNACION = ['administrativo', 'personal'] as const;
 export type PerfilAsignacion = (typeof PERFILES_ASIGNACION)[number];
 
 /**
- * Module that owns each `modulo` segment of a permission key. Every key known
- * today is Finanzas; Administración keys are registered here when they exist.
+ * Module that owns each `modulo` segment of a permission key: the financial
+ * segments belong to Finanzas, the building-management ones to Administración.
  */
-const MODULO_DE_SEGMENTO: Record<string, ModuloProducto> = Object.fromEntries(
-  Object.keys(MODULE_TO_SUBJECT).map((segmento) => [segmento, 'finanzas']),
-);
+const MODULO_DE_SEGMENTO: Record<string, ModuloProducto> = {
+  ...Object.fromEntries(
+    Object.keys(MODULE_TO_SUBJECT).map((segmento) => [segmento, 'finanzas']),
+  ),
+  ...Object.fromEntries(
+    Object.keys(MODULE_TO_SUBJECT_ADMINISTRACION).map((segmento) => [
+      segmento,
+      'administracion',
+    ]),
+  ),
+};
 
-/** The module that owns a `modulo.verbo` key, or null when the key is unknown. */
+/**
+ * The module that owns a `modulo.verbo` key, or null when the key is unknown.
+ * Verbs are checked against the module's own vocabulary: `eliminar`, `subir`
+ * and `actualizar` exist only for Administración keys.
+ */
 export function moduloDePermiso(clave: string): ModuloProducto | null {
   const partes = clave.split('.');
   if (partes.length !== 2) return null;
   const [segmento, verbo] = partes;
-  if (!(verbo in VERB_TO_ACTION)) return null;
-  return MODULO_DE_SEGMENTO[segmento] ?? null;
+  const modulo = MODULO_DE_SEGMENTO[segmento];
+  if (!modulo) return null;
+  const verboValido =
+    verbo in VERB_TO_ACTION ||
+    (modulo === 'administracion' && verbo in VERB_TO_ACTION_ADMINISTRACION);
+  return verboValido ? modulo : null;
 }
 
 /** Keys that are not in the catalog (typos, removed verbs, invented modules). */

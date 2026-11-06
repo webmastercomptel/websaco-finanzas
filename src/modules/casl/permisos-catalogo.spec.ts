@@ -42,3 +42,31 @@ describe('techo duro por perfil', () => {
     expect(sinPermisosVetados('administrativo', claves)).toEqual(claves);
   });
 });
+
+describe('claves de Administración', () => {
+  it('pertenecen al módulo administracion, incluidos sus verbos propios', () => {
+    expect(moduloDePermiso('anuncios.ver')).toBe('administracion');
+    expect(moduloDePermiso('anuncios.eliminar')).toBe('administracion');
+    expect(moduloDePermiso('documentos-administracion.subir')).toBe(
+      'administracion',
+    );
+    expect(moduloDePermiso('tareas.actualizar')).toBe('administracion');
+  });
+
+  it('un verbo propio de Administración no vale en un módulo financiero', () => {
+    expect(moduloDePermiso('facturas.eliminar')).toBeNull();
+    expect(moduloDePermiso('recibos.subir')).toBeNull();
+  });
+
+  it('el personal operativo puede tener claves de Administración pero no de Finanzas', () => {
+    const claves = ['anuncios.ver', 'pqr.gestionar', 'facturas.ver'];
+
+    expect(permisosVetadosParaPerfil('personal', claves)).toEqual([
+      'facturas.ver',
+    ]);
+    expect(sinPermisosVetados('personal', claves)).toEqual([
+      'anuncios.ver',
+      'pqr.gestionar',
+    ]);
+  });
+});

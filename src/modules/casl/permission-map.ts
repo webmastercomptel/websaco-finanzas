@@ -38,6 +38,38 @@ export const MODULE_TO_SUBJECT = {
 } satisfies Record<string, Subject>;
 
 /**
+ * Building-management (Administración) `modulo` segments -> CASL subject.
+ * Kept apart from the financial map so a segment's module is never ambiguous:
+ * `documentos` stays Finanzas (it maps to `Configuracion`), and the building
+ * management one is `documentos-administracion`.
+ */
+export const MODULE_TO_SUBJECT_ADMINISTRACION = {
+  dashboard: 'Dashboard',
+  anuncios: 'Anuncio',
+  usuarios: 'Usuario',
+  pqr: 'Pqr',
+  reservas: 'Reserva',
+  'documentos-administracion': 'Documento',
+  config: 'Config',
+  roles: 'Rol',
+  tareas: 'Tarea',
+  mantenimientos: 'Mantenimiento',
+  actividades: 'Actividad',
+  zonas: 'Zona',
+  tecnicos: 'Tecnico',
+} satisfies Record<string, Subject>;
+
+/**
+ * Verbs only the Administración keys understand, on top of `VERB_TO_ACTION`.
+ * `eliminar` -> `remove` is the one the financial side must never have.
+ */
+export const VERB_TO_ACTION_ADMINISTRACION = {
+  subir: 'create',
+  actualizar: 'update',
+  eliminar: 'remove',
+} satisfies Record<string, Action>;
+
+/**
  * `accion` segment of a permission key -> CASL action.
  *
  * There is no `eliminar` verb, and adding one would be a bug: see the note on
@@ -63,22 +95,43 @@ export function rulesFromPermissionKeys(
   keys: string[],
   opts: { platformAdmin?: boolean } = {},
 ): AppRule[] {
-  const { can, rules } = new AbilityBuilder<AppAbility>(createMongoAbility);
+  const { can, cannot, rules } = new AbilityBuilder<AppAbility>(
+    createMongoAbility,
+  );
+  // CASL's `manage` covers every action, `remove` included. Nothing financial is
+  // ever physically removed, so `remove` is vetoed on every financial subject
+  // AFTER the grants (later rules win) — for platform admins too.
+  const vetarRemoveFinanciero = (): void => {
+    cannot('remove', Object.values(MODULE_TO_SUBJECT) as Subject[]);
+  };
 
   if (opts.platformAdmin) {
     can('manage', 'all');
+    vetarRemoveFinanciero();
     return rules;
   }
 
   for (const key of keys) {
     const [modulo, verbo] = key.split('.');
-    const subject = MODULE_TO_SUBJECT[
+    const financiero = MODULE_TO_SUBJECT[
       modulo as keyof typeof MODULE_TO_SUBJECT
     ] as Subject | undefined;
-    const action = VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION];
+    const administracion = MODULE_TO_SUBJECT_ADMINISTRACION[
+      modulo as keyof typeof MODULE_TO_SUBJECT_ADMINISTRACION
+    ] as Subject | undefined;
+    const subject = financiero ?? administracion;
+    // Only the building-management side knows `subir`/`actualizar`/`eliminar`.
+    // A financial key with such a verb is simply unknown, which means DENY.
+    const action = financiero
+      ? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]
+      : (VERB_TO_ACTION_ADMINISTRACION[
+          verbo as keyof typeof VERB_TO_ACTION_ADMINISTRACION
+        ] ?? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]);
     if (!subject || !action) continue;
     can(action, subject);
   }
 
+  // Only when something was granted: an empty key list must stay an empty rule set.
+  if (rules.length > 0) vetarRemoveFinanciero();
   return rules;
 }

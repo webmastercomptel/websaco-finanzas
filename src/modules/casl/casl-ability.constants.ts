@@ -27,6 +27,12 @@ export const ACTIONS = [
   'annul',
   'approve',
   'export',
+  // Physically removing a NON-financial record (an announcement, a task, a
+  // document of the building-management side). Only the Administración
+  // permission keys can produce it (`eliminar`), and no financial subject can
+  // ever receive it — `permission-map.ts` drops it there. It is not `delete`
+  // on purpose: the audit law's "there is no delete action" stays literally true.
+  'remove',
   // Deliberately NOT `delete` — see the note above. The cycle reset that
   // physically deletes documents is NOT a CASL action at all: it sits behind
   // `PlatformAdminGuard` (see `ReiniciarCicloController`), so no role a
@@ -67,6 +73,21 @@ export const SUBJECTS = [
   // exports the CSV is not automatically allowed to push asientos into
   // another company's books, nor to withdraw them (`annul` = retirar).
   'InterfazComptable',
+  // Building-management (Administración) subjects. Unlike the financial ones,
+  // these records may be physically removed (`remove`).
+  'Dashboard',
+  'Anuncio',
+  'Usuario',
+  'Pqr',
+  'Reserva',
+  'Documento',
+  'Config',
+  'Rol',
+  'Tarea',
+  'Mantenimiento',
+  'Actividad',
+  'Zona',
+  'Tecnico',
   'all', // CASL alias: every subject
 ] as const;
 export type Subject = (typeof SUBJECTS)[number];

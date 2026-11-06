@@ -443,3 +443,52 @@ describe('permisos de Interfaz a Comptable', () => {
     expect(ability.can('create', 'Configuracion')).toBe(false);
   });
 });
+
+describe('permisos de Administración', () => {
+  it('traduce una clave de Administración a su regla CASL', () => {
+    const ability = abilityFor(['anuncios.crear', 'tareas.actualizar']);
+
+    expect(ability.can('create', 'Anuncio')).toBe(true);
+    expect(ability.can('update', 'Tarea')).toBe(true);
+    expect(ability.can('read', 'Anuncio')).toBe(false);
+  });
+
+  it('"eliminar" existe solo en Administración y se traduce a la acción "remove"', () => {
+    const ability = abilityFor(['anuncios.eliminar']);
+
+    expect(ability.can('remove', 'Anuncio')).toBe(true);
+    expect(ability.can('manage', 'Anuncio')).toBe(false);
+  });
+
+  it('"eliminar" sobre un módulo financiero se ignora: nada financiero se borra', () => {
+    const ability = abilityFor(['facturas.eliminar', 'recibos.eliminar']);
+
+    expect(ability.can('remove', 'Factura')).toBe(false);
+    expect(ability.can('remove', 'Recibo')).toBe(false);
+    expect(ability.can('read', 'Factura')).toBe(false);
+  });
+
+  it('"remove" no puede aplicarse a ninguna materia financiera ni siquiera con gestionar', () => {
+    const ability = abilityFor(['facturas.gestionar', 'documentos.gestionar']);
+
+    expect(ability.can('remove', 'Factura')).toBe(false);
+    expect(ability.can('remove', 'Configuracion')).toBe(false);
+  });
+
+  it('"documentos" sigue siendo de Finanzas y el de Administración tiene su propio segmento', () => {
+    expect(abilityFor(['documentos.ver']).can('read', 'Configuracion')).toBe(
+      true,
+    );
+    expect(abilityFor(['documentos.ver']).can('read', 'Documento')).toBe(false);
+    expect(
+      abilityFor(['documentos-administracion.ver']).can('read', 'Documento'),
+    ).toBe(true);
+  });
+
+  it('"gestionar" en Administración concede todo sobre su materia, incluido remove', () => {
+    const ability = abilityFor(['pqr.gestionar']);
+
+    expect(ability.can('remove', 'Pqr')).toBe(true);
+    expect(ability.can('read', 'Anuncio')).toBe(false);
+  });
+});
