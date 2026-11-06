@@ -12,6 +12,7 @@ import { Types } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoteRecibosService } from './lote-recibos.service';
 import { CrearLoteRecibosDto } from './dto/crear-lote-recibos.dto';
@@ -34,6 +35,7 @@ import type { SolicitudGeneracionReciboLote } from '../../contracts';
  *  permission a single Recibo already requires. */
 @Controller('lotes-recibos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class LoteRecibosController {
   constructor(
     private readonly loteRecibos: LoteRecibosService,

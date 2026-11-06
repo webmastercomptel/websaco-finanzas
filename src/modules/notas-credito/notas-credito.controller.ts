@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasCreditoService } from './notas-credito.service';
 import {
@@ -41,6 +42,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
  */
 @Controller('notas-credito')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class NotasCreditoController {
   constructor(
     private readonly notasCredito: NotasCreditoService,

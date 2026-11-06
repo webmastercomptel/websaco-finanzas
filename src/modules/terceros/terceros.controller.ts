@@ -12,6 +12,7 @@ import {
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { TercerosService } from './terceros.service';
 import { ListarTercerosDto } from './dto/listar-terceros.dto';
 import {
@@ -33,6 +34,7 @@ import type { Paginado, Tercero } from '../../contracts';
  */
 @Controller('terceros')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class TercerosController {
   constructor(private readonly terceros: TercerosService) {}
 

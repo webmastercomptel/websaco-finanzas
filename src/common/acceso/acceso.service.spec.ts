@@ -210,3 +210,53 @@ describe('AccesoService.accesoA', () => {
     ).resolves.toBeNull();
   });
 });
+
+describe('AccesoService módulos contratados', () => {
+  const asignacionA = {
+    alcance: 'copropiedad',
+    copropiedadId: copA,
+    permisos: ['facturas.ver'],
+  };
+
+  it('expone los módulos que la copropiedad contrató', async () => {
+    const service = servicio({
+      asignaciones: [asignacionA],
+      copropiedades: [
+        {
+          ...copropiedad(copA, 'COP-A'),
+          modulosContratados: ['finanzas', 'administracion'],
+        },
+      ],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.modulos).toEqual(['finanzas', 'administracion']);
+  });
+
+  it('una copropiedad sin el campo es solo finanzas', async () => {
+    const service = servicio({
+      asignaciones: [asignacionA],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.modulos).toEqual(['finanzas']);
+  });
+
+  it('el administrador de plataforma recibe los módulos reales de cada copropiedad', async () => {
+    const service = servicio({
+      copropiedades: [
+        {
+          ...copropiedad(copA, 'COP-A'),
+          modulosContratados: ['administracion'],
+        },
+      ],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString(), true);
+
+    expect(resultado.modulos).toEqual(['administracion']);
+  });
+});

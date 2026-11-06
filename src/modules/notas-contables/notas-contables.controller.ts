@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasContablesService } from './notas-contables.service';
 import { CrearNotaContableDto } from './dto/crear-nota-contable.dto';
@@ -28,6 +29,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 
 @Controller('notas-contables')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class NotasContablesController {
   constructor(
     private readonly notasContables: NotasContablesService,

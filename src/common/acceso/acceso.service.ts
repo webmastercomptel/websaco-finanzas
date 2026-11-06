@@ -14,6 +14,7 @@ import {
   EntidadAdministradora,
   EntidadAdministradoraDocument,
 } from '../../database/schemas/entidades/entidad-administradora.schema';
+import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {
@@ -21,6 +22,8 @@ export interface AccesoCopropiedad {
   codigo: string;
   nombre: string;
   permissions: string[];
+  /** Product modules this coproperty has contracted (see `modulosEfectivos`). */
+  modulos: ModuloProducto[];
 }
 
 @Injectable()
@@ -149,7 +152,7 @@ export class AccesoService {
   private async todasLasCopropiedades(): Promise<AccesoCopropiedad[]> {
     const todas = await this.copropiedades
       .find({ estado: 'active' })
-      .select('_id codigo nombre')
+      .select('_id codigo nombre modulosContratados')
       .sort({ nombre: 1 })
       .lean()
       .exec();
@@ -158,6 +161,7 @@ export class AccesoService {
       copropiedadId: c._id.toString(),
       codigo: c.codigo,
       nombre: c.nombre,
+      modulos: modulosEfectivos(c),
       // Left empty deliberately: a platform admin is granted everything by the
       // ability factory, not by carrying a copy of every permission key.
       permissions: [],
@@ -192,7 +196,7 @@ export class AccesoService {
         _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
         estado: 'active',
       })
-      .select('_id codigo nombre')
+      .select('_id codigo nombre modulosContratados')
       .sort({ nombre: 1 })
       .lean()
       .exec();
@@ -201,6 +205,7 @@ export class AccesoService {
       copropiedadId: c._id.toString(),
       codigo: c.codigo,
       nombre: c.nombre,
+      modulos: modulosEfectivos(c),
       permissions: permisosDe(c._id.toString()),
     }));
   }

@@ -4,6 +4,7 @@ import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAnyAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { BusquedaService } from './busqueda.service';
 import { BuscarDto } from './dto/buscar.dto';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -11,6 +12,7 @@ import type { RespuestaBusqueda } from '../../contracts';
 
 @Controller('busqueda')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class BusquedaController {
   constructor(private readonly busqueda: BusquedaService) {}
 

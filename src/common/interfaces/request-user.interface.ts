@@ -1,4 +1,5 @@
 // src/common/interfaces/request-user.interface.ts
+import type { ModuloProducto } from '../licencia/modulos';
 
 /**
  * The authenticated caller, attached to the request by the auth guard and read
@@ -23,6 +24,11 @@ export interface IRequestUser {
   isPlatformAdmin?: boolean;
   /** The active coproperty for this request (from X-CoProperty-Id). */
   copropiedadId?: string;
+  /**
+   * Product modules the active coproperty has contracted. Undefined when no
+   * coproperty is active, which denies every route that declares a module.
+   */
+  modulos?: ModuloProducto[];
   /** Role ids backing the permissions below. */
   roleIds?: string[];
   /** Union of permission keys (`modulo.accion`) across the caller's roles. */

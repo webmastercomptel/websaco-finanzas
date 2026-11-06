@@ -13,6 +13,7 @@ import {
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { ConceptosService } from './conceptos.service';
 import {
@@ -44,6 +45,7 @@ import type { ConceptoCobro } from '../../contracts';
  */
 @Controller('conceptos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class ConceptosController {
   constructor(
     private readonly conceptos: ConceptosService,

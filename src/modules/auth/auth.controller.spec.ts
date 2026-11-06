@@ -60,6 +60,7 @@ describe('AuthController.me', () => {
         codigo: 'COP-001',
         nombre: 'Terrazas de Granada',
         permissions: ['facturas.ver'],
+        modulos: ['finanzas', 'administracion'],
       },
     ]);
     const controller = new AuthController(servicio);
@@ -67,7 +68,12 @@ describe('AuthController.me', () => {
     const resultado = await controller.me(user({ accountId: 'acc-1' }));
 
     expect(resultado.copropiedades).toEqual([
-      { id: 'cop-1', codigo: 'COP-001', nombre: 'Terrazas de Granada' },
+      {
+        id: 'cop-1',
+        codigo: 'COP-001',
+        nombre: 'Terrazas de Granada',
+        modulos: ['finanzas', 'administracion'],
+      },
     ]);
   });
 
@@ -81,6 +87,7 @@ describe('AuthController.me', () => {
         codigo: 'COP-001',
         nombre: 'Terrazas',
         permissions: ['facturas.anular'],
+        modulos: ['finanzas'],
       },
     ]);
     const controller = new AuthController(servicio);

@@ -11,6 +11,7 @@ import {
 import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../../casl/policies.guard';
 import { CheckAbility } from '../../casl/check-ability.decorator';
+import { Modulo } from '../../casl/check-ability.decorator';
 import { DocumentosService } from './documentos.service';
 import type { CrearConsecutivoDto } from './dto/crear-consecutivo.dto';
 import type { ActualizarConsecutivoDto } from './dto/actualizar-consecutivo.dto';
@@ -21,6 +22,7 @@ import type { CategoriaDocumento } from '../../../database/schemas/numeracion/co
 
 @Controller('documentos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class DocumentosController {
   constructor(private readonly documentos: DocumentosService) {}
 

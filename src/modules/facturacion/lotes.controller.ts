@@ -20,6 +20,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LotesFacturacionService } from './lotes.service';
 import { FacturasService } from './facturas.service';
@@ -70,6 +71,7 @@ import {
  */
 @Controller('lotes')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class LotesController {
   constructor(
     private readonly lotes: LotesFacturacionService,

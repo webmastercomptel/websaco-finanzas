@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { NotasCreditoService } from './notas-credito.service';
@@ -25,6 +26,7 @@ import type { Factura } from '../../contracts';
  */
 @Controller('facturas')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class AnularFacturaController {
   constructor(private readonly notasCredito: NotasCreditoService) {}
 

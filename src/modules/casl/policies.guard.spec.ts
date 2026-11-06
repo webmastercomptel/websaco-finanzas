@@ -3,8 +3,10 @@ import type { Reflector } from '@nestjs/core';
 import { CaslAbilityFactory } from './casl-ability.factory';
 import { PoliciesGuard } from './policies.guard';
 import {
+  AUTHENTICATED_ONLY_KEY,
   CHECK_ABILITY_KEY,
   CHECK_ANY_ABILITY_KEY,
+  MODULO_KEY,
 } from './check-ability.decorator';
 import type { RequiredRule } from './check-ability.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -13,6 +15,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 const reflectorWith = (
   rules?: RequiredRule[],
   anyRules?: RequiredRule[],
+  authenticatedOnly?: boolean,
 ): Reflector =>
   ({
     getAllAndOverride: (key: string) =>
@@ -20,7 +23,9 @@ const reflectorWith = (
         ? rules
         : key === CHECK_ANY_ABILITY_KEY
           ? anyRules
-          : undefined,
+          : key === AUTHENTICATED_ONLY_KEY
+            ? authenticatedOnly
+            : undefined,
   }) as unknown as Reflector;
 
 /** ExecutionContext stub exposing a request with (or without) a user. */
@@ -31,8 +36,15 @@ const contextWith = (user?: IRequestUser): ExecutionContext =>
     getClass: () => undefined,
   }) as unknown as ExecutionContext;
 
-const guardFor = (rules?: RequiredRule[], anyRules?: RequiredRule[]) =>
-  new PoliciesGuard(reflectorWith(rules, anyRules), new CaslAbilityFactory());
+const guardFor = (
+  rules?: RequiredRule[],
+  anyRules?: RequiredRule[],
+  authenticatedOnly?: boolean,
+) =>
+  new PoliciesGuard(
+    reflectorWith(rules, anyRules, authenticatedOnly),
+    new CaslAbilityFactory(),
+  );
 
 const userWith = (permissions: string[]): IRequestUser => ({
   uid: 'uid-1',
@@ -41,12 +53,30 @@ const userWith = (permissions: string[]): IRequestUser => ({
 });
 
 describe('PoliciesGuard', () => {
-  it('deja pasar una ruta sin @CheckAbility', () => {
-    expect(guardFor(undefined).canActivate(contextWith())).toBe(true);
+  it('deniega una ruta sin @CheckAbility ni @AuthenticatedOnly (default-deny)', () => {
+    expect(() =>
+      guardFor(undefined).canActivate(contextWith(userWith([]))),
+    ).toThrow(ForbiddenException);
   });
 
-  it('deja pasar cuando la lista de reglas está vacía', () => {
-    expect(guardFor([]).canActivate(contextWith())).toBe(true);
+  it('deniega cuando la lista de reglas está vacía', () => {
+    expect(() => guardFor([]).canActivate(contextWith(userWith([])))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('deja pasar una ruta @AuthenticatedOnly a un usuario sin permisos', () => {
+    expect(
+      guardFor(undefined, undefined, true).canActivate(
+        contextWith(userWith([])),
+      ),
+    ).toBe(true);
+  });
+
+  it('@AuthenticatedOnly sigue exigiendo un usuario autenticado', () => {
+    expect(() =>
+      guardFor(undefined, undefined, true).canActivate(contextWith()),
+    ).toThrow(ForbiddenException);
   });
 
   it('deniega una ruta protegida sin usuario autenticado', () => {
@@ -132,8 +162,10 @@ describe('PoliciesGuard', () => {
       ).toThrow(ForbiddenException);
     });
 
-    it('una lista any-of vacía no gatea la ruta', () => {
-      expect(guardFor(undefined, []).canActivate(contextWith())).toBe(true);
+    it('una lista any-of vacía no concede acceso (default-deny)', () => {
+      expect(() =>
+        guardFor(undefined, []).canActivate(contextWith(userWith([]))),
+      ).toThrow(ForbiddenException);
     });
 
     it('el administrador de plataforma pasa', () => {
@@ -177,5 +209,71 @@ describe('PoliciesGuard', () => {
         guard.canActivate(contextWith(userWith(['recibos.crear']))),
       ).toThrow(ForbiddenException);
     });
+  });
+});
+
+describe('PoliciesGuard — licencia por módulo (@Modulo)', () => {
+  const reglas: RequiredRule[] = [{ action: 'read', subject: 'Factura' }];
+
+  /** Reflector stub for a route that declares a module and an ability. */
+  const guardConModulo = (modulo?: string) =>
+    new PoliciesGuard(
+      {
+        getAllAndOverride: (key: string) =>
+          key === CHECK_ABILITY_KEY
+            ? reglas
+            : key === MODULO_KEY
+              ? modulo
+              : undefined,
+      } as unknown as Reflector,
+      new CaslAbilityFactory(),
+    );
+
+  const conModulos = (modulos?: IRequestUser['modulos']): IRequestUser => ({
+    ...userWith(['facturas.ver']),
+    modulos,
+  });
+
+  it('deniega aunque tenga el permiso si la copropiedad no contrató el módulo', () => {
+    expect(() =>
+      guardConModulo('administracion').canActivate(
+        contextWith(conModulos(['finanzas'])),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('permite cuando la copropiedad contrató el módulo y el usuario tiene el permiso', () => {
+    expect(
+      guardConModulo('finanzas').canActivate(
+        contextWith(conModulos(['finanzas'])),
+      ),
+    ).toBe(true);
+  });
+
+  it('el administrador de plataforma también está sujeto a la licencia', () => {
+    const root: IRequestUser = {
+      uid: 'uid-root',
+      email: 'root@ejemplo.com',
+      isPlatformAdmin: true,
+      modulos: ['finanzas'],
+    };
+
+    expect(() =>
+      guardConModulo('administracion').canActivate(contextWith(root)),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('sin copropiedad activa (módulos indefinidos) deniega una ruta de módulo', () => {
+    expect(() =>
+      guardConModulo('finanzas').canActivate(
+        contextWith(conModulos(undefined)),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('una ruta sin @Modulo no exige licencia (el inventario de rutas exige declararla)', () => {
+    expect(
+      guardConModulo(undefined).canActivate(contextWith(conModulos(undefined))),
+    ).toBe(true);
   });
 });

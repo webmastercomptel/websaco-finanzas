@@ -14,6 +14,7 @@ import { Model } from 'mongoose';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { FacturasService } from './facturas.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PlantillaDocumentoService } from '../../common/documentos/plantilla-documento.service';
@@ -50,6 +51,7 @@ import type {
  */
 @Controller('facturas')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class FacturasController {
   constructor(
     private readonly facturas: FacturasService,

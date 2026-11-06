@@ -10,6 +10,7 @@ import {
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { SaldosInicialesService } from './saldos-iniciales.service';
 import { ImportarSaldosInicialesDto } from './dto/importar-saldos-iniciales.dto';
@@ -25,6 +26,7 @@ import type {
 
 @Controller('saldos-iniciales')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class SaldosInicialesController {
   constructor(private readonly saldosIniciales: SaldosInicialesService) {}
 

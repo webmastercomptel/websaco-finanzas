@@ -117,6 +117,16 @@ export class Copropiedad {
   usaGestionEdificios: boolean;
 
   /**
+   * Product modules this coproperty has contracted (`finanzas`,
+   * `administracion`). A commercial entitlement checked by `@Modulo()` on the
+   * routes of each module; permissions still decide what a person may do
+   * inside it. Legacy documents lack the key and read as `['finanzas']` (see
+   * `modulosEfectivos`), so adding it needs no migration.
+   */
+  @Prop({ type: [String], default: undefined })
+  modulosContratados?: string[];
+
+  /**
    * This coproperty's `_id` in the building-management system (24-hex
    * ObjectId string, stored trimmed and lowercase). The only identity sent
    * when publishing to that system — the NIT is ambiguous on its side.

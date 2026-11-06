@@ -2,6 +2,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AuthenticatedOnly } from '../casl/check-ability.decorator';
 import { AccesoService } from '../../common/acceso/acceso.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type { AuthMe } from '../../contracts';
@@ -24,6 +25,7 @@ export class AuthController {
    */
   @Get('me')
   @UseGuards(FirebaseAuthGuard)
+  @AuthenticatedOnly()
   async me(@CurrentUser() user: IRequestUser): Promise<AuthMe> {
     // No local account means no assignments to look up, and asking anyway
     // would be a query whose answer is known.
@@ -50,6 +52,7 @@ export class AuthController {
         id: c.copropiedadId,
         codigo: c.codigo,
         nombre: c.nombre,
+        modulos: c.modulos,
       })),
       alcance,
     };

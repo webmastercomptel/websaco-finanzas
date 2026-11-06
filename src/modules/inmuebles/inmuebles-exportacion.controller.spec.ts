@@ -33,6 +33,7 @@ const usuarioCon = (permissions: string[]): IRequestUser => ({
   uid: 'uid-1',
   email: 'admin@ejemplo.com',
   permissions,
+  modulos: ['finanzas'],
 });
 
 describe('InmueblesController.exportarImportacion', () => {

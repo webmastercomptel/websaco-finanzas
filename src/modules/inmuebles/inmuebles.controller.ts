@@ -19,6 +19,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility, CheckAnyAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { InmueblesService } from './inmuebles.service';
 import { ValoresRecurrentesService } from './valores-recurrentes.service';
 import { InmueblesReporteService } from './inmuebles-reporte.service';
@@ -70,6 +71,7 @@ import type {
  */
 @Controller('inmuebles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class InmueblesController {
   constructor(
     private readonly inmuebles: InmueblesService,

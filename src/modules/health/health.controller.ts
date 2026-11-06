@@ -5,10 +5,12 @@ import {
   HealthCheck,
   MongooseHealthIndicator,
 } from '@nestjs/terminus';
+import { Public } from '../casl/check-ability.decorator';
 import { RedisHealthIndicator } from './redis.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 
 @Controller('health')
+@Public()
 export class HealthController {
   constructor(
     private health: HealthCheckService,

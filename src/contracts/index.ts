@@ -1971,6 +1971,12 @@ export interface CopropiedadResumen {
   nombre: string;
 }
 
+/** A coproperty the caller may operate, with the product modules it contracted. */
+export interface CopropiedadAccesible extends CopropiedadResumen {
+  /** Contracted modules (`finanzas`, `administracion`); drives the menu, never access. */
+  modulos: string[];
+}
+
 /** One row's outcome from a bulk upload of one-off charges that could not be processed. */
 export interface ErrorCargaNovedades {
   /** 1-based, matching the row order the file was uploaded in. */
@@ -2225,7 +2231,7 @@ export interface AuthMe {
   email: string;
   nombre: string | null;
   esAdministradorPlataforma: boolean;
-  copropiedades: CopropiedadResumen[];
+  copropiedades: CopropiedadAccesible[];
   /**
    * Scope of the caller's primary assignment — enough for the header to
    * label who is signed in, without the names/permissions `AsignacionResumen`

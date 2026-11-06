@@ -9,8 +9,10 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { CaslAbilityFactory } from './casl-ability.factory';
 import {
+  AUTHENTICATED_ONLY_KEY,
   CHECK_ABILITY_KEY,
   CHECK_ANY_ABILITY_KEY,
+  MODULO_KEY,
 } from './check-ability.decorator';
 import type { RequiredRule } from './check-ability.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -27,9 +29,10 @@ interface AuthenticatedRequest extends Request {
  * applied per controller in the same UseGuards list, never as a global
  * APP_GUARD where that ordering would not hold.
  *
- * With no authenticated caller it denies. That is what makes it safe to wire in
- * before the auth guard exists: a decorated route fails closed instead of
- * silently running unauthenticated.
+ * Default-deny: a route under this guard with neither ability rules nor an
+ * explicit `AuthenticatedOnly()` is refused. With no authenticated caller it
+ * also denies, so a decorated route fails closed instead of silently running
+ * unauthenticated.
  */
 @Injectable()
 export class PoliciesGuard implements CanActivate {
@@ -49,12 +52,36 @@ export class PoliciesGuard implements CanActivate {
     );
     const hasAll = !!rules && rules.length > 0;
     const hasAny = !!anyRules && anyRules.length > 0;
-    // Opt-in: routes without either decorator are not gated here.
-    if (!hasAll && !hasAny) return true;
+    const authenticatedOnly =
+      this.reflector.getAllAndOverride<boolean | undefined>(
+        AUTHENTICATED_ONLY_KEY,
+        [context.getHandler(), context.getClass()],
+      ) === true;
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = request.user;
     if (!user) {
+      throw new ForbiddenException('No tenés permiso para esta acción');
+    }
+
+    // Licence: a route that belongs to a product module needs the active
+    // coproperty to have contracted it, whatever permissions the caller holds
+    // (platform administrators included: the licence is about the coproperty).
+    const modulo = this.reflector.getAllAndOverride<string | undefined>(
+      MODULO_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (modulo && !(user.modulos as string[] | undefined)?.includes(modulo)) {
+      throw new ForbiddenException(
+        'Tu copropiedad no tiene contratado este módulo',
+      );
+    }
+
+    // Default-deny: a route under this guard must declare what it needs. No
+    // rules and no explicit `@AuthenticatedOnly()` means the route was forgotten,
+    // and a forgotten route must fail closed, never open.
+    if (!hasAll && !hasAny) {
+      if (authenticatedOnly) return true;
       throw new ForbiddenException('No tenés permiso para esta acción');
     }
 

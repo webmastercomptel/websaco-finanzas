@@ -14,6 +14,7 @@ import {
 import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../../casl/policies.guard';
 import { CheckAbility } from '../../casl/check-ability.decorator';
+import { Modulo } from '../../casl/check-ability.decorator';
 import { CuentasContablesService } from './cuentas-contables.service';
 import { ListarCuentasDto } from './dto/listar-cuentas.dto';
 import { ActualizarCuentaDto, CrearCuentaDto } from './dto/guardar-cuenta.dto';
@@ -26,6 +27,7 @@ import type {
 
 @Controller('cuentas-contables')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class CuentasContablesController {
   constructor(private readonly cuentas: CuentasContablesService) {}
 

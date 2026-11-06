@@ -17,6 +17,7 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { AuxiliarCarteraService } from './auxiliar-cartera.service';
 import { VencimientosCarteraService } from './vencimientos-cartera.service';
 import { CarteraGeneralService } from './cartera-general.service';
@@ -72,6 +73,7 @@ import { generarPdfConsecutivos } from '../../common/pdf/consecutivos-pdf';
  */
 @Controller('consultas')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class ConsultasController {
   constructor(
     private readonly auxiliarCartera: AuxiliarCarteraService,

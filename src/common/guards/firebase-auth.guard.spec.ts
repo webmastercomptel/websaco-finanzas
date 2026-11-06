@@ -37,6 +37,7 @@ const acceso = (over: Partial<AccesoCopropiedad> = {}): AccesoCopropiedad => ({
   codigo: 'COP-001',
   nombre: 'Terrazas',
   permissions: ['facturas.ver'],
+  modulos: ['finanzas'],
   ...over,
 });
 

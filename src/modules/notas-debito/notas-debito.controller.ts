@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasDebitoService } from './notas-debito.service';
 import { CrearNotaDebitoDto } from './dto/crear-nota-debito.dto';
@@ -34,6 +35,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
  */
 @Controller('notas-debito')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class NotasDebitoController {
   constructor(
     private readonly notasDebito: NotasDebitoService,

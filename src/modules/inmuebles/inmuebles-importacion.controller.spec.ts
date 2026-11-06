@@ -31,6 +31,7 @@ const usuarioCon = (permissions: string[]): IRequestUser => ({
   uid: 'uid-1',
   email: 'contador@ejemplo.com',
   permissions,
+  modulos: ['finanzas'],
 });
 
 describe.each([

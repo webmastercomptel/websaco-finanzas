@@ -9,6 +9,7 @@ import {
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import {
@@ -39,6 +40,7 @@ const actorDe = (user: IRequestUser): ActorComptable => ({
  */
 @Controller('interfaz-comptable')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class InterfazComptableController {
   constructor(private readonly interfaz: InterfazComptableService) {}
 

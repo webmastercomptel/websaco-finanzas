@@ -1,6 +1,7 @@
 // src/modules/catalogos/catalogos.controller.ts
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
+import { AuthenticatedOnly } from '../casl/check-ability.decorator';
 import { CatalogosService } from './catalogos.service';
 import { ListarCiudadesDto } from './dto/listar-ciudades.dto';
 import type {
@@ -19,6 +20,7 @@ import type {
  */
 @Controller('catalogos')
 @UseGuards(FirebaseAuthGuard)
+@AuthenticatedOnly()
 export class CatalogosController {
   constructor(private readonly catalogos: CatalogosService) {}
 

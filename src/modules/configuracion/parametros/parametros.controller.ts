@@ -3,6 +3,7 @@ import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../../casl/policies.guard';
 import { CheckAbility } from '../../casl/check-ability.decorator';
+import { Modulo } from '../../casl/check-ability.decorator';
 import {
   ParametrosService,
   type ParametrosFacturacion,
@@ -11,6 +12,7 @@ import { ActualizarParametrosDto } from './dto/actualizar-parametros.dto';
 
 @Controller('parametros-facturacion')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class ParametrosController {
   constructor(private readonly parametros: ParametrosService) {}
 

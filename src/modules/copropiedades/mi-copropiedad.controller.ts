@@ -3,6 +3,7 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -25,6 +26,7 @@ import type { Copropiedad, CopropiedadResumen } from '../../contracts';
  */
 @Controller('mi-copropiedad')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class MiCopropiedadController {
   constructor(
     private readonly copropiedades: CopropiedadesService,

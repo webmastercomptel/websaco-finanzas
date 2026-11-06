@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
+import { Modulo } from '../casl/check-ability.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { NotasAnticipoService } from './notas-anticipo.service';
 import { CrearNotaAnticipoDto } from './dto/crear-nota-anticipo.dto';
@@ -40,6 +41,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
  */
 @Controller('notas-anticipo')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
+@Modulo('finanzas')
 export class NotasAnticipoController {
   constructor(
     private readonly notasAnticipo: NotasAnticipoService,
