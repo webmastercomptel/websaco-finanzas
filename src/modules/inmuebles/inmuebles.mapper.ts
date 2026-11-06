@@ -55,6 +55,7 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   area: doc.area,
   coeficiente: doc.coeficiente,
   titular: titularDe(doc.titularId),
+  arrendatario: titularDe(doc.arrendatarioId),
   tipoTitular: doc.tipoTitular,
   resideEnElInmueble: doc.resideEnElInmueble,
   estadoCartera: doc.estadoCartera,

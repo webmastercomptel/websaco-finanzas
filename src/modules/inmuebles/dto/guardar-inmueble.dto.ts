@@ -69,6 +69,11 @@ class CamposInmuebleDto {
   @IsMongoId()
   titularId?: string;
 
+  /** The current tenant (a Tercero of this coproperty); `null` clears it. */
+  @IsOptional()
+  @IsMongoId()
+  arrendatarioId?: string | null;
+
   @IsOptional()
   @IsIn(['propietario', 'arrendatario'])
   tipoTitular?: 'propietario' | 'arrendatario';

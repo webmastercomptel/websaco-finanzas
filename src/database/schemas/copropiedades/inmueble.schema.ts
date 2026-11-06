@@ -85,6 +85,20 @@ export class Inmueble {
   })
   titularId: Types.ObjectId | null;
 
+  /**
+   * Who rents the unit, if anybody. The invoice is always the owner's
+   * (`titularId`, Ley 675 art. 29); the tenant is recorded so they can see the
+   * invoice of their own unit in the portal. At most one current tenant, and
+   * never the same party as the owner.
+   */
+  @Prop({
+    type: SchemaTypes.ObjectId,
+    ref: Tercero.name,
+    default: null,
+    index: true,
+  })
+  arrendatarioId: Types.ObjectId | null;
+
   /** Whether the responsible party owns the unit or rents it. */
   @Prop({
     required: true,

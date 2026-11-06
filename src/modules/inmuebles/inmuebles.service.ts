@@ -153,6 +153,12 @@ const mensajeDeFila = (err: unknown): string => {
   return err instanceof Error ? err.message : 'Error desconocido';
 };
 
+/** The two parties of a unit the contract names: owner and (optional) tenant. */
+const PARTES_POBLADAS = [
+  { path: 'titularId', select: 'nombre numeroIdentificacion' },
+  { path: 'arrendatarioId', select: 'nombre numeroIdentificacion' },
+];
+
 @Injectable()
 export class InmueblesService {
   constructor(
@@ -210,7 +216,7 @@ export class InmueblesService {
     const [documentos, total] = await Promise.all([
       this.inmuebles
         .find(filtro)
-        .populate('titularId', 'nombre numeroIdentificacion')
+        .populate(PARTES_POBLADAS)
         .sort({ codigo: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
@@ -238,7 +244,7 @@ export class InmueblesService {
 
     const documento = await this.inmuebles
       .findOne({ _id: id, copropiedadId })
-      .populate('titularId', 'nombre numeroIdentificacion')
+      .populate(PARTES_POBLADAS)
       .exec();
 
     if (!documento) {
@@ -270,6 +276,8 @@ export class InmueblesService {
         `Ya existe un inmueble con el código ${dto.codigo} en esta copropiedad`,
       );
     }
+
+    await this.validarArrendatario(copropiedadId, dto);
 
     const creado = await this.inmuebles.create({
       ...this.aDocumento(dto),
@@ -304,7 +312,7 @@ export class InmueblesService {
     // when the patch carries a different code (400 would confirm the id exists).
     const guardado = await this.inmuebles
       .findOne({ _id: id, copropiedadId })
-      .select('codigo')
+      .select('codigo titularId arrendatarioId')
       .lean()
       .exec();
     if (!guardado) {
@@ -316,6 +324,8 @@ export class InmueblesService {
         'El código de un inmueble no se puede modificar después de crearlo.',
       );
     }
+
+    await this.validarArrendatario(copropiedadId, dto, guardado);
 
     const cambios = this.aDocumento(dto);
     delete cambios.codigo;
@@ -1393,6 +1403,47 @@ export class InmueblesService {
   }
 
   /**
+   * Guards the owner/tenant pair of a unit. The invoice is always the owner's,
+   * so the tenant may never be the same party; and a tenant id the caller
+   * names must be a Tercero of THIS coproperty (a bare id would accept another
+   * building's party). Omitted fields fall back to what is stored, so a patch
+   * that changes only the owner is still checked against the stored tenant.
+   */
+  private async validarArrendatario(
+    copropiedadId: Types.ObjectId,
+    propuesto: { titularId?: string; arrendatarioId?: string | null },
+    guardado: {
+      titularId?: Types.ObjectId | null;
+      arrendatarioId?: Types.ObjectId | null;
+    } = {},
+  ): Promise<void> {
+    const titular =
+      propuesto.titularId !== undefined
+        ? propuesto.titularId
+        : guardado.titularId;
+    const arrendatario =
+      propuesto.arrendatarioId !== undefined
+        ? propuesto.arrendatarioId
+        : guardado.arrendatarioId;
+
+    if (titular && arrendatario && String(titular) === String(arrendatario)) {
+      throw new BadRequestException(
+        'El arrendatario no puede ser el propietario',
+      );
+    }
+    if (propuesto.arrendatarioId) {
+      const existe = await this.terceros
+        .exists({ _id: propuesto.arrendatarioId, copropiedadId })
+        .exec();
+      if (!existe) {
+        throw new BadRequestException(
+          'El arrendatario no existe en esta copropiedad',
+        );
+      }
+    }
+  }
+
+  /**
    * Translates the Spanish payload into the English document shape.
    *
    * Only keys the caller actually sent are included. Spreading the DTO whole
@@ -1413,6 +1464,7 @@ export class InmueblesService {
     set('area', dto.area);
     set('coeficiente', dto.coeficiente);
     set('titularId', dto.titularId);
+    set('arrendatarioId', dto.arrendatarioId);
     set('tipoTitular', dto.tipoTitular);
     set('resideEnElInmueble', dto.resideEnElInmueble);
     set('estadoCartera', dto.estadoCartera);

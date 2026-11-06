@@ -129,6 +129,8 @@ export interface Inmueble {
    * recorded — a building is often loaded before its ownership papers are.
    */
   titular: TitularResumen | null;
+  /** Current tenant, if any. The invoice stays the owner's (`titular`). */
+  arrendatario: TitularResumen | null;
   tipoTitular: 'propietario' | 'arrendatario';
   resideEnElInmueble: boolean;
   estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
