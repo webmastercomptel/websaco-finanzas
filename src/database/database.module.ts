@@ -203,6 +203,11 @@ import {
 import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
 
 import {
+  Anuncio,
+  AnuncioSchema,
+} from './schemas/administracion/anuncio.schema';
+
+import {
   CarpetaDocumento,
   CarpetaDocumentoSchema,
 } from './schemas/administracion/documento-carpeta.schema';
@@ -226,6 +231,7 @@ const models = [
   { name: Pqr.name, schema: PqrSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
+  { name: Anuncio.name, schema: AnuncioSchema },
   { name: Zona.name, schema: ZonaSchema },
   { name: Reserva.name, schema: ReservaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },

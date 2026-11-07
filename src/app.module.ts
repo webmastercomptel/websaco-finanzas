@@ -35,6 +35,7 @@ import { NotificacionesModule } from './modules/notificaciones/notificaciones.mo
 import { TareasModule } from './modules/tareas/tareas.module';
 import { MantenimientosModule } from './modules/mantenimientos/mantenimientos.module';
 import { ActividadesModule } from './modules/actividades/actividades.module';
+import { AnunciosModule } from './modules/anuncios/anuncios.module';
 import { PqrModule } from './modules/pqr/pqr.module';
 import { ZonasModule } from './modules/zonas/zonas.module';
 import { DocumentosModule } from './modules/documentos/documentos.module';
@@ -111,6 +112,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     TareasModule,
     MantenimientosModule,
     ActividadesModule,
+    AnunciosModule,
     PqrModule,
     ZonasModule,
     DocumentosModule,

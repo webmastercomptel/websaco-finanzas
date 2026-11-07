@@ -3246,3 +3246,43 @@ export interface EstadisticasArchivos {
   espacioUsadoBytes: number;
   espacioTotalBytes: number;
 }
+
+/* ── Anuncios ──────────────────────────────────────────────────── */
+
+/**
+ * How far the delivery of an announcement got. The counts come from the ids
+ * already recorded as delivered, so they cannot disagree with what was sent.
+ */
+export interface EntregaAnuncio {
+  /** Audience size at the last delivery run. */
+  destinatarios: number;
+  /** Residents whose in-app notification was created. */
+  notificados: number;
+  /** Residents whose email the provider accepted. */
+  correosEnviados: number;
+  /** Whether the environment could send email at the last run; null before any run. */
+  correoConfigurado: boolean | null;
+}
+
+/**
+ * An announcement of the active coproperty. A resident only ever receives
+ * published ones (`estado` other than `borrador`).
+ */
+export interface Anuncio {
+  id: string;
+  titulo: string;
+  contenido: string;
+  categoria: 'mantenimiento' | 'seguridad' | 'comunidad' | 'administracion';
+  autor: string;
+  /** Publication date, or the creation date while it is still a draft. */
+  fecha: string;
+  imagen: string | null;
+  destacado: boolean;
+  vistas: number;
+  likes: number;
+  estado: 'borrador' | 'enviando' | 'enviado' | 'fallido';
+  /** Only the resident portal fills it: whether the caller liked it. */
+  likedByMe?: boolean;
+  /** Only the staff side fills it. */
+  entrega?: EntregaAnuncio;
+}
