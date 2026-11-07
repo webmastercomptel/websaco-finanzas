@@ -1,5 +1,6 @@
 // src/modules/tareas/tareas.service.ts
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -196,6 +197,28 @@ export class TareasService {
       .exec();
   }
 
+  /**
+   * Every assignee must be back-office staff of THIS coproperty who can read
+   * tasks (same resolution as the notices). Without it a task manager could
+   * store any account id and read that person's name back through the
+   * populated card. Unknown, inactive, foreign or resident-only = 400.
+   */
+  private async exigirAsignablesValidos(
+    ids: readonly string[],
+    copropiedadId: Types.ObjectId,
+  ): Promise<void> {
+    for (const id of new Set(ids)) {
+      const valido =
+        Types.ObjectId.isValid(id) &&
+        (await this.destinatarioDePersonal(id, copropiedadId)) !== null;
+      if (!valido) {
+        throw new BadRequestException(
+          'Solo se puede asignar personal de esta copropiedad',
+        );
+      }
+    }
+  }
+
   /** A malformed id can never match: answer 404 instead of a cast error (500). */
   private validarId(id: string): void {
     if (!Types.ObjectId.isValid(id)) {
@@ -212,6 +235,7 @@ export class TareasService {
       { accion: 'Creó la tarea', usuario: actor, fecha: new Date() },
     ];
     const asignadosIds = dto.asignadosIds ?? [];
+    await this.exigirAsignablesValidos(asignadosIds, copropiedadId);
     if (asignadosIds.length > 0) {
       historial.push({
         accion: 'Asignó la tarea inicialmente',
@@ -311,6 +335,8 @@ export class TareasService {
       const nuevos = new Set(dto.asignadosIds);
       agregados = dto.asignadosIds.filter((a) => !anteriores.has(a));
       removidos = [...anteriores].filter((a) => !nuevos.has(a));
+      // Only the newly added ones: someone who left keeps their old tasks.
+      await this.exigirAsignablesValidos(agregados, copropiedadId);
 
       if (agregados.length > 0) {
         nuevasEntradas.push({

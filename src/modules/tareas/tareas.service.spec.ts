@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type { Destinatario } from '../../common/directorio/directorio.service';
@@ -156,18 +160,21 @@ const conAsignados = (m: ReturnType<typeof montar>, ids: Types.ObjectId[]) =>
   m.tareas.findOne.mockReturnValue(consulta(tareaDoc({ asignadosIds: ids })));
 
 describe('TareasService — notificación de asignación de tarea', () => {
-  it('un asignado que no es personal de la copropiedad (sin cuenta, inactivo o sin acceso) no recibe email ni notificación', async () => {
+  it('asignar a quien no es personal de la copropiedad (sin cuenta, inactivo o de otro edificio) es 400 y no se crea nada', async () => {
     const m = montar();
     m.directorio.destinatarioDe.mockResolvedValue(null);
 
-    await m.servicio.crear(dtoCrear, actor(OTRO));
+    await expect(m.servicio.crear(dtoCrear, actor(OTRO))).rejects.toThrow(
+      BadRequestException,
+    );
 
+    expect(m.tareas).not.toHaveBeenCalled();
     expect(m.correo.enviar).not.toHaveBeenCalled();
     expect(m.notificaciones.crear).not.toHaveBeenCalled();
     expect(m.enlaces.construir).not.toHaveBeenCalled();
   });
 
-  it('un asignado que solo es residente no recibe email ni notificación (no tiene pantalla de tareas)', async () => {
+  it('asignar a un residente (sin pantalla de tareas) es 400', async () => {
     const m = montar();
     m.directorio.destinatarioDe.mockImplementation((accountId: string) =>
       Promise.resolve({
@@ -178,7 +185,9 @@ describe('TareasService — notificación de asignación de tarea', () => {
       }),
     );
 
-    await m.servicio.crear(dtoCrear, actor(OTRO));
+    await expect(m.servicio.crear(dtoCrear, actor(OTRO))).rejects.toThrow(
+      BadRequestException,
+    );
 
     expect(m.correo.enviar).not.toHaveBeenCalled();
     expect(m.notificaciones.crear).not.toHaveBeenCalled();
@@ -448,14 +457,30 @@ describe('TareasService — notificación de asignación de tarea', () => {
     expect(m.notificaciones.crear).toHaveBeenCalledTimes(1);
   });
 
-  it('si el directorio falla, la creación de la tarea no se ve afectada (la notificación es de mejor esfuerzo)', async () => {
+  it('si el directorio falla al validar los asignados, no se crea nada (no se asigna a ciegas)', async () => {
     const m = montar();
     m.directorio.destinatarioDe.mockRejectedValue(new Error('sin base'));
 
-    await expect(
-      m.servicio.crear(dtoCrear, actor(OTRO)),
-    ).resolves.toMatchObject({ id: TAREA.toString() });
+    await expect(m.servicio.crear(dtoCrear, actor(OTRO))).rejects.toThrow(
+      'sin base',
+    );
+    expect(m.tareas).not.toHaveBeenCalled();
     expect(m.correo.enviar).not.toHaveBeenCalled();
+  });
+
+  it('al editar, un asignado NUEVO que no es personal de la copropiedad es 400 y no se escribe', async () => {
+    const m = montar();
+    conAsignados(m, []);
+    m.directorio.destinatarioDe.mockResolvedValue(null);
+
+    await expect(
+      m.servicio.actualizar(
+        TAREA.toString(),
+        { asignadosIds: [OTRO.toString()] },
+        actor(OTRO),
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(m.tareas.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('si no hay copropiedad con nombre, el email igual sale (nombre vacío)', async () => {
