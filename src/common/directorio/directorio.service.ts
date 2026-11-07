@@ -106,17 +106,44 @@ export class DirectorioService {
     };
   }
 
-  /** Owners and tenants of the coproperty who have a sign-in. */
+  /**
+   * Current owners and tenants of the coproperty who have a sign-in: a linked
+   * Tercero that is the `titularId` or `arrendatarioId` of an active unit here.
+   * A former holder stays linked after a sale or lease end, and must stop
+   * receiving residents' notices (same rule as `AccesoService` for the portal).
+   */
   async residentes(copropiedadId: Types.ObjectId): Promise<Destinatario[]> {
     const vinculados = await this.terceros
       .find({ copropiedadId, estado: 'active', accountId: { $ne: null } })
-      .select('accountId')
+      .select('_id accountId')
       .lean()
       .exec();
+    if (vinculados.length === 0) return [];
+
+    const terceroIds = vinculados.map((t) => t._id);
+    const unidades = await this.inmuebles
+      .find({
+        copropiedadId,
+        estado: 'active',
+        $or: [
+          { titularId: { $in: terceroIds } },
+          { arrendatarioId: { $in: terceroIds } },
+        ],
+      })
+      .select('titularId arrendatarioId')
+      .lean()
+      .exec();
+    const titulares = new Set<string>();
+    for (const u of unidades) {
+      if (u.titularId) titulares.add(u.titularId.toString());
+      if (u.arrendatarioId) titulares.add(u.arrendatarioId.toString());
+    }
 
     const ids = new Map<string, Types.ObjectId>();
     for (const t of vinculados) {
-      if (t.accountId) ids.set(t.accountId.toString(), t.accountId);
+      if (t.accountId && titulares.has(t._id.toString())) {
+        ids.set(t.accountId.toString(), t.accountId);
+      }
     }
     const cuentas = await this.cuentasActivas([...ids.values()]);
     return [...cuentas.values()].map((c) => this.aDestinatario(c, 'residente'));

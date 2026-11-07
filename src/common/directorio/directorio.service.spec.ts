@@ -88,8 +88,14 @@ function crear(opciones: {
 describe('DirectorioService.residentes', () => {
   it('devuelve las cuentas activas vinculadas a un tercero activo de ESA copropiedad', async () => {
     const ana = oid();
+    const t1 = oid();
+    const t2 = oid();
     const { servicio, terceros, cuentas } = crear({
-      terceros: [{ accountId: ana }, { accountId: ana }],
+      terceros: [
+        { _id: t1, accountId: ana },
+        { _id: t2, accountId: ana },
+      ],
+      inmuebles: [{ titularId: t1, arrendatarioId: t2 }],
       cuentas: [cuenta(ana, 'Ana')],
     });
 
@@ -112,6 +118,37 @@ describe('DirectorioService.residentes', () => {
         perfil: 'residente',
       },
     ]);
+  });
+
+  it('ex propietario o ex arrendatario (vinculado pero sin unidad vigente) no recibe avisos', async () => {
+    const ana = oid();
+    const beto = oid();
+    const tAna = oid();
+    const tBeto = oid();
+    const { servicio, inmuebles, cuentas } = crear({
+      terceros: [
+        { _id: tAna, accountId: ana },
+        { _id: tBeto, accountId: beto },
+      ],
+      inmuebles: [{ titularId: oid(), arrendatarioId: tBeto }],
+      cuentas: [cuenta(beto, 'Beto')],
+    });
+
+    const resultado = await servicio.residentes(COP);
+
+    expect(inmuebles.find).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      estado: 'active',
+      $or: [
+        { titularId: { $in: [tAna, tBeto] } },
+        { arrendatarioId: { $in: [tAna, tBeto] } },
+      ],
+    });
+    expect(cuentas.find).toHaveBeenCalledWith({
+      _id: { $in: [beto] },
+      estado: 'active',
+    });
+    expect(resultado.map((r) => r.nombre)).toEqual(['Beto']);
   });
 
   it('sin terceros vinculados no consulta cuentas', async () => {

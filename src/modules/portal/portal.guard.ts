@@ -16,9 +16,12 @@ interface AuthenticatedRequest extends Request {
 }
 
 /**
- * Gate for the resident portal (`/portal/*`): the caller must be a unit holder
- * (owner or tenant) of the ACTIVE coproperty, and that coproperty must have
- * contracted the route's module. It checks the door only; WHICH units and
+ * Gate for the resident portal (`/portal/*`): the caller must CURRENTLY hold an
+ * active unit (as owner or tenant) of the ACTIVE coproperty — `esResidente`,
+ * derived per request by `AccesoService` from `Tercero.accountId` plus the
+ * unit's `titularId`/`arrendatarioId`, so a former owner or tenant whose Tercero
+ * is still linked is refused — and that coproperty must have contracted the
+ * route's module. It checks the door only; WHICH units and
  * documents a resident may see is decided per request by `PortalService`, from
  * the units they actually hold.
  *

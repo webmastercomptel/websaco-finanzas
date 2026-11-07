@@ -19,6 +19,10 @@ import {
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
   Rol,
   RolDocument,
 } from '../../database/schemas/administracion/rol.schema';
@@ -48,8 +52,8 @@ export interface AccesoCopropiedad {
   /** Product modules this coproperty has contracted (see `modulosEfectivos`). */
   modulos: ModuloProducto[];
   /**
-   * Whether this account holds a unit here as owner or tenant (it is linked to
-   * a Tercero). A resident-only account carries no permissions: it reaches the
+   * Whether this account currently holds an active unit here as owner or
+   * tenant (through its linked Tercero). A resident-only account carries no permissions: it reaches the
    * portal routes, never the administrative ones.
    */
   esResidente: boolean;
@@ -68,6 +72,8 @@ export class AccesoService {
     private readonly terceros: Model<TerceroDocument>,
     @InjectModel(Rol.name)
     private readonly roles: Model<RolDocument>,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
   ) {}
 
   /**
@@ -112,16 +118,48 @@ export class AccesoService {
     return aportes;
   }
 
-  /** Ids of the coproperties where this account is linked to an active Tercero. */
+  /**
+   * Ids of the coproperties where this account CURRENTLY holds a unit: linked to
+   * an active Tercero that is the `titularId` or `arrendatarioId` of an active
+   * unit of that same coproperty. Being linked is not enough: after a sale or
+   * the end of a lease the Tercero stays linked, and the former holder must lose
+   * the portal with it. One extra query, only when the account is linked.
+   */
   private async copropiedadesComoResidente(
     accountId: string,
   ): Promise<Set<string>> {
     const vinculados = await this.terceros
       .find({ accountId: new Types.ObjectId(accountId), estado: 'active' })
-      .select('copropiedadId')
+      .select('_id copropiedadId')
       .lean()
       .exec();
-    return new Set(vinculados.map((t) => t.copropiedadId.toString()));
+    if (vinculados.length === 0) return new Set();
+
+    const copropiedadDe = new Map(
+      vinculados.map((t) => [t._id.toString(), t.copropiedadId.toString()]),
+    );
+    const ids = vinculados.map((t) => t._id);
+    const unidades = await this.inmuebles
+      .find({
+        estado: 'active',
+        $or: [{ titularId: { $in: ids } }, { arrendatarioId: { $in: ids } }],
+      })
+      .select('copropiedadId titularId arrendatarioId')
+      .lean()
+      .exec();
+
+    const resultado = new Set<string>();
+    for (const u of unidades) {
+      const copropiedad = u.copropiedadId.toString();
+      for (const parte of [u.titularId, u.arrendatarioId]) {
+        // The party must belong to the unit's own coproperty: a unit pointing
+        // at a foreign Tercero grants nothing anywhere.
+        if (parte && copropiedadDe.get(parte.toString()) === copropiedad) {
+          resultado.add(copropiedad);
+        }
+      }
+    }
+    return resultado;
   }
 
   /**

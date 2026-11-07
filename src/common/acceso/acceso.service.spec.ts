@@ -36,16 +36,33 @@ const servicio = (opts: {
   entidades?: Fila[];
   terceros?: Fila[];
   roles?: ReturnType<typeof consulta> | Fila[];
-}) =>
-  new AccesoService(
+  /**
+   * Active units. Default: each linked Tercero currently holds one unit (as
+   * owner) in its own coproperty, so a "resident" fixture means a current one.
+   */
+  inmuebles?: Fila[];
+}) => {
+  const terceros = (opts.terceros ?? []).map(
+    (t) => ({ _id: oid(), ...t }) as Fila & { _id: Types.ObjectId },
+  );
+  const inmuebles =
+    opts.inmuebles ??
+    terceros.map((t) => ({
+      copropiedadId: t.copropiedadId,
+      titularId: t._id,
+      arrendatarioId: null,
+    }));
+  return new AccesoService(
     consulta(opts.asignaciones ?? []) as never,
     consulta(opts.copropiedades ?? []) as never,
     consulta(opts.entidades ?? []) as never,
-    consulta(opts.terceros ?? []) as never,
+    consulta(terceros) as never,
     (Array.isArray(opts.roles) || opts.roles === undefined
       ? consulta(opts.roles ?? [])
       : opts.roles) as never,
+    consulta(inmuebles) as never,
   );
+};
 
 const copropiedad = (
   id: Types.ObjectId,
@@ -317,12 +334,13 @@ describe('AccesoService residentes (portal)', () => {
   });
 
   it('solo cuentan los terceros activos de ESA cuenta', async () => {
-    const terceros = consulta([{ copropiedadId: copA }]);
+    const terceros = consulta([{ _id: oid(), copropiedadId: copA }]);
     const service = new AccesoService(
       consulta([]) as never,
       consulta([copropiedad(copA, 'COP-A')]) as never,
       consulta([]) as never,
       terceros as never,
+      consulta([]) as never,
       consulta([]) as never,
     );
 
@@ -331,6 +349,88 @@ describe('AccesoService residentes (portal)', () => {
     expect(terceros.find).toHaveBeenCalledWith({
       accountId: cuenta,
       estado: 'active',
+    });
+  });
+});
+
+describe('AccesoService residentes: tenencia VIGENTE, no solo vínculo', () => {
+  const tercero = oid();
+
+  it('ex propietario: el Tercero sigue vinculado pero ya no es titular de nada → sin portal', async () => {
+    const service = servicio({
+      terceros: [{ _id: tercero, copropiedadId: copA }],
+      inmuebles: [],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    await expect(service.copropiedadesDe(cuenta.toString())).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('ex arrendatario conserva el acceso administrativo pero pierde esResidente', async () => {
+    const service = servicio({
+      asignaciones: [
+        { alcance: 'copropiedad', copropiedadId: copA, permisos: ['pqr.ver'] },
+      ],
+      terceros: [{ _id: tercero, copropiedadId: copA }],
+      inmuebles: [],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.esResidente).toBe(false);
+  });
+
+  it('arrendatario vigente de una unidad activa sí es residente', async () => {
+    const service = servicio({
+      terceros: [{ _id: tercero, copropiedadId: copA }],
+      inmuebles: [
+        { copropiedadId: copA, titularId: oid(), arrendatarioId: tercero },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado).toMatchObject({
+      copropiedadId: copA.toString(),
+      esResidente: true,
+    });
+  });
+
+  it('una unidad de OTRA copropiedad que apunte al Tercero no da portal en la suya', async () => {
+    const service = servicio({
+      terceros: [{ _id: tercero, copropiedadId: copA }],
+      inmuebles: [{ copropiedadId: copB, titularId: tercero }],
+      copropiedades: [copropiedad(copA, 'COP-A'), copropiedad(copB, 'COP-B')],
+    });
+
+    await expect(service.copropiedadesDe(cuenta.toString())).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('busca solo unidades activas cuyo titular o arrendatario es uno de sus Terceros', async () => {
+    const inmuebles = consulta([]);
+    const service = new AccesoService(
+      consulta([]) as never,
+      consulta([]) as never,
+      consulta([]) as never,
+      consulta([{ _id: tercero, copropiedadId: copA }]) as never,
+      consulta([]) as never,
+      inmuebles as never,
+    );
+
+    await service.copropiedadesDe(cuenta.toString());
+
+    expect(inmuebles.find).toHaveBeenCalledWith({
+      estado: 'active',
+      $or: [
+        { titularId: { $in: [tercero] } },
+        { arrendatarioId: { $in: [tercero] } },
+      ],
     });
   });
 });
