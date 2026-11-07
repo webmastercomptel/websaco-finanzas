@@ -23,6 +23,7 @@ import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { TenantContextService } from './tenant/tenant-context.service';
 import { AccesoService } from './acceso/acceso.service';
 import { CuentaService } from './cuentas/cuenta.service';
+import { EnlaceAccesoService } from './cuentas/enlace-acceso.service';
 import { NumeracionService } from './numeracion/numeracion.service';
 import { PeriodoService } from './contabilidad/periodo.service';
 import { PresentacionDocumentoService } from './documentos/presentacion-documento.service';
@@ -56,6 +57,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     TenantContextService,
     AccesoService,
     CuentaService,
+    EnlaceAccesoService,
     NumeracionService,
     PeriodoService,
     PresentacionDocumentoService,
@@ -77,6 +79,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     TenantContextService,
     AccesoService,
     CuentaService,
+    EnlaceAccesoService,
     NumeracionService,
     PeriodoService,
     PresentacionDocumentoService,

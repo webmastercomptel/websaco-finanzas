@@ -44,6 +44,8 @@ export default registerAs('app', () => ({
   sendgridApiKey: process.env.SENDGRID_API_KEY,
   sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL,
   sendgridFromName: process.env.SENDGRID_FROM_NAME!,
+  // Web app address for links in emails; optional (see env.validation.ts).
+  frontendUrl: process.env.FRONTEND_URL,
   // Integrations panel — the secret is required by Joi only when the switch is
   // on; the switch is off unless explicitly set (see env.validation.ts).
   panelHmacSecret: process.env.PANEL_HMAC_SECRET,

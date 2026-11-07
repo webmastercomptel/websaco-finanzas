@@ -153,6 +153,19 @@ export const envValidationSchema = Joi.object({
   SENDGRID_FROM_EMAIL: Joi.string().email().empty('').optional(),
   SENDGRID_FROM_NAME: Joi.string().empty('').default('WebSaco'),
 
+  // Public address of the web app, used to build the links in emails (sign-in
+  // links, "open this task"). Optional: without it those emails go out with no
+  // link, never with a wrong one. https is mandatory in production because the
+  // link carries a credential; scheme + host only, no path.
+  FRONTEND_URL: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().uri({ scheme: ['https'] }),
+      otherwise: Joi.string().uri({ scheme: ['http', 'https'] }),
+    })
+    .empty('')
+    .optional(),
+
   // Integrations panel (see modules/integraciones-panel/ and
   // docs/runbooks/integracion-panel.md). The switch is OFF by default: a
   // deployment that never heard of the panel behaves exactly as before. With

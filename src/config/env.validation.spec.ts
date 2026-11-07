@@ -252,6 +252,34 @@ describe('envValidationSchema', () => {
     });
   });
 
+  describe('FRONTEND_URL', () => {
+    it('es opcional', () => {
+      expect(validate({}).error).toBeUndefined();
+    });
+
+    it('acepta http en desarrollo', () => {
+      expect(
+        validate({ FRONTEND_URL: 'http://localhost:5173' }).error,
+      ).toBeUndefined();
+    });
+
+    it('exige https en producción', () => {
+      const produccion = {
+        NODE_ENV: 'production',
+        CORS_ORIGINS: 'https://finanzas.ejemplo.com',
+      };
+
+      expect(
+        validate({ ...produccion, FRONTEND_URL: 'https://app.ejemplo.com' })
+          .error,
+      ).toBeUndefined();
+      expect(
+        validate({ ...produccion, FRONTEND_URL: 'http://app.ejemplo.com' })
+          .error?.message,
+      ).toContain('FRONTEND_URL');
+    });
+  });
+
   describe('correo (SendGrid)', () => {
     const CLAVE = 'SG.clave-de-prueba';
     const REMITENTE = 'notificaciones@ejemplo.com';

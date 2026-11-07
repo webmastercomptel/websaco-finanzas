@@ -166,7 +166,22 @@ import {
   PublicacionLoteSchema,
 } from './schemas/publicaciones/publicacion-lote.schema';
 
+import {
+  ConsecutivoAdministracion,
+  ConsecutivoAdministracionSchema,
+} from './schemas/administracion/consecutivo-administracion.schema';
+
+import {
+  EnlaceAcceso,
+  EnlaceAccesoSchema,
+} from './schemas/cuentas/enlace-acceso.schema';
+
 const models = [
+  { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },
+  {
+    name: ConsecutivoAdministracion.name,
+    schema: ConsecutivoAdministracionSchema,
+  },
   { name: EntidadAdministradora.name, schema: EntidadAdministradoraSchema },
   {
     name: ContadorEntidadAdministradora.name,
