@@ -85,10 +85,11 @@ export class NotificacionesService {
   }
 
   /**
-   * Best-effort producer used by the other building-management modules: one
-   * entry for one recipient. It never throws — a failed write is logged, never
-   * surfaced, so the PQR, task or reservation that triggered it is not put at
-   * risk by a side effect.
+   * Best-effort producer used by the other modules: one entry for one
+   * recipient. It never throws — a failed write is logged, never surfaced, so
+   * the PQR, task or reservation that triggered it is not put at risk by a side
+   * effect. It answers whether the entry was stored, so a resumable delivery
+   * records "notified" only when it really happened.
    */
   async crear(entrada: {
     copropiedadId: Types.ObjectId | string;
@@ -96,7 +97,7 @@ export class NotificacionesService {
     tipo: TipoNotificacion;
     titulo: string;
     descripcion?: string;
-  }): Promise<void> {
+  }): Promise<boolean> {
     try {
       await this.notificaciones.create({
         copropiedadId: entrada.copropiedadId,
@@ -106,10 +107,12 @@ export class NotificacionesService {
         descripcion: entrada.descripcion ?? '',
         leida: false,
       });
+      return true;
     } catch (error: unknown) {
       this.logger.error(
         `No se pudo crear la notificación (${entrada.tipo}) para ${String(entrada.accountId)}: ${(error as Error).message}`,
       );
+      return false;
     }
   }
 }

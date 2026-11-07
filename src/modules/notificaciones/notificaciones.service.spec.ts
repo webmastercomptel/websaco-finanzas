@@ -180,7 +180,7 @@ describe('NotificacionesService.crear (productor)', () => {
     });
   });
 
-  it('nunca lanza: un fallo al guardar no rompe a quien la produce', async () => {
+  it('nunca lanza: un fallo al guardar responde false (quien entrega no lo anota)', async () => {
     const { servicio } = crear({ fallaAlGuardar: true });
 
     await expect(
@@ -190,6 +190,19 @@ describe('NotificacionesService.crear (productor)', () => {
         tipo: 'tarea',
         titulo: 'x',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
+  });
+
+  it('responde true cuando la notificación quedó guardada', async () => {
+    const { servicio } = crear();
+
+    await expect(
+      servicio.crear({
+        copropiedadId: COP,
+        accountId: CUENTA,
+        tipo: 'tarea',
+        titulo: 'x',
+      }),
+    ).resolves.toBe(true);
   });
 });

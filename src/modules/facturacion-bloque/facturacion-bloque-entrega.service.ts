@@ -383,19 +383,22 @@ export class FacturacionBloqueEntregaService {
     const etiqueta = `${idDocumento} a la cuenta ${residente.accountId}`;
     try {
       if (!contexto.notificados.get(idDocumento)?.has(residente.accountId)) {
-        await this.notificaciones.crear({
+        const guardada = await this.notificaciones.crear({
           copropiedadId,
           accountId: residente.accountId,
           tipo: 'pago',
           titulo: construirAsuntoBloque(bloque.tipo, bloque.periodo),
         });
-        await this.registrar(
-          contexto,
-          documento,
-          'notificadosIds',
-          residente.accountId,
-        );
-        contexto.notificados.get(idDocumento)?.add(residente.accountId);
+        // Not stored = still pending: the next send retries it.
+        if (guardada) {
+          await this.registrar(
+            contexto,
+            documento,
+            'notificadosIds',
+            residente.accountId,
+          );
+          contexto.notificados.get(idDocumento)?.add(residente.accountId);
+        }
       }
 
       if (

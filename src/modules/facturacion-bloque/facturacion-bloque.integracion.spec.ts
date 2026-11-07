@@ -211,7 +211,7 @@ function montar() {
   const enlaces = {
     construir: jest.fn().mockResolvedValue('https://app.test/x'),
   };
-  const notificaciones = { crear: jest.fn().mockResolvedValue(undefined) };
+  const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
   const copropiedades = {
     findById: jest.fn().mockReturnValue(consulta({ nombre: 'Torres' })),
   };

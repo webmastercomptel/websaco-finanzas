@@ -283,7 +283,7 @@ export class AnunciosEntregaService {
     const etiqueta = `${anuncio._id.toString()} a ${residente.email}`;
     try {
       if (!contexto.notificados.has(residente.accountId)) {
-        await this.notificaciones.crear({
+        const guardada = await this.notificaciones.crear({
           copropiedadId,
           accountId: residente.accountId,
           tipo: 'anuncio',
@@ -292,8 +292,11 @@ export class AnunciosEntregaService {
             anuncio.titulo,
           ),
         });
-        await this.registrar(contexto, 'notificadosIds', residente.accountId);
-        contexto.notificados.add(residente.accountId);
+        // Not stored = still pending: the next publish retries it.
+        if (guardada) {
+          await this.registrar(contexto, 'notificadosIds', residente.accountId);
+          contexto.notificados.add(residente.accountId);
+        }
       }
 
       if (

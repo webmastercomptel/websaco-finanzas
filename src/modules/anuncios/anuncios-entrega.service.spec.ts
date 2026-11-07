@@ -93,7 +93,7 @@ function montar(opciones: { correoConfigurado?: boolean } = {}) {
       .fn<Promise<string | null>, [string, string, string]>()
       .mockResolvedValue('https://app.test/auth/enlace?token=abc'),
   };
-  const notificaciones = { crear: jest.fn().mockResolvedValue(undefined) };
+  const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
 
   const servicio = new AnunciosEntregaService(
     anuncios as never,
@@ -512,6 +512,25 @@ describe('AnunciosEntregaService — idempotencia y reanudación', () => {
     expect(notificaciones.crear).toHaveBeenCalledTimes(1);
   });
 
+  it('una notificación interna que no se pudo guardar NO queda anotada como entregada', async () => {
+    const montado = montar();
+    const { servicio, notificaciones, residentes } = montado;
+    const [primero] = residentes;
+    notificaciones.crear.mockImplementation(
+      ({ accountId }: { accountId: string }) =>
+        Promise.resolve(accountId !== primero.accountId),
+    );
+
+    await servicio.publicar(ANUNCIO.toString());
+
+    expect(montado.registrados('notificadosIds')).not.toContain(
+      primero.accountId,
+    );
+    expect(montado.registrados('notificadosIds').length).toBe(
+      residentes.length - 1,
+    );
+  });
+
   it('el fallo de un destinatario (correo que lanza, notificación que lanza) no frena a los demás', async () => {
     const { servicio, directorio, correo, notificaciones, finalizacion } =
       montar();
@@ -526,7 +545,7 @@ describe('AnunciosEntregaService — idempotencia y reanudación', () => {
       ({ accountId }: { accountId: string }) =>
         accountId === lista[1].accountId
           ? Promise.reject(new Error('boom inbox'))
-          : Promise.resolve(),
+          : Promise.resolve(true),
     );
 
     await expect(servicio.publicar(ANUNCIO.toString())).resolves.toBeDefined();

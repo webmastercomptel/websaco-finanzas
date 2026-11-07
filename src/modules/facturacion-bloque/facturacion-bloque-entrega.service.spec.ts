@@ -140,7 +140,7 @@ function montar(
       .fn<Promise<string | null>, [string, string, string, number?]>()
       .mockResolvedValue('https://app.test/auth/enlace?token=abc'),
   };
-  const notificaciones = { crear: jest.fn().mockResolvedValue(undefined) };
+  const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
 
   const servicio = new FacturacionBloqueEntregaService(
     bloques as never,
@@ -381,6 +381,26 @@ describe('FacturacionBloqueEntregaService — a quién le llega qué', () => {
     ).toEqual(expect.arrayContaining([dueno.accountId, inquilino.accountId]));
     expect(registrados('notificadosIds')).toHaveLength(2);
     expect(registrados('correosEnviadosIds')).toHaveLength(2);
+  });
+
+  it('una notificación interna que no se pudo guardar NO queda anotada como entregada', async () => {
+    const dueno = persona(1, 'propietario');
+    const inquilino = persona(2, 'arrendatario');
+    const { documentos, residentes } = escenario([
+      { codigo: '301', residentes: [dueno, inquilino] },
+    ]);
+    const { servicio, notificaciones, registrados } = montar({
+      documentos,
+      residentes,
+    });
+    notificaciones.crear.mockImplementation(
+      ({ accountId }: { accountId: string }) =>
+        Promise.resolve(accountId !== inquilino.accountId),
+    );
+
+    await servicio.enviar(BLOQUE.toString(), user);
+
+    expect(registrados('notificadosIds')).toHaveLength(1);
   });
 
   it('la notificación es del tipo pago, de la copropiedad activa, con el asunto del correo', async () => {
