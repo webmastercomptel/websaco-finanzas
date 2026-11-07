@@ -200,7 +200,10 @@ describe('BusquedaAdministracionService', () => {
 
     it('documentos-administracion (ver o subir) habilita documentos pero no facturas por bloque (que pide facturas.crear)', async () => {
       const r = await service.buscar(
-        usuario(['documentos-administracion.ver', 'documentos-administracion.subir']),
+        usuario([
+          'documentos-administracion.ver',
+          'documentos-administracion.subir',
+        ]),
         { q: 'abc' },
       );
 

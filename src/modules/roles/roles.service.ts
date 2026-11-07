@@ -2,12 +2,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { siguienteNumero } from '../../common/consecutivos/codigo-consecutivo';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import {
   ConsecutivoAdministracion,
@@ -42,6 +44,26 @@ const exigirPermisosAsignables = (permisos: readonly string[] | undefined) => {
   if (invalidos.length > 0) {
     throw new BadRequestException(
       `Permisos que un rol no puede incluir: ${invalidos.join(', ')}`,
+    );
+  }
+};
+
+/**
+ * Least privilege, the same rule `EquipoService` applies: a non-platform caller
+ * may only put into (or take out of) a role the keys it holds itself. Without
+ * it, anyone with `roles.gestionar` could write every key into a role they hold
+ * and receive it on the next request (`AccesoService` unions role keys).
+ */
+const exigirClavesPropias = (
+  user: IRequestUser,
+  claves: readonly string[],
+): void => {
+  if (user.isPlatformAdmin) return;
+  const propias = new Set(user.permissions ?? []);
+  const faltantes = [...new Set(claves)].filter((c) => !propias.has(c));
+  if (faltantes.length > 0) {
+    throw new ForbiddenException(
+      `No puedes otorgar ni quitar permisos que no tienes: ${faltantes.join(', ')}`,
     );
   }
 };
@@ -83,8 +105,9 @@ export class RolesService {
       .exec();
   }
 
-  async create(dto: CrearRolDto): Promise<RolContrato> {
+  async create(dto: CrearRolDto, user: IRequestUser): Promise<RolContrato> {
     exigirPermisosAsignables(dto.permisos);
+    exigirClavesPropias(user, dto.permisos ?? []);
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const codigo = await this.siguienteCodigoDeRol(copropiedadId);
     try {
@@ -132,12 +155,24 @@ export class RolesService {
     return documentos.map((d) => toRol(d, porRol.get(d._id.toString()) ?? 0));
   }
 
-  async update(id: string, dto: ActualizarRolDto): Promise<RolContrato> {
+  async update(
+    id: string,
+    dto: ActualizarRolDto,
+    user: IRequestUser,
+  ): Promise<RolContrato> {
     exigirPermisosAsignables(dto.permisos);
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException(`Rol ${id} no encontrado`);
     }
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    if (dto.permisos !== undefined) {
+      await this.exigirCambioDePermisosPermitido(
+        copropiedadId,
+        id,
+        dto.permisos,
+        user,
+      );
+    }
     const cambios: Record<string, unknown> = {};
     if (dto.nombre !== undefined) cambios.nombre = dto.nombre;
     if (dto.descripcion !== undefined) cambios.descripcion = dto.descripcion;
@@ -161,6 +196,48 @@ export class RolesService {
     if (!documento) throw new NotFoundException(`Rol ${id} no encontrado`);
 
     return toRol(documento, await this.contarUsuarios(copropiedadId, id));
+  }
+
+  /**
+   * Guards a change to a role's keys: the caller must hold every key added AND
+   * every key removed (taking away what you could not give is also a privilege
+   * change for everyone holding the role), and may not rewrite the keys of a
+   * role they hold themselves. Platform administrators are exempt. A missing
+   * role is left to the update's own 404.
+   */
+  private async exigirCambioDePermisosPermitido(
+    copropiedadId: Types.ObjectId,
+    id: string,
+    nuevos: readonly string[],
+    user: IRequestUser,
+  ): Promise<void> {
+    if (user.isPlatformAdmin) return;
+    const actual = await this.roles.findOne({ _id: id, copropiedadId }).exec();
+    if (!actual) return;
+
+    const antes = new Set(actual.permisos ?? []);
+    const despues = new Set(nuevos);
+    const cambiadas = [
+      ...[...despues].filter((c) => !antes.has(c)),
+      ...[...antes].filter((c) => !despues.has(c)),
+    ];
+    exigirClavesPropias(user, cambiadas);
+
+    if (user.accountId && Types.ObjectId.isValid(user.accountId)) {
+      const loTiene = await this.asignaciones
+        .exists({
+          accountId: new Types.ObjectId(user.accountId),
+          copropiedadId,
+          roleIds: new Types.ObjectId(id),
+          estado: 'active',
+        })
+        .exec();
+      if (loTiene) {
+        throw new ForbiddenException(
+          'No puedes cambiar los permisos de un rol que tienes asignado',
+        );
+      }
+    }
   }
 
   /**

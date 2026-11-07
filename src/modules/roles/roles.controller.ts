@@ -9,7 +9,9 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import type { Permiso, Rol } from '../../contracts';
@@ -42,14 +44,21 @@ export class RolesController {
 
   @Post()
   @CheckAbility({ action: 'create', subject: 'Rol' })
-  create(@Body() dto: CrearRolDto): Promise<Rol> {
-    return this.roles.create(dto);
+  create(
+    @Body() dto: CrearRolDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Rol> {
+    return this.roles.create(dto, user);
   }
 
   @Patch(':id')
   @CheckAbility({ action: 'update', subject: 'Rol' })
-  update(@Param('id') id: string, @Body() dto: ActualizarRolDto): Promise<Rol> {
-    return this.roles.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: ActualizarRolDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Rol> {
+    return this.roles.update(id, dto, user);
   }
 
   @Delete(':id')
