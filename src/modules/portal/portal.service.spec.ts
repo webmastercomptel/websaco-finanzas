@@ -19,6 +19,35 @@ const usuario: IRequestUser = {
   permissions: [],
 };
 
+/** A full invoice as `FacturasService.findAll` returns it (owner contract). */
+const facturaCompleta = {
+  id: FACTURA,
+  loteId: 'lote-1',
+  inmuebleId: MI_UNIDAD,
+  inmuebleCodigo: 'A-101',
+  terceroId: 'tercero-1',
+  titular: { nombre: 'Ana Propietaria', identificacion: '123' },
+  prefijo: 'FV',
+  numero: 7,
+  numeroCompleto: 'FV-7',
+  fechaEmision: '2026-05-01',
+  fechaVencimiento: '2026-05-15',
+  periodoDesde: '2026-05-01',
+  periodoHasta: '2026-05-31',
+  lineas: [{ concepto: 'Administración', monto: 1000 }],
+  saldosInformativos: [{ concepto: 'Multa', saldo: 50 }],
+  subtotal: 1000,
+  totalImpuestos: 0,
+  total: 1000,
+  saldoPendiente: 400,
+  montoDescuento: 10,
+  fechaLimiteDescuento: '2026-05-10',
+  estado: 'emitida',
+  motivoAnulacion: null,
+  detalleAnulacion: null,
+  fechaAnulacion: null,
+};
+
 /** Acceso that knows one unit, held with `rol`. */
 const accesoCon = (rol: RolPortal) => ({
   unidadesDe: jest.fn(),
@@ -63,7 +92,15 @@ const construir = async (
 ) => {
   const acceso = accesoCon(rol);
   const facturas = {
-    findAll: jest.fn(() => Promise.resolve({ datos: [] })),
+    findAll: jest.fn(() =>
+      Promise.resolve({
+        items: [facturaCompleta],
+        total: 1,
+        pagina: 1,
+        porPagina: 50,
+        totales: { total: 1000, saldoPendiente: 400 },
+      }),
+    ),
     findOneRaw: jest.fn((id: string) =>
       Promise.resolve({
         _id: id,
@@ -104,6 +141,44 @@ describe('PortalService.facturasDe', () => {
       expect.objectContaining({ inmuebleId: MI_UNIDAD, pagina: 2 }),
       expect.anything(),
     );
+  });
+
+  it('al arrendatario solo se le devuelve la factura: sin saldo, titular, líneas ni totales', async () => {
+    const { service } = await construir('arrendatario');
+
+    const pagina = await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+
+    expect(pagina).toEqual({
+      items: [
+        {
+          id: FACTURA,
+          inmuebleId: MI_UNIDAD,
+          inmuebleCodigo: 'A-101',
+          numeroCompleto: 'FV-7',
+          fechaEmision: '2026-05-01',
+          fechaVencimiento: '2026-05-15',
+          periodoDesde: '2026-05-01',
+          periodoHasta: '2026-05-31',
+          total: 1000,
+          estado: 'emitida',
+        },
+      ],
+      total: 1,
+      pagina: 1,
+      porPagina: 50,
+    });
+    expect(pagina).not.toHaveProperty('totales');
+    expect(JSON.stringify(pagina)).not.toMatch(
+      /saldo|titular|terceroId|loteId|Descuento|Anulacion|lineas/i,
+    );
+  });
+
+  it('al propietario se le devuelve el contrato completo de la factura', async () => {
+    const { service } = await construir('propietario');
+
+    const pagina = await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+
+    expect(pagina.items[0]).toEqual(facturaCompleta);
   });
 
   it('solo lista facturas liberadas a los residentes: pide únicamente esos ids', async () => {
