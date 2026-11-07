@@ -275,4 +275,37 @@ describe('inventario de rutas', () => {
     expect(routes).toBeGreaterThan(100);
     expect(problems).toEqual([]);
   });
+
+  /**
+   * Every unauthenticated route, each with why it must be open. A new @Public
+   * route fails here until it is added on purpose.
+   * - health: Cloud Run probes carry no credentials.
+   * - auth/enlace/canjear: the person following an emailed link has no session
+   *   yet; single purpose (token -> custom token), rate-limited, opaque 401.
+   */
+  it('las únicas rutas @Public son las justificadas', () => {
+    const publicas: string[] = [];
+    for (const file of files) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require(file) as Record<string, unknown>;
+      for (const exported of Object.values(mod)) {
+        if (typeof exported !== 'function') continue;
+        const controller = exported as unknown as Ctor;
+        if (Reflect.getMetadata(PATH_METADATA, controller) === undefined) {
+          continue;
+        }
+        for (const [name, handler] of routesOf(controller)) {
+          if (declared(PUBLIC_KEY, controller, handler)) {
+            publicas.push(`${controller.name}.${name}`);
+          }
+        }
+      }
+    }
+    expect(publicas.sort()).toEqual([
+      'EnlaceAccesoController.canjear',
+      'HealthController.check',
+      'HealthController.live',
+      'HealthController.ready',
+    ]);
+  });
 });

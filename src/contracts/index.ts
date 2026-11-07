@@ -2245,6 +2245,17 @@ export interface AuthMe {
   alcance: 'copropiedad' | 'entidad' | null;
 }
 
+/**
+ * Response of `POST /auth/enlace/canjear` (public). The frontend route
+ * `/auth/enlace?token=…` signs in with `signInWithCustomToken(customToken)`,
+ * selects `copropiedadId` and navigates to `destino` (always a same-site path).
+ */
+export interface EnlaceCanjeado {
+  customToken: string;
+  copropiedadId: string;
+  destino: string;
+}
+
 /* ── Consulta de Movimiento Contable (§12) ────────────────────── */
 
 /** One debit or credit line within a journal entry card. */
