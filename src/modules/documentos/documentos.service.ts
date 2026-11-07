@@ -165,12 +165,29 @@ export class DocumentosService {
     return archivos.map((a) => this.aContrato(a, mapa));
   }
 
-  /** Library usage of the coproperty (confirmed files only). */
-  async estadisticas(): Promise<EstadisticasArchivos> {
+  /**
+   * Library usage of the coproperty (confirmed files only), counted over the
+   * folders the caller may read — counts and sizes of a private folder are
+   * information about it too. The quota is the coproperty's.
+   */
+  async estadisticas(user: IRequestUser): Promise<EstadisticasArchivos> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    const [actor, mapa] = await Promise.all([
+      this.actores.deSolicitud(user),
+      this.carpetas.cargarMapa(copropiedadId),
+    ]);
+    const carpetaIds = [...mapa.values()]
+      .filter((c) => this.carpetas.accesoDe(c, actor, mapa).puedeLeer)
+      .map((c) => c._id);
     const [fila] = await this.archivos
       .aggregate<{ total: number; usado: number }>([
-        { $match: { copropiedadId, estado: 'listo' } },
+        {
+          $match: {
+            copropiedadId,
+            estado: 'listo',
+            carpetaId: { $in: carpetaIds },
+          },
+        },
         {
           $group: {
             _id: null,

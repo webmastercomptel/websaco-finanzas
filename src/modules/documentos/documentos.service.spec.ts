@@ -617,7 +617,7 @@ describe('DocumentosService.estadisticas', () => {
     const { servicio, archivos } = montar(actor([], true));
     archivos.aggregate.mockReturnValue(consulta([{ total: 3, usado: 9000 }]));
 
-    await expect(servicio.estadisticas()).resolves.toEqual({
+    await expect(servicio.estadisticas(user)).resolves.toEqual({
       totalArchivos: 3,
       espacioUsadoBytes: 9000,
       espacioTotalBytes: CUOTA_ALMACENAMIENTO_BYTES,
@@ -630,12 +630,28 @@ describe('DocumentosService.estadisticas', () => {
     expect(pipeline[0].$match).toEqual({
       copropiedadId: COPROPIEDAD,
       estado: 'listo',
+      carpetaId: { $in: [ACTAS._id, PRIVADA._id] },
+    });
+  });
+
+  it('respeta los permisos de carpeta: no cuenta archivos de carpetas que el actor no puede leer', async () => {
+    const { servicio, archivos } = montar(actor([ROL_LEE]));
+
+    await servicio.estadisticas(user);
+
+    const pipeline = (
+      archivos.aggregate.mock.calls as unknown[][]
+    )[0][0] as Array<{ $match?: unknown }>;
+    expect(pipeline[0].$match).toEqual({
+      copropiedadId: COPROPIEDAD,
+      estado: 'listo',
+      carpetaId: { $in: [ACTAS._id] },
     });
   });
 
   it('sin archivos devuelve ceros', async () => {
     const { servicio } = montar(actor([], true));
-    await expect(servicio.estadisticas()).resolves.toMatchObject({
+    await expect(servicio.estadisticas(user)).resolves.toMatchObject({
       totalArchivos: 0,
       espacioUsadoBytes: 0,
     });

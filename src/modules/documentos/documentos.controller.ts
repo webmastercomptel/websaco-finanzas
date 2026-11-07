@@ -119,8 +119,10 @@ export class DocumentosController {
 
   @Get('stats')
   @CheckAbility({ action: 'read', subject: 'Documento' })
-  estadisticas(): Promise<EstadisticasArchivos> {
-    return this.documentos.estadisticas();
+  estadisticas(
+    @CurrentUser() user: IRequestUser,
+  ): Promise<EstadisticasArchivos> {
+    return this.documentos.estadisticas(user);
   }
 
   @Get()
