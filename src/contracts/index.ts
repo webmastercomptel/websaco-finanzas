@@ -2863,3 +2863,21 @@ export interface Permiso {
   descripcion: string;
   modulo: string;
 }
+
+/** One entry of the signed-in person's in-app inbox (the bell). */
+export interface Notificacion {
+  id: string;
+  tipo:
+    | 'pqr'
+    | 'reserva'
+    | 'mantenimiento'
+    | 'pago'
+    | 'documento'
+    | 'tarea'
+    | 'anuncio'
+    | 'actividad';
+  titulo: string;
+  descripcion: string;
+  fecha: string;
+  leida: boolean;
+}

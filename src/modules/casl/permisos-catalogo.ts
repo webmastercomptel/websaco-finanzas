@@ -5,9 +5,11 @@
 // `permission-map.ts` uses to build abilities, so the two can never disagree
 // about what a key means.
 import type { ModuloProducto } from '../../common/licencia/modulos';
+import { createAppAbility, type Subject } from './casl-ability.constants';
 import {
   MODULE_TO_SUBJECT,
   MODULE_TO_SUBJECT_ADMINISTRACION,
+  rulesFromPermissionKeys,
   VERB_TO_ACTION,
   VERB_TO_ACTION_ADMINISTRACION,
 } from './permission-map';
@@ -244,6 +246,22 @@ const CLAVES_ADMINISTRACION: ReadonlySet<string> = new Set(
 /** Whether `clave` is one of the permissions a role may bundle. */
 export function esPermisoAdministracion(clave: string): boolean {
   return CLAVES_ADMINISTRACION.has(clave);
+}
+
+/**
+ * Whether a set of permission keys grants `read` on `materia` (`manage` implies
+ * it, as in CASL). Used to decide who is worth notifying: a link into a screen
+ * the person cannot open is noise. Built on the same key -> rule translation as
+ * real authorization, so the two never disagree.
+ */
+export function puedeLeerMateria(
+  claves: readonly string[],
+  materia: Subject,
+): boolean {
+  return createAppAbility(rulesFromPermissionKeys([...claves])).can(
+    'read',
+    materia,
+  );
 }
 
 /** Keys that are not in the catalog (typos, removed verbs, invented modules). */

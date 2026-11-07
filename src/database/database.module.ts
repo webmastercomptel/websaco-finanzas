@@ -178,7 +178,13 @@ import {
 
 import { Rol, RolSchema } from './schemas/administracion/rol.schema';
 
+import {
+  Notificacion,
+  NotificacionSchema,
+} from './schemas/administracion/notificacion.schema';
+
 const models = [
+  { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },
   {

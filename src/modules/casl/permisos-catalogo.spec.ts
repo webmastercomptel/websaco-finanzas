@@ -4,10 +4,27 @@ import {
   PERMISOS_ADMINISTRACION,
   permisosDesconocidos,
   permisosVetadosParaPerfil,
+  puedeLeerMateria,
   sinPermisosVetados,
 } from './permisos-catalogo';
 import { createAppAbility } from './casl-ability.constants';
 import { rulesFromPermissionKeys } from './permission-map';
+
+describe('puedeLeerMateria', () => {
+  it('ver, gestionar y los demás verbos que implican leer permiten leer la materia', () => {
+    expect(puedeLeerMateria(['tareas.ver'], 'Tarea')).toBe(true);
+    expect(puedeLeerMateria(['tareas.gestionar'], 'Tarea')).toBe(true);
+  });
+
+  it('sin la clave de esa materia no se puede leer', () => {
+    expect(puedeLeerMateria(['pqr.ver'], 'Tarea')).toBe(false);
+    expect(puedeLeerMateria([], 'Tarea')).toBe(false);
+  });
+
+  it('una clave de otro módulo no abre una materia ajena', () => {
+    expect(puedeLeerMateria(['facturas.ver'], 'Anuncio')).toBe(false);
+  });
+});
 
 describe('PERMISOS_ADMINISTRACION (catálogo que ofrece el editor de roles)', () => {
   const claves = PERMISOS_ADMINISTRACION.map((p) => p.id);

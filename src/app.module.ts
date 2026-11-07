@@ -30,6 +30,7 @@ import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { PanelControlModule } from './modules/panel-control/panel-control.module';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
@@ -94,6 +95,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     ConsultasModule,
     PortalModule,
     RolesModule,
+    NotificacionesModule,
     AuditoriaModule,
     PanelControlModule,
     ConfiguracionModule,
