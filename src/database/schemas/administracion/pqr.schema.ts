@@ -96,6 +96,14 @@ export class AdjuntoPqr {
     default: 'listo',
   })
   estado: EstadoAdjuntoPqr;
+
+  /**
+   * When the upload was registered. The pending-upload sweep only removes
+   * `pendiente` entries older than its grace; a migrated entry without it is
+   * never swept automatically.
+   */
+  @Prop({ type: Date, default: null })
+  creadoEn: Date | null;
 }
 
 /** One reply on the PQR thread, by staff or by the resident who filed it. */

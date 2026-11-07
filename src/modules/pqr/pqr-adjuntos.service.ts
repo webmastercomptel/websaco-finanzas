@@ -14,6 +14,7 @@ import type { IRequestUser } from '../../common/interfaces/request-user.interfac
 import { GCS_BUCKET } from '../../common/storage/storage.constants';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type {
+  DescargaArchivo,
   Pqr as PqrContrato,
   PqrAdjuntoSubidaIniciada,
 } from '../../contracts';
@@ -25,11 +26,28 @@ import type { CrearAdjuntoPqrDto } from './dto/guardar-adjunto.dto';
 import { filtroPqr, poblarTecnico } from './pqr-consultas';
 import { toPqr } from './pqr.mapper';
 
-/** Largest file a PQR attachment may declare. */
-export const TAMANO_MAXIMO_ADJUNTO_BYTES = 200 * 1024 * 1024;
+/**
+ * Largest file a PQR attachment may be: evidence (photos, a scanned letter),
+ * not an archive. Checked on the declaration AND on the real object at
+ * `confirmar`, because the signed URL does not bound what the browser PUTs.
+ */
+export const TAMANO_MAXIMO_ADJUNTO_BYTES = 25 * 1024 * 1024;
 
-/** How long the signed upload URL works: one upload attempt, not a standing credential. */
-const VIGENCIA_URL_SUBIDA_MS = 15 * 60 * 1000;
+/** Attachments one PQR may hold, pending ones included (they occupy storage too). */
+export const MAXIMO_ADJUNTOS_POR_PQR = 10;
+
+/** How long a signed URL works: one upload or one download, not a standing credential. */
+export const VIGENCIA_URL_ADJUNTO_MS = 15 * 60 * 1000;
+
+/** The ONLY Storage prefix this module touches. */
+export const PREFIJO_ADJUNTOS_PQR = 'pqrs/';
+
+/** Whether a stored path lies inside this module's prefix (and is not the bare prefix). */
+export const esRutaDeAdjuntoPqr = (ruta: string | null): ruta is string =>
+  !!ruta &&
+  ruta.startsWith(PREFIJO_ADJUNTOS_PQR) &&
+  ruta.length > PREFIJO_ADJUNTOS_PQR.length &&
+  !ruta.includes('..');
 
 /** The attachment's `tipo` tag, derived from its MIME type. */
 const tipoDeAdjunto = (mime: string): string => {
@@ -90,18 +108,25 @@ export class PqrAdjuntosService {
     if (!existente) throw new NotFoundException(`PQR ${id} no encontrada`);
 
     if (dto.tamanoBytes > TAMANO_MAXIMO_ADJUNTO_BYTES) {
-      throw new BadRequestException('El archivo supera el límite de 200 MB');
+      throw new BadRequestException('El archivo supera el límite de 25 MB');
     }
 
     const nombreSeguro = dto.nombre.replace(/[^\w.-]+/g, '_');
     const rutaAlmacenamiento = `pqrs/${copropiedadId.toString()}/${id}/${randomUUID()}-${nombreSeguro}`;
 
+    // The cap lives in the filter: concurrent uploads cannot overshoot it.
     const actualizada = await this.pqrs
       .findOneAndUpdate(
-        filtro,
+        {
+          ...filtro,
+          [`archivosAdjuntos.${MAXIMO_ADJUNTOS_POR_PQR - 1}`]: {
+            $exists: false,
+          },
+        },
         {
           $push: {
             archivosAdjuntos: {
+              creadoEn: new Date(),
               tipo: tipoDeAdjunto(dto.mimeType),
               nombre: dto.nombre,
               url: null,
@@ -114,7 +139,12 @@ export class PqrAdjuntosService {
       )
       .populate(poblarTecnico(copropiedadId))
       .exec();
-    if (!actualizada) throw new NotFoundException(`PQR ${id} no encontrada`);
+    if (!actualizada) {
+      // It existed a moment ago, so what failed is the cap.
+      throw new ConflictException(
+        `Una PQR admite como máximo ${MAXIMO_ADJUNTOS_POR_PQR} adjuntos`,
+      );
+    }
 
     const registrado = actualizada.archivosAdjuntos.find(
       (adjunto) => adjunto.rutaAlmacenamiento === rutaAlmacenamiento,
@@ -128,7 +158,7 @@ export class PqrAdjuntosService {
       .getSignedUrl({
         version: 'v4',
         action: 'write',
-        expires: Date.now() + VIGENCIA_URL_SUBIDA_MS,
+        expires: Date.now() + VIGENCIA_URL_ADJUNTO_MS,
         contentType: dto.mimeType,
       });
 
@@ -169,10 +199,29 @@ export class PqrAdjuntosService {
       throw new ConflictException('El adjunto no tiene archivo');
     }
 
+    let tamanoReal: number;
     try {
-      await this.bucket.file(adjunto.rutaAlmacenamiento).getMetadata();
+      const [metadata] = await this.bucket
+        .file(adjunto.rutaAlmacenamiento)
+        .getMetadata();
+      tamanoReal = Number(metadata.size ?? 0);
     } catch {
       throw new BadRequestException('El archivo no se subió correctamente');
+    }
+    if (tamanoReal > TAMANO_MAXIMO_ADJUNTO_BYTES) {
+      // Entry first, then the object: an object left behind is only an orphan,
+      // an entry without its object would be a broken attachment.
+      const quitado = await this.pqrs
+        .updateOne(filtro, {
+          $pull: {
+            archivosAdjuntos: { _id: adjunto._id, estado: 'pendiente' },
+          },
+        })
+        .exec();
+      if (quitado.modifiedCount === 1) {
+        await this.borrarObjeto(adjunto.rutaAlmacenamiento);
+      }
+      throw new BadRequestException('El archivo supera el límite de 25 MB');
     }
 
     // The still-`pendiente` condition lives inside the filter: two concurrent
@@ -198,6 +247,68 @@ export class PqrAdjuntosService {
       throw new ConflictException('El adjunto ya fue confirmado');
     }
     return toPqr(actualizada);
+  }
+
+  /** Best-effort delete inside `pqrs/` only; never throws. */
+  private async borrarObjeto(ruta: string): Promise<void> {
+    if (!esRutaDeAdjuntoPqr(ruta)) return;
+    await this.bucket
+      .file(ruta)
+      .delete()
+      .catch(() => undefined);
+  }
+
+  /**
+   * A short-lived signed read URL for one verified (`listo`) attachment. The
+   * stored `url` stays null: a link is minted per request, for whoever the
+   * route already authorized, and expires in minutes.
+   */
+  private async descargar(
+    id: string,
+    adjuntoId: string,
+    soloDe?: Types.ObjectId,
+  ): Promise<DescargaArchivo> {
+    const noEncontrado = () =>
+      new NotFoundException(`Adjunto ${adjuntoId} no encontrado`);
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(adjuntoId)) {
+      throw noEncontrado();
+    }
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const pqr = await this.pqrs
+      .findOne(filtroPqr(id, copropiedadId, soloDe))
+      .exec();
+    const adjunto = pqr?.archivosAdjuntos.find(
+      (a) => a._id.toString() === adjuntoId,
+    );
+    if (
+      !adjunto ||
+      adjunto.estado !== 'listo' ||
+      !esRutaDeAdjuntoPqr(adjunto.rutaAlmacenamiento)
+    ) {
+      throw noEncontrado();
+    }
+    const [url] = await this.bucket
+      .file(adjunto.rutaAlmacenamiento)
+      .getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + VIGENCIA_URL_ADJUNTO_MS,
+      });
+    return { url, nombre: adjunto.nombre };
+  }
+
+  /** Download from any PQR of the coproperty (staff who can read PQRs). */
+  descargarAdjunto(id: string, adjuntoId: string): Promise<DescargaArchivo> {
+    return this.descargar(id, adjuntoId);
+  }
+
+  /** Download from a PQR the resident filed; anybody else's is a 404. */
+  async descargarAdjuntoResidente(
+    id: string,
+    adjuntoId: string,
+    user: IRequestUser,
+  ): Promise<DescargaArchivo> {
+    return await this.descargar(id, adjuntoId, this.cuentaDelResidente(user));
   }
 
   /** Step 1 on any PQR of the coproperty (staff). */

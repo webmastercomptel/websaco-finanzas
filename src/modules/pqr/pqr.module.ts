@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { PortalAccesoService } from '../portal/portal-acceso.service';
+import { PqrAdjuntosHuerfanosService } from './pqr-adjuntos-huerfanos.service';
 import { PqrAdjuntosService } from './pqr-adjuntos.service';
 import { PqrCierreAutomaticoService } from './pqr-cierre-automatico.service';
 import { PqrNotificacionesService } from './pqr-notificaciones.service';
@@ -26,6 +27,7 @@ import { PqrService } from './pqr.service';
     PqrService,
     PqrNotificacionesService,
     PqrAdjuntosService,
+    PqrAdjuntosHuerfanosService,
     PqrCierreAutomaticoService,
     PortalAccesoService,
   ],

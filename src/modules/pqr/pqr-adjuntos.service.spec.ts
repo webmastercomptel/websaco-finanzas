@@ -7,6 +7,7 @@ import {
 import { Types } from 'mongoose';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import {
+  MAXIMO_ADJUNTOS_POR_PQR,
   PqrAdjuntosService,
   TAMANO_MAXIMO_ADJUNTO_BYTES,
 } from './pqr-adjuntos.service';
@@ -70,12 +71,16 @@ function montar() {
   const pqrs = {
     findOne: jest.fn().mockReturnValue(consulta(pqrDoc())),
     findOneAndUpdate: jest.fn(),
+    updateOne: jest.fn().mockReturnValue({
+      exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+    }),
   };
   const getSignedUrl = jest
     .fn()
     .mockResolvedValue(['https://storage.example.com/firmada']);
   const getMetadata = jest.fn().mockResolvedValue([{ size: 1024 }]);
-  const file = jest.fn(() => ({ getSignedUrl, getMetadata }));
+  const borrar = jest.fn().mockResolvedValue([{}]);
+  const file = jest.fn(() => ({ getSignedUrl, getMetadata, delete: borrar }));
   const bucket = { file };
   const tenant = {
     resolveCoPropertyId: jest.fn().mockReturnValue(COPROPIEDAD),
@@ -85,7 +90,7 @@ function montar() {
     bucket as never,
     tenant as never,
   );
-  return { servicio, pqrs, file, getSignedUrl, getMetadata };
+  return { servicio, pqrs, file, getSignedUrl, getMetadata, borrar };
 }
 
 const dtoPdf = {
@@ -111,10 +116,15 @@ describe('PqrAdjuntosService.iniciarSubida', () => {
     const resultado = await servicio.iniciarSubida(PQR.toString(), dtoPdf);
 
     expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PQR.toString(), copropiedadId: COPROPIEDAD },
+      {
+        _id: PQR.toString(),
+        copropiedadId: COPROPIEDAD,
+        [`archivosAdjuntos.${MAXIMO_ADJUNTOS_POR_PQR - 1}`]: { $exists: false },
+      },
       {
         $push: {
           archivosAdjuntos: {
+            creadoEn: expect.any(Date) as Date,
             tipo: 'pdf',
             nombre: 'reporte.pdf',
             url: null,
@@ -235,7 +245,11 @@ describe('PqrAdjuntosService — residente', () => {
       autorId: CUENTA,
     });
     expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PQR.toString(), copropiedadId: COPROPIEDAD, autorId: CUENTA },
+      expect.objectContaining({
+        _id: PQR.toString(),
+        copropiedadId: COPROPIEDAD,
+        autorId: CUENTA,
+      }),
       expect.anything(),
       expect.anything(),
     );
@@ -371,5 +385,128 @@ describe('PqrAdjuntosService.confirmarSubida', () => {
     await expect(
       servicio.confirmarSubida(PQR.toString(), new Types.ObjectId().toString()),
     ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('PqrAdjuntosService — límites de almacenamiento', () => {
+  it('el límite declarado es razonable para evidencia (no 200 MB)', () => {
+    expect(TAMANO_MAXIMO_ADJUNTO_BYTES).toBeLessThanOrEqual(25 * 1024 * 1024);
+  });
+
+  it('una PQR con el máximo de adjuntos responde 409 y no firma nada', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(
+      servicio.iniciarSubidaResidente(PQR.toString(), dtoPdf, residente),
+    ).rejects.toThrow(ConflictException);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('al confirmar mide el objeto REAL: si supera el límite lo quita de la PQR, borra el objeto y responde 400', async () => {
+    const { servicio, pqrs, getMetadata, borrar } = montar();
+    const pendiente = adjunto({
+      rutaAlmacenamiento: `pqrs/${COPROPIEDAD.toString()}/${PQR.toString()}/x.pdf`,
+    });
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [pendiente] })),
+    );
+    getMetadata.mockResolvedValueOnce([
+      { size: String(TAMANO_MAXIMO_ADJUNTO_BYTES + 1) },
+    ]);
+
+    await expect(
+      servicio.confirmarSubidaResidente(
+        PQR.toString(),
+        pendiente._id.toString(),
+        residente,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(pqrs.updateOne).toHaveBeenCalledWith(
+      {
+        _id: PQR.toString(),
+        copropiedadId: COPROPIEDAD,
+        autorId: CUENTA,
+      },
+      {
+        $pull: {
+          archivosAdjuntos: { _id: pendiente._id, estado: 'pendiente' },
+        },
+      },
+    );
+    expect(borrar).toHaveBeenCalled();
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('PqrAdjuntosService.descargar', () => {
+  const ruta = `pqrs/${COPROPIEDAD.toString()}/${PQR.toString()}/a.pdf`;
+
+  it('firma una URL de lectura corta para un adjunto listo', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    const listo = adjunto({ estado: 'listo', rutaAlmacenamiento: ruta });
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [listo] })),
+    );
+
+    const descarga = await servicio.descargarAdjunto(
+      PQR.toString(),
+      listo._id.toString(),
+    );
+
+    expect(getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 'v4', action: 'read' }),
+    );
+    expect(descarga).toEqual({
+      url: 'https://storage.example.com/firmada',
+      nombre: 'archivo.pdf',
+    });
+  });
+
+  it('un adjunto pendiente (no verificado) es 404', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    const pendiente = adjunto({ rutaAlmacenamiento: ruta });
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [pendiente] })),
+    );
+
+    await expect(
+      servicio.descargarAdjunto(PQR.toString(), pendiente._id.toString()),
+    ).rejects.toThrow(NotFoundException);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('una ruta fuera de pqrs/ nunca se firma', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    const raro = adjunto({
+      estado: 'listo',
+      rutaAlmacenamiento: 'facturas/otra/x.pdf',
+    });
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [raro] })),
+    );
+
+    await expect(
+      servicio.descargarAdjunto(PQR.toString(), raro._id.toString()),
+    ).rejects.toThrow(NotFoundException);
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('el residente solo descarga de una PQR que presentó: la autoría va en el filtro', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(null));
+
+    await expect(
+      servicio.descargarAdjuntoResidente(
+        PQR.toString(),
+        new Types.ObjectId().toString(),
+        residente,
+      ),
+    ).rejects.toThrow(NotFoundException);
+    expect(pqrs.findOne).toHaveBeenCalledWith({
+      _id: PQR.toString(),
+      copropiedadId: COPROPIEDAD,
+      autorId: CUENTA,
+    });
   });
 });

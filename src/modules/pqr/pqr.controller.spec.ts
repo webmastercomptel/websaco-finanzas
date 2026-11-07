@@ -35,6 +35,7 @@ describe('PqrController — política de acceso', () => {
     ['responder', 'manage'],
     ['iniciarAdjunto', 'manage'],
     ['confirmarAdjunto', 'manage'],
+    ['descargarAdjunto', 'read'],
   ] as const)('%s exige la acción %s sobre Pqr', (handler, action) => {
     expect(reglasDe(handler)).toEqual([{ action, subject: 'Pqr' }]);
   });
@@ -74,7 +75,7 @@ describe('PqrController — el PoliciesGuard real sobre las rutas reales', () =>
     } as unknown as ExecutionContext;
   };
 
-  const lecturas = ['listar', 'obtener'] as const;
+  const lecturas = ['listar', 'obtener', 'descargarAdjunto'] as const;
   const escrituras = [
     'crear',
     'actualizar',

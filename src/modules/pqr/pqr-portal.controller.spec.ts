@@ -60,7 +60,7 @@ describe('PqrPortalController — metadatos de acceso', () => {
     ).toBeUndefined();
   });
 
-  it('expone exactamente lo que el residente podía hacer: crear, listar, ver, responder y adjuntar. Ni estado, ni asignación, ni "todas"', () => {
+  it('expone exactamente lo que el residente podía hacer: crear, listar, ver, responder, adjuntar y descargar sus adjuntos. Ni estado, ni asignación, ni "todas"', () => {
     expect(
       handlers()
         .map(([nombre, fn]) => [
@@ -71,6 +71,7 @@ describe('PqrPortalController — metadatos de acceso', () => {
     ).toEqual([
       ['confirmarAdjunto', ':id/adjuntos/:attachmentId/confirmar'],
       ['crear', '/'],
+      ['descargarAdjunto', ':id/adjuntos/:attachmentId/descargar'],
       ['iniciarAdjunto', ':id/adjuntos'],
       ['listar', '/'],
       ['obtener', ':id'],

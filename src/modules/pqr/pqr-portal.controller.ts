@@ -11,7 +11,11 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import type { Pqr, PqrAdjuntoSubidaIniciada } from '../../contracts';
+import type {
+  DescargaArchivo,
+  Pqr,
+  PqrAdjuntoSubidaIniciada,
+} from '../../contracts';
 import { Modulo } from '../casl/check-ability.decorator';
 import { PortalGuard } from '../portal/portal.guard';
 import { CrearAdjuntoPqrDto } from './dto/guardar-adjunto.dto';
@@ -92,5 +96,15 @@ export class PqrPortalController {
     @CurrentUser() user: IRequestUser,
   ): Promise<Pqr> {
     return this.adjuntos.confirmarSubidaResidente(id, attachmentId, user);
+  }
+
+  /** Short-lived signed read URL of one verified attachment of an own PQR. */
+  @Get(':id/adjuntos/:attachmentId/descargar')
+  descargarAdjunto(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<DescargaArchivo> {
+    return this.adjuntos.descargarAdjuntoResidente(id, attachmentId, user);
   }
 }
