@@ -28,6 +28,8 @@ import { NotasAnticipoModule } from './modules/notas-anticipo/notas-anticipo.mod
 import { SaldosInicialesModule } from './modules/saldos-iniciales/saldos-iniciales.module';
 import { ConceptosModule } from './modules/conceptos/conceptos.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
+import { EquipoModule } from './modules/equipo/equipo.module';
+import { AccesoResidentesModule } from './modules/acceso-residentes/acceso-residentes.module';
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RolesModule } from './modules/roles/roles.module';
@@ -108,6 +110,8 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     CopropiedadesModule,
     ConceptosModule,
     UsuariosModule,
+    EquipoModule,
+    AccesoResidentesModule,
     ConsultasModule,
     PortalModule,
     RolesModule,

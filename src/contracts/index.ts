@@ -3490,3 +3490,106 @@ export interface RespuestaBusquedaAdministracion {
   reservas?: ResultadoBusquedaAdministracion[];
   facturasBloque?: ResultadoBusquedaAdministracion[];
 }
+
+/* ── Equipo de la copropiedad (personal con acceso) ─────────────── */
+
+/**
+ * Whether the invitation email went out, shared by every endpoint that sends
+ * one. The two flags are separate on purpose: the email can be sent without a
+ * button (the access link may not be issued for some accounts) and the screen
+ * has to say so instead of promising a one-click sign-in.
+ */
+export interface ResultadoInvitacion {
+  /** False when mail is not configured in this environment, or the send failed. */
+  invitacionEnviada: boolean;
+  /** True when the email carries the sign-in button; false when it went without. */
+  enlaceIncluido: boolean;
+}
+
+/** A role attached to a staff member, as the team screen lists it. */
+export interface RolDeMiembro {
+  id: string;
+  nombre: string;
+}
+
+/**
+ * One person with staff access to the ACTIVE coproperty. `id` is the id of
+ * their assignment here, not of their account: an assignment belongs to exactly
+ * one coproperty, so an id from another building simply does not exist.
+ */
+export interface MiembroEquipo {
+  id: string;
+  nombre: string;
+  email: string;
+  perfil: 'administrativo' | 'personal';
+  estado: 'activo' | 'inactivo';
+  roles: RolDeMiembro[];
+  /** Administración keys granted directly (the roles' keys are not repeated here). */
+  permisos: string[];
+  esAdministradorPlataforma: boolean;
+  /**
+   * False for the rows a coproperty administrator may not touch: platform
+   * administrators and `administrativo` assignments. They are managed from the
+   * platform console.
+   */
+  editable: boolean;
+}
+
+/** Response of `POST /equipo`. */
+export interface MiembroEquipoCreado extends ResultadoInvitacion {
+  miembro: MiembroEquipo;
+  /** True when the email already had an account and it was linked, not created. */
+  cuentaExistente: boolean;
+}
+
+/* ── Acceso de residentes al portal ─────────────────────────────── */
+
+/** How a resident holds one unit. */
+export interface UnidadDeResidente {
+  inmuebleId: string;
+  codigo: string;
+  rol: 'propietario' | 'arrendatario';
+}
+
+/**
+ * Where a resident stands. There is deliberately no "invitado": nothing records
+ * whether an invitation was ever opened, so the state would be a guess.
+ */
+export type EstadoAccesoResidente =
+  'sinCuenta' | 'conCuenta' | 'cuentaInactiva';
+
+/** One owner or tenant of the coproperty and whether they can sign in. */
+export interface ResidenteAcceso {
+  terceroId: string;
+  nombre: string;
+  /** The address an invitation would go to (first valid one of the party); null when none. */
+  email: string | null;
+  estadoAcceso: EstadoAccesoResidente;
+  unidades: UnidadDeResidente[];
+  /** True when access can be created in bulk: no account yet and a usable address. */
+  aprovisionable: boolean;
+}
+
+/** Response of `POST /residentes/:terceroId/acceso`. */
+export interface AccesoResidenteCreado extends ResultadoInvitacion {
+  terceroId: string;
+  /** True when an existing account was linked (explicit `vincularExistente`) instead of created. */
+  cuentaExistente: boolean;
+}
+
+/** Response of `POST /residentes/aprovisionar`: one page of a resumable run. */
+export interface AprovisionamientoResidentes {
+  /** Parties examined in this call (creados + omitidos + errores). */
+  procesados: number;
+  creados: number;
+  omitidos: Array<{ terceroId: string; motivo: string }>;
+  errores: Array<{ terceroId: string; mensaje: string }>;
+  /** Parties still to examine after this page; the screen repeats until it is 0. */
+  pendientes: number;
+  /** Pass it as `desde` on the next call; null when nothing is left. */
+  siguienteDesde: string | null;
+  /** Invitation emails accepted by the provider in this call. */
+  invitacionesEnviadas: number;
+  /** False when mail is not configured: identities were created but nobody was told. */
+  correoConfigurado: boolean;
+}
