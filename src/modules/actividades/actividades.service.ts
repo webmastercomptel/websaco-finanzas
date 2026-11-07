@@ -1,6 +1,7 @@
 // src/modules/actividades/actividades.service.ts
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -27,6 +28,7 @@ import type { Actividad as ActividadContrato } from '../../contracts';
 import {
   Actividad,
   type ActividadDocument,
+  type EstadoActividad,
 } from '../../database/schemas/administracion/actividad.schema';
 import {
   ConsecutivoAdministracion,
@@ -38,6 +40,9 @@ import {
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { construirCorreoActividadNueva } from './actividad-correo';
+
+/** States in which residents may still sign up or out; the rest are history. */
+const ESTADOS_CON_ASISTENCIA: EstadoActividad[] = ['proximo', 'en_curso'];
 import {
   desdeActualizarDto,
   desdeCrearDto,
@@ -265,49 +270,54 @@ export class ActividadesService implements OnApplicationBootstrap {
     return { id };
   }
 
-  /**
-   * Toggles the caller's attendance, atomically. The system this replaces read
-   * the document, checked capacity in memory and saved it back, so two people
-   * taking the last seat both got it. Here the capacity check lives INSIDE the
-   * update filter, so Mongo decides it per document and the list can never
-   * exceed `capacidad`:
-   *
-   * 1. Leave: `$pull` on a document that currently contains the caller.
-   * 2. Join: `$addToSet` on a document that does NOT contain the caller and
-   *    still has room (`$size < capacidad`). `capacidad` 0 therefore means
-   *    nobody can register, same as before.
-   * 3. If neither matched, a read tells "no such activity here" (404) apart
-   *    from "full" (400). It also covers a double click: if the caller is
-   *    already in by now, that is reported as attending instead of a false
-   *    "full".
-   */
-  async alternarAsistencia(
-    id: string,
-    user: IRequestUser,
-  ): Promise<ResultadoAsistencia> {
+  /** The resident's account id, or a 400 when the session has none usable. */
+  private cuentaParaAsistir(user: IRequestUser): Types.ObjectId {
     if (!user.accountId || !Types.ObjectId.isValid(user.accountId)) {
       throw new BadRequestException('Usuario no tiene cuenta asociada');
     }
+    return new Types.ObjectId(user.accountId);
+  }
+
+  /**
+   * Why a join/leave did not apply, read AFTER the atomic write missed:
+   * missing (404), closed (409, attendance of a finished or cancelled activity
+   * is history), or null when the caller simply is already in the wanted state.
+   */
+  private async explicarFallo(
+    id: string,
+    copropiedadId: Types.ObjectId,
+  ): Promise<ActividadDocument> {
+    const existente = await this.actividades
+      .findOne({ _id: id, copropiedadId })
+      .exec();
+    if (!existente)
+      throw new NotFoundException(`Actividad ${id} no encontrada`);
+    if (!ESTADOS_CON_ASISTENCIA.includes(existente.estado)) {
+      throw new ConflictException(
+        'La actividad ya terminó o fue cancelada: no admite cambios de asistencia',
+      );
+    }
+    return existente;
+  }
+
+  /**
+   * Signs the resident up. Explicit and idempotent (a double click never signs
+   * them out, unlike the toggle of the system this replaces), only for an
+   * activity still open (`proximo`/`en_curso`). The capacity check lives INSIDE
+   * the update filter, so Mongo decides it per document and the list can never
+   * exceed `capacidad` (0 = nobody can register).
+   */
+  async asistir(id: string, user: IRequestUser): Promise<ResultadoAsistencia> {
+    const cuentaId = this.cuentaParaAsistir(user);
     this.validarId(id);
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    const cuentaId = new Types.ObjectId(user.accountId);
-
-    const salio = await this.actividades
-      .findOneAndUpdate(
-        { _id: id, copropiedadId, participantesIds: cuentaId },
-        { $pull: { participantesIds: cuentaId } },
-        { new: true },
-      )
-      .exec();
-    if (salio) {
-      return { asistiendo: false, asistentes: salio.participantesIds.length };
-    }
 
     const entro = await this.actividades
       .findOneAndUpdate(
         {
           _id: id,
           copropiedadId,
+          estado: { $in: ESTADOS_CON_ASISTENCIA },
           participantesIds: { $ne: cuentaId },
           $expr: { $lt: [{ $size: '$participantesIds' }, '$capacidad'] },
         },
@@ -319,11 +329,7 @@ export class ActividadesService implements OnApplicationBootstrap {
       return { asistiendo: true, asistentes: entro.participantesIds.length };
     }
 
-    const existente = await this.actividades
-      .findOne({ _id: id, copropiedadId })
-      .exec();
-    if (!existente)
-      throw new NotFoundException(`Actividad ${id} no encontrada`);
+    const existente = await this.explicarFallo(id, copropiedadId);
     if (existente.participantesIds.some((p) => p.equals(cuentaId))) {
       return {
         asistiendo: true,
@@ -333,6 +339,30 @@ export class ActividadesService implements OnApplicationBootstrap {
     throw new BadRequestException(
       'La actividad ya alcanzó su capacidad máxima',
     );
+  }
+
+  /** Signs the resident out; idempotent, only while the activity is open. */
+  async dejarDeAsistir(
+    id: string,
+    user: IRequestUser,
+  ): Promise<ResultadoAsistencia> {
+    const cuentaId = this.cuentaParaAsistir(user);
+    this.validarId(id);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+
+    const salio = await this.actividades
+      .findOneAndUpdate(
+        { _id: id, copropiedadId, estado: { $in: ESTADOS_CON_ASISTENCIA } },
+        { $pull: { participantesIds: cuentaId } },
+        { new: true },
+      )
+      .exec();
+    if (salio) {
+      return { asistiendo: false, asistentes: salio.participantesIds.length };
+    }
+    await this.explicarFallo(id, copropiedadId);
+    // Unreachable in practice (open + existing would have matched).
+    throw new NotFoundException(`Actividad ${id} no encontrada`);
   }
 
   /**

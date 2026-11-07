@@ -4,6 +4,7 @@ import {
   METHOD_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants';
+import { RequestMethod } from '@nestjs/common';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import {
   CHECK_ABILITY_KEY,
@@ -63,17 +64,19 @@ describe('ActividadesPortalController — metadatos de acceso', () => {
     ).toBeUndefined();
   });
 
-  it('expone exactamente listar y asistir', () => {
+  it('expone exactamente listar, asistir (POST) y dejar de asistir (DELETE): sin alternar', () => {
     expect(
       handlers()
         .map(([nombre, fn]) => [
           nombre,
+          RequestMethod[Reflect.getMetadata(METHOD_METADATA, fn) as number],
           String(Reflect.getMetadata(PATH_METADATA, fn)),
         ])
         .sort(),
     ).toEqual([
-      ['asistir', ':id/asistir'],
-      ['listar', '/'],
+      ['asistir', 'POST', ':id/asistir'],
+      ['dejarDeAsistir', 'DELETE', ':id/asistir'],
+      ['listar', 'GET', '/'],
     ]);
   });
 });
@@ -89,9 +92,10 @@ describe('ActividadesPortalController — delegación', () => {
   it('pasa filtros y usuario autenticado al listar, y el id y el usuario al asistir', async () => {
     const servicio = {
       listarParaResidente: jest.fn().mockResolvedValue([]),
-      alternarAsistencia: jest
+      asistir: jest.fn().mockResolvedValue({ asistiendo: true, asistentes: 1 }),
+      dejarDeAsistir: jest
         .fn()
-        .mockResolvedValue({ asistiendo: true, asistentes: 1 }),
+        .mockResolvedValue({ asistiendo: false, asistentes: 0 }),
     };
     const controlador = new ActividadesPortalController(servicio as never);
 
@@ -102,7 +106,10 @@ describe('ActividadesPortalController — delegación', () => {
       { categoria: 'salud' },
       user,
     );
-    expect(servicio.alternarAsistencia).toHaveBeenCalledWith('a1', user);
+    expect(servicio.asistir).toHaveBeenCalledWith('a1', user);
     expect(resultado).toEqual({ asistiendo: true, asistentes: 1 });
+
+    await controlador.dejarDeAsistir('a1', user);
+    expect(servicio.dejarDeAsistir).toHaveBeenCalledWith('a1', user);
   });
 });

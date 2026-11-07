@@ -1,5 +1,13 @@
 // src/modules/actividades/actividades-portal.controller.ts
-import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -14,7 +22,8 @@ import { ListarActividadesDto } from './dto/listar-actividades.dto';
 
 /**
  * Resident side of the community activities: list them (with whether the
- * caller is signed up) and toggle attendance. Guarded by `PortalGuard` (the
+ * caller is signed up), sign up (`POST :id/asistir`) and sign out
+ * (`DELETE :id/asistir`), each explicit and idempotent. Guarded by `PortalGuard` (the
  * caller must hold a unit of the ACTIVE coproperty, which must have contracted
  * the module) and deliberately NOT by CASL: residents carry no permissions, and
  * putting these routes behind `PoliciesGuard` would lock out exactly the people
@@ -39,6 +48,14 @@ export class ActividadesPortalController {
     @Param('id') id: string,
     @CurrentUser() user: IRequestUser,
   ): Promise<ResultadoAsistencia> {
-    return this.actividades.alternarAsistencia(id, user);
+    return this.actividades.asistir(id, user);
+  }
+
+  @Delete(':id/asistir')
+  dejarDeAsistir(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<ResultadoAsistencia> {
+    return this.actividades.dejarDeAsistir(id, user);
   }
 }

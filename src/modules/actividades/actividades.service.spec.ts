@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { Destinatario } from '../../common/directorio/directorio.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -427,59 +431,68 @@ describe('ActividadesService.actualizar y eliminar', () => {
   });
 });
 
-describe('ActividadesService.alternarAsistencia — atómica', () => {
-  it('sale: $pull sobre el documento que ya contiene a la cuenta, en una sola operación', async () => {
+describe('ActividadesService.asistir / dejarDeAsistir — explícitas y atómicas', () => {
+  const ABIERTA = { $in: ['proximo', 'en_curso'] };
+
+  it('asistir: $addToSet con el cupo y el estado verificados dentro del filtro, no en memoria', async () => {
     const { servicio, actividades } = montar();
     actividades.findOneAndUpdate.mockReturnValueOnce(
-      consulta(actividadDoc({ participantesIds: [OTRA_CUENTA] })),
+      consulta(actividadDoc({ participantesIds: [OTRA_CUENTA, CUENTA] })),
     );
 
-    const resultado = await servicio.alternarAsistencia(
-      ACTIVIDAD.toString(),
-      usuario(CUENTA),
-    );
-
-    expect(resultado).toEqual({ asistiendo: false, asistentes: 1 });
-    expect(actividades.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(actividades.findOneAndUpdate).toHaveBeenCalledWith(
-      {
-        _id: ACTIVIDAD.toString(),
-        copropiedadId: COPROPIEDAD,
-        participantesIds: CUENTA,
-      },
-      { $pull: { participantesIds: CUENTA } },
-      { new: true },
-    );
-  });
-
-  it('entra: $addToSet con el cupo verificado dentro del filtro, no en memoria', async () => {
-    const { servicio, actividades } = montar();
-    actividades.findOneAndUpdate
-      .mockReturnValueOnce(consulta(null))
-      .mockReturnValueOnce(
-        consulta(actividadDoc({ participantesIds: [OTRA_CUENTA, CUENTA] })),
-      );
-
-    const resultado = await servicio.alternarAsistencia(
+    const resultado = await servicio.asistir(
       ACTIVIDAD.toString(),
       usuario(CUENTA),
     );
 
     expect(resultado).toEqual({ asistiendo: true, asistentes: 2 });
-    expect(actividades.findOneAndUpdate).toHaveBeenNthCalledWith(
-      2,
+    expect(actividades.findOneAndUpdate).toHaveBeenCalledWith(
       {
         _id: ACTIVIDAD.toString(),
         copropiedadId: COPROPIEDAD,
+        estado: ABIERTA,
         participantesIds: { $ne: CUENTA },
         $expr: { $lt: [{ $size: '$participantesIds' }, '$capacidad'] },
       },
       { $addToSet: { participantesIds: CUENTA } },
       { new: true },
     );
-    // Neither path reads the document first: no read-modify-write window.
     expect(actividades.findOne).not.toHaveBeenCalled();
   });
+
+  it('doble clic en asistir: la segunda vez informa asistiendo, NUNCA da de baja', async () => {
+    const { servicio, actividades } = montar();
+    actividades.findOneAndUpdate.mockReturnValue(consulta(null));
+    actividades.findOne.mockReturnValue(
+      consulta(actividadDoc({ capacidad: 1, participantesIds: [CUENTA] })),
+    );
+
+    const resultado = await servicio.asistir(
+      ACTIVIDAD.toString(),
+      usuario(CUENTA),
+    );
+
+    expect(resultado).toEqual({ asistiendo: true, asistentes: 1 });
+    const operaciones = actividades.findOneAndUpdate.mock.calls.map(
+      ([, cambio]) => Object.keys(cambio as object)[0],
+    );
+    expect(operaciones).not.toContain('$pull');
+  });
+
+  it.each(['finalizado', 'cancelado'])(
+    'asistir a una actividad %s es 409',
+    async (estado) => {
+      const { servicio, actividades } = montar();
+      actividades.findOneAndUpdate.mockReturnValue(consulta(null));
+      actividades.findOne.mockReturnValue(
+        consulta(actividadDoc({ estado, participantesIds: [] })),
+      );
+
+      await expect(
+        servicio.asistir(ACTIVIDAD.toString(), usuario(CUENTA)),
+      ).rejects.toThrow(ConflictException);
+    },
+  );
 
   it('cupo lleno (o capacidad 0): 400', async () => {
     const { servicio, actividades } = montar();
@@ -489,7 +502,7 @@ describe('ActividadesService.alternarAsistencia — atómica', () => {
     );
 
     await expect(
-      servicio.alternarAsistencia(ACTIVIDAD.toString(), usuario(CUENTA)),
+      servicio.asistir(ACTIVIDAD.toString(), usuario(CUENTA)),
     ).rejects.toThrow(
       new BadRequestException('La actividad ya alcanzó su capacidad máxima'),
     );
@@ -501,7 +514,7 @@ describe('ActividadesService.alternarAsistencia — atómica', () => {
     actividades.findOne.mockReturnValue(consulta(null));
 
     await expect(
-      servicio.alternarAsistencia(ACTIVIDAD.toString(), usuario(CUENTA)),
+      servicio.asistir(ACTIVIDAD.toString(), usuario(CUENTA)),
     ).rejects.toThrow(NotFoundException);
     expect(actividades.findOne).toHaveBeenCalledWith({
       _id: ACTIVIDAD.toString(),
@@ -509,49 +522,66 @@ describe('ActividadesService.alternarAsistencia — atómica', () => {
     });
   });
 
-  it('doble clic simultáneo: si la cuenta ya quedó inscrita se informa asistiendo, no un falso "cupo lleno"', async () => {
+  it('dejarDeAsistir: $pull solo en una actividad abierta, idempotente', async () => {
     const { servicio, actividades } = montar();
-    actividades.findOneAndUpdate.mockReturnValue(consulta(null));
-    actividades.findOne.mockReturnValue(
-      consulta(actividadDoc({ capacidad: 1, participantesIds: [CUENTA] })),
+    actividades.findOneAndUpdate.mockReturnValueOnce(
+      consulta(actividadDoc({ participantesIds: [OTRA_CUENTA] })),
     );
 
-    const resultado = await servicio.alternarAsistencia(
+    const resultado = await servicio.dejarDeAsistir(
       ACTIVIDAD.toString(),
       usuario(CUENTA),
     );
 
-    expect(resultado).toEqual({ asistiendo: true, asistentes: 1 });
+    expect(resultado).toEqual({ asistiendo: false, asistentes: 1 });
+    expect(actividades.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: ACTIVIDAD.toString(),
+        copropiedadId: COPROPIEDAD,
+        estado: ABIERTA,
+      },
+      { $pull: { participantesIds: CUENTA } },
+      { new: true },
+    );
+  });
+
+  it('dejarDeAsistir en una actividad finalizada: 409 (la asistencia histórica no se reescribe)', async () => {
+    const { servicio, actividades } = montar();
+    actividades.findOneAndUpdate.mockReturnValue(consulta(null));
+    actividades.findOne.mockReturnValue(
+      consulta(
+        actividadDoc({ estado: 'finalizado', participantesIds: [CUENTA] }),
+      ),
+    );
+
+    await expect(
+      servicio.dejarDeAsistir(ACTIVIDAD.toString(), usuario(CUENTA)),
+    ).rejects.toThrow(ConflictException);
   });
 
   it('sin cuenta asociada: 400 y no toca la base', async () => {
     const { servicio, actividades } = montar();
 
     await expect(
-      servicio.alternarAsistencia(ACTIVIDAD.toString(), usuario()),
+      servicio.asistir(ACTIVIDAD.toString(), usuario()),
     ).rejects.toThrow(
       new BadRequestException('Usuario no tiene cuenta asociada'),
     );
-    expect(actividades.findOneAndUpdate).not.toHaveBeenCalled();
-  });
-
-  it('un accountId que no es un ObjectId también es 400', async () => {
-    const { servicio } = montar();
-
     await expect(
-      servicio.alternarAsistencia(ACTIVIDAD.toString(), {
+      servicio.dejarDeAsistir(ACTIVIDAD.toString(), {
         ...usuario(),
         accountId: 'cuenta-1',
       }),
     ).rejects.toThrow(BadRequestException);
+    expect(actividades.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('un id de actividad mal formado es 404 sin tocar la base', async () => {
     const { servicio, actividades } = montar();
 
-    await expect(
-      servicio.alternarAsistencia('xyz', usuario(CUENTA)),
-    ).rejects.toThrow(NotFoundException);
+    await expect(servicio.asistir('xyz', usuario(CUENTA))).rejects.toThrow(
+      NotFoundException,
+    );
     expect(actividades.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
