@@ -188,7 +188,7 @@ describe('PqrAdjuntosService.iniciarSubida', () => {
     expect(empujado.rutaAlmacenamiento).not.toMatch(/\.\.\//);
   });
 
-  it('rechaza con 400 un archivo declarado por encima de 200 MB, sin escribir', async () => {
+  it('rechaza con 400 un archivo declarado por encima del límite, sin escribir', async () => {
     const { servicio, pqrs } = montar();
 
     await expect(
