@@ -3045,3 +3045,100 @@ export interface Tecnico {
   especialidad: string;
   email: string;
 }
+
+/** A common area, as staff manage it. */
+export interface ZonaComun {
+  id: string;
+  codigo: string;
+  nombre: string;
+  tipo: 'deportiva' | 'social' | 'recreativa' | 'servicios' | 'parqueadero';
+  descripcion: string;
+  capacidad: number;
+  horario: string;
+  estado: 'disponible' | 'ocupada' | 'mantenimiento' | 'cerrada';
+  requiereReserva: boolean;
+  costo: number | null;
+  imagen: string | null;
+  reglas: string[];
+}
+
+/**
+ * A bookable common area, as the resident portal sees it. `estado` collapses to
+ * the booking-oriented pair: only `mantenimiento` is "not bookable".
+ */
+export interface Espacio {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  categoria: 'deportes' | 'social';
+  imagen: string | null;
+  horario: string;
+  estado: 'disponible' | 'mantenimiento';
+  costo: number | null;
+  aforo: number;
+}
+
+/** Response of step 1 of a common area's image upload (signed write URL). */
+export interface ImagenZonaSubidaIniciada {
+  uploadUrl: string;
+  storagePath: string;
+}
+
+/**
+ * A booking. `estado` is a DISPLAY state, not the stored one: `aprobada` reads
+ * `confirmada`, `pendiente` reads `pendiente_aprobacion`, and `rechazada` and
+ * `cancelada` both read `cancelada`. `ReservaSolicitud` carries the finer one.
+ */
+export interface Reserva {
+  id: string;
+  espacio: string;
+  residente: string;
+  /** Account that requested it; absent when staff registered it on someone's behalf. */
+  residenteId?: string;
+  inmueble: string;
+  fecha: string;
+  horario: string;
+  estado: 'confirmada' | 'pendiente_aprobacion' | 'cancelada';
+  motivo?: string;
+}
+
+/** A row of the approval queue. */
+export interface ReservaSolicitud {
+  id: string;
+  residente: {
+    nombre: string;
+    unidad: string;
+    iniciales: string;
+  };
+  area: string;
+  fecha: string;
+  horario: string;
+  estado: 'pendiente' | 'aprobada' | 'rechazada';
+  notas: string | null;
+}
+
+/** Counters of the reservations screen header. */
+export interface ReservasStats {
+  solicitudesPendientes: number;
+  reservasHoy: {
+    total: number;
+    confirmadas: number;
+    enCurso: number;
+  };
+  areaMasDemandada: {
+    nombre: string;
+    porcentaje: number;
+  };
+}
+
+/** One occupied stretch of a day, as UTC `HH:MM`. */
+export interface FranjaOcupada {
+  inicio: string;
+  fin: string;
+}
+
+/** What is taken on one day for one common area. */
+export interface DisponibilidadEspacio {
+  horarioOperacion: { inicio: string; fin: string };
+  ocupados: FranjaOcupada[];
+}

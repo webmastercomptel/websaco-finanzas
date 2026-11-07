@@ -202,11 +202,20 @@ import {
 
 import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
 
+import { Zona, ZonaSchema } from './schemas/administracion/zona.schema';
+
+import {
+  Reserva,
+  ReservaSchema,
+} from './schemas/administracion/reserva.schema';
+
 const models = [
   { name: Tarea.name, schema: TareaSchema },
   { name: Pqr.name, schema: PqrSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
+  { name: Zona.name, schema: ZonaSchema },
+  { name: Reserva.name, schema: ReservaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
