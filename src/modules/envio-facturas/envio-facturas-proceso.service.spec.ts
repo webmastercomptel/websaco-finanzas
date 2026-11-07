@@ -73,7 +73,7 @@ function montar(opciones: { correoConfigurado?: boolean } = {}) {
       Promise.resolve(true),
     ),
   };
-  const notificaciones = { crear: jest.fn().mockResolvedValue(undefined) };
+  const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
   const enlaces = {
     construir: jest
       .fn()
@@ -198,6 +198,19 @@ describe('EnvioFacturasProcesoService', () => {
     });
     expect(t.fila(unidad).enviadoEn).toBeInstanceOf(Date);
     expect(t.fila(unidad).liberadaEn).toBeInstanceOf(Date);
+  });
+
+  it('una notificación interna que no se pudo guardar no se anota y la fila no queda enviada', async () => {
+    const t = montar();
+    const propietario = residente('propietario', 'Pedro Pérez');
+    const unidad = t.agregarUnidad('A-101', [propietario]);
+    await t.marcarTodas();
+    t.notificaciones.crear.mockResolvedValue(false);
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.fila(unidad).notificadosIds ?? []).toEqual([]);
+    expect(t.fila(unidad).estado).not.toBe('enviado');
   });
 
   it('inmueble sin arrendatario no falla', async () => {

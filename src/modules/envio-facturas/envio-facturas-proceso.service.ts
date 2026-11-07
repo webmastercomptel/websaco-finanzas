@@ -393,19 +393,22 @@ export class EnvioFacturasProcesoService {
     const etiqueta = `${fila._id.toString()} a la cuenta ${residente.accountId}`;
     try {
       if (!notificados.has(residente.accountId)) {
-        await this.notificaciones.crear({
+        const guardada = await this.notificaciones.crear({
           copropiedadId: contexto.copropiedadId,
           accountId: residente.accountId,
           tipo: 'pago',
           titulo: construirAsuntoFactura(factura.numeroCompleto),
         });
-        await this.registrar(
-          fila,
-          'notificadosIds',
-          residente.accountId,
-          contexto,
-        );
-        notificados.add(residente.accountId);
+        // Not stored = still pending: the row is retried, never faked as sent.
+        if (guardada) {
+          await this.registrar(
+            fila,
+            'notificadosIds',
+            residente.accountId,
+            contexto,
+          );
+          notificados.add(residente.accountId);
+        }
       }
 
       if (enviados.has(residente.accountId)) return 0;
