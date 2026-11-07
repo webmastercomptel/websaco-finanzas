@@ -119,7 +119,8 @@ npm run seed:admin -- --env=<ambiente>   # scripts: ver "Scripts por ambiente"
   runner de Jest estándar, sin el flag `--experimental-vm-modules`.
 - `pdfjs-dist` (extracción de texto de PDF) NO se incluye: en este dominio los
   PDF se generan, no se leen.
-- **Publicación de lotes a WebSaco3** (opcional, por copropiedad): variables
-  `WEBSACO3_*`, orden de despliegue, el `curl` manual de barrido y cómo
-  recuperar filas fallidas están en
-  [`docs/runbooks/publicacion-websaco3.md`](docs/runbooks/publicacion-websaco3.md).
+- **Envío de facturas a propietarios y arrendatarios**: nunca es automático. El
+  personal autorizado (`facturas.aprobar`) marca las facturas y procesa la cola
+  (`POST /envio-facturas/marcar` y `POST /envio-facturas/procesar-pendientes`);
+  requiere correo configurado (`SENDGRID_*`, `FRONTEND_URL`). La publicación
+  HMAC hacia WebSaco3 fue retirada con la fusión..

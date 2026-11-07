@@ -34,11 +34,7 @@ type Ctor = new (...args: never[]) => object;
 type Handler = (...args: never[]) => unknown;
 
 /** Guards that authenticate a service (HMAC / shared secret), not a person. */
-const SIGNED_SERVICE_GUARDS = [
-  'FirmaWebsaco3Guard',
-  'SecretoProgramadorGuard',
-  'FirmaPanelGuard',
-];
+const SIGNED_SERVICE_GUARDS = ['FirmaPanelGuard'];
 
 function guardName(guard: unknown): string {
   if (typeof guard === 'function') return guard.name;

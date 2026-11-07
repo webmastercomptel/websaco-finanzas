@@ -20,19 +20,6 @@ export default registerAs('app', () => ({
   // Genuinely optional outside production (see env.validation.ts), not a
   // silently defaulted value.
   corsOrigins: process.env.CORS_ORIGINS,
-  // WebSaco3 integration — all optional. Outbound publishing needs URL +
-  // secret + trigger secret together; the secret alone is valid and only
-  // enables the inbound holders pull (see env.validation.ts).
-  // `websaco3PublicacionMaxIntentos` always has a Joi default, so it alone is
-  // safe to `!`.
-  websaco3FacturasEndpointUrl: process.env.WEBSACO3_FACTURAS_ENDPOINT_URL,
-  websaco3HmacSecret: process.env.WEBSACO3_HMAC_SECRET,
-  websaco3PublicacionTriggerSecret:
-    process.env.WEBSACO3_PUBLICACION_TRIGGER_SECRET,
-  websaco3PublicacionMaxIntentos: parseInt(
-    process.env.WEBSACO3_PUBLICACION_MAX_INTENTOS!,
-    10,
-  ),
   // Comptable integration — both optional, present together or not at all
   // (`.and()` in env.validation.ts). Absent means "not configured", which the
   // screen reports; never a boot error.

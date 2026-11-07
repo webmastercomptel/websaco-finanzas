@@ -1,7 +1,6 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
-import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -50,8 +49,6 @@ import { ConfiguracionModule } from './modules/configuracion/configuracion.modul
 import { HealthModule } from './modules/health/health.module';
 import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicion-contabilidad.module';
-import { PublicacionFacturasModule } from './modules/publicacion-facturas/publicacion-facturas.module';
-import { IntegracionesWebsaco3Module } from './modules/integraciones-websaco3/integraciones-websaco3.module';
 import { IntegracionesPanelModule } from './modules/integraciones-panel/integraciones-panel.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
 import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
@@ -86,9 +83,6 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
         connection: { url: config.get<string>('app.redisUrl') },
       }),
     }),
-    // Stays even if PublicacionFacturasModule is ever rolled back —
-    // LotesController itself injects EventEmitter2 to emit the domain fact.
-    EventEmitterModule.forRoot(),
     // Timers for the building-management housekeeping jobs (@Cron). Each one
     // runs under a Redis lock so only one instance executes it.
     ScheduleModule.forRoot(),
@@ -132,8 +126,6 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     HealthModule,
     CatalogosModule,
     AdicionContabilidadModule,
-    PublicacionFacturasModule,
-    IntegracionesWebsaco3Module,
     IntegracionesPanelModule,
     BusquedaModule,
     BusquedaAdministracionModule,

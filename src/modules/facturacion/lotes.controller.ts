@@ -16,7 +16,6 @@ import {
 import type { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { CheckAbility } from '../casl/check-ability.decorator';
@@ -58,10 +57,6 @@ import {
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
-import {
-  LOTE_FACTURAS_PDF_CONFIRMADO,
-  type LoteFacturasPdfConfirmadoEvent,
-} from '../../common/eventos/lote-facturas-pdf-confirmado.event';
 
 /**
  * The monthly billing cycle: define a run, upload novedades, liquidar
@@ -83,7 +78,6 @@ export class LotesController {
     private readonly presentacionDocumento: PresentacionDocumentoService,
     private readonly plantillas: PlantillaDocumentoService,
     private readonly generacion: GeneracionDocumentoService,
-    private readonly eventos: EventEmitter2,
     private readonly storage: DocumentoStorageService,
   ) {}
 
@@ -427,20 +421,8 @@ export class LotesController {
       dto.objectPath,
     );
 
-    // Emitted here, before the snapshot block below, so a snapshot failure
-    // can never suppress it — see LOTE_FACTURAS_PDF_CONFIRMADO's own
-    // docblock. Awaited: the outbox row must exist before this request
-    // returns 200, with no crash window in between. The listener swallows
-    // every error itself, so publishing can never fail this confirmation.
-    // The same awaited emit now also covers the SEND to WebSaco3 (Cloud Run
-    // throttles CPU after the response, so it cannot run afterwards): this
-    // request can take up to the receiver's cold-start timeout (45 s) longer.
-    await this.eventos.emitAsync(LOTE_FACTURAS_PDF_CONFIRMADO, {
-      copropiedadId: copropiedadId.toString(),
-      loteId: lote._id.toString(),
-      objectPath: resultado.objectPath,
-      numerosFactura: facturasLean.map((f) => f.numeroCompleto),
-    } satisfies LoteFacturasPdfConfirmadoEvent);
+    // Confirming the PDF publishes NOTHING: invoices reach residents only
+    // through the explicit send flow (`modules/envio-facturas/`).
 
     const copropiedad = await this.copropiedades.findById(copropiedadId).exec();
     if (facturasLean.length > 0 && copropiedad) {

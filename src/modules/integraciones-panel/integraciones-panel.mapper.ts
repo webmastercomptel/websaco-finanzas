@@ -10,7 +10,6 @@ export interface CopropiedadParaPanel {
   nit?: string | null;
   digitoVerificacion?: string | null;
   comptableEmpresaId?: string | null;
-  websaco3CopropiedadId?: string | null;
 }
 
 /**
@@ -28,12 +27,6 @@ export function toRegistroPanel(doc: CopropiedadParaPanel): RegistroPanel {
     vinculos.push({
       sistema: 'comptable',
       registroId: normalizarId(doc.comptableEmpresaId),
-    });
-  }
-  if (doc.websaco3CopropiedadId) {
-    vinculos.push({
-      sistema: 'administracion',
-      registroId: normalizarId(doc.websaco3CopropiedadId),
     });
   }
 

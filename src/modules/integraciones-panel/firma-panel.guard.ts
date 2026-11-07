@@ -26,7 +26,7 @@ type PeticionConCuerpoCrudo = Request & { rawBody?: Buffer };
  * Authenticates the integrations panel: an HMAC over timestamp, method, full
  * URL and raw body (see `firma-panel.ts`) with `PANEL_HMAC_SECRET`. First guard
  * of every panel route — the caller is a machine, so there is no Firebase and
- * no tenant, same reasoning as `FirmaWebsaco3Guard`.
+ * no tenant, a machine caller.
  *
  * Fails CLOSED and OPAQUE: an unset/blank secret, a missing or repeated
  * header, a stale timestamp and a wrong signature all throw the same bare

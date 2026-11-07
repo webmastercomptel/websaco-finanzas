@@ -90,40 +90,6 @@ export const envValidationSchema = Joi.object({
     otherwise: Joi.string().optional().allow(''),
   }),
 
-  // WebSaco3 integration (see modules/publicacion-facturas/ and
-  // modules/integraciones-websaco3/).
-  //
-  // Outbound publication needs ALL THREE (URL, shared secret, trigger secret):
-  // the listener always enqueues an outbox row regardless of config (the flag
-  // is the domain truth), but nothing ever drains without a URL+secret to send
-  // with AND a trigger secret to authorize the sweep — a partial set would
-  // silently leave rows stuck in `pendiente` forever with no boot-time signal.
-  // `.and(URL, TRIGGER)` + `.with(URL, SECRET)` fails loudly instead.
-  //
-  // WEBSACO3_HMAC_SECRET is shared with WebSaco3 and ALSO authenticates the
-  // inbound holders pull (purpose-bound signature), so it may be set ALONE:
-  // a pull-only deployment must not be forced to configure an outbound URL
-  // and trigger secret nothing would read. Every combination that was valid
-  // before (none, or all three) stays valid.
-  WEBSACO3_FACTURAS_ENDPOINT_URL: Joi.string()
-    .when('NODE_ENV', {
-      is: 'production',
-      then: Joi.string().uri({ scheme: ['https'] }),
-      otherwise: Joi.string().uri({ scheme: ['http', 'https'] }),
-    })
-    .optional(),
-  WEBSACO3_HMAC_SECRET: Joi.string().min(32).optional(),
-  // Sent by the operator as the `X-Scheduler-Secret` header of the manual
-  // sweep `curl` (see docs/runbooks/publicacion-websaco3.md), not shared with
-  // WebSaco3 — a distinct party from WEBSACO3_HMAC_SECRET, so one can rotate
-  // or leak without the other.
-  WEBSACO3_PUBLICACION_TRIGGER_SECRET: Joi.string().min(32).optional(),
-  WEBSACO3_PUBLICACION_MAX_INTENTOS: Joi.number()
-    .integer()
-    .min(1)
-    .max(20)
-    .default(6),
-
   // Comptable integration ("Interfaz a Comptable", see
   // modules/interfaz-comptable/ and docs/runbooks/interfaz-comptable.md).
   // Both optional and paired with `.and()`: a URL with no secret could only
@@ -131,8 +97,8 @@ export const envValidationSchema = Joi.object({
   // nothing reads. With neither, the screen says the integration is not
   // configured. The URL is the API base INCLUDING Comptable's `/api/v1`
   // prefix (e.g. https://comptable.ejemplo.com/api/v1) — the signed path is
-  // derived from it. The secret is shared with Comptable only, never
-  // WEBSACO3_HMAC_SECRET (a different relationship that rotates on its own).
+  // derived from it. The secret is shared with Comptable only (a different
+  // relationship that rotates on its own).
   COMPTABLE_API_URL: Joi.string()
     .when('NODE_ENV', {
       is: 'production',
@@ -171,21 +137,18 @@ export const envValidationSchema = Joi.object({
   // deployment that never heard of the panel behaves exactly as before. With
   // the switch on, the secret is mandatory — a module that answers with no way
   // to authenticate its caller would be a hole, so boot fails naming it. The
-  // secret is shared with the panel and the other three systems and must be
-  // DIFFERENT from COMPTABLE_HMAC_SECRET and WEBSACO3_HMAC_SECRET (it rotates
-  // on its own). An empty value counts as absent.
+  // secret is shared with the panel and the other systems and must be
+  // DIFFERENT from COMPTABLE_HMAC_SECRET (it rotates on its own). An empty value counts as absent.
   INTEGRACION_PANEL_HABILITADA: Joi.boolean().default(false),
   PANEL_HMAC_SECRET: Joi.string()
     .min(32)
     .empty('')
-    .invalid(Joi.ref('COMPTABLE_HMAC_SECRET'), Joi.ref('WEBSACO3_HMAC_SECRET'))
+    .invalid(Joi.ref('COMPTABLE_HMAC_SECRET'))
     .when('INTEGRACION_PANEL_HABILITADA', {
       is: true,
       then: Joi.required(),
       otherwise: Joi.optional(),
     }),
 })
-  .and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')
-  .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET')
   .and('COMPTABLE_API_URL', 'COMPTABLE_HMAC_SECRET')
   .and('SENDGRID_API_KEY', 'SENDGRID_FROM_EMAIL');

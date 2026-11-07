@@ -7,7 +7,6 @@ const base = {
   nit: '900123456',
   digitoVerificacion: '7',
   comptableEmpresaId: null,
-  websaco3CopropiedadId: null,
 };
 
 describe('toRegistroPanel', () => {
@@ -40,12 +39,12 @@ describe('toRegistroPanel', () => {
     const registro = toRegistroPanel({
       ...base,
       comptableEmpresaId: 'a'.repeat(24),
+      // A legacy link to the retired Administración system is never exposed.
       websaco3CopropiedadId: 'b'.repeat(24),
-    });
+    } as never);
 
     expect(registro.vinculos).toEqual([
       { sistema: 'comptable', registroId: 'a'.repeat(24) },
-      { sistema: 'administracion', registroId: 'b'.repeat(24) },
     ]);
   });
 
@@ -64,12 +63,10 @@ describe('toRegistroPanel', () => {
     const registro = toRegistroPanel({
       ...base,
       comptableEmpresaId: 'A'.repeat(24),
-      websaco3CopropiedadId: ` ${'B'.repeat(24)}`,
     });
 
     expect(registro.vinculos).toEqual([
       { sistema: 'comptable', registroId: 'a'.repeat(24) },
-      { sistema: 'administracion', registroId: 'b'.repeat(24) },
     ]);
   });
 

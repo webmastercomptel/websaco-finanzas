@@ -8,7 +8,7 @@ const PATRON_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Single source of truth for "is this a usable address" so the bulk import and
- * the WebSaco3 holders snapshot can never disagree on what counts as valid.
+ * the resident-provisioning path can never disagree on what counts as valid.
  * Deliberately lax and WITHOUT trimming: callers trim first, and a blank or
  * whitespace-padded value is invalid by the pattern itself.
  */

@@ -18,7 +18,6 @@ const copropiedad = (extra: Record<string, unknown> = {}) => ({
   digitoVerificacion: '7',
   estado: 'active',
   comptableEmpresaId: null,
-  websaco3CopropiedadId: null,
   ...extra,
 });
 
@@ -481,37 +480,16 @@ describe('IntegracionesPanelService.fijarVinculo', () => {
     });
   });
 
-  describe('acople con usaGestionEdificios (revisión 5)', () => {
-    it('fijar administracion guarda websaco3CopropiedadId y enciende usaGestionEdificios en la misma escritura', async () => {
+  describe('Administración ya no es un sistema vinculable', () => {
+    it('administracion: 422 SISTEMA_NO_SOPORTADO sin escribir ni tocar la bandera de gestión de edificios', async () => {
       const { servicio, modelo } = servicioCon();
 
-      const res = await servicio.fijarVinculo(ID, {
-        sistema: 'administracion',
-        registroId: B,
-      });
+      const e = await capturar(
+        servicio.fijarVinculo(ID, { sistema: 'administracion', registroId: B }),
+      );
 
-      expect(res).toEqual({ sistema: 'administracion', registroId: B });
-      expect(modelo.updateOne.mock.calls[0][1]).toEqual({
-        $set: { websaco3CopropiedadId: B, usaGestionEdificios: true },
-      });
-    });
-
-    it('borrar administracion lo apaga', async () => {
-      const { servicio, modelo } = servicioCon({
-        doc: copropiedad({
-          websaco3CopropiedadId: B,
-          usaGestionEdificios: true,
-        }),
-      });
-
-      await servicio.fijarVinculo(ID, {
-        sistema: 'administracion',
-        registroId: null,
-      });
-
-      expect(modelo.updateOne.mock.calls[0][1]).toEqual({
-        $set: { websaco3CopropiedadId: null, usaGestionEdificios: false },
-      });
+      expect(e.getResponse()).toMatchObject({ code: 'SISTEMA_NO_SOPORTADO' });
+      expect(modelo.updateOne).not.toHaveBeenCalled();
     });
 
     it('comptable no toca esa bandera', async () => {
@@ -521,20 +499,6 @@ describe('IntegracionesPanelService.fijarVinculo', () => {
 
       expect(JSON.stringify(modelo.updateOne.mock.calls[0][1])).not.toContain(
         'usaGestionEdificios',
-      );
-    });
-
-    it('administracion usa la unicidad de su propio campo', async () => {
-      const { servicio, modelo } = servicioCon({ ocupado: true });
-
-      const e = await capturar(
-        servicio.fijarVinculo(ID, { sistema: 'administracion', registroId: B }),
-      );
-
-      expect(e.getResponse()).toMatchObject({ code: 'REGISTRO_YA_VINCULADO' });
-      expect(modelo.exists.mock.calls[0][0]).toHaveProperty(
-        'websaco3CopropiedadId',
-        B,
       );
     });
   });
@@ -606,58 +570,6 @@ describe('IntegracionesPanelService.fijarVinculo', () => {
       );
 
       expect(e.getResponse()).toMatchObject({ valorActual: B });
-    });
-
-    it('administracion sin id pero con la bandera encendida (legado): desvincular la apaga', async () => {
-      const { servicio, modelo } = servicioCon({
-        doc: copropiedad({ usaGestionEdificios: true }),
-      });
-
-      const res = await servicio.fijarVinculo(ID, {
-        sistema: 'administracion',
-        registroId: null,
-      });
-
-      expect(res).toEqual({ sistema: 'administracion', registroId: null });
-      expect(modelo.updateOne.mock.calls[0][1]).toEqual({
-        $set: { websaco3CopropiedadId: null, usaGestionEdificios: false },
-      });
-    });
-
-    it('administracion con el id y la bandera apagada: fijar el mismo id la enciende', async () => {
-      const { servicio, modelo } = servicioCon({
-        doc: copropiedad({
-          websaco3CopropiedadId: B,
-          usaGestionEdificios: false,
-        }),
-      });
-
-      await servicio.fijarVinculo(ID, {
-        sistema: 'administracion',
-        registroId: B,
-      });
-
-      expect(modelo.updateOne.mock.calls[0][1]).toEqual({
-        $set: { websaco3CopropiedadId: B, usaGestionEdificios: true },
-      });
-      expect(modelo.exists).not.toHaveBeenCalled();
-    });
-
-    it('administracion con id y bandera coherentes: idempotente sin escribir', async () => {
-      const { servicio, modelo } = servicioCon({
-        doc: copropiedad({
-          websaco3CopropiedadId: B,
-          usaGestionEdificios: true,
-        }),
-      });
-
-      const res = await servicio.fijarVinculo(ID, {
-        sistema: 'administracion',
-        registroId: B,
-      });
-
-      expect(res).toEqual({ sistema: 'administracion', registroId: B });
-      expect(modelo.updateOne).not.toHaveBeenCalled();
     });
   });
 

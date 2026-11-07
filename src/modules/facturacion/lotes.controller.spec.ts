@@ -14,7 +14,6 @@ jest.mock('../../common/pdf/consulta-facturacion-pdf', () => ({
 }));
 
 import { LotesController } from './lotes.controller';
-import { LOTE_FACTURAS_PDF_CONFIRMADO } from '../../common/eventos/lote-facturas-pdf-confirmado.event';
 
 const COPROPERTY_ID = new Types.ObjectId('507f1f77bcf86cd799439011');
 const LOTE_ID = new Types.ObjectId('507f1f77bcf86cd799439012');
@@ -50,10 +49,6 @@ const mockGeneracion = (objectPath: string) => ({
   }),
 });
 
-const mockEventos = () => ({
-  emitAsync: jest.fn().mockResolvedValue([]),
-});
-
 /** A real, minimal PDF with exactly `paginas` pages — so the controller's
  *  own page-count verification (`páginas del combinado == cantidad de
  *  facturas`) passes cleanly for these tests instead of tripping the
@@ -84,7 +79,6 @@ const construirController = async (
   });
   const facturas = mockFacturas(facturasLean);
   const generacion = mockGeneracion(objectPath);
-  const eventos = mockEventos();
   const storage = mockStorage(await pdfDePaginas(facturasLean.length));
   const controller = new LotesController(
     lote as never,
@@ -95,10 +89,9 @@ const construirController = async (
     {} as never, // PresentacionDocumentoService — no ejercitado en este test
     {} as never, // PlantillaDocumentoService — no ejercitado en este test
     generacion as never,
-    eventos as never,
     storage as never,
   );
-  return { controller, eventos, generacion, storage, objectPath, facturas };
+  return { controller, generacion, storage, objectPath, facturas };
 };
 
 describe('LotesController.confirmarGeneracionFacturas', () => {
@@ -108,32 +101,8 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
     ...over,
   });
 
-  it('emite LOTE_FACTURAS_PDF_CONFIRMADO con los números de factura en el mismo orden que facturasLean', async () => {
-    const facturasLean = [
-      facturaLean({ numeroCompleto: 'FV-1', codigoInmueble: 'A-101' }),
-      facturaLean({ numeroCompleto: 'FV-2', codigoInmueble: 'A-102' }),
-      facturaLean({ numeroCompleto: 'FV-3', codigoInmueble: 'A-103' }),
-    ];
-    const { controller, eventos, objectPath } =
-      await construirController(facturasLean);
-
-    await controller.confirmarGeneracionFacturas(LOTE_ID.toString(), {
-      objectPath,
-    });
-
-    expect(eventos.emitAsync).toHaveBeenCalledWith(
-      LOTE_FACTURAS_PDF_CONFIRMADO,
-      {
-        copropiedadId: COPROPERTY_ID.toString(),
-        loteId: LOTE_ID.toString(),
-        objectPath,
-        numerosFactura: ['FV-1', 'FV-2', 'FV-3'],
-      },
-    );
-  });
-
-  it('rechaza si el lote ya no tiene facturas (p. ej. se deshizo): no confirma, no emite ni congela nada', async () => {
-    const { controller, eventos, generacion, facturas, objectPath } =
+  it('rechaza si el lote ya no tiene facturas (p. ej. se deshizo): no confirma ni congela nada', async () => {
+    const { controller, generacion, facturas, objectPath } =
       await construirController([]);
 
     const intento = controller.confirmarGeneracionFacturas(LOTE_ID.toString(), {
@@ -143,7 +112,6 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
     await expect(intento).rejects.toBeInstanceOf(ConflictException);
     await expect(intento).rejects.toThrow(/ya no tiene las facturas/);
     expect(generacion.confirmar).not.toHaveBeenCalled();
-    expect(eventos.emitAsync).not.toHaveBeenCalled();
     expect(facturas.guardarPrintSnapshot).not.toHaveBeenCalled();
   });
 
@@ -152,7 +120,7 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
       facturaLean({ numeroCompleto: 'FV-1', codigoInmueble: 'A-101' }),
       facturaLean({ numeroCompleto: 'FV-2', codigoInmueble: 'A-102' }),
     ];
-    const { controller, eventos, generacion, objectPath } =
+    const { controller, generacion, objectPath } =
       await construirController(facturasLean);
     // El lote recuerda 3 facturas, pero solo quedan 2.
     const lote = (controller as unknown as { lotes: { findOneRaw: jest.Mock } })
@@ -171,29 +139,6 @@ describe('LotesController.confirmarGeneracionFacturas', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(generacion.confirmar).not.toHaveBeenCalled();
-    expect(eventos.emitAsync).not.toHaveBeenCalled();
-  });
-
-  it('espera (await) el emitAsync antes de devolver el resultado', async () => {
-    const facturasLean = [
-      facturaLean({ numeroCompleto: 'FV-1', codigoInmueble: 'A-101' }),
-    ];
-    const { controller, eventos, objectPath } =
-      await construirController(facturasLean);
-    let resueltoAntesDeEmitir = false;
-    eventos.emitAsync.mockImplementation(async () => {
-      await Promise.resolve();
-      resueltoAntesDeEmitir = true;
-      return [];
-    });
-
-    const resultado = await controller.confirmarGeneracionFacturas(
-      LOTE_ID.toString(),
-      { objectPath },
-    );
-
-    expect(resueltoAntesDeEmitir).toBe(true);
-    expect(resultado).toEqual({ objectPath });
   });
 });
 
@@ -236,9 +181,9 @@ describe('LotesController: acciones de PDF solo para un lote consolidado (S5)', 
   );
 
   it.each(casosRechazados)(
-    'confirmar-generacion rechaza un lote %s: no confirma, no emite ni congela nada',
+    'confirmar-generacion rechaza un lote %s: no confirma ni congela nada',
     async (_nombre, over, mensaje) => {
-      const { controller, generacion, eventos, facturas, objectPath } =
+      const { controller, generacion, facturas, objectPath } =
         await construirController([facturaLean()], undefined, over);
 
       const intento = controller.confirmarGeneracionFacturas(
@@ -249,7 +194,6 @@ describe('LotesController: acciones de PDF solo para un lote consolidado (S5)', 
       await expect(intento).rejects.toBeInstanceOf(ConflictException);
       await expect(intento).rejects.toThrow(mensaje);
       expect(generacion.confirmar).not.toHaveBeenCalled();
-      expect(eventos.emitAsync).not.toHaveBeenCalled();
       expect(facturas.guardarPrintSnapshot).not.toHaveBeenCalled();
     },
   );

@@ -2793,45 +2793,6 @@ export interface RespuestaBusqueda {
   inmuebles?: ResultadoBusquedaInmueble[];
 }
 
-/**
- * Current holder of a unit as exposed to the building-management system.
- * `email`/`telefono` are `null` when the party has none; the system matches
- * accounts by email on its own side, so nothing is normalized here.
- *
- * `emails` lets the other system keep the party's extra inboxes as alternate
- * recipients. It holds only the VALID addresses, trimmed, deduped
- * case-insensitively (first spelling wins), in the party's original order and
- * capped at 50. `email` is always `emails[0] ?? null`, so the account identity
- * is the first VALID address (not merely the first non-blank one). An empty
- * list means "no valid address"; a consumer that does not see the key at all
- * (older snapshot) must treat it as "leave alternates untouched".
- */
-export interface TitularWebsaco3 {
-  nombre: string;
-  email: string | null;
-  emails: string[];
-  telefono: string | null;
-}
-
-/** One unit of the holders snapshot. `titular` is `null` when the unit has no
- *  current holder (none assigned, retired party, or unresolvable). */
-export interface UnidadPropietarioWebsaco3 {
-  codigo: string;
-  tipo: 'propietario' | 'arrendatario';
-  titular: TitularWebsaco3 | null;
-}
-
-/**
- * Payload (`data` of the envelope) of
- * `GET /integraciones/websaco3/propietarios`: the complete current snapshot
- * of one coproperty, one entry per `Inmueble` (every `estado`), ordered by
- * `codigo`.
- */
-export interface PropietariosWebsaco3 {
-  copropiedad: { nombre: string };
-  unidades: UnidadPropietarioWebsaco3[];
-}
-
 // ── Integrations panel ───────────────────────────────────────────────────
 
 /**
@@ -2839,13 +2800,13 @@ export interface PropietariosWebsaco3 {
  * registros`). Deliberately small: the panel only needs to recognise the
  * record and know what it is already linked to. `nit` is `nit-dv` when the
  * system keeps the check digit apart; `vinculos` lists only the set links,
- * named with the panel's system names (`comptable`, `administracion`).
+ * named with the panel's system name (`comptable`).
  */
 export interface RegistroPanel {
   id: string;
   nombre: string;
   nit: string | null;
-  vinculos: { sistema: 'comptable' | 'administracion'; registroId: string }[];
+  vinculos: { sistema: 'comptable'; registroId: string }[];
 }
 
 /**

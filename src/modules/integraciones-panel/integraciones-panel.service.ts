@@ -19,11 +19,12 @@ import { toRegistroPanel } from './integraciones-panel.mapper';
 /**
  * Panel system name → the Copropiedad field that stores that link. `finanzas`
  * and `nomina` are not here on purpose: this system IS Finanzas and keeps no
- * Nómina link, so both answer 422.
+ * Nómina link. `administracion` is not here either: Administración is part of
+ * this product now (a contracted module, not a separate system to link), so the
+ * panel can no longer set that link. All of them answer 422.
  */
 const CAMPO_POR_SISTEMA = {
   comptable: 'comptableEmpresaId',
-  administracion: 'websaco3CopropiedadId',
 } as const;
 
 type Campo = (typeof CAMPO_POR_SISTEMA)[keyof typeof CAMPO_POR_SISTEMA];
@@ -33,7 +34,7 @@ const LIMITE_POR_DEFECTO = 50;
 
 /**
  * What the integrations panel reads and writes of the coproperty catalogue:
- * the two link fields, nothing else. Like `CopropiedadesService` it is NOT
+ * the Comptable link field, nothing else. Like `CopropiedadesService` it is NOT
  * tenant-scoped — a coproperty IS the tenant — and the caller is a machine
  * authenticated by `FirmaPanelGuard`.
  *
@@ -94,11 +95,6 @@ export class IntegracionesPanelService {
    * requests cannot overwrite each other: the loser matches nothing and gets
    * 409 with the value that won.
    *
-   * Linking Administración also turns `usaGestionEdificios` on, and unlinking
-   * turns it off, in the same write: the flag is what makes Finanzas publish
-   * invoices to that system (see `CopropiedadesService`: "id non-null if and
-   * only if the flag is on"). Linking from the panel therefore STARTS that
-   * publication.
    */
   async fijarVinculo(
     id: string,
@@ -128,15 +124,8 @@ export class IntegracionesPanelService {
     const nuevo = dto.registroId === null ? null : normalizarId(dto.registroId);
     const respuesta = { sistema: dto.sistema, registroId: nuevo };
 
-    // Legacy rows can carry the flag without the id (or the id without the
-    // flag): the same value is then NOT a no-op for Administración, because
-    // the write is also what puts the flag back in step with the link.
-    const banderaDesalineada =
-      dto.sistema === 'administracion' &&
-      (doc.usaGestionEdificios === true) !== (nuevo !== null);
-
     if (nuevo === actual) {
-      if (!banderaDesalineada) return respuesta;
+      return respuesta;
     } else {
       if (
         nuevo === null &&
@@ -156,10 +145,7 @@ export class IntegracionesPanelService {
       }
     }
 
-    const cambio: Record<string, unknown> =
-      dto.sistema === 'administracion'
-        ? { [campo]: nuevo, usaGestionEdificios: nuevo !== null }
-        : { [campo]: nuevo };
+    const cambio: Record<string, unknown> = { [campo]: nuevo };
 
     // The condition is "the field still holds what I just read". Mongoose
     // runs the schema's `lowercase`/`trim` setters on query filters too, so a

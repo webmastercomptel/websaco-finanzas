@@ -6,9 +6,8 @@ const HEX_SHA256 = /^[0-9a-f]{64}$/;
 /**
  * HMAC-SHA256 over the UTF-8 bytes of `message`, lowercase hex.
  *
- * Shared by both directions of the WebSaco3 integration (outbound invoice
- * publication signs a body, inbound holders pull verifies a request) so the
- * primitive lives in exactly one place. What gets signed — and therefore the
+ * Shared by the signed machine-to-machine edges (the Comptable client and the
+ * integrations panel guard) so the primitive lives in exactly one place. What gets signed — and therefore the
  * purpose of the signature — stays with each caller.
  */
 export function hmacSha256Hex(secret: string, message: string): string {
