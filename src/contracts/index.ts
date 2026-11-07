@@ -2980,3 +2980,68 @@ export interface Actividad {
   /** Only the resident portal fills it: whether the caller is signed up. */
   asistiendo?: boolean;
 }
+
+/** An attachment of a PQR. `pendiente` until the upload is verified. */
+export interface PqrArchivoAdjunto {
+  id: string;
+  tipo: string;
+  nombre: string;
+  url: string | null;
+  estado: 'pendiente' | 'listo';
+}
+
+/** Response of step 1 of the PQR attachment upload (signed write URL). */
+export interface PqrAdjuntoSubidaIniciada {
+  pqr: Pqr;
+  uploadUrl: string;
+  attachmentId: string;
+}
+
+/** One reply on a PQR thread. */
+export interface PqrSeguimiento {
+  id: string;
+  autor: string;
+  mensaje: string;
+  fecha: string;
+}
+
+/** Who reported the PQR, with the role they held on the unit when they filed it. */
+export interface PqrResidente {
+  nombre: string;
+  iniciales: string;
+  rol: string;
+}
+
+/** A petition, complaint or claim of the active coproperty. */
+export interface Pqr {
+  id: string;
+  codigo: string;
+  titulo: string;
+  descripcion: string;
+  descripcionCompleta: string;
+  categoria: string;
+  tipo:
+    | 'peticiones'
+    | 'quejas'
+    | 'reclamos'
+    | 'sugerencias'
+    | 'felicitaciones'
+    | 'denuncias';
+  estado: 'urgente' | 'en_revision' | 'pendiente' | 'resuelto' | 'cerrado';
+  prioridad: 'alta' | 'media' | 'normal' | 'baja';
+  unidad: string;
+  residente: PqrResidente;
+  fechaCreacion: string;
+  archivosAdjuntos: PqrArchivoAdjunto[];
+  seguimientos: PqrSeguimiento[];
+  /** Name of the assigned technician, or null. */
+  tecnicoAsignado: string | null;
+}
+
+/** An external technician or provider of the active coproperty. */
+export interface Tecnico {
+  id: string;
+  nombre: string;
+  especialidad: string;
+  email: string;
+}

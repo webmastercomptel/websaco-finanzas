@@ -200,8 +200,11 @@ import {
   ActividadSchema,
 } from './schemas/administracion/actividad.schema';
 
+import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
+
 const models = [
   { name: Tarea.name, schema: TareaSchema },
+  { name: Pqr.name, schema: PqrSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
