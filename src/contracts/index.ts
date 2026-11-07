@@ -3286,3 +3286,111 @@ export interface Anuncio {
   /** Only the staff side fills it. */
   entrega?: EntregaAnuncio;
 }
+
+/* ── Facturación por bloque (adaptador transitorio) ─────────────── */
+
+/**
+ * TRANSITIONAL: PDFs produced outside this system, uploaded as ONE file per
+ * period and cut per unit. Retired when the native invoice pipeline replaces it.
+ * `recibo` is staff-only: residents are never offered one.
+ */
+export type TipoBloqueFacturacion = 'factura' | 'estado_cuenta' | 'recibo';
+
+export type EstadoBloqueFacturacion =
+  | 'pendiente'
+  | 'procesando'
+  | 'generado'
+  | 'pendiente_envio'
+  | 'enviado'
+  | 'error';
+
+/** A unit code found in the PDF that matches no unit of the coproperty. */
+export interface UnidadNoRegistradaBloque {
+  codigo: string;
+  /** 1-indexed pages of the original. */
+  paginas: number[];
+}
+
+/** How far the (explicit) send of a block got; counted from the recorded ids. */
+export interface EntregaBloque {
+  /** Unit-by-resident deliveries targeted at the last send run. */
+  destinatarios: number;
+  notificados: number;
+  correosEnviados: number;
+  /** Whether the environment could send email at the last run; null before any. */
+  correoConfigurado: boolean | null;
+}
+
+/** Staff view of an uploaded block. */
+export interface BloqueFacturacion {
+  id: string;
+  tipo: TipoBloqueFacturacion;
+  periodo: string;
+  nombre: string;
+  estado: EstadoBloqueFacturacion;
+  tamanoBytes: number;
+  totalPaginas: number;
+  /** Units that got their own document. */
+  totalUnidades: number;
+  /** Pages where no unit was recognised. */
+  paginasSinMatch: number[];
+  /** Codes in the PDF with no unit in the coproperty: reported, never sent. */
+  unidadesNoRegistradas: UnidadNoRegistradaBloque[];
+  /** Units with nobody to reach at the last send; null until a send ran. */
+  unidadesSinDestinatario: string[] | null;
+  /** Why the last ingest failed; null otherwise. */
+  motivoError: string | null;
+  subidoPor: string;
+  /** Who pressed "send" (first time) and when; null while nothing was sent. */
+  enviadoPor: string | null;
+  enviadoEn: string | null;
+  /** Only the detail and the send response fill it. */
+  entrega?: EntregaBloque;
+  creadoEn: string;
+}
+
+/** One unit's document inside a block (staff detail). */
+export interface UnidadBloqueFacturacion {
+  id: string;
+  inmuebleId: string;
+  codigoInmueble: string;
+  paginas: number[];
+  tamanoBytes: number;
+}
+
+export interface BloqueFacturacionDetalle extends BloqueFacturacion {
+  unidades: UnidadBloqueFacturacion[];
+}
+
+/** Step 1 of the upload: the record plus the signed URL the browser PUTs to. */
+export interface SubidaBloqueIniciada {
+  bloque: BloqueFacturacion;
+  uploadUrl: string;
+}
+
+/** What `confirmar` answers: the match report the admin reviews before sending. */
+export interface ReporteIngestaBloque {
+  id: string;
+  estado: EstadoBloqueFacturacion;
+  totalPaginas: number;
+  totalUnidades: number;
+  /** Codes of the units that got a document. */
+  unidades: string[];
+  paginasSinMatch: number[];
+  unidadesNoRegistradas: UnidadNoRegistradaBloque[];
+}
+
+/** One document a resident may open: a unit's own PDF. */
+export interface MiDocumentoBloque {
+  id: string;
+  tipo: 'factura' | 'estado_cuenta';
+  periodo: string;
+  inmuebleId: string;
+  codigoInmueble: string;
+  /** The caller's role on that unit. */
+  rol: 'propietario' | 'arrendatario';
+  cantidadPaginas: number;
+  tamanoBytes: number;
+  /** When the admin sent it. */
+  fecha: string;
+}

@@ -217,6 +217,16 @@ import {
   ArchivoDocumentoSchema,
 } from './schemas/administracion/documento-archivo.schema';
 
+import {
+  BloqueFacturacion,
+  BloqueFacturacionSchema,
+} from './schemas/administracion/bloque-facturacion.schema';
+
+import {
+  DocumentoBloque,
+  DocumentoBloqueSchema,
+} from './schemas/administracion/documento-bloque.schema';
+
 import { Zona, ZonaSchema } from './schemas/administracion/zona.schema';
 
 import {
@@ -232,6 +242,8 @@ const models = [
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
   { name: Anuncio.name, schema: AnuncioSchema },
+  { name: BloqueFacturacion.name, schema: BloqueFacturacionSchema },
+  { name: DocumentoBloque.name, schema: DocumentoBloqueSchema },
   { name: Zona.name, schema: ZonaSchema },
   { name: Reserva.name, schema: ReservaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },

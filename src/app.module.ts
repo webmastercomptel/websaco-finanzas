@@ -39,6 +39,7 @@ import { AnunciosModule } from './modules/anuncios/anuncios.module';
 import { PqrModule } from './modules/pqr/pqr.module';
 import { ZonasModule } from './modules/zonas/zonas.module';
 import { DocumentosModule } from './modules/documentos/documentos.module';
+import { FacturacionBloqueModule } from './modules/facturacion-bloque/facturacion-bloque.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
 import { TecnicosModule } from './modules/tecnicos/tecnicos.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
@@ -116,6 +117,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     PqrModule,
     ZonasModule,
     DocumentosModule,
+    FacturacionBloqueModule,
     ReservasModule,
     TecnicosModule,
     AuditoriaModule,

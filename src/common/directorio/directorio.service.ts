@@ -7,6 +7,10 @@ import {
   CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
 import {
+  Inmueble,
+  InmuebleDocument,
+} from '../../database/schemas/copropiedades/inmueble.schema';
+import {
   Account,
   AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
@@ -37,6 +41,14 @@ export interface Destinatario {
   perfil: PerfilDestinatario;
 }
 
+/** How a resident holds one particular unit. */
+export type RolEnInmueble = 'propietario' | 'arrendatario';
+
+/** A recipient together with the role they hold on the unit being addressed. */
+export interface ResidenteDeInmueble extends Destinatario {
+  rol: RolEnInmueble;
+}
+
 /**
  * Who a notification or announcement of a coproperty reaches.
  *
@@ -65,6 +77,8 @@ export class DirectorioService {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
     private readonly acceso: AccesoService,
+    @InjectModel(Inmueble.name)
+    private readonly inmuebles: Model<InmuebleDocument>,
   ) {}
 
   /** The active accounts among `ids`, keyed by id. */
@@ -106,6 +120,111 @@ export class DirectorioService {
     }
     const cuentas = await this.cuentasActivas([...ids.values()]);
     return [...cuentas.values()].map((c) => this.aDestinatario(c, 'residente'));
+  }
+
+  /**
+   * The people to notify about each of the given units: the account behind the
+   * `Tercero` that is the unit's `titularId` (owner) and the one behind its
+   * `arrendatarioId` (tenant), each tagged with the role they hold ON THAT UNIT
+   * (the same person can own one unit and rent another).
+   *
+   * Every id of `inmuebleIds` is a key of the result, with `[]` when nobody is
+   * reachable: a party without an account, an inactive party or account, or an
+   * inactive/foreign unit is omitted instead of failing, because one unit with
+   * nobody to tell must never block the others. The lookup is always bounded by
+   * `copropiedadId` (unit AND parties), so an id of another coproperty yields
+   * nothing. If owner and tenant ever resolve to the same account the owner wins
+   * and it is listed once. Three queries however many units are asked for.
+   */
+  async residentesDeInmuebles(
+    copropiedadId: Types.ObjectId,
+    inmuebleIds: Types.ObjectId[],
+  ): Promise<Map<string, ResidenteDeInmueble[]>> {
+    const resultado = new Map<string, ResidenteDeInmueble[]>(
+      inmuebleIds.map((id) => [id.toString(), []]),
+    );
+    if (inmuebleIds.length === 0) return resultado;
+
+    const unidades = await this.inmuebles
+      .find({ _id: { $in: inmuebleIds }, copropiedadId, estado: 'active' })
+      .select('titularId arrendatarioId')
+      .lean()
+      .exec();
+
+    const terceroIds = new Map<string, Types.ObjectId>();
+    for (const u of unidades) {
+      for (const id of [u.titularId, u.arrendatarioId]) {
+        if (id) terceroIds.set(id.toString(), id);
+      }
+    }
+    if (terceroIds.size === 0) return resultado;
+
+    const terceros = await this.terceros
+      .find({
+        _id: { $in: [...terceroIds.values()] },
+        copropiedadId,
+        estado: 'active',
+        accountId: { $ne: null },
+      })
+      .select('accountId')
+      .lean()
+      .exec();
+    const cuentaDeTercero = new Map<string, Types.ObjectId>();
+    for (const t of terceros) {
+      if (t.accountId) cuentaDeTercero.set(t._id.toString(), t.accountId);
+    }
+    const cuentas = await this.cuentasActivas([...cuentaDeTercero.values()]);
+
+    const alcanzable = (terceroId: Types.ObjectId | null | undefined) => {
+      const cuentaId = terceroId
+        ? cuentaDeTercero.get(terceroId.toString())
+        : undefined;
+      return cuentaId ? cuentas.get(cuentaId.toString()) : undefined;
+    };
+
+    for (const u of unidades) {
+      const lista = resultado.get(u._id.toString());
+      if (!lista) continue;
+      const propietario = alcanzable(u.titularId);
+      if (propietario) {
+        lista.push({
+          ...this.aDestinatario(propietario, 'residente'),
+          rol: 'propietario',
+        });
+      }
+      const arrendatario = alcanzable(u.arrendatarioId);
+      if (
+        arrendatario &&
+        arrendatario._id.toString() !== propietario?._id.toString()
+      ) {
+        lista.push({
+          ...this.aDestinatario(arrendatario, 'residente'),
+          rol: 'arrendatario',
+        });
+      }
+    }
+    return resultado;
+  }
+
+  /**
+   * Same as `residentesDeInmuebles` for ONE unit addressed by its `codigo` (exact
+   * match, as stored). A code that matches no ACTIVE unit of the coproperty gives
+   * `[]`, the same answer as a unit nobody can be reached at.
+   */
+  async residentesDeInmueble(
+    copropiedadId: Types.ObjectId,
+    codigoInmueble: string,
+  ): Promise<ResidenteDeInmueble[]> {
+    const unidad = await this.inmuebles
+      .findOne({ copropiedadId, codigo: codigoInmueble, estado: 'active' })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!unidad) return [];
+    const porUnidad = await this.residentesDeInmuebles(copropiedadId, [
+      unidad._id,
+    ]);
+    return porUnidad.get(unidad._id.toString()) ?? [];
   }
 
   /**
