@@ -42,9 +42,10 @@ const servicio = (opts: {
    */
   inmuebles?: Fila[];
 }) => {
-  const terceros = (opts.terceros ?? []).map(
-    (t) => ({ _id: oid(), ...t }) as Fila & { _id: Types.ObjectId },
-  );
+  const terceros = (opts.terceros ?? []).map((t): Fila => ({
+    _id: oid(),
+    ...t,
+  }));
   const inmuebles =
     opts.inmuebles ??
     terceros.map((t) => ({
@@ -455,7 +456,7 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
     const service = servicio({
       asignaciones: [directa()],
       copropiedades: [copropiedad(copA, 'COP-A')],
-      roles: [rol(rolA, ['pqr.ver', 'tareas.crear'])],
+      roles: [rol(rolA, ['pqr.ver', 'tareas.gestionar'])],
     });
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
@@ -463,7 +464,7 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
     expect([...resultado.permissions].sort()).toEqual([
       'facturas.ver',
       'pqr.ver',
-      'tareas.crear',
+      'tareas.gestionar',
     ]);
   });
 

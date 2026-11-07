@@ -115,6 +115,19 @@ describe('claves de Administración', () => {
     expect(moduloDePermiso('tareas.actualizar')).toBe('administracion');
   });
 
+  it('una clave de Administración vale solo si está en el catálogo (una sola definición)', () => {
+    // Gramaticalmente válidas, pero fuera del catálogo que ofrece el editor.
+    for (const clave of [
+      'usuarios.gestionar',
+      'config.anular',
+      'tareas.crear',
+      'roles.ver',
+    ]) {
+      expect(moduloDePermiso(clave)).toBeNull();
+      expect(permisosDesconocidos([clave])).toEqual([clave]);
+    }
+  });
+
   it('un verbo propio de Administración no vale en un módulo financiero', () => {
     expect(moduloDePermiso('facturas.eliminar')).toBeNull();
     expect(moduloDePermiso('recibos.subir')).toBeNull();

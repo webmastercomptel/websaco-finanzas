@@ -11,7 +11,6 @@ import {
   MODULE_TO_SUBJECT_ADMINISTRACION,
   rulesFromPermissionKeys,
   VERB_TO_ACTION,
-  VERB_TO_ACTION_ADMINISTRACION,
 } from './permission-map';
 
 /** `administrativo` runs the coproperty; `personal` is operational staff. */
@@ -36,8 +35,11 @@ const MODULO_DE_SEGMENTO: Record<string, ModuloProducto> = {
 
 /**
  * The module that owns a `modulo.verbo` key, or null when the key is unknown.
- * Verbs are checked against the module's own vocabulary: `eliminar`, `subir`
- * and `actualizar` exist only for Administración keys.
+ * Finanzas keys are checked against the grammar (segment + verb of
+ * `VERB_TO_ACTION`); Administración keys against the CATALOG below, the one
+ * definition the role editor, `/equipo` and `AccesoService` all share — so
+ * a grammatical but uncatalogued key (`usuarios.gestionar`, `config.anular`)
+ * is unknown everywhere, never assignable through one path and not another.
  */
 export function moduloDePermiso(clave: string): ModuloProducto | null {
   const partes = clave.split('.');
@@ -45,10 +47,10 @@ export function moduloDePermiso(clave: string): ModuloProducto | null {
   const [segmento, verbo] = partes;
   const modulo = MODULO_DE_SEGMENTO[segmento];
   if (!modulo) return null;
-  const verboValido =
-    verbo in VERB_TO_ACTION ||
-    (modulo === 'administracion' && verbo in VERB_TO_ACTION_ADMINISTRACION);
-  return verboValido ? modulo : null;
+  if (modulo === 'administracion') {
+    return esPermisoAdministracion(clave) ? modulo : null;
+  }
+  return verbo in VERB_TO_ACTION ? modulo : null;
 }
 
 /** One assignable Administración permission, as the role editor lists it. */
