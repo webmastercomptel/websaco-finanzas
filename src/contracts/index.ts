@@ -2559,7 +2559,9 @@ export interface RegistroAuditoriaContract {
     | 'reiniciar'
     | 'desmarcar'
     | 'dar-de-baja'
-    | 'retirar';
+    | 'retirar'
+    | 'marcar-envio'
+    | 'enviar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -2567,7 +2569,8 @@ export interface RegistroAuditoriaContract {
     | 'lote-facturacion'
     | 'lote-contabilidad'
     | 'inmueble'
-    | 'lote-comptable';
+    | 'lote-comptable'
+    | 'envio-factura';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
@@ -3564,4 +3567,92 @@ export interface AprovisionamientoResidentes {
   invitacionesEnviadas: number;
   /** False when mail is not configured: identities were created but nobody was told. */
   correoConfigurado: boolean;
+}
+
+/* ── Envío de facturas a propietarios y arrendatarios ─────────────── */
+
+/** Pipeline state of an invoice that was marked for sending (`generado` = no row). */
+export type EstadoEnvioFactura = 'pendiente_envio' | 'enviado' | 'error';
+
+/** Why a row is in `error`; the staff screen explains each one. */
+export type MotivoErrorEnvioFactura =
+  | 'sin_destinatarios'
+  | 'factura_anulada'
+  | 'factura_inexistente'
+  | 'reintentos_agotados';
+
+/** One invoice in the send queue (staff view). Never carries amounts or recipients' data. */
+export interface EnvioFactura {
+  id: string;
+  facturaId: string;
+  inmuebleId: string;
+  codigoInmueble: string;
+  numeroCompleto: string;
+  loteId: string | null;
+  estado: EstadoEnvioFactura;
+  /** Who marked it for sending, and when. */
+  marcadoPor: string;
+  marcadoEn: IsoDate;
+  /** Who ran the processor that handled it last; null before the first run. */
+  procesadoPor: string | null;
+  /** When residents could first open it in the portal; null while unreleased. */
+  liberadaEn: IsoDate | null;
+  /** When every recipient had been reached; null until then. */
+  enviadoEn: IsoDate | null;
+  /** Recipients of the last attempt, and how many were reached by each channel. */
+  destinatarios: number;
+  notificados: number;
+  correosEnviados: number;
+  intentos: number;
+  ultimoError: MotivoErrorEnvioFactura | null;
+}
+
+export interface PaginadoEnviosFactura {
+  items: EnvioFactura[];
+  total: number;
+  pagina: number;
+  porPagina: number;
+}
+
+/** Counts per pipeline state of the active coproperty. */
+export interface ResumenEnvioFacturas {
+  pendientes: number;
+  /** Pending rows a processor holds right now or that are waiting out a backoff. */
+  enCurso: number;
+  enviadas: number;
+  conError: number;
+}
+
+/** What "mark for sending" did. Nothing is sent by it. */
+export interface ResultadoMarcadoEnvio {
+  /** Newly queued, or re-queued from `error`. */
+  marcadas: number;
+  /** Already queued: left as they were. */
+  yaPendientes: number;
+  /** Already sent: left as they were. */
+  yaEnviadas: number;
+  /** Voided invoices: never queued. */
+  omitidasAnuladas: number;
+}
+
+/** What one call of the processor did, so the screen can call again until `hayMas` is false. */
+export interface ResultadoProcesoEnvio {
+  /** Rows this call took. */
+  reclamadas: number;
+  /** Rows that reached every recipient. */
+  enviadas: number;
+  /** Rows left queued because some recipient failed (they will be retried). */
+  reintentables: number;
+  /** Rows that ended in `error` (no recipients, voided, out of retries). */
+  conError: number;
+  /** Individual people reached by this call. */
+  correosEnviados: number;
+  /** Units that had NOBODY reachable this call (no account or no active party). */
+  unidadesSinDestinatario: string[];
+  /** Queued rows ready to be processed now. */
+  pendientes: number;
+  /** Queued rows held by another processor or waiting out a backoff. */
+  enCurso: number;
+  /** True while another call can make progress. */
+  hayMas: boolean;
 }

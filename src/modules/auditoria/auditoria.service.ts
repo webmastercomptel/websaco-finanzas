@@ -24,7 +24,9 @@ export interface EntradaAuditoria {
     | 'reiniciar'
     | 'desmarcar'
     | 'dar-de-baja'
-    | 'retirar';
+    | 'retirar'
+    | 'marcar-envio'
+    | 'enviar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -32,7 +34,8 @@ export interface EntradaAuditoria {
     | 'lote-facturacion'
     | 'lote-contabilidad'
     | 'inmueble'
-    | 'lote-comptable';
+    | 'lote-comptable'
+    | 'envio-factura';
   entidadId: string;
   entidadEtiqueta: string;
 }

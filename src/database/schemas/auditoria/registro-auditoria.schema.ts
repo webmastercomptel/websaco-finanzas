@@ -42,6 +42,8 @@ export class RegistroAuditoria {
       'desmarcar',
       'dar-de-baja',
       'retirar',
+      'marcar-envio',
+      'enviar',
     ],
   })
   accion:
@@ -51,7 +53,9 @@ export class RegistroAuditoria {
     | 'reiniciar'
     | 'desmarcar'
     | 'dar-de-baja'
-    | 'retirar';
+    | 'retirar'
+    | 'marcar-envio'
+    | 'enviar';
 
   @Prop({
     required: true,
@@ -63,6 +67,7 @@ export class RegistroAuditoria {
       'lote-contabilidad',
       'inmueble',
       'lote-comptable',
+      'envio-factura',
     ],
     index: true,
   })
@@ -73,7 +78,8 @@ export class RegistroAuditoria {
     | 'lote-facturacion'
     | 'lote-contabilidad'
     | 'inmueble'
-    | 'lote-comptable';
+    | 'lote-comptable'
+    | 'envio-factura';
 
   @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;

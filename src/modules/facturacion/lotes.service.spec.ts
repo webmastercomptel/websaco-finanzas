@@ -3574,6 +3574,7 @@ describe('LotesFacturacionService.consolidar', () => {
         presentaciones?: unknown;
         auditoria?: unknown;
         publicaciones?: unknown;
+        envios?: unknown;
       } = {},
     ) => {
       const startSession = jest.fn(() => Promise.resolve(sesionFalsa()));
@@ -3602,6 +3603,7 @@ describe('LotesFacturacionService.consolidar', () => {
         (extra.presentaciones ?? cruceCon()) as never,
         extra.auditoria as never,
         (extra.publicaciones ?? cruceCon()) as never,
+        (extra.envios ?? cruceCon()) as never,
       );
       return { service, startSession };
     };
@@ -4143,6 +4145,15 @@ describe('LotesFacturacionService.consolidar', () => {
         );
 
         caso(
+          'bloquea cuando alguna factura del lote ya se marcó para enviar a los residentes',
+          (facturas) => ({
+            facturas,
+            extra: { envios: cruceCon([{ loteId: 'lote-1' }]) },
+          }),
+          /ya se marcaron para enviar a los residentes/,
+        );
+
+        caso(
           'bloquea cuando alguna factura del lote ya tiene printSnapshot',
           () => ({
             facturas: [
@@ -4186,6 +4197,7 @@ describe('LotesFacturacionService.consolidar', () => {
             cruceCon() as never,
             undefined,
             undefined, // publicacionesLote
+            cruceCon() as never, // enviosFactura
           );
 
           await expect(
@@ -5529,6 +5541,7 @@ describe('LotesFacturacionService.cancelar', () => {
         cruceCon() as never,
         auditoria as never,
         cruceCon() as never, // publicacionesLote
+        cruceCon() as never, // enviosFactura
       );
       return {
         service,

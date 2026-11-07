@@ -53,6 +53,7 @@ import { IntegracionesPanelModule } from './modules/integraciones-panel/integrac
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
 import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
 import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
+import { EnvioFacturasModule } from './modules/envio-facturas/envio-facturas.module';
 import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-comptable.module';
 
 /**
@@ -131,6 +132,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     BusquedaAdministracionModule,
     PanelAdministracionModule,
     InterfazComptableModule,
+    EnvioFacturasModule,
   ],
 })
 export class AppModule {}

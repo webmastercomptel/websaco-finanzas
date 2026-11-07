@@ -165,6 +165,10 @@ import {
   PublicacionLote,
   PublicacionLoteSchema,
 } from './schemas/publicaciones/publicacion-lote.schema';
+import {
+  EnvioFactura,
+  EnvioFacturaSchema,
+} from './schemas/facturacion/envio-factura.schema';
 
 import {
   ConsecutivoAdministracion,
@@ -316,6 +320,7 @@ const models = [
   { name: PresentacionDocumento.name, schema: PresentacionDocumentoSchema },
   { name: PlantillaDocumento.name, schema: PlantillaDocumentoSchema },
   { name: PublicacionLote.name, schema: PublicacionLoteSchema },
+  { name: EnvioFactura.name, schema: EnvioFacturaSchema },
 ];
 
 /**

@@ -81,6 +81,10 @@ import {
   PublicacionLote,
   PublicacionLoteDocument,
 } from '../../database/schemas/publicaciones/publicacion-lote.schema';
+import {
+  EnvioFactura,
+  EnvioFacturaDocument,
+} from '../../database/schemas/facturacion/envio-factura.schema';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { PeriodoService } from '../../common/contabilidad/periodo.service';
@@ -319,8 +323,10 @@ type FilaPreparada = {
  * guard reads, the last records the reversal. The guard FAILS CLOSED — an
  * undo with any of the four missing refuses to run instead of skipping its
  * check — so optional here only spares tests that never reach an undo.
- * `publicacionesLote` (the WebSaco3 outbox) was appended later, same way:
- * the guard also refuses once the lote has been (or is being) published.
+ * `publicacionesLote` (the retired WebSaco3 outbox, kept as history) and
+ * `enviosFactura` (the resident send queue) were appended later, same way: the
+ * guard also refuses once the lote has been published or any of its invoices
+ * was marked for sending to residents.
  */
 @Injectable()
 export class LotesFacturacionService {
@@ -373,6 +379,8 @@ export class LotesFacturacionService {
     private readonly auditoria?: AuditoriaService,
     @InjectModel(PublicacionLote.name)
     private readonly publicacionesLote?: Model<PublicacionLoteDocument>,
+    @InjectModel(EnvioFactura.name)
+    private readonly enviosFactura?: Model<EnvioFacturaDocument>,
   ) {}
 
   /**
@@ -2954,13 +2962,15 @@ export class LotesFacturacionService {
       notasContables,
       presentaciones,
       publicacionesLote,
+      enviosFactura,
     } = this;
     if (
       !aplicaciones ||
       !notasCredito ||
       !notasContables ||
       !presentaciones ||
-      !publicacionesLote
+      !publicacionesLote ||
+      !enviosFactura
     ) {
       throw new Error(
         'No se puede deshacer un lote sin poder verificar sus cruces: faltan modelos de la guarda de seguridad',
@@ -2998,6 +3008,18 @@ export class LotesFacturacionService {
     if (publicaciones.length > 0) {
       throw new ConflictException(
         `No se puede deshacer el lote ${lote.numero}: ya fue encolado o publicado a WebSaco3. ${cola}`,
+      );
+    }
+    // Marked for sending = already handed to the release flow: residents may
+    // have been told about these invoices, so they can never be deleted.
+    const envios = await enviosFactura
+      .find({ loteId: lote._id }, { loteId: 1 })
+      .session(session)
+      .lean()
+      .exec();
+    if (envios.length > 0) {
+      throw new ConflictException(
+        `No se puede deshacer el lote ${lote.numero}: sus facturas ya se marcaron para enviar a los residentes. ${cola}`,
       );
     }
     // From the Facturas as read at the start (a confirmed PDF writes

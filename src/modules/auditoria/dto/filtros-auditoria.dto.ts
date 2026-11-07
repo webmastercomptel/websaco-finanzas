@@ -12,6 +12,7 @@ export class FiltrosAuditoriaDto {
     'lote-contabilidad',
     'inmueble',
     'lote-comptable',
+    'envio-factura',
   ])
   entidadTipo?:
     | 'entidad-administradora'
@@ -20,7 +21,8 @@ export class FiltrosAuditoriaDto {
     | 'lote-facturacion'
     | 'lote-contabilidad'
     | 'inmueble'
-    | 'lote-comptable';
+    | 'lote-comptable'
+    | 'envio-factura';
 
   @IsOptional()
   @IsIn([
@@ -31,6 +33,8 @@ export class FiltrosAuditoriaDto {
     'desmarcar',
     'dar-de-baja',
     'retirar',
+    'marcar-envio',
+    'enviar',
   ])
   accion?:
     | 'crear'
@@ -39,7 +43,9 @@ export class FiltrosAuditoriaDto {
     | 'reiniciar'
     | 'desmarcar'
     | 'dar-de-baja'
-    | 'retirar';
+    | 'retirar'
+    | 'marcar-envio'
+    | 'enviar';
 
   @IsOptional()
   @IsDateString()
