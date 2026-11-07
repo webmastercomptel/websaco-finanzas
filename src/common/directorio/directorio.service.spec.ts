@@ -202,6 +202,35 @@ describe('DirectorioService.personalQueLeer', () => {
   });
 });
 
+describe('DirectorioService.destinatarioPorEmail', () => {
+  const id = oid();
+
+  it('busca la cuenta por correo en minúsculas y la trata como destinatario puntual', async () => {
+    const { servicio, cuentas } = crear({
+      cuentas: [cuenta(id, 'Mara')],
+      accesos: { [id.toString()]: acceso(['mantenimientos.ver']) },
+    });
+
+    const resultado = await servicio.destinatarioPorEmail(
+      ' MARA@Ejemplo.com ',
+      COP,
+      'Mantenimiento',
+    );
+
+    expect(cuentas.find).toHaveBeenCalledWith({ email: 'mara@ejemplo.com' });
+    expect(resultado).toMatchObject({ perfil: 'personal', nombre: 'Mara' });
+  });
+
+  it('null cuando no existe una cuenta con ese correo, sin consultar accesos', async () => {
+    const { servicio, accesoA } = crear({ cuentas: [] });
+
+    await expect(
+      servicio.destinatarioPorEmail('nadie@ejemplo.com', COP, 'Mantenimiento'),
+    ).resolves.toBeNull();
+    expect(accesoA).not.toHaveBeenCalled();
+  });
+});
+
 describe('DirectorioService.destinatarioDe', () => {
   const id = oid();
   const cuentaActiva = [cuenta(id, 'Mara')];

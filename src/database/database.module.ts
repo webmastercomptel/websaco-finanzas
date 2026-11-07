@@ -183,7 +183,13 @@ import {
   NotificacionSchema,
 } from './schemas/administracion/notificacion.schema';
 
+import {
+  Tecnico,
+  TecnicoSchema,
+} from './schemas/administracion/tecnico.schema';
+
 const models = [
+  { name: Tecnico.name, schema: TecnicoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },

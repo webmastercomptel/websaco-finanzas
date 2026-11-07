@@ -7,6 +7,19 @@ import { Types } from 'mongoose';
  * because a rendering failure in one row should not take down a whole listing.
  */
 
+/**
+ * Up to two initials from a full name: "Laura Gómez" -> "LG", "Administración"
+ * -> "A". Empty for a missing or blank name.
+ */
+export const iniciales = (nombre: string | undefined | null): string => {
+  const partes = (nombre ?? '').trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return '';
+  if (partes.length === 1) return partes[0].charAt(0).toUpperCase();
+  return (
+    partes[0].charAt(0) + partes[partes.length - 1].charAt(0)
+  ).toUpperCase();
+};
+
 /** Normalizes a Mongo ObjectId (or populated doc / string) to its string form. */
 export const idToString = (
   value: Types.ObjectId | string | { _id: Types.ObjectId } | null | undefined,

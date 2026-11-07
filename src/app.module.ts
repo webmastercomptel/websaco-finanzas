@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // Configuration
 import { buildConfigModuleOptions } from './config/config-module-options';
@@ -74,6 +75,9 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     // Stays even if PublicacionFacturasModule is ever rolled back —
     // LotesController itself injects EventEmitter2 to emit the domain fact.
     EventEmitterModule.forRoot(),
+    // Timers for the building-management housekeeping jobs (@Cron). Each one
+    // runs under a Redis lock so only one instance executes it.
+    ScheduleModule.forRoot(),
     DatabaseModule,
     CommonModule,
     CaslModule,

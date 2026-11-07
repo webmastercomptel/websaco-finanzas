@@ -154,6 +154,25 @@ export class DirectorioService {
   }
 
   /**
+   * The account behind an email address (a technician who happens to have a
+   * sign-in), as a recipient of something about `materia`; null when there is
+   * no such account or it should not be notified. Email is stored lowercased.
+   */
+  async destinatarioPorEmail(
+    email: string,
+    copropiedadId: Types.ObjectId,
+    materia: Subject,
+  ): Promise<Destinatario | null> {
+    const [cuenta] = await this.cuentas
+      .find({ email: email.trim().toLowerCase() })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!cuenta) return null;
+    return this.destinatarioDe(cuenta._id.toString(), copropiedadId, materia);
+  }
+
+  /**
    * One known account (a task's assignee, a PQR's author) as a recipient of
    * something about `materia`, or null when it should not be notified: no
    * account, inactive, no access to the coproperty, or neither able to read the
