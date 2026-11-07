@@ -202,6 +202,16 @@ import {
 
 import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
 
+import {
+  CarpetaDocumento,
+  CarpetaDocumentoSchema,
+} from './schemas/administracion/documento-carpeta.schema';
+
+import {
+  ArchivoDocumento,
+  ArchivoDocumentoSchema,
+} from './schemas/administracion/documento-archivo.schema';
+
 import { Zona, ZonaSchema } from './schemas/administracion/zona.schema';
 
 import {
@@ -210,6 +220,8 @@ import {
 } from './schemas/administracion/reserva.schema';
 
 const models = [
+  { name: CarpetaDocumento.name, schema: CarpetaDocumentoSchema },
+  { name: ArchivoDocumento.name, schema: ArchivoDocumentoSchema },
   { name: Tarea.name, schema: TareaSchema },
   { name: Pqr.name, schema: PqrSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },

@@ -3142,3 +3142,107 @@ export interface DisponibilidadEspacio {
   horarioOperacion: { inicio: string; fin: string };
   ocupados: FranjaOcupada[];
 }
+
+/* ── Administración: Documentos (biblioteca de la copropiedad) ───── */
+
+/** Who a folder rule is about: a staff role of the coproperty, or unit holders. */
+export type AudienciaCarpeta =
+  | { tipo: 'rol'; rolId: string }
+  | { tipo: 'residentes'; rol: 'propietario' | 'arrendatario' | 'todos' };
+
+/**
+ * One rule of a folder's ACL: the audience plus what it may do. A `residentes`
+ * rule can only read (`puedeEscribir` is always false). There is no "administer"
+ * flag: administering needs the `documentos-administracion.gestionar` permission.
+ */
+export type AclCarpetaAdministracion = AudienciaCarpeta & {
+  puedeLeer: boolean;
+  puedeEscribir: boolean;
+};
+
+/** The caller's effective access over a folder (computed per request). */
+export interface PermisosCarpetaAdministracion {
+  puedeLeer: boolean;
+  puedeEscribir: boolean;
+  /** True only for whoever holds `gestionar`; administering is not delegable per folder. */
+  puedeAdministrar: boolean;
+}
+
+/** A file of the library. `tieneArchivo` is false while the upload is unconfirmed. */
+export interface ArchivoAdministracion {
+  id: string;
+  codigo: string;
+  nombre: string;
+  tipo: 'pdf' | 'docx' | 'xlsx' | 'png' | 'jpg' | 'otro';
+  /** Slug of the folder that holds it. */
+  carpeta: string;
+  /** Full folder path for display (e.g. "Contabilidad / 2024 / Balances"). */
+  ubicacion: string;
+  categoria: string;
+  tamanoBytes: number;
+  modificado: string;
+  autor: string;
+  destacado: boolean;
+  etiquetas: string[];
+  tieneArchivo: boolean;
+}
+
+/** A folder as staff see it, with its rules and the caller's effective access. */
+export interface CarpetaAdministracion {
+  id: string;
+  slug: string;
+  nombre: string;
+  descripcion: string;
+  icono: string;
+  color: string;
+  parentId: string | null;
+  acls: AclCarpetaAdministracion[];
+  archivos: number;
+  actualizado: string;
+  tamanoBytes: number;
+  permisos: PermisosCarpetaAdministracion;
+  /** Name of the ancestor whose rules this folder inherits (null when none). */
+  heredaDe: string | null;
+  /** The rules inherited from ancestors, ignoring this folder's own (editor prefill). */
+  permisosHeredados: AclCarpetaAdministracion[];
+}
+
+/**
+ * A folder as a resident sees it: no rules, no role ids, no permissions. A
+ * resident only ever learns that they may read it.
+ */
+export interface CarpetaAdministracionPortal {
+  id: string;
+  slug: string;
+  nombre: string;
+  descripcion: string;
+  icono: string;
+  color: string;
+  parentId: string | null;
+  archivos: number;
+  actualizado: string;
+  tamanoBytes: number;
+}
+
+export interface RutaCarpetaAdministracion {
+  id: string;
+  slug: string;
+  nombre: string;
+}
+
+/** Step 1 of an upload: the pending record plus the URL to PUT the file to. */
+export interface SubidaArchivoIniciada {
+  documento: ArchivoAdministracion;
+  uploadUrl: string;
+}
+
+export interface DescargaArchivo {
+  url: string;
+  nombre: string;
+}
+
+export interface EstadisticasArchivos {
+  totalArchivos: number;
+  espacioUsadoBytes: number;
+  espacioTotalBytes: number;
+}

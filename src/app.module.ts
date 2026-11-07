@@ -37,6 +37,7 @@ import { MantenimientosModule } from './modules/mantenimientos/mantenimientos.mo
 import { ActividadesModule } from './modules/actividades/actividades.module';
 import { PqrModule } from './modules/pqr/pqr.module';
 import { ZonasModule } from './modules/zonas/zonas.module';
+import { DocumentosModule } from './modules/documentos/documentos.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
 import { TecnicosModule } from './modules/tecnicos/tecnicos.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
@@ -112,6 +113,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     ActividadesModule,
     PqrModule,
     ZonasModule,
+    DocumentosModule,
     ReservasModule,
     TecnicosModule,
     AuditoriaModule,
