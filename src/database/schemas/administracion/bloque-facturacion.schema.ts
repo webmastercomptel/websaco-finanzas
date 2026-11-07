@@ -14,10 +14,15 @@ export type BloqueFacturacionDocument = HydratedDocument<BloqueFacturacion> & {
  * `recibo` exists because the system this was ported from accepted it, but it is
  * STAFF-ONLY: residents are never offered a receipt (see
  * `facturacion-bloque-acceso.ts`), so a `recibo` batch can be stored and
- * reviewed but never sent.
+ * reviewed but never sent. It is kept in the schema only for migrated rows: a
+ * new upload may only declare `TIPOS_BLOQUE_SUBIBLES`.
  */
 export const TIPOS_BLOQUE = ['factura', 'estado_cuenta', 'recibo'] as const;
 export type TipoBloque = (typeof TIPOS_BLOQUE)[number];
+
+/** What a new upload may declare: receipts are internal and never uploaded. */
+export const TIPOS_BLOQUE_SUBIBLES = ['factura', 'estado_cuenta'] as const;
+export type TipoBloqueSubible = (typeof TIPOS_BLOQUE_SUBIBLES)[number];
 
 /**
  * Lifecycle of a block of externally produced billing documents.

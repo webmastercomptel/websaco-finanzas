@@ -34,17 +34,16 @@ import { FacturacionBloqueService } from './facturacion-bloque.service';
  * unit). TRANSITIONAL: this module is meant to be deleted whole when the native
  * invoice pipeline replaces it, so nothing outside imports it.
  *
- * The previous system gated these routes with `create`/`delete` on `Documento`;
- * Finanzas has no billing permission and the catalog gets no new keys, so the
- * closest existing semantics are kept, with the same reasoning as before:
+ * Every route is gated by a FINANZAS key on `Factura`, never an Administración
+ * one: these PDFs are every unit's invoices and statements of account, so the
+ * `personal` ceiling (`permisosVetadosParaPerfil`) must strip access, and roles
+ * or `/equipo` (which only carry Administración keys) can never hand it out.
  *
- * - `create Documento` (`documentos-administracion.subir`) for list, detail,
- *   upload, ingest and the original. NOT `read`: the default resident-facing
- *   roles hold `.ver`, and these routes expose every unit's data.
- * - `manage Documento` (`documentos-administracion.gestionar`) for the SEND and
- *   the delete: sending is irreversible and reaches every resident, so it is not
- *   something the person who merely uploads should be able to trigger. (The
- *   previous system let any uploader send; confirm with the product owner.)
+ * - `create Factura` (`facturas.crear`) for list, detail, upload, ingest and the
+ *   original. NOT `read`: these routes expose every unit's documents at once.
+ * - `approve Factura` (`facturas.aprobar`) for the SEND and the delete, the same
+ *   key the native invoice send uses: releasing documents to residents is a
+ *   decision separate from producing them.
  *
  * Residents never come through here: they read under
  * `FacturacionBloquePortalController` (`/portal/mis-documentos`).
@@ -60,13 +59,13 @@ export class FacturacionBloqueController {
   ) {}
 
   @Get()
-  @CheckAbility({ action: 'create', subject: 'Documento' })
+  @CheckAbility({ action: 'create', subject: 'Factura' })
   listar(@Query() filtros: ListarBloquesDto): Promise<BloqueFacturacion[]> {
     return this.bloques.listar(filtros);
   }
 
   @Post()
-  @CheckAbility({ action: 'create', subject: 'Documento' })
+  @CheckAbility({ action: 'create', subject: 'Factura' })
   crear(
     @Body() dto: CrearBloqueDto,
     @CurrentUser() user: IRequestUser,
@@ -75,14 +74,14 @@ export class FacturacionBloqueController {
   }
 
   @Get(':id')
-  @CheckAbility({ action: 'create', subject: 'Documento' })
+  @CheckAbility({ action: 'create', subject: 'Factura' })
   detalle(@Param('id') id: string): Promise<BloqueFacturacionDetalle> {
     return this.bloques.detalle(id);
   }
 
   /** Detects the unit of every page and stores one PDF per unit. Sends NOTHING. */
   @Patch(':id/confirmar')
-  @CheckAbility({ action: 'create', subject: 'Documento' })
+  @CheckAbility({ action: 'create', subject: 'Factura' })
   confirmar(@Param('id') id: string): Promise<ReporteIngestaBloque> {
     return this.ingesta.procesar(id);
   }
@@ -95,7 +94,7 @@ export class FacturacionBloqueController {
    */
   @Post(':id/enviar')
   @HttpCode(200)
-  @CheckAbility({ action: 'manage', subject: 'Documento' })
+  @CheckAbility({ action: 'approve', subject: 'Factura' })
   enviar(
     @Param('id') id: string,
     @CurrentUser() user: IRequestUser,
@@ -104,13 +103,13 @@ export class FacturacionBloqueController {
   }
 
   @Get(':id/descargar')
-  @CheckAbility({ action: 'create', subject: 'Documento' })
+  @CheckAbility({ action: 'create', subject: 'Factura' })
   descargar(@Param('id') id: string): Promise<DescargaArchivo> {
     return this.bloques.descargarOriginal(id);
   }
 
   @Delete(':id')
-  @CheckAbility({ action: 'manage', subject: 'Documento' })
+  @CheckAbility({ action: 'approve', subject: 'Factura' })
   eliminar(@Param('id') id: string): Promise<{ id: string }> {
     return this.bloques.eliminar(id);
   }

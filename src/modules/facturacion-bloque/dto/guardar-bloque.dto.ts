@@ -8,8 +8,8 @@ import {
   Min,
 } from 'class-validator';
 import {
-  TIPOS_BLOQUE,
-  type TipoBloque,
+  TIPOS_BLOQUE_SUBIBLES,
+  type TipoBloqueSubible,
 } from '../../../database/schemas/administracion/bloque-facturacion.schema';
 
 /**
@@ -19,8 +19,11 @@ import {
  * `confirmar`), where it can answer with a message instead of a generic 400.
  */
 export class CrearBloqueDto {
-  @IsIn(TIPOS_BLOQUE)
-  tipo: TipoBloque;
+  /** Receipts are internal: a `recibo` batch can no longer be uploaded. */
+  @IsIn(TIPOS_BLOQUE_SUBIBLES, {
+    message: 'Solo se pueden subir facturas o estados de cuenta',
+  })
+  tipo: TipoBloqueSubible;
 
   /** Free label of the period, e.g. "2026-07". */
   @IsString()

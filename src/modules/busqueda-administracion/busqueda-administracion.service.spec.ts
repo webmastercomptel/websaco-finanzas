@@ -42,7 +42,7 @@ const usuario = (
   ...extra,
 });
 
-/** One read key per searchable subject, plus the upload key of block billing. */
+/** One read key per searchable subject, plus the Finanzas key of block billing. */
 const TODOS = [
   'tareas.ver',
   'anuncios.ver',
@@ -52,7 +52,7 @@ const TODOS = [
   'documentos-administracion.ver',
   'zonas.ver',
   'reservas.ver',
-  'documentos-administracion.subir',
+  'facturas.crear',
 ];
 
 const carpeta = (
@@ -191,16 +191,16 @@ describe('BusquedaAdministracionService', () => {
       ['actividades.ver', 'actividades'],
       ['zonas.ver', 'zonasComunes'],
       ['reservas.ver', 'reservas'],
-      ['documentos-administracion.subir', 'facturasBloque'],
+      ['facturas.crear', 'facturasBloque'],
     ])('%s habilita únicamente el grupo %s', async (permiso, grupo) => {
       const r = await service.buscar(usuario([permiso]), { q: 'abc' });
 
       expect(Object.keys(r)).toEqual([grupo]);
     });
 
-    it('documentos-administracion.ver habilita documentos pero no facturas por bloque (que pide subir)', async () => {
+    it('documentos-administracion (ver o subir) habilita documentos pero no facturas por bloque (que pide facturas.crear)', async () => {
       const r = await service.buscar(
-        usuario(['documentos-administracion.ver']),
+        usuario(['documentos-administracion.ver', 'documentos-administracion.subir']),
         { q: 'abc' },
       );
 

@@ -45,10 +45,16 @@ describe('CrearBloqueDto', () => {
     ).toContain('subidoPorNombre');
   });
 
-  it('acepta los tres tipos del sistema original', async () => {
-    for (const tipo of ['factura', 'estado_cuenta', 'recibo']) {
+  it('acepta factura y estado de cuenta', async () => {
+    for (const tipo of ['factura', 'estado_cuenta']) {
       expect(await errores(CrearBloqueDto, { ...valido, tipo })).toEqual([]);
     }
+  });
+
+  it('rechaza subir un bloque de recibos: los recibos son internos', async () => {
+    expect(
+      await errores(CrearBloqueDto, { ...valido, tipo: 'recibo' }),
+    ).toContain('tipo');
   });
 });
 

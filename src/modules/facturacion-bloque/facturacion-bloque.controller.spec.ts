@@ -5,14 +5,26 @@ import {
   METHOD_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants';
-import { RequestMethod } from '@nestjs/common';
+import {
+  ForbiddenException,
+  RequestMethod,
+  type ExecutionContext,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import {
   CHECK_ABILITY_KEY,
   MODULO_KEY,
   type RequiredRule,
 } from '../casl/check-ability.decorator';
+import { CaslAbilityFactory } from '../casl/casl-ability.factory';
 import { rulesFromPermissionKeys } from '../casl/permission-map';
+import {
+  PERMISOS_ADMINISTRACION,
+  sinPermisosVetados,
+  type PerfilAsignacion,
+} from '../casl/permisos-catalogo';
+import { PoliciesGuard } from '../casl/policies.guard';
 import { FacturacionBloqueController } from './facturacion-bloque.controller';
 
 const prototipo = FacturacionBloqueController.prototype as unknown as Record<
@@ -37,13 +49,13 @@ describe('FacturacionBloqueController — política de acceso', () => {
     ['detalle', 'create'],
     ['confirmar', 'create'],
     ['descargar', 'create'],
-    ['enviar', 'manage'],
-    ['eliminar', 'manage'],
-  ] as const)('%s exige la acción %s sobre Documento', (handler, action) => {
-    expect(reglasDe(handler)).toEqual([{ action, subject: 'Documento' }]);
+    ['enviar', 'approve'],
+    ['eliminar', 'approve'],
+  ] as const)('%s exige la acción %s sobre Factura', (handler, action) => {
+    expect(reglasDe(handler)).toEqual([{ action, subject: 'Factura' }]);
   });
 
-  it('NINGUNA ruta de staff se abre con read: quien solo ve documentos no ve las facturas de todas las unidades', () => {
+  it('NINGUNA ruta de staff se abre con read: quien solo ve facturas no ve los PDF de todas las unidades', () => {
     const rutas = Object.getOwnPropertyNames(prototipo).filter(
       (n) => n !== 'constructor',
     ) as Array<keyof FacturacionBloqueController>;
@@ -97,17 +109,78 @@ describe('FacturacionBloqueController — política de acceso', () => {
     expect(guards).toEqual(['FirebaseAuthGuard', 'PoliciesGuard']);
   });
 
-  it('subir (create) NO alcanza para enviar ni borrar; gestionar (manage) sí alcanza para todo', () => {
-    const subir = rulesFromPermissionKeys([
-      'documentos-administracion.subir',
-    ]).filter((r) => !r.inverted);
-    const gestionar = rulesFromPermissionKeys([
-      'documentos-administracion.gestionar',
-    ]).filter((r) => !r.inverted);
+  it('crear (facturas.crear) NO alcanza para enviar ni borrar; aprobar sí', () => {
+    const crear = rulesFromPermissionKeys(['facturas.crear']).filter(
+      (r) => !r.inverted,
+    );
+    const aprobar = rulesFromPermissionKeys(['facturas.aprobar']).filter(
+      (r) => !r.inverted,
+    );
 
-    expect(subir).toEqual([{ action: 'create', subject: 'Documento' }]);
-    expect(gestionar).toEqual([{ action: 'manage', subject: 'Documento' }]);
+    expect(crear).toEqual([{ action: 'create', subject: 'Factura' }]);
+    expect(aprobar).toEqual([{ action: 'approve', subject: 'Factura' }]);
   });
+});
+
+describe('FacturacionBloqueController — techo de Finanzas (perfil personal)', () => {
+  const guard = new PoliciesGuard(new Reflector(), new CaslAbilityFactory());
+  const rutas = Object.getOwnPropertyNames(prototipo).filter(
+    (n) => n !== 'constructor',
+  ) as Array<keyof FacturacionBloqueController>;
+
+  /** Runs the real guard as it runs per request, after the ceiling trimmed the keys. */
+  const pasa = (
+    handler: keyof FacturacionBloqueController,
+    perfil: PerfilAsignacion,
+    claves: string[],
+  ): boolean => {
+    const user: IRequestUser = {
+      uid: 'u',
+      email: 'a@b.co',
+      accountId: 'cuenta-1',
+      copropiedadId: 'c1',
+      modulos: ['finanzas', 'administracion'],
+      permissions: sinPermisosVetados(perfil, claves),
+    };
+    const contexto = {
+      getHandler: () => prototipo[handler],
+      getClass: () => FacturacionBloqueController,
+      switchToHttp: () => ({ getRequest: () => ({ user }) }),
+    } as unknown as ExecutionContext;
+    try {
+      return guard.canActivate(contexto);
+    } catch (e) {
+      if (e instanceof ForbiddenException) return false;
+      throw e;
+    }
+  };
+
+  const todasLasDeAdministracion = PERMISOS_ADMINISTRACION.map((p) => p.id);
+
+  it.each(rutas)(
+    'personal con TODAS las claves de Administración recibe 403 en %s',
+    (ruta) => {
+      expect(pasa(ruta, 'personal', todasLasDeAdministracion)).toBe(false);
+    },
+  );
+
+  it.each(rutas)(
+    'personal con claves de facturas (recortadas por el techo) recibe 403 en %s',
+    (ruta) => {
+      expect(
+        pasa(ruta, 'personal', ['facturas.crear', 'facturas.aprobar']),
+      ).toBe(false);
+    },
+  );
+
+  it.each(rutas)(
+    'administrativo con facturas.crear y facturas.aprobar entra a %s',
+    (ruta) => {
+      expect(
+        pasa(ruta, 'administrativo', ['facturas.crear', 'facturas.aprobar']),
+      ).toBe(true);
+    },
+  );
 });
 
 describe('FacturacionBloqueController — delegación', () => {

@@ -151,8 +151,8 @@ export class BusquedaAdministracionService {
       documentos: ability.can('read', 'Documento'),
       zonasComunes: ability.can('read', 'Zona'),
       reservas: ability.can('read', 'Reserva'),
-      // Same gate as the block-billing screen's own list (`create Documento`).
-      facturasBloque: ability.can('create', 'Documento'),
+      // Same gate as the block-billing screen's own list (`create Factura`).
+      facturasBloque: ability.can('create', 'Factura'),
     };
 
     // Nothing readable: no query at all (the route's own gate normally stops
