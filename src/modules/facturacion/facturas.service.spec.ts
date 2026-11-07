@@ -362,6 +362,30 @@ describe('FacturasService.findAll — conSaldoPendiente', () => {
   });
 });
 
+describe('FacturasService.findAll — soloIds', () => {
+  it('limita la consulta a esos ids sin pisar la condición de saldo', async () => {
+    const doc = documento();
+    const liberada = new Types.ObjectId();
+    const { service, facturas } = construirServicio([doc]);
+
+    await service.findAll({ conSaldoPendiente: true }, { soloIds: [liberada] });
+
+    expect(facturas.filtros[0]).toMatchObject({
+      copropiedadId: COP,
+      _id: { $in: [doc._id] },
+      $and: [{ _id: { $in: [liberada] } }],
+    });
+  });
+
+  it('sin soloIds no agrega ninguna restricción', async () => {
+    const { service, facturas } = construirServicio([documento()]);
+
+    await service.findAll({});
+
+    expect(facturas.filtros[0].$and).toBeUndefined();
+  });
+});
+
 describe('FacturasService.findAll — estado', () => {
   it('filtra por estado cuando se pasa estado', async () => {
     const { service, facturas } = construirServicio([documento()]);

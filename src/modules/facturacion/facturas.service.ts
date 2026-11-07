@@ -233,9 +233,16 @@ export class FacturasService {
    */
   async findAll(
     query: ListarFacturasDto,
+    opciones: { soloIds?: Types.ObjectId[] } = {},
   ): Promise<PaginadoConTotales<FacturaContract, TotalesFacturas>> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const filtro = await this.construirFiltro(query, copropiedadId);
+    // Server-side narrowing the caller's query cannot express or override (the
+    // resident portal passes the invoices released to residents). A `$and`
+    // clause so it can never clash with an `_id` condition built above.
+    if (opciones.soloIds) {
+      filtro.$and = [{ _id: { $in: opciones.soloIds } }];
+    }
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;

@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import { PortalService } from './portal.service';
 import type { RolPortal } from './portal-acceso.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { ColeccionMemoria } from '../envio-facturas/testing/coleccion-memoria';
 
 const MI_UNIDAD = new Types.ObjectId().toString();
 const OTRA_UNIDAD = new Types.ObjectId().toString();
@@ -32,7 +33,34 @@ const paginaPdf = async (): Promise<Buffer> => {
   return Buffer.from(await doc.save());
 };
 
-const construir = async (rol: RolPortal) => {
+/** The send queue as the portal sees it: which invoices were released, and when. */
+const colaCon = (
+  filas: {
+    facturaId: string;
+    inmuebleId?: string;
+    liberada?: boolean;
+    copropiedadId?: string;
+  }[],
+) => {
+  const cola = new ColeccionMemoria();
+  for (const f of filas) {
+    cola.insertar({
+      _id: new Types.ObjectId(),
+      copropiedadId: new Types.ObjectId(
+        f.copropiedadId ?? usuario.copropiedadId,
+      ),
+      facturaId: new Types.ObjectId(f.facturaId),
+      inmuebleId: new Types.ObjectId(f.inmuebleId ?? MI_UNIDAD),
+      ...(f.liberada === false ? {} : { liberadaEn: new Date() }),
+    });
+  }
+  return cola;
+};
+
+const construir = async (
+  rol: RolPortal,
+  cola: ColeccionMemoria = colaCon([{ facturaId: FACTURA }]),
+) => {
   const acceso = accesoCon(rol);
   const facturas = {
     findAll: jest.fn(() => Promise.resolve({ datos: [] })),
@@ -61,6 +89,7 @@ const construir = async (rol: RolPortal) => {
     estadoCuenta as never,
     presentacion as never,
     storage as never,
+    cola as never,
   );
   return { service, facturas, estadoCuenta, acceso };
 };
@@ -73,7 +102,48 @@ describe('PortalService.facturasDe', () => {
 
     expect(facturas.findAll).toHaveBeenCalledWith(
       expect.objectContaining({ inmuebleId: MI_UNIDAD, pagina: 2 }),
+      expect.anything(),
     );
+  });
+
+  it('solo lista facturas liberadas a los residentes: pide únicamente esos ids', async () => {
+    const liberada = new Types.ObjectId().toString();
+    const marcadaSinEnviar = new Types.ObjectId().toString();
+    const deOtraUnidad = new Types.ObjectId().toString();
+    const deOtraCopropiedad = new Types.ObjectId().toString();
+    const cola = colaCon([
+      { facturaId: liberada },
+      { facturaId: marcadaSinEnviar, liberada: false },
+      { facturaId: deOtraUnidad, inmuebleId: OTRA_UNIDAD },
+      {
+        facturaId: deOtraCopropiedad,
+        copropiedadId: new Types.ObjectId().toString(),
+      },
+    ]);
+    const { service, facturas } = await construir('propietario', cola);
+
+    await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+
+    const [, opciones] = (
+      facturas.findAll.mock.calls as unknown as Array<
+        [unknown, { soloIds: Types.ObjectId[] }]
+      >
+    )[0];
+    expect(opciones.soloIds.map(String)).toEqual([liberada]);
+  });
+
+  it('una unidad sin facturas liberadas devuelve una página vacía sin consultar facturas', async () => {
+    const { service, facturas } = await construir(
+      'arrendatario',
+      colaCon([{ facturaId: FACTURA, liberada: false }]),
+    );
+
+    const pagina = await service.facturasDe(usuario, {
+      inmuebleId: MI_UNIDAD,
+    });
+
+    expect(pagina).toEqual({ items: [], total: 0, pagina: 1, porPagina: 50 });
+    expect(facturas.findAll).not.toHaveBeenCalled();
   });
 
   it('una unidad ajena responde 404 y no consulta facturas', async () => {
@@ -109,6 +179,25 @@ describe('PortalService.documentoPdfDeFactura', () => {
     const bytes = await service.documentoPdfDeFactura(usuario, FACTURA);
 
     expect(bytes.length).toBeGreaterThan(0);
+  });
+
+  it('una factura marcada para enviar pero aún no liberada responde 404', async () => {
+    const { service } = await construir(
+      'propietario',
+      colaCon([{ facturaId: FACTURA, liberada: false }]),
+    );
+
+    await expect(
+      service.documentoPdfDeFactura(usuario, FACTURA),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('una factura que nunca se marcó responde 404 aunque sea de la unidad del residente', async () => {
+    const { service } = await construir('propietario', colaCon([]));
+
+    await expect(
+      service.documentoPdfDeFactura(usuario, FACTURA),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('una factura de una unidad ajena responde 404', async () => {

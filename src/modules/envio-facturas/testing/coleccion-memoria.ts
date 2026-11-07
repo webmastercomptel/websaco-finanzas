@@ -168,6 +168,14 @@ export class ColeccionMemoria {
     return q;
   }
 
+  exists(filtro: Record<string, unknown>) {
+    return consulta(async () => {
+      await ceder();
+      const d = this.docs.find((x) => coincide(x, filtro));
+      return d ? { _id: d._id } : null;
+    });
+  }
+
   countDocuments(filtro: Record<string, unknown> = {}) {
     return consulta(async () => {
       await ceder();
