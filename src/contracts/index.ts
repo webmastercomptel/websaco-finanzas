@@ -2836,3 +2836,30 @@ export interface RegistroPanel {
   nit: string | null;
   vinculos: { sistema: 'comptable' | 'administracion'; registroId: string }[];
 }
+
+/**
+ * A named bundle of Administración permissions, owned by one coproperty.
+ * `permisos` are `modulo.accion` keys from the Administración catalog; the
+ * editor lists them from `GET roles/permisos`.
+ */
+export interface Rol {
+  id: string;
+  codigo: string;
+  nombre: string;
+  descripcion: string;
+  color: string;
+  /** Active staff assignments that carry this role. */
+  usuarios: number;
+  permisos: string[];
+  /** Pre-selected when creating a user; carries no authorization meaning. */
+  esPredeterminado: boolean;
+  fechaCreacion: string;
+}
+
+/** One assignable Administración permission, as the role editor lists it. */
+export interface Permiso {
+  id: string;
+  nombre: string;
+  descripcion: string;
+  modulo: string;
+}

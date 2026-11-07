@@ -35,12 +35,16 @@ const servicio = (opts: {
   copropiedades?: Fila[];
   entidades?: Fila[];
   terceros?: Fila[];
+  roles?: ReturnType<typeof consulta> | Fila[];
 }) =>
   new AccesoService(
     consulta(opts.asignaciones ?? []) as never,
     consulta(opts.copropiedades ?? []) as never,
     consulta(opts.entidades ?? []) as never,
     consulta(opts.terceros ?? []) as never,
+    (Array.isArray(opts.roles) || opts.roles === undefined
+      ? consulta(opts.roles ?? [])
+      : opts.roles) as never,
   );
 
 const copropiedad = (
@@ -319,6 +323,7 @@ describe('AccesoService residentes (portal)', () => {
       consulta([copropiedad(copA, 'COP-A')]) as never,
       consulta([]) as never,
       terceros as never,
+      consulta([]) as never,
     );
 
     await service.copropiedadesDe(cuenta.toString());
@@ -327,6 +332,108 @@ describe('AccesoService residentes (portal)', () => {
       accountId: cuenta,
       estado: 'active',
     });
+  });
+});
+
+describe('AccesoService roles (paquetes de permisos de Administración)', () => {
+  const rolA = oid();
+  const rolB = oid();
+  const directa = (extra: Fila = {}) => ({
+    alcance: 'copropiedad',
+    copropiedadId: copA,
+    permisos: ['facturas.ver'],
+    roleIds: [rolA],
+    ...extra,
+  });
+  const rol = (id: Types.ObjectId, permisos: string[], de = copA) => ({
+    _id: id,
+    copropiedadId: de,
+    permisos,
+  });
+
+  it('une los permisos del rol con los directos de la asignación', async () => {
+    const service = servicio({
+      asignaciones: [directa()],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['pqr.ver', 'tareas.crear'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.ver',
+      'pqr.ver',
+      'tareas.crear',
+    ]);
+  });
+
+  it('solo cuentan los roles que la asignación nombra y que son de ESA copropiedad', async () => {
+    const service = servicio({
+      asignaciones: [directa()],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['pqr.ver'], copB), rol(rolB, ['tareas.ver'], copA)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['facturas.ver']);
+  });
+
+  it('un rol no puede aportar permisos de finanzas ni claves desconocidas', async () => {
+    const service = servicio({
+      asignaciones: [directa({ permisos: [] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['facturas.anular', 'pqr.ver', 'inventada.ver'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['pqr.ver']);
+  });
+
+  it('el personal conserva los permisos de Administración de su rol', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'personal', permisos: [] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['mantenimientos.ver'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['mantenimientos.ver']);
+  });
+
+  it('una asignación por entidad ignora los roles: son de una copropiedad', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          permisos: ['facturas.ver'],
+          roleIds: [rolA],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
+      copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
+      roles: [rol(rolA, ['pqr.ver'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['facturas.ver']);
+  });
+
+  it('sin roleIds no consulta roles', async () => {
+    const roles = consulta([]);
+    const service = servicio({
+      asignaciones: [directa({ roleIds: undefined })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles,
+    });
+
+    await service.copropiedadesDe(cuenta.toString());
+
+    expect(roles.find).not.toHaveBeenCalled();
   });
 });
 

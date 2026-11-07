@@ -1,9 +1,54 @@
 import {
+  esPermisoAdministracion,
   moduloDePermiso,
+  PERMISOS_ADMINISTRACION,
   permisosDesconocidos,
   permisosVetadosParaPerfil,
   sinPermisosVetados,
 } from './permisos-catalogo';
+import { createAppAbility } from './casl-ability.constants';
+import { rulesFromPermissionKeys } from './permission-map';
+
+describe('PERMISOS_ADMINISTRACION (catálogo que ofrece el editor de roles)', () => {
+  const claves = PERMISOS_ADMINISTRACION.map((p) => p.id);
+
+  it('tiene las 29 claves de Administración, sin repetir', () => {
+    expect(claves).toHaveLength(29);
+    expect(new Set(claves).size).toBe(29);
+  });
+
+  it('toda clave pertenece al módulo administracion y ninguna es de finanzas', () => {
+    for (const clave of claves) {
+      expect(moduloDePermiso(clave)).toBe('administracion');
+    }
+  });
+
+  it('el módulo de documentos de Administración no choca con el de Finanzas', () => {
+    expect(claves).toContain('documentos-administracion.ver');
+    expect(claves.some((c) => c.startsWith('documentos.'))).toBe(false);
+  });
+
+  it('toda clave se traduce a una regla de CASL (ninguna queda muerta)', () => {
+    for (const clave of claves) {
+      expect(rulesFromPermissionKeys([clave]).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('eliminar usuarios, anuncios, etc. produce `remove`, nunca sobre una materia financiera', () => {
+    const habilidad = createAppAbility(
+      rulesFromPermissionKeys(['anuncios.eliminar']),
+    );
+    expect(habilidad.can('remove', 'Anuncio')).toBe(true);
+    expect(habilidad.can('remove', 'Factura')).toBe(false);
+  });
+
+  it('esPermisoAdministracion acepta solo las claves del catálogo', () => {
+    expect(esPermisoAdministracion('pqr.gestionar')).toBe(true);
+    expect(esPermisoAdministracion('facturas.ver')).toBe(false);
+    expect(esPermisoAdministracion('pqr.eliminar')).toBe(false);
+    expect(esPermisoAdministracion('inventada.ver')).toBe(false);
+  });
+});
 
 describe('moduloDePermiso', () => {
   it('toda clave conocida de hoy pertenece al módulo finanzas', () => {

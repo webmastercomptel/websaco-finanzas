@@ -49,6 +49,203 @@ export function moduloDePermiso(clave: string): ModuloProducto | null {
   return verboValido ? modulo : null;
 }
 
+/** One assignable Administración permission, as the role editor lists it. */
+export interface PermisoCatalogo {
+  /** The `modulo.accion` key stored on roles and assignments. */
+  id: string;
+  nombre: string;
+  descripcion: string;
+  /** Group heading in the editor. */
+  modulo: string;
+}
+
+const permiso = (
+  id: string,
+  nombre: string,
+  descripcion: string,
+  modulo: string,
+): PermisoCatalogo => ({ id, nombre, descripcion, modulo });
+
+/**
+ * The Administración permissions a role can bundle: the catalog the building-
+ * management system seeded, with one deliberate change — its `documentos.*` keys
+ * are `documentos-administracion.*` here, because `documentos` is a Finanzas
+ * segment (see `MODULE_TO_SUBJECT`). The migration translates stored keys.
+ *
+ * Code, not a collection: the vocabulary has to match `permission-map.ts`
+ * exactly, and a seeded copy could drift from it.
+ */
+export const PERMISOS_ADMINISTRACION: readonly PermisoCatalogo[] = [
+  permiso(
+    'dashboard.ver',
+    'Ver Dashboard',
+    'Acceso al panel principal',
+    'Dashboard',
+  ),
+  permiso('anuncios.ver', 'Ver Anuncios', 'Ver lista de anuncios', 'Anuncios'),
+  permiso(
+    'anuncios.crear',
+    'Crear Anuncios',
+    'Publicar nuevos anuncios',
+    'Anuncios',
+  ),
+  permiso(
+    'anuncios.editar',
+    'Editar Anuncios',
+    'Modificar anuncios existentes',
+    'Anuncios',
+  ),
+  permiso(
+    'anuncios.eliminar',
+    'Eliminar Anuncios',
+    'Borrar anuncios',
+    'Anuncios',
+  ),
+  permiso(
+    'usuarios.ver',
+    'Ver Usuarios',
+    'Ver directorio de usuarios',
+    'Usuarios',
+  ),
+  permiso(
+    'usuarios.crear',
+    'Crear Usuarios',
+    'Registrar nuevos usuarios',
+    'Usuarios',
+  ),
+  permiso(
+    'usuarios.editar',
+    'Editar Usuarios',
+    'Modificar datos de usuarios',
+    'Usuarios',
+  ),
+  permiso(
+    'usuarios.eliminar',
+    'Eliminar Usuarios',
+    'Dar de baja usuarios',
+    'Usuarios',
+  ),
+  permiso('pqr.ver', 'Ver PQR', 'Ver lista de PQR', 'PQR'),
+  permiso(
+    'pqr.gestionar',
+    'Gestionar PQR',
+    'Responder y cambiar estado',
+    'PQR',
+  ),
+  permiso(
+    'reservas.ver',
+    'Ver Reservas',
+    'Ver calendario de reservas',
+    'Reservas',
+  ),
+  permiso(
+    'reservas.aprobar',
+    'Aprobar Reservas',
+    'Aprobar o rechazar solicitudes',
+    'Reservas',
+  ),
+  permiso(
+    'documentos-administracion.ver',
+    'Ver Documentos',
+    'Acceder a documentos',
+    'Documentos',
+  ),
+  permiso(
+    'documentos-administracion.subir',
+    'Subir Documentos',
+    'Cargar nuevos archivos',
+    'Documentos',
+  ),
+  permiso(
+    'documentos-administracion.gestionar',
+    'Gestionar Documentos',
+    'Administrar todas las carpetas y sus permisos, sin importar los ACL',
+    'Documentos',
+  ),
+  permiso(
+    'config.ver',
+    'Ver Configuración',
+    'Acceso a configuración',
+    'Configuración',
+  ),
+  permiso(
+    'config.editar',
+    'Editar Configuración',
+    'Modificar ajustes del sistema',
+    'Configuración',
+  ),
+  permiso(
+    'roles.gestionar',
+    'Gestionar Roles',
+    'Crear y modificar roles',
+    'Configuración',
+  ),
+  permiso('tareas.ver', 'Ver Tareas', 'Ver el tablero de tareas', 'Tareas'),
+  permiso(
+    'tareas.actualizar',
+    'Actualizar Tareas Asignadas',
+    'Completar y agregar observaciones a las tareas propias',
+    'Tareas',
+  ),
+  permiso(
+    'tareas.gestionar',
+    'Gestionar Tareas',
+    'Crear, editar y eliminar tareas',
+    'Tareas',
+  ),
+  permiso(
+    'mantenimientos.ver',
+    'Ver Mantenimientos',
+    'Ver el calendario de mantenimientos',
+    'Mantenimientos',
+  ),
+  permiso(
+    'mantenimientos.gestionar',
+    'Gestionar Mantenimientos',
+    'Crear, editar y eliminar mantenimientos',
+    'Mantenimientos',
+  ),
+  permiso(
+    'actividades.ver',
+    'Ver Actividades',
+    'Ver la agenda de actividades',
+    'Actividades',
+  ),
+  permiso(
+    'actividades.gestionar',
+    'Gestionar Actividades',
+    'Crear, editar y eliminar actividades',
+    'Actividades',
+  ),
+  permiso(
+    'zonas.ver',
+    'Ver Zonas Comunes',
+    'Ver las zonas comunes',
+    'Zonas Comunes',
+  ),
+  permiso(
+    'zonas.gestionar',
+    'Gestionar Zonas Comunes',
+    'Crear, editar y eliminar zonas comunes',
+    'Zonas Comunes',
+  ),
+  permiso(
+    'tecnicos.gestionar',
+    'Gestionar Técnicos',
+    'Crear, editar y eliminar técnicos',
+    'PQR',
+  ),
+];
+
+const CLAVES_ADMINISTRACION: ReadonlySet<string> = new Set(
+  PERMISOS_ADMINISTRACION.map((p) => p.id),
+);
+
+/** Whether `clave` is one of the permissions a role may bundle. */
+export function esPermisoAdministracion(clave: string): boolean {
+  return CLAVES_ADMINISTRACION.has(clave);
+}
+
 /** Keys that are not in the catalog (typos, removed verbs, invented modules). */
 export function permisosDesconocidos(claves: readonly string[]): string[] {
   return claves.filter((c) => moduloDePermiso(c) === null);

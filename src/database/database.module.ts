@@ -176,7 +176,10 @@ import {
   EnlaceAccesoSchema,
 } from './schemas/cuentas/enlace-acceso.schema';
 
+import { Rol, RolSchema } from './schemas/administracion/rol.schema';
+
 const models = [
+  { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },
   {
     name: ConsecutivoAdministracion.name,

@@ -96,6 +96,15 @@ export class Asignacion {
   permisos: string[];
 
   /**
+   * Roles (Administración permission bundles) of this coproperty whose keys are
+   * added to `permisos` when access is resolved. Only meaningful for a
+   * `copropiedad` grant — a role belongs to one building, so an `entidad` grant
+   * ignores them — and only roles of that same building count.
+   */
+  @Prop({ type: [SchemaTypes.ObjectId], ref: 'Rol', default: [] })
+  roleIds: Types.ObjectId[];
+
+  /**
    * Inactive revokes access while keeping the record of who once had it. Do not
    * delete assignments: "who could touch this building last March" is a
    * question an auditor will eventually ask.

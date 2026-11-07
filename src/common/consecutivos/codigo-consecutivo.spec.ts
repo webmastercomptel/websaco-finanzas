@@ -3,6 +3,7 @@ import type { ConsecutivoAdministracionDocument } from '../../database/schemas/a
 import {
   asegurarConsecutivoMinimo,
   siguienteCodigo,
+  siguienteNumero,
 } from './codigo-consecutivo';
 
 type ModeloConsecutivo = Model<ConsecutivoAdministracionDocument>;
@@ -48,6 +49,19 @@ describe('siguienteCodigo', () => {
     const { modelo } = modeloConsecutivo(5);
 
     await expect(siguienteCodigo(modelo, 'DOC', 5)).resolves.toBe('DOC-00005');
+  });
+});
+
+describe('siguienteNumero', () => {
+  it('usa la clave tal cual (una secuencia por copropiedad, por ejemplo) y devuelve el número', async () => {
+    const { modelo, findOneAndUpdate } = modeloConsecutivo(12);
+
+    await expect(siguienteNumero(modelo, 'ROL:abc')).resolves.toBe(12);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { clave: 'ROL:abc' },
+      { $inc: { valor: 1 } },
+      { upsert: true, new: true },
+    );
   });
 });
 

@@ -18,8 +18,13 @@ import {
   Tercero,
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
+import {
+  Rol,
+  RolDocument,
+} from '../../database/schemas/administracion/rol.schema';
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
 import {
+  moduloDePermiso,
   sinPermisosVetados,
   type PerfilAsignacion,
 } from '../../modules/casl/permisos-catalogo';
@@ -61,7 +66,51 @@ export class AccesoService {
     private readonly entidades: Model<EntidadAdministradoraDocument>,
     @InjectModel(Tercero.name)
     private readonly terceros: Model<TerceroDocument>,
+    @InjectModel(Rol.name)
+    private readonly roles: Model<RolDocument>,
   ) {}
+
+  /**
+   * Administración keys contributed by the roles of each direct grant, keyed by
+   * coproperty id. Three filters keep a role from ever widening access beyond
+   * its purpose: only roles the grant names, only roles of the grant's own
+   * coproperty (the query returns by id, so this is checked here, not trusted),
+   * and only Administración keys — a Finanzas or unknown key inside a role is
+   * dropped, whatever got it there. One query for all grants, none when no grant
+   * names a role.
+   */
+  private async permisosDeRoles(
+    directas: Array<{
+      copropiedadId: Types.ObjectId | null;
+      roleIds?: Types.ObjectId[];
+    }>,
+  ): Promise<Map<string, string[]>> {
+    const aportes = new Map<string, string[]>();
+    const ids = directas.flatMap((a) => a.roleIds ?? []);
+    if (ids.length === 0) return aportes;
+
+    const encontrados = await this.roles
+      .find({ _id: { $in: ids } })
+      .select('copropiedadId permisos')
+      .lean()
+      .exec();
+    const porId = new Map(encontrados.map((r) => [r._id.toString(), r]));
+
+    for (const a of directas) {
+      if (!a.copropiedadId) continue;
+      const propia = a.copropiedadId.toString();
+      const claves = new Set<string>();
+      for (const id of a.roleIds ?? []) {
+        const rol = porId.get(id.toString());
+        if (!rol || rol.copropiedadId.toString() !== propia) continue;
+        for (const clave of rol.permisos ?? []) {
+          if (moduloDePermiso(clave) === 'administracion') claves.add(clave);
+        }
+      }
+      aportes.set(propia, [...claves]);
+    }
+    return aportes;
+  }
 
   /** Ids of the coproperties where this account is linked to an active Tercero. */
   private async copropiedadesComoResidente(
@@ -114,9 +163,18 @@ export class AccesoService {
     };
 
     const directas = asignaciones.filter((a) => a.alcance === 'copropiedad');
+    const deRoles = await this.permisosDeRoles(directas);
     for (const a of directas) {
-      if (a.copropiedadId)
-        acumular(a.copropiedadId.toString(), permisosEfectivosDe(a));
+      if (!a.copropiedadId) continue;
+      const id = a.copropiedadId.toString();
+      // The ceiling applies to the union, so a role can never lift it either.
+      acumular(
+        id,
+        permisosEfectivosDe({
+          perfil: a.perfil,
+          permisos: [...a.permisos, ...(deRoles.get(id) ?? [])],
+        }),
+      );
     }
 
     const porEntidad = asignaciones.filter((a) => a.alcance === 'entidad');
