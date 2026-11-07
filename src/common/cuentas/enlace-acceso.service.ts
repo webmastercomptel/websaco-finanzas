@@ -10,6 +10,10 @@ import {
   type AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
 import {
+  Asignacion,
+  type AsignacionDocument,
+} from '../../database/schemas/cuentas/asignacion.schema';
+import {
   EnlaceAcceso,
   type EnlaceAccesoDocument,
 } from '../../database/schemas/cuentas/enlace-acceso.schema';
@@ -31,10 +35,14 @@ const hashDe = (token: string): string =>
  *
  * A link is a bearer credential that lives for days in somebody's inbox, so it
  * is deliberately capped:
- * - Never for a platform admin, an inactive account, or anyone holding a
- *   Finanzas permission in that coproperty. A forwarded email must not be a way
- *   into the financial side; those people sign in normally. Residents and
- *   operational staff (who by construction hold none) are the audience.
+ * - Never for a platform admin, an inactive account, anyone holding a Finanzas
+ *   permission in ANY coproperty they can reach, or anyone with an active
+ *   non-'personal' (administrativo or company-wide) assignment anywhere. The
+ *   custom token is a full session, not a session scoped to the link's
+ *   building: `X-CoProperty-Id` can then name any coproperty the account
+ *   reaches, so the check must cover all of them. A forwarded email must not be
+ *   a way into the financial side; those people sign in normally. Residents and
+ *   operational staff are the audience.
  * - Checked twice: when the link is built, and again when it is redeemed, so a
  *   permission granted after the email went out removes the link's power.
  * - Only the SHA-256 of the token is stored, and the landing path must be a
@@ -55,6 +63,8 @@ export class EnlaceAccesoService {
     private readonly enlaces: Model<EnlaceAccesoDocument>,
     @InjectModel(Account.name)
     private readonly cuentas: Model<AccountDocument>,
+    @InjectModel(Asignacion.name)
+    private readonly asignaciones: Model<AsignacionDocument>,
     private readonly acceso: AccesoService,
     @Inject(FIREBASE_AUTH) private readonly auth: Auth,
   ) {}
@@ -66,12 +76,26 @@ export class EnlaceAccesoService {
   ): Promise<boolean> {
     if (!cuenta || cuenta.estado !== 'active') return false;
     if (cuenta.esAdministradorPlataforma) return false;
-    const acceso = await this.acceso.accesoA(
-      cuenta._id.toString(),
-      copropiedadId,
+
+    // Every coproperty the account reaches, not only the link's: the session
+    // the link opens is not pinned to one building.
+    const accesos = await this.acceso.copropiedadesDe(cuenta._id.toString());
+    if (!accesos.some((a) => a.copropiedadId === copropiedadId)) return false;
+    const tieneFinanzas = accesos.some((a) =>
+      a.permissions.some((p) => moduloDePermiso(p) === 'finanzas'),
     );
-    if (!acceso) return false;
-    return !acceso.permissions.some((p) => moduloDePermiso(p) === 'finanzas');
+    if (tieneFinanzas) return false;
+
+    // An administrativo (or company-wide) grant can receive Finanzas keys at
+    // any moment; such accounts sign in with their password, never a link.
+    const administrativo = await this.asignaciones
+      .exists({
+        accountId: cuenta._id,
+        estado: 'active',
+        perfil: { $ne: 'personal' },
+      })
+      .exec();
+    return !administrativo;
   }
 
   /** Builds `<frontend>/auth/enlace?token=…`, or null when a link must not be issued. */
