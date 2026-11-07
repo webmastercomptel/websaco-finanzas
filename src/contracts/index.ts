@@ -2881,3 +2881,40 @@ export interface Notificacion {
   fecha: string;
   leida: boolean;
 }
+
+/** A person a task is assigned to, as the board shows them. */
+export interface TareaAsignado {
+  nombre: string;
+  iniciales: string;
+  /** No account carries a picture today: always null until one does. */
+  avatar: string | null;
+}
+
+/** One line of a task's audit trail. */
+export interface TareaActividad {
+  accion: string;
+  usuario: string;
+  fecha: string;
+}
+
+/** A free-text note left on a task. */
+export interface TareaObservacion {
+  texto: string;
+  autorId: string;
+  fecha: string;
+}
+
+/** A building-management task of the active coproperty (the kanban card). */
+export interface Tarea {
+  id: string;
+  titulo: string;
+  descripcion: string;
+  categoria: 'limpieza' | 'seguridad' | 'admin' | 'mantenimiento';
+  prioridad: 'alta' | 'normal' | 'baja';
+  estado: 'pendiente' | 'en_progreso' | 'completado';
+  asignados: TareaAsignado[];
+  progreso?: number;
+  fechaLimite?: string;
+  historial?: TareaActividad[];
+  observaciones?: TareaObservacion[];
+}

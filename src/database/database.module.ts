@@ -188,7 +188,10 @@ import {
   TecnicoSchema,
 } from './schemas/administracion/tecnico.schema';
 
+import { Tarea, TareaSchema } from './schemas/administracion/tarea.schema';
+
 const models = [
+  { name: Tarea.name, schema: TareaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
