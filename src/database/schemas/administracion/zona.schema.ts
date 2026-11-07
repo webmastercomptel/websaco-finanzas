@@ -76,8 +76,20 @@ export class Zona {
   @Prop({ type: Number, default: null })
   costo: number | null;
 
+  /**
+   * An external image URL typed by staff, or a legacy public URL from the
+   * migration. An uploaded image lives in `imagenRuta` instead.
+   */
   @Prop({ type: String, default: null })
   imagenUrl: string | null;
+
+  /**
+   * Object path of an uploaded cover image (`zonas/<cop>/<zona>/…`). The object
+   * is PRIVATE: readers get a short-lived signed URL minted per response, so the
+   * bucket that holds Finanzas documents never needs public object ACLs.
+   */
+  @Prop({ type: String, default: null })
+  imagenRuta: string | null;
 
   @Prop({ type: [String], default: [] })
   reglas: string[];

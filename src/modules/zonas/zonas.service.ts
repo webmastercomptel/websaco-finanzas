@@ -26,6 +26,7 @@ import type { ActualizarZonaDto } from './dto/actualizar-zona.dto';
 import type { CrearZonaDto } from './dto/guardar-zona.dto';
 import type { ListarEspaciosDto } from './dto/listar-espacios.dto';
 import type { ListarZonasDto } from './dto/listar-zonas.dto';
+import { ZonasImagenService } from './zonas-imagen.service';
 import {
   desdeActualizarDto,
   desdeCrearDto,
@@ -51,7 +52,17 @@ export class ZonasService {
     @InjectModel(ConsecutivoAdministracion.name)
     private readonly consecutivos: Model<ConsecutivoAdministracionDocument>,
     private readonly tenant: TenantContextService,
+    private readonly imagenes: ZonasImagenService,
   ) {}
+
+  /** Signed read URL of an uploaded image, or null (the mapper falls back). */
+  private async imagenDe(doc: ZonaDocument): Promise<string | null> {
+    return doc.imagenRuta ? this.imagenes.urlLectura(doc.imagenRuta) : null;
+  }
+
+  private async aZonaComun(doc: ZonaDocument): Promise<ZonaComun> {
+    return toZonaComun(doc, await this.imagenDe(doc));
+  }
 
   /** A malformed id can never match: answer 404 instead of a cast error (500). */
   private validarId(id: string): void {
@@ -68,7 +79,7 @@ export class ZonasService {
       ...desdeCrearDto(dto, copropiedadId),
       codigo,
     }).save();
-    return toZonaComun(creada);
+    return this.aZonaComun(creada);
   }
 
   /** The active coproperty's zones by code, optionally filtered. */
@@ -80,7 +91,7 @@ export class ZonasService {
       filtro.estado = filtros.estado;
     }
     const documentos = await this.zonas.find(filtro).sort({ codigo: 1 }).exec();
-    return documentos.map(toZonaComun);
+    return Promise.all(documentos.map((d) => this.aZonaComun(d)));
   }
 
   /**
@@ -96,7 +107,9 @@ export class ZonasService {
     if (filtros.categoria === 'deportes') filtro.tipo = 'deportiva';
     if (filtros.categoria === 'social') filtro.tipo = { $ne: 'deportiva' };
     const documentos = await this.zonas.find(filtro).sort({ codigo: 1 }).exec();
-    return documentos.map(toEspacio);
+    return Promise.all(
+      documentos.map(async (d) => toEspacio(d, await this.imagenDe(d))),
+    );
   }
 
   /** Edits a zone of the active coproperty and returns the contract. */
@@ -113,7 +126,7 @@ export class ZonasService {
     if (!documento) {
       throw new NotFoundException(`Zona común ${id} no encontrada`);
     }
-    return toZonaComun(documento);
+    return this.aZonaComun(documento);
   }
 
   /**

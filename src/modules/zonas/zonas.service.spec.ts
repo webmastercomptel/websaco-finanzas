@@ -57,13 +57,17 @@ function montar() {
   const tenant = {
     resolveCoPropertyId: jest.fn().mockReturnValue(COPROPIEDAD),
   };
+  const imagenes = {
+    urlLectura: jest.fn((ruta: string) => Promise.resolve(`firmada:${ruta}`)),
+  };
   const servicio = new ZonasService(
     zonas as never,
     reservas as never,
     consecutivos as never,
     tenant as never,
+    imagenes as never,
   );
-  return { servicio, zonas, reservas, consecutivos };
+  return { servicio, zonas, reservas, consecutivos, imagenes };
 }
 
 describe('ZonasService.crear', () => {
@@ -151,6 +155,50 @@ describe('ZonasService.listarEspacios', () => {
       copropiedadId: COPROPIEDAD,
       requiereReserva: true,
     });
+  });
+});
+
+describe('ZonasService — imagen privada servida con URL firmada', () => {
+  it('listar y listarEspacios firman la ruta guardada; una URL externa o vieja pasa tal cual', async () => {
+    const { servicio, zonas, imagenes } = montar();
+    zonas.find.mockReturnValue(
+      consulta([
+        zonaDoc({ imagenRuta: 'zonas/c/z/a.png', imagenUrl: null }),
+        zonaDoc({ imagenRuta: null, imagenUrl: 'https://ejemplo.com/x.png' }),
+      ]),
+    );
+
+    const zonasStaff = await servicio.listar({});
+    const espacios = await servicio.listarEspacios({});
+
+    expect(zonasStaff.map((z) => z.imagen)).toEqual([
+      'firmada:zonas/c/z/a.png',
+      'https://ejemplo.com/x.png',
+    ]);
+    expect(espacios.map((e) => e.imagen)).toEqual([
+      'firmada:zonas/c/z/a.png',
+      'https://ejemplo.com/x.png',
+    ]);
+    expect(imagenes.urlLectura).toHaveBeenCalledWith('zonas/c/z/a.png');
+  });
+
+  it('poner una imagen por URL al editar descarta la ruta guardada', async () => {
+    const { servicio, zonas } = montar();
+
+    await servicio.actualizar(ZONA.toString(), {
+      imagen: 'https://ejemplo.com/y.png',
+    });
+
+    expect(zonas.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        $set: expect.objectContaining({
+          imagenUrl: 'https://ejemplo.com/y.png',
+          imagenRuta: null,
+        }) as unknown,
+      },
+      expect.anything(),
+    );
   });
 });
 

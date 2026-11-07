@@ -96,10 +96,15 @@ describe('desdeCrearDto', () => {
 });
 
 describe('desdeActualizarDto', () => {
-  it('solo escribe lo que el cliente mandó, incluido null para limpiar', () => {
+  it('solo escribe lo que el cliente mandó, incluido null para limpiar (también la imagen subida)', () => {
     expect(
       desdeActualizarDto({ nombre: 'Nuevo', costo: null, imagen: null }),
-    ).toEqual({ nombre: 'Nuevo', costo: null, imagenUrl: null });
+    ).toEqual({
+      nombre: 'Nuevo',
+      costo: null,
+      imagenUrl: null,
+      imagenRuta: null,
+    });
   });
 
   it('un cuerpo vacío no escribe nada', () => {

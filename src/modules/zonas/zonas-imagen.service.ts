@@ -20,13 +20,27 @@ import type { IniciarSubidaImagenZonaDto } from './dto/iniciar-subida-imagen-zon
 import { toZonaComun } from './zonas.mapper';
 
 /**
- * Largest cover image a zone may declare. Much smaller than the 200 MB of a PQR
- * attachment: a cover picture has no reason to be big.
+ * Largest cover image a zone may be: checked on the declaration and again on
+ * the real object at `confirmar`. A cover picture has no reason to be big.
  */
 export const TAMANO_MAXIMO_IMAGEN_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Raster formats only. SVG is excluded: it is a document that can carry script,
+ * and these objects are served from the bucket that holds Finanzas documents.
+ */
+export const TIPOS_IMAGEN_ZONA = ['image/png', 'image/jpeg', 'image/webp'];
+
 /** How long the signed upload URL works: one upload attempt, not a standing credential. */
 const VIGENCIA_URL_SUBIDA_MS = 15 * 60 * 1000;
+
+/**
+ * How long a signed READ URL of a cover image works. Long enough for a page
+ * that stays open; listings mint a fresh one on every load.
+ */
+const VIGENCIA_URL_LECTURA_MS = 60 * 60 * 1000;
+
+const PREFIJO_ZONAS = 'zonas/';
 
 /**
  * Cover image of a zone, uploaded straight from the browser to the storage
@@ -37,11 +51,12 @@ const VIGENCIA_URL_SUBIDA_MS = 15 * 60 * 1000;
  *    keeps its current image until step 2.
  * 2. The browser PUTs the file, then calls `confirmar`: the backend checks the
  *    path is one it generated for THIS zone, that the object really exists,
- *    makes it public and only then overwrites `imagenUrl`.
+ *    is a png/jpeg/webp within the size limit (otherwise it is deleted), and
+ *    only then stores the path in `imagenRuta`.
  *
- * The object is made public because the URL goes straight into an `<img>` for
- * every resident; that is how the system this replaces worked, and it needs a
- * bucket that allows per-object public access.
+ * The object is NEVER made public: the shared bucket also holds the Finanzas
+ * PDFs and must stay uniform-access with public access prevented. Readers get
+ * a short-lived signed URL (`urlLectura`), minted every time a zone is mapped.
  */
 @Injectable()
 export class ZonasImagenService {
@@ -72,9 +87,8 @@ export class ZonasImagenService {
     if (!zona) {
       throw new NotFoundException(`Zona común ${zonaId} no encontrada`);
     }
-    // The object is published as-is, so only images may be signed for.
-    if (!dto.mimeType.startsWith('image/')) {
-      throw new BadRequestException('El archivo debe ser una imagen');
+    if (!TIPOS_IMAGEN_ZONA.includes(dto.mimeType)) {
+      throw new BadRequestException('La imagen debe ser PNG, JPEG o WebP');
     }
     if (dto.tamanoBytes > TAMANO_MAXIMO_IMAGEN_BYTES) {
       throw new BadRequestException('La imagen supera el límite de 10 MB');
@@ -107,30 +121,60 @@ export class ZonasImagenService {
 
     // SECURITY: only a path of the exact shape `iniciar` generates for this
     // tenant and zone; otherwise a client could point the zone at somebody
-    // else's object and have it made public.
+    // else's object and have it served.
     const prefijoEsperado = `zonas/${copropiedadId.toString()}/${zonaId}/`;
     if (!storagePath.startsWith(prefijoEsperado)) {
       throw new BadRequestException('storagePath inválido para esta zona');
     }
 
+    if (storagePath.includes('..')) {
+      throw new BadRequestException('storagePath inválido para esta zona');
+    }
+
     const archivo = this.bucket.file(storagePath);
+    let metadata: { size?: string | number; contentType?: string };
     try {
-      await archivo.getMetadata();
+      [metadata] = await archivo.getMetadata();
     } catch {
       throw new BadRequestException('El archivo no se subió correctamente');
     }
-    await archivo.makePublic();
+    const tamano = Number(metadata.size ?? 0);
+    const tipoValido = TIPOS_IMAGEN_ZONA.includes(metadata.contentType ?? '');
+    if (tamano > TAMANO_MAXIMO_IMAGEN_BYTES || !tipoValido) {
+      await archivo.delete().catch(() => undefined);
+      throw new BadRequestException(
+        tipoValido
+          ? 'La imagen supera el límite de 10 MB'
+          : 'La imagen debe ser PNG, JPEG o WebP',
+      );
+    }
 
     const documento = await this.zonas
       .findOneAndUpdate(
         { _id: zonaId, copropiedadId },
-        { $set: { imagenUrl: archivo.publicUrl() } },
+        { $set: { imagenRuta: storagePath, imagenUrl: null } },
         { new: true },
       )
       .exec();
     if (!documento) {
       throw new NotFoundException(`Zona común ${zonaId} no encontrada`);
     }
-    return toZonaComun(documento);
+    return toZonaComun(documento, await this.urlLectura(storagePath));
+  }
+
+  /** Short-lived signed read URL of an uploaded zone image (only under `zonas/`). */
+  async urlLectura(ruta: string): Promise<string | null> {
+    if (!ruta.startsWith(PREFIJO_ZONAS) || ruta.includes('..')) return null;
+    try {
+      const [url] = await this.bucket.file(ruta).getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + VIGENCIA_URL_LECTURA_MS,
+      });
+      return url;
+    } catch {
+      // A zone without its picture is better than a listing that fails.
+      return null;
+    }
   }
 }

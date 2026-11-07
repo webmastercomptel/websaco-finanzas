@@ -7,9 +7,14 @@ import type { CrearZonaDto } from './dto/guardar-zona.dto';
 
 /**
  * Maps a Zona document to the staff contract. Persisted enum values already ARE
- * the contract values, so nothing is translated.
+ * the contract values, so nothing is translated. `imagenFirmada` is the signed
+ * read URL of an uploaded image (the service mints it); without one, the
+ * stored external URL (if any) is used.
  */
-export const toZonaComun = (doc: ZonaDocument): ZonaComun => ({
+export const toZonaComun = (
+  doc: ZonaDocument,
+  imagenFirmada: string | null = null,
+): ZonaComun => ({
   id: doc._id.toString(),
   codigo: doc.codigo,
   nombre: doc.nombre,
@@ -20,7 +25,7 @@ export const toZonaComun = (doc: ZonaDocument): ZonaComun => ({
   estado: doc.estado,
   requiereReserva: doc.requiereReserva,
   costo: doc.costo,
-  imagen: doc.imagenUrl,
+  imagen: imagenFirmada ?? doc.imagenUrl,
   reglas: doc.reglas,
 });
 
@@ -31,12 +36,15 @@ export const toZonaComun = (doc: ZonaDocument): ZonaComun => ({
  * bookable, as in the system this replaces. `categoria` collapses `tipo` to
  * deportes/social.
  */
-export const toEspacio = (doc: ZonaDocument): Espacio => ({
+export const toEspacio = (
+  doc: ZonaDocument,
+  imagenFirmada: string | null = null,
+): Espacio => ({
   id: doc._id.toString(),
   nombre: doc.nombre,
   descripcion: doc.descripcion,
   categoria: doc.tipo === 'deportiva' ? 'deportes' : 'social',
-  imagen: doc.imagenUrl,
+  imagen: imagenFirmada ?? doc.imagenUrl,
   horario: doc.horario,
   estado: doc.estado === 'mantenimiento' ? 'mantenimiento' : 'disponible',
   costo: doc.costo,
@@ -78,7 +86,11 @@ export const desdeActualizarDto = (
     cambios.requiereReserva = dto.requiereReserva;
   }
   if (dto.costo !== undefined) cambios.costo = dto.costo;
-  if (dto.imagen !== undefined) cambios.imagenUrl = dto.imagen;
+  if (dto.imagen !== undefined) {
+    // A typed URL replaces an uploaded image.
+    cambios.imagenUrl = dto.imagen;
+    cambios.imagenRuta = null;
+  }
   if (dto.reglas !== undefined) cambios.reglas = dto.reglas;
   if (dto.estado !== undefined) cambios.estado = dto.estado;
   return cambios;

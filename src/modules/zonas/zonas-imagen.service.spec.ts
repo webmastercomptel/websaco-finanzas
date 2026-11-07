@@ -45,7 +45,10 @@ function montar() {
     getSignedUrl: jest
       .fn()
       .mockResolvedValue(['https://storage.example.com/signed-write-url']),
-    getMetadata: jest.fn().mockResolvedValue([{ size: 1024 }]),
+    getMetadata: jest
+      .fn()
+      .mockResolvedValue([{ size: 1024, contentType: 'image/png' }]),
+    delete: jest.fn().mockResolvedValue([{}]),
     makePublic: jest.fn().mockResolvedValue(undefined),
     publicUrl: jest.fn().mockReturnValue('https://storage.example.com/publica'),
   };
@@ -124,7 +127,19 @@ describe('ZonasImagenService.iniciar', () => {
     expect(archivo.getSignedUrl).not.toHaveBeenCalled();
   });
 
-  it('rechaza con 400 un archivo que no es imagen: se publica tal cual', async () => {
+  it.each(['image/svg+xml', 'image/gif', 'image/tiff'])(
+    'rechaza con 400 un tipo de imagen fuera de png/jpeg/webp (%s)',
+    async (mimeType) => {
+      const { servicio, archivo } = montar();
+
+      await expect(
+        servicio.iniciar(ZONA_ID, { ...dto, mimeType }),
+      ).rejects.toThrow(BadRequestException);
+      expect(archivo.getSignedUrl).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rechaza con 400 un archivo que no es imagen', async () => {
     const { servicio, archivo } = montar();
 
     await expect(
@@ -154,21 +169,55 @@ describe('ZonasImagenService.iniciar', () => {
 describe('ZonasImagenService.confirmar', () => {
   const rutaPropia = `zonas/${COPROPIEDAD.toString()}/${ZONA_ID}/abc-foto.png`;
 
-  it('hace público el objeto y sobreescribe imagenUrl con su URL pública', async () => {
+  it('NUNCA hace público el objeto: guarda la ruta y devuelve una URL de lectura firmada', async () => {
     const { servicio, zonas, archivo } = montar();
+    archivo.getSignedUrl.mockResolvedValue([
+      'https://storage.example.com/firmada-lectura',
+    ]);
     zonas.findOneAndUpdate.mockReturnValue(
-      consulta(zonaDoc({ imagenUrl: 'https://storage.example.com/publica' })),
+      consulta(zonaDoc({ imagenRuta: rutaPropia, imagenUrl: null })),
     );
 
     const resultado = await servicio.confirmar(ZONA_ID, rutaPropia);
 
-    expect(archivo.makePublic).toHaveBeenCalled();
+    expect(archivo.makePublic).not.toHaveBeenCalled();
     expect(zonas.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: ZONA_ID, copropiedadId: COPROPIEDAD },
-      { $set: { imagenUrl: 'https://storage.example.com/publica' } },
+      { $set: { imagenRuta: rutaPropia, imagenUrl: null } },
       { new: true },
     );
-    expect(resultado.imagen).toBe('https://storage.example.com/publica');
+    expect(archivo.getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 'v4', action: 'read' }),
+    );
+    expect(resultado.imagen).toBe(
+      'https://storage.example.com/firmada-lectura',
+    );
+  });
+
+  it('mide el objeto REAL: si supera 10 MB lo borra y responde 400 sin tocar la zona', async () => {
+    const { servicio, zonas, archivo } = montar();
+    archivo.getMetadata.mockResolvedValue([
+      { size: String(11 * 1024 * 1024), contentType: 'image/png' },
+    ]);
+
+    await expect(servicio.confirmar(ZONA_ID, rutaPropia)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(archivo.delete).toHaveBeenCalled();
+    expect(zonas.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('si el objeto real no es png/jpeg/webp lo borra y responde 400', async () => {
+    const { servicio, zonas, archivo } = montar();
+    archivo.getMetadata.mockResolvedValue([
+      { size: 100, contentType: 'image/svg+xml' },
+    ]);
+
+    await expect(servicio.confirmar(ZONA_ID, rutaPropia)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(archivo.delete).toHaveBeenCalled();
+    expect(zonas.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('lanza 404 si la zona no existe en la copropiedad activa', async () => {
