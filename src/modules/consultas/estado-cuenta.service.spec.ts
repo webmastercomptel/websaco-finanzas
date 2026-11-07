@@ -1241,3 +1241,89 @@ describe('EstadoCuentaService', () => {
     });
   });
 });
+
+describe('EstadoCuentaService.findAll con facturasVisibles (vista del portal)', () => {
+  const periodo = {
+    periodStart: '2026-01-01T00:00:00.000Z',
+    periodEnd: '2026-01-31T23:59:59.999Z',
+  };
+
+  /** One released invoice (paid by a receipt) and one not released yet, voided by a credit note. */
+  const escenario = () => {
+    const inmId = id();
+    const liberada = facturaDoc({
+      inmuebleId: inmId,
+      numeroCompleto: 'FV-LIBERADA',
+      total: 100000,
+    });
+    const sinLiberar = facturaDoc({
+      inmuebleId: inmId,
+      numeroCompleto: 'FV-SIN-LIBERAR',
+      total: 200000,
+      estado: 'anulada',
+    });
+    const r = reciboDoc({
+      estado: 'activo',
+      fechaRecibo: new Date('2026-01-20'),
+      montoRecibido: 100000,
+    });
+    const nc = ncDoc({ fecha: new Date('2026-01-18') });
+    const pago = appDoc(r._id, 'RC', {
+      documentoId: liberada._id,
+      montoAplicado: 100000,
+    });
+    const anulacion = appDoc(nc._id, 'NC', {
+      documentoId: sinLiberar._id,
+      montoAplicado: 200000,
+    });
+    const svc = servicio({
+      facturas: mockFind([liberada, sinLiberar]),
+      recibos: mockFind([r]),
+      notasCredito: mockFind([nc]),
+      aplicaciones: mockFind([pago, anulacion]),
+      ...svcDefaults(),
+    });
+    return { svc, inmId, liberada };
+  };
+
+  it('una factura no liberada no aparece en filas, totales ni saldo del propietario', async () => {
+    const { svc, inmId, liberada } = escenario();
+
+    const result = await svc.findAll(
+      { inmuebleId: inmId.toString(), ...periodo },
+      { facturasVisibles: [liberada._id] },
+    );
+
+    expect(JSON.stringify(result)).not.toContain('FV-SIN-LIBERAR');
+    expect(result.movimientos.map((m) => m.numeroCompleto)).toEqual([
+      'FV-LIBERADA',
+      'RC-001-001',
+    ]);
+    // Neither the hidden charge nor the credit note that voids it count.
+    expect(result.cargosDelMes).toBe(100000);
+    expect(result.descuentosAjustes).toBe(0);
+    expect(result.pagosDelMes).toBe(100000);
+    // The totals add up to the rows the owner sees.
+    const sumaFilas = result.movimientos.reduce(
+      (s, m) => s + (m.cargo ?? 0) - (m.abono ?? 0),
+      0,
+    );
+    expect(result.saldoActual).toBe(result.saldoAnterior + sumaFilas);
+    expect(result.saldoActual).toBe(0);
+  });
+
+  it('sin la opción (vista del personal) el estado de cuenta sigue mostrando todo', async () => {
+    const { svc, inmId } = escenario();
+
+    const result = await svc.findAll({
+      inmuebleId: inmId.toString(),
+      ...periodo,
+    });
+
+    expect(result.movimientos.map((m) => m.numeroCompleto)).toContain(
+      'FV-SIN-LIBERAR',
+    );
+    expect(result.cargosDelMes).toBe(300000);
+    expect(result.descuentosAjustes).toBe(200000);
+  });
+});

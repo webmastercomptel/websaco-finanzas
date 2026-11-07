@@ -106,16 +106,7 @@ export class PortalService {
     user: IRequestUser,
     query: ListarFacturasPortalDto,
   ): Promise<PaginadoConTotales<Factura, TotalesFacturas>> {
-    const liberadas = await this.envios
-      .find({
-        copropiedadId: new Types.ObjectId(user.copropiedadId!),
-        inmuebleId: new Types.ObjectId(query.inmuebleId),
-        liberadaEn: { $ne: null },
-      })
-      .select('facturaId')
-      .limit(MAX_LIBERADAS_POR_UNIDAD)
-      .lean()
-      .exec();
+    const liberadas = await this.idsLiberadas(user, query.inmuebleId);
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
     if (liberadas.length === 0) {
@@ -127,8 +118,26 @@ export class PortalService {
         pagina: query.pagina,
         porPagina: query.porPagina,
       },
-      { soloIds: liberadas.map((e) => e.facturaId) },
+      { soloIds: liberadas },
     );
+  }
+
+  /** Ids of the unit's invoices staff released (`EnvioFactura.liberadaEn`). */
+  private async idsLiberadas(
+    user: IRequestUser,
+    inmuebleId: string,
+  ): Promise<Types.ObjectId[]> {
+    const liberadas = await this.envios
+      .find({
+        copropiedadId: new Types.ObjectId(user.copropiedadId!),
+        inmuebleId: new Types.ObjectId(inmuebleId),
+        liberadaEn: { $ne: null },
+      })
+      .select('facturaId')
+      .limit(MAX_LIBERADAS_POR_UNIDAD)
+      .lean()
+      .exec();
+    return liberadas.map((e) => e.facturaId);
   }
 
   /** The invoice's own PDF page, if its unit is one the caller holds. */
@@ -159,7 +168,10 @@ export class PortalService {
 
   /**
    * Statement of account of a unit. Owners only: it shows the accumulated
-   * balance of the owner, which a tenant does not see.
+   * balance of the owner, which a tenant does not see. Built over the
+   * RELEASED invoices only (same gate as `facturasDe`): an invoice nobody sent
+   * yet, and the credit note that voids it, are left out of rows, totals and
+   * balance (see `OpcionesEstadoCuenta`).
    */
   async estadoCuentaDe(
     user: IRequestUser,
@@ -171,11 +183,15 @@ export class PortalService {
         'El estado de cuenta solo está disponible para el propietario',
       );
     }
-    return this.estadoCuenta.findAll({
-      inmuebleId: query.inmuebleId,
-      periodStart: query.periodStart,
-      periodEnd: query.periodEnd,
-    });
+    const facturasVisibles = await this.idsLiberadas(user, query.inmuebleId);
+    return this.estadoCuenta.findAll(
+      {
+        inmuebleId: query.inmuebleId,
+        periodStart: query.periodStart,
+        periodEnd: query.periodEnd,
+      },
+      { facturasVisibles },
+    );
   }
 
   private async rolEnUnidad(

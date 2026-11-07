@@ -182,7 +182,12 @@ export async function calcularDocumentosConSaldoAFecha(
   },
   copropiedadId: Types.ObjectId,
   fecha: Date,
-  opciones?: { inmuebleId?: Types.ObjectId; conceptoId?: Types.ObjectId },
+  opciones?: {
+    inmuebleId?: Types.ObjectId;
+    conceptoId?: Types.ObjectId;
+    /** Only these Facturas count (the portal's released set); ND/SI unaffected. */
+    facturaIds?: Types.ObjectId[];
+  },
 ): Promise<DocumentoConSaldoAFecha[]> {
   const limiteEmision = limiteEmisionParaCorte(fecha);
   const facturasFilter: Record<string, unknown> = {
@@ -210,6 +215,9 @@ export async function calcularDocumentosConSaldoAFecha(
     facturasFilter.inmuebleId = opciones.inmuebleId;
     ndFilter.inmuebleId = opciones.inmuebleId;
     siFilter.inmuebleId = opciones.inmuebleId;
+  }
+  if (opciones?.facturaIds) {
+    facturasFilter._id = { $in: opciones.facturaIds };
   }
   if (opciones?.conceptoId) {
     facturasFilter['lineas.conceptoId'] = opciones.conceptoId;

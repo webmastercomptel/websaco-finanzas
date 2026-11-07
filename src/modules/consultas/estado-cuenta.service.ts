@@ -113,6 +113,22 @@ const calcularDiasMora = (vence: Date, corte: Date): number => {
 };
 
 /**
+ * Options of a statement built for someone who may not see every invoice.
+ *
+ * `facturasVisibles`: when present, the statement is computed as if every
+ * other Factura of the unit did not exist yet (the resident portal passes the
+ * invoices staff released, `EnvioFactura.liberadaEn`). Left out with each
+ * hidden invoice: its charge, any Nota Crédito application against it (the
+ * note that voids it), and it no longer counts for `estado`/`diasMoraMaximo`
+ * or the period's `fechaEmision`. Cash receipts stay: money received is a
+ * fact the owner already knows, so a receipt applied to a hidden invoice
+ * shows as paid (before the period it lands in `ajusteSaldoAnterior`).
+ */
+export interface OpcionesEstadoCuenta {
+  facturasVisibles?: Types.ObjectId[];
+}
+
+/**
  * Read-only owner's statement service. Generates a document-shaped statement
  * for one inmueble and one billing period, intended to be printed or saved as
  * PDF and handed to a propietario.
@@ -188,8 +204,15 @@ export class EstadoCuentaService {
    */
   async findAll(
     query: ConsultarEstadoCuentaDto,
+    opciones: OpcionesEstadoCuenta = {},
   ): Promise<RespuestaEstadoCuenta> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    const visibles = opciones.facturasVisibles
+      ? new Set(opciones.facturasVisibles.map(String))
+      : null;
+    /** False only for an invoice the caller may not see (portal view). */
+    const facturaVisible = (facturaId: Types.ObjectId | string): boolean =>
+      visibles === null || visibles.has(String(facturaId));
     const inmuebleId = new Types.ObjectId(query.inmuebleId);
     const desde = new Date(query.periodStart);
     const hasta = new Date(query.periodEnd);
@@ -219,14 +242,21 @@ export class EstadoCuentaService {
     // same reasoning as the main fetch below: an anulada Factura still
     // really was issued on this date, and printing the period's start date
     // instead (the fallback below) would be a worse answer than the truth.
-    const facturaPeriodo = await this.facturas
+    const facturaPeriodoEncontrada = await this.facturas
       .findOne({
         copropiedadId,
         inmuebleId,
         periodoDesde: desde,
         periodoHasta: hasta,
+        ...(opciones.facturasVisibles
+          ? { _id: { $in: opciones.facturasVisibles } }
+          : {}),
       })
       .exec();
+    const facturaPeriodo =
+      facturaPeriodoEncontrada && facturaVisible(facturaPeriodoEncontrada._id)
+        ? facturaPeriodoEncontrada
+        : null;
 
     const fechaEmision =
       facturaPeriodo?.fechaEmision?.toISOString() ?? desde.toISOString();
@@ -244,7 +274,7 @@ export class EstadoCuentaService {
     // Factura here makes the statement read as "charged X, then credited X
     // back" — correct history, and a correct balance.
     const [
-      facturas,
+      facturasTodas,
       notasDebito,
       saldosIniciales,
       recibos,
@@ -268,6 +298,7 @@ export class EstadoCuentaService {
         .exec(),
       this.notasAnticipo.find({ copropiedadId, inmuebleId }).exec(),
     ]);
+    const facturas = facturasTodas.filter((f) => facturaVisible(f._id));
 
     // Step 2: fetch active applications for RC + NC + NA sources — omitting
     // Notas de Anticipo here was a real bug: their applications (crediting
@@ -278,7 +309,7 @@ export class EstadoCuentaService {
       ...notasCredito.map((nc) => nc._id),
       ...notasAnticipo.map((na) => na._id),
     ];
-    const aplicaciones = sourceIds.length
+    const aplicacionesTodas = sourceIds.length
       ? await this.aplicaciones
           .find({
             copropiedadId,
@@ -287,6 +318,21 @@ export class EstadoCuentaService {
           })
           .exec()
       : [];
+    // A credit note against a hidden invoice is part of that invoice's story
+    // (typically the note that voids it), so it is hidden with it. Receipt
+    // and anticipo applications stay (see `OpcionesEstadoCuenta`).
+    const facturasOcultas = new Set(
+      facturasTodas
+        .filter((f) => !facturaVisible(f._id))
+        .map((f) => String(f._id)),
+    );
+    const aplicaciones = aplicacionesTodas.filter(
+      (app) =>
+        !(
+          app.sourceType === 'NC' &&
+          facturasOcultas.has(String(app.documentoId))
+        ),
+    );
 
     // Recibos activos — reused both for the period-scoped "Recibo" rows in
     // Detalle de Movimientos / `pagosDelMes` (Step 7) and for Anticipos
@@ -672,7 +718,12 @@ export class EstadoCuentaService {
       },
       copropiedadId,
       hastaCorte,
-      { inmuebleId },
+      {
+        inmuebleId,
+        ...(opciones.facturasVisibles
+          ? { facturaIds: opciones.facturasVisibles }
+          : {}),
+      },
     );
     let diasMoraMaximo: number | null = null;
     for (const doc of documentosConSaldo) {

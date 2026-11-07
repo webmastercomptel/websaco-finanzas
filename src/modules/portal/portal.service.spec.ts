@@ -308,10 +308,55 @@ describe('PortalService.estadoCuentaDe', () => {
       ...periodo,
     });
 
-    expect(estadoCuenta.findAll).toHaveBeenCalledWith({
+    expect(estadoCuenta.findAll).toHaveBeenCalledWith(
+      { inmuebleId: MI_UNIDAD, ...periodo },
+      expect.anything(),
+    );
+  });
+
+  it('una factura no liberada no aparece en el estado de cuenta del propietario: solo se le pasan las liberadas de su unidad', async () => {
+    const liberada = new Types.ObjectId().toString();
+    const sinLiberar = new Types.ObjectId().toString();
+    const deOtraUnidad = new Types.ObjectId().toString();
+    const { service, estadoCuenta } = await construir(
+      'propietario',
+      colaCon([
+        { facturaId: liberada },
+        { facturaId: sinLiberar, liberada: false },
+        { facturaId: deOtraUnidad, inmuebleId: OTRA_UNIDAD },
+      ]),
+    );
+
+    await service.estadoCuentaDe(usuario, {
       inmuebleId: MI_UNIDAD,
       ...periodo,
     });
+
+    const [, opciones] = (
+      estadoCuenta.findAll.mock.calls as unknown as Array<
+        [unknown, { facturasVisibles: Types.ObjectId[] }]
+      >
+    )[0];
+    expect(opciones.facturasVisibles.map(String)).toEqual([liberada]);
+  });
+
+  it('sin facturas liberadas el estado de cuenta se pide con la lista vacía (no con todas)', async () => {
+    const { service, estadoCuenta } = await construir(
+      'propietario',
+      colaCon([{ facturaId: FACTURA, liberada: false }]),
+    );
+
+    await service.estadoCuentaDe(usuario, {
+      inmuebleId: MI_UNIDAD,
+      ...periodo,
+    });
+
+    const [, opciones] = (
+      estadoCuenta.findAll.mock.calls as unknown as Array<
+        [unknown, { facturasVisibles: Types.ObjectId[] }]
+      >
+    )[0];
+    expect(opciones.facturasVisibles).toEqual([]);
   });
 
   it('el arrendatario recibe 403 y no se consulta el estado de cuenta', async () => {
