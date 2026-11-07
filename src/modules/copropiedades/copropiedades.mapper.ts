@@ -1,6 +1,7 @@
 // src/modules/copropiedades/copropiedades.mapper.ts
 import { Types } from 'mongoose';
 import type { Copropiedad as CopropiedadContract } from '../../contracts';
+import { modulosEfectivos } from '../../common/licencia/modulos';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 
 /** The shape `entidadId` arrives in when the query populated it. */
@@ -57,4 +58,6 @@ export const toCopropiedad = (
   cuentaAnticipos: doc.cuentaAnticipos,
   cuentaDevoluciones: doc.cuentaDevoluciones,
   cuentaNotasDebito: doc.cuentaNotasDebito,
+  // Same reading as the access layer, so the screen shows what is enforced.
+  modulosContratados: modulosEfectivos(doc),
 });

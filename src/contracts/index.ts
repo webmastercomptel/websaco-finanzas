@@ -1979,6 +1979,15 @@ export interface CopropiedadAccesible extends CopropiedadResumen {
   modulos: string[];
   /** The caller holds a unit here as owner or tenant (portal access). */
   esResidente: boolean;
+  /**
+   * The caller's EFFECTIVE permission keys here (after the profile ceiling and
+   * the role merge — exactly what the guards evaluate). Empty for a
+   * resident-only account and for a platform administrator (that one is told
+   * apart by `AuthMe.esAdministradorPlataforma`). A courtesy for the client to
+   * filter its menu: the server revalidates every request, so exposing it
+   * grants nothing.
+   */
+  permisos: string[];
 }
 
 /** One row's outcome from a bulk upload of one-off charges that could not be processed. */
@@ -2073,6 +2082,13 @@ export interface Copropiedad {
   /** Cuenta de activo para el saldo de notas débito emitidas — contraparte
    *  de cuentaContableCartera pero específico para ND. */
   cuentaNotasDebito: string | null;
+  /**
+   * Product modules this coproperty has contracted (`finanzas`,
+   * `administracion`), at least one. Legacy documents without the key read as
+   * `['finanzas']`, the same rule the access layer applies. Editable only by a
+   * platform administrator (these routes are all behind `PlatformAdminGuard`).
+   */
+  modulosContratados: Array<'finanzas' | 'administracion'>;
 }
 
 /* ── Conceptos de cobro ("Cargos") ─────────────────────────────────
@@ -2863,6 +2879,17 @@ export interface TareaAsignado {
   iniciales: string;
   /** No account carries a picture today: always null until one does. */
   avatar: string | null;
+}
+
+/**
+ * A person a task can be assigned to — the answer of `GET /tareas/asignables`.
+ * `accountId` is what `asignadosIds` takes; nothing else about the account
+ * (email, profile) leaves the server.
+ */
+export interface TareaAsignable {
+  accountId: string;
+  nombre: string;
+  iniciales: string;
 }
 
 /** One line of a task's audit trail. */

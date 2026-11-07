@@ -83,3 +83,49 @@ describe('CamposCopropiedadDto — comptableEmpresaId', () => {
     );
   });
 });
+
+describe('CamposCopropiedadDto — modulosContratados', () => {
+  const validar = (plano: Record<string, unknown>) =>
+    validate(plainToInstance(ActualizarCopropiedadDto, plano));
+
+  it('acepta uno o los dos módulos del producto', async () => {
+    expect(await validar({ modulosContratados: ['finanzas'] })).toHaveLength(0);
+    expect(
+      await validar({ modulosContratados: ['administracion'] }),
+    ).toHaveLength(0);
+    expect(
+      await validar({ modulosContratados: ['finanzas', 'administracion'] }),
+    ).toHaveLength(0);
+  });
+
+  it('es opcional: un patch sin el campo no toca la licencia', async () => {
+    expect(await validar({ ciudad: 'Medellín' })).toHaveLength(0);
+  });
+
+  it('modulosContratados vacío o desconocido es 400', async () => {
+    for (const valor of [
+      [],
+      ['inventado'],
+      ['finanzas', 'inventado'],
+      'finanzas',
+    ]) {
+      const errores = await validar({ modulosContratados: valor });
+      expect(errores).toHaveLength(1);
+      expect(errores[0].property).toBe('modulosContratados');
+    }
+  });
+
+  it('rechaza un módulo repetido', async () => {
+    const errores = await validar({
+      modulosContratados: ['finanzas', 'finanzas'],
+    });
+    expect(errores).toHaveLength(1);
+  });
+
+  it('también se valida al crear', async () => {
+    const errores = await validate(
+      plainToInstance(CrearCopropiedadDto, { modulosContratados: [] }),
+    );
+    expect(errores).toHaveLength(1);
+  });
+});

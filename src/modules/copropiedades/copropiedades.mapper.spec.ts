@@ -41,3 +41,22 @@ describe('toCopropiedad — websaco3CopropiedadId', () => {
     expect(toCopropiedad(documento()).websaco3CopropiedadId).toBeNull();
   });
 });
+
+describe('toCopropiedad — modulosContratados', () => {
+  it('expone los módulos guardados', () => {
+    const doc = documento({
+      modulosContratados: ['finanzas', 'administracion'],
+    });
+
+    expect(toCopropiedad(doc).modulosContratados).toEqual([
+      'finanzas',
+      'administracion',
+    ]);
+  });
+
+  it('un documento legacy sin la clave se lee como solo Finanzas', () => {
+    // Misma regla que el acceso (`modulosEfectivos`): lo que la pantalla
+    // muestra es lo que el servidor aplica.
+    expect(toCopropiedad(documento()).modulosContratados).toEqual(['finanzas']);
+  });
+});

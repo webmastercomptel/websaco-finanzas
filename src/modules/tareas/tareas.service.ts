@@ -17,7 +17,8 @@ import {
   Copropiedad,
   type CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
-import type { Tarea as TareaContrato } from '../../contracts';
+import type { Tarea as TareaContrato, TareaAsignable } from '../../contracts';
+import { iniciales } from '../../common/utils/mapper.utils';
 import { CorreoService } from '../../common/correo/correo.service';
 import { EnlaceAccesoService } from '../../common/cuentas/enlace-acceso.service';
 import {
@@ -217,6 +218,28 @@ export class TareasService {
         );
       }
     }
+  }
+
+  /**
+   * The active coproperty's staff who can read tasks, i.e. exactly who
+   * `exigirAsignablesValidos` accepts as an assignee (the directory resolves
+   * both). Only id and name leave: the form needs nothing else. A platform
+   * administrator with no assignment here is accepted on write but not listed:
+   * the directory enumerates assignments.
+   */
+  async asignables(): Promise<TareaAsignable[]> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const personal = await this.directorio.personalQuePuedeLeer(
+      copropiedadId,
+      'Tarea',
+    );
+    return personal
+      .map((p) => ({
+        accountId: p.accountId,
+        nombre: p.nombre,
+        iniciales: iniciales(p.nombre),
+      }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }
 
   /** A malformed id can never match: answer 404 instead of a cast error (500). */

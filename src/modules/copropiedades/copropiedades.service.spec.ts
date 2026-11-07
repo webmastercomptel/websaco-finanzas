@@ -1364,3 +1364,104 @@ describe('CopropiedadesService — comptableEmpresaId', () => {
     });
   });
 });
+
+describe('CopropiedadesService — modulosContratados', () => {
+  const armar = (filas: unknown[], auditoria = mockAuditoria()) => {
+    const modelo = modeloCon(filas);
+    const service = new CopropiedadesService(
+      modelo as never,
+      mockContador() as never,
+      mockAsignaciones() as never,
+      mockAccounts() as never,
+      auditoria as never,
+      mockConceptos() as never,
+      mockConsecutivos() as never,
+      mockCuentasContables() as never,
+      mockConceptosCobro() as never,
+      mockComptable() as never,
+    );
+    return { modelo, service, auditoria };
+  };
+
+  it('actualizar guarda los módulos contratados', async () => {
+    const { modelo, service } = armar([documento()]);
+
+    await service.update(
+      'cop-1',
+      { modulosContratados: ['finanzas', 'administracion'] },
+      ACTOR,
+    );
+
+    expect(modelo.escrituras[0]).toEqual({
+      modulosContratados: ['finanzas', 'administracion'],
+    });
+  });
+
+  it('crear guarda los módulos contratados', async () => {
+    const { modelo, service } = armar([documento()]);
+
+    await service.create(
+      { nombre: 'Nueva', modulosContratados: ['administracion'] },
+      ACTOR,
+    );
+
+    expect(modelo.escrituras[0]).toMatchObject({
+      modulosContratados: ['administracion'],
+    });
+  });
+
+  it('un patch sin el campo no toca la licencia', async () => {
+    const { modelo, service } = armar([documento()]);
+
+    await service.update('cop-1', { ciudad: 'Medellín' }, ACTOR);
+
+    expect(modelo.escrituras[0]).not.toHaveProperty('modulosContratados');
+  });
+
+  it('cambiar los módulos deja su propia entrada de auditoría con antes y después', async () => {
+    // Una licencia cambia lo que un edificio puede usar: no puede quedar
+    // enterrada en un "actualizó la copropiedad" genérico.
+    const { service, auditoria } = armar([
+      documento({ modulosContratados: ['finanzas'] }),
+    ]);
+
+    await service.update(
+      'cop-1',
+      { modulosContratados: ['finanzas', 'administracion'] },
+      ACTOR,
+    );
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(2);
+    expect(auditoria.registrar).toHaveBeenLastCalledWith({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'actualizar',
+      entidadTipo: 'copropiedad',
+      entidadId: 'cop-1',
+      entidadEtiqueta:
+        'Terrazas de Granada · módulos: finanzas → finanzas, administracion',
+    });
+  });
+
+  it('reenviar los mismos módulos no genera una entrada extra', async () => {
+    const { service, auditoria } = armar([
+      documento({ modulosContratados: ['finanzas', 'administracion'] }),
+    ]);
+
+    await service.update(
+      'cop-1',
+      { modulosContratados: ['administracion', 'finanzas'] },
+      ACTOR,
+    );
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+  });
+
+  it('un documento legacy cuenta como solo Finanzas al comparar', async () => {
+    const { service, auditoria } = armar([documento()]);
+
+    await service.update('cop-1', { modulosContratados: ['finanzas'] }, ACTOR);
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+  });
+});

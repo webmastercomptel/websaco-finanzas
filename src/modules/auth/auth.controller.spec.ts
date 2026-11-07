@@ -1,4 +1,6 @@
+import { Types } from 'mongoose';
 import { AuthController } from './auth.controller';
+import { AccesoService as AccesoServiceReal } from '../../common/acceso/acceso.service';
 import type {
   AccesoService,
   AccesoCopropiedad,
@@ -75,21 +77,29 @@ describe('AuthController.me', () => {
         nombre: 'Terrazas de Granada',
         modulos: ['finanzas', 'administracion'],
         esResidente: false,
+        permisos: ['facturas.ver'],
       },
     ]);
   });
 
-  it('no filtra los permisos en la respuesta', async () => {
-    // El selector solo necesita reconocer y elegir. Los permisos se aplican en
-    // el servidor en cada petición; mandarlos acá invita a que el cliente los
-    // use para decidir, y esa decisión no es suya.
+  it('auth/me incluye los permisos efectivos de cada copropiedad', async () => {
+    // El menú del cliente se filtra con esto. Es una cortesía de la interfaz:
+    // el servidor revalida cada petición, así que exponerlo no da acceso.
     const { servicio } = accesoQueDevuelve([
       {
         copropiedadId: 'cop-1',
         codigo: 'COP-001',
         nombre: 'Terrazas',
-        permissions: ['facturas.anular'],
-        modulos: ['finanzas'],
+        permissions: ['facturas.anular', 'tareas.gestionar'],
+        modulos: ['finanzas', 'administracion'],
+        esResidente: false,
+      },
+      {
+        copropiedadId: 'cop-2',
+        codigo: 'COP-002',
+        nombre: 'Bosques',
+        permissions: ['pqr.ver'],
+        modulos: ['administracion'],
         esResidente: false,
       },
     ]);
@@ -97,7 +107,114 @@ describe('AuthController.me', () => {
 
     const resultado = await controller.me(user({ accountId: 'acc-1' }));
 
-    expect(JSON.stringify(resultado)).not.toContain('facturas.anular');
+    expect(resultado.copropiedades.map((c) => c.permisos)).toEqual([
+      ['facturas.anular', 'tareas.gestionar'],
+      ['pqr.ver'],
+    ]);
+  });
+
+  it('auth/me de un residente trae permisos vacíos', async () => {
+    const { servicio } = accesoQueDevuelve([
+      {
+        copropiedadId: 'cop-1',
+        codigo: 'COP-001',
+        nombre: 'Terrazas',
+        permissions: [],
+        modulos: ['finanzas', 'administracion'],
+        esResidente: true,
+      },
+    ]);
+    const controller = new AuthController(servicio);
+
+    const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+    expect(resultado.copropiedades[0]).toMatchObject({
+      esResidente: true,
+      permisos: [],
+    });
+  });
+
+  it('el administrador de plataforma recibe permisos vacíos: su bandera ya alcanza', async () => {
+    const { servicio } = accesoQueDevuelve([
+      {
+        copropiedadId: 'cop-1',
+        codigo: 'COP-001',
+        nombre: 'Terrazas',
+        permissions: [],
+        modulos: ['finanzas'],
+        esResidente: false,
+      },
+    ]);
+    const controller = new AuthController(servicio);
+
+    const resultado = await controller.me(
+      user({ accountId: 'acc-1', isPlatformAdmin: true }),
+    );
+
+    expect(resultado.esAdministradorPlataforma).toBe(true);
+    expect(resultado.copropiedades[0].permisos).toEqual([]);
+  });
+
+  it('personal nunca ve claves de finanzas en auth/me', async () => {
+    // Con el AccesoService real: el techo del perfil `personal` quita las
+    // claves de Finanzas guardadas, y lo que sale por auth/me es lo ya
+    // recortado, no lo almacenado.
+    const copId = new Types.ObjectId();
+    const filas = (rows: Array<Record<string, unknown>>) => ({
+      findOne: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockReturnValue({
+            exec: () => Promise.resolve(rows[0] ?? null),
+          }),
+        }),
+      }),
+      find: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          sort: jest.fn().mockReturnValue({
+            lean: jest.fn().mockReturnValue({
+              exec: () => Promise.resolve(rows),
+            }),
+          }),
+          lean: jest.fn().mockReturnValue({
+            exec: () => Promise.resolve(rows),
+          }),
+        }),
+        lean: jest.fn().mockReturnValue({
+          exec: () => Promise.resolve(rows),
+        }),
+      }),
+    });
+    const acceso = new AccesoServiceReal(
+      filas([
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copId,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'tareas.ver', 'pqr.ver'],
+        },
+      ]) as never,
+      filas([
+        {
+          _id: copId,
+          codigo: 'COP-A',
+          nombre: 'Edificio A',
+          modulosContratados: ['finanzas', 'administracion'],
+        },
+      ]) as never,
+      filas([]) as never,
+      filas([]) as never,
+      filas([]) as never,
+      filas([]) as never,
+    );
+    const controller = new AuthController(acceso);
+
+    const resultado = await controller.me(
+      user({ accountId: new Types.ObjectId().toString() }),
+    );
+
+    const permisos = resultado.copropiedades[0].permisos;
+    expect(permisos).toEqual(expect.arrayContaining(['tareas.ver', 'pqr.ver']));
+    expect(permisos).not.toContain('facturas.ver');
   });
 
   it('sin cuenta local no consulta asignaciones', async () => {

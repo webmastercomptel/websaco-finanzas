@@ -1,5 +1,9 @@
 import 'reflect-metadata';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { CaslAbilityFactory } from '../casl/casl-ability.factory';
+import { PoliciesGuard } from '../casl/policies.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import {
   CHECK_ABILITY_KEY,
@@ -47,6 +51,51 @@ describe('TareasController — política de acceso', () => {
       }>
     ).map((g) => g.name);
     expect(guards).toEqual(['FirebaseAuthGuard', 'PoliciesGuard']);
+  });
+});
+
+describe('TareasController.asignables', () => {
+  it('exige manage Tarea: quien solo ve o actualiza no necesita la lista', () => {
+    expect(reglasDe('asignables')).toEqual([
+      { action: 'manage', subject: 'Tarea' },
+    ]);
+  });
+
+  it('el PoliciesGuard real deja pasar a tareas.gestionar y niega tareas.ver / tareas.actualizar', () => {
+    const guard = new PoliciesGuard(new Reflector(), new CaslAbilityFactory());
+    const contexto = (permissions: string[]): ExecutionContext =>
+      ({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            user: {
+              uid: 'u',
+              email: 'a@b.co',
+              permissions,
+              modulos: ['administracion'],
+            },
+          }),
+        }),
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        getHandler: () => TareasController.prototype.asignables,
+        getClass: () => TareasController,
+      }) as unknown as ExecutionContext;
+
+    expect(guard.canActivate(contexto(['tareas.gestionar']))).toBe(true);
+    expect(() => guard.canActivate(contexto(['tareas.ver']))).toThrow(
+      ForbiddenException,
+    );
+    expect(() => guard.canActivate(contexto(['tareas.actualizar']))).toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('delega en el servicio', async () => {
+    const asignables = jest.fn().mockResolvedValue([]);
+    const controlador = new TareasController({ asignables } as never);
+
+    await controlador.asignables();
+
+    expect(asignables).toHaveBeenCalledTimes(1);
   });
 });
 

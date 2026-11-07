@@ -127,6 +127,9 @@ function montar() {
           perfil: 'personal',
         }),
       ),
+    personalQuePuedeLeer: jest
+      .fn<Promise<Destinatario[]>, [Types.ObjectId, string]>()
+      .mockResolvedValue([]),
   };
   const correo = { enviar: jest.fn().mockResolvedValue(true) };
   const enlaces = {
@@ -1103,5 +1106,66 @@ describe('TareasService.eliminar', () => {
       NotFoundException,
     );
     expect(m.tareas.findOneAndDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('TareasService.asignables', () => {
+  it('asignables solo devuelve personal de esta copropiedad', async () => {
+    const m = montar();
+    m.directorio.personalQuePuedeLeer.mockResolvedValue([
+      {
+        accountId: 'b',
+        email: 'b@x.co',
+        nombre: 'Ana Zapata',
+        perfil: 'personal',
+      },
+      {
+        accountId: 'a',
+        email: 'a@x.co',
+        nombre: 'Carlos Díaz',
+        perfil: 'personal',
+      },
+    ]);
+
+    const resultado = await m.servicio.asignables();
+
+    // La copropiedad sale del contexto, nunca de un parámetro, y la materia es
+    // Tarea: la misma regla con la que se valida al asignar.
+    expect(m.directorio.personalQuePuedeLeer).toHaveBeenCalledWith(
+      COPROPIEDAD,
+      'Tarea',
+    );
+    expect(resultado).toEqual([
+      { accountId: 'b', nombre: 'Ana Zapata', iniciales: 'AZ' },
+      { accountId: 'a', nombre: 'Carlos Díaz', iniciales: 'CD' },
+    ]);
+  });
+
+  it('no filtra el correo ni el perfil: solo lo que el formulario necesita', async () => {
+    const m = montar();
+    m.directorio.personalQuePuedeLeer.mockResolvedValue([
+      {
+        accountId: 'a',
+        email: 'secreto@x.co',
+        nombre: 'Carlos Díaz',
+        perfil: 'personal',
+      },
+    ]);
+
+    const resultado = await m.servicio.asignables();
+
+    expect(JSON.stringify(resultado)).not.toContain('secreto@x.co');
+  });
+
+  it('ordena por nombre para que la lista sea estable', async () => {
+    const m = montar();
+    m.directorio.personalQuePuedeLeer.mockResolvedValue([
+      { accountId: '2', email: '', nombre: 'Zoila', perfil: 'personal' },
+      { accountId: '1', email: '', nombre: 'Álvaro', perfil: 'personal' },
+    ]);
+
+    const resultado = await m.servicio.asignables();
+
+    expect(resultado.map((r) => r.nombre)).toEqual(['Álvaro', 'Zoila']);
   });
 });

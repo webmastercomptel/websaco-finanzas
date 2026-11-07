@@ -13,7 +13,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import type { Tarea } from '../../contracts';
+import type { Tarea, TareaAsignable } from '../../contracts';
 import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { ActualizarTareaDto } from './dto/actualizar-tarea.dto';
@@ -43,6 +43,18 @@ export class TareasController {
     @CurrentUser() user: IRequestUser,
   ): Promise<Tarea[]> {
     return this.tareas.listar(filtros, user);
+  }
+
+  /**
+   * Staff the task form may offer as assignees. `manage` Tarea, the key that
+   * creates and edits tasks: nobody else has a form to fill. Declared before
+   * any `:id` route so the literal segment is never read as an id. The list is
+   * the same rule the service enforces when it writes the assignment.
+   */
+  @Get('asignables')
+  @CheckAbility({ action: 'manage', subject: 'Tarea' })
+  asignables(): Promise<TareaAsignable[]> {
+    return this.tareas.asignables();
   }
 
   @Post()

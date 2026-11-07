@@ -54,6 +54,9 @@ export class AuthController {
         nombre: c.nombre,
         modulos: c.modulos,
         esResidente: c.esResidente,
+        // Already the effective set (ceiling applied) — never recompute here,
+        // or the menu could disagree with the guard.
+        permisos: c.permissions,
       })),
       alcance,
     };

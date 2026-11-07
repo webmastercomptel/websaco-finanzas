@@ -23,8 +23,10 @@ import { TecnicosService } from './tecnicos.service';
 /**
  * Technicians of the active coproperty. Writes need `manage` Tecnico
  * (`tecnicos.gestionar`). The list is open to whoever works PQRs too, because
- * the assign-technician dialog needs it: there is no `tecnicos.ver` permission,
- * so it accepts `read` Pqr OR `manage` Tecnico (at least one, never neither).
+ * the assign-technician dialog needs it, and to whoever works maintenance,
+ * whose form picks a technician too: there is no `tecnicos.ver` permission, so
+ * it accepts `read` Pqr, `read` Mantenimiento OR `manage` Tecnico (at least
+ * one, never neither). `manage` Mantenimiento implies `read`.
  * The system this was ported from left the list open to any signed-in user.
  */
 @Controller('tecnicos')
@@ -36,6 +38,7 @@ export class TecnicosController {
   @Get()
   @CheckAnyAbility(
     { action: 'read', subject: 'Pqr' },
+    { action: 'read', subject: 'Mantenimiento' },
     { action: 'manage', subject: 'Tecnico' },
   )
   listar(): Promise<Tecnico[]> {

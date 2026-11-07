@@ -28,9 +28,10 @@ describe('TecnicosController — política de acceso', () => {
     );
   });
 
-  it('el listado acepta read Pqr O manage Tecnico (no hay tecnicos.ver) y no exige nada más', () => {
+  it('el listado acepta read Pqr, read Mantenimiento O manage Tecnico (no hay tecnicos.ver) y no exige nada más', () => {
     expect(metadato(CHECK_ANY_ABILITY_KEY, 'listar')).toEqual([
       { action: 'read', subject: 'Pqr' },
+      { action: 'read', subject: 'Mantenimiento' },
       { action: 'manage', subject: 'Tecnico' },
     ]);
     expect(metadato(CHECK_ABILITY_KEY, 'listar')).toBeUndefined();
@@ -81,14 +82,30 @@ describe('TecnicosController — el PoliciesGuard real sobre las rutas reales', 
     } as unknown as ExecutionContext;
   };
 
-  it.each([['pqr.ver'], ['pqr.gestionar'], ['tecnicos.gestionar']])(
-    'listar se permite con %s',
-    (permiso) => {
-      expect(guard.canActivate(contexto('listar', [permiso]))).toBe(true);
-    },
-  );
+  it.each([
+    ['pqr.ver'],
+    ['pqr.gestionar'],
+    ['tecnicos.gestionar'],
+    ['mantenimientos.ver'],
+    ['mantenimientos.gestionar'],
+  ])('listar se permite con %s', (permiso) => {
+    expect(guard.canActivate(contexto('listar', [permiso]))).toBe(true);
+  });
 
-  it('listar se niega a quien no tiene ninguna de las dos habilidades', () => {
+  it('quien gestiona mantenimientos lista técnicos, pero no los edita', () => {
+    // El formulario de mantenimientos necesita el listado; escribir sigue
+    // siendo solo de tecnicos.gestionar.
+    expect(
+      guard.canActivate(contexto('listar', ['mantenimientos.gestionar'])),
+    ).toBe(true);
+    for (const handler of ['crear', 'actualizar', 'eliminar'] as const) {
+      expect(() =>
+        guard.canActivate(contexto(handler, ['mantenimientos.gestionar'])),
+      ).toThrow(ForbiddenException);
+    }
+  });
+
+  it('listar se niega a quien no tiene ninguna de las habilidades', () => {
     expect(() =>
       guard.canActivate(contexto('listar', ['tareas.ver', 'zonas.gestionar'])),
     ).toThrow(ForbiddenException);

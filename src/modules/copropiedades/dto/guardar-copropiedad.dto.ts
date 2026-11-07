@@ -1,5 +1,8 @@
 // src/modules/copropiedades/dto/guardar-copropiedad.dto.ts
 import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsIn,
   IsMongoId,
@@ -8,6 +11,8 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { MODULOS_PRODUCTO } from '../../../common/licencia/modulos';
+import type { ModuloProducto } from '../../../common/licencia/modulos';
 import { WEBSACO3_COPROPIEDAD_ID_REGEX } from '../websaco3-copropiedad-id';
 import { COMPTABLE_EMPRESA_ID_REGEX } from '../comptable-empresa-id';
 
@@ -78,6 +83,22 @@ class CamposCopropiedadDto {
   @IsOptional()
   @IsBoolean()
   usaGestionEdificios?: boolean;
+
+  /**
+   * The licence: which product modules this building has contracted. At least
+   * one, no repeats, only known names. Absent on a patch = leave as is. These
+   * DTOs are reachable only through `PlatformAdminGuard` routes, which is what
+   * keeps a customer's administrator from widening their own licence.
+   */
+  @IsOptional()
+  @IsArray({ message: 'Los módulos contratados deben ser una lista' })
+  @ArrayMinSize(1, { message: 'Debe contratarse al menos un módulo' })
+  @ArrayUnique({ message: 'Un módulo no puede repetirse' })
+  @IsIn(MODULOS_PRODUCTO, {
+    each: true,
+    message: 'Módulo desconocido: use finanzas o administracion',
+  })
+  modulosContratados?: ModuloProducto[];
 
   /**
    * The coproperty's `_id` in the building-management system. Format only is

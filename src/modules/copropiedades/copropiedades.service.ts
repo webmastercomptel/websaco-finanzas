@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { modulosEfectivos } from '../../common/licencia/modulos';
 import {
   Copropiedad,
   CopropiedadDocument,
@@ -382,7 +383,9 @@ export class CopropiedadesService {
     const cambios = this.aDocumento(dto);
     const actual = await this.copropiedades
       .findById(id)
-      .select('usaGestionEdificios websaco3CopropiedadId comptableEmpresaId')
+      .select(
+        'usaGestionEdificios websaco3CopropiedadId comptableEmpresaId modulosContratados',
+      )
       .lean()
       .exec();
     if (!actual) {
@@ -417,6 +420,29 @@ export class CopropiedadesService {
       entidadId: actualizada._id.toString(),
       entidadEtiqueta: actualizada.nombre,
     });
+
+    // A licence change gets its own entry, with before and after: it alters
+    // what a building can use, and a generic "updated" line would bury it.
+    // The audit vocabulary has no licence action, so the label carries it.
+    if (dto.modulosContratados !== undefined) {
+      const antes = modulosEfectivos(actual);
+      const despues = modulosEfectivos({
+        modulosContratados: dto.modulosContratados,
+      });
+      if (
+        antes.length !== despues.length ||
+        despues.some((m) => !antes.includes(m))
+      ) {
+        await this.auditoria.registrar({
+          actorAccountId: actor.accountId,
+          actorNombre: actor.nombre,
+          accion: 'actualizar',
+          entidadTipo: 'copropiedad',
+          entidadId: actualizada._id.toString(),
+          entidadEtiqueta: `${actualizada.nombre} · módulos: ${antes.join(', ')} → ${despues.join(', ')}`,
+        });
+      }
+    }
 
     return this.findOne(actualizada._id.toString());
   }
@@ -843,6 +869,7 @@ export class CopropiedadesService {
     set('email', dto.email);
     set('mostrarLogo', dto.mostrarLogo);
     set('usaGestionEdificios', dto.usaGestionEdificios);
+    set('modulosContratados', dto.modulosContratados);
     set('websaco3CopropiedadId', dto.websaco3CopropiedadId);
     set('comptableEmpresaId', dto.comptableEmpresaId);
     set('cuentaContableCartera', dto.cuentaContableCartera);
