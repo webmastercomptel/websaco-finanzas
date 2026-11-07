@@ -142,6 +142,17 @@ export const envValidationSchema = Joi.object({
     .optional(),
   COMPTABLE_HMAC_SECRET: Joi.string().min(32).optional(),
 
+  // Outgoing email (SendGrid; see common/correo/ and modules/health/correo.health.ts).
+  // Optional and paired with `.and()`: a key with no sender can only produce
+  // sends SendGrid rejects, and a sender with no key is a setting nothing reads.
+  // With neither, no email leaves the system and readiness reports the check as
+  // skipped. The sender address must be a verified Sender Identity in SendGrid;
+  // that cannot be checked here (no network call at boot). An empty value counts
+  // as absent so a blank line in `.env` does not half-configure the pair.
+  SENDGRID_API_KEY: Joi.string().empty('').optional(),
+  SENDGRID_FROM_EMAIL: Joi.string().email().empty('').optional(),
+  SENDGRID_FROM_NAME: Joi.string().empty('').default('WebSaco'),
+
   // Integrations panel (see modules/integraciones-panel/ and
   // docs/runbooks/integracion-panel.md). The switch is OFF by default: a
   // deployment that never heard of the panel behaves exactly as before. With
@@ -163,4 +174,5 @@ export const envValidationSchema = Joi.object({
 })
   .and('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_PUBLICACION_TRIGGER_SECRET')
   .with('WEBSACO3_FACTURAS_ENDPOINT_URL', 'WEBSACO3_HMAC_SECRET')
-  .and('COMPTABLE_API_URL', 'COMPTABLE_HMAC_SECRET');
+  .and('COMPTABLE_API_URL', 'COMPTABLE_HMAC_SECRET')
+  .and('SENDGRID_API_KEY', 'SENDGRID_FROM_EMAIL');

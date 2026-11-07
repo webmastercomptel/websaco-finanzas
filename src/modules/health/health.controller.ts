@@ -7,6 +7,7 @@ import {
 } from '@nestjs/terminus';
 import { Public } from '../casl/check-ability.decorator';
 import { RedisHealthIndicator } from './redis.health';
+import { CorreoHealthIndicator } from './correo.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 
 @Controller('health')
@@ -17,6 +18,7 @@ export class HealthController {
     private mongoose: MongooseHealthIndicator,
     private redis: RedisHealthIndicator,
     private integracionComptable: IntegracionComptableHealthIndicator,
+    private correo: CorreoHealthIndicator,
   ) {}
 
   /**
@@ -31,7 +33,8 @@ export class HealthController {
   /**
    * Readiness: safe to receive traffic — Mongo AND Redis reachable, and the
    * environment's manual configuration steps done (today: the Comptable
-   * integration's URL and shared secret, when it is enabled). Point the load
+   * integration's URL and shared secret, and the SendGrid key and sender, when
+   * each is enabled). Point the load
    * balancer / orchestrator readiness probe here.
    *
    * Both services are managed and remote, so this endpoint doubles as the
@@ -52,6 +55,7 @@ export class HealthController {
       () => this.mongoose.pingCheck('mongodb'),
       () => this.redis.pingCheck('redis'),
       () => this.integracionComptable.check('integracion-comptable'),
+      () => this.correo.check('correo'),
     ]);
   }
 

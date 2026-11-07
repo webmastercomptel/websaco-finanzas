@@ -252,6 +252,46 @@ describe('envValidationSchema', () => {
     });
   });
 
+  describe('correo (SendGrid)', () => {
+    const CLAVE = 'SG.clave-de-prueba';
+    const REMITENTE = 'notificaciones@ejemplo.com';
+
+    it('arranca sin correo configurado', () => {
+      expect(validate({}).error).toBeUndefined();
+    });
+
+    it('arranca con la clave y el remitente juntos, y el nombre es opcional', () => {
+      const { error, value } = validate({
+        SENDGRID_API_KEY: CLAVE,
+        SENDGRID_FROM_EMAIL: REMITENTE,
+      }) as { error?: Error; value: Record<string, unknown> };
+
+      expect(error).toBeUndefined();
+      expect(value.SENDGRID_FROM_NAME).toBe('WebSaco');
+    });
+
+    it('rechaza la clave sin el remitente', () => {
+      const { error } = validate({ SENDGRID_API_KEY: CLAVE });
+
+      expect(error?.message).toContain('SENDGRID_FROM_EMAIL');
+    });
+
+    it('rechaza el remitente sin la clave', () => {
+      const { error } = validate({ SENDGRID_FROM_EMAIL: REMITENTE });
+
+      expect(error?.message).toContain('SENDGRID_API_KEY');
+    });
+
+    it('rechaza un remitente que no es un correo', () => {
+      const { error } = validate({
+        SENDGRID_API_KEY: CLAVE,
+        SENDGRID_FROM_EMAIL: 'no-es-un-correo',
+      });
+
+      expect(error?.message).toContain('SENDGRID_FROM_EMAIL');
+    });
+  });
+
   describe('panel de integraciones', () => {
     const SECRETO = 'panel-secreto-compartido-de-32-caracteres-x';
 

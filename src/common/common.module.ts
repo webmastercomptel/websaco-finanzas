@@ -10,6 +10,7 @@ import type Redis from 'ioredis';
 import { ClsModule } from 'nestjs-cls';
 import { redisProvider } from './redis/redis.provider';
 import { LockService } from './redis/lock.service';
+import { CorreoService } from './correo/correo.service';
 import { REDIS_CLIENT } from './redis/redis.constants';
 import {
   firebaseAppProvider,
@@ -46,6 +47,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
   providers: [
     redisProvider,
     LockService,
+    CorreoService,
     firebaseAppProvider,
     firebaseAuthProvider,
     FirebaseAuthGuard,
@@ -66,6 +68,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
   exports: [
     REDIS_CLIENT,
     LockService,
+    CorreoService,
     FIREBASE_APP,
     FIREBASE_AUTH,
     FirebaseAuthGuard,

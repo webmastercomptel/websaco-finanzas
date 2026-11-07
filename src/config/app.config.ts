@@ -38,6 +38,12 @@ export default registerAs('app', () => ({
   // screen reports; never a boot error.
   comptableApiUrl: process.env.COMPTABLE_API_URL,
   comptableHmacSecret: process.env.COMPTABLE_HMAC_SECRET,
+  // Outgoing email — key and sender present together or not at all (`.and()`
+  // in env.validation.ts); absent means "email not configured". The display
+  // name always has a Joi default.
+  sendgridApiKey: process.env.SENDGRID_API_KEY,
+  sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL,
+  sendgridFromName: process.env.SENDGRID_FROM_NAME!,
   // Integrations panel — the secret is required by Joi only when the switch is
   // on; the switch is off unless explicitly set (see env.validation.ts).
   panelHmacSecret: process.env.PANEL_HMAC_SECRET,
