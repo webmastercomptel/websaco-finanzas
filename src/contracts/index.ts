@@ -3394,3 +3394,99 @@ export interface MiDocumentoBloque {
   /** When the admin sent it. */
   fecha: string;
 }
+
+/* ── Panel de Administración (resumen del tablero) ──────────────── */
+
+/** One counter of the Administración dashboard. */
+export interface IndicadorPanel {
+  valor: number;
+}
+
+/** One announcement head shown on the dashboard. */
+export interface ComunicacionPanel {
+  id: string;
+  /** The announcement's `categoria`. */
+  tipo: string;
+  titulo: string;
+  fecha?: IsoDate;
+  descripcion?: string;
+}
+
+/**
+ * Summary of the building-management (Administración) dashboard. Served in this
+ * one shape to staff (`GET /panel-administracion/resumen`) and to residents
+ * (`GET /portal/panel`), so a single screen renders both.
+ *
+ * Every block is optional on purpose: an ABSENT key means the caller may not
+ * read that subject (staff) or the block does not exist for their profile
+ * (residents); a PRESENT block with `valor: 0` / zeros is a real "nothing
+ * yet". The client must never read an absent key as zero.
+ *
+ * Staff blocks are limited by the caller's abilities; the resident panel only
+ * ever carries the resident's OWN PQRs and reservations and the published
+ * announcements — never financial data and never another person's records.
+ */
+export interface ResumenPanelAdministracion {
+  estadisticas: {
+    /** Staff only. Active staff assignments to the active coproperty (needs read Usuario). */
+    usuariosActivos?: IndicadorPanel;
+    /** Needs read Anuncio (staff). Published announcements. */
+    anunciosRecientes?: IndicadorPanel;
+    /** Needs read Tarea (staff). A non-manager only counts tasks assigned to them. */
+    tareasPendientes?: IndicadorPanel;
+    /** Needs read Pqr (staff: all of the coproperty; resident: their own). */
+    pqrAbiertas?: IndicadorPanel;
+  };
+  /** Needs read Pqr. Mon..Sat distribution (America/Bogota) of PQRs by creation day. */
+  pqrSemanal?: Array<{ dia: string; valor: number }>;
+  /** Needs read Reserva (staff: all; resident: their own). */
+  reservas?: {
+    /** Percentage (0-100) of approved bookings over all of them. */
+    ocupacion: number;
+    etiqueta: string;
+  };
+  /** Needs read Anuncio (staff). The three newest published announcements. */
+  comunicaciones?: ComunicacionPanel[];
+}
+
+/* ── Búsqueda global de Administración ──────────────────────────── */
+
+export type TipoResultadoBusquedaAdministracion =
+  | 'tarea'
+  | 'anuncio'
+  | 'pqr'
+  | 'mantenimiento'
+  | 'actividad'
+  | 'documento'
+  | 'zonaComun'
+  | 'reserva'
+  | 'facturaBloque';
+
+/** One hit of the Administración search, already resolved to a frontend route. */
+export interface ResultadoBusquedaAdministracion {
+  id: string;
+  tipo: TipoResultadoBusquedaAdministracion;
+  titulo: string;
+  descripcion: string;
+  /** Frontend path (with `?abrir=<id>` so the screen opens the record). */
+  ruta: string;
+}
+
+/**
+ * Response of `GET /busqueda-administracion`. Same contract as `RespuestaBusqueda`
+ * (the financial search): a group the caller may not read is ABSENT (key
+ * missing), never `[]`, so the client can tell "no permission" from "no
+ * matches". The two responses have disjoint keys, so the unified search box
+ * merges them with a plain object spread.
+ */
+export interface RespuestaBusquedaAdministracion {
+  tareas?: ResultadoBusquedaAdministracion[];
+  anuncios?: ResultadoBusquedaAdministracion[];
+  pqr?: ResultadoBusquedaAdministracion[];
+  mantenimientos?: ResultadoBusquedaAdministracion[];
+  actividades?: ResultadoBusquedaAdministracion[];
+  documentos?: ResultadoBusquedaAdministracion[];
+  zonasComunes?: ResultadoBusquedaAdministracion[];
+  reservas?: ResultadoBusquedaAdministracion[];
+  facturasBloque?: ResultadoBusquedaAdministracion[];
+}

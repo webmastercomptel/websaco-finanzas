@@ -52,6 +52,8 @@ import { PublicacionFacturasModule } from './modules/publicacion-facturas/public
 import { IntegracionesWebsaco3Module } from './modules/integraciones-websaco3/integraciones-websaco3.module';
 import { IntegracionesPanelModule } from './modules/integraciones-panel/integraciones-panel.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
+import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
+import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
 import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-comptable.module';
 
 /**
@@ -130,6 +132,8 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     IntegracionesWebsaco3Module,
     IntegracionesPanelModule,
     BusquedaModule,
+    BusquedaAdministracionModule,
+    PanelAdministracionModule,
     InterfazComptableModule,
   ],
 })
