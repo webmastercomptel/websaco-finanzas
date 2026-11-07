@@ -153,10 +153,23 @@ const mensajeDeFila = (err: unknown): string => {
   return err instanceof Error ? err.message : 'Error desconocido';
 };
 
-/** The two parties of a unit the contract names: owner and (optional) tenant. */
-const PARTES_POBLADAS = [
-  { path: 'titularId', select: 'nombre numeroIdentificacion' },
-  { path: 'arrendatarioId', select: 'nombre numeroIdentificacion' },
+/**
+ * The two parties of a unit the contract names: owner and (optional) tenant.
+ * Populated only from the SAME coproperty: a stored id of another building's
+ * Tercero (legacy data, or written before the check existed) reads as no party
+ * instead of leaking that party's name and identification.
+ */
+const partesPobladas = (copropiedadId: Types.ObjectId) => [
+  {
+    path: 'titularId',
+    select: 'nombre numeroIdentificacion',
+    match: { copropiedadId },
+  },
+  {
+    path: 'arrendatarioId',
+    select: 'nombre numeroIdentificacion',
+    match: { copropiedadId },
+  },
 ];
 
 @Injectable()
@@ -216,7 +229,7 @@ export class InmueblesService {
     const [documentos, total] = await Promise.all([
       this.inmuebles
         .find(filtro)
-        .populate(PARTES_POBLADAS)
+        .populate(partesPobladas(copropiedadId))
         .sort({ codigo: 1 })
         .skip((pagina - 1) * porPagina)
         .limit(porPagina)
@@ -244,7 +257,7 @@ export class InmueblesService {
 
     const documento = await this.inmuebles
       .findOne({ _id: id, copropiedadId })
-      .populate(PARTES_POBLADAS)
+      .populate(partesPobladas(copropiedadId))
       .exec();
 
     if (!documento) {
@@ -1404,9 +1417,9 @@ export class InmueblesService {
 
   /**
    * Guards the owner/tenant pair of a unit. The invoice is always the owner's,
-   * so the tenant may never be the same party; and a tenant id the caller
-   * names must be a Tercero of THIS coproperty (a bare id would accept another
-   * building's party). Omitted fields fall back to what is stored, so a patch
+   * so the tenant may never be the same party; and an owner or tenant id the
+   * caller names must be a Tercero of THIS coproperty (a bare id would accept
+   * another building's party, then populate its name and issue invoices to it). Omitted fields fall back to what is stored, so a patch
    * that changes only the owner is still checked against the stored tenant.
    */
   private async validarArrendatario(
@@ -1430,6 +1443,16 @@ export class InmueblesService {
       throw new BadRequestException(
         'El arrendatario no puede ser el propietario',
       );
+    }
+    if (propuesto.titularId) {
+      const existe = await this.terceros
+        .exists({ _id: propuesto.titularId, copropiedadId })
+        .exec();
+      if (!existe) {
+        throw new BadRequestException(
+          'El propietario no existe en esta copropiedad',
+        );
+      }
     }
     if (propuesto.arrendatarioId) {
       const existe = await this.terceros

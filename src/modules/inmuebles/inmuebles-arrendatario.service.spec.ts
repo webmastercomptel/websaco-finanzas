@@ -182,3 +182,80 @@ describe('toInmueble — arrendatario', () => {
     ).toBeNull();
   });
 });
+
+describe('Inmueble.titularId — mismo tenant (hallazgo 10)', () => {
+  /** Only the ids in `propios` are Terceros of the active coproperty. */
+  const tercerosDe = (...propios: Types.ObjectId[]) => ({
+    exists: jest.fn((filtro: Filtro) => ({
+      exec: () =>
+        Promise.resolve(
+          String(filtro.copropiedadId) === String(COP) &&
+            propios.some((p) => String(p) === String(filtro._id))
+            ? { _id: String(filtro._id) }
+            : null,
+        ),
+    })),
+  });
+
+  it('create: rechaza con 400 un titular de OTRA copropiedad, sin escribir', async () => {
+    const inmuebles = inmueblesCon();
+    const terceros = tercerosDe();
+
+    await expect(
+      servicio(inmuebles, terceros).create({
+        codigo: '301',
+        titularId: TITULAR.toString(),
+      }),
+    ).rejects.toThrow('El propietario no existe en esta copropiedad');
+    expect(terceros.exists).toHaveBeenCalledWith({
+      _id: TITULAR.toString(),
+      copropiedadId: COP,
+    });
+    expect(inmuebles.create).not.toHaveBeenCalled();
+  });
+
+  it('update: rechaza con 400 cambiar el titular a uno de otra copropiedad', async () => {
+    const inmuebles = inmueblesCon();
+
+    await expect(
+      servicio(inmuebles, tercerosDe()).update('inm-1', {
+        titularId: TITULAR.toString(),
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(inmuebles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('create: un titular propio pasa', async () => {
+    const inmuebles = inmueblesCon();
+
+    await servicio(inmuebles, tercerosDe(TITULAR)).create({
+      codigo: '301',
+      titularId: TITULAR.toString(),
+    });
+
+    expect(inmuebles.create).toHaveBeenCalled();
+  });
+
+  it('la lectura solo puebla partes de la copropiedad activa (un id ajeno guardado no se lee)', async () => {
+    const populate = jest.fn(() => ({
+      exec: () => Promise.resolve(documento()),
+    }));
+    const inmuebles = {
+      ...inmueblesCon(),
+      findOne: jest.fn(() => ({ populate })),
+    };
+
+    await servicio(inmuebles as never, tercerosDe()).findOne('inm-1');
+
+    expect(populate).toHaveBeenCalledWith([
+      expect.objectContaining({
+        path: 'titularId',
+        match: { copropiedadId: COP },
+      }),
+      expect.objectContaining({
+        path: 'arrendatarioId',
+        match: { copropiedadId: COP },
+      }),
+    ]);
+  });
+});
