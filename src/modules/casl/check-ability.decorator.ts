@@ -16,9 +16,9 @@ export interface RequiredRule {
  * Declares the abilities a route requires. Multiple rules are ALL required
  * (logical AND).
  *
- * Enforcement is opt-in: a route with no decorator is not gated by CASL at all.
- * That is a real footgun on a financial endpoint — every controller that reads
- * or writes a document must carry it.
+ * Enforcement is default-deny: under `PoliciesGuard` a route with neither
+ * this, `CheckAnyAbility` nor `AuthenticatedOnly()` is refused (403), and the
+ * route-policy inventory (`route-policies.spec.ts`) fails the build for it.
  *
  * Example: CheckAbility({ action: 'annul', subject: 'Factura' })
  */

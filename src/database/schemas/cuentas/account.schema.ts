@@ -7,9 +7,11 @@ export type AccountDocument = HydratedDocument<Account>;
 /**
  * Somebody who signs in to operate this system.
  *
- * Everyone here is staff: the administrator of one or more coproperties, or the
- * platform operator. Unit owners and tenants are `Tercero` records and never
- * have an account — this product has no resident-facing side at all.
+ * Staff (the administrator of one or more coproperties, operational personnel,
+ * the platform operator) AND residents. An owner or tenant gets an account when
+ * staff provision their sign-in (`/residentes`); it is linked through
+ * `Tercero.accountId`, carries no permissions, and reaches only the `/portal/*`
+ * routes, for the units it currently holds.
  *
  * Not the identity provider's record, but this system's own. The provider
  * answers "is this person who they claim to be"; this answers "and what may

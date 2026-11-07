@@ -6,9 +6,9 @@ Instructions for AI coding agents in this repo. Human setup docs live in `README
 
 ## What this is
 
-REST API for WebSACO Finanzas (billing, receivables, reports). Stack: Node 22, NestJS 11, TypeScript, MongoDB/Mongoose, Redis (ioredis), Firebase Admin (token verification only), `pdf-lib`. Target: Cloud Run.
+REST API for WebSACO Finanzas (billing, receivables, reports). Stack: Node 22, NestJS 11, TypeScript, MongoDB/Mongoose, Redis (ioredis), Firebase Admin (token verification, plus user creation for staff/resident sign-in provisioning and custom tokens for access links), `pdf-lib`, `pdfjs-dist` (reading the block-billing PDFs), SendGrid, `@nestjs/schedule`. Target: Cloud Run.
 
-Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts, the catalog/identity model (coproperties, units, parties, charge concepts, accounts/assignments), tenant context + CASL + the API contract convention, and the financial documents (facturación, recibos, notas contables/crédito/débito, PDFs, accounting ledger, estado de cuenta, cartera aging, auditoría). Queues/mailer not yet built.
+Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts, the catalog/identity model (coproperties, units, parties, charge concepts, accounts/assignments), tenant context + CASL + the API contract convention, and the financial documents (facturación, recibos, notas contables/crédito/débito, PDFs, accounting ledger, estado de cuenta, cartera aging, auditoría). Since the fusion, also the Administración modules (PQR, reservations, documents, announcements, tasks, maintenance, activities, roles, staff team and resident provisioning, the resident portal) behind the `administracion` licence, and the native invoice send (`envio-facturas`). No queues: delivery runs inside the request, resumable.
 
 ## Commands
 
@@ -18,7 +18,7 @@ Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts,
 | `npm run build` | SWC build — **does not typecheck** |
 | `npm run typecheck` | `tsc --noEmit` — the real type gate |
 | `npm run lint` | ESLint with `--fix` |
-| `npm test` | Jest unit tests (`*.spec.ts`) |
+| `npm test` | Jest unit tests (`*.spec.ts`), run as `node --experimental-vm-modules node_modules/jest/bin/jest.js` (pdfjs-dist is ESM; a bare `npx jest` skips its tests) |
 | `npm run test:cov` | Coverage |
 | `npm run seed:admin -- --env=<name>` | Creates the first platform-admin account from `ROOT_ADMIN_EMAIL` |
 | `npm run <script> -- --env=<name> [flags]` | The other scripts in `src/seed/` that open Mongo (`seed:demo`, `clear:demo`, `migrar:nombre-propio`, `limpiar:indices-ingles`, `sembrar:consecutivos`; `seed-cargos.ts` has no npm alias). Their own flags (`--simular`, `--aplicar`, `--db=<name>`) go after `--env` |
@@ -68,7 +68,7 @@ return this.model.find({ copropiedadId }).exec();
 
 ## The audit law
 
-**No financial document is ever physically deleted.** Voiding is a state transition (`estado: 'anulada'`) plus an append-only log entry (who/when/why). This is enforced in the vocabulary: there is no `delete` action and no `eliminar` verb in `permission-map.ts`, so no route can be granted it. `annul` is the sanctioned replacement, kept separate from `update` so a role can hold one without the other. Don't add `delete`/`eliminar` back — `permission-map.spec.ts` fails on purpose if someone does.
+**No financial document is ever physically deleted.** Voiding is a state transition (`estado: 'anulada'`) plus an append-only log entry (who/when/why). This is enforced in the vocabulary: the financial verbs (`VERB_TO_ACTION`) have no `eliminar`, and `remove` is vetoed on every financial subject after the grants (platform admins included), so no route over a financial document can be granted it. `eliminar` → `remove` exists ONLY for Administración segments (`VERB_TO_ACTION_ADMINISTRACION`: PQR, tasks, documents of the building library…, which are not financial records). `annul` is the sanctioned replacement, kept separate from `update` so a role can hold one without the other. Don't add `eliminar` to the financial verbs or lift the veto — `permission-map.spec.ts` fails on purpose if someone does.
 
 **Narrow exception — undoing a failed `consolidar` run** (`LotesFacturacionService.deshacerConsolidacion`, confirmed with accounting). If a consolidación fails (a tanda's transaction, or an exception escaping the run), the lote is put back to zero: every Factura of that `loteId` plus its SaldoCartera increments, `CarteraPorDocumento`/`SaldoTotalDocumento` rows and asientos are physically deleted, and the invoice counter is rewound to where `reservarBloqueFacturas` found it (one conditional `updateOne`: only if it still equals what the run left, so it can never go up or clobber numbers someone else reserved). `cancelar` runs the same undo for a lote that already has Facturas. The exception stops exactly there:
 
@@ -83,7 +83,7 @@ return this.model.find({ copropiedadId }).exec();
 
 The guard verifies `Authorization: Bearer <token>` with `verifyIdToken(token, true)` — `checkRevoked: true` costs one round trip but gives immediate lockout on a disabled account instead of waiting up to an hour for expiry. Don't drop it. Every verification failure returns the same opaque 401 — a probe shouldn't distinguish expired/revoked/forged; detail goes to the log.
 
-**This project only ever verifies identities — it never creates, updates, or deletes Firebase users.** Accounts are provisioned by hand in the console; don't add `createUser`/`setCustomUserClaims`/a seed that writes to Firebase — the identity pool is shared with another system's real users.
+**Firebase writes happen in exactly one place: `FirebaseUsuariosService`**, used by `/equipo` (staff of a coproperty) and `/residentes` (owners and tenants) to create the sign-in with a random password nobody sees; people enter through an emailed access link or "forgot password". An existing identity is never taken over silently (residents need `vincularExistente: true`; bulk provisioning never links). Nothing else may call `createUser`/`updateUser`/`deleteUser`/`setCustomUserClaims`, and no seed writes to Firebase — the identity pool is shared with another system's real users (see `../CLAUDE.md`). `EnlaceAccesoService` mints custom tokens for access links (it reads and writes no user); the public redeem is `POST /auth/enlace/canjear` (rate-limited, opaque 401), and it never issues a link to a platform admin, an inactive account, or an account with Finanzas reach in ANY coproperty or a non-`personal` assignment anywhere.
 
 **Two identities, not one:** the provider answers "who are you", the local `Account` answers "what may you do here". A valid token with no local account is authenticated and entitled to nothing — the guard lets it through with an empty permission list rather than rejecting, because real users of the other system can obtain valid tokens for this API and must land on nothing (not an error).
 
@@ -91,7 +91,7 @@ The guard verifies `Authorization: Bearer <token>` with `verifyIdToken(token, tr
 
 ## Authorization
 
-`@CheckAbility({ action, subject })` on the route, `PoliciesGuard` in the controller's own `@UseGuards` (never a global `APP_GUARD` — must run after auth). **Enforcement is opt-in**: an undecorated route is unchecked, which is a hole on any financial endpoint — every controller that reads/writes a document needs one.
+`@CheckAbility({ action, subject })` on the route, `PoliciesGuard` in the controller's own `@UseGuards` (never a global `APP_GUARD` — must run after auth). **Enforcement is default-deny**: under `PoliciesGuard` a route with no `@CheckAbility`/`@CheckAnyAbility` and no `@AuthenticatedOnly()` answers 403, and `casl/route-policies.spec.ts` fails for any route that does not declare exactly one policy (public, signed service, platform admin, authenticated-only, portal, or CASL + `@Modulo`). The `@Public()` routes are pinned by name in that spec, each with its reason. Residents carry no permissions and use `/portal/*` behind `PortalGuard` (current holder of an active unit of the active coproperty). The `personal` profile ceiling strips every Finanzas key (on write and on read); roles and `/equipo` can only carry Administración catalog keys, and a grantor can only give (or take out of a role) keys they hold.
 
 Permission keys are Spanish `modulo.accion` strings mapped to CASL rules in exactly one place, `permission-map.ts` — new subject → add to both `SUBJECTS` and `MODULE_TO_SUBJECT`. Unknown keys are skipped, and skipping means deny. `Inmueble`/`Tercero`/`ConceptoCobro` are distinct subjects from `Consulta` on purpose — reading the arrears report doesn't imply editing who owns a unit.
 
@@ -205,13 +205,13 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 - `--` and PowerShell (reported, NOT verified here): on Windows PowerShell with npm >= 9 the `--` may be consumed before reaching the script, so `--env` is lost and the script stops with the usage message. Workarounds to try: `npm.cmd run <script> -- --env=<name>`, or quote it: `npm run <script> '--' --env=<name>`.
 - `/health/ready` also runs `integracion-comptable` (`modules/health/integracion-comptable.health.ts`): it reads `COMPTABLE_API_URL` / `COMPTABLE_HMAC_SECRET` and fails on a half-set pair, a URL that is not an `http(s)` URL, carries credentials/query/fragment, or does not end in `/api/v1` (the one thing Joi's scheme check misses; without the prefix every Comptable route 404s). Neither set = `up` with `omitido`. Config only, no call to Comptable; it is NOT in `GET /health` (the Dockerfile HEALTHCHECK), because a bad URL is fixed by a redeploy, not a restart.
 - Redis: one shared client (`common/redis/redis.provider.ts`) with an `error` listener and a capped `retryStrategy`. Don't open ad-hoc clients.
-- Redis has **no consumer yet beyond its own health check** — wired ahead of BullMQ. Don't invent uses for it, don't remove it either.
-- `pdf-lib` (writing PDFs) is core; `pdfjs-dist` (reading them) is deliberately absent — nothing in the domain reads PDFs.
+- Redis consumers: `LockService` (cron locks and the block-billing ingest lock) and `LimiteIntentosService` (fixed-window counter for the public access-link redeem; fails closed). One shared client; don't open ad-hoc ones.
+- `pdf-lib` (writing PDFs) is core. `pdfjs-dist` (exact version `6.2.108`, ESM) is used ONLY by the transitional block-billing adapter (`modules/facturacion-bloque/`) to detect units in externally produced PDFs; no financial module reads PDFs.
 - `npm run build` skips typechecking (`typeCheck: false`, SWC). A green build proves nothing about types — use `npm run typecheck`.
 
 ## Not here yet — do not assume it exists
 
-BullMQ queues and the mailer (`app.module.ts` still just has comments where they'll attach). Verify against `src/modules/` and `src/database/schemas/` before assuming any other module is missing — this list drifts fast.
+BullMQ queues (deliberately not used: email delivery runs inside the request with leases and resumable progress). The mailer exists (`common/correo/`, SendGrid, optional via `SENDGRID_*`). Verify against `src/modules/` and `src/database/schemas/` before assuming any other module is missing — this list drifts fast.
 
 ## Decisions pending claude-mem save
 

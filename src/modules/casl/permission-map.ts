@@ -72,8 +72,10 @@ export const VERB_TO_ACTION_ADMINISTRACION = {
 /**
  * `accion` segment of a permission key -> CASL action.
  *
- * There is no `eliminar` verb, and adding one would be a bug: see the note on
- * ACTIONS in casl-ability.constants.ts. `anular` is how a document is retired.
+ * There is no `eliminar` verb here, and adding one would be a bug: see the note
+ * on ACTIONS in casl-ability.constants.ts. `anular` is how a document is
+ * retired. `eliminar` exists only in `VERB_TO_ACTION_ADMINISTRACION`, and
+ * `remove` stays vetoed on every financial subject.
  */
 export const VERB_TO_ACTION = {
   ver: 'read',
