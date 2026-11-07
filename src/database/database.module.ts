@@ -190,8 +190,20 @@ import {
 
 import { Tarea, TareaSchema } from './schemas/administracion/tarea.schema';
 
+import {
+  Mantenimiento,
+  MantenimientoSchema,
+} from './schemas/administracion/mantenimiento.schema';
+
+import {
+  Actividad,
+  ActividadSchema,
+} from './schemas/administracion/actividad.schema';
+
 const models = [
   { name: Tarea.name, schema: TareaSchema },
+  { name: Mantenimiento.name, schema: MantenimientoSchema },
+  { name: Actividad.name, schema: ActividadSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },

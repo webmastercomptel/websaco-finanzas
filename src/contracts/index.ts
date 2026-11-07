@@ -2918,3 +2918,65 @@ export interface Tarea {
   historial?: TareaActividad[];
   observaciones?: TareaObservacion[];
 }
+
+/** A maintenance job of the active coproperty (list row and detail). */
+export interface Mantenimiento {
+  id: string;
+  codigo: string;
+  titulo: string;
+  descripcion: string;
+  tipo: 'preventivo' | 'correctivo';
+  estado: 'programado' | 'en_progreso' | 'completado' | 'cancelado';
+  prioridad?: 'urgente' | 'alta' | 'normal' | 'baja';
+  fecha: string;
+  horario?: string;
+  proveedor: {
+    nombre: string;
+    iniciales: string;
+  };
+  tecnicoId: string | null;
+  ubicacion: string;
+  notas?: string;
+  costoEstimado?: number;
+  completadoEn?: string;
+}
+
+/**
+ * Counters of the maintenance screen. The names suggest bounded ranges but the
+ * counts are NOT bounded by date: `programadosSemana` counts every scheduled
+ * job, `completadosMes` every completed one, ever. Kept as the system this was
+ * ported from computed them; `enProgresoCorrective` keeps its mixed-language
+ * name because the frontend already reads it.
+ */
+export interface MantenimientosStats {
+  programadosSemana: number;
+  enProgresoCorrective: number;
+  completadosMes: number;
+}
+
+/** A community activity of the active coproperty. */
+export interface Actividad {
+  id: string;
+  codigo: string;
+  titulo: string;
+  descripcion: string;
+  categoria:
+    | 'integracion'
+    | 'salud'
+    | 'asamblea'
+    | 'cultural'
+    | 'deportivo'
+    | 'operativo';
+  fecha: string;
+  horario: string;
+  ubicacion: string;
+  imagen: string | null;
+  destacado: boolean;
+  tags: string[];
+  asistentes: number;
+  capacidad: number;
+  estado: 'proximo' | 'en_curso' | 'finalizado' | 'cancelado';
+  organizador: string;
+  /** Only the resident portal fills it: whether the caller is signed up. */
+  asistiendo?: boolean;
+}
