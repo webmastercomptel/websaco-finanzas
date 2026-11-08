@@ -289,3 +289,43 @@ describe('ZonasImagenService — la URL de subida no sirve después de confirmar
     });
   });
 });
+
+describe('ZonasImagenService.confirmar — la imagen reemplazada no queda huérfana', () => {
+  const rutaNueva = `zonas/${COPROPIEDAD.toString()}/${ZONA_ID}/nueva-foto.png`;
+  const rutaVieja = `zonas/${COPROPIEDAD.toString()}/${ZONA_ID}/vieja-foto.png`;
+
+  it('al confirmar una imagen nueva borra el objeto de la anterior', async () => {
+    const { servicio, zonas, bucket, archivo } = montar();
+    zonas.findOne.mockReturnValue(
+      consulta({ _id: ZONA, imagenRuta: rutaVieja }),
+    );
+    zonas.findOneAndUpdate.mockReturnValue(
+      consulta(zonaDoc({ imagenRuta: rutaNueva })),
+    );
+
+    await servicio.confirmar(ZONA_ID, rutaNueva);
+
+    expect(bucket.file).toHaveBeenCalledWith(rutaVieja);
+    expect(archivo.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('no borra nada fuera del prefijo de esa zona ni la misma ruta confirmada otra vez', async () => {
+    for (const anterior of [
+      `zonas/${COPROPIEDAD.toString()}/${new Types.ObjectId().toString()}/x.png`,
+      'otra-cosa/x.png',
+      rutaNueva,
+    ]) {
+      const { servicio, zonas, archivo } = montar();
+      zonas.findOne.mockReturnValue(
+        consulta({ _id: ZONA, imagenRuta: anterior }),
+      );
+      zonas.findOneAndUpdate.mockReturnValue(
+        consulta(zonaDoc({ imagenRuta: rutaNueva })),
+      );
+
+      await servicio.confirmar(ZONA_ID, rutaNueva);
+
+      expect(archivo.delete).not.toHaveBeenCalled();
+    }
+  });
+});

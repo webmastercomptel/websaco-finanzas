@@ -124,7 +124,7 @@ export class ZonasImagenService {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const zona = await this.zonas
       .findOne({ _id: zonaId, copropiedadId })
-      .select('_id')
+      .select('_id imagenRuta')
       .exec();
     if (!zona) {
       throw new NotFoundException(`Zona común ${zonaId} no encontrada`);
@@ -169,6 +169,20 @@ export class ZonasImagenService {
       .exec();
     if (!documento) {
       throw new NotFoundException(`Zona común ${zonaId} no encontrada`);
+    }
+    // The replaced picture is nobody's any more: delete it (best effort, only
+    // an object this zone's own uploads created), or every change leaks one.
+    const anterior = zona.imagenRuta ?? null;
+    if (
+      anterior &&
+      anterior !== storagePath &&
+      anterior.startsWith(prefijoEsperado) &&
+      !anterior.includes('..')
+    ) {
+      await this.bucket
+        .file(anterior)
+        .delete()
+        .catch(() => undefined);
     }
     return toZonaComun(documento, await this.urlLectura(storagePath));
   }
