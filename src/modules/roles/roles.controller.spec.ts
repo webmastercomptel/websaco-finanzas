@@ -8,11 +8,13 @@ import { rulesFromPermissionKeys } from '../casl/permission-map';
 import { RolesController } from './roles.controller';
 
 /** The rules a handler requires, as the policies guard reads them. */
-const requisitos = (handler: keyof RolesController): RequiredRule[] =>
-  Reflect.getMetadata(
+const requisitos = (handler: keyof RolesController): RequiredRule[] => {
+  const metodo: unknown = Reflect.get(RolesController.prototype, handler);
+  return Reflect.getMetadata(
     CHECK_ABILITY_KEY,
-    RolesController.prototype[handler],
+    metodo as object,
   ) as RequiredRule[];
+};
 
 /** Whether a caller holding `claves` clears every rule of the handler. */
 const puede = (handler: keyof RolesController, claves: string[]): boolean => {
