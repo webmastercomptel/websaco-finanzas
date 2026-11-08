@@ -19,9 +19,9 @@ import { ActualizarRolDto, CrearRolDto } from './dto/guardar-rol.dto';
 import { RolesService } from './roles.service';
 
 /**
+ * Roles of the active coproperty: named bundles of Administración permissions.
  * Each verb asks for its own action: `roles.ver` (read) opens the two reads
  * and nothing else; `roles.gestionar` (manage) covers all of them.
- * covers all of them and nothing weaker does.
  */
 @Controller('roles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
