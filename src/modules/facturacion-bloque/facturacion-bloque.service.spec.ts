@@ -135,6 +135,17 @@ describe('FacturacionBloqueService.crear', () => {
     expect(respuesta.bloque.estado).toBe('pendiente');
   });
 
+  it('devuelve los encabezados que el navegador debe mandar en el PUT: el tipo firmado y el de solo crear', async () => {
+    const { servicio } = montar();
+
+    const respuesta = await servicio.crear(dto, user);
+
+    expect(respuesta.encabezadosSubida).toEqual({
+      'Content-Type': 'application/pdf',
+      'x-goog-if-generation-match': '0',
+    });
+  });
+
   it('quién sube sale de la cuenta autenticada, no del cuerpo', async () => {
     const { servicio, instancias } = montar();
 

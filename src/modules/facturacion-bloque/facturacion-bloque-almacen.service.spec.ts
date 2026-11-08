@@ -123,6 +123,19 @@ describe('FacturacionBloqueAlmacenService — confinado a facturacion-bloque/', 
     );
   });
 
+  it('la URL de subida es solo de crear: firma x-goog-if-generation-match: 0', async () => {
+    const { servicio, archivo } = montar();
+    const ruta = rutaOriginal(COP, BLOQUE);
+
+    await servicio.firmarSubida(ruta);
+
+    expect(archivo(ruta).getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extensionHeaders: { 'x-goog-if-generation-match': '0' },
+      }),
+    );
+  });
+
   it('la URL de lectura es corta, de lectura, y el nombre de descarga va firmado y saneado', async () => {
     const { servicio, archivo } = montar();
     const ruta = rutaDeUnidad(COP, BLOQUE, INMUEBLE);

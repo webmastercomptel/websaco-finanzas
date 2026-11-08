@@ -9,6 +9,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { encabezadosSubida } from '../../common/storage/subida-firmada';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type {
   BloqueFacturacion as BloqueContrato,
@@ -114,7 +115,11 @@ export class FacturacionBloqueService {
     }).save();
 
     const uploadUrl = await this.almacen.firmarSubida(ruta);
-    return { bloque: toBloque(creado), uploadUrl };
+    return {
+      bloque: toBloque(creado),
+      uploadUrl,
+      encabezadosSubida: encabezadosSubida('application/pdf'),
+    };
   }
 
   /** The blocks of the active coproperty, newest first. */

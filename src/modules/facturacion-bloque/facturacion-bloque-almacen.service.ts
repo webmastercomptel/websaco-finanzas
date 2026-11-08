@@ -2,6 +2,7 @@
 import type { Bucket } from '@google-cloud/storage';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { GCS_BUCKET } from '../../common/storage/storage.constants';
+import { ENCABEZADOS_SOLO_CREAR } from '../../common/storage/subida-firmada';
 
 /**
  * The ONLY Storage prefix this module touches. Nothing here may read, sign, list
@@ -80,7 +81,12 @@ export class FacturacionBloqueAlmacenService {
     }
   }
 
-  /** Signed URL to PUT the original, pinned to `application/pdf`. */
+  /**
+   * Signed URL to PUT the original, pinned to `application/pdf` and create-only:
+   * once the object exists the same URL cannot replace it, so the PDF the
+   * ingest read is the one that stays. The browser must send the matching
+   * `encabezadosSubida`.
+   */
   async firmarSubida(ruta: string): Promise<string> {
     this.exigir(ruta);
     const [url] = await this.bucket.file(ruta).getSignedUrl({
@@ -88,6 +94,7 @@ export class FacturacionBloqueAlmacenService {
       action: 'write',
       expires: Date.now() + VIGENCIA_URL_MS,
       contentType: 'application/pdf',
+      extensionHeaders: { ...ENCABEZADOS_SOLO_CREAR },
     });
     return url;
   }

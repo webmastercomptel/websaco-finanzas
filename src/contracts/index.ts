@@ -3403,10 +3403,15 @@ export interface BloqueFacturacionDetalle extends BloqueFacturacion {
   unidades: UnidadBloqueFacturacion[];
 }
 
-/** Step 1 of the upload: the record plus the signed URL the browser PUTs to. */
+/**
+ * Step 1 of the upload: the record plus the signed URL the browser PUTs to.
+ * `encabezadosSubida` are the headers the PUT must carry exactly as given (the
+ * URL is signed for them and create-only); without them Storage answers 403.
+ */
 export interface SubidaBloqueIniciada {
   bloque: BloqueFacturacion;
   uploadUrl: string;
+  encabezadosSubida: Record<string, string>;
 }
 
 /** What `confirmar` answers: the match report the admin reviews before sending. */
