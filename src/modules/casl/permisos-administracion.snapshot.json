@@ -1,0 +1,182 @@
+[
+  {
+    "id": "dashboard.ver",
+    "nombre": "Ver Dashboard",
+    "descripcion": "Acceso al panel principal",
+    "modulo": "Dashboard"
+  },
+  {
+    "id": "anuncios.ver",
+    "nombre": "Ver Anuncios",
+    "descripcion": "Ver lista de anuncios",
+    "modulo": "Anuncios"
+  },
+  {
+    "id": "anuncios.crear",
+    "nombre": "Crear Anuncios",
+    "descripcion": "Publicar nuevos anuncios",
+    "modulo": "Anuncios"
+  },
+  {
+    "id": "anuncios.editar",
+    "nombre": "Editar Anuncios",
+    "descripcion": "Modificar anuncios existentes",
+    "modulo": "Anuncios"
+  },
+  {
+    "id": "anuncios.eliminar",
+    "nombre": "Eliminar Anuncios",
+    "descripcion": "Borrar anuncios",
+    "modulo": "Anuncios"
+  },
+  {
+    "id": "usuarios.ver",
+    "nombre": "Ver Usuarios",
+    "descripcion": "Ver directorio de usuarios",
+    "modulo": "Usuarios"
+  },
+  {
+    "id": "usuarios.crear",
+    "nombre": "Crear Usuarios",
+    "descripcion": "Registrar nuevos usuarios",
+    "modulo": "Usuarios"
+  },
+  {
+    "id": "usuarios.editar",
+    "nombre": "Editar Usuarios",
+    "descripcion": "Modificar datos de usuarios",
+    "modulo": "Usuarios"
+  },
+  {
+    "id": "usuarios.eliminar",
+    "nombre": "Eliminar Usuarios",
+    "descripcion": "Dar de baja usuarios",
+    "modulo": "Usuarios"
+  },
+  {
+    "id": "pqr.ver",
+    "nombre": "Ver PQR",
+    "descripcion": "Ver lista de PQR",
+    "modulo": "PQR"
+  },
+  {
+    "id": "pqr.gestionar",
+    "nombre": "Gestionar PQR",
+    "descripcion": "Responder y cambiar estado",
+    "modulo": "PQR"
+  },
+  {
+    "id": "reservas.ver",
+    "nombre": "Ver Reservas",
+    "descripcion": "Ver calendario de reservas",
+    "modulo": "Reservas"
+  },
+  {
+    "id": "reservas.aprobar",
+    "nombre": "Aprobar Reservas",
+    "descripcion": "Aprobar o rechazar solicitudes",
+    "modulo": "Reservas"
+  },
+  {
+    "id": "documentos-administracion.ver",
+    "nombre": "Ver Documentos",
+    "descripcion": "Acceder a documentos",
+    "modulo": "Documentos"
+  },
+  {
+    "id": "documentos-administracion.subir",
+    "nombre": "Subir Documentos",
+    "descripcion": "Cargar nuevos archivos",
+    "modulo": "Documentos"
+  },
+  {
+    "id": "documentos-administracion.gestionar",
+    "nombre": "Gestionar Documentos",
+    "descripcion": "Administrar todas las carpetas y sus permisos, sin importar los ACL",
+    "modulo": "Documentos"
+  },
+  {
+    "id": "config.ver",
+    "nombre": "Ver Configuración",
+    "descripcion": "Acceso a configuración",
+    "modulo": "Configuración"
+  },
+  {
+    "id": "config.editar",
+    "nombre": "Editar Configuración",
+    "descripcion": "Modificar ajustes del sistema",
+    "modulo": "Configuración"
+  },
+  {
+    "id": "roles.ver",
+    "nombre": "Ver Roles",
+    "descripcion": "Ver los roles y el catálogo de permisos, sin modificarlos",
+    "modulo": "Configuración"
+  },
+  {
+    "id": "roles.gestionar",
+    "nombre": "Gestionar Roles",
+    "descripcion": "Crear y modificar roles",
+    "modulo": "Configuración"
+  },
+  {
+    "id": "tareas.ver",
+    "nombre": "Ver Tareas",
+    "descripcion": "Ver el tablero de tareas",
+    "modulo": "Tareas"
+  },
+  {
+    "id": "tareas.actualizar",
+    "nombre": "Actualizar Tareas Asignadas",
+    "descripcion": "Completar y agregar observaciones a las tareas propias",
+    "modulo": "Tareas"
+  },
+  {
+    "id": "tareas.gestionar",
+    "nombre": "Gestionar Tareas",
+    "descripcion": "Crear, editar y eliminar tareas",
+    "modulo": "Tareas"
+  },
+  {
+    "id": "mantenimientos.ver",
+    "nombre": "Ver Mantenimientos",
+    "descripcion": "Ver el calendario de mantenimientos",
+    "modulo": "Mantenimientos"
+  },
+  {
+    "id": "mantenimientos.gestionar",
+    "nombre": "Gestionar Mantenimientos",
+    "descripcion": "Crear, editar y eliminar mantenimientos",
+    "modulo": "Mantenimientos"
+  },
+  {
+    "id": "actividades.ver",
+    "nombre": "Ver Actividades",
+    "descripcion": "Ver la agenda de actividades",
+    "modulo": "Actividades"
+  },
+  {
+    "id": "actividades.gestionar",
+    "nombre": "Gestionar Actividades",
+    "descripcion": "Crear, editar y eliminar actividades",
+    "modulo": "Actividades"
+  },
+  {
+    "id": "zonas.ver",
+    "nombre": "Ver Zonas Comunes",
+    "descripcion": "Ver las zonas comunes",
+    "modulo": "Zonas Comunes"
+  },
+  {
+    "id": "zonas.gestionar",
+    "nombre": "Gestionar Zonas Comunes",
+    "descripcion": "Crear, editar y eliminar zonas comunes",
+    "modulo": "Zonas Comunes"
+  },
+  {
+    "id": "tecnicos.gestionar",
+    "nombre": "Gestionar Técnicos",
+    "descripcion": "Crear, editar y eliminar técnicos",
+    "modulo": "PQR"
+  }
+]
