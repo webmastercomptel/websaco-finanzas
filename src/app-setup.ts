@@ -1,5 +1,6 @@
 // src/app-setup.ts
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { corsOptionsFor } from './config/cors';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
@@ -9,6 +10,11 @@ export interface AppSetupOptions {
   env: string | undefined;
   /** CORS_ORIGINS, comma-separated. */
   corsOrigins: string | undefined;
+  /**
+   * TRUST_PROXY_HOPS: exact number of proxies in front of the app (1 on Cloud
+   * Run). Absent = 0, X-Forwarded-For ignored (never spoofable).
+   */
+  trustProxyHops?: number;
 }
 
 /**
@@ -29,6 +35,15 @@ export function configureApp(
   options: AppSetupOptions,
 ): void {
   app.setGlobalPrefix('api/v1');
+
+  // `req.ip` keys the per-address limit of the public access-link redeem.
+  // A hop COUNT, never `true`: Express then takes the address the last N
+  // proxies appended to X-Forwarded-For, not the left-most entry, which the
+  // client writes itself.
+  (app as NestExpressApplication).set(
+    'trust proxy',
+    options.trustProxyHops ?? 0,
+  );
 
   // The browser app is served from a different origin (Vite in development, a
   // separate host in production), so every call it makes is cross-origin.

@@ -335,3 +335,20 @@ describe('envValidationSchema', () => {
     });
   });
 });
+
+describe('envValidationSchema — TRUST_PROXY_HOPS', () => {
+  it('vale 1 por defecto (Cloud Run: un salto, el frente de Google)', () => {
+    const resultado = validate({});
+    expect(resultado.error).toBeUndefined();
+    const valor = resultado.value as { TRUST_PROXY_HOPS: number };
+    expect(valor.TRUST_PROXY_HOPS).toBe(1);
+  });
+
+  it('acepta un entero chico y rechaza "true" o negativos (nunca confiar en todo)', () => {
+    expect(validate({ TRUST_PROXY_HOPS: '2' }).error).toBeUndefined();
+    expect(validate({ TRUST_PROXY_HOPS: '0' }).error).toBeUndefined();
+    expect(validate({ TRUST_PROXY_HOPS: 'true' }).error).toBeDefined();
+    expect(validate({ TRUST_PROXY_HOPS: '-1' }).error).toBeDefined();
+    expect(validate({ TRUST_PROXY_HOPS: '10' }).error).toBeDefined();
+  });
+});

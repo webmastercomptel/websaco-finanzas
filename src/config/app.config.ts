@@ -12,6 +12,8 @@ import { registerAs } from '@nestjs/config';
 export default registerAs('app', () => ({
   env: process.env.NODE_ENV,
   port: parseInt(process.env.PORT!, 10),
+  // Joi default 1 (Cloud Run); see TRUST_PROXY_HOPS in env.validation.ts.
+  trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS!, 10),
   mongodbUri: process.env.MONGODB_URI!,
   redisUrl: process.env.REDIS_URL!,
   firebaseServiceAccountBase64: process.env.FIREBASE_SERVICE_ACCOUNT_BASE64!,

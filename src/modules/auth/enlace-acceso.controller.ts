@@ -15,10 +15,15 @@ import type { EnlaceCanjeado } from '../../contracts';
 import { Public } from '../casl/check-ability.decorator';
 import { CanjearEnlaceDto } from './dto/canjear-enlace.dto';
 
-/** Attempts per client address per window. */
+/**
+ * Attempts per client address per window. `req.ip` is the real client only
+ * because `configureApp` trusts exactly TRUST_PROXY_HOPS proxies.
+ *
+ * There is deliberately NO global bucket: one counting every request, valid or
+ * not, let anyone lock every resident out with ~10 req/s of garbage, and it
+ * added no brute-force protection (tokens carry 256 bits of entropy).
+ */
 const LIMITE_POR_IP = 20;
-/** Attempts across every client per window: bounds the cost if addresses rotate. */
-const LIMITE_GLOBAL = 600;
 const VENTANA_MS = 60_000;
 
 /**
@@ -32,7 +37,7 @@ const VENTANA_MS = 60_000;
  * token here, call `signInWithCustomToken(customToken)`, select
  * `copropiedadId` as the active coproperty, then navigate to `destino`.
  *
- * Rate-limited per client address and globally (Redis, fails closed). Every
+ * Rate-limited per client address (Redis, fails closed). Every
  * failure — unknown, expired, revoked, or an account that no longer qualifies —
  * is the same 401, so the route cannot be used to probe which tokens exist.
  */
@@ -56,12 +61,7 @@ export class EnlaceAccesoController {
       LIMITE_POR_IP,
       VENTANA_MS,
     );
-    const global = await this.limite.permitir(
-      'limite:enlace-canjear:global',
-      LIMITE_GLOBAL,
-      VENTANA_MS,
-    );
-    if (!porIp || !global) {
+    if (!porIp) {
       throw new HttpException(
         'Demasiados intentos. Espera un minuto e inténtalo de nuevo.',
         HttpStatus.TOO_MANY_REQUESTS,

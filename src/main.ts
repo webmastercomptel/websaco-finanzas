@@ -25,6 +25,7 @@ async function bootstrap() {
   configureApp(app, {
     env: configService.get<string>('app.env'),
     corsOrigins: configService.get<string>('app.corsOrigins'),
+    trustProxyHops: configService.get<number>('app.trustProxyHops'),
   });
 
   app.enableShutdownHooks();

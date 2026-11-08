@@ -103,16 +103,19 @@ describe('EnlaceAccesoController.canjear', () => {
     );
   });
 
-  it('el límite global también corta aunque la IP esté dentro del suyo', async () => {
+  it('no hay cubeta global: el tráfico inválido de otras direcciones no deja afuera a los demás residentes', async () => {
+    // Before: one shared bucket counted every request, valid or not, so
+    // ~10 req/s of garbage from anywhere locked every resident out.
     const { controlador, enlaces, limite } = montar({
       permitidos: [true, false],
     });
 
-    await expect(
-      controlador.canjear({ token: TOKEN }, req),
-    ).rejects.toMatchObject({ status: HttpStatus.TOO_MANY_REQUESTS });
-    expect(enlaces.canjear).not.toHaveBeenCalled();
-    expect(limite.permitir).toHaveBeenCalledWith(
+    await expect(controlador.canjear({ token: TOKEN }, req)).resolves.toEqual(
+      expect.objectContaining({ customToken: 'ct' }),
+    );
+    expect(enlaces.canjear).toHaveBeenCalled();
+    expect(limite.permitir).toHaveBeenCalledTimes(1);
+    expect(limite.permitir).not.toHaveBeenCalledWith(
       'limite:enlace-canjear:global',
       expect.any(Number),
       expect.any(Number),

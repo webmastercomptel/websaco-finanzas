@@ -132,6 +132,17 @@ export const envValidationSchema = Joi.object({
     .empty('')
     .optional(),
 
+  // How many reverse proxies sit between the client and this process; Express
+  // derives `req.ip` by trusting exactly that many hops of X-Forwarded-For,
+  // counted from the right (the entries proxies append), so a value the client
+  // wrote itself is never taken. 1 = Cloud Run behind Google's front end (the
+  // target). 2 = an external HTTPS load balancer in front of Cloud Run. 0 =
+  // exposed directly (X-Forwarded-For ignored). Too LOW is safe (every client
+  // reads as the proxy, so per-address limits become shared); too HIGH lets a
+  // client pick its own address. Never `true`: that trusts the left-most,
+  // client-controlled entry. Used by the access-link redeem's per-IP limit.
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).max(3).default(1),
+
   // Integrations panel (see modules/integraciones-panel/ and
   // docs/runbooks/integracion-panel.md). The switch is OFF by default: a
   // deployment that never heard of the panel behaves exactly as before. With
