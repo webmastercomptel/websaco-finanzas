@@ -593,6 +593,21 @@ describe('EquipoService.crear — cuentas que ya existen', () => {
     expect(m.firebase.crear).not.toHaveBeenCalled();
   });
 
+  it('el 409 lleva el código estable CUENTA_EXISTENTE y conserva el mensaje', async () => {
+    const c = cuenta({ email: 'nuevo@correo.co' });
+    const m = montar({ cuentas: [c] });
+
+    const error = await m.servicio
+      .crear(dto, caller())
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      code: 'CUENTA_EXISTENTE',
+      message: expect.stringContaining('vincularExistente') as string,
+    });
+  });
+
   it('con vincularExistente le suma una asignación personal sin tocar Firebase ni la cuenta', async () => {
     const c = cuenta({ email: 'nuevo@correo.co' });
     const m = montar({ cuentas: [c] });

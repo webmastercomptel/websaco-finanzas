@@ -486,6 +486,21 @@ describe('AccesoResidentesService.crearAcceso con una cuenta que ya existe', () 
     expect(m.auditoria.registrar).not.toHaveBeenCalled();
   });
 
+  it('el 409 lleva el código estable CUENTA_EXISTENTE y conserva el mensaje', async () => {
+    const t = tercero();
+    const m = montar({ terceros: [t], cuentas: [cuenta()] });
+
+    const error = await m.servicio
+      .crearAcceso(t._id.toString(), {}, USER)
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      code: 'CUENTA_EXISTENTE',
+      message: expect.stringContaining('vincularExistente') as string,
+    });
+  });
+
   it('con vincularExistente vincula la cuenta existente, sin tocar Firebase', async () => {
     const t = tercero();
     const c = cuenta();

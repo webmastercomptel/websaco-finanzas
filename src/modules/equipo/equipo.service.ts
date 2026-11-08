@@ -37,6 +37,7 @@ import {
 import { InvitacionAccesoService } from '../acceso-residentes/invitacion-acceso.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { esPermisoAdministracion } from '../casl/permisos-catalogo';
+import { CODIGO_CUENTA_EXISTENTE } from '../../common/firebase/codigos-cuenta';
 import type { ListarEquipoDto } from './dto/listar-equipo.dto';
 import type {
   ActualizarMiembroEquipoDto,
@@ -376,9 +377,11 @@ export class EquipoService {
 
     if (existente) {
       if (dto.vincularExistente !== true) {
-        throw new ConflictException(
-          'Ya existe una cuenta con ese correo. Si es la misma persona, confirma el vínculo con vincularExistente',
-        );
+        throw new ConflictException({
+          code: CODIGO_CUENTA_EXISTENTE,
+          message:
+            'Ya existe una cuenta con ese correo. Si es la misma persona, confirma el vínculo con vincularExistente',
+        });
       }
       if (existente.esAdministradorPlataforma) {
         throw new ConflictException(

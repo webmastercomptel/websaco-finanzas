@@ -48,6 +48,7 @@ import { MAX_APROVISIONAMIENTO } from './dto/aprovisionar-residentes.dto';
 import type { CrearAccesoResidenteDto } from './dto/crear-acceso-residente.dto';
 import type { ListarResidentesDto } from './dto/listar-residentes.dto';
 import { InvitacionAccesoService } from './invitacion-acceso.service';
+import { CODIGO_CUENTA_EXISTENTE } from '../../common/firebase/codigos-cuenta';
 
 /** Mongo's duplicate-key error code. */
 const CLAVE_DUPLICADA = 11000;
@@ -332,9 +333,11 @@ export class AccesoResidentesService {
         );
       }
       if (!opciones.vincularExistente) {
-        throw new ConflictException(
-          'Ya existe una cuenta con el correo del tercero. Si es la misma persona, confirma el vínculo con vincularExistente',
-        );
+        throw new ConflictException({
+          code: CODIGO_CUENTA_EXISTENTE,
+          message:
+            'Ya existe una cuenta con el correo del tercero. Si es la misma persona, confirma el vínculo con vincularExistente',
+        });
       }
       await this.exigirCuentaVinculable(existente, tercero, copropiedadId);
       cuenta = existente;
