@@ -3677,8 +3677,14 @@ export interface PaginadoEnviosFactura {
 /** Counts per pipeline state of the active coproperty. */
 export interface ResumenEnvioFacturas {
   pendientes: number;
-  /** Pending rows a processor holds right now or that are waiting out a backoff. */
+  /** Queued rows a live processor holds right now (a lease still inside its validity). */
   enCurso: number;
+  /**
+   * Queued rows nobody holds that are only waiting out their retry backoff after a
+   * failed attempt. They become `pendientes` by themselves; a processor running
+   * does NOT explain them, so the screen must not say "another process is sending".
+   */
+  enEspera: number;
   enviadas: number;
   conError: number;
 }
@@ -3711,8 +3717,10 @@ export interface ResultadoProcesoEnvio {
   unidadesSinDestinatario: string[];
   /** Queued rows ready to be processed now. */
   pendientes: number;
-  /** Queued rows held by another processor or waiting out a backoff. */
+  /** Queued rows held right now by another processor (a live lease). */
   enCurso: number;
+  /** Queued rows only waiting out their retry backoff (nobody holds them). */
+  enEspera: number;
   /** True while another call can make progress. */
   hayMas: boolean;
 }

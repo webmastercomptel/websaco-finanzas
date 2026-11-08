@@ -276,8 +276,36 @@ describe('EnvioFacturasService.marcar', () => {
     expect(await t.servicio.resumen()).toEqual({
       pendientes: 1,
       enCurso: 1,
+      enEspera: 0,
       enviadas: 0,
       conError: 1,
+    });
+  });
+
+  it('el resumen separa lo que espera su reintento de lo que tiene un candado vivo', async () => {
+    const t = montar();
+    for (const unidad of ['A-101', 'A-102', 'A-103', 'A-104']) {
+      t.factura(unidad);
+    }
+    await t.servicio.marcar({ loteId: LOTE.toString() }, staff());
+    const futuro = new Date(Date.now() + 10 * 60_000);
+    // Listo para procesar.
+    // docs[1]: solo espera su reintento (sin candado).
+    t.envios.docs[1].proximoIntentoEn = futuro;
+    // docs[2]: candado vivo.
+    t.envios.docs[2].tokenEnvio = 'viva';
+    t.envios.docs[2].envioIniciadoEn = new Date();
+    // docs[3]: candado vivo Y con espera de reintento: manda el candado.
+    t.envios.docs[3].tokenEnvio = 'otra-viva';
+    t.envios.docs[3].envioIniciadoEn = new Date();
+    t.envios.docs[3].proximoIntentoEn = futuro;
+
+    expect(await t.servicio.resumen()).toEqual({
+      pendientes: 1,
+      enCurso: 2,
+      enEspera: 1,
+      enviadas: 0,
+      conError: 0,
     });
   });
 });

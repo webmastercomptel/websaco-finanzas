@@ -300,7 +300,8 @@ describe('EnvioFacturasProcesoService', () => {
       });
       // Waiting out the backoff: not claimable yet, so the screen stops looping.
       expect(primera.hayMas).toBe(false);
-      expect(primera.enCurso).toBe(1);
+      expect(primera.enCurso).toBe(0);
+      expect(primera.enEspera).toBe(1);
 
       // Backoff over, provider healthy again.
       t.fila(unidad).proximoIntentoEn = new Date(Date.now() - 1000);
@@ -357,7 +358,12 @@ describe('EnvioFacturasProcesoService', () => {
 
       const r = await t.proceso.procesarPendientes(staff());
 
-      expect(r).toMatchObject({ reclamadas: 0, hayMas: false, enCurso: 1 });
+      expect(r).toMatchObject({
+        reclamadas: 0,
+        hayMas: false,
+        enCurso: 1,
+        enEspera: 0,
+      });
       expect(t.correo.enviar).not.toHaveBeenCalled();
       expect(fila.tokenEnvio).toBe('corrida-viva');
     });
@@ -442,7 +448,12 @@ describe('EnvioFacturasProcesoService', () => {
 
     const segundo = await t.proceso.procesarPendientes(staff('Beto'));
 
-    expect(segundo).toMatchObject({ reclamadas: 0, hayMas: false, enCurso: 1 });
+    expect(segundo).toMatchObject({
+      reclamadas: 0,
+      hayMas: false,
+      enCurso: 1,
+      enEspera: 0,
+    });
     soltarCorreo();
     await primero;
     expect(t.correo.enviar).toHaveBeenCalledTimes(1);

@@ -25,7 +25,7 @@ import {
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import type { ListarEnviosFacturasDto } from './dto/listar-envios-facturas.dto';
 import type { MarcarEnvioFacturasDto } from './dto/marcar-envio-facturas.dto';
-import { filtroReclamable, MAX_POR_PAGINA } from './envio-facturas.constantes';
+import { contarCola, MAX_POR_PAGINA } from './envio-facturas.constantes';
 import { toEnvioFactura } from './envio-facturas.mapper';
 
 /** The account behind a request; a request without one cannot be attributed. */
@@ -222,17 +222,12 @@ export class EnvioFacturasService {
   /** Counts per state, with "pending" meaning exactly what the next processing call would take. */
   async resumen(): Promise<ResumenEnvioFacturas> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    const [pendientes, enviadas, conError, enCola] = await Promise.all([
-      this.envios
-        .countDocuments(filtroReclamable(copropiedadId, new Date()))
-        .exec(),
+    const [cola, enviadas, conError] = await Promise.all([
+      contarCola(this.envios, copropiedadId, new Date()),
       this.envios.countDocuments({ copropiedadId, estado: 'enviado' }).exec(),
       this.envios.countDocuments({ copropiedadId, estado: 'error' }).exec(),
-      this.envios
-        .countDocuments({ copropiedadId, estado: 'pendiente_envio' })
-        .exec(),
     ]);
-    return { pendientes, enCurso: enCola - pendientes, enviadas, conError };
+    return { ...cola, enviadas, conError };
   }
 
   private async facturasDelLote(

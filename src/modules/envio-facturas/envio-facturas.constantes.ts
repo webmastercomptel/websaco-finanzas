@@ -72,3 +72,65 @@ export const filtroReclamable = (
     },
   ],
 });
+
+/**
+ * Queued rows that are only waiting out their retry backoff: no live lease, but
+ * `proximoIntentoEn` is still in the future. The complement of
+ * {@link filtroReclamable} among the rows without a live lease, so a row is in
+ * exactly one of "claimable", "waiting" or "held by a live processor".
+ */
+export const filtroEnEspera = (
+  copropiedadId: Types.ObjectId,
+  ahora: Date,
+): Record<string, unknown> => ({
+  copropiedadId,
+  estado: 'pendiente_envio',
+  $and: [
+    {
+      $or: [
+        { tokenEnvio: null },
+        {
+          envioIniciadoEn: {
+            $lt: new Date(ahora.getTime() - VIGENCIA_ENVIO_MS),
+          },
+        },
+      ],
+    },
+    { proximoIntentoEn: { $gt: ahora } },
+  ],
+});
+
+/** The queue split three ways; the three numbers always add up to the queued rows. */
+export interface ConteoCola {
+  /** Ready to be processed right now. */
+  pendientes: number;
+  /** Held by a live processor (a lease still inside its validity). */
+  enCurso: number;
+  /** Only waiting out their retry backoff; nobody holds them. */
+  enEspera: number;
+}
+
+/** Minimal shape of the model needed to count the queue (keeps this file free of Mongoose). */
+interface ContableCola {
+  countDocuments(filtro: Record<string, unknown>): {
+    exec(): Promise<number>;
+  };
+}
+
+/**
+ * Counts the queue of a coproperty in the three buckets above. `enCurso` is the
+ * remainder, so a row with a live lease AND a pending backoff counts as held
+ * (the lease is what stops anybody from taking it), never twice.
+ */
+export async function contarCola(
+  envios: ContableCola,
+  copropiedadId: Types.ObjectId,
+  ahora: Date,
+): Promise<ConteoCola> {
+  const [pendientes, enEspera, enCola] = await Promise.all([
+    envios.countDocuments(filtroReclamable(copropiedadId, ahora)).exec(),
+    envios.countDocuments(filtroEnEspera(copropiedadId, ahora)).exec(),
+    envios.countDocuments({ copropiedadId, estado: 'pendiente_envio' }).exec(),
+  ]);
+  return { pendientes, enEspera, enCurso: enCola - pendientes - enEspera };
+}

@@ -32,6 +32,7 @@ import {
   etiquetaPeriodo,
 } from './envio-factura-correo';
 import {
+  contarCola,
   ENVIOS_SIMULTANEOS,
   esperaTrasFallo,
   filtroReclamable,
@@ -150,6 +151,7 @@ export class EnvioFacturasProcesoService {
       unidadesSinDestinatario: [],
       pendientes: 0,
       enCurso: 0,
+      enEspera: 0,
       hayMas: false,
     };
 
@@ -171,14 +173,14 @@ export class EnvioFacturasProcesoService {
     }
 
     const ahora = new Date();
-    const [pendientes, enCola] = await Promise.all([
-      this.envios.countDocuments(filtroReclamable(copropiedadId, ahora)).exec(),
-      this.envios
-        .countDocuments({ copropiedadId, estado: 'pendiente_envio' })
-        .exec(),
-    ]);
+    const { pendientes, enCurso, enEspera } = await contarCola(
+      this.envios,
+      copropiedadId,
+      ahora,
+    );
     resultado.pendientes = pendientes;
-    resultado.enCurso = enCola - pendientes;
+    resultado.enCurso = enCurso;
+    resultado.enEspera = enEspera;
     resultado.unidadesSinDestinatario.sort();
     // Stop when this call could not take anything: whatever is left is held by
     // another processor or waiting out a backoff, and repeating would spin.
