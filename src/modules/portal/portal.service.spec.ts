@@ -211,14 +211,14 @@ describe('PortalService.facturasDe', () => {
     const cola = colaCon([{ facturaId: FACTURA }]);
     const orden: unknown[] = [];
     const findOriginal = cola.find.bind(cola);
-    cola.find = ((filtro: Record<string, unknown>) => {
+    cola.find = (filtro: Record<string, unknown>) => {
       const q = findOriginal(filtro);
       q.sort = ((criterio: unknown) => {
         orden.push(criterio);
         return q;
       }) as typeof q.sort;
       return q;
-    }) as typeof cola.find;
+    };
     const { service } = await construir('propietario', cola);
 
     await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
