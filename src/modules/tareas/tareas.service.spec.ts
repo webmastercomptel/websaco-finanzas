@@ -864,7 +864,12 @@ describe('TareasService.listar', () => {
 
     expect(resultado).toHaveLength(1);
     expect(resultado[0].asignados).toEqual([
-      { nombre: 'María Gómez', iniciales: 'MG', avatar: null },
+      {
+        accountId: ASIGNADO.toString(),
+        nombre: 'María Gómez',
+        iniciales: 'MG',
+        avatar: null,
+      },
     ]);
   });
 });

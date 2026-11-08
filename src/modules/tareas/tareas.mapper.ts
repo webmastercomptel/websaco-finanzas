@@ -18,7 +18,7 @@ import type { ActualizarTareaDto } from './dto/actualizar-tarea.dto';
  */
 const esCuentaPoblada = (
   valor: unknown,
-): valor is Pick<AccountDocument, 'nombreCompleto'> =>
+): valor is Pick<AccountDocument, '_id' | 'nombreCompleto'> =>
   valor != null &&
   !(valor instanceof Types.ObjectId) &&
   typeof valor === 'object' &&
@@ -40,6 +40,7 @@ export const toTarea = (doc: TareaDocument): Tarea => ({
   asignados: ((doc.asignadosIds ?? []) as unknown[])
     .filter(esCuentaPoblada)
     .map((cuenta) => ({
+      accountId: cuenta._id.toString(),
       nombre: cuenta.nombreCompleto,
       iniciales: iniciales(cuenta.nombreCompleto),
       avatar: null,

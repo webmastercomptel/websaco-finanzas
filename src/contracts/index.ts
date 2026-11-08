@@ -2893,6 +2893,11 @@ export interface Notificacion {
 
 /** A person a task is assigned to, as the board shows them. */
 export interface TareaAsignado {
+  /**
+   * The assignee's account id — the same value `asignadosIds` takes and
+   * `TareaAsignable.accountId` carries, so clients match people by id, never by name.
+   */
+  accountId: string;
   nombre: string;
   iniciales: string;
   /** No account carries a picture today: always null until one does. */

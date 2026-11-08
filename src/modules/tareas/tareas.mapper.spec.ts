@@ -61,7 +61,7 @@ describe('toTarea', () => {
     });
   });
 
-  it('arma los asignados desde las cuentas pobladas, con iniciales y avatar nulo', () => {
+  it('arma los asignados desde las cuentas pobladas, con id de cuenta, iniciales y avatar nulo', () => {
     const tarea = toTarea(
       documento({
         asignadosIds: [{ _id: ID, nombreCompleto: 'Laura Gómez' }],
@@ -69,7 +69,12 @@ describe('toTarea', () => {
     );
 
     expect(tarea.asignados).toEqual([
-      { nombre: 'Laura Gómez', iniciales: 'LG', avatar: null },
+      {
+        accountId: ID.toString(),
+        nombre: 'Laura Gómez',
+        iniciales: 'LG',
+        avatar: null,
+      },
     ]);
   });
 
