@@ -4,7 +4,7 @@ import type { Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { Modulo } from '../casl/check-ability.decorator';
+import { Modulo, ModuloAlguno } from '../casl/check-ability.decorator';
 import {
   EstadoCuentaPortalDto,
   ListarFacturasPortalDto,
@@ -25,6 +25,13 @@ import { PortalService } from './portal.service';
 export class PortalController {
   constructor(private readonly portal: PortalService) {}
 
+  /**
+   * The resident's own unit list. Shared by both products: the PQR and booking
+   * forms (Administración) and the invoice screens (Finanzas) all start from it,
+   * and it carries no financial data (code and role only). Invoices and the
+   * statement stay Finanzas-only through the class-level `@Modulo`.
+   */
+  @ModuloAlguno('finanzas', 'administracion')
   @Get('unidades')
   unidades(@CurrentUser() user: IRequestUser) {
     return this.portal.unidades(user);

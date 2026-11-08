@@ -81,3 +81,16 @@ export const CHECK_ANY_ABILITY_KEY = 'check_any_ability';
  */
 export const CheckAnyAbility = (...rules: RequiredRule[]) =>
   SetMetadata(CHECK_ANY_ABILITY_KEY, rules);
+
+/**
+ * Like `Modulo`, but the route is available when the active coproperty has
+ * contracted ANY of the listed modules. For the few resident-facing reads that
+ * both products need (the caller's own unit list feeds the PQR and booking
+ * forms of Administración and the invoice screens of Finanzas). The first
+ * argument is separate so the list can never be empty. Everything else about
+ * the route (guards, ownership checks in the service) stays as it was.
+ */
+export const ModuloAlguno = (
+  primero: ModuloProducto,
+  ...resto: ModuloProducto[]
+) => SetMetadata(MODULO_KEY, [primero, ...resto]);

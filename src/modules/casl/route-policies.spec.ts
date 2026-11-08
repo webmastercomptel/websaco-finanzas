@@ -19,6 +19,7 @@ import {
   MODULO_KEY,
   PUBLIC_KEY,
 } from './check-ability.decorator';
+import { MODULOS_PRODUCTO } from '../../common/licencia/modulos';
 
 // Controllers are only imported to read decorator metadata, never executed. The
 // PDF renderer does not resolve in every environment (a known, unrelated
@@ -48,6 +49,19 @@ function guardNames(controller: Ctor, handler: Handler): string[] {
   const methodGuards =
     (Reflect.getMetadata(GUARDS_METADATA, handler) as unknown[]) ?? [];
   return [...classGuards, ...methodGuards].map(guardName);
+}
+
+/**
+ * A declared module must be a real product module; a list (`@ModuloAlguno`)
+ * must be non-empty and made only of real ones, or the guard would deny (or
+ * match) for the wrong reason.
+ */
+function moduloValido(modulo: string | string[]): boolean {
+  const lista = typeof modulo === 'string' ? [modulo] : modulo;
+  return (
+    lista.length > 0 &&
+    lista.every((m) => (MODULOS_PRODUCTO as readonly string[]).includes(m))
+  );
 }
 
 function declared(key: string, controller: Ctor, handler: Handler): boolean {
@@ -94,9 +108,12 @@ export function routeProblem(
       return 'PortalGuard runs before FirebaseAuthGuard';
     }
     const modulo =
-      (Reflect.getMetadata(MODULO_KEY, handler) as string | undefined) ??
-      (Reflect.getMetadata(MODULO_KEY, controller) as string | undefined);
-    return modulo ? null : 'under PortalGuard without @Modulo';
+      (Reflect.getMetadata(MODULO_KEY, handler) as
+        string | string[] | undefined) ??
+      (Reflect.getMetadata(MODULO_KEY, controller) as
+        string | string[] | undefined);
+    if (!modulo) return 'under PortalGuard without @Modulo';
+    return moduloValido(modulo) ? null : 'declares an unknown @Modulo';
   }
   if (guards.includes('PoliciesGuard')) {
     if (at('FirebaseAuthGuard') > at('PoliciesGuard')) {
@@ -107,9 +124,12 @@ export function routeProblem(
       hasRules(CHECK_ANY_ABILITY_KEY, controller, handler);
     if (!hasAbility) return 'under PoliciesGuard without @CheckAbility';
     const modulo =
-      (Reflect.getMetadata(MODULO_KEY, handler) as string | undefined) ??
-      (Reflect.getMetadata(MODULO_KEY, controller) as string | undefined);
-    return modulo ? null : 'under PoliciesGuard without @Modulo';
+      (Reflect.getMetadata(MODULO_KEY, handler) as
+        string | string[] | undefined) ??
+      (Reflect.getMetadata(MODULO_KEY, controller) as
+        string | string[] | undefined);
+    if (!modulo) return 'under PoliciesGuard without @Modulo';
+    return moduloValido(modulo) ? null : 'declares an unknown @Modulo';
   }
   return declared(AUTHENTICATED_ONLY_KEY, controller, handler)
     ? null
@@ -184,6 +204,17 @@ describe('routeProblem (classifier)', () => {
       h,
     );
     expect(routeProblem(c, h)).toBe('under PoliciesGuard without @Modulo');
+  });
+
+  it('acepta una lista de módulos (@ModuloAlguno) y rechaza una vacía o con un módulo desconocido', () => {
+    const Portal = class PortalGuard {};
+    const [c, h] = make([Auth, Portal]);
+    Reflect.defineMetadata(MODULO_KEY, ['finanzas', 'administracion'], h);
+    expect(routeProblem(c, h)).toBeNull();
+    Reflect.defineMetadata(MODULO_KEY, [], h);
+    expect(routeProblem(c, h)).toBe('declares an unknown @Modulo');
+    Reflect.defineMetadata(MODULO_KEY, ['finanzas', 'otro'], h);
+    expect(routeProblem(c, h)).toBe('declares an unknown @Modulo');
   });
 
   it('rechaza una ruta sin ningún guard y sin @Public', () => {
