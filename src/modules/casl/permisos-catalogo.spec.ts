@@ -29,9 +29,9 @@ describe('puedeLeerMateria', () => {
 describe('PERMISOS_ADMINISTRACION (catálogo que ofrece el editor de roles)', () => {
   const claves = PERMISOS_ADMINISTRACION.map((p) => p.id);
 
-  it('tiene las 29 claves de Administración, sin repetir', () => {
-    expect(claves).toHaveLength(29);
-    expect(new Set(claves).size).toBe(29);
+  it('tiene las 30 claves de Administración, sin repetir', () => {
+    expect(claves).toHaveLength(30);
+    expect(new Set(claves).size).toBe(30);
   });
 
   it('toda clave pertenece al módulo administracion y ninguna es de finanzas', () => {
@@ -57,6 +57,30 @@ describe('PERMISOS_ADMINISTRACION (catálogo que ofrece el editor de roles)', ()
     );
     expect(habilidad.can('remove', 'Anuncio')).toBe(true);
     expect(habilidad.can('remove', 'Factura')).toBe(false);
+  });
+
+  it('roles.ver es una clave de Administración del grupo Configuración y permite el perfil personal', () => {
+    const entrada = PERMISOS_ADMINISTRACION.find((p) => p.id === 'roles.ver');
+
+    expect(entrada).toBeDefined();
+    expect(entrada?.modulo).toBe('Configuración');
+    expect(moduloDePermiso('roles.ver')).toBe('administracion');
+    expect(permisosVetadosParaPerfil('personal', ['roles.ver'])).toEqual([]);
+  });
+
+  it('roles.ver solo permite leer roles; roles.gestionar sigue cubriéndolo todo', () => {
+    const ver = createAppAbility(rulesFromPermissionKeys(['roles.ver']));
+    expect(ver.can('read', 'Rol')).toBe(true);
+    expect(ver.can('create', 'Rol')).toBe(false);
+    expect(ver.can('update', 'Rol')).toBe(false);
+    expect(ver.can('remove', 'Rol')).toBe(false);
+
+    const gestionar = createAppAbility(
+      rulesFromPermissionKeys(['roles.gestionar']),
+    );
+    for (const accion of ['read', 'create', 'update', 'remove'] as const) {
+      expect(gestionar.can(accion, 'Rol')).toBe(true);
+    }
   });
 
   it('esPermisoAdministracion acepta solo las claves del catálogo', () => {
@@ -121,7 +145,6 @@ describe('claves de Administración', () => {
       'usuarios.gestionar',
       'config.anular',
       'tareas.crear',
-      'roles.ver',
     ]) {
       expect(moduloDePermiso(clave)).toBeNull();
       expect(permisosDesconocidos([clave])).toEqual([clave]);

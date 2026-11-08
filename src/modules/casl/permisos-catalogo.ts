@@ -179,6 +179,12 @@ export const PERMISOS_ADMINISTRACION: readonly PermisoCatalogo[] = [
     'Configuración',
   ),
   permiso(
+    'roles.ver',
+    'Ver Roles',
+    'Ver los roles y el catálogo de permisos, sin modificarlos',
+    'Configuración',
+  ),
+  permiso(
     'roles.gestionar',
     'Gestionar Roles',
     'Crear y modificar roles',

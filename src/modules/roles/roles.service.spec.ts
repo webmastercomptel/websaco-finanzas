@@ -386,7 +386,8 @@ describe('RolesService.permisos', () => {
 
     const catalogo = servicio.permisos();
 
-    expect(catalogo.length).toBe(29);
+    expect(catalogo.length).toBe(30);
+    expect(catalogo.map((p) => p.id)).toContain('roles.ver');
     expect(catalogo.map((p) => p.id)).toContain('roles.gestionar');
     expect(catalogo.some((p) => p.id.startsWith('facturas.'))).toBe(false);
   });
