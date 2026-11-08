@@ -207,6 +207,25 @@ describe('PortalService.facturasDe', () => {
     expect(opciones.soloIds.map(String)).toEqual([liberada]);
   });
 
+  it('el tope de liberadas por unidad se aplica en un orden fijo: las más recientes primero', async () => {
+    const cola = colaCon([{ facturaId: FACTURA }]);
+    const orden: unknown[] = [];
+    const findOriginal = cola.find.bind(cola);
+    cola.find = ((filtro: Record<string, unknown>) => {
+      const q = findOriginal(filtro);
+      q.sort = ((criterio: unknown) => {
+        orden.push(criterio);
+        return q;
+      }) as typeof q.sort;
+      return q;
+    }) as typeof cola.find;
+    const { service } = await construir('propietario', cola);
+
+    await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+
+    expect(orden).toEqual([{ liberadaEn: -1, _id: -1 }]);
+  });
+
   it('una unidad sin facturas liberadas devuelve una página vacía sin consultar facturas', async () => {
     const { service, facturas } = await construir(
       'arrendatario',

@@ -134,6 +134,9 @@ export class PortalService {
         liberadaEn: { $ne: null },
       })
       .select('facturaId')
+      // Past the cap, keep the most recently released (stable on ties) rather
+      // than whatever subset the server happens to return.
+      .sort({ liberadaEn: -1, _id: -1 })
       .limit(MAX_LIBERADAS_POR_UNIDAD)
       .lean()
       .exec();
