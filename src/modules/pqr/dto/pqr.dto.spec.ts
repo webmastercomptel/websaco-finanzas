@@ -154,3 +154,34 @@ describe('CrearAdjuntoPqrDto', () => {
     ).toEqual(expect.arrayContaining(['nombre', 'tamanoBytes']));
   });
 });
+
+describe('CrearAdjuntoPqrDto — tipos permitidos', () => {
+  it.each(['text/html', 'image/svg+xml', 'application/javascript', 'text/xml'])(
+    'rechaza %s (podría ejecutarse al abrirse desde el bucket)',
+    async (mimeType) => {
+      expect(
+        await invalidas(CrearAdjuntoPqrDto, {
+          nombre: 'x',
+          mimeType,
+          tamanoBytes: 10,
+        }),
+      ).toEqual(['mimeType']);
+    },
+  );
+
+  it.each([
+    'image/jpeg',
+    'image/png',
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ])('acepta %s', async (mimeType) => {
+    expect(
+      await invalidas(CrearAdjuntoPqrDto, {
+        nombre: 'x',
+        mimeType,
+        tamanoBytes: 10,
+      }),
+    ).toEqual([]);
+  });
+});

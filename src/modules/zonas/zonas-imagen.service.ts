@@ -10,6 +10,10 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { GCS_BUCKET } from '../../common/storage/storage.constants';
+import {
+  ENCABEZADOS_SOLO_CREAR,
+  encabezadosSubida,
+} from '../../common/storage/subida-firmada';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ImagenZonaSubidaIniciada, ZonaComun } from '../../contracts';
 import {
@@ -102,9 +106,16 @@ export class ZonasImagenService {
       action: 'write',
       expires: Date.now() + VIGENCIA_URL_SUBIDA_MS,
       contentType: dto.mimeType,
+      // Create-only: after `confirmar` checked the object, this URL cannot
+      // replace it (see `ENCABEZADOS_SOLO_CREAR`).
+      extensionHeaders: { ...ENCABEZADOS_SOLO_CREAR },
     });
 
-    return { uploadUrl, storagePath };
+    return {
+      uploadUrl,
+      storagePath,
+      encabezadosSubida: encabezadosSubida(dto.mimeType),
+    };
   }
 
   /** Step 2. A client-supplied path is never trusted: it must carry this tenant and zone. */

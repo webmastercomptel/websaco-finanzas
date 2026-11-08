@@ -22,7 +22,15 @@ import {
   Pqr,
   type PqrDocument,
 } from '../../database/schemas/administracion/pqr.schema';
-import type { CrearAdjuntoPqrDto } from './dto/guardar-adjunto.dto';
+import {
+  disposicionDescarga,
+  ENCABEZADOS_SOLO_CREAR,
+  encabezadosSubida,
+} from '../../common/storage/subida-firmada';
+import {
+  TIPOS_ADJUNTO_PQR,
+  type CrearAdjuntoPqrDto,
+} from './dto/guardar-adjunto.dto';
 import { filtroPqr, poblarTecnico } from './pqr-consultas';
 import { toPqr } from './pqr.mapper';
 
@@ -65,7 +73,9 @@ const tipoDeAdjunto = (mime: string): string => {
  * bucket in two steps so no bytes ever pass through this API:
  *
  * 1. `iniciar`: registers the attachment as `pendiente` (the backend owns the
- *    object path) and signs a write URL pinned to the declared content type.
+ *    object path) and signs a create-only write URL pinned to the declared
+ *    content type (one of `TIPOS_ADJUNTO_PQR`); the browser must send the
+ *    returned `encabezadosSubida` on its PUT.
  * 2. The browser PUTs the file, then calls `confirmar`: the backend checks the
  *    object really exists before flipping that one attachment to `listo`. The
  *    client's "I uploaded it" is never trusted on its own.
@@ -109,6 +119,10 @@ export class PqrAdjuntosService {
 
     if (dto.tamanoBytes > TAMANO_MAXIMO_ADJUNTO_BYTES) {
       throw new BadRequestException('El archivo supera el límite de 25 MB');
+    }
+    // The DTO already refuses it; repeated here so no caller can skip it.
+    if (!TIPOS_ADJUNTO_PQR.includes(dto.mimeType)) {
+      throw new BadRequestException('Tipo de archivo no permitido');
     }
 
     const nombreSeguro = dto.nombre.replace(/[^\w.-]+/g, '_');
@@ -160,12 +174,16 @@ export class PqrAdjuntosService {
         action: 'write',
         expires: Date.now() + VIGENCIA_URL_ADJUNTO_MS,
         contentType: dto.mimeType,
+        // Create-only: once the object exists (and `confirmar` checked it),
+        // the same URL cannot replace it with something bigger or different.
+        extensionHeaders: { ...ENCABEZADOS_SOLO_CREAR },
       });
 
     return {
       pqr: toPqr(actualizada),
       uploadUrl,
       attachmentId: registrado._id.toString(),
+      encabezadosSubida: encabezadosSubida(dto.mimeType),
     };
   }
 
@@ -200,15 +218,18 @@ export class PqrAdjuntosService {
     }
 
     let tamanoReal: number;
+    let tipoReal: string;
     try {
       const [metadata] = await this.bucket
         .file(adjunto.rutaAlmacenamiento)
         .getMetadata();
       tamanoReal = Number(metadata.size ?? 0);
+      tipoReal = metadata.contentType ?? '';
     } catch {
       throw new BadRequestException('El archivo no se subió correctamente');
     }
-    if (tamanoReal > TAMANO_MAXIMO_ADJUNTO_BYTES) {
+    const tipoValido = TIPOS_ADJUNTO_PQR.includes(tipoReal);
+    if (tamanoReal > TAMANO_MAXIMO_ADJUNTO_BYTES || !tipoValido) {
       // Entry first, then the object: an object left behind is only an orphan,
       // an entry without its object would be a broken attachment.
       const quitado = await this.pqrs
@@ -221,7 +242,11 @@ export class PqrAdjuntosService {
       if (quitado.modifiedCount === 1) {
         await this.borrarObjeto(adjunto.rutaAlmacenamiento);
       }
-      throw new BadRequestException('El archivo supera el límite de 25 MB');
+      throw new BadRequestException(
+        tipoValido
+          ? 'El archivo supera el límite de 25 MB'
+          : 'Tipo de archivo no permitido',
+      );
     }
 
     // The still-`pendiente` condition lives inside the filter: two concurrent
@@ -293,6 +318,9 @@ export class PqrAdjuntosService {
         version: 'v4',
         action: 'read',
         expires: Date.now() + VIGENCIA_URL_ADJUNTO_MS,
+        // Saved, never rendered: also covers legacy objects stored with
+        // whatever type the uploader declared before the allowlist.
+        responseDisposition: disposicionDescarga(adjunto.nombre),
       });
     return { url, nombre: adjunto.nombre };
   }

@@ -78,7 +78,9 @@ function montar() {
   const getSignedUrl = jest
     .fn()
     .mockResolvedValue(['https://storage.example.com/firmada']);
-  const getMetadata = jest.fn().mockResolvedValue([{ size: 1024 }]);
+  const getMetadata = jest
+    .fn()
+    .mockResolvedValue([{ size: 1024, contentType: 'application/pdf' }]);
   const borrar = jest.fn().mockResolvedValue([{}]);
   const file = jest.fn(() => ({ getSignedUrl, getMetadata, delete: borrar }));
   const bucket = { file };
@@ -508,5 +510,89 @@ describe('PqrAdjuntosService.descargar', () => {
       copropiedadId: COPROPIEDAD,
       autorId: CUENTA,
     });
+  });
+});
+
+describe('PqrAdjuntosService — la URL de subida no sirve después de confirmar', () => {
+  const conPush = (pqrs: ReturnType<typeof montar>['pqrs']) =>
+    pqrs.findOneAndUpdate.mockImplementation(
+      (
+        _f: unknown,
+        cambio: { $push: { archivosAdjuntos: Record<string, unknown> } },
+      ) =>
+        consulta(
+          pqrDoc({
+            archivosAdjuntos: [adjunto(cambio.$push.archivosAdjuntos)],
+          }),
+        ),
+    );
+
+  it('firma la escritura con x-goog-if-generation-match: 0 (solo crea, nunca reemplaza) y devuelve los encabezados que el navegador debe mandar', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    conPush(pqrs);
+
+    const resultado = await servicio.iniciarSubida(PQR.toString(), dtoPdf);
+
+    expect(getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'write',
+        contentType: 'application/pdf',
+        extensionHeaders: { 'x-goog-if-generation-match': '0' },
+      }),
+    );
+    expect(resultado.encabezadosSubida).toEqual({
+      'Content-Type': 'application/pdf',
+      'x-goog-if-generation-match': '0',
+    });
+  });
+
+  it('rechaza con 400 un tipo fuera de la lista (html) sin registrar ni firmar', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+
+    await expect(
+      servicio.iniciarSubida(PQR.toString(), {
+        ...dtoPdf,
+        mimeType: 'text/html',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(getSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('al confirmar, un objeto real con tipo fuera de la lista se quita y se borra (400)', async () => {
+    const { servicio, pqrs, getMetadata, borrar } = montar();
+    const pendiente = adjunto();
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [pendiente] })),
+    );
+    getMetadata.mockResolvedValue([{ size: 10, contentType: 'image/svg+xml' }]);
+
+    await expect(
+      servicio.confirmarSubida(PQR.toString(), pendiente._id.toString()),
+    ).rejects.toThrow(BadRequestException);
+    expect(pqrs.updateOne).toHaveBeenCalled();
+    expect(borrar).toHaveBeenCalled();
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('la URL de descarga fuerza attachment (el navegador no renderiza el archivo)', async () => {
+    const { servicio, pqrs, getSignedUrl } = montar();
+    const listo = adjunto({
+      estado: 'listo',
+      nombre: 'mi "foto".png',
+      rutaAlmacenamiento: `pqrs/${COPROPIEDAD.toString()}/${PQR.toString()}/a.png`,
+    });
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [listo] })),
+    );
+
+    await servicio.descargarAdjunto(PQR.toString(), listo._id.toString());
+
+    expect(getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'read',
+        responseDisposition: 'attachment; filename="mi_foto_.png"',
+      }),
+    );
   });
 });

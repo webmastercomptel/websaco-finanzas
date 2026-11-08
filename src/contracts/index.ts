@@ -3015,6 +3015,11 @@ export interface PqrAdjuntoSubidaIniciada {
   pqr: Pqr;
   uploadUrl: string;
   attachmentId: string;
+  /**
+   * Headers the browser MUST send verbatim on the PUT (`Content-Type` and the
+   * create-only `x-goog-if-generation-match: 0` the URL was signed with).
+   */
+  encabezadosSubida: Record<string, string>;
 }
 
 /** One reply on a PQR thread. */
@@ -3102,6 +3107,11 @@ export interface Espacio {
 export interface ImagenZonaSubidaIniciada {
   uploadUrl: string;
   storagePath: string;
+  /**
+   * Headers the browser MUST send verbatim on the PUT (`Content-Type` and the
+   * create-only `x-goog-if-generation-match: 0` the URL was signed with).
+   */
+  encabezadosSubida: Record<string, string>;
 }
 
 /**

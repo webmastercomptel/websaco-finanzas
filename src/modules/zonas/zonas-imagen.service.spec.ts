@@ -269,3 +269,23 @@ describe('ZonasImagenService.confirmar', () => {
     );
   });
 });
+
+describe('ZonasImagenService — la URL de subida no sirve después de confirmar', () => {
+  it('firma la escritura con x-goog-if-generation-match: 0 y devuelve los encabezados que el navegador debe mandar', async () => {
+    const { servicio, archivo } = montar();
+
+    const resultado = await servicio.iniciar(ZONA_ID, dto);
+
+    expect(archivo.getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'write',
+        contentType: 'image/png',
+        extensionHeaders: { 'x-goog-if-generation-match': '0' },
+      }),
+    );
+    expect(resultado.encabezadosSubida).toEqual({
+      'Content-Type': 'image/png',
+      'x-goog-if-generation-match': '0',
+    });
+  });
+});
