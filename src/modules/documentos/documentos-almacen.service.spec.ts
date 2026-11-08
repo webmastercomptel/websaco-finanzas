@@ -10,7 +10,9 @@ import { GRACIA_SUBIDAS_PENDIENTES_MS } from './documentos-huerfanos.service';
 
 function montar() {
   const getSignedUrl = jest.fn().mockResolvedValue(['https://firmada.example']);
-  const getMetadata = jest.fn().mockResolvedValue([{ size: '2048' }]);
+  const getMetadata = jest
+    .fn()
+    .mockResolvedValue([{ size: '2048', contentType: 'application/pdf' }]);
   const borrar = jest.fn().mockResolvedValue(undefined);
   const file = jest.fn(() => ({ getSignedUrl, getMetadata, delete: borrar }));
   const getFiles = jest.fn();
@@ -78,29 +80,99 @@ describe('DocumentosAlmacenService', () => {
     );
   });
 
+  it('firma la subida solo-crear: el objeto no se puede reemplazar con la misma URL', async () => {
+    const { servicio, getSignedUrl } = montar();
+    await servicio.firmarSubida(VALIDA, 'application/pdf');
+    expect(getSignedUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extensionHeaders: { 'x-goog-if-generation-match': '0' },
+      }),
+    );
+  });
+
   it('firma la lectura con vigencia corta', async () => {
     const { servicio, getSignedUrl } = montar();
     const antes = Date.now();
-    await servicio.firmarLectura(VALIDA);
+    await servicio.firmarLectura(VALIDA, 'Acta.pdf', 'application/pdf');
     const { expires } = (getSignedUrl.mock.calls as unknown[][])[0][0] as {
       expires: number;
     };
     expect(expires - antes).toBeLessThanOrEqual(VIGENCIA_URL_MS + 1000);
   });
 
+  it.each([
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+  ])(
+    '%s se puede ver en el navegador: inline con el tipo fijado',
+    async (tipo) => {
+      const { servicio, getSignedUrl } = montar();
+      await servicio.firmarLectura(VALIDA, 'Acta 12.pdf', tipo);
+      expect(getSignedUrl).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'read',
+          responseDisposition: 'inline; filename="Acta_12.pdf"',
+          responseType: tipo,
+        }),
+      );
+    },
+  );
+
+  it.each([
+    'text/html',
+    'image/svg+xml',
+    'application/xhtml+xml',
+    'text/xml',
+    'application/javascript',
+    'application/zip',
+    'application/octet-stream',
+    'TEXT/HTML',
+  ])(
+    '%s nunca se renderiza desde el bucket: attachment, sin fijar el tipo',
+    async (tipo) => {
+      const { servicio, getSignedUrl } = montar();
+      await servicio.firmarLectura(VALIDA, 'a "b".html', tipo);
+      const opciones = (getSignedUrl.mock.calls as unknown[][])[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(opciones.responseDisposition).toBe(
+        'attachment; filename="a_b_.html"',
+      );
+      expect(opciones).not.toHaveProperty('responseType');
+    },
+  );
+
   it('se niega a firmar, medir o leer fuera del prefijo', async () => {
     const { servicio, file } = montar();
-    await expect(servicio.firmarLectura('facturas/x.pdf')).rejects.toThrow();
+    await expect(
+      servicio.firmarLectura('facturas/x.pdf', 'x.pdf', 'application/pdf'),
+    ).rejects.toThrow();
     await expect(
       servicio.firmarSubida('pqrs/x.pdf', 'application/pdf'),
     ).rejects.toThrow();
-    await expect(servicio.tamanoReal('zonas/x.png')).rejects.toThrow();
+    await expect(servicio.objetoReal('zonas/x.png')).rejects.toThrow();
     expect(file).not.toHaveBeenCalled();
   });
 
-  it('devuelve el tamaño real del objeto subido', async () => {
+  it('devuelve el tamaño y el tipo reales del objeto subido', async () => {
     const { servicio } = montar();
-    await expect(servicio.tamanoReal(VALIDA)).resolves.toBe(2048);
+    await expect(servicio.objetoReal(VALIDA)).resolves.toEqual({
+      tamanoBytes: 2048,
+      mimeType: 'application/pdf',
+    });
+  });
+
+  it('un objeto sin tipo registrado devuelve cadena vacía', async () => {
+    const { servicio, getMetadata } = montar();
+    getMetadata.mockResolvedValue([{ size: '1' }]);
+    await expect(servicio.objetoReal(VALIDA)).resolves.toEqual({
+      tamanoBytes: 1,
+      mimeType: '',
+    });
   });
 
   it('borra un objeto del prefijo', async () => {
@@ -132,7 +204,7 @@ describe('DocumentosAlmacenService', () => {
 
   it('jamás lista el bucket', async () => {
     const { servicio, getFiles } = montar();
-    await servicio.firmarLectura(VALIDA);
+    await servicio.firmarLectura(VALIDA, 'a.pdf', 'application/pdf');
     await servicio.eliminar(VALIDA);
     expect(getFiles).not.toHaveBeenCalled();
   });

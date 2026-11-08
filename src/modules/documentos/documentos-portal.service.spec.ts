@@ -69,6 +69,7 @@ const archivoDoc = (
   carpetaId,
   codigo: 'DOC-001',
   nombre: 'Reglamento.pdf',
+  mimeType: 'application/pdf',
   tipo: 'pdf',
   categoria: '',
   rutaAlmacenamiento: `${PREFIJO_DOCUMENTOS}${COPROPIEDAD.toString()}/uuid-Reglamento.pdf`,
@@ -324,7 +325,11 @@ describe('DocumentosPortalService.descargar', () => {
       copropiedadId: COPROPIEDAD,
       estado: 'listo',
     });
-    expect(almacen.firmarLectura).toHaveBeenCalledWith(doc.rutaAlmacenamiento);
+    expect(almacen.firmarLectura).toHaveBeenCalledWith(
+      doc.rutaAlmacenamiento,
+      doc.nombre,
+      doc.mimeType,
+    );
     expect(res).toEqual({
       url: 'https://storage/lectura',
       nombre: 'Reglamento.pdf',

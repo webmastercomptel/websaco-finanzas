@@ -3265,10 +3265,16 @@ export interface RutaCarpetaAdministracion {
   nombre: string;
 }
 
-/** Step 1 of an upload: the pending record plus the URL to PUT the file to. */
+/**
+ * Step 1 of an upload: the pending record plus the URL to PUT the file to.
+ * `encabezadosSubida` are the headers the browser must send on that PUT, exactly
+ * as given (the URL is signed for them and create-only); without them Storage
+ * answers 403.
+ */
 export interface SubidaArchivoIniciada {
   documento: ArchivoAdministracion;
   uploadUrl: string;
+  encabezadosSubida: Record<string, string>;
 }
 
 export interface DescargaArchivo {

@@ -128,7 +128,9 @@ function montar(a: ActorDocumentos) {
   const almacen = {
     firmarSubida: jest.fn().mockResolvedValue('https://storage/subida'),
     firmarLectura: jest.fn().mockResolvedValue('https://storage/lectura'),
-    tamanoReal: jest.fn().mockResolvedValue(4096),
+    objetoReal: jest
+      .fn()
+      .mockResolvedValue({ tamanoBytes: 4096, mimeType: 'application/pdf' }),
     eliminar: jest.fn().mockResolvedValue(true),
   };
   const notificaciones = {
@@ -194,6 +196,10 @@ describe('DocumentosService.iniciar — subida en dos pasos', () => {
       'application/pdf',
     );
     expect(res.uploadUrl).toBe('https://storage/subida');
+    expect(res.encabezadosSubida).toEqual({
+      'Content-Type': 'application/pdf',
+      'x-goog-if-generation-match': '0',
+    });
     expect(res.documento).toMatchObject({
       carpeta: 'actas',
       tieneArchivo: false,
@@ -329,7 +335,7 @@ describe('DocumentosService.confirmar', () => {
     await expect(
       servicio.confirmar(new Types.ObjectId().toString(), user),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(almacen.tamanoReal).not.toHaveBeenCalled();
+    expect(almacen.objetoReal).not.toHaveBeenCalled();
   });
 
   it('un documento ya confirmado es 409', async () => {
@@ -343,7 +349,7 @@ describe('DocumentosService.confirmar', () => {
   it('si el objeto no llegó a Storage es 400 y no cambia el estado', async () => {
     const { servicio, archivos, almacen } = montar(actor([ROL_ESCRIBE]));
     archivos.findOne.mockReturnValue(consulta(pendiente()));
-    almacen.tamanoReal.mockRejectedValue(new Error('404'));
+    almacen.objetoReal.mockRejectedValue(new Error('404'));
     await expect(
       servicio.confirmar(new Types.ObjectId().toString(), user),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -356,7 +362,10 @@ describe('DocumentosService.confirmar', () => {
     );
     const doc = pendiente();
     archivos.findOne.mockReturnValue(consulta(doc));
-    almacen.tamanoReal.mockResolvedValue(TAMANO_MAXIMO_DOCUMENTO_BYTES + 1);
+    almacen.objetoReal.mockResolvedValue({
+      tamanoBytes: TAMANO_MAXIMO_DOCUMENTO_BYTES + 1,
+      mimeType: 'application/pdf',
+    });
 
     await expect(
       servicio.confirmar(doc._id.toString(), user),
@@ -371,6 +380,47 @@ describe('DocumentosService.confirmar', () => {
     expect(notificaciones.notificarNuevo).not.toHaveBeenCalled();
   });
 
+  it('un objeto real de otro tipo que el declarado se borra con su registro y es 400', async () => {
+    const { servicio, archivos, almacen, notificaciones } = montar(
+      actor([ROL_ESCRIBE]),
+    );
+    const doc = pendiente();
+    archivos.findOne.mockReturnValue(consulta(doc));
+    almacen.objetoReal.mockResolvedValue({
+      tamanoBytes: 100,
+      mimeType: 'text/html',
+    });
+
+    await expect(
+      servicio.confirmar(doc._id.toString(), user),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(archivos.deleteOne).toHaveBeenCalledWith({
+      _id: doc._id.toString(),
+      copropiedadId: COPROPIEDAD,
+      estado: 'pendiente',
+    });
+    expect(almacen.eliminar).toHaveBeenCalledWith(doc.rutaAlmacenamiento);
+    expect(archivos.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(notificaciones.notificarNuevo).not.toHaveBeenCalled();
+  });
+
+  it('compara el tipo sin importar mayúsculas ni parámetros (charset)', async () => {
+    const { servicio, archivos, almacen } = montar(actor([ROL_ESCRIBE]));
+    const doc = pendiente();
+    archivos.findOne.mockReturnValue(consulta(doc));
+    archivos.findOneAndUpdate.mockReturnValue(
+      consulta({ ...doc, estado: 'listo' }),
+    );
+    almacen.objetoReal.mockResolvedValue({
+      tamanoBytes: 10,
+      mimeType: 'Application/PDF; charset=binary',
+    });
+    await expect(
+      servicio.confirmar(doc._id.toString(), user),
+    ).resolves.toBeDefined();
+  });
+
   it('confirma de forma atómica (solo si sigue pendiente), guarda el tamaño real y notifica', async () => {
     const { servicio, archivos, almacen, notificaciones } = montar(
       actor([ROL_ESCRIBE]),
@@ -380,7 +430,10 @@ describe('DocumentosService.confirmar', () => {
     archivos.findOneAndUpdate.mockReturnValue(
       consulta({ ...doc, estado: 'listo', tamanoBytes: 4096 }),
     );
-    almacen.tamanoReal.mockResolvedValue(4096);
+    almacen.objetoReal.mockResolvedValue({
+      tamanoBytes: 4096,
+      mimeType: 'application/pdf',
+    });
 
     const res = await servicio.confirmar(doc._id.toString(), user);
 
@@ -418,7 +471,11 @@ describe('DocumentosService.descargar', () => {
 
     const res = await servicio.descargar(doc._id.toString(), user);
 
-    expect(almacen.firmarLectura).toHaveBeenCalledWith(doc.rutaAlmacenamiento);
+    expect(almacen.firmarLectura).toHaveBeenCalledWith(
+      doc.rutaAlmacenamiento,
+      'Acta.pdf',
+      'application/pdf',
+    );
     expect(res).toEqual({ url: 'https://storage/lectura', nombre: 'Acta.pdf' });
   });
 

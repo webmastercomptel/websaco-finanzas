@@ -31,9 +31,11 @@ import type { CarpetaDocumentoDocument } from '../../database/schemas/administra
 import { CarpetasService, type MapaCarpetas } from './carpetas.service';
 import { type ActorDocumentos } from './documentos-acceso';
 import { DocumentosActorService } from './documentos-actor.service';
+import { encabezadosSubida } from '../../common/storage/subida-firmada';
 import {
   DocumentosAlmacenService,
   rutaParaArchivo,
+  tipoEsencial,
 } from './documentos-almacen.service';
 import { DocumentosNotificacionesService } from './documentos-notificaciones.service';
 import { tipoDeArchivo, toArchivo } from './documentos.mapper';
@@ -258,7 +260,11 @@ export class DocumentosService {
       rutaAlmacenamiento,
       dto.mimeType,
     );
-    return { documento: this.aContrato(creado, mapa), uploadUrl };
+    return {
+      documento: this.aContrato(creado, mapa),
+      uploadUrl,
+      encabezadosSubida: encabezadosSubida(dto.mimeType),
+    };
   }
 
   /**
@@ -290,12 +296,19 @@ export class DocumentosService {
     }
 
     let tamanoReal: number;
+    let tipoReal: string;
     try {
-      tamanoReal = await this.almacen.tamanoReal(archivo.rutaAlmacenamiento);
+      const objeto = await this.almacen.objetoReal(archivo.rutaAlmacenamiento);
+      tamanoReal = objeto.tamanoBytes;
+      tipoReal = objeto.mimeType;
     } catch {
       throw new BadRequestException('El archivo no se subió correctamente');
     }
-    if (tamanoReal > TAMANO_MAXIMO_DOCUMENTO_BYTES) {
+    // The signed URL pins the declared type, so a different one on the real
+    // object means the upload did not go through this flow: refuse it.
+    const tipoCoincide =
+      tipoEsencial(tipoReal) === tipoEsencial(archivo.mimeType);
+    if (tamanoReal > TAMANO_MAXIMO_DOCUMENTO_BYTES || !tipoCoincide) {
       // Record first, then the object: an object left behind is only an
       // orphan, a record without its object would be a broken download.
       const borrado = await this.archivos
@@ -304,7 +317,11 @@ export class DocumentosService {
       if (borrado.deletedCount === 1) {
         await this.almacen.eliminar(archivo.rutaAlmacenamiento);
       }
-      throw new BadRequestException('El archivo supera el límite de 200 MB');
+      throw new BadRequestException(
+        tipoCoincide
+          ? 'El archivo supera el límite de 200 MB'
+          : 'El tipo del archivo no coincide con el declarado',
+      );
     }
 
     const confirmado = await this.archivos
@@ -343,7 +360,11 @@ export class DocumentosService {
     if (!archivo.rutaAlmacenamiento || archivo.estado !== 'listo') {
       throw new ConflictException('El documento no tiene archivo');
     }
-    const url = await this.almacen.firmarLectura(archivo.rutaAlmacenamiento);
+    const url = await this.almacen.firmarLectura(
+      archivo.rutaAlmacenamiento,
+      archivo.nombre,
+      archivo.mimeType,
+    );
     return { url, nombre: archivo.nombre };
   }
 

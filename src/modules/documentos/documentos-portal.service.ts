@@ -240,7 +240,11 @@ export class DocumentosPortalService {
     ) {
       throw new NotFoundException(`Documento ${id} no encontrado`);
     }
-    const url = await this.almacen.firmarLectura(archivo.rutaAlmacenamiento);
+    const url = await this.almacen.firmarLectura(
+      archivo.rutaAlmacenamiento,
+      archivo.nombre,
+      archivo.mimeType,
+    );
     return { url, nombre: archivo.nombre };
   }
 }
