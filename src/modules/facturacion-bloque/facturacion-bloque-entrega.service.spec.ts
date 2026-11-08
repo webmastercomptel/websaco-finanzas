@@ -820,3 +820,9 @@ describe('FacturacionBloqueEntregaService — reintento y progreso', () => {
     expect(respuesta.enviadoPor).toBe('Ana Administradora');
   });
 });
+
+describe('vigencia del enlace del aviso de bloque', () => {
+  it('es de 7 días: el enlace abre la sesión del propietario (estado de cuenta incluido)', () => {
+    expect(VIGENCIA_ENLACE_MS).toBe(7 * 24 * 60 * 60 * 1000);
+  });
+});

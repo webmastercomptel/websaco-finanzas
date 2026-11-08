@@ -55,13 +55,15 @@ export const ENVIOS_SIMULTANEOS = 10;
 export const VIGENCIA_ENVIO_MS = 3 * 60 * 1000;
 
 /**
- * How long the access link of a billing notice works: 35 days, as in the system
- * this was ported from. A notice must stay usable for the whole cycle (invoice
- * issued on the 8th, paid on the 29th) plus a margin, and the generic 7-day link
- * would leave the resident of a slow-moving household with a dead button. The
- * link is still refused for anybody holding a Finanzas permission.
+ * How long the access link of a billing notice works: 7 days, like every other
+ * access link (it used to be 35, as in the system this was ported from). The
+ * link is reusable until it expires and opens the owner's session, statement
+ * of account included, so a forwarded or archived copy of the email must not
+ * stay a credential for a whole payment cycle. After a week the button opens
+ * the normal sign-in instead. Still refused for anybody holding a Finanzas
+ * permission.
  */
-export const VIGENCIA_ENLACE_MS = 35 * 24 * 60 * 60 * 1000;
+export const VIGENCIA_ENLACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** The two delivery-progress arrays of a unit's document. */
 type CampoProgreso = 'notificadosIds' | 'correosEnviadosIds';

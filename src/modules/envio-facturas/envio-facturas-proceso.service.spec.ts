@@ -267,14 +267,17 @@ describe('EnvioFacturasProcesoService', () => {
     expect(mensaje.html).toContain('octubre de 2026');
     expect(mensaje.html).not.toContain('<b>Pérez</b>'); // names are escaped
     expect(mensaje.html).not.toMatch(/\$|total|saldo/i);
-    const [, , destino] = t.enlaces.construir.mock.calls[0] as [
+    const [, , destino, vigencia] = t.enlaces.construir.mock.calls[0] as [
       string,
       string,
       string,
+      number,
     ];
     expect(destino).toMatch(
       /^\/portal\/facturas\?inmuebleId=[0-9a-f]{24}&abrir=[0-9a-f]{24}$/,
     );
+    // The link opens the owner's statement: 7 days, not a payment cycle.
+    expect(vigencia).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   describe('reintento tras corte no duplica', () => {

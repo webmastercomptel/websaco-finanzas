@@ -115,3 +115,28 @@ describe('CorreoService', () => {
     ).resolves.toBe(false);
   });
 });
+
+describe('CorreoService — sin seguimiento de SendGrid', () => {
+  beforeEach(() => {
+    mockSend.mockReset().mockResolvedValue([{ statusCode: 202 }, {}]);
+  });
+
+  it('apaga el seguimiento de clics y de apertura en cada mensaje (los enlaces de acceso son credenciales)', async () => {
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({
+      para: 'vecino@ejemplo.com',
+      asunto: 'Su factura',
+      html: '<a href="https://app.ejemplo.com/auth/enlace?token=t">Ver</a>',
+    });
+
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trackingSettings: {
+          clickTracking: { enable: false, enableText: false },
+          openTracking: { enable: false },
+        },
+      }),
+    );
+  });
+});

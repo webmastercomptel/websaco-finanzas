@@ -71,6 +71,14 @@ export class CorreoService {
         from: this.remitente,
         subject: mensaje.asunto,
         html: mensaje.html,
+        // Many of these emails carry an access link, which is a bearer
+        // credential: click tracking would rewrite it through SendGrid's
+        // redirect domain (and log it there), open tracking adds a pixel.
+        // Off per message, whatever the account default says.
+        trackingSettings: {
+          clickTracking: { enable: false, enableText: false },
+          openTracking: { enable: false },
+        },
         attachments: mensaje.adjuntos?.map((adjunto) => ({
           content: adjunto.contenido.toString('base64'),
           filename: adjunto.nombre,
