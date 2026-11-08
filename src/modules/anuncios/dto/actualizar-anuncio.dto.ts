@@ -11,6 +11,7 @@ import {
   CATEGORIAS_ANUNCIO,
   type CategoriaAnuncio,
 } from '../../../database/schemas/administracion/anuncio.schema';
+import { ImagenAnuncio } from './imagen-anuncio.decorator';
 
 /**
  * Body of `PATCH /anuncios/:id`: only the fields the client sends are changed.
@@ -33,8 +34,7 @@ export class ActualizarAnuncioDto {
   @IsOptional()
   categoria?: CategoriaAnuncio;
 
-  @IsString()
-  @IsOptional()
+  @ImagenAnuncio()
   imagen?: string | null;
 
   @IsBoolean()

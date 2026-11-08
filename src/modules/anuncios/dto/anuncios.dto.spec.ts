@@ -136,3 +136,59 @@ describe('PublicarAnuncioDto', () => {
     expect(errores.map((e) => e.property)).toContain('rolesDestino');
   });
 });
+
+describe('imagen del anuncio: solo URL https', () => {
+  const base = {
+    titulo: 'Corte de agua',
+    contenido: 'Hola',
+    categoria: 'seguridad',
+  };
+
+  it.each([
+    'https://storage.googleapis.com/bucket/foto.png',
+    'https://cdn.ejemplo.com/a/b.jpg?v=2',
+  ])('acepta %s al crear y al editar', async (imagen) => {
+    expect(await invalidas(CrearAnuncioDto, { ...base, imagen })).toEqual([]);
+    expect(await invalidas(ActualizarAnuncioDto, { imagen })).toEqual([]);
+  });
+
+  it.each([
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'data:image/svg+xml,<svg onload=alert(1)>',
+    'http://cdn.ejemplo.com/foto.png',
+    'ftp://cdn.ejemplo.com/foto.png',
+    '//cdn.ejemplo.com/foto.png',
+    '/relativa/foto.png',
+    'https://usuario:clave@cdn.ejemplo.com/foto.png',
+    'https://cdn.ejemplo.com/con espacio.png',
+    'no es una url',
+    '',
+  ])('rechaza %j al crear y al editar', async (imagen) => {
+    expect(await invalidas(CrearAnuncioDto, { ...base, imagen })).toContain(
+      'imagen',
+    );
+    expect(await invalidas(ActualizarAnuncioDto, { imagen })).toContain(
+      'imagen',
+    );
+  });
+
+  it('rechaza una URL de más de 2048 caracteres', async () => {
+    const imagen = `https://cdn.ejemplo.com/${'a'.repeat(2048)}.png`;
+    expect(await invalidas(CrearAnuncioDto, { ...base, imagen })).toContain(
+      'imagen',
+    );
+    expect(await invalidas(ActualizarAnuncioDto, { imagen })).toContain(
+      'imagen',
+    );
+  });
+
+  it('sigue aceptando null y omitirla (sin imagen)', async () => {
+    expect(await invalidas(CrearAnuncioDto, { ...base, imagen: null })).toEqual(
+      [],
+    );
+    expect(await invalidas(CrearAnuncioDto, base)).toEqual([]);
+    expect(await invalidas(ActualizarAnuncioDto, { imagen: null })).toEqual([]);
+  });
+});

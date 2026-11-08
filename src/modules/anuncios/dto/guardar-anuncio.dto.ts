@@ -11,6 +11,7 @@ import {
   CATEGORIAS_ANUNCIO,
   type CategoriaAnuncio,
 } from '../../../database/schemas/administracion/anuncio.schema';
+import { ImagenAnuncio } from './imagen-anuncio.decorator';
 
 /**
  * Body of `POST /anuncios`. Neither the tenant nor the author is part of it: the
@@ -33,9 +34,8 @@ export class CrearAnuncioDto {
   @IsIn(CATEGORIAS_ANUNCIO)
   categoria: CategoriaAnuncio;
 
-  /** `null` is accepted (and stored) as "no image"; omitting it does the same. */
-  @IsString()
-  @IsOptional()
+  /** An https URL; `null` is accepted (and stored) as "no image"; omitting it does the same. */
+  @ImagenAnuncio()
   imagen?: string | null;
 
   @IsBoolean()
