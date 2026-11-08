@@ -165,14 +165,18 @@ export class RolesService {
       throw new NotFoundException(`Rol ${id} no encontrado`);
     }
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    if (dto.permisos !== undefined) {
-      await this.exigirCambioDePermisosPermitido(
-        copropiedadId,
-        id,
-        dto.permisos,
-        user,
-      );
-    }
+    // The keys the check was made against: the write only applies while the
+    // role still has exactly them, so a concurrent edit cannot make this one
+    // silently drop a key its author could not have removed.
+    const revisados =
+      dto.permisos !== undefined
+        ? await this.exigirCambioDePermisosPermitido(
+            copropiedadId,
+            id,
+            dto.permisos,
+            user,
+          )
+        : undefined;
     const cambios: Record<string, unknown> = {};
     if (dto.nombre !== undefined) cambios.nombre = dto.nombre;
     if (dto.descripcion !== undefined) cambios.descripcion = dto.descripcion;
@@ -185,13 +189,27 @@ export class RolesService {
     let documento: RolDocument | null;
     try {
       documento = await this.roles
-        .findOneAndUpdate({ _id: id, copropiedadId }, cambios, { new: true })
+        .findOneAndUpdate(
+          {
+            _id: id,
+            copropiedadId,
+            ...(revisados !== undefined ? { permisos: revisados } : {}),
+          },
+          cambios,
+          { new: true },
+        )
         .exec();
     } catch (error: unknown) {
       if ((error as { code?: number }).code === CLAVE_DUPLICADA) {
         throw new ConflictException('Ya existe un rol con ese nombre');
       }
       throw error;
+    }
+    if (!documento && revisados !== undefined) {
+      // It existed at the check, so what no longer matches is its keys.
+      throw new ConflictException(
+        'Otra persona cambió los permisos de este rol mientras lo editabas. Recarga y vuelve a intentarlo.',
+      );
     }
     if (!documento) throw new NotFoundException(`Rol ${id} no encontrado`);
 
@@ -204,16 +222,19 @@ export class RolesService {
    * change for everyone holding the role), and may not rewrite the keys of a
    * role they hold themselves. Platform administrators are exempt. A missing
    * role is left to the update's own 404.
+   *
+   * Returns the keys the check was made against (undefined when nothing was
+   * checked), so the caller can make its write conditional on them.
    */
   private async exigirCambioDePermisosPermitido(
     copropiedadId: Types.ObjectId,
     id: string,
     nuevos: readonly string[],
     user: IRequestUser,
-  ): Promise<void> {
-    if (user.isPlatformAdmin) return;
+  ): Promise<string[] | undefined> {
+    if (user.isPlatformAdmin) return undefined;
     const actual = await this.roles.findOne({ _id: id, copropiedadId }).exec();
-    if (!actual) return;
+    if (!actual) return undefined;
 
     const antes = new Set(actual.permisos ?? []);
     const despues = new Set(nuevos);
@@ -238,6 +259,8 @@ export class RolesService {
         );
       }
     }
+    // Exact array as stored (same order), so the equality filter matches it.
+    return actual.permisos ? [...actual.permisos] : undefined;
   }
 
   /**

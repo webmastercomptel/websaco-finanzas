@@ -187,7 +187,11 @@ describe('RolesService.update', () => {
     );
 
     expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: ROL_ID.toString(), copropiedadId: COP },
+      {
+        _id: ROL_ID.toString(),
+        copropiedadId: COP,
+        permisos: ['tareas.ver'],
+      },
       { nombre: 'Portero 24h', permisos: ['tareas.ver', 'pqr.ver'] },
       { new: true },
     );
@@ -385,5 +389,39 @@ describe('RolesService.permisos', () => {
     expect(catalogo.length).toBe(29);
     expect(catalogo.map((p) => p.id)).toContain('roles.gestionar');
     expect(catalogo.some((p) => p.id.startsWith('facturas.'))).toBe(false);
+  });
+});
+
+describe('RolesService.update — escritura condicionada a lo revisado', () => {
+  it('si otro editor cambió los permisos entre la revisión y la escritura responde 409 y no pisa nada', async () => {
+    // A (without pqr.ver) reviewed {tareas.ver}; meanwhile B added pqr.ver, so
+    // the conditional write no longer matches and A cannot drop B's key.
+    const { servicio, roles } = crear({ encontrado: documento() });
+    roles.findOneAndUpdate.mockReturnValue(exec(null));
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver', 'roles.gestionar'] },
+        EDITOR_LIMITADO,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ permisos: ['tareas.ver'] }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('sin tocar permisos la escritura no lleva condición sobre ellos', async () => {
+    const { servicio, roles } = crear({ encontrado: documento() });
+
+    await servicio.update(ROL_ID.toString(), { nombre: 'x' }, ADMIN_COP);
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: ROL_ID.toString(), copropiedadId: COP },
+      { nombre: 'x' },
+      { new: true },
+    );
   });
 });
