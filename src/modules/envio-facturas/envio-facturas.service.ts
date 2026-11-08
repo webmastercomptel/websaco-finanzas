@@ -110,6 +110,22 @@ export class EnvioFacturasService {
 
     const ahora = new Date();
     const nombre = user.nombre ?? '';
+    // Audited BEFORE anything is queued (as the send is): if the audit write
+    // fails, no row exists without its `marcar-envio` entry. The label counts
+    // what this call is about to queue; a concurrent mark of the same invoices
+    // may leave the real number lower (the rows keep `marcadoPor` anyway).
+    const aEncolar =
+      nuevas.length + existentes.filter((e) => e.estado === 'error').length;
+    if (aEncolar > 0) {
+      await this.auditoria.registrar({
+        actorAccountId: cuenta.toString(),
+        actorNombre: nombre,
+        accion: 'marcar-envio',
+        entidadTipo: 'envio-factura',
+        entidadId: porLote ? dto.loteId! : emitidas[0]._id.toString(),
+        entidadEtiqueta: `Facturas marcadas para envío: ${aEncolar}`,
+      });
+    }
     // Insert-only upserts: if two requests race for the same invoice, the unique
     // index lets exactly one create the row and the other changes nothing.
     const insertadas = nuevas.length
@@ -171,16 +187,6 @@ export class EnvioFacturasService {
     ).modifiedCount;
 
     const marcadas = insertadas + reencoladas;
-    if (marcadas > 0) {
-      await this.auditoria.registrar({
-        actorAccountId: cuenta.toString(),
-        actorNombre: nombre,
-        accion: 'marcar-envio',
-        entidadTipo: 'envio-factura',
-        entidadId: porLote ? dto.loteId! : emitidas[0]._id.toString(),
-        entidadEtiqueta: `Facturas marcadas para envío: ${marcadas}`,
-      });
-    }
 
     return {
       marcadas,

@@ -51,6 +51,17 @@ function montar() {
 }
 
 describe('EnvioFacturasService.marcar', () => {
+  it('audita ANTES de encolar: si la auditoría falla no queda ninguna fila marcada', async () => {
+    const t = montar();
+    t.factura('A-101');
+    t.auditoria.registrar.mockRejectedValue(new Error('auditoría caída'));
+
+    await expect(
+      t.servicio.marcar({ loteId: LOTE.toString() }, staff()),
+    ).rejects.toThrow('auditoría caída');
+    expect(t.envios.docs).toHaveLength(0);
+  });
+
   it('marca todas las facturas de un lote y no envía nada', async () => {
     const t = montar();
     t.factura('A-101');
