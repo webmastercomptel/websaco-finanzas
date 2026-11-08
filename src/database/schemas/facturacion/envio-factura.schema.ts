@@ -44,9 +44,11 @@ export type MotivoErrorEnvio = (typeof MOTIVOS_ERROR_ENVIO)[number];
  * (`tokenEnvio` + `envioIniciadoEn`, renewed after every batch) keeps two
  * concurrent processors from delivering the same row.
  *
- * `liberadaEn` is set at the FIRST claim and is what makes the invoice visible
- * in the resident portal: staff reviewed it and pressed send, so residents may
- * open it even while some of the notices are still being retried.
+ * `liberadaEn` is set by the FIRST processor that holds the row and finds the
+ * invoice still `emitida` (just before its first notice), and is what makes
+ * the invoice visible in the resident portal: staff reviewed it and pressed
+ * send, so residents may open it even while some of the notices are still
+ * being retried. An invoice voided after it was marked is never released.
  */
 @Schema({ timestamps: true, collection: 'envios_factura', versionKey: false })
 export class EnvioFactura {

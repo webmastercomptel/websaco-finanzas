@@ -632,4 +632,54 @@ describe('EnvioFacturasProcesoService', () => {
       hayMas: false,
     });
   });
+  it('una factura anulada después de marcarla no se libera al portal', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [
+      residente('propietario', 'Pedro Pérez'),
+    ]);
+    await t.marcarTodas();
+    t.facturas.docs[0].estado = 'anulada';
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.fila(unidad).ultimoError).toBe('factura_anulada');
+    // Never stamped: the owner does not see a voided invoice nobody sent.
+    expect(t.fila(unidad).liberadaEn).toBeUndefined();
+  });
+
+  it('antes de cada tanda vuelve a comprobar qué filas sigue teniendo: no envía a las que otro procesador tomó', async () => {
+    const t = montar();
+    const unidades = Array.from({ length: 20 }, (_, i) =>
+      t.agregarUnidad(`C-${i}`, [residente('propietario', `Dueño C${i}`)]),
+    );
+    await t.marcarTodas();
+    // The first batch stalls in the provider long enough for the lease to
+    // expire; another processor then takes PART of the remaining rows.
+    let soltarCorreo!: () => void;
+    const compuerta = new Promise<void>((resolver) => {
+      soltarCorreo = resolver;
+    });
+    t.correo.enviar.mockImplementationOnce(async () => {
+      await compuerta;
+      return true;
+    });
+    const corrida = t.proceso.procesarPendientes(staff('Ana'));
+    while (t.correo.enviar.mock.calls.length === 0) {
+      await new Promise((r) => setImmediate(r));
+    }
+    const robadas = unidades.slice(15).map((u) => t.fila(u));
+    for (const fila of robadas) fila.tokenEnvio = 'otro-procesador';
+    soltarCorreo();
+    await corrida;
+
+    const para = new Set(t.correo.enviar.mock.calls.map(([m]) => m.para));
+    for (const u of unidades.slice(15)) {
+      expect(para.has(u.residentes[0].email)).toBe(false);
+    }
+    for (const u of unidades.slice(0, 15)) {
+      expect(para.has(u.residentes[0].email)).toBe(true);
+    }
+    // The rows the other processor holds are left exactly as it has them.
+    expect(robadas.every((f) => f.tokenEnvio === 'otro-procesador')).toBe(true);
+  });
 });

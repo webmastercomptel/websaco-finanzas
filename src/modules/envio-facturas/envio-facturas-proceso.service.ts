@@ -191,7 +191,8 @@ export class EnvioFacturasProcesoService {
    * first. Two steps, both safe: pick candidates, then ONE `updateMany` whose
    * filter repeats the claimable test, so a row someone else took in between is
    * simply not updated. What this call really won is whatever carries its token.
-   * `liberadaEn` is set with `$min` so only the FIRST claim ever stamps it.
+   * `liberadaEn` is NOT stamped here but per row in `entregarFila`, once the
+   * invoice is known to be still `emitida` (see `liberar`).
    */
   private async reclamar(
     copropiedadId: Types.ObjectId,
@@ -224,7 +225,6 @@ export class EnvioFacturasProcesoService {
             procesadoPorNombre: nombre,
             ultimaCorridaId: corridaId,
           },
-          $min: { liberadaEn: ahora },
         },
       )
       .exec();
@@ -275,9 +275,15 @@ export class EnvioFacturasProcesoService {
       // Out of time: stop STARTING work and answer; the rest is released and the
       // screen calls again.
       if (Date.now() - inicio > PRESUPUESTO_MS) return;
+      // Only the rows this call STILL holds: if a batch stalled past the lease,
+      // another processor may have taken some of the rest, and sending to them
+      // too would widen the overlap beyond the one batch Ruling 10 accepts.
+      const tanda = filas.slice(i, i + ENVIOS_SIMULTANEOS);
+      const propias = await this.filasPropias(copropiedadId, token, tanda);
+      if (propias.size === 0) return;
       const resultados = await Promise.all(
-        filas
-          .slice(i, i + ENVIOS_SIMULTANEOS)
+        tanda
+          .filter((fila) => propias.has(fila._id.toString()))
           .map((fila) => this.entregarFila(fila, contexto)),
       );
       for (const r of resultados) {
@@ -315,6 +321,7 @@ export class EnvioFacturasProcesoService {
       if (factura.estado !== 'emitida') {
         return await this.cerrarConError(fila, contexto, 'factura_anulada');
       }
+      await this.liberar(fila, contexto);
 
       const elegibles = this.sinRepetidos(
         contexto.residentes.get(fila.inmuebleId.toString()) ?? [],
@@ -557,6 +564,47 @@ export class EnvioFacturasProcesoService {
       )
       .exec();
     return { tipo: agotada ? 'error' : 'reintentable', correos: 0 };
+  }
+
+  /**
+   * Makes the invoice visible in the portal (Ruling 6), before its first
+   * notice goes out so the emailed link never lands on a 404. Done per row,
+   * AFTER the invoice was found still `emitida`: an invoice voided after it was
+   * marked is never released. `$min` keeps the first stamp; the token in the
+   * filter means only the current holder can stamp.
+   */
+  private async liberar(
+    fila: EnvioFacturaDocument,
+    contexto: ContextoProceso,
+  ): Promise<void> {
+    await this.envios
+      .updateOne(
+        {
+          _id: fila._id,
+          copropiedadId: contexto.copropiedadId,
+          tokenEnvio: contexto.token,
+        },
+        { $min: { liberadaEn: new Date() } },
+      )
+      .exec();
+  }
+
+  /** Ids (as strings) of the given rows that still carry this call's token. */
+  private async filasPropias(
+    copropiedadId: Types.ObjectId,
+    token: string,
+    filas: EnvioFacturaDocument[],
+  ): Promise<Set<string>> {
+    const propias = await this.envios
+      .find({
+        copropiedadId,
+        tokenEnvio: token,
+        _id: { $in: filas.map((f) => f._id) },
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    return new Set(propias.map((f) => String(f._id)));
   }
 
   /** Renews the lease of what this call still holds; false when it holds nothing. */
