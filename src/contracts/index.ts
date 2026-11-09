@@ -179,6 +179,9 @@ export interface ResultadoImportacionInmuebles {
    *  skipped for having a Factura. Kept for one release, same reason as
    *  `eliminadosAntes`. */
   bloqueadosPorFactura: string[];
+  /** Non-blocking heads-ups about rows that WERE processed (today only
+   *  `arrendatario-sin-correo`). Never changes a count. */
+  advertencias: AdvertenciaVistaPreviaImportacion[];
 }
 
 /** A non-blocking heads-up from the import preview. Never changes a count. */
@@ -186,8 +189,14 @@ export interface AdvertenciaVistaPreviaImportacion {
   /** `codigo-parecido`: a different code that reads the same once case,
    *  separators and leading zeros are ignored (see `claveParecida`).
    *  `codigo-repetido-en-archivo`: the code already appeared earlier in the
-   *  file — the import patches the same unit, so the last row wins. */
-  tipo: 'codigo-parecido' | 'codigo-repetido-en-archivo';
+   *  file — the import patches the same unit, so the last row wins.
+   *  `arrendatario-sin-correo`: the row's tenant has no e-mail (neither in
+   *  the row nor stored), so it cannot be matched by e-mail on a later import
+   *  and it will have no portal access. Also reported by the import itself. */
+  tipo:
+    | 'codigo-parecido'
+    | 'codigo-repetido-en-archivo'
+    | 'arrendatario-sin-correo';
   /** 1-based, matching the row order the file was uploaded in. */
   fila: number;
   codigo: string;
@@ -220,6 +229,13 @@ export interface VistaPreviaImportacionInmuebles {
   repetidasEnArchivo: number;
   /** Counted rows whose titular would be created as a NEW Tercero. */
   titularesNuevos: number;
+  /** Counted rows whose tenant would be created as a NEW Tercero (one per
+   *  e-mail however many rows share it; tenants known only by name are not
+   *  deduplicated across rows). */
+  arrendatariosNuevos: number;
+  /** Counted rows whose tenant is an EXISTING Tercero of the coproperty found
+   *  by e-mail and not yet the unit's tenant — the import would link it. */
+  arrendatariosAVincular: number;
   errores: ErrorImportacionInmueble[];
   /** Codes of the rows counted in `aCrear`, capped at 200. */
   codigosACrear: string[];
@@ -296,6 +312,12 @@ export interface FilaExportacionInmueble {
   direccionTitular: string;
   /** DANE municipality CODE (not the name), as the import expects it. */
   ciudadTitular: string;
+  /** The unit's current tenant (`""` when it has none), in the import's own
+   *  columns: the import links it by e-mail, or creates it from these. */
+  arrendatarioNombre: string;
+  arrendatarioTelefono: string;
+  /** Every address of the tenant joined with `, `, like `emailTitular`. */
+  arrendatarioCorreo: string;
 }
 
 /** Response of `GET /inmuebles/exportar-importacion`. */

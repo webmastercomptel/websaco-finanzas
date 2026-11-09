@@ -29,6 +29,7 @@ interface InmuebleExistente {
   id: string;
   codigo: string;
   titularId?: string | null;
+  arrendatarioId?: string | null;
   tieneFacturas?: boolean;
 }
 
@@ -69,7 +70,11 @@ const inmueblesModeloCon = (
         exec: () =>
           Promise.resolve(
             encontrado
-              ? { _id: encontrado.id, titularId: encontrado.titularId ?? null }
+              ? {
+                  _id: encontrado.id,
+                  titularId: encontrado.titularId ?? null,
+                  arrendatarioId: encontrado.arrendatarioId ?? null,
+                }
               : null,
           ),
       };
@@ -124,6 +129,7 @@ interface TerceroGuardado {
   segundoNombre?: string | null;
   primerApellido?: string | null;
   segundoApellido?: string | null;
+  telefono?: string | null;
 }
 
 /** `porIdentificacion` maps an existing party's identification to its id;
@@ -132,8 +138,11 @@ interface TerceroGuardado {
 const tercerosModeloCon = (
   porIdentificacion: Record<string, string> = {},
   porId: Record<string, TerceroGuardado> = {},
+  /** Stored e-mail (lower case) -> ids of the parties that carry it. */
+  porCorreo: Record<string, string[]> = {},
 ) => {
   const creados: Record<string, unknown>[] = [];
+  const filtrosFind: Filtro[] = [];
   const actualizaciones: {
     id: string;
     filtro: Filtro;
@@ -144,6 +153,26 @@ const tercerosModeloCon = (
     creados,
     actualizaciones,
     filtrosFindOne,
+    filtrosFind,
+    /** The tenant lookup by e-mail: the service sends the addresses as
+     *  anchored case-insensitive regexes inside `emails.$in`. */
+    find: jest.fn((filtro: Filtro) => {
+      filtrosFind.push(filtro);
+      const patrones = (filtro.emails as { $in: RegExp[] }).$in;
+      const ids = new Set<string>();
+      for (const [correo, idsDelCorreo] of Object.entries(porCorreo)) {
+        if (patrones.some((r) => r.test(correo))) {
+          idsDelCorreo.forEach((id) => ids.add(id));
+        }
+      }
+      const cadena = {
+        select: () => cadena,
+        limit: () => cadena,
+        lean: () => cadena,
+        exec: () => Promise.resolve([...ids].map((_id) => ({ _id }))),
+      };
+      return cadena;
+    }),
     findOne: jest.fn((filtro: Filtro) => {
       filtrosFindOne.push(filtro);
       const idPorIdentificacion =
@@ -233,6 +262,7 @@ describe('InmueblesService.importar — alta de filas nuevas', () => {
       errores: [],
       eliminadosAntes: 0,
       bloqueadosPorFactura: [],
+      advertencias: [],
     });
     expect(inmuebles.escrituras).toHaveLength(2);
     expect(inmuebles.actualizaciones).toHaveLength(0);
@@ -312,6 +342,7 @@ describe('InmueblesService.importar — actualización de inmuebles existentes',
       errores: [],
       eliminadosAntes: 0,
       bloqueadosPorFactura: [],
+      advertencias: [],
     });
     expect(inmuebles.create).not.toHaveBeenCalled();
     expect(inmuebles.actualizaciones).toEqual([
@@ -1062,6 +1093,7 @@ describe('InmueblesService.importar — garantías', () => {
       ],
       eliminadosAntes: 0,
       bloqueadosPorFactura: [],
+      advertencias: [],
     });
     expect(inmuebles.findOne).not.toHaveBeenCalled();
     expect(inmuebles.create).not.toHaveBeenCalled();
@@ -2000,5 +2032,398 @@ describe('InmueblesService.importar — claves duplicadas y rollback seguro', ()
       titularId: 'ter-nuevo',
     });
     expect(terceros.deleteOne).not.toHaveBeenCalled();
+  });
+});
+
+describe('InmueblesService.importar — arrendatario', () => {
+  const unidadExistente = { id: 'inm-1', codigo: '301' };
+
+  it('vincula al tercero que ya tiene ese correo en la copropiedad (sin distinguir mayúsculas ni espacios)', async () => {
+    const inmuebles = inmueblesModeloCon([unidadExistente]);
+    const terceros = tercerosModeloCon(
+      {},
+      {},
+      { 'luis@ejemplo.com': ['ter-arr'] },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: '  LUIS@Ejemplo.COM ',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.actualizados).toBe(1);
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(terceros.filtrosFind[0]).toMatchObject({ copropiedadId: COP });
+    expect(inmuebles.actualizaciones).toEqual([
+      {
+        filtro: { _id: 'inm-1', copropiedadId: COP },
+        cambios: { arrendatarioId: 'ter-arr' },
+      },
+    ]);
+  });
+
+  it('crea el tercero (nombre, teléfono, correo) cuando ningún tercero tiene ese correo y lo deja como arrendatario de un inmueble nuevo', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioTelefono: '3001112233',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.creados).toBe(1);
+    expect(resultado.advertencias).toEqual([]);
+    expect(terceros.creados).toHaveLength(1);
+    expect(terceros.creados[0]).toMatchObject({
+      copropiedadId: COP,
+      tipoPersona: 'natural',
+      nombre: 'Luis Gómez',
+      telefono: '3001112233',
+      emails: ['luis@ejemplo.com'],
+    });
+    expect(inmuebles.escrituras[0]).toMatchObject({
+      arrendatarioId: 'ter-nuevo',
+    });
+  });
+
+  it('crea el tercero y repunta un inmueble existente que cambia de arrendatario', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, arrendatarioId: 'ter-viejo' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-viejo': { nombre: 'Marta Ríos', emails: ['marta@ejemplo.com'] } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(terceros.creados).toHaveLength(1);
+    expect(inmuebles.actualizaciones).toEqual([
+      {
+        filtro: { _id: 'inm-1', copropiedadId: COP },
+        cambios: { arrendatarioId: 'ter-nuevo' },
+      },
+    ]);
+  });
+
+  it('un correo que ya está en el titular de la misma fila es error de fila ("no puede ser el propietario") y no escribe nada; las demás filas siguen', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana Pérez',
+          emailTitular: 'dueno@ejemplo.com',
+          arrendatarioNombre: 'Ana P.',
+          arrendatarioCorreo: 'DUENO@ejemplo.com',
+        }),
+        fila({ codigo: '302' }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([
+      {
+        fila: 1,
+        codigo: '301',
+        mensaje: 'El arrendatario no puede ser el propietario',
+      },
+    ]);
+    expect(resultado.creados).toBe(1);
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.escrituras.map((e) => e.codigo)).toEqual(['302']);
+  });
+
+  it('un correo que resuelve al mismo tercero que el titular de la unidad (titular guardado) es el mismo error', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, titularId: 'ter-1' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-1': { nombre: 'Ana Pérez' } },
+      { 'ana@ejemplo.com': ['ter-1'] },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Ana',
+          arrendatarioCorreo: 'ana@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([
+      {
+        fila: 1,
+        codigo: '301',
+        mensaje: 'El arrendatario no puede ser el propietario',
+      },
+    ]);
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('las celdas de arrendatario vacías dejan intacto el arrendatario guardado: no se busca, no se crea, no se repunta', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, arrendatarioId: 'ter-arr' },
+    ]);
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          zona: 'Norte',
+          arrendatarioNombre: '',
+          arrendatarioTelefono: '  ',
+          arrendatarioCorreo: null,
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.find).not.toHaveBeenCalled();
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.actualizaciones).toEqual([
+      {
+        filtro: { _id: 'inm-1', copropiedadId: COP },
+        cambios: { zona: 'Norte' },
+      },
+    ]);
+  });
+
+  it('teléfono o correo sin nombre es error de fila y no escribe nada', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({ codigo: '301', arrendatarioTelefono: '3001112233' }),
+        fila({ codigo: '302', arrendatarioCorreo: 'luis@ejemplo.com' }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(2);
+    expect(resultado.errores[0].mensaje).toMatch(/arrendatarioNombre/);
+    expect(resultado.creados).toBe(0);
+    expect(inmuebles.create).not.toHaveBeenCalled();
+    expect(terceros.create).not.toHaveBeenCalled();
+  });
+
+  it('un correo de arrendatario mal formado es error de esa fila y no rechaza el archivo', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis',
+          arrendatarioCorreo: 'no-es-correo',
+        }),
+        fila({ codigo: '302' }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0]).toMatchObject({ fila: 1, codigo: '301' });
+    expect(resultado.errores[0].mensaje).toMatch(/no es un correo válido/);
+    expect(resultado.creados).toBe(1);
+  });
+
+  it('un correo que tienen varios terceros es error de fila: no elige uno al azar', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon(
+      {},
+      {},
+      { 'familia@ejemplo.com': ['ter-a', 'ter-b'] },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis',
+          arrendatarioCorreo: 'familia@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0].mensaje).toMatch(/más de un tercero/);
+    expect(inmuebles.create).not.toHaveBeenCalled();
+    expect(terceros.create).not.toHaveBeenCalled();
+  });
+
+  it('sin correo se crea igual y la fila queda advertida (sin correo no hay acceso al portal)', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301', arrendatarioNombre: 'Luis Gómez' })],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.creados).toBe(1);
+    expect(resultado.advertencias).toEqual([
+      { tipo: 'arrendatario-sin-correo', fila: 1, codigo: '301' },
+    ]);
+    expect(terceros.creados[0]).toMatchObject({
+      nombre: 'Luis Gómez',
+      emails: [],
+    });
+    expect(terceros.find).not.toHaveBeenCalled();
+  });
+
+  it('reimportar un arrendatario sin correo con el mismo nombre no lo duplica: es la misma persona y solo se completa lo que falta', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, arrendatarioId: 'ter-arr' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-arr': { nombre: 'Luis Gómez', emails: [], telefono: null } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: ' luis gómez ',
+          arrendatarioTelefono: '3001112233',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(terceros.actualizaciones).toEqual([
+      {
+        id: 'ter-arr',
+        filtro: { _id: 'ter-arr', copropiedadId: COP },
+        cambios: { telefono: '3001112233' },
+      },
+    ]);
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+    expect(resultado.advertencias).toEqual([
+      { tipo: 'arrendatario-sin-correo', fila: 1, codigo: '301' },
+    ]);
+  });
+
+  it('reimportar sin cambios (mismo arrendatario por correo, mismos datos) no escribe nada', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, arrendatarioId: 'ter-arr' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      {
+        'ter-arr': {
+          nombre: 'Luis Gómez',
+          emails: ['luis@ejemplo.com'],
+          telefono: '3001112233',
+        },
+      },
+      { 'luis@ejemplo.com': ['ter-arr'] },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioTelefono: '3001112233',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.advertencias).toEqual([]);
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+    expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('si el inmueble nuevo falla después de crear al arrendatario, ese tercero se retira (sin huérfanos) y la fila es error', async () => {
+    const inmuebles = inmueblesModeloCon();
+    inmuebles.create.mockRejectedValueOnce(
+      Object.assign(new Error('boom'), { code: 11000 }),
+    );
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(1);
+    expect(terceros.deleteOne).toHaveBeenCalledWith({
+      _id: 'ter-nuevo',
+      copropiedadId: COP,
+    });
+  });
+
+  it('las columnas viejas tipoTitular y resideEnElInmueble conviven con las nuevas: se ignoran y el arrendatario se procesa', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          tipoTitular: 'arrendatario',
+          resideEnElInmueble: true,
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(inmuebles.escrituras[0]).toMatchObject({
+      tipoTitular: 'propietario',
+      arrendatarioId: 'ter-nuevo',
+    });
+    expect(inmuebles.escrituras[0]).not.toHaveProperty('resideEnElInmueble');
   });
 });

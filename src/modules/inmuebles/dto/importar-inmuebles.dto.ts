@@ -212,6 +212,28 @@ export class FilaImportarInmuebleDto {
   @IsString()
   @MaxLength(10)
   ciudadTitular?: string;
+
+  /* ── El arrendatario, en la misma fila ─────────────────────────
+   * Tres columnas opcionales. Si la fila trae alguna, el nombre es
+   * obligatorio. El arrendatario se busca por correo dentro de la misma
+   * copropiedad (si existe se vincula, si no se crea con estos datos); una
+   * celda vacía deja intacto el arrendatario guardado: el import nunca borra.
+   */
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  arrendatarioNombre?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  arrendatarioTelefono?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  arrendatarioCorreo?: string;
 }
 
 /**

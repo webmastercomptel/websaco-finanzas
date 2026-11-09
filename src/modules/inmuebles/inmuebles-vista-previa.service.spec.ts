@@ -18,6 +18,7 @@ interface Unidad {
   codigo: string;
   estado?: 'active' | 'inactive';
   titularId?: string | null;
+  arrendatarioId?: string | null;
 }
 
 /** Every method that could write or delete, on every mocked model. */
@@ -56,6 +57,7 @@ const inmueblesModeloCon = (
               codigo: u.codigo,
               estado: u.estado ?? 'active',
               titularId: u.titularId ?? null,
+              arrendatarioId: u.arrendatarioId ?? null,
             })),
           ),
       };
@@ -75,7 +77,13 @@ const inmueblesModeloCon = (
         lean: () => cadena,
         exec: () =>
           Promise.resolve(
-            u ? { _id: u.id, titularId: u.titularId ?? null } : null,
+            u
+              ? {
+                  _id: u.id,
+                  titularId: u.titularId ?? null,
+                  arrendatarioId: u.arrendatarioId ?? null,
+                }
+              : null,
           ),
       };
       return cadena;
@@ -111,16 +119,36 @@ interface TerceroGuardado {
   primerNombre?: string | null;
   primerApellido?: string | null;
   numeroIdentificacion?: string | null;
+  emails?: string[];
+  telefono?: string | null;
 }
 
 const tercerosModeloCon = (
   porIdentificacion: Record<string, string> = {},
   porId: Record<string, TerceroGuardado> = {},
+  /** Stored e-mail (lower case) -> ids of the parties that carry it. */
+  porCorreo: Record<string, string[]> = {},
 ) => {
   const filtrosFindOne: Filtro[] = [];
   const escritura = () => jest.fn();
   return {
     filtrosFindOne,
+    find: jest.fn((filtro: Filtro) => {
+      const patrones = (filtro.emails as { $in: RegExp[] }).$in;
+      const ids = new Set<string>();
+      for (const [correo, idsDelCorreo] of Object.entries(porCorreo)) {
+        if (patrones.some((r) => r.test(correo))) {
+          idsDelCorreo.forEach((id) => ids.add(id));
+        }
+      }
+      const cadena = {
+        select: () => cadena,
+        limit: () => cadena,
+        lean: () => cadena,
+        exec: () => Promise.resolve([...ids].map((_id) => ({ _id }))),
+      };
+      return cadena;
+    }),
     findOne: jest.fn((filtro: Filtro) => {
       filtrosFindOne.push(filtro);
       const idPorIdentificacion =
@@ -186,6 +214,7 @@ const montar = (
     compartidos?: string[];
     porIdentificacion?: Record<string, string>;
     terceros?: Record<string, TerceroGuardado>;
+    porCorreo?: Record<string, string[]>;
     codigoCopropiedad?: string;
   } = {},
 ) => {
@@ -193,6 +222,7 @@ const montar = (
   const terceros = tercerosModeloCon(
     opciones.porIdentificacion,
     opciones.terceros,
+    opciones.porCorreo,
   );
   const progreso = progresoModeloCon();
   const service = new InmueblesService(
@@ -542,6 +572,8 @@ describe('InmueblesService.previsualizarImportacion — copropiedad equivocada',
       aActualizar: 0,
       repetidasEnArchivo: 0,
       titularesNuevos: 0,
+      arrendatariosNuevos: 0,
+      arrendatariosAVincular: 0,
       errores: [
         {
           fila: 2,
@@ -729,5 +761,140 @@ describe('InmueblesService.previsualizarImportacion — advertencias', () => {
     });
 
     expect(vista.advertencias).toEqual([]);
+  });
+});
+
+describe('InmueblesService.previsualizarImportacion — arrendatario', () => {
+  it('cuenta los arrendatarios a vincular (el correo ya existe) y los nuevos (no existe), y no escribe nada', async () => {
+    const { service, inmuebles, terceros } = montar(
+      [{ id: 'inm-1', codigo: '301' }],
+      { porCorreo: { 'luis@ejemplo.com': ['ter-arr'] } },
+    );
+
+    const vista = await service.previsualizarImportacion({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'LUIS@ejemplo.com',
+        }),
+        fila({
+          codigo: '302',
+          arrendatarioNombre: 'Marta Ríos',
+          arrendatarioCorreo: 'marta@ejemplo.com',
+        }),
+        fila({ codigo: '303' }),
+      ],
+    });
+
+    expect(vista.errores).toEqual([]);
+    expect(vista.arrendatariosAVincular).toBe(1);
+    expect(vista.arrendatariosNuevos).toBe(1);
+    for (const modelo of [inmuebles, terceros]) {
+      for (const metodo of METODOS_DE_ESCRITURA) {
+        expect(modelo[metodo]).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('un arrendatario nuevo compartido por dos filas (mismo correo) cuenta una vez como nuevo y la otra como a vincular, como hará el import', async () => {
+    const { service } = montar();
+
+    const vista = await service.previsualizarImportacion({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+        fila({
+          codigo: '302',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'Luis@Ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(vista.arrendatariosNuevos).toBe(1);
+    expect(vista.arrendatariosAVincular).toBe(1);
+  });
+
+  it('el arrendatario que ya es el de la unidad no cuenta ni como nuevo ni como a vincular', async () => {
+    const { service } = montar(
+      [{ id: 'inm-1', codigo: '301', arrendatarioId: 'ter-arr' }],
+      {
+        porCorreo: { 'luis@ejemplo.com': ['ter-arr'] },
+        terceros: { 'ter-arr': { nombre: 'Luis Gómez' } },
+      },
+    );
+
+    const vista = await service.previsualizarImportacion({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: 'luis@ejemplo.com',
+        }),
+      ],
+    });
+
+    expect(vista.arrendatariosAVincular).toBe(0);
+    expect(vista.arrendatariosNuevos).toBe(0);
+    expect(vista.advertencias).toEqual([]);
+  });
+
+  it('los errores del arrendatario salen como errores de fila, con el mismo mensaje que el import, y esa fila no cuenta', async () => {
+    const filas = [
+      fila({
+        codigo: '301',
+        nombreTitular: 'Ana Pérez',
+        emailTitular: 'dueno@ejemplo.com',
+        arrendatarioNombre: 'Ana',
+        arrendatarioCorreo: 'dueno@ejemplo.com',
+      }),
+      fila({ codigo: '302', arrendatarioTelefono: '3001112233' }),
+    ];
+
+    const vista = await montar().service.previsualizarImportacion({ filas });
+    const real = await montar().service.importar({ filas });
+
+    expect(vista.errores).toHaveLength(2);
+    expect(vista.errores[0].mensaje).toBe(
+      'El arrendatario no puede ser el propietario',
+    );
+    expect(vista.errores).toEqual(real.errores);
+    expect(vista.aCrear).toBe(0);
+    expect(vista.arrendatariosNuevos).toBe(0);
+    expect(vista.titularesNuevos).toBe(0);
+  });
+
+  it('un arrendatario sin correo se cuenta y queda como advertencia (igual que en el import)', async () => {
+    const filas = [fila({ codigo: '301', arrendatarioNombre: 'Luis Gómez' })];
+
+    const vista = await montar().service.previsualizarImportacion({ filas });
+    const real = await montar().service.importar({ filas });
+
+    expect(vista.arrendatariosNuevos).toBe(1);
+    expect(vista.advertencias).toEqual([
+      { tipo: 'arrendatario-sin-correo', fila: 1, codigo: '301' },
+    ]);
+    expect(vista.advertencias).toEqual(real.advertencias);
+  });
+
+  it('las columnas viejas tipoTitular y resideEnElInmueble no cambian la vista previa', async () => {
+    const { service } = montar();
+
+    const vista = await service.previsualizarImportacion({
+      filas: [
+        fila({
+          codigo: '301',
+          tipoTitular: 'arrendatario',
+          resideEnElInmueble: true,
+        }),
+      ],
+    });
+
+    expect(vista.errores).toEqual([]);
+    expect(vista.aCrear).toBe(1);
   });
 });

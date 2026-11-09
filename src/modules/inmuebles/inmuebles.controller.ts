@@ -141,7 +141,7 @@ export class InmueblesController {
   }
 
   /**
-   * The roster in the import's exact shape (25 columns, every unit active or
+   * The roster in the import's exact shape (26 columns, every unit active or
    * inactive, titular columns joined) — what the frontend's "Descargar
    * inmuebles" builds the editable import workbook from. It exposes the
    * titulares' personal data, so it needs BOTH read on `Inmueble` and read on

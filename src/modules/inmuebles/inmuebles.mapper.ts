@@ -97,6 +97,7 @@ export type TerceroParaExportar = Partial<
     | 'telefono'
     | 'direccion'
     | 'ciudadCodigo'
+    | 'nombre'
   >
 >;
 
@@ -119,6 +120,7 @@ export const toFilaExportacion = (
   copropiedadCodigo: string,
   unidad: UnidadParaExportar,
   titular?: TerceroParaExportar | null,
+  arrendatario?: TerceroParaExportar | null,
 ): FilaExportacionInmueble => ({
   codigoCopropiedad: copropiedadCodigo,
   codigo: unidad.codigo,
@@ -143,6 +145,9 @@ export const toFilaExportacion = (
   telefonoTitular: titular?.telefono ?? '',
   direccionTitular: titular?.direccion ?? '',
   ciudadTitular: titular?.ciudadCodigo ?? '',
+  arrendatarioNombre: arrendatario?.nombre ?? '',
+  arrendatarioTelefono: arrendatario?.telefono ?? '',
+  arrendatarioCorreo: formatEmails(arrendatario?.emails),
 });
 
 /** Caps on the lists of the import preview: it answers in one JSON body, and
@@ -161,6 +166,8 @@ export interface ClasificacionVistaPrevia {
   aActualizar: number;
   repetidasEnArchivo: number;
   titularesNuevos: number;
+  arrendatariosNuevos: number;
+  arrendatariosAVincular: number;
   errores: ErrorImportacionInmueble[];
   advertencias: AdvertenciaVistaPreviaImportacion[];
   /** Stored codes of the active units missing from the file. */
@@ -179,6 +186,8 @@ export const toVistaPreviaImportacion = (
   aActualizar: c.aActualizar,
   repetidasEnArchivo: c.repetidasEnArchivo,
   titularesNuevos: c.titularesNuevos,
+  arrendatariosNuevos: c.arrendatariosNuevos,
+  arrendatariosAVincular: c.arrendatariosAVincular,
   errores: c.errores,
   codigosACrear: c.codigosACrear.slice(0, MAX_CODIGOS_A_CREAR_VISTA_PREVIA),
   codigosACrearTruncado:
@@ -208,6 +217,8 @@ export const toVistaPreviaAbortada = (
   aActualizar: 0,
   repetidasEnArchivo: 0,
   titularesNuevos: 0,
+  arrendatariosNuevos: 0,
+  arrendatariosAVincular: 0,
   errores,
   codigosACrear: [],
   codigosACrearTruncado: false,

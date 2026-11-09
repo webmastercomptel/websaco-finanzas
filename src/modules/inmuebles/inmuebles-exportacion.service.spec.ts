@@ -81,6 +81,67 @@ const unidad = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe('InmueblesService.exportarImportacion — arrendatario', () => {
+  it('escribe el arrendatario actual de cada unidad en sus tres columnas y deja vacías las de la que no tiene', async () => {
+    const inmuebles = modeloCon([
+      unidad({ codigo: '301', titularId: TER_1, arrendatarioId: TER_2 }),
+      unidad({ codigo: '302', titularId: TER_1 }),
+    ]);
+    const terceros = modeloCon([
+      { _id: TER_1, nombre: 'Ana Pérez', primerNombre: 'Ana' },
+      {
+        _id: TER_2,
+        nombre: 'Luis Gómez',
+        telefono: '3001112233',
+        emails: ['luis@ejemplo.com', 'luis.trabajo@ejemplo.com'],
+      },
+    ]);
+
+    const respuesta = await servicio(inmuebles, terceros).exportarImportacion();
+
+    expect(respuesta.filas[0]).toMatchObject({
+      codigo: '301',
+      nom1Titular: 'Ana',
+      arrendatarioNombre: 'Luis Gómez',
+      arrendatarioTelefono: '3001112233',
+      arrendatarioCorreo: 'luis@ejemplo.com, luis.trabajo@ejemplo.com',
+    });
+    expect(respuesta.filas[1]).toMatchObject({
+      codigo: '302',
+      arrendatarioNombre: '',
+      arrendatarioTelefono: '',
+      arrendatarioCorreo: '',
+    });
+  });
+
+  it('busca titulares y arrendatarios en UNA consulta con la copropiedad activa y los ids de las unidades', async () => {
+    const inmuebles = modeloCon([
+      unidad({ titularId: TER_1, arrendatarioId: TER_2 }),
+    ]);
+    const terceros = modeloCon([]);
+
+    await servicio(inmuebles, terceros).exportarImportacion();
+
+    expect(terceros.llamadas).toHaveLength(1);
+    expect(terceros.llamadas[0].filtro).toEqual({
+      copropiedadId: COP,
+      _id: { $in: [TER_1, TER_2] },
+    });
+    expect(inmuebles.llamadas[0].select).toContain('arrendatarioId');
+    expect(terceros.llamadas[0].select).toContain('nombre');
+  });
+
+  it('el archivo exportado ya no trae las columnas retiradas', async () => {
+    const respuesta = await servicio(
+      modeloCon([unidad()]),
+      modeloCon([]),
+    ).exportarImportacion();
+
+    expect(respuesta.filas[0]).not.toHaveProperty('tipoTitular');
+    expect(respuesta.filas[0]).not.toHaveProperty('resideEnElInmueble');
+  });
+});
+
 describe('InmueblesService.exportarImportacion', () => {
   it('consulta unidades y titulares con la copropiedad activa, sin paginar y ordenado por código', async () => {
     const inmuebles = modeloCon([unidad({ titularId: TER_1 })]);

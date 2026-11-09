@@ -30,6 +30,7 @@ import {
   type ProgresoActual,
 } from './progreso-importacion.service';
 import type {
+  AdvertenciaVistaPreviaImportacion,
   ExportacionImportacionInmuebles,
   Inmueble as InmuebleContract,
   Paginado,
@@ -94,17 +95,48 @@ type PlanTitular =
     }
   | { tipo: 'crear' };
 
+/** The unit's current tenant as the importer reads it back. */
+type ArrendatarioLeido = Pick<Tercero, 'nombre' | 'emails' | 'telefono'> & {
+  _id: Types.ObjectId;
+};
+
+/** What an import row does about its tenant — see `planificarArrendatario`.
+ *  `sinCorreo`: the tenant ends up with no e-mail (no portal access), which
+ *  the import and its preview report as a warning, never as an error. */
+type PlanArrendatario = (
+  | { tipo: 'ninguno' }
+  | { tipo: 'vincular'; terceroId: Types.ObjectId }
+  | {
+      tipo: 'refrescar';
+      tercero: ArrendatarioLeido;
+      /** Only what differs from the stored party. */
+      datos: { telefono?: string; emails?: string[] };
+    }
+  | {
+      tipo: 'crear';
+      datos: { nombre: string; telefono?: string; emails: string[] };
+    }
+) & { sinCorreo: boolean };
+
 /** Records created by the row being processed, so a failure later in the same
  *  row can take back exactly those — see `upsertFila`. */
 interface RastroFila {
   terceroId?: Types.ObjectId;
+  arrendatarioTerceroId?: Types.ObjectId;
 }
 
 /** A unit as the import and its preview read it back. */
 interface ExistenteLeve {
   _id: Types.ObjectId;
   titularId?: Types.ObjectId | null;
+  arrendatarioId?: Types.ObjectId | null;
 }
+
+/** The comparison form of an e-mail address: trimmed and case-folded. */
+const claveCorreo = (correo: string): string => correo.trim().toLowerCase();
+
+const ERROR_ARRENDATARIO_ES_PROPIETARIO =
+  'El arrendatario no puede ser el propietario';
 
 /** The comparison form of a unit code: trimmed and case-folded, which is what
  *  `filtroCodigoDuplicado` matches (anchored, case-insensitive). */
@@ -404,6 +436,12 @@ export class InmueblesService {
    * - A duplicate-key error is reported as "Código duplicado", never with
    *   index names.
    *
+   * The unit's TENANT travels in three optional columns (`arrendatarioNombre`,
+   * `arrendatarioTelefono`, `arrendatarioCorreo`): see `planificarArrendatario`.
+   * Retired columns (`tipoTitular`, `resideEnElInmueble`) are accepted and
+   * ignored by the DTO; units created here are always `propietario`. The result
+   * carries non-blocking `advertencias` (a tenant with no e-mail).
+   *
    * Rows are independent. One bad code or a malformed email fails only that
    * row and keeps going, because asking somebody to re-upload a 400-row file
    * over three typos is not a serious answer.
@@ -441,10 +479,12 @@ export class InmueblesService {
         errores: erroresCodigo,
         eliminadosAntes: 0,
         bloqueadosPorFactura: [],
+        advertencias: [],
       };
     }
 
     const errores: ResultadoImportacionInmuebles['errores'] = [];
+    const advertencias: AdvertenciaVistaPreviaImportacion[] = [];
     let creados = 0;
     let actualizados = 0;
 
@@ -458,9 +498,19 @@ export class InmueblesService {
     try {
       for (const [indice, fila] of dto.filas.entries()) {
         try {
-          const resultado = await this.upsertFila(copropiedadId, fila);
+          const { resultado, arrendatarioSinCorreo } = await this.upsertFila(
+            copropiedadId,
+            fila,
+          );
           if (resultado === 'actualizado') actualizados += 1;
           else creados += 1;
+          if (arrendatarioSinCorreo) {
+            advertencias.push({
+              tipo: 'arrendatario-sin-correo',
+              fila: indice + 1,
+              codigo: fila.codigo,
+            });
+          }
         } catch (err) {
           errores.push({
             fila: indice + 1,
@@ -490,6 +540,7 @@ export class InmueblesService {
       errores,
       eliminadosAntes: 0,
       bloqueadosPorFactura: [],
+      advertencias,
     };
   }
 
@@ -523,9 +574,10 @@ export class InmueblesService {
    *   row is just wrong, and retiring it for that would punish a typo.
    *
    * Known limitation: rows are planned against the database as it is now, so
-   * effects of earlier rows on later ones are not simulated. The one exception
-   * is `titularesNuevos`, which counts a NEW identification once however many
-   * rows share it; titulares known only by name (no identification) are not
+   * effects of earlier rows on later ones are not simulated. The exceptions are
+   * `titularesNuevos` (counts a NEW identification once however many rows
+   * share it) and `arrendatariosNuevos` (a NEW tenant e-mail counts once, the
+   * rows after it count as `arrendatariosAVincular`); titulares known only by name (no identification) are not
    * deduplicated across rows, so that count can be higher than what the import
    * ends up creating.
    */
@@ -552,7 +604,7 @@ export class InmueblesService {
 
     const unidades = await this.inmuebles
       .find({ copropiedadId })
-      .select('_id codigo titularId estado')
+      .select('_id codigo titularId arrendatarioId estado')
       .sort({ codigo: 1 })
       .lean()
       .exec();
@@ -561,7 +613,11 @@ export class InmueblesService {
     for (const u of unidades) {
       const clave = claveCodigo(u.codigo);
       if (!existentes.has(clave)) {
-        existentes.set(clave, { _id: u._id, titularId: u.titularId });
+        existentes.set(clave, {
+          _id: u._id,
+          titularId: u.titularId,
+          arrendatarioId: u.arrendatarioId,
+        });
       }
       const parecida = claveParecida(u.codigo);
       if (parecida) {
@@ -578,6 +634,8 @@ export class InmueblesService {
       aActualizar: 0,
       repetidasEnArchivo: 0,
       titularesNuevos: 0,
+      arrendatariosNuevos: 0,
+      arrendatariosAVincular: 0,
       errores: [],
       advertencias: [],
       ausentes: [],
@@ -585,6 +643,7 @@ export class InmueblesService {
     const codigosEnArchivo = new Set<string>();
     const aplicados = new Set<string>();
     const identificacionesNuevas = new Set<string>();
+    const correosArrendatariosNuevos = new Set<string>();
     const archivoPorClaveParecida = new Map<string, Map<string, string>>();
 
     for (const [indice, filaCruda] of dto.filas.entries()) {
@@ -629,11 +688,8 @@ export class InmueblesService {
       }
 
       try {
-        const { fila, existente, plan } = await this.planificarFila(
-          copropiedadId,
-          filaCruda,
-          existentes,
-        );
+        const { fila, existente, plan, planArrendatario } =
+          await this.planificarFila(copropiedadId, filaCruda, existentes);
 
         if (aplicados.has(clave)) {
           clasificacion.repetidasEnArchivo += 1;
@@ -656,6 +712,27 @@ export class InmueblesService {
             clasificacion.titularesNuevos += 1;
           }
           if (identificacion) identificacionesNuevas.add(identificacion);
+        }
+        if (planArrendatario.tipo === 'vincular') {
+          clasificacion.arrendatariosAVincular += 1;
+        } else if (planArrendatario.tipo === 'crear') {
+          // The import creates ONE Tercero per e-mail and the next rows find
+          // it, so a tenant shared by several units is new once and linked
+          // after that.
+          const correos = planArrendatario.datos.emails.map(claveCorreo);
+          if (correos.some((c) => correosArrendatariosNuevos.has(c))) {
+            clasificacion.arrendatariosAVincular += 1;
+          } else {
+            clasificacion.arrendatariosNuevos += 1;
+          }
+          correos.forEach((c) => correosArrendatariosNuevos.add(c));
+        }
+        if (planArrendatario.sinCorreo) {
+          clasificacion.advertencias.push({
+            tipo: 'arrendatario-sin-correo',
+            fila: numeroFila,
+            codigo,
+          });
         }
       } catch (err) {
         clasificacion.errores.push({
@@ -721,6 +798,7 @@ export class InmueblesService {
     datos: DatosTitularFila;
     existente: ExistenteLeve | null;
     plan: PlanTitular;
+    planArrendatario: PlanArrendatario;
   }> {
     const fila = this.sinCeldasVacias(filaCruda);
     const datos = this.validarFila(fila);
@@ -729,7 +807,7 @@ export class InmueblesService {
       ? (existentes.get(claveCodigo(fila.codigo)) ?? null)
       : await this.inmuebles
           .findOne(this.filtroCodigoDuplicado(copropiedadId, fila.codigo))
-          .select('_id titularId')
+          .select('_id titularId arrendatarioId')
           .lean()
           .exec();
 
@@ -743,7 +821,22 @@ export class InmueblesService {
           }
         : undefined,
     );
-    return { fila, datos, existente, plan };
+    // The titular the unit will have once the row is applied: the tenant may
+    // never be that same party.
+    const titularFinalId =
+      plan.tipo === 'refrescar'
+        ? plan.tercero._id
+        : plan.tipo === 'ninguno'
+          ? (existente?.titularId ?? null)
+          : null;
+    const planArrendatario = await this.planificarArrendatario(
+      copropiedadId,
+      fila,
+      datos,
+      existente,
+      titularFinalId,
+    );
+    return { fila, datos, existente, plan, planArrendatario };
   }
 
   /**
@@ -778,12 +871,14 @@ export class InmueblesService {
   private async upsertFila(
     copropiedadId: Types.ObjectId,
     filaCruda: FilaImportarInmuebleDto,
-  ): Promise<'actualizado' | 'creado'> {
-    const { fila, datos, existente, plan } = await this.planificarFila(
-      copropiedadId,
-      filaCruda,
-    );
+  ): Promise<{
+    resultado: 'actualizado' | 'creado';
+    arrendatarioSinCorreo: boolean;
+  }> {
+    const { fila, datos, existente, plan, planArrendatario } =
+      await this.planificarFila(copropiedadId, filaCruda);
     const rastro: RastroFila = {};
+    const arrendatarioSinCorreo = planArrendatario.sinCorreo;
 
     try {
       if (!existente) {
@@ -792,6 +887,11 @@ export class InmueblesService {
           fila,
           datos,
           plan,
+          rastro,
+        );
+        const arrendatarioId = await this.aplicarArrendatario(
+          copropiedadId,
+          planArrendatario,
           rastro,
         );
 
@@ -808,12 +908,13 @@ export class InmueblesService {
           area: fila.area,
           coeficiente: fila.coeficiente,
           titularId,
+          ...(arrendatarioId ? { arrendatarioId } : {}),
           tipoTitular: 'propietario',
           estadoCartera: fila.estadoCartera ?? 'vigente',
           contacto: fila.contacto,
           observaciones: fila.observaciones,
         });
-        return 'creado';
+        return { resultado: 'creado', arrendatarioSinCorreo };
       }
 
       const cambios = this.aDocumento(fila);
@@ -852,26 +953,213 @@ export class InmueblesService {
           )
           .exec();
       }
-      return 'actualizado';
+
+      const arrendatarioId = await this.aplicarArrendatario(
+        copropiedadId,
+        planArrendatario,
+        rastro,
+      );
+      if (
+        arrendatarioId &&
+        arrendatarioId.toString() !== existente.arrendatarioId?.toString()
+      ) {
+        await this.inmuebles
+          .updateOne(
+            { _id: existente._id, copropiedadId },
+            { $set: { arrendatarioId } },
+          )
+          .exec();
+      }
+      return { resultado: 'actualizado', arrendatarioSinCorreo };
     } catch (err) {
-      if (rastro.terceroId) {
-        // The repoint may have been applied before the error surfaced: a
-        // Tercero a unit already points at must not be deleted (an orphan
-        // party is harmless, a dangling `titularId` is not). If even that
-        // check fails, keep the Tercero.
+      // The repoint may have been applied before the error surfaced: a
+      // Tercero a unit already points at must not be deleted (an orphan party
+      // is harmless, a dangling reference is not). If even that check fails,
+      // keep the Tercero.
+      for (const [terceroId, campo] of [
+        [rastro.terceroId, 'titularId'],
+        [rastro.arrendatarioTerceroId, 'arrendatarioId'],
+      ] as const) {
+        if (!terceroId) continue;
         const referenciado = await this.inmuebles
-          .exists({ copropiedadId, titularId: rastro.terceroId })
+          .exists({ copropiedadId, [campo]: terceroId })
           .exec()
           .catch(() => true);
         if (!referenciado) {
           await this.terceros
-            .deleteOne({ _id: rastro.terceroId, copropiedadId })
+            .deleteOne({ _id: terceroId, copropiedadId })
             .exec()
             .catch(() => undefined);
         }
       }
       throw err;
     }
+  }
+
+  /**
+   * Decides, with READS only, what a row does about the unit's TENANT — the
+   * caller applies it with `aplicarArrendatario`, so every way the row can be
+   * rejected is known before its first write (and the preview can reuse it).
+   *
+   * The row's three tenant columns (`arrendatarioNombre`, `arrendatarioTelefono`,
+   * `arrendatarioCorreo`) follow the import's upsert rules: all empty means
+   * "leave the stored tenant alone" (`ninguno`) — the import never deletes.
+   * Otherwise:
+   * - the name is required (a phone or e-mail alone is a row error);
+   * - the tenant is searched BY E-MAIL inside the same coproperty (trim,
+   *   case-insensitive, any of the cell's addresses). One match is linked
+   *   (`vincular`; `ninguno` if it already is the unit's tenant) and the
+   *   existing party is NOT modified — it may be somebody else's owner. Two
+   *   different parties sharing the address is a row error: guessing would
+   *   bill the wrong person;
+   * - no match: when the unit's current tenant is the same person (same name)
+   *   it is completed in place with the phone/e-mail the row sends that
+   *   differ (`refrescar`, or `ninguno` when nothing differs, so
+   *   re-importing an unedited export writes nothing); otherwise a new
+   *   Tercero is created from the row (`crear`: only a name is required to
+   *   create one, see the Tercero schema);
+   * - the tenant may never be the owner: the same address as the row's own
+   *   titular, or a tenant that resolves to the unit's titular Tercero, is
+   *   'El arrendatario no puede ser el propietario'.
+   *
+   * `sinCorreo` flags a tenant that ends up with no e-mail (it cannot reach the
+   * portal and cannot be matched on the next import): a warning, never an error.
+   */
+  private async planificarArrendatario(
+    copropiedadId: Types.ObjectId,
+    fila: FilaImportarInmuebleDto,
+    datosTitular: DatosTitularFila,
+    existente: ExistenteLeve | null,
+    titularFinalId: Types.ObjectId | null,
+  ): Promise<PlanArrendatario> {
+    const nombre = fila.arrendatarioNombre?.trim();
+    const telefono = fila.arrendatarioTelefono?.trim();
+    const correoCrudo = fila.arrendatarioCorreo?.trim();
+    if (!nombre && !telefono && !correoCrudo) {
+      return { tipo: 'ninguno', sinCorreo: false };
+    }
+    if (!nombre) {
+      throw new Error(
+        'El arrendatario necesita nombre: la fila trae teléfono o correo pero no arrendatarioNombre',
+      );
+    }
+
+    let emails: string[];
+    try {
+      emails = [...new Set(parseEmails(correoCrudo))];
+    } catch (err) {
+      throw new Error(`Correo del arrendatario: ${mensajeDeFila(err)}`);
+    }
+
+    const correosTitular = (datosTitular.emails ?? []).map(claveCorreo);
+    if (emails.some((e) => correosTitular.includes(claveCorreo(e)))) {
+      throw new Error(ERROR_ARRENDATARIO_ES_PROPIETARIO);
+    }
+    const esElTitular = (id: Types.ObjectId): boolean =>
+      !!titularFinalId && String(id) === String(titularFinalId);
+
+    if (emails.length > 0) {
+      const encontrados = await this.terceros
+        .find({
+          copropiedadId,
+          emails: {
+            $in: emails.map((e) => new RegExp(`^${escapeRegex(e)}$`, 'i')),
+          },
+        })
+        .select('_id')
+        .limit(2)
+        .lean()
+        .exec();
+      if (new Set(encontrados.map((t) => String(t._id))).size > 1) {
+        throw new Error(
+          'El correo del arrendatario lo tiene más de un tercero en esta copropiedad: no se puede elegir a cuál vincular',
+        );
+      }
+      const porCorreo = encontrados[0];
+      if (porCorreo) {
+        if (esElTitular(porCorreo._id)) {
+          throw new Error(ERROR_ARRENDATARIO_ES_PROPIETARIO);
+        }
+        if (String(porCorreo._id) === String(existente?.arrendatarioId)) {
+          return { tipo: 'ninguno', sinCorreo: false };
+        }
+        return { tipo: 'vincular', terceroId: porCorreo._id, sinCorreo: false };
+      }
+    }
+
+    const actual = existente?.arrendatarioId
+      ? await this.terceros
+          .findOne({ _id: existente.arrendatarioId, copropiedadId })
+          .select('nombre emails telefono')
+          .lean()
+          .exec()
+      : null;
+    if (actual && mismoNombre(nombre, actual.nombre)) {
+      if (esElTitular(actual._id)) {
+        throw new Error(ERROR_ARRENDATARIO_ES_PROPIETARIO);
+      }
+      const guardados = (actual.emails ?? []).map(claveCorreo).sort();
+      const cambioTelefono = !!telefono && telefono !== actual.telefono;
+      const cambioCorreos =
+        emails.length > 0 &&
+        emails.map(claveCorreo).sort().join(',') !== guardados.join(',');
+      const sinCorreo = emails.length === 0 && guardados.length === 0;
+      if (!cambioTelefono && !cambioCorreos) {
+        return { tipo: 'ninguno', sinCorreo };
+      }
+      return {
+        tipo: 'refrescar',
+        tercero: actual,
+        datos: {
+          ...(cambioTelefono ? { telefono } : {}),
+          ...(cambioCorreos ? { emails } : {}),
+        },
+        sinCorreo,
+      };
+    }
+
+    return {
+      tipo: 'crear',
+      datos: { nombre, telefono: telefono || undefined, emails },
+      sinCorreo: emails.length === 0,
+    };
+  }
+
+  /**
+   * Carries out a `planificarArrendatario` decision and returns the Tercero
+   * the unit must point at (`undefined` leaves `arrendatarioId` alone). A
+   * party it CREATES is recorded in `rastro` so the caller can take back
+   * exactly that record if a later step of the same row fails.
+   */
+  private async aplicarArrendatario(
+    copropiedadId: Types.ObjectId,
+    plan: PlanArrendatario,
+    rastro: RastroFila,
+  ): Promise<Types.ObjectId | undefined> {
+    if (plan.tipo === 'ninguno') return undefined;
+    if (plan.tipo === 'vincular') return plan.terceroId;
+
+    if (plan.tipo === 'refrescar') {
+      const cambios: Record<string, unknown> = {};
+      if (plan.datos.telefono !== undefined) {
+        cambios.telefono = plan.datos.telefono;
+      }
+      if (plan.datos.emails !== undefined) cambios.emails = plan.datos.emails;
+      await this.terceros
+        .updateOne({ _id: plan.tercero._id, copropiedadId }, { $set: cambios })
+        .exec();
+      return plan.tercero._id;
+    }
+
+    const creado = await this.terceros.create({
+      copropiedadId,
+      tipoPersona: 'natural',
+      nombre: plan.datos.nombre,
+      telefono: plan.datos.telefono,
+      emails: plan.datos.emails,
+    });
+    rastro.arrendatarioTerceroId = creado._id;
+    return creado._id;
   }
 
   /**
@@ -936,7 +1224,7 @@ export class InmueblesService {
     const unidades = await this.inmuebles
       .find({ copropiedadId })
       .select(
-        'codigo referencia bloque zona uso area coeficiente titularId estadoCartera contacto observaciones',
+        'codigo referencia bloque zona uso area coeficiente titularId arrendatarioId estadoCartera contacto observaciones',
       )
       .sort({ codigo: 1 })
       .limit(MAX_INMUEBLES_EXPORTACION + 1)
@@ -948,23 +1236,28 @@ export class InmueblesService {
       );
     }
 
-    const titularIds = [
+    // Owners and tenants come from ONE tenant-scoped query over the ids the
+    // units point at (never a bare `_id` lookup).
+    const terceroIds = [
       ...new Set(
         unidades
-          .map((u) => u.titularId?.toString())
+          .flatMap((u) => [
+            u.titularId?.toString(),
+            u.arrendatarioId?.toString(),
+          ])
           .filter((id): id is string => Boolean(id)),
       ),
     ].map((id) => new Types.ObjectId(id));
-    const titulares = titularIds.length
+    const terceros = terceroIds.length
       ? await this.terceros
-          .find({ copropiedadId, _id: { $in: titularIds } })
+          .find({ copropiedadId, _id: { $in: terceroIds } })
           .select(
-            'primerNombre segundoNombre primerApellido segundoApellido razonSocial tipoIdentificacion numeroIdentificacion digitoVerificacion emails telefono direccion ciudadCodigo',
+            'nombre primerNombre segundoNombre primerApellido segundoApellido razonSocial tipoIdentificacion numeroIdentificacion digitoVerificacion emails telefono direccion ciudadCodigo',
           )
           .lean()
           .exec()
       : [];
-    const titularPorId = new Map(titulares.map((t) => [t._id.toString(), t]));
+    const terceroPorId = new Map(terceros.map((t) => [t._id.toString(), t]));
 
     return {
       copropiedadCodigo: copropiedad.codigo,
@@ -972,7 +1265,10 @@ export class InmueblesService {
         toFilaExportacion(
           copropiedad.codigo,
           u,
-          u.titularId ? titularPorId.get(u.titularId.toString()) : undefined,
+          u.titularId ? terceroPorId.get(u.titularId.toString()) : undefined,
+          u.arrendatarioId
+            ? terceroPorId.get(u.arrendatarioId.toString())
+            : undefined,
         ),
       ),
     };

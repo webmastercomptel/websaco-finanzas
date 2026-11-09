@@ -1,7 +1,7 @@
 import { parseEmails } from '../../common/utils/email.utils';
 import { toFilaExportacion } from './inmuebles.mapper';
 
-/** The 25 import columns, in the order the import template reads them. */
+/** The 26 import columns, in the order the import template reads them. */
 const COLUMNAS = [
   'codigoCopropiedad',
   'codigo',
@@ -26,6 +26,9 @@ const COLUMNAS = [
   'telefonoTitular',
   'direccionTitular',
   'ciudadTitular',
+  'arrendatarioNombre',
+  'arrendatarioTelefono',
+  'arrendatarioCorreo',
 ];
 
 const unidadCompleta = {
@@ -42,11 +45,11 @@ const unidadCompleta = {
 };
 
 describe('toFilaExportacion', () => {
-  it('trae exactamente las 23 columnas del import, en su orden', () => {
+  it('trae exactamente las 26 columnas del import, en su orden', () => {
     const fila = toFilaExportacion('0001', unidadCompleta, null);
 
     expect(Object.keys(fila)).toEqual(COLUMNAS);
-    expect(COLUMNAS).toHaveLength(23);
+    expect(COLUMNAS).toHaveLength(26);
   });
 
   it('las columnas retiradas (tipoTitular, resideEnElInmueble) ya no salen en el archivo', () => {
@@ -160,6 +163,45 @@ describe('toFilaExportacion', () => {
     for (const columna of titulares) {
       expect(fila[columna as keyof typeof fila]).toBe('');
     }
+  });
+
+  it('sin arrendatario las tres columnas del arrendatario salen ""', () => {
+    const fila = toFilaExportacion('0001', unidadCompleta, null, null);
+
+    expect(fila).toMatchObject({
+      arrendatarioNombre: '',
+      arrendatarioTelefono: '',
+      arrendatarioCorreo: '',
+    });
+  });
+
+  it('el arrendatario sale en sus tres columnas, con todos sus correos unidos como los lee el import', () => {
+    const emails = ['luis@ejemplo.com', 'luis.trabajo@ejemplo.com'];
+
+    const fila = toFilaExportacion('0001', unidadCompleta, null, {
+      nombre: 'Luis Gómez',
+      telefono: '3001112233',
+      emails,
+    });
+
+    expect(fila).toMatchObject({
+      arrendatarioNombre: 'Luis Gómez',
+      arrendatarioTelefono: '3001112233',
+    });
+    expect(parseEmails(fila.arrendatarioCorreo)).toEqual(emails);
+  });
+
+  it('las columnas del arrendatario van al final, después de las del titular (un archivo viejo sigue alineado)', () => {
+    const claves = Object.keys(
+      toFilaExportacion('0001', unidadCompleta, null, null),
+    );
+
+    expect(claves.slice(-4)).toEqual([
+      'ciudadTitular',
+      'arrendatarioNombre',
+      'arrendatarioTelefono',
+      'arrendatarioCorreo',
+    ]);
   });
 
   it('varios emails ida y vuelta: lo exportado se vuelve a leer igual con parseEmails del import', () => {
