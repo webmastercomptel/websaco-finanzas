@@ -1,0 +1,32 @@
+# Keeps secrets and local state out of the build context (and out of any cached
+# builder layer). Only what `npm ci` + `npm run build` need is sent.
+node_modules
+dist
+coverage
+.git
+.gitignore
+.worktrees
+.claude
+.agents
+.atl
+.vscode
+.idea
+
+# Environment files: the image never carries configuration or secrets.
+.env
+.env.*
+!.env.example
+
+# Credentials and local artefacts
+service-account.json
+*firebase-adminsdk*.json
+*-adminsdk-*.json
+*.log
+
+# Not part of the runtime image
+docs
+openspec
+scripts
+test
+docker-compose.yml
+archivo.txt

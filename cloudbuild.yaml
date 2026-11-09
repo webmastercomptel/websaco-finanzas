@@ -1,3 +1,9 @@
+# Cloud Build pipeline of the unified backend (the only one): build the image,
+# push it, and roll the Cloud Run service to it. It changes ONLY the image and
+# labels; memory, CPU, timeout, instances, probes and env vars are properties of
+# the service and are set with `gcloud run services update` (see
+# docs/runbooks/despliegue-fusion.md). A build started by hand has no COMMIT_SHA:
+# pass --substitutions=COMMIT_SHA=<tag>.
 steps:
   # 1. Intentar descargar la imagen 'latest' para usarla como caché
   - id: Pull Cache
@@ -49,6 +55,10 @@ steps:
 images:
   - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA
   - $_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$REPO_NAME/$_SERVICE_NAME:latest
+
+# npm ci + the SWC build + two pushes outlast Cloud Build's 10-minute default on
+# a cold cache.
+timeout: 1200s
 
 options:
   logging: CLOUD_LOGGING_ONLY
