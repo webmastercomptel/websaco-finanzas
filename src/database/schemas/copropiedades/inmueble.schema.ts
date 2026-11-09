@@ -107,10 +107,6 @@ export class Inmueble {
   })
   tipoTitular: 'propietario' | 'arrendatario';
 
-  /** Whether the responsible party actually lives here. */
-  @Prop({ required: true, default: true })
-  resideEnElInmueble: boolean;
-
   /**
    * Collection status, used to steer follow-up rather than to block billing.
    * A unit in legal proceedings keeps accruing charges; what changes is who

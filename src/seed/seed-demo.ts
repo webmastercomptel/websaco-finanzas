@@ -234,7 +234,6 @@ async function seedDemo(): Promise<void> {
                 10000,
               titularId: tercero._id,
               tipoTitular: i % 7 === 0 ? 'arrendatario' : 'propietario',
-              resideEnElInmueble: i % 9 !== 0,
               estadoCartera:
                 i % 13 === 0
                   ? 'juridico'

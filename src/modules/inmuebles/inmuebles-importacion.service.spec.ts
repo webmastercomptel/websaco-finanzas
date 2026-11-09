@@ -238,7 +238,7 @@ describe('InmueblesService.importar — alta de filas nuevas', () => {
     expect(inmuebles.actualizaciones).toHaveLength(0);
   });
 
-  it('un inmueble nuevo nace con los valores por defecto: propietario, no reside, vigente', async () => {
+  it('un inmueble nuevo nace con los valores por defecto: propietario, vigente', async () => {
     const inmuebles = inmueblesModeloCon();
     const service = nuevoServicio(inmuebles, tercerosModeloCon());
 
@@ -246,9 +246,21 @@ describe('InmueblesService.importar — alta de filas nuevas', () => {
 
     expect(inmuebles.escrituras[0]).toMatchObject({
       tipoTitular: 'propietario',
-      resideEnElInmueble: false,
       estadoCartera: 'vigente',
     });
+  });
+
+  it('una fila que aún trae resideEnElInmueble (archivo viejo) se procesa y el valor no se guarda al crear', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301', resideEnElInmueble: true })],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.creados).toBe(1);
+    expect(inmuebles.escrituras[0]).not.toHaveProperty('resideEnElInmueble');
   });
 
   it('una celda en blanco en un inmueble nuevo se trata como no enviada', async () => {
@@ -295,6 +307,22 @@ describe('InmueblesService.importar — actualización de inmuebles existentes',
       {
         filtro: { _id: 'inm-1', copropiedadId: COP },
         cambios: { zona: 'Norte', area: 55.5 },
+      },
+    ]);
+  });
+
+  it('una fila vieja con resideEnElInmueble sobre un inmueble existente no escribe ese campo (ni lo borra)', async () => {
+    const inmuebles = inmueblesModeloCon([{ id: 'inm-1', codigo: '301' }]);
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    await service.importar({
+      filas: [fila({ codigo: '301', zona: 'Norte', resideEnElInmueble: true })],
+    });
+
+    expect(inmuebles.actualizaciones).toEqual([
+      {
+        filtro: { _id: 'inm-1', copropiedadId: COP },
+        cambios: { zona: 'Norte' },
       },
     ]);
   });
@@ -1211,8 +1239,8 @@ describe('InmueblesService.importar — idempotencia al reimportar un archivo ex
       telefono: '3000000000',
     };
     const unidades = [
-      { codigo: '301', area: 50, resideEnElInmueble: false },
-      { codigo: '302', area: 60, resideEnElInmueble: true },
+      { codigo: '301', area: 50 },
+      { codigo: '302', area: 60 },
     ];
     const inmuebles = inmueblesModeloCon(
       [
@@ -1413,7 +1441,6 @@ describe('InmueblesService.importar — null se trata como celda en blanco', () 
           area: null,
           coeficiente: null,
           referencia: null,
-          resideEnElInmueble: null,
           nombreTitular: null,
           numeroIdentificacionTitular: null,
           emailTitular: null,

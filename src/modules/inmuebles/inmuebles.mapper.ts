@@ -57,7 +57,6 @@ export const toInmueble = (doc: InmuebleDocument): InmuebleContract => ({
   titular: titularDe(doc.titularId),
   arrendatario: titularDe(doc.arrendatarioId),
   tipoTitular: doc.tipoTitular,
-  resideEnElInmueble: doc.resideEnElInmueble,
   estadoCartera: doc.estadoCartera,
   estado: doc.estado === 'active' ? 'activo' : 'inactivo',
   observaciones: doc.observaciones,
@@ -76,7 +75,6 @@ export type UnidadParaExportar = Partial<
     | 'area'
     | 'coeficiente'
     | 'tipoTitular'
-    | 'resideEnElInmueble'
     | 'estadoCartera'
     | 'contacto'
     | 'observaciones'
@@ -132,7 +130,6 @@ export const toFilaExportacion = (
   area: unidad.area ?? '',
   coeficiente: unidad.coeficiente ?? '',
   tipoTitular: unidad.tipoTitular ?? '',
-  resideEnElInmueble: unidad.resideEnElInmueble ?? false,
   estadoCartera: unidad.estadoCartera ?? '',
   contacto: unidad.contacto ?? '',
   observaciones: unidad.observaciones ?? '',

@@ -22,7 +22,6 @@ const documento = () => ({
   coeficiente: null,
   titularId: null,
   tipoTitular: 'propietario',
-  resideEnElInmueble: true,
   estadoCartera: 'vigente',
   estado: 'active',
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),

@@ -77,7 +77,6 @@ const unidad = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   codigo: '301',
   area: 50,
-  resideEnElInmueble: false,
   titularId: null,
   ...over,
 });

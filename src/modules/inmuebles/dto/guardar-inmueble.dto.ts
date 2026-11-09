@@ -1,7 +1,7 @@
 // src/modules/inmuebles/dto/guardar-inmueble.dto.ts
-import { Type } from 'class-transformer';
+import { Exclude, Type } from 'class-transformer';
 import {
-  IsBoolean,
+  Allow,
   IsIn,
   IsMongoId,
   IsNumber,
@@ -78,9 +78,18 @@ class CamposInmuebleDto {
   @IsIn(['propietario', 'arrendatario'])
   tipoTitular?: 'propietario' | 'arrendatario';
 
-  @IsOptional()
-  @IsBoolean()
-  resideEnElInmueble?: boolean;
+  /**
+   * RETIRED field ("el titular reside en el inmueble"), kept only so an old
+   * client that still sends it does not get a 400 from the global
+   * `forbidNonWhitelisted` pipe. `@Exclude()` drops the value while the body
+   * is transformed (so it is always `undefined` and never reaches the service
+   * nor the database); `@Allow()` is what whitelists the key itself, because
+   * the class field exists as an own property. Existing documents that still
+   * carry it are left as they are.
+   */
+  @Exclude()
+  @Allow()
+  resideEnElInmueble?: never;
 
   @IsOptional()
   @IsIn(['vigente', 'juridico', 'dificil_recaudo'])

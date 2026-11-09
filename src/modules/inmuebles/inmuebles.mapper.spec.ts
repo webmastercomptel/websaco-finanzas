@@ -12,7 +12,6 @@ const COLUMNAS = [
   'area',
   'coeficiente',
   'tipoTitular',
-  'resideEnElInmueble',
   'estadoCartera',
   'contacto',
   'observaciones',
@@ -39,18 +38,17 @@ const unidadCompleta = {
   area: 55.5,
   coeficiente: 0.25,
   tipoTitular: 'arrendatario' as const,
-  resideEnElInmueble: true,
   estadoCartera: 'juridico' as const,
   contacto: 'Portería',
   observaciones: 'Esquinero',
 };
 
 describe('toFilaExportacion', () => {
-  it('trae exactamente las 25 columnas del import, en su orden', () => {
+  it('trae exactamente las 24 columnas del import, en su orden', () => {
     const fila = toFilaExportacion('0001', unidadCompleta, null);
 
     expect(Object.keys(fila)).toEqual(COLUMNAS);
-    expect(COLUMNAS).toHaveLength(25);
+    expect(COLUMNAS).toHaveLength(24);
   });
 
   it('repite el código de la copropiedad en cada fila y copia los valores de la unidad tal cual', () => {

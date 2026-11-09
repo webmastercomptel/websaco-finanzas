@@ -1,9 +1,9 @@
 // src/modules/inmuebles/dto/importar-inmuebles.dto.ts
-import { Transform, Type } from 'class-transformer';
+import { Exclude, Transform, Type } from 'class-transformer';
 import {
+  Allow,
   ArrayMinSize,
   IsArray,
-  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -96,10 +96,17 @@ export class FilaImportarInmuebleDto {
   @IsIn(['propietario', 'arrendatario'])
   tipoTitular?: 'propietario' | 'arrendatario';
 
-  @CeldaVaciaComoAusente()
-  @IsOptional()
-  @IsBoolean()
-  resideEnElInmueble?: boolean;
+  /**
+   * RETIRED column ("el titular reside en el inmueble"): files downloaded
+   * before it was retired still carry it, and the global
+   * `forbidNonWhitelisted` pipe would answer 400 for the WHOLE file.
+   * `@Exclude()` drops the cell while the body is transformed (whatever it
+   * holds, so it is always `undefined`) and `@Allow()` whitelists the key
+   * itself: accepted, never validated, never stored.
+   */
+  @Exclude()
+  @Allow()
+  resideEnElInmueble?: never;
 
   @CeldaVaciaComoAusente()
   @IsOptional()

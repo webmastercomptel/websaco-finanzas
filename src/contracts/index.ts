@@ -132,7 +132,6 @@ export interface Inmueble {
   /** Current tenant, if any. The invoice stays the owner's (`titular`). */
   arrendatario: TitularResumen | null;
   tipoTitular: 'propietario' | 'arrendatario';
-  resideEnElInmueble: boolean;
   estadoCartera: 'vigente' | 'juridico' | 'dificil_recaudo';
   /**
    * Whether this unit is billed going forward — `LotesFacturacionService`
@@ -260,7 +259,7 @@ export interface ResultadoDarDeBajaInmuebles {
  * EXACTLY the column set and order `POST /inmuebles/importar` reads, so the
  * file a person downloads, edits and uploads again round-trips without
  * mapping. Strings are never null (absent → `""`), `area`/`coeficiente` are
- * numbers (absent → `""`), `resideEnElInmueble` is a boolean. Titular columns
+ * numbers (absent → `""`). Titular columns
  * come from the joined Tercero and are all `""` for a unit without titular.
  *
  * `estado` is deliberately not a column: the import cannot carry it and never
@@ -279,7 +278,6 @@ export interface FilaExportacionInmueble {
   area: number | '';
   coeficiente: number | '';
   tipoTitular: string;
-  resideEnElInmueble: boolean;
   estadoCartera: string;
   contacto: string;
   observaciones: string;

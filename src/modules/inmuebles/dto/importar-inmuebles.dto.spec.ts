@@ -1,7 +1,23 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { FilaImportarInmuebleDto } from './importar-inmuebles.dto';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
+import {
+  FilaImportarInmuebleDto,
+  ImportarInmueblesDto,
+} from './importar-inmuebles.dto';
+
+/** The exact pipe `app-setup.ts` installs globally. */
+const pipe = new ValidationPipe({
+  whitelist: true,
+  forbidNonWhitelisted: true,
+  transform: true,
+});
+const pasarPorPipe = (fila: Record<string, unknown>) =>
+  pipe.transform(
+    { filas: [{ codigoCopropiedad: '0001', codigo: '301', ...fila }] },
+    { type: 'body', metatype: ImportarInmueblesDto },
+  ) as Promise<ImportarInmueblesDto>;
 
 const fila = (over: Record<string, unknown> = {}) =>
   plainToInstance(FilaImportarInmuebleDto, {
@@ -19,20 +35,16 @@ describe('FilaImportarInmuebleDto — celdas en blanco', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  it('un null (área, coeficiente, enums, residencia) también queda sin enviar', async () => {
+  it('un null (área, coeficiente, estado de cartera) también queda sin enviar', async () => {
     const dto = fila({
       area: null,
       coeficiente: null,
-      tipoTitular: null,
       estadoCartera: null,
-      resideEnElInmueble: null,
     });
 
     expect(dto.area).toBeUndefined();
     expect(dto.coeficiente).toBeUndefined();
-    expect(dto.tipoTitular).toBeUndefined();
     expect(dto.estadoCartera).toBeUndefined();
-    expect(dto.resideEnElInmueble).toBeUndefined();
     expect(await validate(dto)).toHaveLength(0);
   });
 
@@ -44,22 +56,40 @@ describe('FilaImportarInmuebleDto — celdas en blanco', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  it('un tipo de titular, estado de cartera o residencia en blanco no rechaza el archivo entero', async () => {
-    const dto = fila({
-      tipoTitular: '',
-      estadoCartera: ' ',
-      resideEnElInmueble: '',
-    });
+  it('un estado de cartera en blanco no rechaza el archivo entero', async () => {
+    const dto = fila({ estadoCartera: ' ' });
 
-    expect(dto.tipoTitular).toBeUndefined();
     expect(dto.estadoCartera).toBeUndefined();
-    expect(dto.resideEnElInmueble).toBeUndefined();
     expect(await validate(dto)).toHaveLength(0);
   });
 
   it('un valor inválido no vacío sigue siendo rechazado', async () => {
-    const dto = fila({ tipoTitular: 'inquilino' });
+    const dto = fila({ estadoCartera: 'moroso' });
 
     expect(await validate(dto)).not.toHaveLength(0);
+  });
+});
+
+describe('FilaImportarInmuebleDto — columnas retiradas', () => {
+  it('un archivo viejo con la columna resideEnElInmueble se acepta (sin 400) y el valor se descarta', async () => {
+    const dto = await pasarPorPipe({
+      resideEnElInmueble: true,
+      zona: 'Norte',
+    });
+
+    expect(dto.filas[0].zona).toBe('Norte');
+    expect(dto.filas[0].resideEnElInmueble).toBeUndefined();
+  });
+
+  it('el valor de una columna retirada no se valida: incluso basura se acepta y se ignora', async () => {
+    const dto = await pasarPorPipe({ resideEnElInmueble: 'quizás' });
+
+    expect(dto.filas[0].resideEnElInmueble).toBeUndefined();
+  });
+
+  it('una propiedad desconocida cualquiera sigue siendo rechazada (el pipe global no se relajó)', async () => {
+    await expect(
+      pasarPorPipe({ columnaInventada: 'x' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

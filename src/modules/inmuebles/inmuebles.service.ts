@@ -795,7 +795,7 @@ export class InmueblesService {
           rastro,
         );
 
-        // Defaults (`propietario`, not resident, `vigente`) apply only here:
+        // Defaults (`propietario`, `vigente`) apply only here:
         // they describe a unit that did not exist, never a patch.
         await this.inmuebles.create({
           copropiedadId,
@@ -808,7 +808,6 @@ export class InmueblesService {
           coeficiente: fila.coeficiente,
           titularId,
           tipoTitular: fila.tipoTitular ?? 'propietario',
-          resideEnElInmueble: fila.resideEnElInmueble ?? false,
           estadoCartera: fila.estadoCartera ?? 'vigente',
           contacto: fila.contacto,
           observaciones: fila.observaciones,
@@ -933,7 +932,7 @@ export class InmueblesService {
     const unidades = await this.inmuebles
       .find({ copropiedadId })
       .select(
-        'codigo referencia bloque zona uso area coeficiente titularId tipoTitular resideEnElInmueble estadoCartera contacto observaciones',
+        'codigo referencia bloque zona uso area coeficiente titularId tipoTitular estadoCartera contacto observaciones',
       )
       .sort({ codigo: 1 })
       .limit(MAX_INMUEBLES_EXPORTACION + 1)
@@ -1489,7 +1488,6 @@ export class InmueblesService {
     set('titularId', dto.titularId);
     set('arrendatarioId', dto.arrendatarioId);
     set('tipoTitular', dto.tipoTitular);
-    set('resideEnElInmueble', dto.resideEnElInmueble);
     set('estadoCartera', dto.estadoCartera);
     if (dto.estado !== undefined) {
       doc.estado = dto.estado === 'inactivo' ? 'inactive' : 'active';
