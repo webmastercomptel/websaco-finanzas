@@ -263,6 +263,17 @@ describe('InmueblesService.importar — alta de filas nuevas', () => {
     expect(inmuebles.escrituras[0]).not.toHaveProperty('resideEnElInmueble');
   });
 
+  it('una fila vieja con tipoTitular no decide el tipo de un inmueble nuevo: nace propietario', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    await service.importar({
+      filas: [fila({ codigo: '301', tipoTitular: 'arrendatario' })],
+    });
+
+    expect(inmuebles.escrituras[0].tipoTitular).toBe('propietario');
+  });
+
   it('una celda en blanco en un inmueble nuevo se trata como no enviada', async () => {
     const inmuebles = inmueblesModeloCon();
     const service = nuevoServicio(inmuebles, tercerosModeloCon());
@@ -307,6 +318,24 @@ describe('InmueblesService.importar — actualización de inmuebles existentes',
       {
         filtro: { _id: 'inm-1', copropiedadId: COP },
         cambios: { zona: 'Norte', area: 55.5 },
+      },
+    ]);
+  });
+
+  it('una fila vieja con tipoTitular sobre un inmueble existente no reescribe el que ya tiene', async () => {
+    const inmuebles = inmueblesModeloCon([{ id: 'inm-1', codigo: '301' }]);
+    const service = nuevoServicio(inmuebles, tercerosModeloCon());
+
+    await service.importar({
+      filas: [
+        fila({ codigo: '301', zona: 'Norte', tipoTitular: 'arrendatario' }),
+      ],
+    });
+
+    expect(inmuebles.actualizaciones).toEqual([
+      {
+        filtro: { _id: 'inm-1', copropiedadId: COP },
+        cambios: { zona: 'Norte' },
       },
     ]);
   });

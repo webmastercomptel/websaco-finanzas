@@ -277,7 +277,6 @@ export interface FilaExportacionInmueble {
   uso: string;
   area: number | '';
   coeficiente: number | '';
-  tipoTitular: string;
   estadoCartera: string;
   contacto: string;
   observaciones: string;

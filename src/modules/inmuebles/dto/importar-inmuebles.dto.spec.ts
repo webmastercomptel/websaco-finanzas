@@ -81,6 +81,14 @@ describe('FilaImportarInmuebleDto — columnas retiradas', () => {
     expect(dto.filas[0].resideEnElInmueble).toBeUndefined();
   });
 
+  it('un archivo viejo con la columna tipoTitular se acepta (sin 400) y el valor se descarta, aunque sea inválido', async () => {
+    const valido = await pasarPorPipe({ tipoTitular: 'arrendatario' });
+    const invalido = await pasarPorPipe({ tipoTitular: 'inquilino' });
+
+    expect(valido.filas[0].tipoTitular).toBeUndefined();
+    expect(invalido.filas[0].tipoTitular).toBeUndefined();
+  });
+
   it('el valor de una columna retirada no se valida: incluso basura se acepta y se ignora', async () => {
     const dto = await pasarPorPipe({ resideEnElInmueble: 'quizás' });
 

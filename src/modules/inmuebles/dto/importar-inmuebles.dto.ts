@@ -91,10 +91,16 @@ export class FilaImportarInmuebleDto {
   @Max(100)
   coeficiente?: number;
 
-  @CeldaVaciaComoAusente()
-  @IsOptional()
-  @IsIn(['propietario', 'arrendatario'])
-  tipoTitular?: 'propietario' | 'arrendatario';
+  /**
+   * RETIRED column, import side only (the manual create/edit API still has
+   * `tipoTitular`): the tenant now has its own columns, so this one no longer
+   * decides anything. Same accept-and-ignore treatment as
+   * `resideEnElInmueble`: an old file keeps working, the cell is dropped
+   * unvalidated, and units the import creates are always `propietario`.
+   */
+  @Exclude()
+  @Allow()
+  tipoTitular?: never;
 
   /**
    * RETIRED column ("el titular reside en el inmueble"): files downloaded

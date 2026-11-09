@@ -74,7 +74,6 @@ export type UnidadParaExportar = Partial<
     | 'uso'
     | 'area'
     | 'coeficiente'
-    | 'tipoTitular'
     | 'estadoCartera'
     | 'contacto'
     | 'observaciones'
@@ -129,7 +128,6 @@ export const toFilaExportacion = (
   uso: unidad.uso ?? '',
   area: unidad.area ?? '',
   coeficiente: unidad.coeficiente ?? '',
-  tipoTitular: unidad.tipoTitular ?? '',
   estadoCartera: unidad.estadoCartera ?? '',
   contacto: unidad.contacto ?? '',
   observaciones: unidad.observaciones ?? '',

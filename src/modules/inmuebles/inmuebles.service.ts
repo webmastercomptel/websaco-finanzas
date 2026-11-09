@@ -795,7 +795,8 @@ export class InmueblesService {
           rastro,
         );
 
-        // Defaults (`propietario`, `vigente`) apply only here:
+        // Defaults (always `propietario` — the import has no tipoTitular
+        // column any more — and `vigente`) apply only here:
         // they describe a unit that did not exist, never a patch.
         await this.inmuebles.create({
           copropiedadId,
@@ -807,7 +808,7 @@ export class InmueblesService {
           area: fila.area,
           coeficiente: fila.coeficiente,
           titularId,
-          tipoTitular: fila.tipoTitular ?? 'propietario',
+          tipoTitular: 'propietario',
           estadoCartera: fila.estadoCartera ?? 'vigente',
           contacto: fila.contacto,
           observaciones: fila.observaciones,
@@ -822,6 +823,9 @@ export class InmueblesService {
       delete cambios.codigo;
       delete cambios.estado;
       delete cambios.titularId;
+      // Retired import column: an existing unit keeps whatever type it has
+      // (legacy data still carries it), even if a caller bypassed the DTO.
+      delete cambios.tipoTitular;
       if (Object.keys(cambios).length > 0) {
         await this.inmuebles
           .updateOne({ _id: existente._id, copropiedadId }, { $set: cambios })
@@ -932,7 +936,7 @@ export class InmueblesService {
     const unidades = await this.inmuebles
       .find({ copropiedadId })
       .select(
-        'codigo referencia bloque zona uso area coeficiente titularId tipoTitular estadoCartera contacto observaciones',
+        'codigo referencia bloque zona uso area coeficiente titularId estadoCartera contacto observaciones',
       )
       .sort({ codigo: 1 })
       .limit(MAX_INMUEBLES_EXPORTACION + 1)

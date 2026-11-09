@@ -11,7 +11,6 @@ const COLUMNAS = [
   'uso',
   'area',
   'coeficiente',
-  'tipoTitular',
   'estadoCartera',
   'contacto',
   'observaciones',
@@ -37,18 +36,24 @@ const unidadCompleta = {
   uso: 'Vivienda',
   area: 55.5,
   coeficiente: 0.25,
-  tipoTitular: 'arrendatario' as const,
   estadoCartera: 'juridico' as const,
   contacto: 'Portería',
   observaciones: 'Esquinero',
 };
 
 describe('toFilaExportacion', () => {
-  it('trae exactamente las 24 columnas del import, en su orden', () => {
+  it('trae exactamente las 23 columnas del import, en su orden', () => {
     const fila = toFilaExportacion('0001', unidadCompleta, null);
 
     expect(Object.keys(fila)).toEqual(COLUMNAS);
-    expect(COLUMNAS).toHaveLength(24);
+    expect(COLUMNAS).toHaveLength(23);
+  });
+
+  it('las columnas retiradas (tipoTitular, resideEnElInmueble) ya no salen en el archivo', () => {
+    const fila = toFilaExportacion('0001', unidadCompleta, null);
+
+    expect(fila).not.toHaveProperty('tipoTitular');
+    expect(fila).not.toHaveProperty('resideEnElInmueble');
   });
 
   it('repite el código de la copropiedad en cada fila y copia los valores de la unidad tal cual', () => {
@@ -150,9 +155,7 @@ describe('toFilaExportacion', () => {
   it('sin titular todas las columnas del titular salen ""', () => {
     const fila = toFilaExportacion('0001', unidadCompleta, undefined);
 
-    const titulares = COLUMNAS.filter(
-      (c) => c.endsWith('Titular') && c !== 'tipoTitular',
-    );
+    const titulares = COLUMNAS.filter((c) => c.endsWith('Titular'));
     expect(titulares).toHaveLength(12);
     for (const columna of titulares) {
       expect(fila[columna as keyof typeof fila]).toBe('');
