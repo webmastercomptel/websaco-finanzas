@@ -352,3 +352,47 @@ describe('envValidationSchema — TRUST_PROXY_HOPS', () => {
     expect(validate({ TRUST_PROXY_HOPS: '10' }).error).toBeDefined();
   });
 });
+
+describe('APP_ROLE', () => {
+  it('por defecto es all: un despliegue que no lo conoce se comporta como antes', () => {
+    const resultado = validate({});
+
+    expect(resultado.error).toBeUndefined();
+    expect((resultado.value as { APP_ROLE: string }).APP_ROLE).toBe('all');
+  });
+
+  it.each(['all', 'api', 'worker'])('acepta %s', (rol) => {
+    expect(validate({ APP_ROLE: rol }).error).toBeUndefined();
+  });
+
+  it('rechaza un rol desconocido, nombrando la variable', () => {
+    expect(validate({ APP_ROLE: 'workers' }).error?.message).toContain(
+      'APP_ROLE',
+    );
+  });
+});
+
+describe('SENTRY_DSN', () => {
+  it('es opcional: sin ella no se reporta nada', () => {
+    expect(validate({}).error).toBeUndefined();
+  });
+
+  it('un valor vacío cuenta como ausente', () => {
+    expect(validate({ SENTRY_DSN: '' }).error).toBeUndefined();
+  });
+
+  it('acepta un DSN https', () => {
+    expect(
+      validate({ SENTRY_DSN: 'https://clave@o123.ingest.sentry.io/456' }).error,
+    ).toBeUndefined();
+  });
+
+  it('rechaza algo que no es una URL https', () => {
+    expect(validate({ SENTRY_DSN: 'no-es-un-dsn' }).error?.message).toContain(
+      'SENTRY_DSN',
+    );
+    expect(
+      validate({ SENTRY_DSN: 'http://clave@sentry.local/1' }).error?.message,
+    ).toContain('SENTRY_DSN');
+  });
+});

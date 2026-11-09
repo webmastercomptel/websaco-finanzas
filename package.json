@@ -40,6 +40,7 @@
     "@nestjs/terminus": "^11.1.1",
     "@react-pdf/renderer": "^4.9.0",
     "@sendgrid/mail": "^8.1.6",
+    "@sentry/node": "10.77.1",
     "bullmq": "^6.3.8",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",

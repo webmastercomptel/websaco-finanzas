@@ -1,5 +1,6 @@
 // src/app.module.ts
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -11,6 +12,8 @@ import { buildConfigModuleOptions } from './config/config-module-options';
 // Core modules
 import { DatabaseModule } from './database/database.module';
 import { CommonModule } from './common/common.module';
+import { FiltroExcepcionesSentry } from './common/sentry/filtro-sentry';
+import { ProcesoModule } from './common/proceso/proceso.module';
 import { CaslModule } from './modules/casl/casl.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { InmueblesModule } from './modules/inmuebles/inmuebles.module';
@@ -83,10 +86,14 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
       useFactory: (config: ConfigService) => ({
         connection: { url: config.get<string>('app.redisUrl') },
       }),
+      // No worker opens by itself: `ProcesoModule` opens them when APP_ROLE
+      // says this process consumes queues.
+      extraOptions: { manualRegistration: true },
     }),
     // Timers for the building-management housekeeping jobs (@Cron). Each one
     // runs under a Redis lock so only one instance executes it.
     ScheduleModule.forRoot(),
+    ProcesoModule,
     DatabaseModule,
     CommonModule,
     CaslModule,
@@ -134,5 +141,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     InterfazComptableModule,
     EnvioFacturasModule,
   ],
+  // Reports server-side failures when SENTRY_DSN is set (a no-op otherwise).
+  providers: [{ provide: APP_FILTER, useClass: FiltroExcepcionesSentry }],
 })
 export class AppModule {}

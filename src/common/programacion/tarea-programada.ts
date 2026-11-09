@@ -1,6 +1,10 @@
 // src/common/programacion/tarea-programada.ts
 import type { Logger } from '@nestjs/common';
 import type { LockService } from '../redis/lock.service';
+import {
+  ejecutaTareasProgramadas,
+  rolProcesoActual,
+} from '../proceso/rol-proceso';
 import { isScriptEnvMode } from '../scripts/script-mode';
 
 /** Lock name and its auto-expiry (must exceed the task's worst-case duration). */
@@ -23,6 +27,8 @@ export async function ejecutarTareaProgramada(
   { clave, ttlMs }: OpcionesTareaProgramada,
   tarea: () => Promise<void>,
 ): Promise<boolean> {
+  // APP_ROLE=api: another process owns the scheduled work.
+  if (!ejecutaTareasProgramadas(rolProcesoActual())) return false;
   try {
     return await lock.runExclusive(clave, ttlMs, tarea);
   } catch (error: unknown) {
@@ -53,6 +59,7 @@ export function ejecutarAlArrancar(
   tarea: () => Promise<unknown>,
 ): void {
   if (isScriptEnvMode()) return;
+  if (!ejecutaTareasProgramadas(rolProcesoActual())) return;
   setImmediate(() => {
     void tarea().catch((error: unknown) => {
       logger.error(

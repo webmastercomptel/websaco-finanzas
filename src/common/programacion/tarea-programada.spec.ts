@@ -1,6 +1,7 @@
 import type { Logger } from '@nestjs/common';
 import type { LockService } from '../redis/lock.service';
 import { activateScriptEnvMode } from '../scripts/script-mode';
+import { establecerRolProceso } from '../proceso/rol-proceso';
 import {
   ejecutarAlArrancar,
   ejecutarTareaProgramada,
@@ -102,6 +103,55 @@ describe('ejecutarAlArrancar', () => {
   it('no hace nada en un script que eligió su entorno con --env', async () => {
     jest.useFakeTimers();
     activateScriptEnvMode();
+    const tarea = jest.fn().mockResolvedValue(undefined);
+
+    ejecutarAlArrancar(registro().logger, 'limpieza de PQR', tarea);
+    await jest.runAllTimersAsync();
+
+    expect(tarea).not.toHaveBeenCalled();
+  });
+});
+
+describe('rol del proceso (APP_ROLE)', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    establecerRolProceso('all');
+  });
+
+  it('con rol api la tarea programada no corre ni toma el candado', async () => {
+    establecerRolProceso('api');
+    const { lock, runExclusive } = candado(true);
+    const tarea = jest.fn().mockResolvedValue(undefined);
+
+    const corrio = await ejecutarTareaProgramada(
+      lock,
+      registro().logger,
+      { clave: 'k', ttlMs: 1 },
+      tarea,
+    );
+
+    expect(corrio).toBe(false);
+    expect(runExclusive).not.toHaveBeenCalled();
+    expect(tarea).not.toHaveBeenCalled();
+  });
+
+  it('con rol worker la tarea programada corre igual que en all', async () => {
+    establecerRolProceso('worker');
+    const tarea = jest.fn().mockResolvedValue(undefined);
+
+    const corrio = await ejecutarTareaProgramada(
+      candado(true).lock,
+      registro().logger,
+      { clave: 'k', ttlMs: 1 },
+      tarea,
+    );
+
+    expect(corrio).toBe(true);
+  });
+
+  it('con rol api la pasada inicial no se lanza', async () => {
+    jest.useFakeTimers();
+    establecerRolProceso('api');
     const tarea = jest.fn().mockResolvedValue(undefined);
 
     ejecutarAlArrancar(registro().logger, 'limpieza de PQR', tarea);

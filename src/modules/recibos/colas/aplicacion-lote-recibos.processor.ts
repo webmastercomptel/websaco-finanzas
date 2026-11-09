@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { Types } from 'mongoose';
+import { OPCIONES_TRABAJADOR_LOTE } from '../../../common/colas/opciones-trabajador';
 import { LoteRecibosService } from '../lote-recibos.service';
 import {
   NOMBRE_COLA_APLICACION_LOTE_RECIBOS,
@@ -8,7 +9,7 @@ import {
   type ResultadoAplicacionLoteRecibos,
 } from './aplicacion-lote-recibos.constants';
 
-@Processor(NOMBRE_COLA_APLICACION_LOTE_RECIBOS)
+@Processor(NOMBRE_COLA_APLICACION_LOTE_RECIBOS, OPCIONES_TRABAJADOR_LOTE)
 export class AplicacionLoteRecibosProcessor extends WorkerHost {
   constructor(private readonly loteRecibos: LoteRecibosService) {
     super();

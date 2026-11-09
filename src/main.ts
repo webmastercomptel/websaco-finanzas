@@ -6,6 +6,7 @@ import './common/dns-setup';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 
+import { iniciarSentry } from './common/sentry/iniciar-sentry';
 import { AppModule } from './app.module';
 import { configureApp } from './app-setup';
 
@@ -17,6 +18,14 @@ import { configureApp } from './app-setup';
  * filter or interceptor here instead would put it outside that coverage.
  */
 async function bootstrap() {
+  // Before the app exists so start-up failures are captured. Read straight from
+  // the environment because it must precede Nest; Joi still validates the DSN
+  // when the app boots. Absent = Sentry off.
+  iniciarSentry({
+    dsn: process.env.SENTRY_DSN,
+    env: process.env.NODE_ENV,
+    release: process.env.K_REVISION,
+  });
   // `rawBody` keeps the exact bytes of every request body: the integrations
   // panel signs its bodies and `FirmaPanelGuard` verifies over those bytes.
   const app = await NestFactory.create(AppModule, { rawBody: true });

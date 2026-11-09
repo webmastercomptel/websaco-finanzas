@@ -6,6 +6,22 @@ export const envValidationSchema = Joi.object({
     .default('development'),
   PORT: Joi.number().default(3000),
 
+  // What this process is for (see common/proceso/): `all` = HTTP + queue
+  // workers + scheduled jobs (today's behaviour, the default), `api` = HTTP
+  // only, `worker` = HTTP plus the queue workers and scheduled jobs. An `api`
+  // process only enqueues lote jobs: it needs an `all`/`worker` process to
+  // run them.
+  APP_ROLE: Joi.string().valid('all', 'api', 'worker').default('all'),
+
+  // Error reporting (see common/sentry/). Optional: without a DSN nothing is
+  // reported. https only; an empty value counts as absent. main.ts reads it
+  // straight from the environment because Sentry must start before Nest; this
+  // rule only keeps a typo from passing silently.
+  SENTRY_DSN: Joi.string()
+    .uri({ scheme: ['https'] })
+    .empty('')
+    .optional(),
+
   // Both data services are managed and remote (MongoDB Atlas, Redis Cloud), so
   // each is configured with the single connection string its provider hands
   // you — one value to paste, nothing to assemble out of host/port/password.

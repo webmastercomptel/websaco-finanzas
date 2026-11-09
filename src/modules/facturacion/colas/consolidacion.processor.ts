@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { Types } from 'mongoose';
+import { OPCIONES_TRABAJADOR_LOTE } from '../../../common/colas/opciones-trabajador';
 import { LotesFacturacionService } from '../lotes.service';
 import {
   NOMBRE_COLA_CONSOLIDACION,
@@ -14,7 +15,7 @@ import {
  * result via `Job.waitUntilFinished` — the external `POST :id/consolidar`
  * contract doesn't change, only WHERE the work actually executes.
  */
-@Processor(NOMBRE_COLA_CONSOLIDACION)
+@Processor(NOMBRE_COLA_CONSOLIDACION, OPCIONES_TRABAJADOR_LOTE)
 export class ConsolidacionProcessor extends WorkerHost {
   constructor(private readonly lotes: LotesFacturacionService) {
     super();
