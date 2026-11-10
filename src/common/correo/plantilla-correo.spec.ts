@@ -1,3 +1,4 @@
+import { LOGO_CORREO_CID } from './logo-correo';
 import {
   renderCajaDetalle,
   renderFilaDetalle,
@@ -8,15 +9,24 @@ import {
 describe('renderPlantillaCorreo', () => {
   const base = { heading: 'Hola', bodyHtml: '<p>Cuerpo</p>' };
 
-  it('incluye título, cuerpo y el pie automático, sin imagen incrustada', () => {
+  it('incluye título, cuerpo y el pie automático', () => {
     const html = renderPlantillaCorreo(base);
 
     expect(html).toContain('<h1');
     expect(html).toContain('Hola');
     expect(html).toContain('<p>Cuerpo</p>');
     expect(html).toContain('mensaje automático');
-    expect(html).not.toContain('cid:');
-    expect(html).not.toContain('<img');
+  });
+
+  it('el encabezado es el logo incrustado por Content-ID, con alt y tamaño fijos', () => {
+    const html = renderPlantillaCorreo(base);
+
+    expect(LOGO_CORREO_CID).toBe('logo-websaco');
+    expect(html).toContain('src="cid:logo-websaco"');
+    expect(html).toMatch(/<img[^>]*alt="WebSaco"/);
+    expect(html).toMatch(/<img[^>]*width="\d+"/);
+    expect(html).toMatch(/<img[^>]*height="\d+"/);
+    expect(html).toMatch(/<img[^>]*display:\s*block/);
   });
 
   it('dibuja el botón solo cuando hay enlace, y escapa la dirección', () => {

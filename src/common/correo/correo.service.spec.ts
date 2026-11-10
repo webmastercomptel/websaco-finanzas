@@ -116,6 +116,89 @@ describe('CorreoService', () => {
   });
 });
 
+describe('CorreoService — logo incrustado', () => {
+  beforeEach(() => {
+    mockSend.mockReset().mockResolvedValue([{ statusCode: 202 }, {}]);
+  });
+
+  const enviados = () =>
+    (
+      mockSend.mock.calls[0] as [
+        { attachments?: Array<Record<string, string>> },
+      ]
+    )[0].attachments;
+
+  it('si el HTML referencia cid:logo-websaco adjunta el logo inline con su content_id', async () => {
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({
+      para: 'vecino@ejemplo.com',
+      asunto: 'x',
+      html: '<img src="cid:logo-websaco" alt="WebSaco">',
+    });
+
+    const adjuntos = enviados() ?? [];
+    expect(adjuntos).toHaveLength(1);
+    expect(adjuntos[0]).toEqual({
+      content: expect.stringMatching(/^[A-Za-z0-9+/]+=*$/) as string,
+      filename: 'websaco-logo.png',
+      type: 'image/png',
+      disposition: 'inline',
+      content_id: 'logo-websaco',
+    });
+    expect(adjuntos[0].content.length).toBeGreaterThan(100);
+  });
+
+  it('el logo viaja junto a los adjuntos del mensaje, sin pisarlos', async () => {
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({
+      para: 'vecino@ejemplo.com',
+      asunto: 'x',
+      html: '<img src="cid:logo-websaco">',
+      adjuntos: [
+        {
+          nombre: 'factura.pdf',
+          tipo: 'application/pdf',
+          contenido: Buffer.from('pdf'),
+        },
+      ],
+    });
+
+    const adjuntos = enviados() ?? [];
+    expect(adjuntos.map((a) => a.filename)).toEqual([
+      'factura.pdf',
+      'websaco-logo.png',
+    ]);
+    expect(adjuntos[0].disposition).toBe('attachment');
+  });
+
+  it('un HTML sin plantilla no recibe el logo ni adjuntos', async () => {
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({
+      para: 'vecino@ejemplo.com',
+      asunto: 'x',
+      html: '<p>Hola</p>',
+    });
+
+    expect(enviados()).toBeUndefined();
+  });
+
+  it('sin SendGrid configurado sigue sin enviar nada (solo log)', async () => {
+    const servicio = crear({});
+
+    const ok = await servicio.enviar({
+      para: 'vecino@ejemplo.com',
+      asunto: 'x',
+      html: '<img src="cid:logo-websaco">',
+    });
+
+    expect(ok).toBe(false);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+});
+
 describe('CorreoService — sin seguimiento de SendGrid', () => {
   beforeEach(() => {
     mockSend.mockReset().mockResolvedValue([{ statusCode: 202 }, {}]);

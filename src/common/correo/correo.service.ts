@@ -9,12 +9,17 @@ import { ConfigService } from '@nestjs/config';
 // ES imports, which is exactly the form that breaks here.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import sgMail = require('@sendgrid/mail');
+import { logoInlineCorreo, REFERENCIA_LOGO_CORREO } from './logo-correo';
 
-/** A file attached to an outgoing email. */
+/**
+ * A file attached to an outgoing email. With `idContenido` it is sent inline
+ * (referenced from the HTML as `cid:<idContenido>`) instead of as a download.
+ */
 export interface AdjuntoCorreo {
   nombre: string;
   tipo: string;
   contenido: Buffer;
+  idContenido?: string;
 }
 
 /** One outgoing email. */
@@ -79,11 +84,13 @@ export class CorreoService {
           clickTracking: { enable: false, enableText: false },
           openTracking: { enable: false },
         },
-        attachments: mensaje.adjuntos?.map((adjunto) => ({
+        attachments: this.adjuntosParaEnvio(mensaje)?.map((adjunto) => ({
           content: adjunto.contenido.toString('base64'),
           filename: adjunto.nombre,
           type: adjunto.tipo,
-          disposition: 'attachment',
+          ...(adjunto.idContenido
+            ? { disposition: 'inline', content_id: adjunto.idContenido }
+            : { disposition: 'attachment' }),
         })),
       });
       return true;
@@ -93,5 +100,20 @@ export class CorreoService {
       );
       return false;
     }
+  }
+
+  /**
+   * The message's own attachments plus, when the HTML shows the template's
+   * `cid:` logo, that logo inline — so every templated email carries it with no
+   * change in its caller. `undefined` (not `[]`) when there is nothing to attach.
+   */
+  private adjuntosParaEnvio(
+    mensaje: MensajeCorreo,
+  ): AdjuntoCorreo[] | undefined {
+    const adjuntos = mensaje.adjuntos ?? [];
+    const conLogo = mensaje.html.includes(REFERENCIA_LOGO_CORREO)
+      ? [...adjuntos, logoInlineCorreo()]
+      : adjuntos;
+    return conLogo.length > 0 ? conLogo : undefined;
   }
 }

@@ -1,5 +1,14 @@
 // src/common/correo/plantilla-correo.ts
+import { REFERENCIA_LOGO_CORREO } from './logo-correo';
 import { escapeHtml } from './texto-correo';
+
+/**
+ * Displayed size of the logo. The source PNG is 1038x336 (about 20 KB, ~6x the
+ * displayed width: sharp on high-density screens), so the fixed width/height
+ * keep the 3.09:1 ratio and stop clients from rendering it at full size.
+ */
+const ANCHO_LOGO_PX = 160;
+const ALTO_LOGO_PX = 52;
 
 /**
  * The color system of every transactional email. A template file only ever
@@ -45,8 +54,13 @@ const PIE_HTML = `
 
 /**
  * The visual shell of every transactional email: backdrop, bordered card with a
- * text wordmark (no inline image: nothing hosts the logo yet), heading, body,
- * optional button and footer. The single point of change for branding.
+ * logo, heading, body, optional button and footer. The single point of change
+ * for branding.
+ *
+ * The logo is not a hosted URL (nothing hosts it, and a localhost link is dead in
+ * a mail client): `CorreoService` attaches the PNG inline under the Content-ID
+ * this `cid:` reference names. If a client blocks images the `alt` text renders
+ * in the brand color, so the masthead never collapses into a blank gap.
  */
 export const renderPlantillaCorreo = ({
   heading,
@@ -55,7 +69,9 @@ export const renderPlantillaCorreo = ({
 }: ParametrosPlantilla): string => `
   <div style="background: ${COLORES_CORREO.page}; padding: 32px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
     <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border: 1px solid ${COLORES_CORREO.border}; border-radius: 16px; padding: 40px; color: ${COLORES_CORREO.body};">
-      <p style="margin: 0 0 28px; color: ${COLORES_CORREO.accent}; font-size: 20px; font-weight: 800; letter-spacing: -0.01em;">WebSaco</p>
+      <div style="margin: 0 0 28px;">
+        <img src="${REFERENCIA_LOGO_CORREO}" alt="WebSaco" width="${ANCHO_LOGO_PX}" height="${ALTO_LOGO_PX}" style="display: block; border: 0; width: ${ANCHO_LOGO_PX}px; height: ${ALTO_LOGO_PX}px; color: ${COLORES_CORREO.accent}; font-size: 20px; font-weight: 800; line-height: ${ALTO_LOGO_PX}px;">
+      </div>
 
       <h1 style="margin: 0 0 20px; color: ${COLORES_CORREO.ink}; font-size: 22px; font-weight: 700; line-height: 1.3;">${heading}</h1>
 

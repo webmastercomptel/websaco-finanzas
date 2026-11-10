@@ -367,7 +367,8 @@ describe('AnunciosEntregaService — entrega', () => {
     await servicio.publicar(ANUNCIO.toString());
 
     const html = correo.enviar.mock.calls[0][0].html;
-    expect(html).not.toContain('<img');
+    // The template's own logo is an <img>, so only the injected tag is checked.
+    expect(html).not.toContain('<img src=x');
     expect(html).toContain(
       '&lt;img src=x onerror=alert(1)&gt; &amp; &quot;Co&quot;',
     );
