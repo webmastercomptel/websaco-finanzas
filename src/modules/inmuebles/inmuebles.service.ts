@@ -145,7 +145,7 @@ const claveCodigo = (codigo: string): string => codigo.trim().toLowerCase();
 /** Same person by display name: trim, spaces collapsed, case-insensitive. */
 const mismoNombre = (a?: string | null, b?: string | null): boolean => {
   const normalizar = (v: string): string =>
-    v.trim().replace(/s+/g, ' ').toLowerCase();
+    v.trim().replace(/\s+/g, ' ').toLowerCase();
   return !!a && !!b && normalizar(a) === normalizar(b);
 };
 

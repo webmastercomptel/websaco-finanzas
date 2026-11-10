@@ -1337,16 +1337,62 @@ describe('InmueblesService.importar — idempotencia al reimportar un archivo ex
     );
     const terceros = tercerosModeloCon(
       {},
-      { 'ter-1': { nombre: 'Ana Pérez' } },
+      { 'ter-1': { nombre: 'Rosa Pérez Sosa' } },
     );
     const service = nuevoServicio(inmuebles, terceros);
 
     await service.importar({
-      filas: [fila({ codigo: '301', nombreTitular: '  ANA pérez ' })],
+      filas: [fila({ codigo: '301', nombreTitular: '  ROSA pérez  SOSA ' })],
     });
 
     expect(terceros.create).not.toHaveBeenCalled();
     expect(inmuebles.updateOne).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['otras mayúsculas', 'CARLOS SOSA'],
+    ['doble espacio interno', 'Carlos  Sosa'],
+    ['espacios y tabulaciones al borde', ' \tCarlos Sosa \n'],
+    ['mayúsculas, doble espacio y bordes a la vez', '  CARLOS \t SOSA  '],
+  ])(
+    'un nombre con «s» que cambia solo en %s es la misma persona (titular compartido)',
+    async (_caso, nombreFila) => {
+      const inmuebles = inmueblesModeloCon(
+        [{ id: 'inm-1', codigo: '301', titularId: 'ter-1' }],
+        ['ter-1'],
+      );
+      const terceros = tercerosModeloCon(
+        {},
+        { 'ter-1': { nombre: 'Carlos Sosa' } },
+      );
+      const service = nuevoServicio(inmuebles, terceros);
+
+      await service.importar({
+        filas: [fila({ codigo: '301', nombreTitular: nombreFila })],
+      });
+
+      expect(terceros.create).not.toHaveBeenCalled();
+      expect(inmuebles.updateOne).not.toHaveBeenCalled();
+    },
+  );
+
+  it('«Sosa» y «Sossa» son personas distintas: un titular compartido no se reutiliza', async () => {
+    const inmuebles = inmueblesModeloCon(
+      [{ id: 'inm-1', codigo: '301', titularId: 'ter-1' }],
+      ['ter-1'],
+    );
+    const terceros = tercerosModeloCon({}, { 'ter-1': { nombre: 'Ana Sosa' } });
+    const service = nuevoServicio(inmuebles, terceros);
+
+    await service.importar({
+      filas: [fila({ codigo: '301', nombreTitular: 'Ana Sossa' })],
+    });
+
+    expect(terceros.updateOne).not.toHaveBeenCalled();
+    expect(terceros.creados).toHaveLength(1);
+    expect(inmuebles.actualizaciones[0].cambios).toEqual({
+      titularId: 'ter-nuevo',
+    });
   });
 
   it('un nombre distinto en un titular NO compartido corrige el mismo tercero (typo o dueño renombrado)', async () => {
@@ -2340,6 +2386,64 @@ describe('InmueblesService.importar — arrendatario', () => {
     expect(resultado.advertencias).toEqual([
       { tipo: 'arrendatario-sin-correo', fila: 1, codigo: '301' },
     ]);
+  });
+
+  it.each([
+    ['otras mayúsculas', 'CARLOS SOSA'],
+    ['doble espacio interno', 'Carlos  Sosa'],
+    ['espacios al borde', '  Carlos Sosa  '],
+  ])(
+    'reimportar un arrendatario sin correo con un nombre con «s» que cambia solo en %s no lo duplica',
+    async (_caso, nombreFila) => {
+      const inmuebles = inmueblesModeloCon([
+        { ...unidadExistente, arrendatarioId: 'ter-arr' },
+      ]);
+      const terceros = tercerosModeloCon(
+        {},
+        { 'ter-arr': { nombre: 'Carlos Sosa', emails: [], telefono: null } },
+      );
+      const service = nuevoServicio(inmuebles, terceros);
+
+      const resultado = await service.importar({
+        filas: [
+          fila({
+            codigo: '301',
+            arrendatarioNombre: nombreFila,
+            arrendatarioTelefono: '3001112233',
+          }),
+        ],
+      });
+
+      expect(resultado.errores).toEqual([]);
+      expect(terceros.create).not.toHaveBeenCalled();
+      expect(terceros.actualizaciones).toEqual([
+        {
+          id: 'ter-arr',
+          filtro: { _id: 'ter-arr', copropiedadId: COP },
+          cambios: { telefono: '3001112233' },
+        },
+      ]);
+      expect(inmuebles.updateOne).not.toHaveBeenCalled();
+    },
+  );
+
+  it('«Sosa» y «Sossa» son personas distintas: el arrendatario sin correo se crea nuevo', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { ...unidadExistente, arrendatarioId: 'ter-arr' },
+    ]);
+    const terceros = tercerosModeloCon(
+      {},
+      { 'ter-arr': { nombre: 'Carlos Sosa', emails: [], telefono: null } },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [fila({ codigo: '301', arrendatarioNombre: 'Carlos Sossa' })],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.creados).toHaveLength(1);
+    expect(terceros.creados[0]).toMatchObject({ nombre: 'Carlos Sossa' });
   });
 
   it('reimportar sin cambios (mismo arrendatario por correo, mismos datos) no escribe nada', async () => {
