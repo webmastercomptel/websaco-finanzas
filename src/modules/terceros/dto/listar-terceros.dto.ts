@@ -1,6 +1,15 @@
 // src/modules/terceros/dto/listar-terceros.dto.ts
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 /**
  * Query parameters for the party listing.
@@ -17,6 +26,23 @@ export class ListarTercerosDto {
     typeof value === 'string' ? value.trim() : undefined,
   )
   buscar?: string;
+
+  /**
+   * Exact e-mail match against ANY address of the party. Lets the unit form
+   * ask the server whether a tenant's address is already taken instead of
+   * downloading a page of parties and comparing in the browser (which misses
+   * everyone past the page). Trimmed and lower-cased here; a non-string is
+   * passed through untouched so the validators reject it instead of it
+   * reaching the filter as an operator object.
+   */
+  @IsOptional()
+  @Transform(({ value }): unknown =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  @IsEmail()
+  email?: string;
 
   @IsOptional()
   @IsIn(['activo', 'inactivo', 'todos'])

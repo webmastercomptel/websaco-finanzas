@@ -47,6 +47,18 @@ export class TercerosService {
       filtro.$or = [{ nombre: patron }, { numeroIdentificacion: patron }];
     }
 
+    if (query.email) {
+      // Stored addresses keep their original case, so the match is
+      // case-insensitive; the value is escaped and anchored, never a
+      // user-controlled pattern (no ReDoS, no operator injection — the DTO
+      // already guarantees a string). `$regex` over an array field matches
+      // when ANY element does.
+      filtro.emails = {
+        $regex: `^${escapeRegex(query.email)}$`,
+        $options: 'i',
+      };
+    }
+
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
 

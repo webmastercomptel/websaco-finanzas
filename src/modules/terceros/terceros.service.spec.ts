@@ -163,6 +163,135 @@ describe('TercerosService.findAll', () => {
   });
 });
 
+describe('TercerosService.findAll · filtro por correo exacto', () => {
+  /**
+   * Evaluates the `emails` condition the way MongoDB does for an array field:
+   * a `$regex` matches when ANY element matches. Lets the tests prove what
+   * the filter accepts instead of only comparing its shape.
+   */
+  const coincide = (filtro: Filtro, emails: string[]): boolean => {
+    const cond = filtro.emails as { $regex: string; $options: string };
+    const re = new RegExp(cond.$regex, cond.$options);
+    return emails.some((e) => re.test(e));
+  };
+
+  const filtrar = async (query: Record<string, unknown>) => {
+    const modelo = modeloCon([]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+    await service.findAll(query);
+    return modelo.filtros[0];
+  };
+
+  it('coincide con cualquiera de los correos del tercero', async () => {
+    const filtro = await filtrar({ email: 'gerente@admin.co' });
+
+    expect(coincide(filtro, ['ana@correo.com', 'gerente@admin.co'])).toBe(true);
+    expect(coincide(filtro, ['gerente@admin.co', 'ana@correo.com'])).toBe(true);
+    expect(coincide(filtro, ['ana@correo.com'])).toBe(false);
+    expect(coincide(filtro, [])).toBe(false);
+  });
+
+  it('ignora mayúsculas del dato guardado y del parámetro', async () => {
+    const filtro = await filtrar({ email: 'Ana@Correo.com' });
+
+    expect(coincide(filtro, ['ANA@correo.COM'])).toBe(true);
+  });
+
+  it('es exacto: no coincide con un correo que solo lo contiene', async () => {
+    const filtro = await filtrar({ email: 'ana@correo.com' });
+
+    expect(coincide(filtro, ['juana@correo.com'])).toBe(false);
+    expect(coincide(filtro, ['ana@correo.com.co'])).toBe(false);
+    expect(coincide(filtro, ['xana@correo.com'])).toBe(false);
+  });
+
+  it('trata los metacaracteres como texto literal', async () => {
+    const filtro = await filtrar({ email: 'a.b+c@correo.com' });
+
+    expect(coincide(filtro, ['a.b+c@correo.com'])).toBe(true);
+    expect(coincide(filtro, ['axb+c@correo.com'])).toBe(false);
+    expect(coincide(filtro, ['a.bbc@correo.com'])).toBe(false);
+  });
+
+  it('un valor con forma de operador o de patrón nunca llega como operador', async () => {
+    for (const email of ['{"$ne":""}', '.*', '(a+)+$', '^.*$']) {
+      const filtro = await filtrar({ email });
+
+      expect(Object.keys(filtro.emails as object).sort()).toEqual([
+        '$options',
+        '$regex',
+      ]);
+      expect(coincide(filtro, ['ana@correo.com'])).toBe(false);
+      expect(coincide(filtro, [email])).toBe(true);
+    }
+  });
+
+  it('sigue acotado a la copropiedad activa', async () => {
+    const filtro = await filtrar({ email: 'ana@correo.com' });
+
+    expect(filtro.copropiedadId).toBe(COP);
+  });
+
+  it('se compone con estado, buscar y paginación', async () => {
+    const modelo = modeloCon([documento()], { total: 1 });
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    const pagina = await service.findAll({
+      email: 'ana@correo.com',
+      estado: 'todos',
+      buscar: 'Ana',
+      pagina: 2,
+      porPagina: 10,
+    });
+
+    const filtro = modelo.filtros[0];
+    expect(filtro.copropiedadId).toBe(COP);
+    expect(filtro.estado).toBeUndefined();
+    expect(filtro.$or).toBeDefined();
+    expect(filtro.emails).toBeDefined();
+    expect(modelo.filtros[1]).toEqual(filtro);
+    expect(pagina).toMatchObject({ total: 1, pagina: 2, porPagina: 10 });
+  });
+
+  it('con estado inactivo sólo mira los inactivos', async () => {
+    const filtro = await filtrar({
+      email: 'ana@correo.com',
+      estado: 'inactivo',
+    });
+
+    expect(filtro.estado).toBe('inactive');
+    expect(filtro.emails).toBeDefined();
+  });
+
+  it('sin correo no agrega ninguna condición sobre emails', async () => {
+    const filtro = await filtrar({});
+
+    expect(filtro.emails).toBeUndefined();
+  });
+
+  it('devuelve la misma forma de ítem', async () => {
+    const modelo = modeloCon([documento({ emails: ['ana@correo.com'] })]);
+    const service = new TercerosService(
+      modelo as never,
+      tenantQueDevuelve(COP),
+    );
+
+    const { items } = await service.findAll({ email: 'ana@correo.com' });
+
+    expect(items[0]).toMatchObject({
+      nombre: 'Ana Pérez',
+      emails: ['ana@correo.com'],
+      estado: 'activo',
+    });
+  });
+});
+
 describe('TercerosService.findOne', () => {
   it('busca por id Y copropiedad en la misma consulta', async () => {
     const modelo = modeloCon([documento()]);
