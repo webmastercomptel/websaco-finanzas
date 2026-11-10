@@ -57,6 +57,7 @@ const construirModelos = (
   const cuentasCreadas: Record<string, unknown>[] = [];
   const asignacionesGuardadas: Record<string, unknown>[] = [];
   const filtrosAccounts: Filtro[] = [];
+  const filtrosListado: Filtro[] = [];
 
   const accounts = {
     filtrosAccounts,
@@ -67,13 +68,17 @@ const construirModelos = (
         exec: () => Promise.resolve(opts.duplicada ? { _id: 'x' } : null),
       };
     }),
-    find: jest.fn(() => ({
-      sort: () => ({
-        skip: () => ({
-          limit: () => ({ exec: () => Promise.resolve(cuentas) }),
+    find: jest.fn((filtro?: Filtro) => {
+      if (filtro) filtrosListado.push(filtro);
+      return {
+        sort: () => ({
+          skip: () => ({
+            limit: () => ({ exec: () => Promise.resolve(cuentas) }),
+          }),
         }),
-      }),
-    })),
+      };
+    }),
+    filtrosListado,
     countDocuments: jest.fn(() => ({
       exec: () => Promise.resolve(cuentas.length),
     })),
@@ -98,6 +103,9 @@ const construirModelos = (
           sort: () => ({ exec: () => Promise.resolve(asignaciones) }),
         }),
       }),
+    })),
+    distinct: jest.fn(() => ({
+      exec: () => Promise.resolve(asignaciones.map((a) => a.accountId)),
     })),
     findOne: jest.fn(() => ({
       sort: () => ({
@@ -598,5 +606,51 @@ describe('UsuariosService — techo duro del personal operativo', () => {
     expect(asignacionesModel.create).toHaveBeenCalledWith(
       expect.objectContaining({ perfil: 'personal', permisos: [] }),
     );
+  });
+});
+
+describe('UsuariosService.findAll — solo el equipo de la plataforma', () => {
+  const servicioCon = (opts: Parameters<typeof construirModelos>[0] = {}) => {
+    const { accounts, asignacionesModel } = construirModelos(opts);
+    const { firebase } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+    return { service, accounts, asignacionesModel };
+  };
+
+  it('deja fuera a quien no es administrador de plataforma ni tiene asignación (propietarios y arrendatarios)', async () => {
+    const conAsignacion = new Types.ObjectId();
+    const { service, accounts } = servicioCon({
+      asignaciones: [asignacionDoc({ accountId: conAsignacion })],
+    });
+
+    await service.findAll({ estado: 'todos' } as never);
+
+    const filtro = accounts.filtrosListado[0] as {
+      $and: Record<string, unknown>[];
+    };
+    expect(filtro.$and[0]).toEqual({
+      $or: [
+        { esAdministradorPlataforma: true },
+        { _id: { $in: [conAsignacion] } },
+      ],
+    });
+  });
+
+  it('conserva el filtro de estado y la búsqueda junto a la restricción de equipo', async () => {
+    const { service, accounts } = servicioCon();
+
+    await service.findAll({ estado: 'inactivo', buscar: 'ana' } as never);
+
+    const filtro = accounts.filtrosListado[0] as {
+      $and: Record<string, unknown>[];
+    };
+    expect(filtro.$and).toHaveLength(3);
+    expect(filtro.$and[1]).toEqual({ estado: 'inactive' });
+    expect(filtro.$and[2]).toHaveProperty('$or');
   });
 });

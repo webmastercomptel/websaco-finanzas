@@ -71,21 +71,40 @@ export class UsuariosService {
   ) {}
 
   /**
-   * Lists accounts and each one's primary assignment.
+   * Lists the platform's STAFF accounts and each one's primary assignment:
+   * platform admins and anyone holding an assignment (administrators and
+   * operational staff). Residents (owners and tenants) have an Account too —
+   * they sign in to the portal — but no assignment, so they are left out: this
+   * screen is for who runs buildings, and a roster of every owner of every
+   * building would bury it. An account whose assignment was deactivated still
+   * shows (it has one), so a deactivated administrator can be found again.
    *
    * Not scoped by TenantContextService, same as Entidades/Copropiedades: this
-   * is the platform's whole roster, not one building's.
+   * is the platform's whole staff roster, not one building's.
    */
   async findAll(query: ListarUsuariosDto): Promise<Paginado<UsuarioContract>> {
-    const filtro: Record<string, unknown> = {};
+    const conAsignacion = await this.asignaciones.distinct('accountId').exec();
+    const condiciones: Record<string, unknown>[] = [
+      {
+        $or: [
+          { esAdministradorPlataforma: true },
+          { _id: { $in: conAsignacion } },
+        ],
+      },
+    ];
 
     if (query.estado !== 'todos') {
-      filtro.estado = query.estado === 'inactivo' ? 'inactive' : 'active';
+      condiciones.push({
+        estado: query.estado === 'inactivo' ? 'inactive' : 'active',
+      });
     }
     if (query.buscar) {
       const patron = { $regex: escapeRegex(query.buscar), $options: 'i' };
-      filtro.$or = [{ nombreCompleto: patron }, { email: patron }];
+      condiciones.push({
+        $or: [{ nombreCompleto: patron }, { email: patron }],
+      });
     }
+    const filtro: Record<string, unknown> = { $and: condiciones };
 
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;
