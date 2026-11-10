@@ -705,24 +705,6 @@ export interface Factura {
   fechaAnulacion: IsoDate | null;
 }
 
-/** What a TENANT sees of an invoice in `GET /portal/facturas`: the invoice
- *  itself and nothing about the owner's account — no balance, holder, lines,
- *  informative debts, discount or voiding detail. Owners get the full
- *  `Factura`. */
-export type FacturaPortalArrendatario = Pick<
-  Factura,
-  | 'id'
-  | 'inmuebleId'
-  | 'inmuebleCodigo'
-  | 'numeroCompleto'
-  | 'fechaEmision'
-  | 'fechaVencimiento'
-  | 'periodoDesde'
-  | 'periodoHasta'
-  | 'total'
-  | 'estado'
->;
-
 /** One entry of `GET /lotes/:id/facturas/documentos` — a plain listing of a
  *  lote's invoices (id + unit code). There is no per-invoice presentation
  *  pointer any more: a lote's invoice run produces ONE combined PDF (one

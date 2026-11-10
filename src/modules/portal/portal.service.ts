@@ -15,8 +15,6 @@ import { DocumentoStorageService } from '../../common/storage/documento-storage.
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type {
   Factura,
-  FacturaPortalArrendatario,
-  Paginado,
   PaginadoConTotales,
   TotalesFacturas,
 } from '../../contracts';
@@ -32,20 +30,6 @@ import {
   type RolPortal,
   type UnidadPortal,
 } from './portal-acceso.service';
-
-/** Projection a tenant gets of an invoice (see `FacturaPortalArrendatario`). */
-const paraArrendatario = (f: Factura): FacturaPortalArrendatario => ({
-  id: f.id,
-  inmuebleId: f.inmuebleId,
-  inmuebleCodigo: f.inmuebleCodigo,
-  numeroCompleto: f.numeroCompleto,
-  fechaEmision: f.fechaEmision,
-  fechaVencimiento: f.fechaVencimiento,
-  periodoDesde: f.periodoDesde,
-  periodoHasta: f.periodoHasta,
-  total: f.total,
-  estado: f.estado,
-});
 
 /** Most released invoices of one unit the portal lists (years of monthly billing). */
 const MAX_LIBERADAS_POR_UNIDAD = 5000;
@@ -85,27 +69,12 @@ export class PortalService {
   async facturasDe(
     user: IRequestUser,
     query: ListarFacturasPortalDto,
-  ): Promise<
-    | PaginadoConTotales<Factura, TotalesFacturas>
-    | Paginado<FacturaPortalArrendatario>
-  > {
-    const rol = await this.rolEnUnidad(user, query.inmuebleId);
-    const pagina = await this.facturasLiberadas(user, query);
-    if (rol === 'propietario') return pagina;
-    // A tenant gets the invoice, not the owner's account: balance, holder,
-    // lines, informative debts and grand totals stay out of the response.
-    return {
-      items: pagina.items.map(paraArrendatario),
-      total: pagina.total,
-      pagina: pagina.pagina,
-      porPagina: pagina.porPagina,
-    };
-  }
-
-  private async facturasLiberadas(
-    user: IRequestUser,
-    query: ListarFacturasPortalDto,
   ): Promise<PaginadoConTotales<Factura, TotalesFacturas>> {
+    // Owner and tenant get the same `Factura`: the invoice is the unit's own
+    // document (one period). Only the statement of account (the accumulated
+    // debt) is owner-only. The role check is still the scope check: it answers
+    // 404 for a unit the caller does not currently hold.
+    await this.rolEnUnidad(user, query.inmuebleId);
     const liberadas = await this.idsLiberadas(user, query.inmuebleId);
     const pagina = query.pagina ?? 1;
     const porPagina = query.porPagina ?? 50;

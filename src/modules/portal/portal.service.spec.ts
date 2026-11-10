@@ -19,7 +19,7 @@ const usuario: IRequestUser = {
   permissions: [],
 };
 
-/** A full invoice as `FacturasService.findAll` returns it (owner contract). */
+/** A full invoice as `FacturasService.findAll` returns it (owner and tenant get it as is). */
 const facturaCompleta = {
   id: FACTURA,
   loteId: 'lote-1',
@@ -143,42 +143,69 @@ describe('PortalService.facturasDe', () => {
     );
   });
 
-  it('al arrendatario solo se le devuelve la factura: sin saldo, titular, líneas ni totales', async () => {
-    const { service } = await construir('arrendatario');
+  it.each(['propietario', 'arrendatario'] as const)(
+    'el %s recibe el mismo contrato completo de la factura: saldo, titular y líneas',
+    async (rol) => {
+      const { service } = await construir(rol);
 
-    const pagina = await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+      const pagina = await service.facturasDe(usuario, {
+        inmuebleId: MI_UNIDAD,
+      });
 
-    expect(pagina).toEqual({
-      items: [
-        {
-          id: FACTURA,
-          inmuebleId: MI_UNIDAD,
-          inmuebleCodigo: 'A-101',
-          numeroCompleto: 'FV-7',
-          fechaEmision: '2026-05-01',
-          fechaVencimiento: '2026-05-15',
-          periodoDesde: '2026-05-01',
-          periodoHasta: '2026-05-31',
-          total: 1000,
-          estado: 'emitida',
-        },
-      ],
-      total: 1,
-      pagina: 1,
-      porPagina: 50,
-    });
-    expect(pagina).not.toHaveProperty('totales');
-    expect(JSON.stringify(pagina)).not.toMatch(
-      /saldo|titular|terceroId|loteId|Descuento|Anulacion|lineas/i,
+      expect(pagina.items).toEqual([facturaCompleta]);
+      expect(pagina.items[0]).toMatchObject({
+        saldoPendiente: 400,
+        titular: { nombre: 'Ana Propietaria', identificacion: '123' },
+        lineas: [{ concepto: 'Administración', monto: 1000 }],
+      });
+    },
+  );
+
+  it('el arrendatario y el propietario reciben exactamente la misma página', async () => {
+    const { service: delPropietario } = await construir('propietario');
+    const { service: delArrendatario } = await construir('arrendatario');
+
+    const pagina = { inmuebleId: MI_UNIDAD };
+
+    expect(await delArrendatario.facturasDe(usuario, pagina)).toEqual(
+      await delPropietario.facturasDe(usuario, pagina),
     );
   });
 
-  it('al propietario se le devuelve el contrato completo de la factura', async () => {
-    const { service } = await construir('propietario');
+  it.each(['propietario', 'arrendatario'] as const)(
+    'el %s solo pide las facturas liberadas de su unidad: ni las sin liberar ni las de otra unidad',
+    async (rol) => {
+      const liberada = new Types.ObjectId().toString();
+      const sinLiberar = new Types.ObjectId().toString();
+      const deOtraUnidad = new Types.ObjectId().toString();
+      const { service, facturas } = await construir(
+        rol,
+        colaCon([
+          { facturaId: liberada },
+          { facturaId: sinLiberar, liberada: false },
+          { facturaId: deOtraUnidad, inmuebleId: OTRA_UNIDAD },
+        ]),
+      );
 
-    const pagina = await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
+      await service.facturasDe(usuario, { inmuebleId: MI_UNIDAD });
 
-    expect(pagina.items[0]).toEqual(facturaCompleta);
+      const [consulta, opciones] = (
+        facturas.findAll.mock.calls as unknown as Array<
+          [{ inmuebleId: string }, { soloIds: Types.ObjectId[] }]
+        >
+      )[0];
+      expect(consulta.inmuebleId).toBe(MI_UNIDAD);
+      expect(opciones.soloIds.map(String)).toEqual([liberada]);
+    },
+  );
+
+  it('el arrendatario de una unidad no ve las facturas de otra: responde 404 sin consultar facturas', async () => {
+    const { service, facturas } = await construir('arrendatario');
+
+    await expect(
+      service.facturasDe(usuario, { inmuebleId: OTRA_UNIDAD }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(facturas.findAll).not.toHaveBeenCalled();
   });
 
   it('solo lista facturas liberadas a los residentes: pide únicamente esos ids', async () => {
