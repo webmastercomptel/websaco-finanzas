@@ -59,3 +59,22 @@ describe('UsuariosController.update', () => {
     );
   });
 });
+
+describe('UsuariosController.permisosFinanzas', () => {
+  it('devuelve las claves reales de Finanzas, sin tocar la base de datos', () => {
+    const controller = makeController({});
+
+    const { claves } = controller.permisosFinanzas();
+
+    expect(claves).toContain('facturas.aprobar');
+    expect(claves).not.toContain('inmuebles.aprobar');
+    expect(claves).toHaveLength(69);
+  });
+
+  it('está declarada antes de `:id`, o la ruta se leería como un id', () => {
+    const rutas = Object.getOwnPropertyNames(UsuariosController.prototype);
+    expect(rutas.indexOf('permisosFinanzas')).toBeLessThan(
+      rutas.indexOf('findOne'),
+    );
+  });
+});

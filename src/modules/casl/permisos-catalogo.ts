@@ -5,7 +5,11 @@
 // `permission-map.ts` uses to build abilities, so the two can never disagree
 // about what a key means.
 import type { ModuloProducto } from '../../common/licencia/modulos';
-import { createAppAbility, type Subject } from './casl-ability.constants';
+import {
+  createAppAbility,
+  type Action,
+  type Subject,
+} from './casl-ability.constants';
 import {
   MODULE_TO_SUBJECT,
   MODULE_TO_SUBJECT_ADMINISTRACION,
@@ -51,6 +55,71 @@ export function moduloDePermiso(clave: string): ModuloProducto | null {
     return esPermisoAdministracion(clave) ? modulo : null;
   }
   return verbo in VERB_TO_ACTION ? modulo : null;
+}
+
+type SujetoFinanciero =
+  (typeof MODULE_TO_SUBJECT)[keyof typeof MODULE_TO_SUBJECT];
+
+/**
+ * The CASL actions that some route REALLY requires on each financial subject
+ * (`@CheckAbility` / `@CheckAnyAbility`), except `manage`, which every subject
+ * with at least one action gets through its `gestionar` key. The permission
+ * matrix offers a `modulo.verbo` key only when its subject appears here with
+ * the verb's action — «un inmueble no se aprueba».
+ *
+ * Hand-kept, pinned by `permisos-finanzas.spec.ts`, which scans every
+ * controller and fails when a route asks for something not listed (nobody could
+ * be granted it) or this lists something no route asks for. A subject shared by
+ * several modules (`Configuracion`) is listed once: every one of its modules
+ * grants the same thing, so they offer the same actions. `Anulacion` has no
+ * route at all yet; `export` is required by none (exports are `read`).
+ *
+ * `Record<SujetoFinanciero, …>` makes a new financial subject a compile error
+ * here until it is classified.
+ */
+const ACCIONES_REALES_FINANZAS: Readonly<
+  Record<SujetoFinanciero, readonly Action[]>
+> = {
+  Inmueble: ['read', 'create', 'update'],
+  Tercero: ['read', 'create', 'update'],
+  ConceptoCobro: ['read', 'create', 'update'],
+  Factura: ['read', 'create', 'update', 'annul', 'approve'],
+  Recibo: ['read', 'create', 'annul'],
+  NotaCredito: ['read', 'create', 'update', 'annul'],
+  NotaContable: ['read', 'create', 'annul'],
+  OtraNota: ['read', 'create', 'annul'],
+  NotaAnticipo: ['read', 'create', 'annul'],
+  SaldoInicial: ['read', 'create', 'annul'],
+  SaldoInicialAnticipo: ['read', 'create', 'annul'],
+  Anulacion: [],
+  Consulta: ['read'],
+  Configuracion: ['read', 'create', 'update'],
+  InterfazComptable: ['read', 'create', 'annul'],
+};
+
+/**
+ * The Finanzas `modulo.verbo` keys that exist for real: the ones whose action
+ * some route requires, plus `gestionar` for every module that has any. This is
+ * what the permission matrix draws; every other module x verb pair is a dash.
+ * Granting a key outside it is still accepted (the grammar in
+ * `moduloDePermiso` is unchanged and old data stays valid): it just does
+ * nothing anybody checks.
+ */
+export const PERMISOS_FINANZAS: readonly string[] = Object.entries(
+  MODULE_TO_SUBJECT,
+).flatMap(([modulo, sujeto]) => {
+  const acciones = ACCIONES_REALES_FINANZAS[sujeto];
+  if (acciones.length === 0) return [];
+  return Object.entries(VERB_TO_ACTION)
+    .filter(([, accion]) => accion === 'manage' || acciones.includes(accion))
+    .map(([verbo]) => `${modulo}.${verbo}`);
+});
+
+const CLAVES_FINANZAS: ReadonlySet<string> = new Set(PERMISOS_FINANZAS);
+
+/** Whether `clave` is a Finanzas key that exists for real (see PERMISOS_FINANZAS). */
+export function esPermisoFinanzas(clave: string): boolean {
+  return CLAVES_FINANZAS.has(clave);
 }
 
 /** One assignable Administración permission, as the role editor lists it. */

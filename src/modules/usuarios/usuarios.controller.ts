@@ -19,7 +19,8 @@ import {
   ActualizarUsuarioDto,
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
-import type { Usuario, Paginado } from '../../contracts';
+import { PERMISOS_FINANZAS } from '../casl/permisos-catalogo';
+import type { PermisosFinanzas, Usuario, Paginado } from '../../contracts';
 
 /**
  * The platform's user roster — who may sign in, and where. Mirrors "Usuarios"
@@ -43,6 +44,16 @@ export class UsuariosController {
   @Get()
   findAll(@Query() query: ListarUsuariosDto): Promise<Paginado<Usuario>> {
     return this.usuarios.findAll(query);
+  }
+
+  /**
+   * The Finanzas keys that exist for real, so the matrix does not draw a
+   * checkbox for a pair no route checks. Static vocabulary, no query. Declared
+   * before `:id` so the path is never read as an id.
+   */
+  @Get('permisos-finanzas')
+  permisosFinanzas(): PermisosFinanzas {
+    return { claves: [...PERMISOS_FINANZAS] };
   }
 
   @Get(':id')

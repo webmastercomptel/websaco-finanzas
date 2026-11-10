@@ -2891,6 +2891,15 @@ export interface Permiso {
   modulo: string;
 }
 
+/**
+ * The Finanzas `modulo.accion` keys that exist for real (some route requires
+ * what they grant), for the permission matrix of `/usuarios`: any other
+ * module x verb pair is drawn as a dash. `GET usuarios/permisos-finanzas`.
+ */
+export interface PermisosFinanzas {
+  claves: string[];
+}
+
 /** One entry of the signed-in person's in-app inbox (the bell). */
 export interface Notificacion {
   id: string;
