@@ -32,6 +32,7 @@ export const toAsignacionResumen = (
     copropiedadNombre: copropiedad?.nombre ?? null,
     entidadId: entidad?.id ?? null,
     entidadNombre: entidad?.nombre ?? null,
+    perfil: doc.perfil ?? 'administrativo',
     permisos: doc.permisos,
   };
 };

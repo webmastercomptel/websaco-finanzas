@@ -2246,6 +2246,10 @@ export interface AsignacionResumen {
   copropiedadNombre: string | null;
   entidadId: string | null;
   entidadNombre: string | null;
+  /** Profile of the assignment; a legacy row with none reads as
+   *  `administrativo`. The edit form needs it to know which key blocks the
+   *  person may hold (`personal` never holds Finanzas keys). */
+  perfil: 'administrativo' | 'personal';
   permisos: string[];
 }
 
