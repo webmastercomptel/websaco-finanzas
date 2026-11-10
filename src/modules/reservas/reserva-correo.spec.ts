@@ -100,3 +100,40 @@ describe('construirCorreoReservaRespuesta', () => {
     expect(html).not.toContain('Ver mi reserva');
   });
 });
+
+describe('las horas del correo son las que escribió la persona', () => {
+  // Stored as the Bogotá wall clock written as UTC: 21:00 typed is T21:00Z.
+  const noche = {
+    nombreDestinatario: 'Admin',
+    nombreCopropiedad: 'Torres del Parque',
+    espacio: 'Salón Social',
+    inicio: new Date('2026-09-10T21:00:00.000Z'),
+    fin: new Date('2026-09-10T23:00:00.000Z'),
+    enlace: null,
+  };
+
+  it('una reserva de 21:00 a 23:00 se lee 9:00 y 11:00 p. m., no 4:00 y 6:00 (sin restar 5 horas)', () => {
+    const { html } = construirCorreoReservaNueva({
+      ...noche,
+      residenteNombre: 'Juan',
+      unidad: '501',
+      motivo: null,
+    });
+
+    expect(html).toMatch(/9:00/);
+    expect(html).toMatch(/11:00/);
+    expect(html).not.toMatch(/\b4:00/);
+    expect(html).not.toMatch(/\b6:00/);
+    expect(html).toMatch(/\b10\b/);
+  });
+
+  it('también en la respuesta al residente', () => {
+    const { html } = construirCorreoReservaRespuesta({
+      ...noche,
+      respuesta: 'aprobada',
+    });
+
+    expect(html).toMatch(/9:00/);
+    expect(html).not.toMatch(/\b4:00/);
+  });
+});

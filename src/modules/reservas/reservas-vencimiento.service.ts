@@ -12,6 +12,7 @@ import {
   ejecutarTareaProgramada,
 } from '../../common/programacion/tarea-programada';
 import { LockService } from '../../common/redis/lock.service';
+import { relojDeParedBogota } from '../../common/utils/reloj-bogota';
 import {
   Reserva,
   type ReservaDocument,
@@ -55,7 +56,9 @@ export class ReservasVencimientoService implements OnApplicationBootstrap {
 
         const resultado = await this.reservas
           .updateMany(
-            { estado: 'pendiente', inicio: { $lt: new Date() } },
+            // `inicio` is the Bogotá wall clock as UTC: compare on that scale,
+            // or a request is cancelled 5 hours before its typed start.
+            { estado: 'pendiente', inicio: { $lt: relojDeParedBogota() } },
             { $set: { estado: 'cancelada', activa: false } },
           )
           .exec();

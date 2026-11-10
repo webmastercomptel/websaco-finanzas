@@ -64,3 +64,17 @@ describe('construirCorreoActividadNueva', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 });
+
+describe('la fecha de la actividad es su día, sin hora ni corrimiento', () => {
+  it('una actividad del 10 de septiembre (medianoche UTC guardada) se anuncia el 10, no el 9 a las 7:00 p. m.', () => {
+    const { html } = construirCorreoActividadNueva({
+      ...base,
+      fecha: new Date('2026-09-10T00:00:00.000Z'),
+    });
+
+    expect(html).toMatch(/\b10\b/);
+    expect(html).toContain('2026');
+    expect(html).not.toMatch(/\b9\b(?:\s|&nbsp;|de)*sept/i);
+    expect(html).not.toMatch(/7:00/);
+  });
+});

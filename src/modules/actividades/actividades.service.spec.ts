@@ -599,22 +599,51 @@ describe('ActividadesService.finalizarPasadas — cron', () => {
     );
   });
 
-  it('finaliza las próximas y en curso anteriores al inicio de hoy', async () => {
-    const { servicio, actividades } = montar();
-    const antes = new Date();
+  describe('el día de corte es el de Bogotá (la fecha se guarda como medianoche UTC del día)', () => {
+    afterEach(() => jest.restoreAllMocks());
 
-    await servicio.finalizarPasadas();
+    const corteA = async (ahoraReal: string) => {
+      jest.spyOn(Date, 'now').mockReturnValue(Date.parse(ahoraReal));
+      const { servicio, actividades } = montar();
+      await servicio.finalizarPasadas();
+      expect(actividades.updateMany).toHaveBeenCalledTimes(1);
+      return actividades.updateMany.mock.calls[0] as [
+        { estado: { $in: string[] }; fecha: { $lt: Date } },
+        { estado: string },
+      ];
+    };
 
-    expect(actividades.updateMany).toHaveBeenCalledTimes(1);
-    const [filtro, cambio] = actividades.updateMany.mock.calls[0] as [
-      { estado: { $in: string[] }; fecha: { $lt: Date } },
-      { estado: string },
-    ];
-    expect(filtro.estado).toEqual({ $in: ['proximo', 'en_curso'] });
-    const hoy = new Date(antes);
-    hoy.setHours(0, 0, 0, 0);
-    expect(filtro.fecha.$lt.getTime()).toBe(hoy.getTime());
-    expect(cambio).toEqual({ estado: 'finalizado' });
+    it('finaliza las próximas y en curso de días anteriores al de hoy en Bogotá', async () => {
+      // 00:05 in Bogotá on 11 Sep = 05:05 UTC.
+      const [filtro, cambio] = await corteA('2026-09-11T05:05:00.000Z');
+
+      expect(filtro.estado).toEqual({ $in: ['proximo', 'en_curso'] });
+      expect(filtro.fecha.$lt.toISOString()).toBe('2026-09-11T00:00:00.000Z');
+      expect(cambio).toEqual({ estado: 'finalizado' });
+    });
+
+    it('a las 19:30 de Bogotá (00:30 UTC del día siguiente) una actividad de esa noche NO se finaliza', async () => {
+      const [filtro] = await corteA('2026-09-11T00:30:00.000Z');
+      const actividadDeEstaNoche = new Date('2026-09-10T00:00:00.000Z');
+
+      expect(filtro.fecha.$lt.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+      expect(actividadDeEstaNoche < filtro.fecha.$lt).toBe(false);
+    });
+  });
+
+  it('el cron corre a la medianoche de Bogotá, no a la del servidor (UTC)', () => {
+    // The decorator stores its options on the method itself (read, not called).
+    const metodo = Object.getOwnPropertyDescriptor(
+      ActividadesService.prototype,
+      'finalizarPasadas',
+    )?.value as object;
+    const opciones = Reflect.getMetadata('SCHEDULE_CRON_OPTIONS', metodo) as {
+      cronTime: string;
+      timeZone?: string;
+    };
+
+    expect(opciones.cronTime).toBe('0 0 * * *');
+    expect(opciones.timeZone).toBe('America/Bogota');
   });
 
   it('si otra instancia tiene el lock no ejecuta el cambio', async () => {

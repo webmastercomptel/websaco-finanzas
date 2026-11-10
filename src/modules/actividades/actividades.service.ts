@@ -24,6 +24,7 @@ import {
 } from '../../common/programacion/tarea-programada';
 import { LockService } from '../../common/redis/lock.service';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { inicioDelDiaBogota } from '../../common/utils/reloj-bogota';
 import type { Actividad as ActividadContrato } from '../../contracts';
 import {
   Actividad,
@@ -374,21 +375,21 @@ export class ActividadesService implements OnApplicationBootstrap {
    * It spans ALL coproperties on purpose: it is housekeeping with no request
    * and no tenant, and the tenancy law governs request-scoped reads.
    *
-   * Timezone caveat, kept from the original: "today" is the SERVER's local
-   * midnight (`setHours`), and Cloud Run runs in UTC. So the cut-off is 19:00
-   * the previous day in Bogotá, and an evening activity can be closed while it
-   * is still happening. Fixing it means choosing a product timezone for the
-   * cut-off, not changing this line in a port.
+   * "Today" is Bogotá's. `fecha` is the activity's DAY stored as UTC midnight
+   * (its free-text `horario` is not a reliable time), so an activity counts as
+   * past once its Bogotá day is over: the cut-off is `inicioDelDiaBogota()` and
+   * the cron fires at Bogotá midnight. The system this replaces used the
+   * server's midnight (UTC on Cloud Run = 19:00 in Bogotá), closing an evening
+   * activity while it was still happening.
    */
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'America/Bogota' })
   async finalizarPasadas(): Promise<void> {
     await ejecutarTareaProgramada(
       this.lock,
       this.logger,
       { clave: 'cron:actividades:finalizar-pasadas', ttlMs: 600_000 },
       async () => {
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
+        const hoy = inicioDelDiaBogota();
 
         const resultado = await this.actividades
           .updateMany(

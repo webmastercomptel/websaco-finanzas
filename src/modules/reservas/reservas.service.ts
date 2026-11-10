@@ -10,6 +10,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import {
+  inicioDelDiaBogota,
+  relojDeParedBogota,
+} from '../../common/utils/reloj-bogota';
 import type {
   DisponibilidadEspacio,
   Reserva as ReservaContrato,
@@ -289,13 +293,13 @@ export class ReservasService {
    * computed them: `reservasHoy` counts every booking that STARTS today
    * whatever its state, `enCurso` every one of those happening right now, and
    * `areaMasDemandada` ranks areas by all bookings ever made, cancelled or not.
+   * "Today" and "now" are Bogotá's, on the wall-clock scale bookings are stored
+   * in (see `reloj-bogota.ts`): at 22:00 in Bogotá it is still that day.
    */
   async estadisticas(): Promise<ReservasStats> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    const ahora = new Date();
-    const inicioDia = new Date(
-      Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate()),
-    );
+    const ahora = relojDeParedBogota();
+    const inicioDia = inicioDelDiaBogota();
     const finDia = new Date(inicioDia.getTime() + 24 * MS_POR_HORA);
 
     const [solicitudesPendientes, hoy, porArea, totalGeneral] =
@@ -487,7 +491,8 @@ export class ReservasService {
     const zona = await this.cargarZona(dto.espacioId, copropiedadId);
     const { inicio, fin } = this.leerIntervalo(dto.inicio, dto.fin);
 
-    const ahora = new Date();
+    // Stored times are the Bogotá wall clock as UTC: compare on that scale.
+    const ahora = relojDeParedBogota();
     if (inicio <= ahora) {
       throw new BadRequestException('La reserva debe comenzar en el futuro');
     }
@@ -559,8 +564,10 @@ export class ReservasService {
     this.validarId(id);
     const autorId = this.cuentaDelResidente(user);
     const copropiedadId = this.tenant.resolveCoPropertyId();
+    // Six hours before the typed start, both on the Bogotá wall-clock scale.
     const limite = new Date(
-      Date.now() + HORAS_MINIMAS_PARA_CANCELAR * MS_POR_HORA,
+      relojDeParedBogota().getTime() +
+        HORAS_MINIMAS_PARA_CANCELAR * MS_POR_HORA,
     );
 
     const cancelada = await this.reservas

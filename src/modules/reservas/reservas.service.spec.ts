@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { relojDeParedBogota } from '../../common/utils/reloj-bogota';
 import type { UnidadPortal } from '../portal/portal-acceso.service';
 import { MS_POR_HORA, MS_POR_MINUTO } from './reservas-horario';
 import { ReservasService } from './reservas.service';
@@ -316,11 +317,13 @@ describe('ReservasService.crearComoResidente', () => {
     it('un residente no puede pedir una reserva que ya empezó', async () => {
       const { servicio, reservas } = montar();
 
+      // One hour ago on the Bogotá wall clock (the scale bookings are stored in).
+      const pared = relojDeParedBogota().getTime();
       await expect(
         servicio.crearComoResidente(
           dtoPortal({
-            inicio: enHoras(-1).toISOString(),
-            fin: enHoras(1).toISOString(),
+            inicio: new Date(pared - MS_POR_HORA).toISOString(),
+            fin: new Date(pared + MS_POR_HORA).toISOString(),
           }),
           residente(),
         ),
@@ -606,7 +609,7 @@ describe('ReservasService — lecturas del personal', () => {
   describe('estadisticas', () => {
     it('cuenta las pendientes, las de hoy (confirmadas y en curso) y el área más pedida', async () => {
       const { servicio, reservas, zonas } = montar();
-      const ahora = new Date();
+      const ahora = relojDeParedBogota();
       reservas.countDocuments.mockImplementation(
         (filtro: { estado?: string }) =>
           Promise.resolve(filtro.estado === 'pendiente' ? 4 : 10),
@@ -863,7 +866,7 @@ describe('ReservasService — reservas propias del residente', () => {
       reservas.findOneAndUpdate.mockReturnValue(
         consulta(reservaDoc({ estado: 'cancelada' })),
       );
-      const antes = Date.now();
+      const antes = relojDeParedBogota().getTime();
 
       const resultado = await servicio.cancelarPropia(
         RESERVA.toString(),
@@ -888,7 +891,9 @@ describe('ReservasService — reservas propias del residente', () => {
       expect(filtro.estado).toEqual({ $in: ['pendiente', 'aprobada'] });
       const limite = filtro.inicio.$gte.getTime();
       expect(limite).toBeGreaterThanOrEqual(antes + 6 * MS_POR_HORA);
-      expect(limite).toBeLessThanOrEqual(Date.now() + 6 * MS_POR_HORA);
+      expect(limite).toBeLessThanOrEqual(
+        relojDeParedBogota().getTime() + 6 * MS_POR_HORA,
+      );
       expect(cambio).toEqual({ $set: { estado: 'cancelada', activa: false } });
       expect(opciones).toEqual({ new: true });
       expect(resultado.estado).toBe('cancelada');
@@ -963,6 +968,143 @@ describe('ReservasService — reservas propias del residente', () => {
         }),
       ).rejects.toThrow(ForbiddenException);
       expect(reservas.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * Bookings are stored as the Bogotá wall clock written as UTC (21:00 is
+ * `T21:00Z`), so every rule against "now" must compare with the wall clock,
+ * not the real instant (5 hours ahead). The clock is pinned through
+ * `Date.now`, never read from the machine.
+ */
+describe('ReservasService — reglas contra la hora de Bogotá (reloj de pared)', () => {
+  // 16:30 in Bogotá = 21:30 UTC real.
+  const AHORA_REAL = Date.parse('2026-09-10T21:30:00.000Z');
+
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(AHORA_REAL);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('una solicitud para hoy a las 21:00 hecha a las 16:30 de Bogotá se ACEPTA (antes se rechazaba)', async () => {
+    const { servicio, reservas } = montar();
+
+    await expect(
+      servicio.crearComoResidente(
+        dtoPortal({
+          inicio: '2026-09-10T21:00:00.000Z',
+          fin: '2026-09-10T22:00:00.000Z',
+        }),
+        residente(),
+      ),
+    ).resolves.toBeDefined();
+    expect(reservas).toHaveBeenCalledTimes(1);
+  });
+
+  it('una solicitud para hoy a las 16:00 hecha a las 16:30 de Bogotá se rechaza: ya empezó', async () => {
+    const { servicio, reservas } = montar();
+
+    await expect(
+      servicio.crearComoResidente(
+        dtoPortal({
+          inicio: '2026-09-10T16:00:00.000Z',
+          fin: '2026-09-10T17:00:00.000Z',
+        }),
+        residente(),
+      ),
+    ).rejects.toThrow('futuro');
+    expect(reservas).not.toHaveBeenCalled();
+  });
+
+  it('"una activa por espacio" cuenta las que no terminaron según la hora de Bogotá', async () => {
+    const { servicio, reservas } = montar();
+
+    await servicio.crearComoResidente(
+      dtoPortal({
+        inicio: '2026-09-11T10:00:00.000Z',
+        fin: '2026-09-11T11:00:00.000Z',
+      }),
+      residente(),
+    );
+
+    const [filtro] = reservas.countDocuments.mock.calls[0] as [
+      { fin: { $gt: Date } },
+    ];
+    expect(filtro.fin.$gt.toISOString()).toBe('2026-09-10T16:30:00.000Z');
+  });
+
+  describe('cancelar con 6 horas de anticipación', () => {
+    const limiteDelFiltro = async (): Promise<Date> => {
+      const { servicio, reservas } = montar();
+      await servicio.cancelarPropia(RESERVA.toString(), residente());
+      const [filtro] = reservas.findOneAndUpdate.mock.calls[0] as [
+        { inicio: { $gte: Date } },
+      ];
+      return filtro.inicio.$gte;
+    };
+
+    it('el límite es la hora de Bogotá más 6 horas (16:30 → 22:30), no la hora UTC real', async () => {
+      expect((await limiteDelFiltro()).toISOString()).toBe(
+        '2026-09-10T22:30:00.000Z',
+      );
+    });
+
+    it('se puede cancelar exactamente 6 horas antes de la hora escrita y NO a 5 h 59 min', async () => {
+      const limite = await limiteDelFiltro();
+      const aSeisHoras = new Date('2026-09-10T22:30:00.000Z');
+      const aCincoHoras59 = new Date('2026-09-10T22:29:00.000Z');
+
+      // The filter is `inicio >= limite`: Mongo applies exactly this comparison.
+      expect(aSeisHoras >= limite).toBe(true);
+      expect(aCincoHoras59 >= limite).toBe(false);
+    });
+  });
+
+  describe('estadisticas usan el día y la hora de Bogotá', () => {
+    // 22:00 in Bogotá on 9 Sep = 03:00 UTC real on 10 Sep.
+    const NOCHE_REAL = Date.parse('2026-09-10T03:00:00.000Z');
+
+    it('"hoy" es el 9 de septiembre de Bogotá aunque en UTC ya sea el 10', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(NOCHE_REAL);
+      const { servicio, reservas } = montar();
+
+      await servicio.estadisticas();
+
+      const [filtro] = reservas.find.mock.calls[0] as [
+        { inicio: { $gte: Date; $lt: Date } },
+      ];
+      expect(filtro.inicio.$gte.toISOString()).toBe('2026-09-09T00:00:00.000Z');
+      expect(filtro.inicio.$lt.toISOString()).toBe('2026-09-10T00:00:00.000Z');
+    });
+
+    it('"en curso" compara la hora escrita con la hora de Bogotá', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(NOCHE_REAL);
+      const { servicio, reservas } = montar();
+      reservas.find.mockReturnValue(
+        consulta([
+          // 21:00–23:00 typed: happening at 22:00 Bogotá.
+          {
+            estado: 'aprobada',
+            inicio: new Date('2026-09-09T21:00:00.000Z'),
+            fin: new Date('2026-09-09T23:00:00.000Z'),
+          },
+          // 17:00–18:00 typed: already over at 22:00 Bogotá.
+          {
+            estado: 'aprobada',
+            inicio: new Date('2026-09-09T17:00:00.000Z'),
+            fin: new Date('2026-09-09T18:00:00.000Z'),
+          },
+        ]),
+      );
+
+      const resultado = await servicio.estadisticas();
+
+      expect(resultado.reservasHoy).toEqual({
+        total: 2,
+        confirmadas: 2,
+        enCurso: 1,
+      });
     });
   });
 });

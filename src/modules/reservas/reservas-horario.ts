@@ -4,7 +4,9 @@
 // as in the system this replaces: the web client sends the wall-clock time the
 // person picked as if it were UTC, so reading it back in UTC reproduces what
 // they typed. Colombia is UTC-5, so do NOT "fix" this to a local timezone
-// without changing the client in the same release.
+// without changing the client in the same release. Because of that scale, a
+// stored time is never compared with the real `Date.now()`: "now" comes from
+// `relojDeParedBogota()` (`common/utils/reloj-bogota.ts`).
 
 export const MS_POR_MINUTO = 60_000;
 export const MS_POR_HORA = 60 * MS_POR_MINUTO;

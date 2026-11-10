@@ -269,6 +269,22 @@ describe('ZonasService.eliminar', () => {
     expect(filtro.fin.$gt).toBeInstanceOf(Date);
   });
 
+  it('"no terminaron" se mide con la hora de Bogotá: una reserva que acaba a las 21:00 escritas sigue vigente a las 16:30', async () => {
+    // 16:30 in Bogotá = 21:30 UTC real; bookings store the typed hour as UTC.
+    const ahoraReal = jest
+      .spyOn(Date, 'now')
+      .mockReturnValue(Date.parse('2026-09-10T21:30:00.000Z'));
+    const { servicio, reservas } = montar();
+
+    await servicio.eliminar(ZONA.toString());
+    ahoraReal.mockRestore();
+
+    const [filtro] = reservas.countDocuments.mock.calls[0] as [
+      { fin: { $gt: Date } },
+    ];
+    expect(filtro.fin.$gt.toISOString()).toBe('2026-09-10T16:30:00.000Z');
+  });
+
   it('se niega con 409 si la zona tiene reservas vigentes, sin borrar nada', async () => {
     const { servicio, zonas, reservas } = montar();
     reservas.countDocuments.mockResolvedValue(2);

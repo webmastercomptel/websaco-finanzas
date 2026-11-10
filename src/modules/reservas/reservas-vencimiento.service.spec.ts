@@ -59,7 +59,6 @@ describe('ReservasVencimientoService.vencerPendientes — cron', () => {
 
   it('cancela solo las pendientes cuyo inicio ya pasó, en todas las copropiedades', async () => {
     const { servicio, reservas } = montar();
-    const antes = Date.now();
 
     await servicio.vencerPendientes();
 
@@ -68,8 +67,36 @@ describe('ReservasVencimientoService.vencerPendientes — cron', () => {
     ];
     expect(filtro.estado).toBe('pendiente');
     expect(filtro).not.toHaveProperty('copropiedadId');
-    expect(filtro.inicio.$lt.getTime()).toBeGreaterThanOrEqual(antes);
-    expect(filtro.inicio.$lt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(filtro.inicio.$lt).toBeInstanceOf(Date);
+  });
+
+  describe('compara con la hora de Bogotá (las horas se guardan como reloj de pared)', () => {
+    // 16:30 in Bogotá = 21:30 UTC real.
+    beforeEach(() => {
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(Date.parse('2026-09-10T21:30:00.000Z'));
+    });
+
+    const corte = async (): Promise<Date> => {
+      const { servicio, reservas } = montar();
+      await servicio.vencerPendientes();
+      const [filtro] = reservas.updateMany.mock.calls[0] as [
+        { inicio: { $lt: Date } },
+      ];
+      return filtro.inicio.$lt;
+    };
+
+    it('el corte es las 16:30 escritas, no las 21:30 UTC reales', async () => {
+      expect((await corte()).toISOString()).toBe('2026-09-10T16:30:00.000Z');
+    });
+
+    it('deja la pendiente cuya hora escrita (21:00) aún no llega y cancela la que ya pasó (16:00)', async () => {
+      const limite = await corte();
+      // The filter is `inicio < corte`: Mongo applies exactly this comparison.
+      expect(new Date('2026-09-10T21:00:00.000Z') < limite).toBe(false);
+      expect(new Date('2026-09-10T16:00:00.000Z') < limite).toBe(true);
+    });
   });
 
   it('libera la franja en el mismo update: estado cancelada Y activa false', async () => {

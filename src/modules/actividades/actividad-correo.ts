@@ -4,7 +4,7 @@ import {
   renderFilaDetalle,
   renderPlantillaCorreo,
 } from '../../common/correo/plantilla-correo';
-import { escapeHtml, formatFecha } from '../../common/correo/texto-correo';
+import { escapeHtml, formatDiaUtc } from '../../common/correo/texto-correo';
 
 /** What the "new community activity" email needs to say. */
 export interface DatosCorreoActividadNueva {
@@ -30,7 +30,7 @@ export const construirCorreoActividadNueva = (
 ): { asunto: string; html: string } => {
   const filas = [
     ['Categoría', escapeHtml(datos.categoria)],
-    ['Fecha', escapeHtml(formatFecha(datos.fecha))],
+    ['Fecha', escapeHtml(formatDiaUtc(datos.fecha))],
     ['Horario', escapeHtml(datos.horario || 'Por confirmar')],
     ...(datos.ubicacion ? [['Ubicación', escapeHtml(datos.ubicacion)]] : []),
     ...(datos.descripcion

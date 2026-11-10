@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { siguienteCodigo } from '../../common/consecutivos/codigo-consecutivo';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
+import { relojDeParedBogota } from '../../common/utils/reloj-bogota';
 import type { Espacio, ZonaComun } from '../../contracts';
 import {
   ConsecutivoAdministracion,
@@ -147,7 +148,8 @@ export class ZonasService {
       copropiedadId,
       zonaId: new Types.ObjectId(id),
       estado: { $in: [...ESTADOS_RESERVA_ACTIVOS] },
-      fin: { $gt: new Date() },
+      // Bookings store the Bogotá wall clock as UTC: "not ended" on that scale.
+      fin: { $gt: relojDeParedBogota() },
     });
     if (vigentes > 0) {
       throw new ConflictException(

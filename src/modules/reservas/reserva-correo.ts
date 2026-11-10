@@ -4,7 +4,10 @@ import {
   renderFilaDetalle,
   renderPlantillaCorreo,
 } from '../../common/correo/plantilla-correo';
-import { escapeHtml, formatFecha } from '../../common/correo/texto-correo';
+import {
+  escapeHtml,
+  formatFechaRelojDePared,
+} from '../../common/correo/texto-correo';
 
 /** What the "new reservation request" email to staff needs to say. */
 export interface DatosCorreoReservaNueva {
@@ -33,8 +36,8 @@ export const construirCorreoReservaNueva = (
       'Solicitante',
       `${escapeHtml(datos.residenteNombre)}${datos.unidad ? ` (unidad ${escapeHtml(datos.unidad)})` : ''}`,
     ],
-    ['Desde', escapeHtml(formatFecha(datos.inicio))],
-    ['Hasta', escapeHtml(formatFecha(datos.fin))],
+    ['Desde', escapeHtml(formatFechaRelojDePared(datos.inicio))],
+    ['Hasta', escapeHtml(formatFechaRelojDePared(datos.fin))],
     ...(datos.motivo ? [['Motivo', escapeHtml(datos.motivo)]] : []),
   ];
 
@@ -112,7 +115,7 @@ export const construirCorreoReservaRespuesta = (
         ${VERBO_RESPUESTA[datos.respuesta]}.
       </p>
       ${renderCajaDetalle(
-        `${renderFilaDetalle('Desde', escapeHtml(formatFecha(datos.inicio)))}${renderFilaDetalle('Hasta', escapeHtml(formatFecha(datos.fin)), true)}`,
+        `${renderFilaDetalle('Desde', escapeHtml(formatFechaRelojDePared(datos.inicio)))}${renderFilaDetalle('Hasta', escapeHtml(formatFechaRelojDePared(datos.fin)), true)}`,
       )}
     `,
     cta: datos.enlace
