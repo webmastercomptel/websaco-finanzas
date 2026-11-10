@@ -39,7 +39,7 @@ describe('construirCorreoInvitacion', () => {
 
   it('distingue residente de personal y avisa si la cuenta ya existía', () => {
     expect(construirCorreoInvitacion(base).html).toContain(
-      'información de tu unidad',
+      'información de tu inmueble',
     );
     const personal = construirCorreoInvitacion({
       ...base,

@@ -53,7 +53,7 @@ export const construirCorreoPqrNueva = (
     heading: escapeHtml(datos.titulo),
     bodyHtml: `
       <p style="margin: 0 0 20px;">
-        ${escapeHtml(datos.nombreDestinatario)}, se registró una nueva PQR en <strong>${escapeHtml(datos.nombreCopropiedad)}</strong>${datos.unidad ? `, unidad ${escapeHtml(datos.unidad)}` : ''}${datos.residenteNombre ? ` a nombre de ${escapeHtml(datos.residenteNombre)}` : ''}:
+        ${escapeHtml(datos.nombreDestinatario)}, se registró una nueva PQR en <strong>${escapeHtml(datos.nombreCopropiedad)}</strong>${datos.unidad ? `, inmueble ${escapeHtml(datos.unidad)}` : ''}${datos.residenteNombre ? ` a nombre de ${escapeHtml(datos.residenteNombre)}` : ''}:
       </p>
       ${renderCajaDetalle(`
         ${renderFilaDetalle('Tipo', escapeHtml(ETIQUETA_TIPO[datos.tipo] ?? datos.tipo))}

@@ -2238,7 +2238,7 @@ export class LotesFacturacionService {
       .reduce((acc, m) => acc + m.monto, 0);
     if (sumaDebitos !== sumaCreditos) {
       throw new Error(
-        `Asiento contable desbalanceado para la unidad ${preliminar.codigoInmueble}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
+        `Asiento contable desbalanceado para el inmueble ${preliminar.codigoInmueble}: débitos ${sumaDebitos} vs créditos ${sumaCreditos}`,
       );
     }
 

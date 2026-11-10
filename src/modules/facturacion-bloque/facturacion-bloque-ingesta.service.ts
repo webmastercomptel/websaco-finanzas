@@ -186,7 +186,7 @@ export class FacturacionBloqueIngestaService {
           bloque._id,
           copropiedadId,
           token,
-          'No se pudieron generar los documentos por unidad. Reintentá el procesamiento.',
+          'No se pudieron generar los documentos por inmueble. Reintentá el procesamiento.',
         );
       }
       throw error;
@@ -537,11 +537,11 @@ export class FacturacionBloqueIngestaService {
         const codigos = [...new Set(rechazadas)];
         const listados = codigos.slice(0, MAX_CODIGOS_EN_MENSAJE).join(', ');
         const mas = codigos.length > MAX_CODIGOS_EN_MENSAJE ? ' y otras' : '';
-        return `El documento contiene identificadores de unidad, pero no se pudieron asociar sin ambigüedad a una unidad registrada (${rechazadas.length} página(s); unidades: ${listados}${mas}). Revise el formato del código impreso en el PDF`;
+        return `El documento contiene identificadores de inmueble, pero no se pudieron asociar sin ambigüedad a un inmueble registrado (${rechazadas.length} página(s); inmuebles: ${listados}${mas}). Revise el formato del código impreso en el PDF`;
       }
-      return 'El documento no contiene identificadores de unidad — no corresponde a un documento de facturación';
+      return 'El documento no contiene identificadores de inmueble — no corresponde a un documento de facturación';
     }
-    return `Se detectaron ${noRegistradas} código(s) de unidad, pero ninguno corresponde a un inmueble activo de la copropiedad. Revise el formato del código impreso en el PDF`;
+    return `Se detectaron ${noRegistradas} código(s) de inmueble, pero ninguno corresponde a un inmueble activo de la copropiedad. Revise el formato del código impreso en el PDF`;
   }
 
   /** Renews the ingest lease; false when this request no longer owns the block. */

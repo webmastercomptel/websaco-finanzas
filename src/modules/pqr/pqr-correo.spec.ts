@@ -31,7 +31,7 @@ describe('construirCorreoPqrNueva', () => {
   });
 
   it('menciona unidad y residente solo cuando existen', () => {
-    expect(construirCorreoPqrNueva(nueva).html).toContain('unidad A-101');
+    expect(construirCorreoPqrNueva(nueva).html).toContain('inmueble A-101');
     expect(construirCorreoPqrNueva(nueva).html).toContain(
       'a nombre de Juan Pérez',
     );
@@ -41,7 +41,7 @@ describe('construirCorreoPqrNueva', () => {
       unidad: '',
       residenteNombre: '',
     }).html;
-    expect(sin).not.toContain('unidad ');
+    expect(sin).not.toContain('inmueble ');
     expect(sin).not.toContain('a nombre de');
   });
 

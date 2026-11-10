@@ -231,7 +231,7 @@ describe('ReservasService.crearComoResidente', () => {
     portalAcceso.unidadesDe.mockResolvedValue([]);
     await expect(
       servicio.crearComoResidente(dtoPortal(), residente()),
-    ).rejects.toThrow(/No tenés unidades/);
+    ).rejects.toThrow(/No tenés inmuebles/);
     expect(reservas).not.toHaveBeenCalled();
   });
 

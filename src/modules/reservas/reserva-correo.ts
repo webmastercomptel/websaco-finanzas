@@ -34,7 +34,7 @@ export const construirCorreoReservaNueva = (
   const filas = [
     [
       'Solicitante',
-      `${escapeHtml(datos.residenteNombre)}${datos.unidad ? ` (unidad ${escapeHtml(datos.unidad)})` : ''}`,
+      `${escapeHtml(datos.residenteNombre)}${datos.unidad ? ` (inmueble ${escapeHtml(datos.unidad)})` : ''}`,
     ],
     ['Desde', escapeHtml(formatFechaRelojDePared(datos.inicio))],
     ['Hasta', escapeHtml(formatFechaRelojDePared(datos.fin))],

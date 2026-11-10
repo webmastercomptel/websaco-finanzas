@@ -29,7 +29,7 @@ describe('construirCorreoReservaNueva', () => {
     const { html } = construirCorreoReservaNueva(base);
 
     expect(html).toContain('Juan Pérez');
-    expect(html).toContain('(unidad 501)');
+    expect(html).toContain('(inmueble 501)');
     expect(html).toContain('Cumpleaños');
     expect(html).toContain('Aprobar o rechazar');
     expect(html).toContain('https://app.example.com/auth/enlace?x=1');
@@ -44,7 +44,7 @@ describe('construirCorreoReservaNueva', () => {
     });
 
     expect(html).not.toContain('Aprobar o rechazar');
-    expect(html).not.toContain('unidad');
+    expect(html).not.toContain('inmueble');
     expect(html).not.toContain('Motivo');
   });
 

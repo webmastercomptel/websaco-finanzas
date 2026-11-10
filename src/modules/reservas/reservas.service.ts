@@ -453,15 +453,17 @@ export class ReservasService {
       if (unidades.length === 1) return unidades[0];
       throw new BadRequestException(
         unidades.length === 0
-          ? 'No tenés unidades en esta copropiedad'
-          : 'Indicá desde qué unidad reservás',
+          ? 'No tenés inmuebles en esta copropiedad'
+          : 'Indicá desde qué inmueble reservás',
       );
     }
     const unidad = unidades.find(
       (u) => u.codigo.toLowerCase() === codigo.toLowerCase(),
     );
     if (!unidad) {
-      throw new ForbiddenException('La unidad indicada no es una de las tuyas');
+      throw new ForbiddenException(
+        'El inmueble indicado no es uno de los tuyos',
+      );
     }
     return unidad;
   }

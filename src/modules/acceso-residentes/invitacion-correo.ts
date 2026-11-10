@@ -32,7 +32,7 @@ export const construirCorreoInvitacion = (
 ): { asunto: string; html: string } => {
   const rol =
     datos.tipo === 'residente'
-      ? 'consultar la información de tu unidad'
+      ? 'consultar la información de tu inmueble'
       : 'trabajar con el equipo de la copropiedad';
 
   const entrada = datos.enlace
