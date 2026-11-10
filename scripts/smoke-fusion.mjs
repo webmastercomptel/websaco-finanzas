@@ -119,7 +119,7 @@ function construirChecks(config) {
       ['/copropiedades', 'Copropiedades (plataforma)'],
       ['/portal/unidades', 'Portal del residente'],
       ['/pqrs', 'PQR (Administración)'],
-      ['/documentos/carpetas', 'Documentos (Administración)'],
+      ['/documentos-administracion/carpetas', 'Documentos (Administración)'],
       ['/facturacion-bloque', 'Facturación por bloque'],
       ['/envio-facturas', 'Envío de facturas'],
     ].map(([ruta, nombre]) => ({

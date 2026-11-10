@@ -11,7 +11,7 @@ import {
 import { AclCarpetaDto } from './guardar-carpeta.dto';
 
 /**
- * Body of `PATCH /documentos/carpetas/:id`: name, description and/or rules. The
+ * Body of `PATCH /documentos-administracion/carpetas/:id`: name, description and/or rules. The
  * slug never changes, so already-shared links keep working. Sending `acls: []`
  * switches the folder back to inheriting.
  */

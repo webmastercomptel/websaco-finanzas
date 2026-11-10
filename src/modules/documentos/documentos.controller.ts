@@ -48,8 +48,14 @@ import {
  * `DocumentosPortalController` (`/portal/documentos`).
  *
  * Static `carpetas/...` and `stats` routes are declared before the `:id` ones.
+ *
+ * The prefix is `documentos-administracion`, NOT `documentos`: Finanzas already
+ * owns `/documentos` (document-type table in `configuracion/documentos`), and two
+ * controllers under one prefix made `GET /documentos` answer with the wrong shape.
+ * `casl/route-collisions.spec.ts` fails if any two controllers can resolve the
+ * same request.
  */
-@Controller('documentos')
+@Controller('documentos-administracion')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
 @Modulo('administracion')
 export class DocumentosController {

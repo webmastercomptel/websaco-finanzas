@@ -44,9 +44,9 @@ const nombresDeGuards = (controlador: Ctor): string[] =>
   ).map((g) => g.name);
 
 describe('DocumentosController — política de acceso (personal)', () => {
-  it('cuelga de documentos', () => {
+  it('cuelga de documentos-administracion (no de documentos, que es de Finanzas)', () => {
     expect(Reflect.getMetadata(PATH_METADATA, DocumentosController)).toBe(
-      'documentos',
+      'documentos-administracion',
     );
   });
 

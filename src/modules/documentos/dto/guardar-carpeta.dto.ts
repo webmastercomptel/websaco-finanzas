@@ -45,7 +45,7 @@ export class AclCarpetaDto {
   puedeEscribir: boolean;
 }
 
-/** Body of `POST /documentos/carpetas`. The tenant is never part of it. */
+/** Body of `POST /documentos-administracion/carpetas`. The tenant is never part of it. */
 export class CrearCarpetaDto {
   @IsString()
   @IsNotEmpty()

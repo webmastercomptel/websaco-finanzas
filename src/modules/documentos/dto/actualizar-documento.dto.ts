@@ -8,7 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 
-/** Body of `PATCH /documentos/:id`: featured flag, tags and/or the folder to move it to. */
+/** Body of `PATCH /documentos-administracion/:id`: featured flag, tags and/or the folder to move it to. */
 export class ActualizarDocumentoDto {
   @IsBoolean()
   @IsOptional()
