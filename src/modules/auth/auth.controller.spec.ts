@@ -78,6 +78,8 @@ describe('AuthController.me', () => {
         modulos: ['finanzas', 'administracion'],
         esResidente: false,
         permisos: ['facturas.ver'],
+        perfil: null,
+        rolNombre: null,
       },
     ]);
   });
@@ -266,5 +268,84 @@ describe('AuthController.me', () => {
 
     expect(alcancePrimarioDe).not.toHaveBeenCalled();
     expect(resultado.alcance).toBeNull();
+  });
+
+  describe('perfil y nombre del rol por copropiedad', () => {
+    const base: AccesoCopropiedad = {
+      copropiedadId: 'cop-1',
+      codigo: 'COP-001',
+      nombre: 'Terrazas',
+      permissions: [],
+      modulos: ['administracion'],
+      esResidente: false,
+    };
+
+    it('expone el perfil administrativo de la copropiedad', async () => {
+      const { servicio } = accesoQueDevuelve([
+        { ...base, perfil: 'administrativo', rolNombre: null },
+      ]);
+      const controller = new AuthController(servicio);
+
+      const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+      expect(resultado.copropiedades[0]).toMatchObject({
+        perfil: 'administrativo',
+        rolNombre: null,
+      });
+    });
+
+    it('expone el perfil personal con el nombre de su rol', async () => {
+      const { servicio } = accesoQueDevuelve([
+        { ...base, perfil: 'personal', rolNombre: 'Portero' },
+      ]);
+      const controller = new AuthController(servicio);
+
+      const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+      expect(resultado.copropiedades[0]).toMatchObject({
+        perfil: 'personal',
+        rolNombre: 'Portero',
+      });
+    });
+
+    it('expone el perfil personal sin rol', async () => {
+      const { servicio } = accesoQueDevuelve([
+        { ...base, perfil: 'personal', rolNombre: null },
+      ]);
+      const controller = new AuthController(servicio);
+
+      const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+      expect(resultado.copropiedades[0].perfil).toBe('personal');
+      expect(resultado.copropiedades[0].rolNombre).toBeNull();
+    });
+
+    it('un residente trae perfil y rol null: no hay asignación en ese edificio', async () => {
+      const { servicio } = accesoQueDevuelve([{ ...base, esResidente: true }]);
+      const controller = new AuthController(servicio);
+
+      const resultado = await controller.me(user({ accountId: 'acc-1' }));
+
+      expect(resultado.copropiedades[0]).toMatchObject({
+        esResidente: true,
+        perfil: null,
+        rolNombre: null,
+      });
+    });
+
+    it('el administrador de plataforma trae perfil y rol null', async () => {
+      const { servicio } = accesoQueDevuelve([base]);
+      const controller = new AuthController(servicio);
+
+      const resultado = await controller.me(
+        user({ accountId: 'acc-1', isPlatformAdmin: true }),
+      );
+
+      expect(resultado.esAdministradorPlataforma).toBe(true);
+      expect(resultado.copropiedades[0]).toMatchObject({
+        perfil: null,
+        rolNombre: null,
+      });
+    });
   });
 });

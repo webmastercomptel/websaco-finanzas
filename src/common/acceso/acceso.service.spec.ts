@@ -593,3 +593,163 @@ describe('AccesoService techo duro al leer', () => {
     expect(resultado.permissions).toEqual(['facturas.ver']);
   });
 });
+
+describe('AccesoService perfil y nombre del rol (rótulo del encabezado)', () => {
+  const rolA = oid();
+  const rolB = oid();
+  const directa = (extra: Fila = {}) => ({
+    alcance: 'copropiedad',
+    copropiedadId: copA,
+    permisos: [],
+    ...extra,
+  });
+  const rol = (
+    id: Types.ObjectId,
+    nombre: string,
+    de = copA,
+    permisos: string[] = ['pqr.ver'],
+  ) => ({ _id: id, copropiedadId: de, nombre, permisos });
+
+  it('una asignación administrativa expone el perfil y ningún rol', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'administrativo' })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.perfil).toBe('administrativo');
+    expect(resultado.rolNombre).toBeNull();
+  });
+
+  it('una asignación sin perfil (legado) se rotula como administrativa', async () => {
+    const service = servicio({
+      asignaciones: [directa()],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.perfil).toBe('administrativo');
+  });
+
+  it('el personal con rol expone el nombre de ese rol', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'personal', roleIds: [rolA] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, 'Portero')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.perfil).toBe('personal');
+    expect(resultado.rolNombre).toBe('Portero');
+  });
+
+  it('el personal sin rol queda con rolNombre null', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'personal', permisos: ['tareas.ver'] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.perfil).toBe('personal');
+    expect(resultado.rolNombre).toBeNull();
+  });
+
+  it('con varios roles toma el primero que la asignación nombra', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'personal', roleIds: [rolB, rolA] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, 'Portero'), rol(rolB, 'Jardinero')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.rolNombre).toBe('Jardinero');
+  });
+
+  it('un rol de OTRA copropiedad nunca da su nombre', async () => {
+    const service = servicio({
+      asignaciones: [directa({ perfil: 'personal', roleIds: [rolA] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, 'Secreto de otro edificio', copB)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.rolNombre).toBeNull();
+  });
+
+  it('el perfil y el rol corresponden a cada copropiedad, no a la primera asignación', async () => {
+    const service = servicio({
+      asignaciones: [
+        directa({ perfil: 'personal', roleIds: [rolA] }),
+        directa({ copropiedadId: copB, perfil: 'administrativo' }),
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A'), copropiedad(copB, 'COP-B')],
+      roles: [rol(rolA, 'Portero')],
+    });
+
+    const resultado = await service.copropiedadesDe(cuenta.toString());
+    const de = (id: Types.ObjectId) =>
+      resultado.find((c) => c.copropiedadId === id.toString());
+
+    expect(de(copA)).toMatchObject({
+      perfil: 'personal',
+      rolNombre: 'Portero',
+    });
+    expect(de(copB)).toMatchObject({
+      perfil: 'administrativo',
+      rolNombre: null,
+    });
+  });
+
+  it('si una vía por entidad es administrativa, el edificio se rotula administrativo', async () => {
+    const service = servicio({
+      asignaciones: [
+        directa({ perfil: 'personal', roleIds: [rolA] }),
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          perfil: 'administrativo',
+          permisos: ['facturas.ver'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
+      copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
+      roles: [rol(rolA, 'Portero')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.perfil).toBe('administrativo');
+    expect(resultado.rolNombre).toBeNull();
+  });
+
+  it('un residente sin asignación en el edificio no tiene perfil ni rol', async () => {
+    const service = servicio({
+      asignaciones: [],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      terceros: [{ copropiedadId: copA }],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.esResidente).toBe(true);
+    expect(resultado.perfil).toBeNull();
+    expect(resultado.rolNombre).toBeNull();
+  });
+
+  it('el administrador de plataforma no tiene perfil ni rol', async () => {
+    const service = servicio({
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString(), true);
+
+    expect(resultado.perfil).toBeNull();
+    expect(resultado.rolNombre).toBeNull();
+  });
+});

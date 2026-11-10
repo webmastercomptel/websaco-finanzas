@@ -2007,6 +2007,19 @@ export interface CopropiedadAccesible extends CopropiedadResumen {
    * grants nothing.
    */
   permisos: string[];
+  /**
+   * Profile the caller holds IN THIS coproperty, so the header can label them
+   * without guessing from `AuthMe.alcance` (which only describes the first
+   * assignment). `null` with no assignment here (a resident, a platform
+   * administrator). Optional so a client that predates it keeps working.
+   */
+  perfil?: 'administrativo' | 'personal' | null;
+  /**
+   * Name of the staff member's Administración role in this coproperty (only
+   * for `perfil: 'personal'`; null otherwise). Just the name — never the role's
+   * keys or anything of another building.
+   */
+  rolNombre?: string | null;
 }
 
 /** One row's outcome from a bulk upload of one-off charges that could not be processed. */

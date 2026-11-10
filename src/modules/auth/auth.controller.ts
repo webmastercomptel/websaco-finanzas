@@ -57,6 +57,8 @@ export class AuthController {
         // Already the effective set (ceiling applied) — never recompute here,
         // or the menu could disagree with the guard.
         permisos: c.permissions,
+        perfil: c.perfil ?? null,
+        rolNombre: c.rolNombre ?? null,
       })),
       alcance,
     };

@@ -57,6 +57,19 @@ export interface AccesoCopropiedad {
    * portal routes, never the administrative ones.
    */
   esResidente: boolean;
+  /**
+   * Profile the caller holds IN THIS coproperty, for the header label only (not
+   * an access decision). `administrativo` wins when more than one route reaches
+   * the building. `null` when no assignment reaches it (a resident-only account,
+   * or a platform administrator, who carries no assignment).
+   */
+  perfil?: PerfilAsignacion | null;
+  /**
+   * Name of the Administración role the caller's DIRECT grant on this building
+   * names (the first one, in the grant's own order), for the header label. Null
+   * without one; never a role of another building (checked like the key merge).
+   */
+  rolNombre?: string | null;
 }
 
 @Injectable()
@@ -77,8 +90,8 @@ export class AccesoService {
   ) {}
 
   /**
-   * Administración keys contributed by the roles of each direct grant, keyed by
-   * coproperty id. Three filters keep a role from ever widening access beyond
+   * Administración keys and the display name contributed by the roles of each
+   * direct grant, keyed by coproperty id. Three filters keep a role from ever widening access beyond
    * its purpose: only roles the grant names, only roles of the grant's own
    * coproperty (the query returns by id, so this is checked here, not trusted),
    * and only Administración keys — a Finanzas or unknown key inside a role is
@@ -90,14 +103,17 @@ export class AccesoService {
       copropiedadId: Types.ObjectId | null;
       roleIds?: Types.ObjectId[];
     }>,
-  ): Promise<Map<string, string[]>> {
-    const aportes = new Map<string, string[]>();
+  ): Promise<Map<string, { claves: string[]; nombre: string | null }>> {
+    const aportes = new Map<
+      string,
+      { claves: string[]; nombre: string | null }
+    >();
     const ids = directas.flatMap((a) => a.roleIds ?? []);
     if (ids.length === 0) return aportes;
 
     const encontrados = await this.roles
       .find({ _id: { $in: ids } })
-      .select('copropiedadId permisos')
+      .select('copropiedadId permisos nombre')
       .lean()
       .exec();
     const porId = new Map(encontrados.map((r) => [r._id.toString(), r]));
@@ -106,14 +122,17 @@ export class AccesoService {
       if (!a.copropiedadId) continue;
       const propia = a.copropiedadId.toString();
       const claves = new Set<string>();
+      let nombre: string | null = null;
       for (const id of a.roleIds ?? []) {
         const rol = porId.get(id.toString());
         if (!rol || rol.copropiedadId.toString() !== propia) continue;
+        // The label shows one role: the first valid one the grant names.
+        nombre ??= rol.nombre?.trim() || null;
         for (const clave of rol.permisos ?? []) {
           if (moduloDePermiso(clave) === 'administracion') claves.add(clave);
         }
       }
-      aportes.set(propia, [...claves]);
+      aportes.set(propia, { claves: [...claves], nombre });
     }
     return aportes;
   }
@@ -200,19 +219,32 @@ export class AccesoService {
       permisosPorCopropiedad.set(id, actuales);
     };
 
+    // Header label data, per coproperty: the profile (administrativo wins when
+    // two routes reach the same building) and the role name of a direct grant.
+    const perfilPorCopropiedad = new Map<string, PerfilAsignacion>();
+    const rolNombrePorCopropiedad = new Map<string, string>();
+    const anotarPerfil = (id: string, perfil: PerfilAsignacion): void => {
+      if (perfilPorCopropiedad.get(id) !== 'administrativo') {
+        perfilPorCopropiedad.set(id, perfil);
+      }
+    };
+
     const directas = asignaciones.filter((a) => a.alcance === 'copropiedad');
     const deRoles = await this.permisosDeRoles(directas);
     for (const a of directas) {
       if (!a.copropiedadId) continue;
       const id = a.copropiedadId.toString();
+      const delRol = deRoles.get(id);
       // The ceiling applies to the union, so a role can never lift it either.
       acumular(
         id,
         permisosEfectivosDe({
           perfil: a.perfil,
-          permisos: [...a.permisos, ...(deRoles.get(id) ?? [])],
+          permisos: [...a.permisos, ...(delRol?.claves ?? [])],
         }),
       );
+      anotarPerfil(id, a.perfil ?? 'administrativo');
+      if (delRol?.nombre) rolNombrePorCopropiedad.set(id, delRol.nombre);
     }
 
     const porEntidad = asignaciones.filter((a) => a.alcance === 'entidad');
@@ -252,17 +284,25 @@ export class AccesoService {
         // A company grant reaches every building it administers, so the
         // permissions of that grant land on each of them.
         const permisosPorEntidad = new Map<string, string[]>();
+        const perfilPorEntidad = new Map<string, PerfilAsignacion>();
         for (const a of deEntidadesActivas) {
           permisosPorEntidad.set(
             a.entidadId!.toString(),
             permisosEfectivosDe(a),
           );
+          perfilPorEntidad.set(
+            a.entidadId!.toString(),
+            a.perfil ?? 'administrativo',
+          );
         }
 
         for (const c of administradas) {
-          const permisos =
-            permisosPorEntidad.get(c.entidadId?.toString() ?? '') ?? [];
-          acumular(c._id.toString(), permisos);
+          const entidad = c.entidadId?.toString() ?? '';
+          acumular(c._id.toString(), permisosPorEntidad.get(entidad) ?? []);
+          anotarPerfil(
+            c._id.toString(),
+            perfilPorEntidad.get(entidad) ?? 'administrativo',
+          );
         }
       }
     }
@@ -276,6 +316,18 @@ export class AccesoService {
       [...permisosPorCopropiedad.keys()],
       (id) => [...(permisosPorCopropiedad.get(id) ?? [])],
       residente,
+      (id) => {
+        const perfil = perfilPorCopropiedad.get(id) ?? null;
+        // A role name only labels a `personal` profile; an administrativo
+        // route reaching the same building outranks it.
+        return {
+          perfil,
+          rolNombre:
+            perfil === 'personal'
+              ? (rolNombrePorCopropiedad.get(id) ?? null)
+              : null,
+        };
+      },
     );
   }
 
@@ -315,6 +367,8 @@ export class AccesoService {
       // ability factory, not by carrying a copy of every permission key.
       permissions: [],
       esResidente: false,
+      perfil: null,
+      rolNombre: null,
     }));
   }
 
@@ -339,6 +393,10 @@ export class AccesoService {
     ids: string[],
     permisosDe: (id: string) => string[],
     residente: Set<string>,
+    etiquetaDe: (id: string) => {
+      perfil: PerfilAsignacion | null;
+      rolNombre: string | null;
+    } = () => ({ perfil: null, rolNombre: null }),
   ): Promise<AccesoCopropiedad[]> {
     if (ids.length === 0) return [];
 
@@ -359,6 +417,7 @@ export class AccesoService {
       modulos: modulosEfectivos(c),
       permissions: permisosDe(c._id.toString()),
       esResidente: residente.has(c._id.toString()),
+      ...etiquetaDe(c._id.toString()),
     }));
   }
 }
