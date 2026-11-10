@@ -4,7 +4,7 @@ import {
   renderFilaDetalle,
   renderPlantillaCorreo,
 } from '../../common/correo/plantilla-correo';
-import { escapeHtml, formatFecha } from '../../common/correo/texto-correo';
+import { escapeHtml, formatDiaUtc } from '../../common/correo/texto-correo';
 
 const ETIQUETA_TIPO: Record<string, string> = {
   preventivo: 'Mantenimiento preventivo',
@@ -36,7 +36,7 @@ export const construirCorreoMantenimientoAsignado = (
     ['Tipo', escapeHtml(ETIQUETA_TIPO[datos.tipo] ?? datos.tipo)],
     [
       'Fecha',
-      `${escapeHtml(formatFecha(datos.fecha))}${datos.horario ? ` (${escapeHtml(datos.horario)})` : ''}`,
+      `${escapeHtml(formatDiaUtc(datos.fecha))}${datos.horario ? ` (${escapeHtml(datos.horario)})` : ''}`,
     ],
     ...(datos.descripcion ? [['Detalle', escapeHtml(datos.descripcion)]] : []),
   ];

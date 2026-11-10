@@ -86,3 +86,16 @@ describe('construirCorreoAnuncio', () => {
     expect(html).toContain('&lt;b&gt;hola&lt;/b&gt; &amp; &quot;chau&quot;');
   });
 });
+
+describe('la fecha del anuncio es un instante real', () => {
+  it('una publicación a las 22:00 en Bogotá conserva el día y la hora de Bogotá', () => {
+    // 22:00 in Bogotá on the 20th is 03:00 UTC of the 21st.
+    const { html } = construirCorreoAnuncio({
+      ...base,
+      fecha: new Date('2026-11-21T03:00:00.000Z'),
+    });
+
+    expect(html).toContain('20/11/2026');
+    expect(html).toMatch(/10:00\s?p\.\s?m\./);
+  });
+});

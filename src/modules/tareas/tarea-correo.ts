@@ -4,7 +4,7 @@ import {
   renderFilaDetalle,
   renderPlantillaCorreo,
 } from '../../common/correo/plantilla-correo';
-import { escapeHtml, formatFecha } from '../../common/correo/texto-correo';
+import { escapeHtml, formatDiaUtc } from '../../common/correo/texto-correo';
 
 /** What the "you were assigned a task" email needs to say. */
 export interface DatosCorreoTareaAsignada {
@@ -31,7 +31,7 @@ export const construirCorreoTareaAsignada = (
     ['Categoría', escapeHtml(datos.categoria)],
     ['Prioridad', escapeHtml(datos.prioridad)],
     ...(datos.fechaLimite
-      ? [['Fecha límite', escapeHtml(formatFecha(datos.fechaLimite))]]
+      ? [['Fecha límite', escapeHtml(formatDiaUtc(datos.fechaLimite))]]
       : []),
     ...(datos.descripcion
       ? [['Descripción', escapeHtml(datos.descripcion)]]

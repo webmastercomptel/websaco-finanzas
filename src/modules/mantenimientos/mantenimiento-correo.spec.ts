@@ -56,3 +56,17 @@ describe('construirCorreoMantenimientoAsignado', () => {
     expect(html).toContain('&lt;script&gt;');
   });
 });
+
+describe('la fecha del mantenimiento es su día, sin hora ni corrimiento', () => {
+  it('un mantenimiento del 20 de noviembre (medianoche UTC guardada) dice 20, no 19 a las 7:00 p. m.', () => {
+    const { html } = construirCorreoMantenimientoAsignado({
+      ...base,
+      fecha: new Date('2026-11-20T00:00:00.000Z'),
+    });
+
+    expect(html).toContain('20/11/2026');
+    expect(html).not.toContain('19/11/2026');
+    expect(html).not.toMatch(/7:00/);
+    expect(html).not.toMatch(/p\.\s?m\./);
+  });
+});
