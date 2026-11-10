@@ -73,7 +73,7 @@ Required ones stop the boot naming the variable.
 | `COMPTABLE_API_URL` + `COMPTABLE_HMAC_SECRET` | optional pair | URL must end in `/api/v1`; secret at least 32 chars. |
 | `INTEGRACION_PANEL_HABILITADA` + `PANEL_HMAC_SECRET` | optional | Secret mandatory when enabled, different from the Comptable one. |
 | `APP_ROLE` | default `all` | `all` = HTTP + queue workers + scheduled jobs (today's behaviour); `api` = HTTP only (does not consume lote jobs nor run `@Cron`); `worker` = same as `all` (HTTP stays up because Cloud Run needs a port). An `api` process still enqueues lote jobs: do not run only `api` processes, or `consolidar` waits for a worker that does not exist. |
-| `SENTRY_DSN` | optional | `https://` DSN. Absent = nothing is reported. Only unexpected errors and 5xx are sent, without request data. |
+| `SENTRY_DSN` | optional | `https://` DSN. Absent = nothing is reported. Only unexpected errors and 5xx are sent, with no request body, cookies or credential headers (only method, path, an allow-list of harmless headers, and the stack; sensitive query values are redacted). |
 | `NODE_OPTIONS` | image default | `--max-old-space-size=<MB>`. |
 
 Read from the platform, not set by hand: `K_REVISION` (used as the Sentry release).
