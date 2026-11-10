@@ -71,19 +71,24 @@ export class UsuariosService {
   ) {}
 
   /**
-   * Lists the platform's STAFF accounts and each one's primary assignment:
-   * platform admins and anyone holding an assignment (administrators and
-   * operational staff). Residents (owners and tenants) have an Account too —
-   * they sign in to the portal — but no assignment, so they are left out: this
-   * screen is for who runs buildings, and a roster of every owner of every
-   * building would bury it. An account whose assignment was deactivated still
-   * shows (it has one), so a deactivated administrator can be found again.
+   * Lists the platform's ADMINISTRATOR accounts and each one's primary
+   * assignment: platform admins and anyone holding an `administrativo`
+   * assignment (a legacy row with no profile counts as one) — building
+   * administrators and accountants, the only people created on this screen.
+   * Operational staff (`personal`) are created and managed by each building
+   * in /equipo, and residents (owners and tenants) have an Account too — they
+   * sign in to the portal — but no assignment: a roster of every technician
+   * and every owner of every building would bury the screen, so both are left
+   * out. An account whose assignment was deactivated still shows (it has one),
+   * so a deactivated administrator can be found again.
    *
    * Not scoped by TenantContextService, same as Entidades/Copropiedades: this
    * is the platform's whole staff roster, not one building's.
    */
   async findAll(query: ListarUsuariosDto): Promise<Paginado<UsuarioContract>> {
-    const conAsignacion = await this.asignaciones.distinct('accountId').exec();
+    const conAsignacion = await this.asignaciones
+      .distinct('accountId', { perfil: { $ne: 'personal' } })
+      .exec();
     const condiciones: Record<string, unknown>[] = [
       {
         $or: [

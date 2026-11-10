@@ -653,4 +653,14 @@ describe('UsuariosService.findAll — solo el equipo de la plataforma', () => {
     expect(filtro.$and[1]).toEqual({ estado: 'inactive' });
     expect(filtro.$and[2]).toHaveProperty('$or');
   });
+
+  it('no cuenta como administrador a quien solo tiene asignaciones de personal operativo', async () => {
+    const { service, asignacionesModel } = servicioCon();
+
+    await service.findAll({ estado: 'todos' } as never);
+
+    expect(asignacionesModel.distinct).toHaveBeenCalledWith('accountId', {
+      perfil: { $ne: 'personal' },
+    });
+  });
 });
