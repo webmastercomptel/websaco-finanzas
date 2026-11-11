@@ -19,9 +19,14 @@ import { ActualizarRolDto, CrearRolDto } from './dto/guardar-rol.dto';
 import { RolesService } from './roles.service';
 
 /**
- * Roles of the active coproperty: named bundles of Administración permissions.
- * Each verb asks for its own action: `roles.ver` (read) opens the two reads
- * and nothing else; `roles.gestionar` (manage) covers all of them.
+ * Roles of the active coproperty: named bundles of permissions of any offered
+ * module (Finanzas and Administración keys alike). Each verb asks for its own
+ * action: `roles.ver` (read) opens the two reads and nothing else;
+ * `roles.gestionar` (manage) covers all of them. Which keys a caller may put in
+ * a role, or take out of one, is the delegation cap in the service ("you give
+ * only what you hold"), not this controller's business; every write receives
+ * the caller so it can be judged and audited. `GET /roles/permisos` still lists
+ * the Administración catalog only.
  */
 @Controller('roles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
@@ -63,7 +68,10 @@ export class RolesController {
 
   @Delete(':id')
   @CheckAbility({ action: 'remove', subject: 'Rol' })
-  remove(@Param('id') id: string): Promise<{ id: string }> {
-    return this.roles.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<{ id: string }> {
+    return this.roles.remove(id, user);
   }
 }

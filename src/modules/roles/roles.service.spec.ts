@@ -32,6 +32,23 @@ const EDITOR_LIMITADO: IRequestUser = {
   permissions: ['roles.gestionar', 'tareas.ver'],
 };
 
+/** Ana: can edit roles and holds a slice of Finanzas, nothing more. */
+const ANA: IRequestUser = {
+  uid: 'a',
+  email: 'ana@x.co',
+  nombre: 'Ana Pérez',
+  accountId: CUENTA.toString(),
+  permissions: ['roles.gestionar', 'facturas.ver', 'facturas.crear'],
+};
+
+const PLATAFORMA: IRequestUser = {
+  uid: 'r',
+  email: 'root@x.co',
+  accountId: CUENTA.toString(),
+  isPlatformAdmin: true,
+  permissions: [],
+};
+
 function documento(extra: Record<string, unknown> = {}) {
   return {
     _id: ROL_ID,
@@ -57,6 +74,8 @@ function crear(
     conteos?: Array<{ _id: Types.ObjectId; n: number }>;
     /** Mongo error code the save fails with (11000 = duplicate key). */
     errorAlGuardar?: number;
+    /** Makes the audit write fail. */
+    errorAuditoria?: boolean;
   } = {},
 ) {
   const guardar = jest
@@ -90,13 +109,19 @@ function crear(
     findOneAndUpdate: jest.fn().mockReturnValue(exec({ valor: 7 })),
   };
   const tenant = { resolveCoPropertyId: jest.fn().mockReturnValue(COP) };
+  const auditoria = {
+    registrar: opciones.errorAuditoria
+      ? jest.fn().mockRejectedValue(new Error('auditoría caída'))
+      : jest.fn().mockResolvedValue(undefined),
+  };
   const servicio = new RolesService(
     roles as never,
     asignaciones as never,
     consecutivos as never,
     tenant as never,
+    auditoria as never,
   );
-  return { servicio, roles, asignaciones, consecutivos };
+  return { servicio, roles, asignaciones, consecutivos, auditoria };
 }
 
 describe('RolesService.create', () => {
@@ -126,25 +151,140 @@ describe('RolesService.create', () => {
     expect(rol.usuarios).toBe(0);
   });
 
-  it.each([
-    ['una clave de finanzas', ['facturas.ver']],
-    ['una clave inventada', ['inventada.ver']],
-    ['un verbo que no existe en Administración', ['pqr.eliminar']],
-  ])('rechaza %s dentro de un rol', async (_n, permisos) => {
+  it('S-R1.1: quien tiene una clave de Finanzas puede ponerla en un rol (201)', async () => {
     const { servicio, roles } = crear();
 
-    await expect(
-      servicio.create({ nombre: 'X', permisos }, ADMIN_COP),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(roles.create).not.toHaveBeenCalled();
+    const rol = await servicio.create(
+      { nombre: 'Facturador', permisos: ['facturas.ver', 'facturas.crear'] },
+      ANA,
+    );
+
+    expect(roles.create).toHaveBeenCalledWith(
+      expect.objectContaining({ permisos: ['facturas.ver', 'facturas.crear'] }),
+    );
+    expect(rol.permisos).toEqual(['facturas.ver', 'facturas.crear']);
   });
 
-  it('un nombre repetido en la copropiedad responde 409', async () => {
-    const { servicio } = crear({ errorAlGuardar: 11000 });
+  it('S-R1.2: una clave de Finanzas que quien lo crea no tiene es 403 y no se guarda', async () => {
+    const { servicio, roles, consecutivos, auditoria } = crear();
+
+    await expect(
+      servicio.create({ nombre: 'X', permisos: ['facturas.anular'] }, ANA),
+    ).rejects.toThrow(/facturas\.anular/);
+    await expect(
+      servicio.create({ nombre: 'X', permisos: ['facturas.anular'] }, ANA),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(roles.create).not.toHaveBeenCalled();
+    expect(consecutivos.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['una clave inventada', ['inventada.ver']],
+    ['un verbo que no existe en Administración', ['pqr.eliminar']],
+    [
+      'una clave de Finanzas con un verbo que no se ofrece',
+      ['inmuebles.aprobar'],
+    ],
+    ['el viejo gestionar de Finanzas', ['facturas.gestionar']],
+  ])(
+    'S-R1.3: rechaza %s dentro de un rol (400), también al administrador de plataforma',
+    async (_n, permisos) => {
+      for (const quien of [ADMIN_COP, PLATAFORMA]) {
+        const { servicio, roles, auditoria } = crear();
+
+        await expect(
+          servicio.create({ nombre: 'X', permisos }, quien),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(roles.create).not.toHaveBeenCalled();
+        expect(auditoria.registrar).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('el 400 por clave inexistente se decide antes que el 403 por clave ajena', async () => {
+    const { servicio } = crear();
+
+    await expect(
+      servicio.create(
+        { nombre: 'X', permisos: ['facturas.anular', 'inventada.ver'] },
+        ANA,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('un nombre repetido en la copropiedad responde 409 y no deja rastro en la auditoría', async () => {
+    const { servicio, auditoria } = crear({ errorAlGuardar: 11000 });
 
     await expect(
       servicio.create({ nombre: 'Portero' }, ADMIN_COP),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('S-L2.1: el servicio no mira el contrato de la copropiedad: una clave de otro módulo se guarda igual (queda inerte)', async () => {
+    const { servicio, roles } = crear();
+    const conPqr: IRequestUser = { ...ANA, permissions: ['pqr.ver'] };
+
+    await servicio.create({ nombre: 'Soporte', permisos: ['pqr.ver'] }, conPqr);
+
+    expect(roles.create).toHaveBeenCalled();
+  });
+
+  it('D7.2: quien tiene roles.gestionar y no tiene facturas.anular no puede armar un rol con ella (403)', async () => {
+    const { servicio, roles } = crear();
+
+    await expect(
+      servicio.create(
+        { nombre: 'Atajo', permisos: ['tareas.ver', 'facturas.anular'] },
+        EDITOR_LIMITADO,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(roles.create).not.toHaveBeenCalled();
+  });
+
+  it('S-A2.1: crear un rol con dos claves escribe UNA entrada de auditoría con las claves ordenadas', async () => {
+    const { servicio, auditoria } = crear();
+
+    await servicio.create(
+      { nombre: 'Facturador', permisos: ['facturas.ver', 'facturas.crear'] },
+      ANA,
+    );
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: CUENTA.toString(),
+      actorNombre: 'Ana Pérez',
+      accion: 'crear',
+      entidadTipo: 'rol',
+      entidadId: ROL_ID.toString(),
+      entidadEtiqueta: `Rol: Facturador (copropiedad ${COP.toString()})`,
+      detalle: {
+        agregadas: ['facturas.crear', 'facturas.ver'],
+        quitadas: [],
+      },
+    });
+  });
+
+  it('un rol creado sin claves también queda auditado, con listas vacías', async () => {
+    const { servicio, auditoria } = crear();
+
+    await servicio.create({ nombre: 'Vacío' }, ADMIN_COP);
+
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'crear',
+        detalle: { agregadas: [], quitadas: [] },
+      }),
+    );
+  });
+
+  it('si la auditoría falla, la petición falla (como en el resto del sistema)', async () => {
+    const { servicio } = crear({ errorAuditoria: true });
+
+    await expect(
+      servicio.create({ nombre: 'X', permisos: ['tareas.ver'] }, ADMIN_COP),
+    ).rejects.toThrow('auditoría caída');
   });
 });
 
@@ -198,18 +338,42 @@ describe('RolesService.update', () => {
     expect(rol.usuarios).toBe(2);
   });
 
-  it('rechaza permisos de finanzas al editar', async () => {
+  it('una clave de Finanzas al editar: con la clave propia 200, sin ella 403', async () => {
     const { servicio, roles } = crear({ encontrado: documento() });
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['tareas.ver', 'facturas.ver'] },
+      ANA,
+    );
+    expect(roles.findOneAndUpdate).toHaveBeenCalledTimes(1);
 
     await expect(
       servicio.update(
         ROL_ID.toString(),
-        { permisos: ['facturas.anular'] },
-        ADMIN_COP,
+        { permisos: ['tareas.ver', 'facturas.anular'] },
+        ANA,
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+    ).rejects.toThrow(/facturas\.anular/);
+    expect(roles.findOneAndUpdate).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ['una clave inventada', ['tareas.ver', 'inventada.ver']],
+    ['pqr.eliminar', ['pqr.eliminar']],
+  ])(
+    'una clave NUEVA que no se ofrece (%s) es 400, también para plataforma',
+    async (_n, permisos) => {
+      for (const quien of [ADMIN_COP, PLATAFORMA]) {
+        const { servicio, roles } = crear({ encontrado: documento() });
+
+        await expect(
+          servicio.update(ROL_ID.toString(), { permisos }, quien),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('un rol de otra copropiedad (o inexistente) es 404', async () => {
     const { servicio } = crear({ encontrado: null });
@@ -219,12 +383,33 @@ describe('RolesService.update', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('S-R3.3: con permisos en el cuerpo, un rol ajeno o inexistente también es 404 y no se escribe', async () => {
+    const { servicio, roles, auditoria } = crear({ encontrado: null });
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver'] },
+        PLATAFORMA,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(roles.findOne).toHaveBeenCalledWith({
+      _id: ROL_ID.toString(),
+      copropiedadId: COP,
+    });
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
   it('un id mal formado es 404, sin tocar la base', async () => {
     const { servicio, roles } = crear();
 
-    await expect(
-      servicio.update('no-es-un-id', { nombre: 'x' }, ADMIN_COP),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    for (const cuerpo of [{ nombre: 'x' }, { permisos: ['tareas.ver'] }]) {
+      await expect(
+        servicio.update('no-es-un-id', cuerpo, ADMIN_COP),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    }
+    expect(roles.findOne).not.toHaveBeenCalled();
     expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
@@ -270,7 +455,106 @@ describe('RolesService — mínimo privilegio (quien edita solo da lo que tiene)
     expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('no puede cambiar los permisos de un rol que él mismo tiene asignado', async () => {
+  it('S-R2.2: tampoco puede quitar una clave de Finanzas que no tiene', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: ['facturas.ver', 'facturas.anular'] }),
+    });
+
+    await expect(
+      servicio.update(ROL_ID.toString(), { permisos: ['facturas.ver'] }, ANA),
+    ).rejects.toThrow(/facturas\.anular/);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('S-R2.3: quitar y agregar claves que sí tiene está permitido', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: ['roles.gestionar'] }),
+    });
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['tareas.ver'] },
+      EDITOR_LIMITADO,
+    );
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it('una clave que ya estaba y no se toca no se juzga, aunque quien edita no la tenga', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: ['anuncios.ver', 'tareas.ver'] }),
+    });
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['anuncios.ver', 'tareas.ver', 'facturas.ver'] },
+      ANA,
+    );
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      { permisos: ['anuncios.ver', 'tareas.ver', 'facturas.ver'] },
+      expect.anything(),
+    );
+  });
+
+  it('tareas.gestionar (Administración) no habilita a dar tareas.ver: la clave es exacta', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: [] }),
+    });
+    const soloGestionar: IRequestUser = {
+      ...EDITOR_LIMITADO,
+      permissions: ['roles.gestionar', 'tareas.gestionar'],
+    };
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver'] },
+        soloGestionar,
+      ),
+    ).rejects.toThrow(/tareas\.ver/);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('S-R2.4: el administrador de plataforma puede armar cualquier rol del catálogo, Finanzas incluida', async () => {
+    const { servicio, roles, asignaciones } = crear({
+      encontrado: documento(),
+      loTiene: true,
+    });
+
+    await servicio.create(
+      { nombre: 'Todo', permisos: ['usuarios.crear', 'facturas.depurar'] },
+      PLATAFORMA,
+    );
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['usuarios.crear', 'facturas.anular'] },
+      PLATAFORMA,
+    );
+
+    expect(roles.create).toHaveBeenCalled();
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    // Exempt from the "role you hold" rule as well.
+    expect(asignaciones.exists).not.toHaveBeenCalled();
+  });
+
+  it('D7.2: tampoco puede añadir a un rol existente una clave que no tiene', async () => {
+    const { servicio, roles } = crear({ encontrado: documento() });
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver', 'facturas.anular'] },
+        EDITOR_LIMITADO,
+      ),
+    ).rejects.toThrow(/facturas\.anular/);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('RolesService.update — un rol que tienes no se reescribe', () => {
+  it('S-R3.1: no puede cambiar los permisos de un rol que él mismo tiene asignado', async () => {
     const { servicio, roles, asignaciones } = crear({
       encontrado: documento(),
       loTiene: true,
@@ -292,6 +576,22 @@ describe('RolesService — mínimo privilegio (quien edita solo da lo que tiene)
     expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
+  it('ni siquiera con la misma lista de claves', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento(),
+      loTiene: true,
+    });
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver'] },
+        ADMIN_COP,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it('sí puede renombrar un rol que tiene (sin tocar permisos)', async () => {
     const { servicio, roles } = crear({
       encontrado: documento(),
@@ -306,46 +606,73 @@ describe('RolesService — mínimo privilegio (quien edita solo da lo que tiene)
 
     expect(roles.findOneAndUpdate).toHaveBeenCalled();
   });
+});
 
-  it('quitar y agregar claves que sí tiene está permitido', async () => {
-    const { servicio, roles } = crear({
-      encontrado: documento({ permisos: ['roles.gestionar'] }),
+describe('RolesService.update — claves heredadas que no se ofrecen (caso a)', () => {
+  const conLegado = () =>
+    crear({
+      encontrado: documento({ permisos: ['facturas.gestionar', 'tareas.ver'] }),
     });
+
+  it('la clave heredada que viaja de vuelta sin cambios no se juzga: 200', async () => {
+    const { servicio, roles } = conLegado();
 
     await servicio.update(
       ROL_ID.toString(),
-      { permisos: ['tareas.ver'] },
-      EDITOR_LIMITADO,
+      { permisos: ['facturas.gestionar', 'tareas.ver', 'facturas.ver'] },
+      ANA,
     );
 
-    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        permisos: ['facturas.gestionar', 'tareas.ver'],
+      }),
+      {
+        permisos: ['facturas.gestionar', 'tareas.ver', 'facturas.ver'],
+      },
+      expect.anything(),
+    );
   });
 
-  it('el administrador de plataforma puede armar cualquier rol del catálogo', async () => {
-    const { servicio, roles } = crear({
-      encontrado: documento(),
-      loTiene: true,
-    });
-    const plataforma: IRequestUser = {
-      uid: 'r',
-      email: 'root@x.co',
-      accountId: CUENTA.toString(),
-      isPlatformAdmin: true,
-      permissions: [],
-    };
+  it('omitirla también es 200: se descarta sin juicio, aunque quien edita no tenga las demás claves', async () => {
+    const { servicio, roles, auditoria } = conLegado();
 
-    await servicio.create(
-      { nombre: 'Todo', permisos: ['usuarios.crear'] },
-      plataforma,
-    );
-    await servicio.update(
-      ROL_ID.toString(),
-      { permisos: ['usuarios.crear'] },
-      plataforma,
-    );
+    // Ana does not hold tareas.ver either, but it stays: only the legacy key
+    // goes, and a key that grants nothing is never judged.
+    await servicio.update(ROL_ID.toString(), { permisos: ['tareas.ver'] }, ANA);
 
-    expect(roles.create).toHaveBeenCalled();
-    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      { permisos: ['tareas.ver'] },
+      expect.anything(),
+    );
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ detalle: { agregadas: [], quitadas: [] } }),
+    );
+  });
+
+  it('una clave NUEVA de ese tipo es 400 (también para plataforma)', async () => {
+    for (const quien of [ANA, PLATAFORMA]) {
+      const { servicio, roles } = crear({
+        encontrado: documento({ permisos: ['tareas.ver'] }),
+      });
+
+      await expect(
+        servicio.update(
+          ROL_ID.toString(),
+          { permisos: ['tareas.ver', 'facturas.gestionar'] },
+          quien,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        servicio.update(
+          ROL_ID.toString(),
+          { permisos: ['tareas.ver', 'inmuebles.aprobar'] },
+          quien,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+    }
   });
 });
 
@@ -353,7 +680,9 @@ describe('RolesService.remove', () => {
   it('borra un rol sin usuarios, por id Y copropiedad', async () => {
     const { servicio, roles } = crear({ encontrado: documento(), enUso: 0 });
 
-    await expect(servicio.remove(ROL_ID.toString())).resolves.toEqual({
+    await expect(
+      servicio.remove(ROL_ID.toString(), ADMIN_COP),
+    ).resolves.toEqual({
       id: ROL_ID.toString(),
     });
     expect(roles.findOneAndDelete).toHaveBeenCalledWith({
@@ -362,20 +691,80 @@ describe('RolesService.remove', () => {
     });
   });
 
-  it('se niega si el rol todavía tiene usuarios asignados', async () => {
-    const { servicio, roles } = crear({ encontrado: documento(), enUso: 1 });
+  it('se niega si el rol todavía tiene usuarios asignados, sin auditar', async () => {
+    const { servicio, roles, auditoria } = crear({
+      encontrado: documento(),
+      enUso: 1,
+    });
 
-    await expect(servicio.remove(ROL_ID.toString())).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      servicio.remove(ROL_ID.toString(), ADMIN_COP),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(roles.findOneAndDelete).not.toHaveBeenCalled();
+    expect(auditoria.registrar).not.toHaveBeenCalled();
   });
 
-  it('un rol de otra copropiedad es 404', async () => {
-    const { servicio } = crear({ encontrado: null });
+  it('un rol de otra copropiedad es 404, sin auditar', async () => {
+    const { servicio, auditoria } = crear({ encontrado: null });
 
-    await expect(servicio.remove(ROL_ID.toString())).rejects.toBeInstanceOf(
-      NotFoundException,
+    await expect(
+      servicio.remove(ROL_ID.toString(), ADMIN_COP),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('un id mal formado es 404', async () => {
+    const { servicio, roles } = crear();
+
+    await expect(
+      servicio.remove('no-es-un-id', ADMIN_COP),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(roles.findOne).not.toHaveBeenCalled();
+  });
+
+  it('S-R2.5: borrar un rol que nadie tiene no exige tener sus claves', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: ['facturas.anular', 'anuncios.ver'] }),
+      enUso: 0,
+    });
+
+    await servicio.remove(ROL_ID.toString(), ANA);
+
+    expect(roles.findOneAndDelete).toHaveBeenCalled();
+  });
+
+  it('S-A2.4: borrar escribe una entrada «eliminar» sobre el rol, con las claves que llevaba', async () => {
+    const { servicio, auditoria } = crear({
+      encontrado: documento({
+        permisos: ['tareas.ver', 'facturas.anular', 'facturas.gestionar'],
+      }),
+      enUso: 0,
+    });
+
+    await servicio.remove(ROL_ID.toString(), ANA);
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: CUENTA.toString(),
+      actorNombre: 'Ana Pérez',
+      accion: 'eliminar',
+      entidadTipo: 'rol',
+      entidadId: ROL_ID.toString(),
+      entidadEtiqueta: `Rol: Portero (copropiedad ${COP.toString()})`,
+      // Offered keys only, sorted: the legacy gestionar grants nothing.
+      detalle: { agregadas: [], quitadas: ['facturas.anular', 'tareas.ver'] },
+    });
+  });
+
+  it('si la auditoría falla, la petición falla', async () => {
+    const { servicio } = crear({
+      encontrado: documento(),
+      enUso: 0,
+      errorAuditoria: true,
+    });
+
+    await expect(servicio.remove(ROL_ID.toString(), ADMIN_COP)).rejects.toThrow(
+      'auditoría caída',
     );
   });
 });
@@ -397,7 +786,7 @@ describe('RolesService.update — escritura condicionada a lo revisado', () => {
   it('si otro editor cambió los permisos entre la revisión y la escritura responde 409 y no pisa nada', async () => {
     // A (without pqr.ver) reviewed {tareas.ver}; meanwhile B added pqr.ver, so
     // the conditional write no longer matches and A cannot drop B's key.
-    const { servicio, roles } = crear({ encontrado: documento() });
+    const { servicio, roles, auditoria } = crear({ encontrado: documento() });
     roles.findOneAndUpdate.mockReturnValue(exec(null));
 
     await expect(
@@ -409,6 +798,47 @@ describe('RolesService.update — escritura condicionada a lo revisado', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ permisos: ['tareas.ver'] }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('S-R3.2: la condición rige también para el administrador de plataforma', async () => {
+    const { servicio, roles } = crear({ encontrado: documento() });
+    roles.findOneAndUpdate.mockReturnValue(exec(null));
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver', 'facturas.anular'] },
+        PLATAFORMA,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ permisos: ['tareas.ver'] }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('un rol guardado sin claves se condiciona a «sin claves» (campo ausente o lista vacía)', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento({ permisos: [] }),
+    });
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['tareas.ver'] },
+      ADMIN_COP,
+    );
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: ROL_ID.toString(),
+        copropiedadId: COP,
+        $or: [{ permisos: { $exists: false } }, { permisos: { $size: 0 } }],
+      },
       expect.anything(),
       expect.anything(),
     );
@@ -424,5 +854,78 @@ describe('RolesService.update — escritura condicionada a lo revisado', () => {
       { nombre: 'x' },
       { new: true },
     );
+    expect(roles.findOne).not.toHaveBeenCalled();
+  });
+});
+
+describe('RolesService.update — auditoría', () => {
+  it('S-A2.2: renombrar escribe una entrada con las dos listas vacías', async () => {
+    const { servicio, auditoria } = crear({
+      encontrado: documento({ nombre: 'Otro' }),
+    });
+
+    await servicio.update(ROL_ID.toString(), { nombre: 'Otro' }, ANA);
+
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+    expect(auditoria.registrar).toHaveBeenCalledWith({
+      actorAccountId: CUENTA.toString(),
+      actorNombre: 'Ana Pérez',
+      accion: 'actualizar',
+      entidadTipo: 'rol',
+      entidadId: ROL_ID.toString(),
+      entidadEtiqueta: `Rol: Otro (copropiedad ${COP.toString()})`,
+      detalle: { agregadas: [], quitadas: [] },
+    });
+  });
+
+  it('cambiar claves registra lo que el tope juzgó: agregadas y quitadas ordenadas', async () => {
+    const { servicio, auditoria } = crear({
+      encontrado: documento({ permisos: ['tareas.ver', 'pqr.ver'] }),
+    });
+    const editor: IRequestUser = {
+      ...ANA,
+      permissions: ['tareas.ver', 'pqr.ver', 'facturas.ver', 'facturas.crear'],
+    };
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { permisos: ['pqr.ver', 'facturas.ver', 'facturas.crear'] },
+      editor,
+    );
+
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accion: 'actualizar',
+        entidadTipo: 'rol',
+        detalle: {
+          agregadas: ['facturas.crear', 'facturas.ver'],
+          quitadas: ['tareas.ver'],
+        },
+      }),
+    );
+  });
+
+  it('S-A2.3: un tope que falla no deja entrada', async () => {
+    const { servicio, auditoria } = crear({ encontrado: documento() });
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver', 'facturas.anular'] },
+        ANA,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('si la auditoría falla, la petición falla', async () => {
+    const { servicio } = crear({
+      encontrado: documento(),
+      errorAuditoria: true,
+    });
+
+    await expect(
+      servicio.update(ROL_ID.toString(), { nombre: 'x' }, ADMIN_COP),
+    ).rejects.toThrow('auditoría caída');
   });
 });

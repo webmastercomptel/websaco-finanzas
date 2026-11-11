@@ -5,7 +5,9 @@ import {
 } from '../casl/check-ability.decorator';
 import { createAppAbility } from '../casl/casl-ability.constants';
 import { rulesFromPermissionKeys } from '../casl/permission-map';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { RolesController } from './roles.controller';
+import type { RolesService } from './roles.service';
 
 /** The rules a handler requires, as the policies guard reads them. */
 const requisitos = (handler: keyof RolesController): RequiredRule[] => {
@@ -52,5 +54,36 @@ describe('RolesController — permisos por ruta', () => {
 
   it('sin ninguna clave de roles no se abre nada', () => {
     expect(puede('findAll', ['usuarios.ver'])).toBe(false);
+  });
+});
+
+describe('RolesController — quién actúa', () => {
+  const usuario: IRequestUser = {
+    uid: 'u',
+    email: 'a@x.co',
+    accountId: 'cuenta-1',
+    permissions: ['roles.gestionar'],
+  };
+  const servicio = {
+    create: jest.fn().mockResolvedValue({ id: 'r' }),
+    update: jest.fn().mockResolvedValue({ id: 'r' }),
+    remove: jest.fn().mockResolvedValue({ id: 'r' }),
+  };
+  const controlador = new RolesController(servicio as unknown as RolesService);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('eliminar pasa quien actúa al servicio: el borrado de un rol se audita con su autor', async () => {
+    await controlador.remove('r', usuario);
+
+    expect(servicio.remove).toHaveBeenCalledWith('r', usuario);
+  });
+
+  it('crear y editar siguen pasando quien actúa', async () => {
+    await controlador.create({ nombre: 'X' }, usuario);
+    await controlador.update('r', { nombre: 'Y' }, usuario);
+
+    expect(servicio.create).toHaveBeenCalledWith({ nombre: 'X' }, usuario);
+    expect(servicio.update).toHaveBeenCalledWith('r', { nombre: 'Y' }, usuario);
   });
 });
