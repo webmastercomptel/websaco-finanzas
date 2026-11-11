@@ -19,6 +19,10 @@ import {
   RolDocument,
 } from '../../database/schemas/administracion/rol.schema';
 import {
+  Account,
+  AccountDocument,
+} from '../../database/schemas/cuentas/account.schema';
+import {
   Asignacion,
   AsignacionDocument,
 } from '../../database/schemas/cuentas/asignacion.schema';
@@ -68,6 +72,8 @@ export class RolesService {
     private readonly consecutivos: Model<ConsecutivoAdministracionDocument>,
     private readonly tenant: TenantContextService,
     private readonly auditoria: AuditoriaService,
+    @InjectModel(Account.name)
+    private readonly cuentas: Model<AccountDocument>,
   ) {}
 
   /** `ROL-001`, sequenced per coproperty (the key embeds it, the code does not). */
@@ -190,6 +196,9 @@ export class RolesService {
       exigirClavesConocidas(dto.permisos, revisados);
       cambio = exigirDelegacion(user, revisados, dto.permisos);
       await this.exigirNoTenerElRol(user, copropiedadId, id);
+      if (cambio.agregadas.length > 0 || cambio.quitadas.length > 0) {
+        await this.exigirTitularesAdministrables(user, copropiedadId, id);
+      }
     }
     const cambios: Record<string, unknown> = {};
     if (dto.nombre !== undefined) cambios.nombre = dto.nombre;
@@ -256,6 +265,46 @@ export class RolesService {
     if (loTiene) {
       throw new ForbiddenException(
         'No puedes cambiar los permisos de un rol que tienes asignado',
+      );
+    }
+  }
+
+  /**
+   * The keys of a role reach every active holder, so changing them changes the
+   * access of rows the team screens must not touch: an `administrativo` row
+   * (only a platform admin edits those; one moved from `personal` in the
+   * Usuarios screen keeps its `roleIds`) and any account of a platform admin.
+   * Refused when ANY active holder in this coproperty is one of them; a platform
+   * admin is exempt. Only called when the keys really change: a rename, or the
+   * same keys sent again, changes nobody's access.
+   */
+  private async exigirTitularesAdministrables(
+    user: IRequestUser,
+    copropiedadId: Types.ObjectId,
+    id: string,
+  ): Promise<void> {
+    if (user.isPlatformAdmin) return;
+    const titulares = await this.asignaciones
+      .find({ copropiedadId, roleIds: id, estado: 'active' })
+      .select({ perfil: 1, accountId: 1 })
+      .lean()
+      .exec();
+    // A legacy row with no `perfil` reads as `administrativo`.
+    const hayAdministrativo = titulares.some(
+      (titular) => (titular.perfil ?? 'administrativo') !== 'personal',
+    );
+    const deCuentaDePlataforma =
+      !hayAdministrativo &&
+      titulares.length > 0 &&
+      (await this.cuentas
+        .exists({
+          _id: { $in: titulares.map((titular) => titular.accountId) },
+          esAdministradorPlataforma: true,
+        })
+        .exec());
+    if (hayAdministrativo || deCuentaDePlataforma) {
+      throw new ForbiddenException(
+        'Este rol lo tiene una cuenta que se administra desde la plataforma: sus permisos no se pueden cambiar aquí',
       );
     }
   }

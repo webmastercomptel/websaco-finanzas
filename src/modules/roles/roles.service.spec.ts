@@ -76,6 +76,10 @@ function crear(
     errorAlGuardar?: number;
     /** Makes the audit write fail. */
     errorAuditoria?: boolean;
+    /** Active assignments of this coproperty that carry the role. */
+    titulares?: Array<{ perfil?: string; accountId: Types.ObjectId }>;
+    /** Whether some holder's account is a platform admin. */
+    titularDePlataforma?: boolean;
   } = {},
 ) {
   const guardar = jest
@@ -104,6 +108,18 @@ function crear(
       .fn()
       .mockReturnValue(exec(opciones.loTiene ? { _id: 'a' } : null)),
     aggregate: jest.fn().mockReturnValue(exec(opciones.conteos ?? [])),
+    find: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockReturnValue(exec(opciones.titulares ?? [])),
+      }),
+    }),
+  };
+  const cuentas = {
+    exists: jest
+      .fn()
+      .mockReturnValue(
+        exec(opciones.titularDePlataforma ? { _id: 'c' } : null),
+      ),
   };
   const consecutivos = {
     findOneAndUpdate: jest.fn().mockReturnValue(exec({ valor: 7 })),
@@ -120,8 +136,9 @@ function crear(
     consecutivos as never,
     tenant as never,
     auditoria as never,
+    cuentas as never,
   );
-  return { servicio, roles, asignaciones, consecutivos, auditoria };
+  return { servicio, roles, asignaciones, cuentas, consecutivos, auditoria };
 }
 
 describe('RolesService.create', () => {
@@ -605,6 +622,140 @@ describe('RolesService.update — un rol que tienes no se reescribe', () => {
     );
 
     expect(roles.findOneAndUpdate).toHaveBeenCalled();
+  });
+});
+
+describe('RolesService.update — un rol que tiene una cuenta de la plataforma no se reescribe aquí', () => {
+  const MENSAJE =
+    'Este rol lo tiene una cuenta que se administra desde la plataforma: sus permisos no se pueden cambiar aquí';
+  const OTRA_CUENTA = new Types.ObjectId();
+  /** P: has roles.gestionar and every key he edits, holds no role R. */
+  const MIEMBRO: IRequestUser = {
+    uid: 'm',
+    email: 'miembro@x.co',
+    accountId: CUENTA.toString(),
+    permissions: ['roles.gestionar', 'tareas.ver', 'pqr.ver'],
+  };
+  const edicion = { permisos: ['tareas.ver', 'pqr.ver'] };
+
+  it('un titular activo administrativo: 403 con el mensaje, sin escribir ni auditar', async () => {
+    const { servicio, roles, auditoria } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'administrativo', accountId: OTRA_CUENTA }],
+    });
+
+    const intento = servicio.update(ROL_ID.toString(), edicion, MIEMBRO);
+
+    await expect(intento).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(intento).rejects.toThrow(MENSAJE);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('una fila heredada sin perfil se lee como administrativo: 403', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento(),
+      titulares: [{ accountId: OTRA_CUENTA }],
+    });
+
+    await expect(
+      servicio.update(ROL_ID.toString(), edicion, MIEMBRO),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('un titular personal cuya cuenta es de administrador de plataforma: 403', async () => {
+    const { servicio, roles, cuentas } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'personal', accountId: OTRA_CUENTA }],
+      titularDePlataforma: true,
+    });
+
+    await expect(
+      servicio.update(ROL_ID.toString(), edicion, MIEMBRO),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(cuentas.exists).toHaveBeenCalledWith({
+      _id: { $in: [OTRA_CUENTA] },
+      esAdministradorPlataforma: true,
+    });
+    expect(roles.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('solo titulares personal de cuentas normales: se escribe y se audita (200)', async () => {
+    const { servicio, roles, auditoria } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'personal', accountId: OTRA_CUENTA }],
+    });
+
+    await servicio.update(ROL_ID.toString(), edicion, MIEMBRO);
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+  });
+
+  it('mira solo a los titulares ACTIVOS de esta copropiedad', async () => {
+    const { servicio, asignaciones } = crear({ encontrado: documento() });
+
+    await servicio.update(ROL_ID.toString(), edicion, MIEMBRO);
+
+    expect(asignaciones.find).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      roleIds: ROL_ID.toString(),
+      estado: 'active',
+    });
+  });
+
+  it('el administrador de plataforma queda exento: edita aunque lo tenga una cuenta administrativa', async () => {
+    const { servicio, roles, asignaciones } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'administrativo', accountId: OTRA_CUENTA }],
+      titularDePlataforma: true,
+    });
+
+    await servicio.update(ROL_ID.toString(), edicion, PLATAFORMA);
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    expect(asignaciones.find).not.toHaveBeenCalled();
+  });
+
+  it('renombrar sigue permitido aunque lo tenga una cuenta administrativa (y no consulta titulares)', async () => {
+    const { servicio, roles, asignaciones } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'administrativo', accountId: OTRA_CUENTA }],
+    });
+
+    await servicio.update(ROL_ID.toString(), { nombre: 'Otro' }, MIEMBRO);
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+    expect(asignaciones.find).not.toHaveBeenCalled();
+  });
+
+  it('reenviar las mismas claves no cambia el acceso de nadie: se permite', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento(),
+      titulares: [{ perfil: 'administrativo', accountId: OTRA_CUENTA }],
+    });
+
+    await servicio.update(
+      ROL_ID.toString(),
+      { nombre: 'Otro', permisos: ['tareas.ver'] },
+      MIEMBRO,
+    );
+
+    expect(roles.findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  it('borrar conserva su regla: con titulares sigue siendo 409', async () => {
+    const { servicio, roles } = crear({
+      encontrado: documento(),
+      enUso: 1,
+      titulares: [{ perfil: 'administrativo', accountId: OTRA_CUENTA }],
+    });
+
+    await expect(
+      servicio.remove(ROL_ID.toString(), MIEMBRO),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(roles.findOneAndDelete).not.toHaveBeenCalled();
   });
 });
 
