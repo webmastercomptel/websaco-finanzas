@@ -856,6 +856,28 @@ describe('EquipoService.crear — cuentas que ya existen', () => {
     expect(m.enviados[0].html).toContain('contraseña de siempre');
   });
 
+  it('quien se suma a sí mismo es 403, no escribe nada y no audita: ni reactivando su fila personal inactiva ni creándola (p. ej. con acceso de entidad)', async () => {
+    const yo = cuenta({ email: 'nuevo@correo.co' });
+    const yoMismo = actor(['tareas.ver'], { accountId: yo._id.toString() });
+    const inactiva = asignacion(yo._id, { estado: 'inactive', permisos: [] });
+    const reactivando = montar({ cuentas: [yo], asignaciones: [inactiva] });
+
+    await expect(
+      reactivando.servicio.crear({ ...dto, vincularExistente: true }, yoMismo),
+    ).rejects.toThrow('No puedes modificar tu propio acceso');
+    expect(inactiva.estado).toBe('inactive');
+    expect(inactiva.permisos).toEqual([]);
+
+    const creando = montar({ cuentas: [yo] });
+    await expect(
+      creando.servicio.crear({ ...dto, vincularExistente: true }, yoMismo),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(creando.asignacionesModel.create).not.toHaveBeenCalled();
+    expect(creando.storeAsig).toHaveLength(0);
+    expect(creando.auditoria.registrar).not.toHaveBeenCalled();
+    expect(creando.firebase.crear).not.toHaveBeenCalled();
+  });
+
   it('rechaza (409) a un administrador de la plataforma, aun con el indicador', async () => {
     const c = cuenta({
       email: 'nuevo@correo.co',

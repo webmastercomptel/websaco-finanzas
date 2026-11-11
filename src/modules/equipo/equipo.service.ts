@@ -412,6 +412,12 @@ export class EquipoService {
     const cuentaExistente = existente !== null;
 
     if (existente) {
+      // Same rule as update and deactivate: nobody grants themselves access
+      // (an entity-scope caller or an inactive own row would otherwise be able
+      // to create or reactivate their own assignment here).
+      if (existente._id.toString() === user.accountId) {
+        throw new ForbiddenException('No puedes modificar tu propio acceso');
+      }
       if (dto.vincularExistente !== true) {
         throw new ConflictException({
           code: CODIGO_CUENTA_EXISTENTE,
