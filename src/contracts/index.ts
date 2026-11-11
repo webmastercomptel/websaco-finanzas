@@ -3605,7 +3605,7 @@ export interface MiembroEquipo {
   perfil: 'administrativo' | 'personal';
   estado: 'activo' | 'inactivo';
   roles: RolDeMiembro[];
-  /** Administración keys granted directly (the roles' keys are not repeated here). */
+  /** Keys granted directly, of any module (the roles' keys are not repeated here). */
   permisos: string[];
   esAdministradorPlataforma: boolean;
   /**

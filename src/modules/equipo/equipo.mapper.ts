@@ -24,6 +24,10 @@ export interface CuentaEquipo {
  * `perfil` reads as `administrativo`, as `AccesoService` does, so it is shown as
  * not editable rather than as something this module may touch.
  *
+ * `permisos` are the keys stored directly on the assignment, of any module and
+ * exactly as stored (a legacy or not-offered key included, so the screen can
+ * send it back untouched); the keys that come through roles are not repeated.
+ *
  * Role names are resolved by the caller from ONE query for the whole list; a
  * role that no longer resolves (deleted) is simply omitted.
  */
