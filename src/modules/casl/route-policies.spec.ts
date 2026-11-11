@@ -304,6 +304,52 @@ describe('inventario de rutas', () => {
   });
 
   /**
+   * Every route open to EITHER product (`@ModuloAlguno`). Sharing a route is a
+   * commercial decision, so a new one fails here until it is added on purpose:
+   * - portal unidades: every resident form starts from it, no financial data.
+   * - equipo / roles: a team is managed whichever product the building bought.
+   * - catalogo-permisos: the Finanzas key list those two screens draw.
+   * `/residentes` is NOT in the list: it stays Administración only.
+   */
+  it('las únicas rutas compartidas entre módulos (@ModuloAlguno) son las justificadas', () => {
+    const compartidas: string[] = [];
+    for (const file of files) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require(file) as Record<string, unknown>;
+      for (const exported of Object.values(mod)) {
+        if (typeof exported !== 'function') continue;
+        const controller = exported as unknown as Ctor;
+        if (Reflect.getMetadata(PATH_METADATA, controller) === undefined) {
+          continue;
+        }
+        for (const [name, handler] of routesOf(controller)) {
+          const modulo =
+            (Reflect.getMetadata(MODULO_KEY, handler) as unknown) ??
+            (Reflect.getMetadata(MODULO_KEY, controller) as unknown);
+          if (Array.isArray(modulo)) {
+            compartidas.push(`${controller.name}.${name}`);
+          }
+        }
+      }
+    }
+    expect(compartidas.sort()).toEqual([
+      'CatalogoPermisosController.finanzas',
+      'EquipoController.actualizar',
+      'EquipoController.crear',
+      'EquipoController.desactivar',
+      'EquipoController.listar',
+      'EquipoController.obtener',
+      'EquipoController.reenviarInvitacion',
+      'PortalController.unidades',
+      'RolesController.create',
+      'RolesController.findAll',
+      'RolesController.permisos',
+      'RolesController.remove',
+      'RolesController.update',
+    ]);
+  });
+
+  /**
    * Every unauthenticated route, each with why it must be open. A new @Public
    * route fails here until it is added on purpose.
    * - health: Cloud Run probes carry no credentials.

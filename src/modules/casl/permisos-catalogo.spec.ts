@@ -1,7 +1,11 @@
 import * as catalogo from './permisos-catalogo';
 import {
   esPermisoAdministracion,
+  esPermisoFinanzas,
+  MARGEN_CLAVES_HEREDADAS,
+  MAX_CLAVES_ASIGNABLES,
   moduloDePermiso,
+  PERMISOS_FINANZAS,
   PERMISOS_ADMINISTRACION,
   permisosDesconocidos,
   puedeLeerMateria,
@@ -168,5 +172,33 @@ describe('claves de Administración', () => {
   it('un verbo propio de Administración no vale en un módulo financiero', () => {
     expect(moduloDePermiso('facturas.eliminar')).toBeNull();
     expect(moduloDePermiso('recibos.subir')).toBeNull();
+  });
+});
+
+describe('MAX_CLAVES_ASIGNABLES (límite de claves de un cuerpo de Equipo o Roles)', () => {
+  const ofrecidas = PERMISOS_FINANZAS.length + PERMISOS_ADMINISTRACION.length;
+
+  it('se deriva de los catálogos más un margen, no es un literal', () => {
+    expect(MAX_CLAVES_ASIGNABLES).toBe(ofrecidas + MARGEN_CLAVES_HEREDADAS);
+  });
+
+  it('nunca queda por debajo del catálogo ofrecido: una petición con todas las claves cabe', () => {
+    expect(MAX_CLAVES_ASIGNABLES).toBeGreaterThanOrEqual(ofrecidas);
+    expect(esPermisoFinanzas(PERMISOS_FINANZAS[0])).toBe(true);
+  });
+
+  it('hoy vale 116 = 56 de Finanzas + 30 de Administración + 30 de margen', () => {
+    expect(PERMISOS_FINANZAS).toHaveLength(56);
+    expect(PERMISOS_ADMINISTRACION).toHaveLength(30);
+    expect(MARGEN_CLAVES_HEREDADAS).toBe(30);
+    expect(MAX_CLAVES_ASIGNABLES).toBe(116);
+  });
+
+  it('el margen cubre las 17 claves `x.gestionar` de Finanzas que pueden viajar de vuelta antes de la limpieza', () => {
+    const modulosFinanzas = new Set(
+      PERMISOS_FINANZAS.map((c) => c.split('.')[0]),
+    );
+    expect(modulosFinanzas.size).toBeLessThanOrEqual(MARGEN_CLAVES_HEREDADAS);
+    expect(MARGEN_CLAVES_HEREDADAS).toBeGreaterThanOrEqual(17);
   });
 });

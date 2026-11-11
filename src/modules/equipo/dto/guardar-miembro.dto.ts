@@ -11,6 +11,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { MAX_CLAVES_ASIGNABLES } from '../../casl/permisos-catalogo';
 
 /** `trim` for the strings a person types; leaves non-strings for the validator to reject. */
 const recortar = ({ value }: { value: unknown }): unknown =>
@@ -50,10 +51,14 @@ export class CrearMiembroEquipoDto {
   @Matches(ID_HEX, { each: true, message: 'cada rol debe ser un id válido' })
   rolIds?: string[];
 
-  /** Administración keys granted directly, on top of the roles'. */
+  /**
+   * Permission keys of any offered module (Finanzas and Administración)
+   * granted directly, on top of the roles'. The size limit is derived from the
+   * catalogs, with room for stored keys that travel back untouched.
+   */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(60)
+  @ArrayMaxSize(MAX_CLAVES_ASIGNABLES)
   @IsString({ each: true })
   @MaxLength(80, { each: true })
   permisos?: string[];
@@ -89,7 +94,7 @@ export class ActualizarMiembroEquipoDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(60)
+  @ArrayMaxSize(MAX_CLAVES_ASIGNABLES)
   @IsString({ each: true })
   @MaxLength(80, { each: true })
   permisos?: string[];

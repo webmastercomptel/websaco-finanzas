@@ -42,6 +42,7 @@ import {
   exigirDelegacion,
   type CambioDeClaves,
 } from '../casl/delegacion';
+import { filtroListaExacta } from '../casl/filtro-lista-exacta';
 import { CODIGO_CUENTA_EXISTENTE } from '../../common/firebase/codigos-cuenta';
 import type { ListarEquipoDto } from './dto/listar-equipo.dto';
 import type {
@@ -77,21 +78,6 @@ interface Concesion {
 }
 
 const unicos = <T>(valores: readonly T[]): T[] => [...new Set(valores)];
-
-/**
- * Mongo condition for "this array field is still exactly what I read": array
- * equality (same elements, same order) for a non-empty list, and
- * "absent or empty" for an empty one, because legacy rows may lack the field
- * and `{ campo: [] }` would not match them. Returned as a single condition so
- * two of them can sit side by side under `$and`, which two `$or` keys could not.
- */
-const filtroListaExacta = (
-  campo: string,
-  lista: readonly unknown[],
-): Record<string, unknown> =>
-  lista.length > 0
-    ? { [campo]: [...lista] }
-    : { $or: [{ [campo]: { $exists: false } }, { [campo]: { $size: 0 } }] };
 
 /** The 409 every conditional write answers when the row moved under it. */
 const MENSAJE_ACCESO_CAMBIO =
@@ -584,9 +570,7 @@ export class EquipoService {
       )
       .exec();
     if (res.matchedCount === 0) {
-      throw new ConflictException(
-        'El acceso cambió mientras se procesaba: vuelve a intentarlo',
-      );
+      throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
     }
     return previa._id;
   }

@@ -30,25 +30,13 @@ import {
   exigirDelegacion,
   type CambioDeClaves,
 } from '../casl/delegacion';
+import { filtroListaExacta } from '../casl/filtro-lista-exacta';
 import { PERMISOS_ADMINISTRACION } from '../casl/permisos-catalogo';
 import type { ActualizarRolDto, CrearRolDto } from './dto/guardar-rol.dto';
 import { toPermiso, toRol } from './roles.mapper';
 
 /** Mongo's duplicate-key error code. */
 const CLAVE_DUPLICADA = 11000;
-
-/**
- * Filter that matches the keys exactly as the check read them (same order), so
- * a write made on top of an out-of-date read matches nothing instead of
- * silently overwriting a concurrent change. A role stored with no keys matches
- * both an empty list and an absent field.
- */
-const filtroPermisosExactos = (
-  permisos: readonly string[],
-): Record<string, unknown> =>
-  permisos.length > 0
-    ? { permisos: [...permisos] }
-    : { $or: [{ permisos: { $exists: false } }, { permisos: { $size: 0 } }] };
 
 /**
  * Roles of the ACTIVE coproperty (the tenant comes from the request context,
@@ -220,7 +208,7 @@ export class RolesService {
             _id: id,
             copropiedadId,
             ...(revisados !== undefined
-              ? filtroPermisosExactos(revisados)
+              ? filtroListaExacta('permisos', revisados)
               : {}),
           },
           cambios,

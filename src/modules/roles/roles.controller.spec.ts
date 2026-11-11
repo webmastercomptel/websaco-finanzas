@@ -1,8 +1,10 @@
 import 'reflect-metadata';
 import {
   CHECK_ABILITY_KEY,
+  MODULO_KEY,
   type RequiredRule,
 } from '../casl/check-ability.decorator';
+import { guardDejaPasar } from '../casl/testing/politica-de-ruta';
 import { createAppAbility } from '../casl/casl-ability.constants';
 import { rulesFromPermissionKeys } from '../casl/permission-map';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -86,4 +88,58 @@ describe('RolesController — quién actúa', () => {
     expect(servicio.create).toHaveBeenCalledWith({ nombre: 'X' }, usuario);
     expect(servicio.update).toHaveBeenCalledWith('r', { nombre: 'Y' }, usuario);
   });
+});
+
+describe('RolesController — licencia: finanzas o administracion', () => {
+  const rutas = [
+    ['findAll', 'roles.ver'],
+    ['permisos', 'roles.ver'],
+    ['create', 'roles.gestionar'],
+    ['update', 'roles.gestionar'],
+    ['remove', 'roles.gestionar'],
+  ] as const;
+
+  it('declara la lista de módulos, no uno solo', () => {
+    expect(Reflect.getMetadata(MODULO_KEY, RolesController)).toEqual([
+      'finanzas',
+      'administracion',
+    ]);
+  });
+
+  it.each(rutas)(
+    '%s abre con %s en una copropiedad solo con finanzas, solo con administracion o con ambos',
+    (ruta, clave) => {
+      for (const modulos of [
+        ['finanzas'],
+        ['administracion'],
+        ['finanzas', 'administracion'],
+      ] as const) {
+        expect(
+          guardDejaPasar(RolesController, ruta, [clave], {
+            modulos: [...modulos],
+          }),
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.each(rutas)(
+    '%s responde 403 sin ninguno de los dos módulos, aunque tenga la clave',
+    (ruta, clave) => {
+      expect(
+        guardDejaPasar(RolesController, ruta, [clave], { modulos: [] }),
+      ).toBe(false);
+    },
+  );
+
+  it.each(rutas)(
+    '%s sigue pidiendo la clave roles.*: con finanzas pero sin ella, 403',
+    (ruta) => {
+      expect(
+        guardDejaPasar(RolesController, ruta, ['usuarios.ver'], {
+          modulos: ['finanzas'],
+        }),
+      ).toBe(false);
+    },
+  );
 });

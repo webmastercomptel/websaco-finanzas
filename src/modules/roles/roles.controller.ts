@@ -12,7 +12,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
+import { CheckAbility, ModuloAlguno } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import type { Permiso, Rol } from '../../contracts';
 import { ActualizarRolDto, CrearRolDto } from './dto/guardar-rol.dto';
@@ -26,11 +26,15 @@ import { RolesService } from './roles.service';
  * a role, or take out of one, is the delegation cap in the service ("you give
  * only what you hold"), not this controller's business; every write receives
  * the caller so it can be judged and audited. `GET /roles/permisos` still lists
- * the Administración catalog only.
+ * the Administración catalog only; the Finanzas list is served by
+ * `GET /catalogo-permisos/finanzas`.
+ *
+ * Licence: either module opens the door (`@ModuloAlguno`), as for `/equipo`; the
+ * `roles.*` keys are still required.
  */
 @Controller('roles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
-@Modulo('administracion')
+@ModuloAlguno('finanzas', 'administracion')
 export class RolesController {
   constructor(private readonly roles: RolesService) {}
 

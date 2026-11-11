@@ -35,6 +35,7 @@ import { AccesoResidentesModule } from './modules/acceso-residentes/acceso-resid
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { CatalogoPermisosModule } from './modules/catalogo-permisos/catalogo-permisos.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { TareasModule } from './modules/tareas/tareas.module';
 import { MantenimientosModule } from './modules/mantenimientos/mantenimientos.module';
@@ -117,6 +118,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     ConsultasModule,
     PortalModule,
     RolesModule,
+    CatalogoPermisosModule,
     NotificacionesModule,
     TareasModule,
     MantenimientosModule,

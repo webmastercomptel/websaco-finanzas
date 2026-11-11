@@ -2902,7 +2902,9 @@ export interface Permiso {
 /**
  * The Finanzas `modulo.accion` keys that exist for real (some route requires
  * what they grant), for the permission matrix of `/usuarios`: any other
- * module x verb pair is drawn as a dash. `GET usuarios/permisos-finanzas`.
+ * module x verb pair is drawn as a dash. Served by `GET usuarios/permisos-finanzas`
+ * (platform admin) and by `GET catalogo-permisos/finanzas` (the team screens of a
+ * building, under either licence): the same list.
  */
 export interface PermisosFinanzas {
   claves: string[];

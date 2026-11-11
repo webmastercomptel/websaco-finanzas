@@ -6,6 +6,11 @@ import {
   CrearMiembroEquipoDto,
 } from './guardar-miembro.dto';
 import { ListarEquipoDto } from './listar-equipo.dto';
+import {
+  MAX_CLAVES_ASIGNABLES,
+  PERMISOS_ADMINISTRACION,
+  PERMISOS_FINANZAS,
+} from '../../casl/permisos-catalogo';
 
 /** Same options as the global ValidationPipe in main.ts. */
 const errores = async <T extends object>(
@@ -121,3 +126,50 @@ describe('ListarEquipoDto', () => {
     );
   });
 });
+
+describe.each([
+  [
+    'CrearMiembroEquipoDto',
+    CrearMiembroEquipoDto,
+    { nombre: 'Ana', email: 'a@b.co' },
+  ],
+  ['ActualizarMiembroEquipoDto', ActualizarMiembroEquipoDto, {}],
+] as const)(
+  '%s — límite de claves derivado del catálogo',
+  (_nombre, clase, base) => {
+    const claveN = (n: number) =>
+      Array.from({ length: n }, (_, i) => `modulo${i}.ver`);
+
+    it('acepta una petición con TODAS las claves ofrecidas más 17 `x.gestionar` que viajan de vuelta (S-D8.1)', async () => {
+      const permisos = [
+        ...PERMISOS_FINANZAS,
+        ...PERMISOS_ADMINISTRACION.map((p) => p.id),
+        ...Array.from({ length: 17 }, (_, i) => `legado${i}.gestionar`),
+      ];
+      expect(permisos.length).toBeLessThanOrEqual(MAX_CLAVES_ASIGNABLES);
+
+      expect(await errores(clase, { ...base, permisos })).toEqual([]);
+    });
+
+    it('el tope es MAX_CLAVES_ASIGNABLES: ese número cabe, uno más no (S-D8.2)', async () => {
+      expect(
+        await errores(clase, {
+          ...base,
+          permisos: claveN(MAX_CLAVES_ASIGNABLES),
+        }),
+      ).toEqual([]);
+      expect(
+        await errores(clase, {
+          ...base,
+          permisos: claveN(MAX_CLAVES_ASIGNABLES + 1),
+        }),
+      ).toContain('permisos');
+    });
+
+    it('sigue limitando la longitud de cada clave a 80', async () => {
+      expect(
+        await errores(clase, { ...base, permisos: ['a'.repeat(81)] }),
+      ).toContain('permisos');
+    });
+  },
+);

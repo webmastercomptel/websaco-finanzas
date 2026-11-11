@@ -11,6 +11,8 @@ import {
   MODULO_KEY,
   type RequiredRule,
 } from '../casl/check-ability.decorator';
+import { guardDejaPasar } from '../casl/testing/politica-de-ruta';
+import { AccesoResidentesController } from '../acceso-residentes/acceso-residentes.controller';
 import { EquipoController } from './equipo.controller';
 
 const proto = EquipoController.prototype as unknown as Record<string, object>;
@@ -18,11 +20,12 @@ const reglasDe = (handler: keyof EquipoController): RequiredRule[] =>
   Reflect.getMetadata(CHECK_ABILITY_KEY, proto[handler]) as RequiredRule[];
 
 describe('EquipoController — política de acceso', () => {
-  it('cuelga de equipo, bajo administracion y con los guards en orden', () => {
+  it('cuelga de equipo, bajo cualquiera de los dos módulos y con los guards en orden', () => {
     expect(Reflect.getMetadata(PATH_METADATA, EquipoController)).toBe('equipo');
-    expect(Reflect.getMetadata(MODULO_KEY, EquipoController)).toBe(
+    expect(Reflect.getMetadata(MODULO_KEY, EquipoController)).toEqual([
+      'finanzas',
       'administracion',
-    );
+    ]);
     const guards = (
       Reflect.getMetadata(GUARDS_METADATA, EquipoController) as Array<{
         name: string;
@@ -88,5 +91,59 @@ describe('EquipoController — política de acceso', () => {
     );
     expect(servicio.desactivar).toHaveBeenCalledWith('m1', user);
     expect(servicio.reenviarInvitacion).toHaveBeenCalledWith('m1');
+  });
+});
+
+describe('EquipoController — licencia: finanzas o administracion', () => {
+  const rutas = [
+    ['listar', 'usuarios.ver'],
+    ['obtener', 'usuarios.ver'],
+    ['crear', 'usuarios.crear'],
+    ['actualizar', 'usuarios.editar'],
+    ['reenviarInvitacion', 'usuarios.editar'],
+    ['desactivar', 'usuarios.eliminar'],
+  ] as const;
+
+  it.each(rutas)(
+    '%s abre con %s en una copropiedad solo con finanzas, solo con administracion o con ambos',
+    (ruta, clave) => {
+      for (const modulos of [
+        ['finanzas'],
+        ['administracion'],
+        ['finanzas', 'administracion'],
+      ] as const) {
+        expect(
+          guardDejaPasar(EquipoController, ruta, [clave], {
+            modulos: [...modulos],
+          }),
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.each(rutas)(
+    '%s responde 403 sin ninguno de los dos módulos, aunque tenga la clave',
+    (ruta, clave) => {
+      expect(
+        guardDejaPasar(EquipoController, ruta, [clave], { modulos: [] }),
+      ).toBe(false);
+    },
+  );
+
+  it.each(rutas)(
+    '%s sigue pidiendo la clave usuarios.*: con finanzas pero sin ella, 403',
+    (ruta) => {
+      expect(
+        guardDejaPasar(EquipoController, ruta, ['roles.gestionar'], {
+          modulos: ['finanzas'],
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it('Residentes no cambia: solo con administracion', () => {
+    expect(Reflect.getMetadata(MODULO_KEY, AccesoResidentesController)).toBe(
+      'administracion',
+    );
   });
 });

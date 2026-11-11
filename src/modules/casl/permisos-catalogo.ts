@@ -339,6 +339,26 @@ const CLAVES_ADMINISTRACION: ReadonlySet<string> = new Set(
   PERMISOS_ADMINISTRACION.map((p) => p.id),
 );
 
+/**
+ * Room, on top of the offered catalog, for keys that travel back untouched in a
+ * save: up to 17 leftover Finanzas `x.gestionar` before the post-deploy cleanup
+ * (`--retirar-gestionar`), plus older keys that are not offered. Not a
+ * quota: the request is still judged key by key.
+ */
+export const MARGEN_CLAVES_HEREDADAS = 30;
+
+/**
+ * Most permission keys a body of `/equipo` or `/roles` may carry. DERIVED from
+ * the catalogs (never a literal), so a catalog that grows can never leave a
+ * request that ticks every box over the limit: it is the Finanzas catalog plus
+ * the Administración one plus the margin above (116 today: 56 + 30 + 30).
+ * `permisos-catalogo.spec.ts` pins that it stays at least the offered size.
+ */
+export const MAX_CLAVES_ASIGNABLES: number =
+  PERMISOS_FINANZAS.length +
+  PERMISOS_ADMINISTRACION.length +
+  MARGEN_CLAVES_HEREDADAS;
+
 /** Whether `clave` is one of the permissions a role may bundle. */
 export function esPermisoAdministracion(clave: string): boolean {
   return CLAVES_ADMINISTRACION.has(clave);

@@ -18,7 +18,7 @@ import type {
   MiembroEquipoCreado,
   ResultadoInvitacion,
 } from '../../contracts';
-import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
+import { CheckAbility, ModuloAlguno } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import {
   ActualizarMiembroEquipoDto,
@@ -28,15 +28,21 @@ import { ListarEquipoDto } from './dto/listar-equipo.dto';
 import { EquipoService } from './equipo.service';
 
 /**
- * Staff of the active coproperty. It reuses the `Usuario` permissions of
+ * Team of the active coproperty. It reuses the `Usuario` permissions of
  * Administración (no new catalog key): `usuarios.ver` lists, `crear` adds,
- * `editar` edits/re-invites, `eliminar` deactivates. What a caller may grant is
- * further capped by their own permissions in the service; this layer only
- * decides who may use the door at all.
+ * `editar` edits/re-invites, `eliminar` deactivates. What a caller may grant or
+ * take away, of ANY offered module, is further capped by their own permissions
+ * in the service (the delegation law); this layer only decides who may use the
+ * door at all.
+ *
+ * Licence: `@ModuloAlguno('finanzas', 'administracion')`. A team is managed
+ * whichever product the building bought, so either module opens the door; the
+ * `usuarios.*` keys are still required, and a key of a module the coproperty did
+ * not contract is stored but inert. `/residentes` stays Administración only.
  */
 @Controller('equipo')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
-@Modulo('administracion')
+@ModuloAlguno('finanzas', 'administracion')
 export class EquipoController {
   constructor(private readonly equipo: EquipoService) {}
 

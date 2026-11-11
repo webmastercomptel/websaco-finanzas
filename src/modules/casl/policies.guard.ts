@@ -68,10 +68,9 @@ export class PoliciesGuard implements CanActivate {
     // Licence: a route that belongs to a product module needs the active
     // coproperty to have contracted it, whatever permissions the caller holds
     // (platform administrators included: the licence is about the coproperty).
-    const modulo = this.reflector.getAllAndOverride<string | undefined>(
-      MODULO_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const modulo = this.reflector.getAllAndOverride<
+      string | readonly string[] | undefined
+    >(MODULO_KEY, [context.getHandler(), context.getClass()]);
     exigirModulo(modulo, user);
 
     // Default-deny: a route under this guard must declare what it needs. No
