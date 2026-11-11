@@ -55,6 +55,15 @@ const exigirPermisosValidos = (
   }
 };
 
+/** Mongo's unique-index violation (E11000). */
+const CLAVE_DUPLICADA = 11000;
+
+/** ObjectId equality where null/undefined both mean "no target". */
+const igualId = (
+  a: Types.ObjectId | null | undefined,
+  b: Types.ObjectId | null,
+): boolean => (a == null || b == null ? a == null && b == null : a.equals(b));
+
 /** A Firebase uid an administrator has not yet claimed — see seed-admin.ts. */
 const esIdentidadReal = (firebaseUid: string): boolean =>
   !firebaseUid.startsWith('pendiente:');
@@ -297,7 +306,13 @@ export class UsuariosService {
    *
    * The old grant is deactivated, never deleted, when the target changes —
    * Asignacion carries the same audit law as everywhere else: "who could
-   * touch this building last March" has to stay answerable.
+   * touch this building last March" has to stay answerable. It is retired only
+   * AFTER the new grant is written (reusing an existing row for that target
+   * when there is one), so a failure cannot strand the account with no access.
+   *
+   * Known limitation: the primary is still "newest active by createdAt", and a
+   * reactivated row keeps its old createdAt, so with several active rows it may
+   * not be the one read back as primary.
    */
   private async actualizarAsignacionPrimaria(
     accountId: Types.ObjectId,
@@ -308,12 +323,23 @@ export class UsuariosService {
       .sort({ createdAt: -1 })
       .exec();
 
+    const copropiedadId =
+      dto.alcance === 'copropiedad' && dto.copropiedadId
+        ? new Types.ObjectId(dto.copropiedadId)
+        : null;
+    const entidadId =
+      dto.alcance === 'entidad' && dto.entidadId
+        ? new Types.ObjectId(dto.entidadId)
+        : null;
+
+    // ObjectId equality, never string equality: @IsMongoId accepts uppercase
+    // hex, and the same target spelled differently must not read as a move.
     const mismoObjetivo =
       actual != null &&
       actual.alcance === dto.alcance &&
       (dto.alcance === 'copropiedad'
-        ? actual.copropiedadId?.toString() === dto.copropiedadId
-        : actual.entidadId?.toString() === dto.entidadId);
+        ? igualId(actual.copropiedadId, copropiedadId)
+        : igualId(actual.entidadId, entidadId));
 
     // The profile that will apply, and the permissions it will hold: checked
     // against the ceiling before anything is written.
@@ -333,26 +359,76 @@ export class UsuariosService {
       return;
     }
 
+    const permisos = dto.permisos ?? [];
+
+    // The unique indexes ignore `estado`, so an INACTIVE row for the new target
+    // (an earlier A → B → A move, or one created and retired from /equipo)
+    // still occupies the slot: reuse it instead of inserting a second one.
+    const objetivo = copropiedadId
+      ? { copropiedadId }
+      : entidadId
+        ? { entidadId }
+        : null;
+    const existente = objetivo
+      ? await this.asignaciones
+          .findOne({ accountId, alcance: dto.alcance, ...objetivo })
+          .exec()
+      : null;
+
+    if (existente && actual && existente._id.equals(actual._id)) {
+      // Second guard: the lookup found the row we are about to retire, so this
+      // is the same target after all. Edit in place; never deactivate it.
+      exigirPermisosValidos(perfil, dto.permisos ?? actual.permisos);
+      actual.permisos = dto.permisos ?? actual.permisos;
+      actual.perfil = perfil;
+      await actual.save();
+      return;
+    }
+    if (existente && existente.estado === 'active') {
+      // Only an INACTIVE row may be reactivated. An active one for that target
+      // (e.g. granted from /equipo, with its own roles) is somebody's live
+      // access: rewriting it here would silently change it.
+      throw new ConflictException(
+        'La persona ya tiene un acceso activo a ese destino: edítalo desde allí',
+      );
+    }
+
+    // Write the NEW grant first and retire the old one only afterwards, so a
+    // failed write can never leave the account with no active access.
+    try {
+      if (existente) {
+        // Scope and target already match: that is what the lookup above keyed on.
+        existente.estado = 'active';
+        existente.permisos = permisos;
+        existente.perfil = perfil;
+        // A fresh row carries no roles; a reactivated one must not silently
+        // regain those of its earlier life.
+        existente.roleIds = [];
+        await existente.save();
+      } else {
+        await this.asignaciones.create({
+          accountId,
+          alcance: dto.alcance,
+          copropiedadId,
+          entidadId,
+          permisos,
+          perfil,
+          estado: 'active',
+        });
+      }
+    } catch (error: unknown) {
+      if ((error as { code?: number }).code === CLAVE_DUPLICADA) {
+        throw new ConflictException(
+          'Otra solicitud creó ese acceso al mismo tiempo: vuelve a intentarlo',
+        );
+      }
+      throw error;
+    }
+
     if (actual) {
       actual.estado = 'inactive';
       await actual.save();
     }
-
-    await this.asignaciones.create({
-      accountId,
-      alcance: dto.alcance,
-      copropiedadId:
-        dto.alcance === 'copropiedad' && dto.copropiedadId
-          ? new Types.ObjectId(dto.copropiedadId)
-          : null,
-      entidadId:
-        dto.alcance === 'entidad' && dto.entidadId
-          ? new Types.ObjectId(dto.entidadId)
-          : null,
-      permisos: dto.permisos ?? [],
-      perfil,
-      estado: 'active',
-    });
   }
 
   /** The most recent active assignment for each account, keyed by account id. */

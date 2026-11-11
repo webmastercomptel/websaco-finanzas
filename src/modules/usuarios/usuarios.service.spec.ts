@@ -30,9 +30,11 @@ const asignacionDoc = (over: Record<string, unknown> = {}) => ({
   _id: new Types.ObjectId(),
   accountId: new Types.ObjectId(),
   alcance: 'copropiedad',
-  copropiedadId: new Types.ObjectId(),
-  entidadId: null,
+  copropiedadId: new Types.ObjectId() as Types.ObjectId | null,
+  entidadId: null as Types.ObjectId | null,
   permisos: ['inmuebles.gestionar'],
+  perfil: 'administrativo' as 'administrativo' | 'personal',
+  roleIds: [] as Types.ObjectId[],
   estado: 'active',
   save: jest.fn().mockResolvedValue(undefined),
   ...over,
@@ -48,6 +50,8 @@ const construirModelos = (
     cuentas?: ReturnType<typeof cuentaDoc>[];
     asignaciones?: ReturnType<typeof asignacionDoc>[];
     duplicada?: boolean;
+    /** Makes `asignaciones.create` reject with this, e.g. a Mongo E11000. */
+    errorAlCrear?: Error;
   } = {},
 ) => {
   // A live array, not a snapshot: `create` appends to it, so the service's
@@ -107,14 +111,50 @@ const construirModelos = (
     distinct: jest.fn(() => ({
       exec: () => Promise.resolve(asignaciones.map((a) => a.accountId)),
     })),
-    findOne: jest.fn(() => ({
-      sort: () => ({
-        exec: () => Promise.resolve(asignaciones[0] ?? null),
-      }),
-    })),
+    // Filter-aware, like the real collection: `{ estado: 'active' }` is the
+    // "newest active row" lookup (chained with `.sort`); anything else is the
+    // by-target lookup (`alcance` + `copropiedadId`/`entidadId`), any estado.
+    // Both honour `accountId`, so a row of ANOTHER account never matches.
+    findOne: jest.fn((filtro: Filtro = {}) => {
+      const deLaCuenta = (a: ReturnType<typeof asignacionDoc>) =>
+        filtro.accountId === undefined ||
+        a.accountId.toString() ===
+          (filtro.accountId as Types.ObjectId).toString();
+      const buscar = () => {
+        if (filtro.estado === 'active') {
+          return (
+            asignaciones.find((a) => deLaCuenta(a) && a.estado === 'active') ??
+            null
+          );
+        }
+        return (
+          asignaciones.find(
+            (a) =>
+              deLaCuenta(a) &&
+              a.alcance === filtro.alcance &&
+              (filtro.copropiedadId === undefined ||
+                a.copropiedadId?.toString() ===
+                  (filtro.copropiedadId as Types.ObjectId).toString()) &&
+              (filtro.entidadId === undefined ||
+                a.entidadId?.toString() ===
+                  (filtro.entidadId as Types.ObjectId).toString()),
+          ) ?? null
+        );
+      };
+      return {
+        sort: () => ({ exec: () => Promise.resolve(buscar()) }),
+        exec: () => Promise.resolve(buscar()),
+      };
+    }),
     create: jest.fn((doc: Record<string, unknown>) => {
+      if (opts.errorAlCrear !== undefined) {
+        return Promise.reject(opts.errorAlCrear);
+      }
       asignacionesGuardadas.push(doc);
-      return Promise.resolve(asignacionDoc(doc));
+      const creada = asignacionDoc(doc);
+      // Newest first, like the sorted reads: a later update sees this row.
+      asignaciones.unshift(creada);
+      return Promise.resolve(creada);
     }),
   };
 
@@ -492,6 +532,350 @@ describe('UsuariosService.update', () => {
     expect(asignacionesModel.create).not.toHaveBeenCalled();
     expect(actual.permisos).toEqual(['facturas.ver']);
     expect(actual.estado).toBe('active');
+  });
+
+  describe('cambio de objetivo con filas previas (índice único ignora el estado)', () => {
+    const servicioCon = (
+      opts: Parameters<typeof construirModelos>[0],
+    ): {
+      service: UsuariosService;
+      asignacionesModel: ReturnType<
+        typeof construirModelos
+      >['asignacionesModel'];
+    } => {
+      const { accounts, asignacionesModel } = construirModelos(opts);
+      const { firebase } = firebaseUsuariosCon();
+      return {
+        service: new UsuariosService(
+          accounts as never,
+          asignacionesModel as never,
+          firebase,
+          mockAuditoria() as never,
+        ),
+        asignacionesModel,
+      };
+    };
+
+    it('A → B → A reactiva la fila vieja de A: queda A activa, B inactiva, sin crear otra A', async () => {
+      const cuenta = cuentaDoc();
+      const copA = new Types.ObjectId();
+      const copB = new Types.ObjectId();
+      const filaA = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copA,
+      });
+      const filas = [filaA];
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: filas,
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        { alcance: 'copropiedad', copropiedadId: copB.toString() },
+        ACTOR,
+      );
+      await service.update(
+        cuenta._id.toString(),
+        { alcance: 'copropiedad', copropiedadId: copA.toString() },
+        ACTOR,
+      );
+
+      const filaB = filas.find(
+        (f) => f.copropiedadId?.toString() === copB.toString(),
+      );
+      expect(filaA.estado).toBe('active');
+      expect(filaB?.estado).toBe('inactive');
+      // Only B was ever created; going back to A reused the existing row.
+      expect(asignacionesModel.create).toHaveBeenCalledTimes(1);
+      expect(filas.filter((f) => f.estado === 'active')).toEqual([filaA]);
+    });
+
+    it('un objetivo con fila inactiva previa (p. ej. creada en Equipo) se reactiva con los permisos nuevos', async () => {
+      const cuenta = cuentaDoc();
+      const copActual = new Types.ObjectId();
+      const copDestino = new Types.ObjectId();
+      const rolViejo = new Types.ObjectId();
+      const actual = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copActual,
+      });
+      const inactiva = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copDestino,
+        estado: 'inactive',
+        perfil: 'personal',
+        permisos: ['pqr.ver'],
+        roleIds: [rolViejo],
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual, inactiva],
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copDestino.toString(),
+          perfil: 'administrativo',
+          permisos: ['facturas.ver'],
+        },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      // The reused row is a different document from the one being retired.
+      expect(inactiva._id.equals(actual._id)).toBe(false);
+      expect(inactiva.estado).toBe('active');
+      expect(inactiva.permisos).toEqual(['facturas.ver']);
+      expect(inactiva.perfil).toBe('administrativo');
+      // A new grant never inherits roles from an earlier, retired one.
+      expect(inactiva.roleIds).toEqual([]);
+      expect(inactiva.save).toHaveBeenCalled();
+      expect(actual.estado).toBe('inactive');
+    });
+
+    it('un objetivo de alcance entidad con fila inactiva previa también se reactiva', async () => {
+      const cuenta = cuentaDoc();
+      const entidad = new Types.ObjectId();
+      const actual = asignacionDoc({ accountId: cuenta._id });
+      const inactiva = asignacionDoc({
+        accountId: cuenta._id,
+        alcance: 'entidad',
+        copropiedadId: null,
+        entidadId: entidad,
+        estado: 'inactive',
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual, inactiva],
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        { alcance: 'entidad', entidadId: entidad.toString() },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(inactiva._id.equals(actual._id)).toBe(false);
+      expect(inactiva.estado).toBe('active');
+      expect(inactiva.alcance).toBe('entidad');
+      expect(actual.estado).toBe('inactive');
+    });
+
+    it('si el alta del nuevo objetivo choca con la clave única (carrera): 409 y la fila actual sigue activa', async () => {
+      const cuenta = cuentaDoc();
+      const actual = asignacionDoc({ accountId: cuenta._id });
+      const { service } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual],
+        errorAlCrear: Object.assign(new Error('E11000 duplicate key'), {
+          code: 11000,
+        }),
+      });
+
+      await expect(
+        service.update(
+          cuenta._id.toString(),
+          {
+            alcance: 'copropiedad',
+            copropiedadId: new Types.ObjectId().toString(),
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(actual.estado).toBe('active');
+      expect(actual.save).not.toHaveBeenCalled();
+    });
+
+    it('el mismo destino con el id en mayúsculas es el mismo objetivo: edita en sitio y la fila sigue activa', async () => {
+      // @IsMongoId acepta hexadecimal en mayúsculas; comparar cadenas lo
+      // trataba como otro destino y dejaba a la cuenta sin fila activa.
+      const cuenta = cuentaDoc();
+      const copId = new Types.ObjectId();
+      const roleId = new Types.ObjectId();
+      const actual = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copId,
+        roleIds: [roleId],
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual],
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copId.toString().toUpperCase(),
+          permisos: ['facturas.ver'],
+        },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(actual.estado).toBe('active');
+      expect(actual.permisos).toEqual(['facturas.ver']);
+      // Same-target edit: roles are untouched, as in the lowercase path.
+      expect(actual.roleIds).toEqual([roleId]);
+    });
+
+    it('el mismo destino de alcance entidad con el id en mayúsculas también edita en sitio', async () => {
+      const cuenta = cuentaDoc();
+      const entidad = new Types.ObjectId();
+      const actual = asignacionDoc({
+        accountId: cuenta._id,
+        alcance: 'entidad',
+        copropiedadId: null,
+        entidadId: entidad,
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual],
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        { alcance: 'entidad', entidadId: entidad.toString().toUpperCase() },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(actual.estado).toBe('active');
+    });
+
+    it('si la búsqueda por destino devuelve la propia fila actual, no la retira', async () => {
+      // Segunda defensa: aunque la comparación de ids fallara, la fila que se
+      // acaba de escribir activa nunca se desactiva a continuación.
+      const cuenta = cuentaDoc();
+      const actual = asignacionDoc({ accountId: cuenta._id });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual],
+      });
+      asignacionesModel.findOne
+        .mockImplementationOnce(
+          // First call: the "newest active row" lookup, as usual.
+          () =>
+            ({
+              sort: () => ({ exec: () => Promise.resolve(actual) }),
+            }) as never,
+        )
+        .mockImplementationOnce(
+          // Second call: the by-target lookup answers with the same row.
+          () => ({ exec: () => Promise.resolve(actual) }) as never,
+        );
+
+      await service.update(
+        cuenta._id.toString(),
+        {
+          alcance: 'copropiedad',
+          copropiedadId: new Types.ObjectId().toString(),
+          permisos: ['facturas.ver'],
+        },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(actual.estado).toBe('active');
+    });
+
+    it('si el destino ya tiene otra fila ACTIVA (p. ej. de Equipo): 409, no se reescribe nada y la actual sigue activa', async () => {
+      const cuenta = cuentaDoc();
+      const copActual = new Types.ObjectId();
+      const copDestino = new Types.ObjectId();
+      const roleId = new Types.ObjectId();
+      const actual = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copActual,
+      });
+      const deEquipo = asignacionDoc({
+        accountId: cuenta._id,
+        copropiedadId: copDestino,
+        perfil: 'personal',
+        permisos: ['pqr.ver'],
+        roleIds: [roleId],
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual, deEquipo],
+      });
+
+      await expect(
+        service.update(
+          cuenta._id.toString(),
+          {
+            alcance: 'copropiedad',
+            copropiedadId: copDestino.toString(),
+            perfil: 'administrativo',
+            permisos: ['facturas.ver'],
+          },
+          ACTOR,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(deEquipo.save).not.toHaveBeenCalled();
+      expect(actual.save).not.toHaveBeenCalled();
+      expect(actual.estado).toBe('active');
+      expect(deEquipo.estado).toBe('active');
+      expect(deEquipo.permisos).toEqual(['pqr.ver']);
+      expect(deEquipo.perfil).toBe('personal');
+      expect(deEquipo.roleIds).toEqual([roleId]);
+    });
+
+    it('una fila de otra cuenta para el mismo destino no cuenta como existente', async () => {
+      const cuenta = cuentaDoc();
+      const copDestino = new Types.ObjectId();
+      const actual = asignacionDoc({ accountId: cuenta._id });
+      const ajena = asignacionDoc({
+        accountId: new Types.ObjectId(),
+        copropiedadId: copDestino,
+        estado: 'inactive',
+      });
+      const { service, asignacionesModel } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual, ajena],
+      });
+
+      await service.update(
+        cuenta._id.toString(),
+        { alcance: 'copropiedad', copropiedadId: copDestino.toString() },
+        ACTOR,
+      );
+
+      expect(asignacionesModel.create).toHaveBeenCalledTimes(1);
+      expect(ajena.estado).toBe('inactive');
+      expect(ajena.save).not.toHaveBeenCalled();
+    });
+
+    it('un error de escritura que no es clave duplicada se propaga y deja activa la fila actual', async () => {
+      const cuenta = cuentaDoc();
+      const actual = asignacionDoc({ accountId: cuenta._id });
+      const { service } = servicioCon({
+        cuentas: [cuenta],
+        asignaciones: [actual],
+        errorAlCrear: new Error('mongo caído'),
+      });
+
+      await expect(
+        service.update(
+          cuenta._id.toString(),
+          {
+            alcance: 'copropiedad',
+            copropiedadId: new Types.ObjectId().toString(),
+          },
+          ACTOR,
+        ),
+      ).rejects.toThrow('mongo caído');
+
+      expect(actual.estado).toBe('active');
+      expect(actual.save).not.toHaveBeenCalled();
+    });
   });
 
   it('registra la auditoría con el actor autenticado, nunca uno del body', async () => {
