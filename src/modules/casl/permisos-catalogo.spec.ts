@@ -97,6 +97,19 @@ describe('moduloDePermiso', () => {
     expect(moduloDePermiso('interfaz-comptable.crear')).toBe('finanzas');
   });
 
+  it('`gestionar` ya no es una clave de Finanzas pero sigue siendo de Administración', () => {
+    expect(moduloDePermiso('facturas.gestionar')).toBeNull();
+    expect(moduloDePermiso('recibos.gestionar')).toBeNull();
+    expect(moduloDePermiso('pqr.gestionar')).toBe('administracion');
+    expect(moduloDePermiso('roles.gestionar')).toBe('administracion');
+  });
+
+  it('`depurar` es un verbo de Finanzas y no existe en Administración', () => {
+    expect(moduloDePermiso('facturas.depurar')).toBe('finanzas');
+    expect(moduloDePermiso('inmuebles.depurar')).toBe('finanzas');
+    expect(moduloDePermiso('pqr.depurar')).toBeNull();
+  });
+
   it('una clave desconocida o mal formada no pertenece a ningún módulo', () => {
     expect(moduloDePermiso('inventado.ver')).toBeNull();
     expect(moduloDePermiso('facturas.eliminar')).toBeNull();
@@ -109,6 +122,12 @@ describe('permisosDesconocidos', () => {
     expect(
       permisosDesconocidos(['facturas.ver', 'facturas.eliminar', 'x.ver']),
     ).toEqual(['facturas.eliminar', 'x.ver']);
+  });
+
+  it('un `gestionar` de Finanzas guardado de antes cuenta como desconocido', () => {
+    expect(
+      permisosDesconocidos(['facturas.gestionar', 'pqr.gestionar']),
+    ).toEqual(['facturas.gestionar']);
   });
 });
 

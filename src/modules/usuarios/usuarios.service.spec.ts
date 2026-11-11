@@ -32,7 +32,7 @@ const asignacionDoc = (over: Record<string, unknown> = {}) => ({
   alcance: 'copropiedad',
   copropiedadId: new Types.ObjectId() as Types.ObjectId | null,
   entidadId: null as Types.ObjectId | null,
-  permisos: ['inmuebles.gestionar'],
+  permisos: ['inmuebles.editar'],
   perfil: 'administrativo' as 'administrativo' | 'personal',
   roleIds: [] as Types.ObjectId[],
   estado: 'active',
@@ -296,7 +296,7 @@ describe('UsuariosService.create', () => {
         password: 'clave123',
         alcance: 'copropiedad',
         copropiedadId: copId,
-        permisos: ['inmuebles.gestionar'],
+        permisos: ['inmuebles.editar'],
       },
       ACTOR,
     );
@@ -307,7 +307,7 @@ describe('UsuariosService.create', () => {
         // The tenancy law: stored as an ObjectId, never the raw string —
         // see TenantContextService.resolveCoPropertyId's docblock.
         copropiedadId: new Types.ObjectId(copId),
-        permisos: ['inmuebles.gestionar'],
+        permisos: ['inmuebles.editar'],
       }),
     );
   });

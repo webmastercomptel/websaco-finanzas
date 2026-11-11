@@ -33,6 +33,14 @@ export const ACTIONS = [
   // ever receive it — `permission-map.ts` drops it there. It is not `delete`
   // on purpose: the audit law's "there is no delete action" stays literally true.
   'remove',
+  // The guarded hard delete of data that is NOT yet a document: a charge
+  // concept nobody used, a unit with no Factura, a lote cancelled before it
+  // issued anything. Only the Finanzas verb `depurar` produces it, and the
+  // services behind those routes refuse anything already issued. It is NOT
+  // `remove`: that stays vetoed on every financial subject (the audit law), and
+  // holding `purge` never implies it. Named apart from `delete` for the same
+  // reason `remove` is.
+  'purge',
   // Deliberately NOT `delete` — see the note above. The cycle reset that
   // physically deletes documents is NOT a CASL action at all: it sits behind
   // `PlatformAdminGuard` (see `ReiniciarCicloController`), so no role a

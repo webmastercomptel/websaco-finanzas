@@ -37,11 +37,20 @@ import {
  * Permissions an assignment really grants: the hard ceiling is applied on
  * read too, so a row written before the ceiling existed (or edited straight in
  * the database) can never hand Finanzas to operational staff.
+ *
+ * Only KNOWN keys are returned (`moduloDePermiso !== null`). An unknown stored
+ * key grants nothing (`rulesFromPermissionKeys` skips it), so listing it would
+ * only show the frontend a dead key: the clearest case is a Finanzas
+ * `x.gestionar` saved before that verb was retired.
  */
 const permisosEfectivosDe = (a: {
   perfil?: PerfilAsignacion;
   permisos: string[];
-}): string[] => sinPermisosVetados(a.perfil ?? 'administrativo', a.permisos);
+}): string[] =>
+  sinPermisosVetados(
+    a.perfil ?? 'administrativo',
+    a.permisos.filter((clave) => moduloDePermiso(clave) !== null),
+  );
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {

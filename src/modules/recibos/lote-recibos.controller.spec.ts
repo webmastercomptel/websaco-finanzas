@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { describirRutaGuardada } from '../casl/testing/politica-de-ruta';
 import { LoteRecibosController } from './lote-recibos.controller';
 
 const COPROPERTY_ID = new Types.ObjectId();
@@ -149,3 +150,21 @@ describe('LoteRecibosController.urlLecturaRecibos', () => {
     );
   });
 });
+
+describirRutaGuardada(
+  'POST /lotes-recibos/:id/aplicar (aplicar un lote de recibos)',
+  {
+    controlador: LoteRecibosController,
+    handler: 'aplicar',
+    regla: { action: 'approve', subject: 'Recibo' },
+    claveQueAbre: 'recibos.aprobar',
+    clavesQueNoAbren: ['recibos.ver', 'recibos.crear', 'recibos.anular'],
+    clavesConvertidas: [
+      'recibos.ver',
+      'recibos.crear',
+      'recibos.anular',
+      'recibos.aprobar',
+    ],
+    gestionarViejo: 'recibos.gestionar',
+  },
+);

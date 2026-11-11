@@ -107,6 +107,63 @@ describe('AccesoService.copropiedadesDe', () => {
     });
   });
 
+  it('una clave directa desconocida no se devuelve: un `gestionar` de Finanzas guardado no llega a /auth/me', async () => {
+    // Finanzas `x.gestionar` stopped being a key: it grants nothing, so the
+    // frontend must never be shown a dead key. Known keys next to it survive.
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          permisos: ['facturas.gestionar', 'facturas.ver', 'inventada.ver'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['facturas.ver']);
+  });
+
+  it('lo mismo vale para una asignación por entidad', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          permisos: ['recibos.gestionar', 'recibos.aprobar'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
+      copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['recibos.aprobar']);
+  });
+
+  it('las claves de Administración con `gestionar` se conservan', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          permisos: ['pqr.gestionar', 'tareas.gestionar'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([
+      'pqr.gestionar',
+      'tareas.gestionar',
+    ]);
+  });
+
   it('una asignación a una entidad alcanza todos sus edificios', async () => {
     // Este es el punto de la entidad: la empresa toma un edificio más y la
     // gente ya lo tiene, sin editar a nadie.

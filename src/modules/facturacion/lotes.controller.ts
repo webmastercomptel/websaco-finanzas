@@ -546,11 +546,12 @@ export class LotesController {
 
   /**
    * Hard delete — refused once consolidado, when it would mean discarding
-   * real Facturas. See `LotesFacturacionService.cancelar`.
+   * real Facturas. See `LotesFacturacionService.cancelar`. Gated by `purge`
+   * (`facturas.depurar`), the guarded pre-document delete, never `remove`.
    */
   @Delete(':id')
   @HttpCode(204)
-  @CheckAbility({ action: 'manage', subject: 'Factura' })
+  @CheckAbility({ action: 'purge', subject: 'Factura' })
   cancelar(
     @Param('id') id: string,
     @CurrentUser() user: IRequestUser,

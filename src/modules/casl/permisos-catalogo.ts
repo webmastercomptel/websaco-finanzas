@@ -40,7 +40,8 @@ const MODULO_DE_SEGMENTO: Record<string, ModuloProducto> = {
 /**
  * The module that owns a `modulo.verbo` key, or null when the key is unknown.
  * Finanzas keys are checked against the grammar (segment + verb of
- * `VERB_TO_ACTION`); Administración keys against the CATALOG below, the one
+ * `VERB_TO_ACTION`, which has no `gestionar`: `facturas.gestionar` is
+ * unknown); Administración keys against the CATALOG below, the one
  * definition the role editor, `/equipo` and `AccesoService` all share — so
  * a grammatical but uncatalogued key (`usuarios.gestionar`, `config.anular`)
  * is unknown everywhere, never assignable through one path and not another.
@@ -62,10 +63,11 @@ type SujetoFinanciero =
 
 /**
  * The CASL actions that some route REALLY requires on each financial subject
- * (`@CheckAbility` / `@CheckAnyAbility`), except `manage`, which every subject
- * with at least one action gets through its `gestionar` key. The permission
- * matrix offers a `modulo.verbo` key only when its subject appears here with
- * the verb's action — «un inmueble no se aprueba».
+ * (`@CheckAbility` / `@CheckAnyAbility`). The permission matrix offers a
+ * `modulo.verbo` key only when its subject appears here with the verb's action
+ * — «un inmueble no se aprueba». No route may require `manage` on a financial
+ * subject (Finanzas has no `gestionar` verb): `permisos-finanzas.spec.ts` fails
+ * if one does.
  *
  * Hand-kept, pinned by `permisos-finanzas.spec.ts`, which scans every
  * controller and fails when a route asks for something not listed (nobody could
@@ -74,17 +76,26 @@ type SujetoFinanciero =
  * grants the same thing, so they offer the same actions. `Anulacion` has no
  * route at all yet; `export` is required by none (exports are `read`).
  *
+ * `purge` is the guarded hard delete of pre-document data (verb `depurar`):
+ * a charge concept nobody used, a unit with no Factura, a lote before it issued
+ * anything. `Recibo` has `approve` for applying a batch of receipts, a release
+ * decision like `facturas.aprobar`.
+ *
+ * A new action here is granted to nobody automatically: once `gestionar` is not
+ * a key, the one-off conversion (or a platform admin ticking the box) decides
+ * who receives it.
+ *
  * `Record<SujetoFinanciero, …>` makes a new financial subject a compile error
  * here until it is classified.
  */
 const ACCIONES_REALES_FINANZAS: Readonly<
   Record<SujetoFinanciero, readonly Action[]>
 > = {
-  Inmueble: ['read', 'create', 'update'],
+  Inmueble: ['read', 'create', 'update', 'purge'],
   Tercero: ['read', 'create', 'update'],
-  ConceptoCobro: ['read', 'create', 'update'],
-  Factura: ['read', 'create', 'update', 'annul', 'approve'],
-  Recibo: ['read', 'create', 'annul'],
+  ConceptoCobro: ['read', 'create', 'update', 'purge'],
+  Factura: ['read', 'create', 'update', 'annul', 'approve', 'purge'],
+  Recibo: ['read', 'create', 'annul', 'approve'],
   NotaCredito: ['read', 'create', 'update', 'annul'],
   NotaContable: ['read', 'create', 'annul'],
   OtraNota: ['read', 'create', 'annul'],
@@ -99,19 +110,19 @@ const ACCIONES_REALES_FINANZAS: Readonly<
 
 /**
  * The Finanzas `modulo.verbo` keys that exist for real: the ones whose action
- * some route requires, plus `gestionar` for every module that has any. This is
- * what the permission matrix draws; every other module x verb pair is a dash.
- * Granting a key outside it is still accepted (the grammar in
- * `moduloDePermiso` is unchanged and old data stays valid): it just does
- * nothing anybody checks.
+ * some route requires. This is what the permission matrix draws; every other
+ * module x verb pair is a dash. There is no `gestionar` key in Finanzas: each
+ * permission is one exact action, so it can be held, given and taken away on
+ * its own. Granting a key outside this list is still accepted where the grammar
+ * in `moduloDePermiso` allows it (old data stays valid): it just does nothing
+ * anybody checks.
  */
 export const PERMISOS_FINANZAS: readonly string[] = Object.entries(
   MODULE_TO_SUBJECT,
 ).flatMap(([modulo, sujeto]) => {
   const acciones = ACCIONES_REALES_FINANZAS[sujeto];
-  if (acciones.length === 0) return [];
   return Object.entries(VERB_TO_ACTION)
-    .filter(([, accion]) => accion === 'manage' || acciones.includes(accion))
+    .filter(([, accion]) => acciones.includes(accion))
     .map(([verbo]) => `${modulo}.${verbo}`);
 });
 

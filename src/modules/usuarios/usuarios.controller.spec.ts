@@ -68,7 +68,9 @@ describe('UsuariosController.permisosFinanzas', () => {
 
     expect(claves).toContain('facturas.aprobar');
     expect(claves).not.toContain('inmuebles.aprobar');
-    expect(claves).toHaveLength(69);
+    expect(claves).toContain('facturas.depurar');
+    expect(claves).not.toContain('facturas.gestionar');
+    expect(claves).toHaveLength(56);
   });
 
   it('está declarada antes de `:id`, o la ruta se leería como un id', () => {

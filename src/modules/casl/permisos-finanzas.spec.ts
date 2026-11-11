@@ -111,8 +111,6 @@ describe('PERMISOS_FINANZAS frente a las rutas del backend', () => {
   });
 
   it('toda acción que una ruta exige sobre una materia financiera la concede alguna clave del catálogo', () => {
-    // `manage` (gestionar) must exist for EVERY module of the subject, since
-    // each module is a separate key that grants the same thing.
     const sinClave = financieros
       .filter(
         ({ subject, action }) =>
@@ -132,7 +130,9 @@ describe('PERMISOS_FINANZAS frente a las rutas del backend', () => {
     const muertas = PERMISOS_FINANZAS.filter((clave) => {
       const modulo = clave.split('.')[0] as keyof typeof MODULE_TO_SUBJECT;
       const subject = MODULE_TO_SUBJECT[modulo];
-      // The only actions a single key can grant are the ones in the vocabulary.
+      // The only actions a single Finanzas key can grant are the ones in the
+      // financial vocabulary. `manage` is not among them: no Finanzas key maps
+      // to it, so a key can never stand in for "every action" (see the pin below).
       const acciones: Action[] = [
         'read',
         'create',
@@ -140,25 +140,24 @@ describe('PERMISOS_FINANZAS frente a las rutas del backend', () => {
         'annul',
         'approve',
         'export',
-        'manage',
+        'purge',
       ];
       const concedidas = acciones.filter((a) => concede(clave, a, subject));
-      // `manage` implies every other action, so judge a `gestionar` key by
-      // whether the subject has ANY route at all.
-      if (concedidas.includes('manage')) {
-        return !financieros.some((f) => f.subject === subject);
-      }
       return !concedidas.some((a) => exigeAlgunaRuta(subject, a));
     });
     expect(muertas).toEqual([]);
   });
 
-  it('toda materia con rutas ofrece `gestionar` en cada uno de sus módulos', () => {
-    const modulosSinGestionar = Object.entries(MODULE_TO_SUBJECT)
-      .filter(([, subject]) => financieros.some((f) => f.subject === subject))
-      .map(([modulo]) => modulo)
-      .filter((modulo) => !PERMISOS_FINANZAS.includes(`${modulo}.gestionar`));
-    expect(modulosSinGestionar).toEqual([]);
+  it('ninguna ruta financiera exige `manage`: ninguna clave de Finanzas la podría conceder', () => {
+    // Finanzas has no `gestionar` verb. A route asking `manage` on a financial
+    // subject would be reachable by a platform admin only, so this fails the
+    // moment someone writes one (use a real action, e.g. `purge`, instead).
+    const conManage = financieros
+      .filter(({ action }) => action === 'manage')
+      .map(
+        ({ subject, rutas }) => `${subject} (${rutas.slice(0, 2).join(', ')})`,
+      );
+    expect(conManage).toEqual([]);
   });
 });
 
@@ -183,7 +182,8 @@ describe('PERMISOS_FINANZAS (catálogo de claves reales)', () => {
       'terceros.anular',
       'conceptos.aprobar',
       'recibos.editar',
-      'recibos.aprobar',
+      'recibos.depurar',
+      'terceros.depurar',
       'consultas.crear',
       'consultas.editar',
       'cuentas-contables.anular',
@@ -195,9 +195,13 @@ describe('PERMISOS_FINANZAS (catálogo de claves reales)', () => {
     }
   });
 
-  it('las que sí existen están: aprobar facturas, anular recibos, gestionar todo lo que tiene acciones', () => {
+  it('las que sí existen están: aprobar facturas, anular recibos, aprobar el lote de recibos, depurar', () => {
     for (const real of [
       'facturas.aprobar',
+      'recibos.aprobar',
+      'inmuebles.depurar',
+      'conceptos.depurar',
+      'facturas.depurar',
       'facturas.anular',
       'recibos.anular',
       'notas-credito.editar',
@@ -210,7 +214,7 @@ describe('PERMISOS_FINANZAS (catálogo de claves reales)', () => {
     }
   });
 
-  it('un módulo sin ninguna ruta (anulaciones) no ofrece ni `gestionar`', () => {
+  it('un módulo sin ninguna ruta (anulaciones) no ofrece ninguna clave', () => {
     expect(
       PERMISOS_FINANZAS.filter((c) => c.startsWith('anulaciones.')),
     ).toEqual([]);
@@ -222,7 +226,7 @@ describe('PERMISOS_FINANZAS (catálogo de claves reales)', () => {
         (c) => c.split('.')[1],
       );
     const referencia = acciones('cuentas-contables');
-    expect(referencia).toEqual(['ver', 'crear', 'editar', 'gestionar']);
+    expect(referencia).toEqual(['ver', 'crear', 'editar']);
     for (const modulo of [
       'parametros-facturacion',
       'documentos',
@@ -232,7 +236,31 @@ describe('PERMISOS_FINANZAS (catálogo de claves reales)', () => {
     }
   });
 
-  it('cuenta las claves reales (69 de las 126 combinaciones módulo x verbo)', () => {
-    expect(PERMISOS_FINANZAS).toHaveLength(69);
+  it('cuenta las claves reales (56 de las 126 combinaciones módulo x verbo)', () => {
+    expect(PERMISOS_FINANZAS).toHaveLength(56);
+  });
+
+  it('ninguna clave ofrecida es `gestionar`: en Finanzas ya no es una clave', () => {
+    expect(PERMISOS_FINANZAS.filter((c) => c.endsWith('.gestionar'))).toEqual(
+      [],
+    );
+    expect(esPermisoFinanzas('facturas.gestionar')).toBe(false);
+  });
+
+  it('las cuatro claves que reemplazan a `gestionar` están ofrecidas', () => {
+    for (const nueva of [
+      'inmuebles.depurar',
+      'conceptos.depurar',
+      'facturas.depurar',
+      'recibos.aprobar',
+    ]) {
+      expect(PERMISOS_FINANZAS).toContain(nueva);
+    }
+  });
+
+  it('`depurar` solo se ofrece donde existe un borrado previo al documento', () => {
+    expect(
+      PERMISOS_FINANZAS.filter((c) => c.endsWith('.depurar')).sort(),
+    ).toEqual(['conceptos.depurar', 'facturas.depurar', 'inmuebles.depurar']);
   });
 });

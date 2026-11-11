@@ -2,6 +2,7 @@ import { createAppAbility, ACTIONS } from './casl-ability.constants';
 import {
   MODULE_TO_SUBJECT,
   VERB_TO_ACTION,
+  VERB_TO_ACTION_ADMINISTRACION,
   rulesFromPermissionKeys,
 } from './permission-map';
 
@@ -63,12 +64,47 @@ describe('rulesFromPermissionKeys', () => {
     expect(ability.can('annul', 'Factura')).toBe(false);
   });
 
-  it('gestionar concede todas las acciones sobre ese módulo únicamente', () => {
+  it('en Finanzas `gestionar` ya no es una clave: no concede nada', () => {
+    // Amendment G: unknown key = deny, for every financial segment.
+    for (const modulo of Object.keys(MODULE_TO_SUBJECT)) {
+      expect(abilityFor([`${modulo}.gestionar`]).rules).toHaveLength(0);
+    }
     const ability = abilityFor(['recibos.gestionar']);
 
-    expect(ability.can('annul', 'Recibo')).toBe(true);
-    expect(ability.can('create', 'Recibo')).toBe(true);
+    expect(ability.can('annul', 'Recibo')).toBe(false);
+    expect(ability.can('create', 'Recibo')).toBe(false);
+    expect(ability.can('read', 'Recibo')).toBe(false);
+    expect(ability.can('manage', 'Recibo')).toBe(false);
+  });
+
+  it('`depurar` concede `purge` sobre su materia y nada más', () => {
+    const ability = abilityFor(['facturas.depurar']);
+
+    expect(ability.can('purge', 'Factura')).toBe(true);
     expect(ability.can('read', 'Factura')).toBe(false);
+    expect(ability.can('annul', 'Factura')).toBe(false);
+    expect(ability.can('purge', 'Recibo')).toBe(false);
+  });
+
+  it('`depurar` NUNCA concede `remove`: nada financiero se borra como documento', () => {
+    for (const clave of [
+      'facturas.depurar',
+      'inmuebles.depurar',
+      'conceptos.depurar',
+    ]) {
+      const ability = abilityFor([clave]);
+      for (const sujeto of Object.values(MODULE_TO_SUBJECT)) {
+        expect(ability.can('remove', sujeto)).toBe(false);
+      }
+    }
+  });
+
+  it('recibos.aprobar concede `approve` sobre Recibo y nada más', () => {
+    const ability = abilityFor(['recibos.aprobar']);
+
+    expect(ability.can('approve', 'Recibo')).toBe(true);
+    expect(ability.can('create', 'Recibo')).toBe(false);
+    expect(ability.can('approve', 'Factura')).toBe(false);
   });
 });
 
@@ -77,6 +113,18 @@ describe('vocabulario de autorización', () => {
     // Ningún documento financiero se borra: si este test falla, alguien
     // reintrodujo el borrado físico por la puerta de atrás.
     expect(Object.keys(VERB_TO_ACTION)).not.toContain('eliminar');
+  });
+
+  it('el mapa financiero no tiene `gestionar` y sí `depurar` -> purge', () => {
+    expect(Object.keys(VERB_TO_ACTION)).not.toContain('gestionar');
+    expect(VERB_TO_ACTION.depurar).toBe('purge');
+    // `gestionar` lives only on the Administración side.
+    expect(VERB_TO_ACTION_ADMINISTRACION.gestionar).toBe('manage');
+  });
+
+  it('`purge` es una acción propia, distinta de `remove`', () => {
+    expect(ACTIONS as readonly string[]).toContain('purge');
+    expect(VERB_TO_ACTION.depurar).not.toBe('remove');
   });
 
   it('no existe la acción "delete" en el vocabulario CASL', () => {
@@ -249,14 +297,14 @@ describe('permisos de Configuracion (Maestro de Cuentas, Parámetros, Documentos
   });
 
   it('un permiso de Configuracion no concede acceso a otros subjects', () => {
-    const ability = abilityFor(['parametros-facturacion.gestionar']);
+    const ability = abilityFor(['parametros-facturacion.editar']);
 
     expect(ability.can('read', 'Factura')).toBe(false);
     expect(ability.can('read', 'ConceptoCobro')).toBe(false);
   });
 
   it('permisos de otros módulos no conceden acceso a Configuracion', () => {
-    const ability = abilityFor(['facturas.ver', 'conceptos.gestionar']);
+    const ability = abilityFor(['facturas.ver', 'conceptos.editar']);
 
     expect(ability.can('read', 'Configuracion')).toBe(false);
   });
@@ -307,7 +355,7 @@ describe('permisos de SaldoInicial (saldos iniciales de cartera)', () => {
     const ability = abilityFor([
       'facturas.ver',
       'facturas.crear',
-      'facturas.gestionar',
+      'facturas.depurar',
     ]);
 
     expect(ability.can('read', 'SaldoInicial')).toBe(false);
@@ -348,7 +396,7 @@ describe('permisos de SaldoInicialAnticipo (saldos iniciales de anticipo)', () =
     const ability = abilityFor([
       'notas-anticipo.ver',
       'notas-anticipo.crear',
-      'facturas.gestionar',
+      'facturas.depurar',
     ]);
 
     expect(ability.can('read', 'SaldoInicialAnticipo')).toBe(false);
@@ -423,7 +471,7 @@ describe('permisos de Interfaz a Comptable', () => {
       'adicion-contabilidad.ver',
       'adicion-contabilidad.crear',
       'adicion-contabilidad.anular',
-      'adicion-contabilidad.gestionar',
+      'adicion-contabilidad.editar',
     ]);
 
     expect(ability.can('read', 'InterfazComptable')).toBe(false);
@@ -436,7 +484,7 @@ describe('permisos de Interfaz a Comptable', () => {
       'interfaz-comptable.ver',
       'interfaz-comptable.crear',
       'interfaz-comptable.anular',
-      'interfaz-comptable.gestionar',
+      'interfaz-comptable.editar',
     ]);
 
     expect(ability.can('read', 'Configuracion')).toBe(false);
@@ -468,11 +516,23 @@ describe('permisos de Administración', () => {
     expect(ability.can('read', 'Factura')).toBe(false);
   });
 
-  it('"remove" no puede aplicarse a ninguna materia financiera ni siquiera con gestionar', () => {
-    const ability = abilityFor(['facturas.gestionar', 'documentos.gestionar']);
+  it('"remove" no puede aplicarse a ninguna materia financiera ni siquiera con depurar', () => {
+    const ability = abilityFor(['facturas.depurar', 'documentos.depurar']);
 
+    expect(ability.can('purge', 'Factura')).toBe(true);
     expect(ability.can('remove', 'Factura')).toBe(false);
     expect(ability.can('remove', 'Configuracion')).toBe(false);
+  });
+
+  it('"remove" sigue vetado en toda materia financiera para el administrador de plataforma', () => {
+    const ability = abilityFor([], true);
+
+    for (const sujeto of Object.values(MODULE_TO_SUBJECT)) {
+      expect(ability.can('remove', sujeto)).toBe(false);
+      // The platform admin still reaches the guarded hard deletes.
+      expect(ability.can('purge', sujeto)).toBe(true);
+    }
+    expect(ability.can('remove', 'Anuncio')).toBe(true);
   });
 
   it('"documentos" sigue siendo de Finanzas y el de Administración tiene su propio segmento', () => {
@@ -488,7 +548,21 @@ describe('permisos de Administración', () => {
   it('"gestionar" en Administración concede todo sobre su materia, incluido remove', () => {
     const ability = abilityFor(['pqr.gestionar']);
 
+    expect(ability.can('manage', 'Pqr')).toBe(true);
     expect(ability.can('remove', 'Pqr')).toBe(true);
     expect(ability.can('read', 'Anuncio')).toBe(false);
+  });
+
+  it('"gestionar" de Administración sigue siendo `manage` en cada materia que lo ofrece', () => {
+    expect(abilityFor(['roles.gestionar']).can('manage', 'Rol')).toBe(true);
+    expect(abilityFor(['tareas.gestionar']).can('manage', 'Tarea')).toBe(true);
+  });
+
+  it('un `gestionar` de Administración no abre ninguna materia financiera', () => {
+    const ability = abilityFor(['pqr.gestionar', 'roles.gestionar']);
+
+    for (const sujeto of Object.values(MODULE_TO_SUBJECT)) {
+      expect(ability.can('read', sujeto)).toBe(false);
+    }
   });
 });

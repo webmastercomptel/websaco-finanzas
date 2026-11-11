@@ -39,9 +39,10 @@ import type { ConceptoCobro } from '../../contracts';
  *
  * DELETE exists, unlike most of this domain — see the guards in
  * ConceptosService.delete() for why a concept is the one thing here that
- * can be gone for good rather than just retired. Gated by `manage` (the
- * `conceptos.gestionar` permission key), stricter than the `update` that
- * editing a concept only needs.
+ * can be gone for good rather than just retired. Gated by `purge` (the
+ * `conceptos.depurar` permission key), stricter than the `update` that
+ * editing a concept only needs. `purge` is the guarded pre-document hard
+ * delete, never `remove`.
  */
 @Controller('conceptos')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
@@ -78,7 +79,7 @@ export class ConceptosController {
 
   @Delete(':id')
   @HttpCode(204)
-  @CheckAbility({ action: 'manage', subject: 'ConceptoCobro' })
+  @CheckAbility({ action: 'purge', subject: 'ConceptoCobro' })
   delete(@Param('id') id: string): Promise<void> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     return this.conceptos.delete(copropiedadId.toString(), id);

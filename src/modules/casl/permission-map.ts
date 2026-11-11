@@ -62,11 +62,15 @@ export const MODULE_TO_SUBJECT_ADMINISTRACION = {
 /**
  * Verbs only the Administración keys understand, on top of `VERB_TO_ACTION`.
  * `eliminar` -> `remove` is the one the financial side must never have.
+ * `gestionar` -> `manage` lives here too: in Administración one key covering a
+ * whole subject is the established vocabulary (`pqr.gestionar`), while in
+ * Finanzas it was retired so every permission is an exact, delegable key.
  */
 export const VERB_TO_ACTION_ADMINISTRACION = {
   subir: 'create',
   actualizar: 'update',
   eliminar: 'remove',
+  gestionar: 'manage',
 } satisfies Record<string, Action>;
 
 /**
@@ -76,6 +80,14 @@ export const VERB_TO_ACTION_ADMINISTRACION = {
  * on ACTIONS in casl-ability.constants.ts. `anular` is how a document is
  * retired. `eliminar` exists only in `VERB_TO_ACTION_ADMINISTRACION`, and
  * `remove` stays vetoed on every financial subject.
+ *
+ * There is no `gestionar` verb either: a Finanzas key that stood for "every
+ * action" could not be held, given or taken away one action at a time. A stored
+ * `facturas.gestionar` is therefore an unknown key, which means DENY.
+ * `depurar` -> `purge` is the guarded hard delete of pre-document data (a
+ * charge concept, a unit with no Factura, a lote before it issues anything);
+ * it is deliberately not `remove`, so the veto above does not apply to it and
+ * does not need to be lifted.
  */
 export const VERB_TO_ACTION = {
   ver: 'read',
@@ -84,7 +96,7 @@ export const VERB_TO_ACTION = {
   anular: 'annul',
   aprobar: 'approve',
   exportar: 'export',
-  gestionar: 'manage',
+  depurar: 'purge',
 } satisfies Record<string, Action>;
 
 /**
