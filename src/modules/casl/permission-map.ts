@@ -156,18 +156,27 @@ export function rulesFromPermissionKeys(
 
   for (const key of keys) {
     const [modulo, verbo] = key.split('.');
-    const financiero = MODULE_TO_SUBJECT[
-      modulo as keyof typeof MODULE_TO_SUBJECT
-    ] as Subject | undefined;
-    const administracion = MODULE_TO_SUBJECT_ADMINISTRACION[
-      modulo as keyof typeof MODULE_TO_SUBJECT_ADMINISTRACION
-    ] as Subject | undefined;
+    // Own properties only: a segment or verb such as `constructor` or
+    // `__proto__` must not resolve through Object.prototype (unknown = deny).
+    const financiero = Object.hasOwn(MODULE_TO_SUBJECT, modulo)
+      ? (MODULE_TO_SUBJECT[modulo as keyof typeof MODULE_TO_SUBJECT] as Subject)
+      : undefined;
+    const administracion = Object.hasOwn(
+      MODULE_TO_SUBJECT_ADMINISTRACION,
+      modulo,
+    )
+      ? (MODULE_TO_SUBJECT_ADMINISTRACION[
+          modulo as keyof typeof MODULE_TO_SUBJECT_ADMINISTRACION
+        ] as Subject)
+      : undefined;
     const subject = financiero ?? administracion;
     // Only the building-management side knows `subir`/`actualizar`/`eliminar`,
     // and only Finanzas knows `depurar`. A key whose verb its side does not
     // know is simply unknown, which means DENY.
     const action = financiero
-      ? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]
+      ? Object.hasOwn(VERB_TO_ACTION, verbo)
+        ? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]
+        : undefined
       : accionDeAdministracion(verbo);
     if (!subject || !action) continue;
     can(action, subject);

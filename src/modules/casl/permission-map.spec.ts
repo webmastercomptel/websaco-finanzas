@@ -49,6 +49,24 @@ describe('rulesFromPermissionKeys', () => {
     expect(ability.can('create', 'Factura')).toBe(false);
   });
 
+  it.each([
+    'constructor.ver',
+    '__proto__.ver',
+    'toString.ver',
+    'facturas.constructor',
+    'facturas.__proto__',
+    'pqr.constructor',
+    'pqr.__proto__',
+  ])(
+    '%s (nombre heredado de Object.prototype) no concede nada: es desconocida y desconocida es DENEGAR',
+    (clave) => {
+      expect(rulesFromPermissionKeys([clave])).toEqual([]);
+      expect(abilityFor([clave, 'facturas.ver']).can('create', 'Factura')).toBe(
+        false,
+      );
+    },
+  );
+
   it('sin claves no concede ningún permiso', () => {
     const ability = abilityFor([]);
 

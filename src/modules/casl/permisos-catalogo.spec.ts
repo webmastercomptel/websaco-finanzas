@@ -117,6 +117,23 @@ describe('moduloDePermiso', () => {
     expect(moduloDePermiso('facturas.eliminar')).toBeNull();
     expect(moduloDePermiso('facturas')).toBeNull();
   });
+
+  it.each([
+    'constructor.ver',
+    '__proto__.ver',
+    'toString.ver',
+    'hasOwnProperty.ver',
+    'facturas.constructor',
+    'facturas.__proto__',
+    'facturas.toString',
+    'pqr.constructor',
+    'pqr.__proto__',
+  ])(
+    '%s hereda de Object.prototype: no es una clave, es desconocida',
+    (clave) => {
+      expect(moduloDePermiso(clave)).toBeNull();
+    },
+  );
 });
 
 describe('permisosDesconocidos', () => {

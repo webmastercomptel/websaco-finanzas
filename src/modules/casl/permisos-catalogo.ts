@@ -58,12 +58,14 @@ export function moduloDePermiso(clave: string): ModuloProducto | null {
   const partes = clave.split('.');
   if (partes.length !== 2) return null;
   const [segmento, verbo] = partes;
+  // Own properties only: `constructor.ver` or `facturas.__proto__` would
+  // otherwise resolve through Object.prototype and read as a known key.
+  if (!Object.hasOwn(MODULO_DE_SEGMENTO, segmento)) return null;
   const modulo = MODULO_DE_SEGMENTO[segmento];
-  if (!modulo) return null;
   if (modulo === 'administracion') {
     return esPermisoAdministracion(clave) ? modulo : null;
   }
-  return verbo in VERB_TO_ACTION ? modulo : null;
+  return Object.hasOwn(VERB_TO_ACTION, verbo) ? modulo : null;
 }
 
 type SujetoFinanciero =
