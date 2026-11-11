@@ -46,7 +46,7 @@ function posicionApertura(codigo: string): number {
 
 describe('scripts de src/seed que abren Mongo', () => {
   it('se detectan los scripts (si esta lista queda vacía, el resto de la spec no prueba nada)', () => {
-    expect(scripts.length).toBeGreaterThanOrEqual(7);
+    expect(scripts.length).toBeGreaterThanOrEqual(8);
   });
 
   describe.each(scripts)('$nombre', ({ codigo }) => {

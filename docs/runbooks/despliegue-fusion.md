@@ -19,6 +19,9 @@ BUCKET=<FIREBASE_STORAGE_BUCKET value>
 
 1. **Pre-flight** (section 10), including a rollback target noted down.
 2. **Mongo indexes** that boot cannot create safely (section 7).
+   If the release carries the team-delegation change, also run its permission-key
+   conversion script here, BEFORE the backend starts: `equipo-delegacion.md`
+   (`npm run revisar:claves-finanzas-latentes`). Not detectable by readiness.
 3. **Bucket** settings: CORS, UBLA, public access prevention (section 5).
 4. **Env vars and secrets** on the service (section 3), before the new revision starts:
    readiness fails loudly on a half-set Comptable or SendGrid pair.
@@ -354,3 +357,4 @@ a frontend older than the backend keeps working, one newer than the backend does
 | `SENTRY_DSN`, `APP_ROLE`, `NODE_OPTIONS` | No: all optional, default behaviour unchanged |
 | Index scripts of section 7 | No: a missing unique index is silent (check by hand) |
 | Removing `WEBSACO3_*` | No (harmless if left) |
+| Permission-key conversion (`revisar:claves-finanzas-latentes`, read-only first, then `--aplicar`, BEFORE the backend deploy; `--retirar-gestionar` only after the release is accepted) | No: after the deploy a Finanzas key on a `personal` row is legitimate, so no indicator can tell a missed strip from a real grant. Full steps, freeze note and rollback: `equipo-delegacion.md` |

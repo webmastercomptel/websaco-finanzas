@@ -25,7 +25,8 @@
     "clear:demo": "ts-node src/seed/clear-demo.ts",
     "migrar:nombre-propio": "ts-node src/seed/migrar-nombre-propio.ts",
     "limpiar:indices-ingles": "ts-node src/seed/limpiar-indices-ingles.ts",
-    "sembrar:consecutivos": "ts-node src/seed/sembrar-consecutivos.ts"
+    "sembrar:consecutivos": "ts-node src/seed/sembrar-consecutivos.ts",
+    "revisar:claves-finanzas-latentes": "ts-node src/seed/claves-finanzas-latentes.ts"
   },
   "dependencies": {
     "@casl/ability": "^7.0.1",
