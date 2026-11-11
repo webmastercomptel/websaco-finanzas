@@ -64,7 +64,7 @@ export class CrearUsuarioDto {
   @IsArray()
   @IsString({ each: true })
   permisos?: string[];
-  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
+  /** Who manages the row (`personal` is the team member of /equipo); it never limits the keys. */ @IsOptional()
   @IsIn(PERFILES_ASIGNACION)
   perfil?: PerfilAsignacion;
 }
@@ -110,7 +110,7 @@ export class ActualizarUsuarioDto {
   @IsArray()
   @IsString({ each: true })
   permisos?: string[];
-  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
+  /** Who manages the row (`personal` is the team member of /equipo); it never limits the keys. */ @IsOptional()
   @IsIn(PERFILES_ASIGNACION)
   perfil?: PerfilAsignacion;
 

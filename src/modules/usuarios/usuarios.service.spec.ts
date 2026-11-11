@@ -926,7 +926,7 @@ describe('UsuariosService.update', () => {
   });
 });
 
-describe('UsuariosService — techo duro del personal operativo', () => {
+describe('UsuariosService — claves de permiso: solo se rechazan las desconocidas', () => {
   const COP = new Types.ObjectId().toString();
   const base = {
     nombre: 'Luis',
@@ -948,25 +948,143 @@ describe('UsuariosService — techo duro del personal operativo', () => {
     return { service, crear, accounts, asignacionesModel };
   };
 
-  it('rechaza con 400 permisos de finanzas para el personal, ANTES de tocar Firebase', async () => {
-    const { service, crear } = servicio();
+  it('el personal puede recibir claves de Finanzas: el perfil solo dice quién gestiona la fila', async () => {
+    const { service, crear, asignacionesModel } = servicio();
 
-    await expect(
-      service.create(
-        { ...base, perfil: 'personal', permisos: ['facturas.ver'] },
-        ACTOR,
-      ),
-    ).rejects.toThrow(BadRequestException);
-    expect(crear).not.toHaveBeenCalled();
+    await service.create(
+      { ...base, perfil: 'personal', permisos: ['facturas.ver', 'pqr.ver'] },
+      ACTOR,
+    );
+
+    expect(crear).toHaveBeenCalledTimes(1);
+    expect(asignacionesModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        perfil: 'personal',
+        permisos: ['facturas.ver', 'pqr.ver'],
+      }),
+    );
   });
 
-  it('rechaza con 400 claves de permiso que no existen en el catálogo', async () => {
+  it('rechaza con 400 claves de permiso que no existen en el catálogo, ANTES de tocar Firebase', async () => {
     const { service, crear } = servicio();
 
     await expect(
       service.create({ ...base, permisos: ['facturas.eliminar'] }, ACTOR),
     ).rejects.toThrow(/facturas\.eliminar/);
     expect(crear).not.toHaveBeenCalled();
+  });
+
+  it('lo mismo con perfil personal: una clave desconocida es 400 y no crea nada', async () => {
+    const { service, crear, asignacionesModel } = servicio();
+
+    await expect(
+      service.create(
+        { ...base, perfil: 'personal', permisos: ['facturas.gestionar'] },
+        ACTOR,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(crear).not.toHaveBeenCalled();
+    expect(asignacionesModel.create).not.toHaveBeenCalled();
+  });
+
+  it('actualizar el mismo destino de una fila personal con claves de Finanzas las guarda', async () => {
+    const cuenta = cuentaDoc();
+    const copId = new Types.ObjectId();
+    const actual = asignacionDoc({
+      accountId: cuenta._id,
+      copropiedadId: copId,
+      perfil: 'personal',
+      permisos: ['pqr.ver'],
+    });
+    const { accounts, asignacionesModel } = construirModelos({
+      cuentas: [cuenta],
+      asignaciones: [actual],
+    });
+    const { firebase } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+
+    await service.update(
+      cuenta._id.toString(),
+      {
+        alcance: 'copropiedad',
+        copropiedadId: copId.toString(),
+        permisos: ['facturas.ver', 'pqr.ver'],
+      },
+      ACTOR,
+    );
+
+    expect(actual.perfil).toBe('personal');
+    expect(actual.permisos).toEqual(['facturas.ver', 'pqr.ver']);
+    expect(asignacionesModel.create).not.toHaveBeenCalled();
+  });
+
+  it('actualizar con una clave desconocida es 400 antes de tocar la cuenta', async () => {
+    const cuenta = cuentaDoc();
+    const { accounts, asignacionesModel } = construirModelos({
+      cuentas: [cuenta],
+      asignaciones: [],
+    });
+    const { firebase, establecerHabilitado } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+
+    await expect(
+      service.update(
+        cuenta._id.toString(),
+        {
+          estado: 'inactivo',
+          perfil: 'personal',
+          permisos: ['facturas.gestionar'],
+        },
+        ACTOR,
+      ),
+    ).rejects.toThrow(BadRequestException);
+    expect(establecerHabilitado).not.toHaveBeenCalled();
+    expect(cuenta.save).not.toHaveBeenCalled();
+  });
+
+  it('una fila con una clave heredada desconocida sigue pudiendo guardarse sin reenviar permisos', async () => {
+    // Stored keys are never judged: only what the request itself sends.
+    const cuenta = cuentaDoc();
+    const copId = new Types.ObjectId();
+    const actual = asignacionDoc({
+      accountId: cuenta._id,
+      copropiedadId: copId,
+      permisos: ['facturas.gestionar', 'facturas.ver'],
+    });
+    const { accounts, asignacionesModel } = construirModelos({
+      cuentas: [cuenta],
+      asignaciones: [actual],
+    });
+    const { firebase } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+
+    await service.update(
+      cuenta._id.toString(),
+      {
+        alcance: 'copropiedad',
+        copropiedadId: copId.toString(),
+        perfil: 'personal',
+      },
+      ACTOR,
+    );
+
+    expect(actual.perfil).toBe('personal');
+    expect(actual.permisos).toEqual(['facturas.gestionar', 'facturas.ver']);
   });
 
   it('un perfil administrativo conserva sus permisos de finanzas', async () => {

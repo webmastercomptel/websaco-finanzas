@@ -1,11 +1,10 @@
+import * as catalogo from './permisos-catalogo';
 import {
   esPermisoAdministracion,
   moduloDePermiso,
   PERMISOS_ADMINISTRACION,
   permisosDesconocidos,
-  permisosVetadosParaPerfil,
   puedeLeerMateria,
-  sinPermisosVetados,
 } from './permisos-catalogo';
 import { createAppAbility } from './casl-ability.constants';
 import { rulesFromPermissionKeys } from './permission-map';
@@ -59,13 +58,12 @@ describe('PERMISOS_ADMINISTRACION (catálogo que ofrece el editor de roles)', ()
     expect(habilidad.can('remove', 'Factura')).toBe(false);
   });
 
-  it('roles.ver es una clave de Administración del grupo Configuración y permite el perfil personal', () => {
+  it('roles.ver es una clave de Administración del grupo Configuración', () => {
     const entrada = PERMISOS_ADMINISTRACION.find((p) => p.id === 'roles.ver');
 
     expect(entrada).toBeDefined();
     expect(entrada?.modulo).toBe('Configuración');
     expect(moduloDePermiso('roles.ver')).toBe('administracion');
-    expect(permisosVetadosParaPerfil('personal', ['roles.ver'])).toEqual([]);
   });
 
   it('roles.ver solo permite leer roles; roles.gestionar sigue cubriéndolo todo', () => {
@@ -131,20 +129,17 @@ describe('permisosDesconocidos', () => {
   });
 });
 
-describe('techo duro por perfil', () => {
-  const claves = ['facturas.ver', 'recibos.crear'];
-
-  it('el personal operativo no puede tener ninguna clave de finanzas', () => {
-    expect(permisosVetadosParaPerfil('personal', claves)).toEqual(claves);
+describe('el perfil ya no limita qué claves puede tener una fila', () => {
+  it('no existe ningún veto por perfil: ni al escribir ni al leer', () => {
+    expect(catalogo).not.toHaveProperty('permisosVetadosParaPerfil');
+    expect(catalogo).not.toHaveProperty('sinPermisosVetados');
   });
 
-  it('el perfil administrativo no tiene vetos', () => {
-    expect(permisosVetadosParaPerfil('administrativo', claves)).toEqual([]);
-  });
-
-  it('sinPermisosVetados recorta al leer: el personal queda sin claves de finanzas', () => {
-    expect(sinPermisosVetados('personal', claves)).toEqual([]);
-    expect(sinPermisosVetados('administrativo', claves)).toEqual(claves);
+  it('el perfil sigue siendo un dato de quién gestiona la fila', () => {
+    expect([...catalogo.PERFILES_ASIGNACION]).toEqual([
+      'administrativo',
+      'personal',
+    ]);
   });
 });
 
@@ -173,17 +168,5 @@ describe('claves de Administración', () => {
   it('un verbo propio de Administración no vale en un módulo financiero', () => {
     expect(moduloDePermiso('facturas.eliminar')).toBeNull();
     expect(moduloDePermiso('recibos.subir')).toBeNull();
-  });
-
-  it('el personal operativo puede tener claves de Administración pero no de Finanzas', () => {
-    const claves = ['anuncios.ver', 'pqr.gestionar', 'facturas.ver'];
-
-    expect(permisosVetadosParaPerfil('personal', claves)).toEqual([
-      'facturas.ver',
-    ]);
-    expect(sinPermisosVetados('personal', claves)).toEqual([
-      'anuncios.ver',
-      'pqr.gestionar',
-    ]);
   });
 });

@@ -1,9 +1,11 @@
 // src/modules/casl/permisos-catalogo.ts
 //
-// Which product module owns each permission key, and the hard ceiling that
-// keeps operational staff out of Finanzas. Pure functions over the same maps
+// Which product module owns each permission key, which Finanzas keys exist for
+// real, and the Administración catalog. Pure functions over the same maps
 // `permission-map.ts` uses to build abilities, so the two can never disagree
-// about what a key means.
+// about what a key means. Any assignment may hold any known key, whatever its
+// profile: `perfil` only says who may manage the row (see `PERFILES_ASIGNACION`); what a team member may be given is decided by the
+// delegation cap (`delegacion.ts`), not by this file.
 import type { ModuloProducto } from '../../common/licencia/modulos';
 import {
   createAppAbility,
@@ -17,7 +19,13 @@ import {
   VERB_TO_ACTION,
 } from './permission-map';
 
-/** `administrativo` runs the coproperty; `personal` is operational staff. */
+/**
+ * `administrativo` runs the coproperty; `personal` is the team member added from
+ * `/equipo`. The profile says WHO MANAGES the row (only a platform admin edits an
+ * `administrativo` one, `/equipo` manages `personal` ones) and drives the header
+ * label, notice recipients and the sign-in-link rule. It never limits which
+ * permission keys the row may hold.
+ */
 export const PERFILES_ASIGNACION = ['administrativo', 'personal'] as const;
 export type PerfilAsignacion = (typeof PERFILES_ASIGNACION)[number];
 
@@ -355,26 +363,4 @@ export function puedeLeerMateria(
 /** Keys that are not in the catalog (typos, removed verbs, invented modules). */
 export function permisosDesconocidos(claves: readonly string[]): string[] {
   return claves.filter((c) => moduloDePermiso(c) === null);
-}
-
-/**
- * Keys this profile may never hold. Operational staff never touch Finanzas,
- * whatever a role editor sends: this is the ceiling, enforced on write and
- * again on read.
- */
-export function permisosVetadosParaPerfil(
-  perfil: PerfilAsignacion,
-  claves: readonly string[],
-): string[] {
-  if (perfil !== 'personal') return [];
-  return claves.filter((c) => moduloDePermiso(c) === 'finanzas');
-}
-
-/** The keys that survive the ceiling for this profile (applied when reading). */
-export function sinPermisosVetados(
-  perfil: PerfilAsignacion,
-  claves: readonly string[],
-): string[] {
-  const vetados = new Set(permisosVetadosParaPerfil(perfil, claves));
-  return claves.filter((c) => !vetados.has(c));
 }

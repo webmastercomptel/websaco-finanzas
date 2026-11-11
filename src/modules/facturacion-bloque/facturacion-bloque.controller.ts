@@ -35,9 +35,12 @@ import { FacturacionBloqueService } from './facturacion-bloque.service';
  * invoice pipeline replaces it, so nothing outside imports it.
  *
  * Every route is gated by a FINANZAS key on `Factura`, never an Administración
- * one: these PDFs are every unit's invoices and statements of account, so the
- * `personal` ceiling (`permisosVetadosParaPerfil`) must strip access, and roles
- * or `/equipo` (which only carry Administración keys) can never hand it out.
+ * one: these PDFs are every unit's invoices and statements of account. The
+ * profile does not matter: a `personal` team member who holds the invoice keys
+ * reaches the routes like anybody else, and `/equipo` or a role can hand those
+ * keys out only to someone who is allowed to receive them from a person who
+ * holds them (the delegation cap, `casl/delegacion.ts`). Without them, no
+ * Administración key opens anything here.
  *
  * - `create Factura` (`facturas.crear`) for list, detail, upload, ingest and the
  *   original. NOT `read`: these routes expose every unit's documents at once.

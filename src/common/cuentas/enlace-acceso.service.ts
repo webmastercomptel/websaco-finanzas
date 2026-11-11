@@ -42,7 +42,9 @@ const hashDe = (token: string): string =>
  *   building: `X-CoProperty-Id` can then name any coproperty the account
  *   reaches, so the check must cover all of them. A forwarded email must not be
  *   a way into the financial side; those people sign in normally. Residents and
- *   operational staff are the audience.
+ *   team members with no Finanzas key (Administración keys only) are the
+ *   audience: since a `personal` member can now hold Finanzas keys, the first
+ *   Finanzas key granted anywhere ends the link, built or already emailed.
  * - Checked twice: when the link is built, and again when it is redeemed, so a
  *   permission granted after the email went out removes the link's power.
  * - Only the SHA-256 of the token is stored, and the landing path must be a

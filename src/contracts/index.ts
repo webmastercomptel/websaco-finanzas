@@ -1999,8 +1999,8 @@ export interface CopropiedadAccesible extends CopropiedadResumen {
   /** The caller holds a unit here as owner or tenant (portal access). */
   esResidente: boolean;
   /**
-   * The caller's EFFECTIVE permission keys here (after the profile ceiling and
-   * the role merge — exactly what the guards evaluate). Empty for a
+   * The caller's EFFECTIVE permission keys here (direct keys plus those of the
+   * roles it names, unknown keys dropped — exactly what the guards evaluate). Empty for a
    * resident-only account and for a platform administrator (that one is told
    * apart by `AuthMe.esAdministradorPlataforma`). A courtesy for the client to
    * filter its menu: the server revalidates every request, so exposing it

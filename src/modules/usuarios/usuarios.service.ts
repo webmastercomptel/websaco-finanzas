@@ -27,17 +27,19 @@ import type {
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
   permisosDesconocidos,
-  permisosVetadosParaPerfil,
   type PerfilAsignacion,
 } from '../casl/permisos-catalogo';
 
 /**
- * Rejects a permission list that names keys outside the catalog, or that gives
- * operational staff anything of Finanzas (the hard ceiling). Runs before any
- * side effect, so a refused request leaves nothing half-created.
+ * Rejects a permission list that names keys outside the catalog. That is the
+ * ONLY rule: the console is platform-admin only, so there is no delegation cap
+ * here, and the profile never limits the keys (a `personal` row may hold
+ * Finanzas keys; `perfil` only says who manages the row). It judges what the
+ * request SENDS, never what is stored, so a legacy key already on a row never
+ * blocks saving it. Runs before any side effect, so a refused request leaves
+ * nothing half-created.
  */
 const exigirPermisosValidos = (
-  perfil: PerfilAsignacion,
   permisos: readonly string[] | undefined,
 ): void => {
   if (!permisos || permisos.length === 0) return;
@@ -45,12 +47,6 @@ const exigirPermisosValidos = (
   if (desconocidos.length > 0) {
     throw new BadRequestException(
       `Permisos que no existen: ${desconocidos.join(', ')}`,
-    );
-  }
-  const vetados = permisosVetadosParaPerfil(perfil, permisos);
-  if (vetados.length > 0) {
-    throw new BadRequestException(
-      `El personal operativo no puede tener permisos de Finanzas: ${vetados.join(', ')}`,
     );
   }
 };
@@ -178,7 +174,7 @@ export class UsuariosService {
   ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
     const perfil = dto.perfil ?? 'administrativo';
-    exigirPermisosValidos(perfil, dto.permisos);
+    exigirPermisosValidos(dto.permisos);
 
     const yaExiste = await this.accounts.exists({ email: correo }).exec();
     if (yaExiste) {
@@ -243,13 +239,7 @@ export class UsuariosService {
     dto: ActualizarUsuarioDto,
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
-    // Only what the request itself says is checkable here; the combination with
-    // the stored profile is checked when the assignment is written.
-    if (dto.perfil !== undefined) {
-      exigirPermisosValidos(dto.perfil, dto.permisos);
-    } else {
-      exigirPermisosValidos('administrativo', dto.permisos);
-    }
+    exigirPermisosValidos(dto.permisos);
 
     const cuenta = await this.accounts.findById(id).exec();
     if (!cuenta) {
@@ -341,14 +331,8 @@ export class UsuariosService {
         ? igualId(actual.copropiedadId, copropiedadId)
         : igualId(actual.entidadId, entidadId));
 
-    // The profile that will apply, and the permissions it will hold: checked
-    // against the ceiling before anything is written.
     const perfil: PerfilAsignacion =
       dto.perfil ?? actual?.perfil ?? 'administrativo';
-    exigirPermisosValidos(
-      perfil,
-      dto.permisos ?? (mismoObjetivo ? actual.permisos : []),
-    );
 
     if (mismoObjetivo) {
       // Same target: changing what someone may do there is not the same
@@ -378,7 +362,6 @@ export class UsuariosService {
     if (existente && actual && existente._id.equals(actual._id)) {
       // Second guard: the lookup found the row we are about to retire, so this
       // is the same target after all. Edit in place; never deactivate it.
-      exigirPermisosValidos(perfil, dto.permisos ?? actual.permisos);
       actual.permisos = dto.permisos ?? actual.permisos;
       actual.perfil = perfil;
       await actual.save();

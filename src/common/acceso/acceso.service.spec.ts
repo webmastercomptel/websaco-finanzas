@@ -537,16 +537,54 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
     expect(resultado.permissions).toEqual(['facturas.ver']);
   });
 
-  it('un rol no puede aportar permisos de finanzas ni claves desconocidas', async () => {
+  it('un rol aporta sus claves de Finanzas y de Administración, pero no las desconocidas', async () => {
     const service = servicio({
       asignaciones: [directa({ permisos: [] })],
       copropiedades: [copropiedad(copA, 'COP-A')],
-      roles: [rol(rolA, ['facturas.anular', 'pqr.ver', 'inventada.ver'])],
+      roles: [
+        rol(rolA, [
+          'facturas.anular',
+          'pqr.ver',
+          'inventada.ver',
+          'facturas.gestionar',
+        ]),
+      ],
     });
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual(['pqr.ver']);
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.anular',
+      'pqr.ver',
+    ]);
+  });
+
+  it('un rol de OTRA copropiedad no aporta ni sus claves de Finanzas', async () => {
+    const service = servicio({
+      asignaciones: [directa({ permisos: [] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['facturas.anular'], copB)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([]);
+  });
+
+  it('une sin duplicados una clave que está en la asignación y en el rol', async () => {
+    const service = servicio({
+      asignaciones: [directa({ permisos: ['facturas.ver', 'pqr.ver'] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['facturas.ver', 'tareas.ver'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.ver',
+      'pqr.ver',
+      'tareas.ver',
+    ]);
   });
 
   it('el personal conserva los permisos de Administración de su rol', async () => {
@@ -595,15 +633,15 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
   });
 });
 
-describe('AccesoService techo duro al leer', () => {
-  it('una asignación de perfil personal pierde las claves de finanzas aunque estén guardadas', async () => {
+describe('AccesoService: el perfil no recorta permisos al leer', () => {
+  it('una asignación de perfil personal conserva sus claves de Finanzas', async () => {
     const service = servicio({
       asignaciones: [
         {
           alcance: 'copropiedad',
           copropiedadId: copA,
           perfil: 'personal',
-          permisos: ['facturas.ver', 'recibos.crear'],
+          permisos: ['facturas.ver', 'recibos.crear', 'pqr.ver'],
         },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
@@ -611,10 +649,14 @@ describe('AccesoService techo duro al leer', () => {
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual([]);
+    expect(resultado.permissions).toEqual([
+      'facturas.ver',
+      'recibos.crear',
+      'pqr.ver',
+    ]);
   });
 
-  it('el recorte también aplica a un grant por entidad', async () => {
+  it('un grant por entidad de perfil personal llega a cada edificio administrado', async () => {
     const service = servicio({
       asignaciones: [
         {
@@ -625,12 +667,71 @@ describe('AccesoService techo duro al leer', () => {
         },
       ],
       entidades: [{ _id: entidadA }],
+      copropiedades: [
+        copropiedad(copA, 'COP-A', entidadA),
+        copropiedad(copB, 'COP-B', entidadA),
+      ],
+    });
+
+    const resultado = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.map((c) => c.permissions)).toEqual([
+      ['facturas.ver'],
+      ['facturas.ver'],
+    ]);
+  });
+
+  it('una fila directa y un grant por entidad sobre el mismo edificio se unen sin duplicados', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'recibos.crear'],
+        },
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'facturas.anular'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
       copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
     });
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual([]);
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.anular',
+      'facturas.ver',
+      'recibos.crear',
+    ]);
+  });
+
+  it('la clave de un módulo no contratado se conserva en la lista (la ruta responde 403 por licencia)', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'pqr.ver'],
+        },
+      ],
+      copropiedades: [
+        {
+          ...copropiedad(copA, 'COP-A'),
+          modulosContratados: ['administracion'],
+        },
+      ],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.modulos).toEqual(['administracion']);
+    expect(resultado.permissions).toEqual(['facturas.ver', 'pqr.ver']);
   });
 
   it('una asignación sin perfil (legado) se trata como administrativa', async () => {

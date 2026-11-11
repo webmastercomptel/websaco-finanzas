@@ -29,28 +29,22 @@ import {
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
 import {
   moduloDePermiso,
-  sinPermisosVetados,
   type PerfilAsignacion,
 } from '../../modules/casl/permisos-catalogo';
 
 /**
- * Permissions an assignment really grants: the hard ceiling is applied on
- * read too, so a row written before the ceiling existed (or edited straight in
- * the database) can never hand Finanzas to operational staff.
+ * Only KNOWN keys (`moduloDePermiso !== null`, Finanzas and Administración)
+ * are returned, whatever their `perfil`: the profile never cuts permissions.
+ * An unknown stored key grants nothing (`rulesFromPermissionKeys` skips it), so
+ * listing it would only show the frontend a dead key: the clearest case is a
+ * Finanzas `x.gestionar` saved before that verb was retired.
  *
- * Only KNOWN keys are returned (`moduloDePermiso !== null`). An unknown stored
- * key grants nothing (`rulesFromPermissionKeys` skips it), so listing it would
- * only show the frontend a dead key: the clearest case is a Finanzas
- * `x.gestionar` saved before that verb was retired.
+ * A key of a module the coproperty did not contract stays in the list: it is
+ * inert (every route carries its `@Modulo`), and contracting the module later
+ * activates it with no data change.
  */
-const permisosEfectivosDe = (a: {
-  perfil?: PerfilAsignacion;
-  permisos: string[];
-}): string[] =>
-  sinPermisosVetados(
-    a.perfil ?? 'administrativo',
-    a.permisos.filter((clave) => moduloDePermiso(clave) !== null),
-  );
+const clavesConocidas = (claves: readonly string[]): string[] =>
+  claves.filter((clave) => moduloDePermiso(clave) !== null);
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {
@@ -99,13 +93,13 @@ export class AccesoService {
   ) {}
 
   /**
-   * Administración keys and the display name contributed by the roles of each
-   * direct grant, keyed by coproperty id. Three filters keep a role from ever widening access beyond
-   * its purpose: only roles the grant names, only roles of the grant's own
-   * coproperty (the query returns by id, so this is checked here, not trusted),
-   * and only Administración keys — a Finanzas or unknown key inside a role is
-   * dropped, whatever got it there. One query for all grants, none when no grant
-   * names a role.
+   * Known keys (Finanzas and Administración) and the display name contributed
+   * by the roles of each direct grant, keyed by coproperty id. Three filters
+   * keep a role from ever widening access beyond its purpose: only roles the
+   * grant names, only roles of the grant's own coproperty (the query returns by
+   * id, so this is checked here, not trusted), and only known keys — an unknown
+   * key inside a role is dropped, whatever got it there. One query for all
+   * grants, none when no grant names a role.
    */
   private async permisosDeRoles(
     directas: Array<{
@@ -138,7 +132,7 @@ export class AccesoService {
         // The label shows one role: the first valid one the grant names.
         nombre ??= rol.nombre?.trim() || null;
         for (const clave of rol.permisos ?? []) {
-          if (moduloDePermiso(clave) === 'administracion') claves.add(clave);
+          if (moduloDePermiso(clave) !== null) claves.add(clave);
         }
       }
       aportes.set(propia, { claves: [...claves], nombre });
@@ -244,14 +238,9 @@ export class AccesoService {
       if (!a.copropiedadId) continue;
       const id = a.copropiedadId.toString();
       const delRol = deRoles.get(id);
-      // The ceiling applies to the union, so a role can never lift it either.
-      acumular(
-        id,
-        permisosEfectivosDe({
-          perfil: a.perfil,
-          permisos: [...a.permisos, ...(delRol?.claves ?? [])],
-        }),
-      );
+      // Direct keys plus those of the roles the grant names (already known
+      // keys): the union is what the member holds here, whatever the profile.
+      acumular(id, [...clavesConocidas(a.permisos), ...(delRol?.claves ?? [])]);
       anotarPerfil(id, a.perfil ?? 'administrativo');
       if (delRol?.nombre) rolNombrePorCopropiedad.set(id, delRol.nombre);
     }
@@ -297,7 +286,7 @@ export class AccesoService {
         for (const a of deEntidadesActivas) {
           permisosPorEntidad.set(
             a.entidadId!.toString(),
-            permisosEfectivosDe(a),
+            clavesConocidas(a.permisos),
           );
           perfilPorEntidad.set(
             a.entidadId!.toString(),
