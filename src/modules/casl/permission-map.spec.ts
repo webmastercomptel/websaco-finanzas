@@ -1,6 +1,8 @@
 import { createAppAbility, ACTIONS } from './casl-ability.constants';
+import { PERMISOS_ADMINISTRACION } from './permisos-catalogo';
 import {
   MODULE_TO_SUBJECT,
+  MODULE_TO_SUBJECT_ADMINISTRACION,
   VERB_TO_ACTION,
   VERB_TO_ACTION_ADMINISTRACION,
   rulesFromPermissionKeys,
@@ -563,6 +565,72 @@ describe('permisos de Administración', () => {
 
     for (const sujeto of Object.values(MODULE_TO_SUBJECT)) {
       expect(ability.can('read', sujeto)).toBe(false);
+    }
+  });
+});
+
+describe('verbos de Administración: no heredan los verbos solo de Finanzas', () => {
+  // The vocabulary every catalogued Administración key uses today. Pinned
+  // literally so a refactor of the tables cannot move any of them.
+  const ACCION_POR_VERBO_ADMINISTRACION = {
+    ver: 'read',
+    crear: 'create',
+    editar: 'update',
+    aprobar: 'approve',
+    gestionar: 'manage',
+    subir: 'create',
+    actualizar: 'update',
+    eliminar: 'remove',
+  } as const;
+
+  it('cada clave catalogada de Administración se traduce como siempre', () => {
+    expect(PERMISOS_ADMINISTRACION.length).toBeGreaterThan(0);
+    for (const { id } of PERMISOS_ADMINISTRACION) {
+      const [segmento, verbo] = id.split('.');
+      const accion =
+        ACCION_POR_VERBO_ADMINISTRACION[
+          verbo as keyof typeof ACCION_POR_VERBO_ADMINISTRACION
+        ];
+      const sujeto =
+        MODULE_TO_SUBJECT_ADMINISTRACION[
+          segmento as keyof typeof MODULE_TO_SUBJECT_ADMINISTRACION
+        ];
+
+      // The verb is one the catalog is known to use...
+      expect(accion).toBeDefined();
+      // ...and the key yields exactly that action on its own subject.
+      const reglas = rulesFromPermissionKeys([id]);
+      expect(createAppAbility(reglas).can(accion, sujeto)).toBe(true);
+      expect(reglas.filter((r) => !r.inverted).map((r) => r.action)).toEqual([
+        accion,
+      ]);
+    }
+  });
+
+  it('`x.depurar` sobre un segmento de Administración no concede nada', () => {
+    for (const segmento of Object.keys(MODULE_TO_SUBJECT_ADMINISTRACION)) {
+      expect(rulesFromPermissionKeys([`${segmento}.depurar`])).toEqual([]);
+    }
+    const ability = abilityFor(['pqr.depurar']);
+    expect(ability.can('purge', 'Pqr')).toBe(false);
+    expect(ability.can('read', 'Pqr')).toBe(false);
+  });
+
+  it('un verbo que se agregue solo a Finanzas tampoco llega a Administración', () => {
+    const usados = new Set<string>(
+      Object.keys(ACCION_POR_VERBO_ADMINISTRACION),
+    );
+    const soloFinanzas = Object.keys(VERB_TO_ACTION).filter(
+      (verbo) =>
+        !usados.has(verbo) && !(verbo in VERB_TO_ACTION_ADMINISTRACION),
+    );
+
+    // `depurar` is one today; anything added to VERB_TO_ACTION later lands here.
+    expect(soloFinanzas).toContain('depurar');
+    for (const verbo of soloFinanzas) {
+      for (const segmento of Object.keys(MODULE_TO_SUBJECT_ADMINISTRACION)) {
+        expect(rulesFromPermissionKeys([`${segmento}.${verbo}`])).toEqual([]);
+      }
     }
   });
 });

@@ -60,7 +60,8 @@ export const MODULE_TO_SUBJECT_ADMINISTRACION = {
 } satisfies Record<string, Subject>;
 
 /**
- * Verbs only the Administración keys understand, on top of `VERB_TO_ACTION`.
+ * Verbs only the Administración keys understand, on top of the few shared with
+ * `VERB_TO_ACTION` (`VERBOS_COMPARTIDOS_CON_ADMINISTRACION`).
  * `eliminar` -> `remove` is the one the financial side must never have.
  * `gestionar` -> `manage` lives here too: in Administración one key covering a
  * whole subject is the established vocabulary (`pqr.gestionar`), while in
@@ -100,6 +101,34 @@ export const VERB_TO_ACTION = {
 } satisfies Record<string, Action>;
 
 /**
+ * The verbs of `VERB_TO_ACTION` that Administración keys also use (`pqr.ver`,
+ * `tareas.aprobar`...). An explicit allow-list on purpose: Administración used
+ * to fall back to the whole financial table, so every verb added there later
+ * (`depurar` -> `purge`) would have silently become an Administración verb too.
+ * A Finanzas-only verb must be added to the financial table and nowhere else.
+ */
+const VERBOS_COMPARTIDOS_CON_ADMINISTRACION = [
+  'ver',
+  'crear',
+  'editar',
+  'aprobar',
+] as const satisfies ReadonlyArray<keyof typeof VERB_TO_ACTION>;
+
+/** CASL action of an Administración verb, or undefined when it is not one. */
+function accionDeAdministracion(verbo: string): Action | undefined {
+  if (Object.hasOwn(VERB_TO_ACTION_ADMINISTRACION, verbo)) {
+    return VERB_TO_ACTION_ADMINISTRACION[
+      verbo as keyof typeof VERB_TO_ACTION_ADMINISTRACION
+    ];
+  }
+  return (VERBOS_COMPARTIDOS_CON_ADMINISTRACION as readonly string[]).includes(
+    verbo,
+  )
+    ? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]
+    : undefined;
+}
+
+/**
  * Builds CASL rules from a role's permission keys. Platform admins get
  * `manage all` and the keys are ignored. Unknown or malformed keys are skipped
  * defensively, so a stray catalog entry can never crash authorization — note
@@ -134,13 +163,12 @@ export function rulesFromPermissionKeys(
       modulo as keyof typeof MODULE_TO_SUBJECT_ADMINISTRACION
     ] as Subject | undefined;
     const subject = financiero ?? administracion;
-    // Only the building-management side knows `subir`/`actualizar`/`eliminar`.
-    // A financial key with such a verb is simply unknown, which means DENY.
+    // Only the building-management side knows `subir`/`actualizar`/`eliminar`,
+    // and only Finanzas knows `depurar`. A key whose verb its side does not
+    // know is simply unknown, which means DENY.
     const action = financiero
       ? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]
-      : (VERB_TO_ACTION_ADMINISTRACION[
-          verbo as keyof typeof VERB_TO_ACTION_ADMINISTRACION
-        ] ?? VERB_TO_ACTION[verbo as keyof typeof VERB_TO_ACTION]);
+      : accionDeAdministracion(verbo);
     if (!subject || !action) continue;
     can(action, subject);
   }

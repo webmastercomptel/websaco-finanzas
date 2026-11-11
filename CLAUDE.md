@@ -208,6 +208,7 @@ A feature module is `modules/<name>/` with `<name>.module.ts/.controller.ts/.ser
 - Redis consumers: `LockService` (cron locks and the block-billing ingest lock) and `LimiteIntentosService` (fixed-window counter for the public access-link redeem; fails closed). One shared client; don't open ad-hoc ones.
 - `pdf-lib` (writing PDFs) is core. `pdfjs-dist` (exact version `6.2.108`, ESM) is used ONLY by the transitional block-billing adapter (`modules/facturacion-bloque/`) to detect units in externally produced PDFs; no financial module reads PDFs.
 - `npm run build` skips typechecking (`typeCheck: false`, SWC). A green build proves nothing about types — use `npm run typecheck`.
+- What the SWC build compiles into `dist/` is decided by `builder.options.ignore` in `nest-cli.json` (`**/*.spec.ts`, `**/testing/**`), NOT by the `exclude` of `tsconfig.build.json`, which the SWC builder never reads. Spec helpers go in a `testing/` folder (`modules/casl/testing/`, `modules/envio-facturas/testing/`) so they stay out of the image.
 
 ## Not here yet — do not assume it exists
 
