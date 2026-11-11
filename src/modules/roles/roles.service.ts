@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { siguienteNumero } from '../../common/consecutivos/codigo-consecutivo';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -59,8 +59,9 @@ const CLAVE_DUPLICADA = 11000;
  * module is contracted later.
  *
  * Every write is audited (`entidadTipo: 'rol'`, with `detalle` = the keys the
- * cap judged), deletion included. The entry is written after the change and
- * only when it succeeded, so a refused request leaves none.
+ * cap judged), deletion included. The change and its entry are written in one
+ * Mongo transaction (as `inmuebles-baja` does), so a failed audit write leaves
+ * no change behind, and a refused request leaves no entry.
  */
 @Injectable()
 export class RolesService {
@@ -74,7 +75,28 @@ export class RolesService {
     private readonly auditoria: AuditoriaService,
     @InjectModel(Account.name)
     private readonly cuentas: Model<AccountDocument>,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
+
+  /**
+   * Same shape as the other transactional services: `withTransaction` may
+   * re-run the callback on a transient error, so it must be safe to repeat (the
+   * writes below are keyed by id and, for the keys, conditional).
+   */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
 
   /** `ROL-001`, sequenced per coproperty (the key embeds it, the code does not). */
   private async siguienteCodigoDeRol(
@@ -104,16 +126,20 @@ export class RolesService {
     rol: { _id: Types.ObjectId | string; nombre: string },
     copropiedadId: Types.ObjectId,
     detalle: CambioDeClaves,
+    session: ClientSession,
   ): Promise<void> {
-    return this.auditoria.registrar({
-      actorAccountId: user.accountId!,
-      actorNombre: user.nombre ?? user.email,
-      accion,
-      entidadTipo: 'rol',
-      entidadId: rol._id.toString(),
-      entidadEtiqueta: `Rol: ${rol.nombre} (copropiedad ${copropiedadId.toString()})`,
-      detalle,
-    });
+    return this.auditoria.registrar(
+      {
+        actorAccountId: user.accountId!,
+        actorNombre: user.nombre ?? user.email,
+        accion,
+        entidadTipo: 'rol',
+        entidadId: rol._id.toString(),
+        entidadEtiqueta: `Rol: ${rol.nombre} (copropiedad ${copropiedadId.toString()})`,
+        detalle,
+      },
+      session,
+    );
   }
 
   async create(dto: CrearRolDto, user: IRequestUser): Promise<RolContrato> {
@@ -125,14 +151,31 @@ export class RolesService {
     const codigo = await this.siguienteCodigoDeRol(copropiedadId);
     let creado: RolDocument;
     try {
-      creado = await this.roles.create({
-        copropiedadId,
-        codigo,
-        nombre: dto.nombre,
-        descripcion: dto.descripcion ?? '',
-        ...(dto.color !== undefined && { color: dto.color }),
-        esPredeterminado: dto.esPredeterminado ?? false,
-        permisos,
+      creado = await this.transaccion(async (session) => {
+        // The array form is what lets Mongoose take options (the session).
+        const [nuevo] = await this.roles.create(
+          [
+            {
+              copropiedadId,
+              codigo,
+              nombre: dto.nombre,
+              descripcion: dto.descripcion ?? '',
+              ...(dto.color !== undefined && { color: dto.color }),
+              esPredeterminado: dto.esPredeterminado ?? false,
+              permisos,
+            },
+          ],
+          { session },
+        );
+        await this.auditar(
+          user,
+          'crear',
+          nuevo,
+          copropiedadId,
+          cambio,
+          session,
+        );
+        return nuevo;
       });
     } catch (error: unknown) {
       if ((error as { code?: number }).code === CLAVE_DUPLICADA) {
@@ -140,7 +183,6 @@ export class RolesService {
       }
       throw error;
     }
-    await this.auditar(user, 'crear', creado, copropiedadId, cambio);
     return toRol(creado, 0);
   }
 
@@ -211,19 +253,33 @@ export class RolesService {
 
     let documento: RolDocument | null;
     try {
-      documento = await this.roles
-        .findOneAndUpdate(
-          {
-            _id: id,
+      documento = await this.transaccion(async (session) => {
+        const actualizado = await this.roles
+          .findOneAndUpdate(
+            {
+              _id: id,
+              copropiedadId,
+              ...(revisados !== undefined
+                ? filtroListaExacta('permisos', revisados)
+                : {}),
+            },
+            cambios,
+            { new: true, session },
+          )
+          .exec();
+        // No match, no change, no entry: the refusal is decided below.
+        if (actualizado) {
+          await this.auditar(
+            user,
+            'actualizar',
+            actualizado,
             copropiedadId,
-            ...(revisados !== undefined
-              ? filtroListaExacta('permisos', revisados)
-              : {}),
-          },
-          cambios,
-          { new: true },
-        )
-        .exec();
+            cambio,
+            session,
+          );
+        }
+        return actualizado;
+      });
     } catch (error: unknown) {
       if ((error as { code?: number }).code === CLAVE_DUPLICADA) {
         throw new ConflictException('Ya existe un rol con ese nombre');
@@ -238,7 +294,6 @@ export class RolesService {
     }
     if (!documento) throw new NotFoundException(`Rol ${id} no encontrado`);
 
-    await this.auditar(user, 'actualizar', documento, copropiedadId, cambio);
     return toRol(documento, await this.contarUsuarios(copropiedadId, id));
   }
 
@@ -330,14 +385,19 @@ export class RolesService {
         'No se puede eliminar un rol con usuarios asignados',
       );
     }
-    await this.roles.findOneAndDelete({ _id: id, copropiedadId }).exec();
-    await this.auditar(
-      user,
-      'eliminar',
-      actual,
-      copropiedadId,
-      cambioDeClaves(actual.permisos ?? [], []),
-    );
+    await this.transaccion(async (session) => {
+      await this.roles
+        .findOneAndDelete({ _id: id, copropiedadId }, { session })
+        .exec();
+      await this.auditar(
+        user,
+        'eliminar',
+        actual,
+        copropiedadId,
+        cambioDeClaves(actual.permisos ?? [], []),
+        session,
+      );
+    });
     return { id };
   }
 

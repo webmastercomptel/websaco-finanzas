@@ -191,22 +191,34 @@ function montar(opciones: Opciones = {}) {
         return a ? copia(a) : null;
       }),
     ),
-    create: jest.fn((doc: Omit<AsignacionFake, '_id'>) => {
-      if (
-        storeAsig.some(
-          (a) =>
-            mismo(a.accountId, doc.accountId) &&
-            mismo(a.copropiedadId, doc.copropiedadId),
-        )
-      ) {
-        return Promise.reject(Object.assign(new Error('dup'), { code: 11000 }));
-      }
-      const nueva = { _id: new Types.ObjectId(), ...doc };
-      storeAsig.push(nueva);
-      return Promise.resolve(nueva);
-    }),
+    create: jest.fn(
+      (
+        docs: Array<Omit<AsignacionFake, '_id'>>,
+        _opciones?: { session?: unknown },
+      ) => {
+        const [doc] = docs;
+        if (
+          storeAsig.some(
+            (a) =>
+              mismo(a.accountId, doc.accountId) &&
+              mismo(a.copropiedadId, doc.copropiedadId),
+          )
+        ) {
+          return Promise.reject(
+            Object.assign(new Error('dup'), { code: 11000 }),
+          );
+        }
+        const nueva = { _id: new Types.ObjectId(), ...doc };
+        storeAsig.push(nueva);
+        return Promise.resolve([nueva]);
+      },
+    ),
     updateOne: jest.fn(
-      (f: Record<string, unknown>, u: { $set: Record<string, unknown> }) =>
+      (
+        f: Record<string, unknown>,
+        u: { $set: Record<string, unknown> },
+        _opciones?: { session?: unknown },
+      ) =>
         consulta(() => {
           const a = storeAsig.find((x) => coincide(x as never, f));
           if (!a) return { matchedCount: 0 };
@@ -236,7 +248,11 @@ function montar(opciones: Opciones = {}) {
       return Promise.resolve(nueva);
     }),
     updateOne: jest.fn(
-      (f: { _id: Types.ObjectId }, u: { $set: Record<string, unknown> }) =>
+      (
+        f: { _id: Types.ObjectId },
+        u: { $set: Record<string, unknown> },
+        _opciones?: { session?: unknown },
+      ) =>
         consulta(() => {
           const c = storeCuentas.find((x) => mismo(x._id, f._id));
           if (c) Object.assign(c, u.$set);
@@ -321,6 +337,48 @@ function montar(opciones: Opciones = {}) {
   };
   const auditoria = { registrar: jest.fn().mockResolvedValue(undefined) };
   const tenant = { resolveCoPropertyId: jest.fn(() => COP) };
+  // A transaction that behaves like Mongo's where it matters here: what the
+  // callback wrote is undone when it throws. Rows are mutated in place, so the
+  // undo restores each stored object instead of swapping the arrays.
+  const sesiones: Array<{
+    withTransaction: (fn: () => Promise<void>) => Promise<void>;
+    endSession: jest.Mock;
+    deshecha: boolean;
+  }> = [];
+  const conexion = {
+    startSession: jest.fn(() => {
+      const sesion = {
+        deshecha: false,
+        endSession: jest.fn().mockResolvedValue(undefined),
+        withTransaction: async (fn: () => Promise<void>) => {
+          const foto = [storeAsig, storeCuentas].map((lista) => ({
+            lista,
+            filas: (lista as unknown as Array<Record<string, unknown>>).map(
+              (fila) => ({
+                fila,
+                antes: copia(fila),
+              }),
+            ),
+          }));
+          try {
+            await fn();
+          } catch (error) {
+            sesion.deshecha = true;
+            for (const { lista, filas } of foto) {
+              lista.length = 0;
+              for (const { fila, antes } of filas) {
+                Object.assign(fila, antes);
+                (lista as unknown[]).push(fila);
+              }
+            }
+            throw error;
+          }
+        },
+      };
+      sesiones.push(sesion);
+      return Promise.resolve(sesion);
+    }),
+  };
   const invitaciones = new InvitacionAccesoService(
     correo as never,
     enlaces as never,
@@ -335,9 +393,12 @@ function montar(opciones: Opciones = {}) {
     tenant as never,
     invitaciones,
     auditoria as never,
+    conexion as never,
   );
   return {
     servicio,
+    conexion,
+    sesiones,
     asignacionesModel,
     cuentasModel,
     rolesModel,
@@ -398,16 +459,19 @@ describe('EquipoService.crear — lo que sí hace', () => {
       }),
     );
     expect(m.asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        perfil: 'personal',
-        alcance: 'copropiedad',
-        entidadId: null,
-        estado: 'active',
-        permisos: ['tareas.ver'],
-      }),
+      [
+        expect.objectContaining({
+          perfil: 'personal',
+          alcance: 'copropiedad',
+          entidadId: null,
+          estado: 'active',
+          permisos: ['tareas.ver'],
+        }),
+      ],
+      { session: m.sesiones[0] },
     );
     expect(
-      String(m.asignacionesModel.create.mock.calls[0][0].copropiedadId),
+      String(m.asignacionesModel.create.mock.calls[0][0][0].copropiedadId),
     ).toBe(COP.toString());
     expect(m.auditoria.registrar).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -415,6 +479,7 @@ describe('EquipoService.crear — lo que sí hace', () => {
         accion: 'crear',
         entidadTipo: 'usuario',
       }),
+      expect.anything(),
     );
     expect(r).toMatchObject({
       cuentaExistente: false,
@@ -459,7 +524,7 @@ describe('EquipoService.crear — lo que sí hace', () => {
       actor(['tareas.ver', 'anuncios.ver']),
     );
 
-    expect(m.asignacionesModel.create.mock.calls[0][0].roleIds).toEqual([
+    expect(m.asignacionesModel.create.mock.calls[0][0][0].roleIds).toEqual([
       r1._id,
     ]);
     expect(r.miembro.roles).toEqual([
@@ -577,7 +642,7 @@ describe('EquipoService.crear — el techo de privilegios', () => {
       );
 
       expect(r.miembro.permisos).toEqual([clave]);
-      expect(m.asignacionesModel.create.mock.calls[0][0].permisos).toEqual([
+      expect(m.asignacionesModel.create.mock.calls[0][0][0].permisos).toEqual([
         clave,
       ]);
     },
@@ -714,7 +779,7 @@ describe('EquipoService.crear — el techo de privilegios', () => {
 
     await m.servicio.crear(hostil, actor(['tareas.ver']));
 
-    const creada = m.asignacionesModel.create.mock.calls[0][0];
+    const creada = m.asignacionesModel.create.mock.calls[0][0][0];
     expect(creada.perfil).toBe('personal');
     expect(creada.alcance).toBe('copropiedad');
     expect(creada.entidadId).toBeNull();
@@ -740,6 +805,7 @@ describe('EquipoService.crear — auditoría con detalle y enlace de acceso', ()
         entidadTipo: 'usuario',
         detalle: detalle(['pqr.ver', 'tareas.ver'], []),
       }),
+      expect.anything(),
     );
   });
 
@@ -851,7 +917,8 @@ describe('EquipoService.crear — cuentas que ya existen', () => {
     expect(m.cuentasModel.create).not.toHaveBeenCalled();
     expect(m.cuentasModel.updateOne).not.toHaveBeenCalled();
     expect(m.asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({ accountId: c._id, perfil: 'personal' }),
+      [expect.objectContaining({ accountId: c._id, perfil: 'personal' })],
+      { session: m.sesiones[0] },
     );
     expect(m.enviados[0].html).toContain('contraseña de siempre');
   });
@@ -956,6 +1023,7 @@ describe('EquipoService.crear — cuentas que ya existen', () => {
         accion: 'crear',
         detalle: detalle(['tareas.ver'], []),
       }),
+      expect.anything(),
     );
   });
 
@@ -1005,6 +1073,7 @@ describe('EquipoService.actualizar', () => {
         accion: 'actualizar',
         detalle: detalle(['anuncios.ver'], ['tareas.ver']),
       }),
+      expect.anything(),
     );
   });
 
@@ -1399,6 +1468,7 @@ describe('EquipoService.actualizar — el techo al agregar y al quitar', () => {
         accion: 'actualizar',
         detalle: detalle([], []),
       }),
+      expect.anything(),
     );
   });
 
@@ -1547,6 +1617,7 @@ describe('EquipoService.actualizar — el techo al agregar y al quitar', () => {
       expect.objectContaining({
         detalle: detalle(['facturas.ver', 'pqr.ver'], ['tareas.ver']),
       }),
+      expect.anything(),
     );
 
     m.auditoria.registrar.mockRejectedValueOnce(new Error('sin auditoría'));
@@ -1717,6 +1788,7 @@ describe('EquipoService.desactivar', () => {
         entidadId: c._id.toString(),
         detalle: detalle([], ['tareas.ver']),
       }),
+      expect.anything(),
     );
     const filtro = m.asignacionesModel.updateOne.mock.calls[0][0];
     expect(String(filtro.copropiedadId)).toBe(COP.toString());
@@ -1773,6 +1845,7 @@ describe('EquipoService.desactivar', () => {
         accion: 'retirar',
         detalle: detalle([], ['anuncios.ver', 'facturas.ver', 'tareas.ver']),
       }),
+      expect.anything(),
     );
   });
 
@@ -1788,6 +1861,7 @@ describe('EquipoService.desactivar', () => {
     expect(a.estado).toBe('inactive');
     expect(m.auditoria.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ detalle: detalle([], []) }),
+      expect.anything(),
     );
   });
 
@@ -2017,5 +2091,155 @@ describe('EquipoService.listar / obtener', () => {
     await expect(m.servicio.obtener('xx')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('EquipoService — el cambio y su entrada de auditoría van en una sola transacción', () => {
+  const caller = () =>
+    actor(['usuarios.eliminar', 'usuarios.editar', 'tareas.ver', 'pqr.ver']);
+  const sinAuditoria = (m: ReturnType<typeof montar>) =>
+    m.auditoria.registrar.mockRejectedValueOnce(new Error('sin auditoría'));
+
+  it('crear con cuenta nueva: la asignación y la entrada comparten sesión; la identidad y la cuenta quedan fuera', async () => {
+    const m = montar();
+
+    await m.servicio.crear(
+      { ...CREAR, permisos: ['tareas.ver'] },
+      actor(['usuarios.crear', 'tareas.ver']),
+    );
+
+    expect(m.sesiones).toHaveLength(1);
+    // The Account is written outside the transaction: no options, no session.
+    expect(m.cuentasModel.create.mock.calls[0]).toHaveLength(1);
+    expect(m.asignacionesModel.create.mock.calls[0][1]).toEqual({
+      session: m.sesiones[0],
+    });
+    expect(m.auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'crear' }),
+      m.sesiones[0],
+    );
+    expect(m.sesiones[0].endSession).toHaveBeenCalled();
+  });
+
+  it('crear: si la auditoría falla no queda la asignación (sin cambio guardado y sin entrada); la identidad y la cuenta inertes sí, y el reintento topa con la regla de cuenta existente', async () => {
+    const m = montar();
+    sinAuditoria(m);
+    const dto = { ...CREAR, permisos: ['tareas.ver'] };
+    const quien = actor(['usuarios.crear', 'tareas.ver']);
+
+    await expect(m.servicio.crear(dto, quien)).rejects.toThrow('sin auditoría');
+
+    expect(m.sesiones[0].deshecha).toBe(true);
+    expect(m.storeAsig).toHaveLength(0);
+    expect(m.storeCuentas).toHaveLength(1);
+    expect(m.identidades.has('nuevo@correo.co')).toBe(true);
+    expect(m.enviados).toHaveLength(0);
+    await expect(m.servicio.crear(dto, quien)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'CUENTA_EXISTENTE',
+      }) as unknown,
+    });
+    expect(m.firebase.crear).toHaveBeenCalledTimes(1);
+  });
+
+  it('crear vinculando una cuenta existente que reactiva su fila: si la auditoría falla la fila sigue inactiva y con sus claves viejas', async () => {
+    const c = cuenta({ email: 'nuevo@correo.co' });
+    const previa = asignacion(c._id, {
+      estado: 'inactive',
+      permisos: ['config.editar'],
+    });
+    const m = montar({ cuentas: [c], asignaciones: [previa] });
+    sinAuditoria(m);
+
+    await expect(
+      m.servicio.crear(
+        { ...CREAR, permisos: ['tareas.ver'], vincularExistente: true },
+        actor(['usuarios.crear', 'tareas.ver']),
+      ),
+    ).rejects.toThrow('sin auditoría');
+
+    expect(previa.estado).toBe('inactive');
+    expect(previa.permisos).toEqual(['config.editar']);
+    expect(m.asignacionesModel.updateOne.mock.calls[0][2]).toEqual({
+      session: m.sesiones[0],
+    });
+  });
+
+  it('actualizar: claves, nombre y entrada comparten sesión; si la auditoría falla no cambia ni lo uno ni lo otro', async () => {
+    const c = cuenta();
+    const a = asignacion(c._id, { permisos: ['tareas.ver'] });
+    const m = montar({ cuentas: [c], asignaciones: [a] });
+    sinAuditoria(m);
+
+    await expect(
+      m.servicio.actualizar(
+        a._id.toString(),
+        { permisos: ['tareas.ver', 'pqr.ver'], nombre: 'Nombre Nuevo' },
+        caller(),
+      ),
+    ).rejects.toThrow('sin auditoría');
+
+    expect(m.sesiones[0].deshecha).toBe(true);
+    expect(a.permisos).toEqual(['tareas.ver']);
+    expect(c.nombreCompleto).toBe('Persona Uno');
+    expect(m.asignacionesModel.updateOne.mock.calls[0][2]).toEqual({
+      session: m.sesiones[0],
+    });
+    expect(m.cuentasModel.updateOne.mock.calls[0][2]).toEqual({
+      session: m.sesiones[0],
+    });
+    expect(m.auditoria.registrar).toHaveBeenCalledWith(
+      expect.anything(),
+      m.sesiones[0],
+    );
+  });
+
+  it('actualizar: un conflicto de lo que cambió mientras tanto (409) deshace también el cambio de nombre y no audita', async () => {
+    const c = cuenta();
+    const a = asignacion(c._id, { permisos: ['tareas.ver'] });
+    const m = montar({ cuentas: [c], asignaciones: [a] });
+    entreLecturaYEscritura(m, () => a.permisos.push('pqr.ver'));
+
+    await expect(
+      m.servicio.actualizar(
+        a._id.toString(),
+        { permisos: ['tareas.ver', 'pqr.ver'], nombre: 'Nombre Nuevo' },
+        caller(),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(c.nombreCompleto).toBe('Persona Uno');
+    expect(m.auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('desactivar: la baja y la entrada comparten sesión; si la auditoría falla el miembro sigue activo', async () => {
+    const c = cuenta();
+    const a = asignacion(c._id);
+    const m = montar({ cuentas: [c], asignaciones: [a] });
+    sinAuditoria(m);
+
+    await expect(
+      m.servicio.desactivar(a._id.toString(), caller()),
+    ).rejects.toThrow('sin auditoría');
+
+    expect(m.sesiones[0].deshecha).toBe(true);
+    expect(a.estado).toBe('active');
+    expect(m.asignacionesModel.updateOne.mock.calls[0][2]).toEqual({
+      session: m.sesiones[0],
+    });
+    expect(m.auditoria.registrar).toHaveBeenCalledWith(
+      expect.anything(),
+      m.sesiones[0],
+    );
+  });
+
+  it('sin cambio que guardar (miembro ya inactivo) no abre transacción', async () => {
+    const c = cuenta();
+    const a = asignacion(c._id, { estado: 'inactive' });
+    const m = montar({ cuentas: [c], asignaciones: [a] });
+
+    await m.servicio.desactivar(a._id.toString(), caller());
+
+    expect(m.conexion.startSession).not.toHaveBeenCalled();
   });
 });

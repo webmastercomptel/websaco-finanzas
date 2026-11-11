@@ -7,8 +7,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { FirebaseUsuariosService } from '../../common/firebase/firebase-usuarios.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -107,7 +107,11 @@ const MENSAJE_ACCESO_CAMBIO =
  * - Writes that depend on a check are conditional on the row still being what
  *   the check read, so a concurrent grant cannot slip past it (409).
  * - Roles must be roles of THIS coproperty.
- * - The caller cannot edit or deactivate themselves, and cannot touch a
+ * - Every write of a member and its audit entry commit or roll back together
+ *   (one Mongo transaction), so a failed audit write leaves no change behind and
+ *   a retry cannot skip the entry. The Firebase identity and the Account of a new
+ *   person cannot join it and are written first.
+ * - The caller cannot add, edit or deactivate themselves, and cannot touch a
  *   platform administrator or an `administrativo` assignment.
  * - Deactivating only switches this building's assignment off. The Account and
  *   the Firebase identity are never touched: the person may work elsewhere.
@@ -131,6 +135,7 @@ export class EquipoService {
     private readonly tenant: TenantContextService,
     private readonly invitaciones: InvitacionAccesoService,
     private readonly auditoria: AuditoriaService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /* ── Reads ─────────────────────────────────────────────── */
@@ -347,6 +352,27 @@ export class EquipoService {
     }
   }
 
+  /**
+   * Same shape as the other transactional services (`inmuebles-baja`):
+   * `withTransaction` may re-run the callback on a transient error, so what it
+   * does must be safe to repeat (every write here is conditional or an upsert of
+   * the same state).
+   */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
+
   private exigirNoSerYo(asignacion: AsignacionLean, user: IRequestUser): void {
     if (asignacion.accountId.toString() === user.accountId) {
       throw new ForbiddenException('No puedes modificar tu propio acceso');
@@ -373,9 +399,10 @@ export class EquipoService {
    * Gives a person staff access (`personal`) to the active coproperty,
    * creating their sign-in when the email is new.
    *
-   * Order: validate everything, then Firebase identity, Account, Assignment.
-   * Whatever fails after the identity exists leaves something inert (an
-   * account with no assignment grants nothing), and the retry meets the
+   * Order: validate everything, then Firebase identity and Account (neither can
+   * join a Mongo transaction), then the Assignment together with its audit entry
+   * in one transaction. Whatever fails after the identity exists leaves something
+   * inert (an account with no assignment grants nothing), and the retry meets the
    * existing-account rule instead of creating a second identity.
    */
   async crear(
@@ -408,7 +435,6 @@ export class EquipoService {
     const existente = await this.cuentas.findOne({ email }).exec();
 
     let cuenta: AccountDocument;
-    let asignacionId: Types.ObjectId;
     const cuentaExistente = existente !== null;
 
     if (existente) {
@@ -436,7 +462,6 @@ export class EquipoService {
         );
       }
       cuenta = existente;
-      asignacionId = await this.asignarAExistente(cuenta, grant, copropiedadId);
     } else {
       // Random and never shown: the person gets in through the invitation link
       // and chooses their own password.
@@ -456,20 +481,25 @@ export class EquipoService {
       } catch (error: unknown) {
         this.relanzar(error);
       }
-      asignacionId = await this.crearAsignacion(
-        cuenta._id,
-        grant,
-        copropiedadId,
-      );
     }
 
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'crear',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
-      detalle: cambio,
+    const cuentaId = cuenta._id;
+    const asignacionId = await this.transaccion(async (session) => {
+      const id = cuentaExistente
+        ? await this.asignarAExistente(cuenta, grant, copropiedadId, session)
+        : await this.crearAsignacion(cuentaId, grant, copropiedadId, session);
+      await this.auditoria.registrar(
+        {
+          ...this.actor(user),
+          accion: 'crear',
+          entidadTipo: 'usuario',
+          entidadId: cuentaId.toString(),
+          entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
+          detalle: cambio,
+        },
+        session,
+      );
+      return id;
     });
 
     const invitacion = await this.invitaciones.enviar({
@@ -507,18 +537,25 @@ export class EquipoService {
     accountId: Types.ObjectId,
     grant: Concesion,
     copropiedadId: Types.ObjectId,
+    session: ClientSession,
   ): Promise<Types.ObjectId> {
     try {
-      const creada = await this.asignaciones.create({
-        accountId,
-        perfil: 'personal',
-        alcance: 'copropiedad',
-        copropiedadId,
-        entidadId: null,
-        permisos: grant.permisos,
-        roleIds: grant.roleIds,
-        estado: 'active',
-      });
+      // The array form is what lets Mongoose take options (the session).
+      const [creada] = await this.asignaciones.create(
+        [
+          {
+            accountId,
+            perfil: 'personal',
+            alcance: 'copropiedad',
+            copropiedadId,
+            entidadId: null,
+            permisos: grant.permisos,
+            roleIds: grant.roleIds,
+            estado: 'active',
+          },
+        ],
+        { session },
+      );
       return creada._id;
     } catch (error: unknown) {
       this.relanzar(error);
@@ -534,6 +571,7 @@ export class EquipoService {
     cuenta: AccountDocument,
     grant: Concesion,
     copropiedadId: Types.ObjectId,
+    session: ClientSession,
   ): Promise<Types.ObjectId> {
     const previa = (await this.asignaciones
       .findOne({
@@ -545,7 +583,7 @@ export class EquipoService {
       .exec()) as AsignacionLean | null;
 
     if (!previa) {
-      return this.crearAsignacion(cuenta._id, grant, copropiedadId);
+      return this.crearAsignacion(cuenta._id, grant, copropiedadId, session);
     }
     if (previa.estado === 'active') {
       throw new ConflictException(
@@ -573,6 +611,7 @@ export class EquipoService {
             roleIds: grant.roleIds,
           },
         },
+        { session },
       )
       .exec();
     if (res.matchedCount === 0) {
@@ -638,50 +677,62 @@ export class EquipoService {
       if (concesion.roleIds !== undefined) cambios.roleIds = roleIds;
     }
 
-    if (dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto) {
+    const nombreNuevo =
+      dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto
+        ? dto.nombre
+        : undefined;
+    if (nombreNuevo !== undefined) {
       await this.exigirCuentaExclusiva(asignacion);
     }
 
-    if (Object.keys(cambios).length > 0) {
-      const res = await this.asignaciones
-        .updateOne(
-          {
-            _id: asignacion._id,
-            copropiedadId,
-            alcance: 'copropiedad',
-            perfil: 'personal',
-            estado: 'active',
-            $and: [
-              filtroListaExacta('permisos', permisosActuales),
-              filtroListaExacta('roleIds', rolesActuales),
-            ],
-          },
-          { $set: cambios },
-        )
-        .exec();
-      if (res.matchedCount === 0) {
-        throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
+    // Keys, name and audit entry are one unit: a refused or failed step undoes
+    // the others, so no change is ever saved without its entry (nor the reverse).
+    await this.transaccion(async (session) => {
+      if (Object.keys(cambios).length > 0) {
+        const res = await this.asignaciones
+          .updateOne(
+            {
+              _id: asignacion._id,
+              copropiedadId,
+              alcance: 'copropiedad',
+              perfil: 'personal',
+              estado: 'active',
+              $and: [
+                filtroListaExacta('permisos', permisosActuales),
+                filtroListaExacta('roleIds', rolesActuales),
+              ],
+            },
+            { $set: cambios },
+            { session },
+          )
+          .exec();
+        if (res.matchedCount === 0) {
+          throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
+        }
       }
-    }
-    if (dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto) {
-      await this.cuentas
-        .updateOne(
-          { _id: cuenta._id },
-          { $set: { nombreCompleto: dto.nombre } },
-        )
-        .exec();
-    }
-
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'actualizar',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(
-        dto.nombre ?? cuenta.nombreCompleto,
-        copropiedadId,
-      ),
-      detalle: cambio,
+      if (nombreNuevo !== undefined) {
+        await this.cuentas
+          .updateOne(
+            { _id: cuenta._id },
+            { $set: { nombreCompleto: nombreNuevo } },
+            { session },
+          )
+          .exec();
+      }
+      await this.auditoria.registrar(
+        {
+          ...this.actor(user),
+          accion: 'actualizar',
+          entidadTipo: 'usuario',
+          entidadId: cuenta._id.toString(),
+          entidadEtiqueta: this.etiqueta(
+            dto.nombre ?? cuenta.nombreCompleto,
+            copropiedadId,
+          ),
+          detalle: cambio,
+        },
+        session,
+      );
     });
     return this.obtener(id);
   }
@@ -739,32 +790,38 @@ export class EquipoService {
       'No puedes desactivar a alguien con permisos que tú no tienes',
     );
 
-    const res = await this.asignaciones
-      .updateOne(
+    await this.transaccion(async (session) => {
+      const res = await this.asignaciones
+        .updateOne(
+          {
+            _id: asignacion._id,
+            copropiedadId,
+            alcance: 'copropiedad',
+            perfil: 'personal',
+            estado: 'active',
+            $and: [
+              filtroListaExacta('permisos', permisosActuales),
+              filtroListaExacta('roleIds', rolesActuales),
+            ],
+          },
+          { $set: { estado: 'inactive' } },
+          { session },
+        )
+        .exec();
+      if (res.matchedCount === 0) {
+        throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
+      }
+      await this.auditoria.registrar(
         {
-          _id: asignacion._id,
-          copropiedadId,
-          alcance: 'copropiedad',
-          perfil: 'personal',
-          estado: 'active',
-          $and: [
-            filtroListaExacta('permisos', permisosActuales),
-            filtroListaExacta('roleIds', rolesActuales),
-          ],
+          ...this.actor(user),
+          accion: 'retirar',
+          entidadTipo: 'usuario',
+          entidadId: cuenta._id.toString(),
+          entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
+          detalle: cambio,
         },
-        { $set: { estado: 'inactive' } },
-      )
-      .exec();
-    if (res.matchedCount === 0) {
-      throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
-    }
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'retirar',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
-      detalle: cambio,
+        session,
+      );
     });
     return { id };
   }

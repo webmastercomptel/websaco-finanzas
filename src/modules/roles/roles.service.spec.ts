@@ -84,14 +84,14 @@ function crear(
 ) {
   const guardar = jest
     .fn()
-    .mockImplementation((datos: Record<string, unknown>) =>
+    .mockImplementation((datos: Array<Record<string, unknown>>) =>
       opciones.errorAlGuardar
         ? Promise.reject(
             Object.assign(new Error('E11000 duplicate key'), {
               code: opciones.errorAlGuardar,
             }),
           )
-        : Promise.resolve(documento(datos)),
+        : Promise.resolve([documento(datos[0])]),
     );
   const roles = {
     create: guardar,
@@ -130,6 +130,31 @@ function crear(
       ? jest.fn().mockRejectedValue(new Error('auditoría caída'))
       : jest.fn().mockResolvedValue(undefined),
   };
+  // A transaction as far as it matters here: it records whether it was undone
+  // (the callback threw), which is when Mongo would discard what it wrote.
+  const sesiones: Array<{
+    withTransaction: (fn: () => Promise<void>) => Promise<void>;
+    endSession: jest.Mock;
+    deshecha: boolean;
+  }> = [];
+  const conexion = {
+    startSession: jest.fn(() => {
+      const sesion = {
+        deshecha: false,
+        endSession: jest.fn().mockResolvedValue(undefined),
+        withTransaction: async (fn: () => Promise<void>) => {
+          try {
+            await fn();
+          } catch (error) {
+            sesion.deshecha = true;
+            throw error;
+          }
+        },
+      };
+      sesiones.push(sesion);
+      return Promise.resolve(sesion);
+    }),
+  };
   const servicio = new RolesService(
     roles as never,
     asignaciones as never,
@@ -137,8 +162,18 @@ function crear(
     tenant as never,
     auditoria as never,
     cuentas as never,
+    conexion as never,
   );
-  return { servicio, roles, asignaciones, cuentas, consecutivos, auditoria };
+  return {
+    servicio,
+    roles,
+    asignaciones,
+    cuentas,
+    consecutivos,
+    auditoria,
+    conexion,
+    sesiones,
+  };
 }
 
 describe('RolesService.create', () => {
@@ -159,11 +194,14 @@ describe('RolesService.create', () => {
       { upsert: true, new: true },
     );
     expect(roles.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        copropiedadId: COP,
-        codigo: 'ROL-007',
-        nombre: 'Portero',
-      }),
+      [
+        expect.objectContaining({
+          copropiedadId: COP,
+          codigo: 'ROL-007',
+          nombre: 'Portero',
+        }),
+      ],
+      { session: expect.anything() as unknown },
     );
     expect(rol.usuarios).toBe(0);
   });
@@ -177,7 +215,12 @@ describe('RolesService.create', () => {
     );
 
     expect(roles.create).toHaveBeenCalledWith(
-      expect.objectContaining({ permisos: ['facturas.ver', 'facturas.crear'] }),
+      [
+        expect.objectContaining({
+          permisos: ['facturas.ver', 'facturas.crear'],
+        }),
+      ],
+      { session: expect.anything() as unknown },
     );
     expect(rol.permisos).toEqual(['facturas.ver', 'facturas.crear']);
   });
@@ -269,18 +312,21 @@ describe('RolesService.create', () => {
     );
 
     expect(auditoria.registrar).toHaveBeenCalledTimes(1);
-    expect(auditoria.registrar).toHaveBeenCalledWith({
-      actorAccountId: CUENTA.toString(),
-      actorNombre: 'Ana Pérez',
-      accion: 'crear',
-      entidadTipo: 'rol',
-      entidadId: ROL_ID.toString(),
-      entidadEtiqueta: `Rol: Facturador (copropiedad ${COP.toString()})`,
-      detalle: {
-        agregadas: ['facturas.crear', 'facturas.ver'],
-        quitadas: [],
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      {
+        actorAccountId: CUENTA.toString(),
+        actorNombre: 'Ana Pérez',
+        accion: 'crear',
+        entidadTipo: 'rol',
+        entidadId: ROL_ID.toString(),
+        entidadEtiqueta: `Rol: Facturador (copropiedad ${COP.toString()})`,
+        detalle: {
+          agregadas: ['facturas.crear', 'facturas.ver'],
+          quitadas: [],
+        },
       },
-    });
+      expect.anything(),
+    );
   });
 
   it('un rol creado sin claves también queda auditado, con listas vacías', async () => {
@@ -293,6 +339,7 @@ describe('RolesService.create', () => {
         accion: 'crear',
         detalle: { agregadas: [], quitadas: [] },
       }),
+      expect.anything(),
     );
   });
 
@@ -350,7 +397,7 @@ describe('RolesService.update', () => {
         permisos: ['tareas.ver'],
       },
       { nombre: 'Portero 24h', permisos: ['tareas.ver', 'pqr.ver'] },
-      { new: true },
+      { new: true, session: expect.anything() as unknown },
     );
     expect(rol.usuarios).toBe(2);
   });
@@ -799,6 +846,7 @@ describe('RolesService.update — claves heredadas que no se ofrecen (caso a)', 
     );
     expect(auditoria.registrar).toHaveBeenCalledWith(
       expect.objectContaining({ detalle: { agregadas: [], quitadas: [] } }),
+      expect.anything(),
     );
   });
 
@@ -836,10 +884,10 @@ describe('RolesService.remove', () => {
     ).resolves.toEqual({
       id: ROL_ID.toString(),
     });
-    expect(roles.findOneAndDelete).toHaveBeenCalledWith({
-      _id: ROL_ID.toString(),
-      copropiedadId: COP,
-    });
+    expect(roles.findOneAndDelete).toHaveBeenCalledWith(
+      { _id: ROL_ID.toString(), copropiedadId: COP },
+      { session: expect.anything() as unknown },
+    );
   });
 
   it('se niega si el rol todavía tiene usuarios asignados, sin auditar', async () => {
@@ -895,16 +943,19 @@ describe('RolesService.remove', () => {
     await servicio.remove(ROL_ID.toString(), ANA);
 
     expect(auditoria.registrar).toHaveBeenCalledTimes(1);
-    expect(auditoria.registrar).toHaveBeenCalledWith({
-      actorAccountId: CUENTA.toString(),
-      actorNombre: 'Ana Pérez',
-      accion: 'eliminar',
-      entidadTipo: 'rol',
-      entidadId: ROL_ID.toString(),
-      entidadEtiqueta: `Rol: Portero (copropiedad ${COP.toString()})`,
-      // Offered keys only, sorted: the legacy gestionar grants nothing.
-      detalle: { agregadas: [], quitadas: ['facturas.anular', 'tareas.ver'] },
-    });
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      {
+        actorAccountId: CUENTA.toString(),
+        actorNombre: 'Ana Pérez',
+        accion: 'eliminar',
+        entidadTipo: 'rol',
+        entidadId: ROL_ID.toString(),
+        entidadEtiqueta: `Rol: Portero (copropiedad ${COP.toString()})`,
+        // Offered keys only, sorted: the legacy gestionar grants nothing.
+        detalle: { agregadas: [], quitadas: ['facturas.anular', 'tareas.ver'] },
+      },
+      expect.anything(),
+    );
   });
 
   it('si la auditoría falla, la petición falla', async () => {
@@ -1003,7 +1054,7 @@ describe('RolesService.update — escritura condicionada a lo revisado', () => {
     expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: ROL_ID.toString(), copropiedadId: COP },
       { nombre: 'x' },
-      { new: true },
+      { new: true, session: expect.anything() as unknown },
     );
     expect(roles.findOne).not.toHaveBeenCalled();
   });
@@ -1018,15 +1069,18 @@ describe('RolesService.update — auditoría', () => {
     await servicio.update(ROL_ID.toString(), { nombre: 'Otro' }, ANA);
 
     expect(auditoria.registrar).toHaveBeenCalledTimes(1);
-    expect(auditoria.registrar).toHaveBeenCalledWith({
-      actorAccountId: CUENTA.toString(),
-      actorNombre: 'Ana Pérez',
-      accion: 'actualizar',
-      entidadTipo: 'rol',
-      entidadId: ROL_ID.toString(),
-      entidadEtiqueta: `Rol: Otro (copropiedad ${COP.toString()})`,
-      detalle: { agregadas: [], quitadas: [] },
-    });
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      {
+        actorAccountId: CUENTA.toString(),
+        actorNombre: 'Ana Pérez',
+        accion: 'actualizar',
+        entidadTipo: 'rol',
+        entidadId: ROL_ID.toString(),
+        entidadEtiqueta: `Rol: Otro (copropiedad ${COP.toString()})`,
+        detalle: { agregadas: [], quitadas: [] },
+      },
+      expect.anything(),
+    );
   });
 
   it('cambiar claves registra lo que el tope juzgó: agregadas y quitadas ordenadas', async () => {
@@ -1053,6 +1107,7 @@ describe('RolesService.update — auditoría', () => {
           quitadas: ['tareas.ver'],
         },
       }),
+      expect.anything(),
     );
   });
 
@@ -1078,5 +1133,128 @@ describe('RolesService.update — auditoría', () => {
     await expect(
       servicio.update(ROL_ID.toString(), { nombre: 'x' }, ADMIN_COP),
     ).rejects.toThrow('auditoría caída');
+  });
+});
+
+describe('RolesService — el cambio y su entrada de auditoría van en una sola transacción', () => {
+  it('crear: el rol y la entrada comparten sesión; si la auditoría falla se deshace', async () => {
+    const { servicio, roles, auditoria, sesiones } = crear({
+      errorAuditoria: true,
+    });
+
+    await expect(
+      servicio.create(
+        { nombre: 'Portero', permisos: ['tareas.ver'] },
+        ADMIN_COP,
+      ),
+    ).rejects.toThrow('auditoría caída');
+
+    expect(sesiones).toHaveLength(1);
+    expect(sesiones[0].deshecha).toBe(true);
+    expect(roles.create).toHaveBeenCalledWith(expect.anything(), {
+      session: sesiones[0],
+    });
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.anything(),
+      sesiones[0],
+    );
+    expect(sesiones[0].endSession).toHaveBeenCalled();
+  });
+
+  it('crear con éxito: confirma y no se deshace', async () => {
+    const { servicio, sesiones } = crear();
+
+    await servicio.create(
+      { nombre: 'Portero', permisos: ['tareas.ver'] },
+      ADMIN_COP,
+    );
+
+    expect(sesiones[0].deshecha).toBe(false);
+  });
+
+  it('crear: un nombre repetido sigue siendo 409 aunque ocurra dentro de la transacción', async () => {
+    const { servicio, auditoria } = crear({ errorAlGuardar: 11000 });
+
+    await expect(
+      servicio.create({ nombre: 'Portero', permisos: [] }, ADMIN_COP),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('actualizar: el cambio y la entrada comparten sesión; si la auditoría falla se deshace', async () => {
+    const { servicio, roles, auditoria, sesiones } = crear({
+      encontrado: documento(),
+      errorAuditoria: true,
+    });
+
+    await expect(
+      servicio.update(ROL_ID.toString(), { nombre: 'Otro' }, ADMIN_COP),
+    ).rejects.toThrow('auditoría caída');
+
+    expect(sesiones[0].deshecha).toBe(true);
+    expect(roles.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      { new: true, session: sesiones[0] },
+    );
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.anything(),
+      sesiones[0],
+    );
+  });
+
+  it('actualizar: si otro editor cambió las claves (409) no hay entrada y la petición sigue siendo 409', async () => {
+    const { servicio, roles, auditoria } = crear({ encontrado: documento() });
+    roles.findOneAndUpdate.mockReturnValue(exec(null));
+
+    await expect(
+      servicio.update(
+        ROL_ID.toString(),
+        { permisos: ['tareas.ver', 'pqr.ver'] },
+        ADMIN_COP,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('actualizar: un nombre repetido sigue siendo 409 dentro de la transacción', async () => {
+    const { servicio, roles } = crear({ encontrado: documento() });
+    roles.findOneAndUpdate.mockImplementation(() => ({
+      exec: () =>
+        Promise.reject(Object.assign(new Error('dup'), { code: 11000 })),
+    }));
+
+    await expect(
+      servicio.update(ROL_ID.toString(), { nombre: 'Repetido' }, ADMIN_COP),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('eliminar: el borrado y la entrada comparten sesión; si la auditoría falla se deshace y el rol no se pierde', async () => {
+    const { servicio, roles, auditoria, sesiones } = crear({
+      encontrado: documento(),
+      errorAuditoria: true,
+    });
+
+    await expect(servicio.remove(ROL_ID.toString(), ADMIN_COP)).rejects.toThrow(
+      'auditoría caída',
+    );
+
+    expect(sesiones[0].deshecha).toBe(true);
+    expect(roles.findOneAndDelete).toHaveBeenCalledWith(expect.anything(), {
+      session: sesiones[0],
+    });
+    expect(auditoria.registrar).toHaveBeenCalledWith(
+      expect.anything(),
+      sesiones[0],
+    );
+  });
+
+  it('eliminar un rol con usuarios sigue siendo 409 y no abre transacción', async () => {
+    const { servicio, conexion } = crear({ encontrado: documento(), enUso: 1 });
+
+    await expect(
+      servicio.remove(ROL_ID.toString(), ADMIN_COP),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(conexion.startSession).not.toHaveBeenCalled();
   });
 });
