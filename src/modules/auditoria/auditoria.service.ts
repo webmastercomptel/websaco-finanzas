@@ -5,6 +5,7 @@ import {
   RegistroAuditoria,
   RegistroAuditoriaDocument,
 } from '../../database/schemas/auditoria/registro-auditoria.schema';
+import type { CambioDeClaves } from '../casl/delegacion';
 import { FiltrosAuditoriaDto } from './dto/filtros-auditoria.dto';
 
 /**
@@ -26,7 +27,8 @@ export interface EntradaAuditoria {
     | 'dar-de-baja'
     | 'retirar'
     | 'marcar-envio'
-    | 'enviar';
+    | 'enviar'
+    | 'eliminar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -35,9 +37,16 @@ export interface EntradaAuditoria {
     | 'lote-contabilidad'
     | 'inmueble'
     | 'lote-comptable'
-    | 'envio-factura';
+    | 'envio-factura'
+    | 'rol';
   entidadId: string;
   entidadEtiqueta: string;
+  /**
+   * Permission keys the write added and removed. Written only when present: an
+   * entry without it stays valid, and an empty pair (a rename that touched no
+   * keys) is a real value, not an absence.
+   */
+  detalle?: CambioDeClaves;
 }
 
 /** A single page of audit log entries. */
@@ -77,6 +86,14 @@ export class AuditoriaService {
       entidadTipo: entrada.entidadTipo,
       entidadId: entrada.entidadId,
       entidadEtiqueta: entrada.entidadEtiqueta,
+      // Copied field by field like the rest: without this line the detail would
+      // be dropped silently, since nothing else forwards unknown fields.
+      ...(entrada.detalle && {
+        detalle: {
+          agregadas: [...entrada.detalle.agregadas],
+          quitadas: [...entrada.detalle.quitadas],
+        },
+      }),
     };
     if (session) {
       await this.registros.create([registro], { session });

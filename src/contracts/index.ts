@@ -2613,7 +2613,8 @@ export interface RegistroAuditoriaContract {
     | 'dar-de-baja'
     | 'retirar'
     | 'marcar-envio'
-    | 'enviar';
+    | 'enviar'
+    | 'eliminar';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -2622,10 +2623,17 @@ export interface RegistroAuditoriaContract {
     | 'lote-contabilidad'
     | 'inmueble'
     | 'lote-comptable'
-    | 'envio-factura';
+    | 'envio-factura'
+    | 'rol';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
+  /**
+   * Permission keys the write added and removed (Equipo and Roles). `null` on
+   * entries that carry none: those written before it existed and every action
+   * that touches no keys.
+   */
+  detalle?: { agregadas: string[]; quitadas: string[] } | null;
 }
 
 /** Dashboard KPIs for the super-admin panel. */

@@ -5,6 +5,18 @@ import { Account } from '../cuentas/account.schema';
 
 export type RegistroAuditoriaDocument = HydratedDocument<RegistroAuditoria>;
 
+/** Keys an audited write added and removed from a permission set. */
+@Schema({ _id: false })
+export class DetalleAuditoria {
+  @Prop({ type: [String], default: [] })
+  agregadas: string[];
+
+  @Prop({ type: [String], default: [] })
+  quitadas: string[];
+}
+
+const DetalleAuditoriaSchema = SchemaFactory.createForClass(DetalleAuditoria);
+
 /**
  * Append-only audit log for platform-level mutations.
  *
@@ -12,8 +24,9 @@ export type RegistroAuditoriaDocument = HydratedDocument<RegistroAuditoria>;
  * reset (`reiniciar`) or unit retirement (`dar-de-baja`, entity type
  * `inmueble`: one entry per batch, written in the same transaction as the
  * retirement) happened, by whom, on what
- * entity — not what changed field by field. This is the first version:
- * field-level diffs are YAGNI until a concrete need surfaces.
+ * entity — not what changed field by field. The one exception is `detalle`:
+ * the permission keys a team or role write added and removed, because "who
+ * gave whom what" is the question an access audit exists to answer.
  *
  * Not scoped by tenant — these events happen above any single coproperty,
  * same as the Entidades/Copropiedades/Usuarios catalogs themselves.
@@ -44,6 +57,7 @@ export class RegistroAuditoria {
       'retirar',
       'marcar-envio',
       'enviar',
+      'eliminar',
     ],
   })
   accion:
@@ -55,7 +69,8 @@ export class RegistroAuditoria {
     | 'dar-de-baja'
     | 'retirar'
     | 'marcar-envio'
-    | 'enviar';
+    | 'enviar'
+    | 'eliminar';
 
   @Prop({
     required: true,
@@ -68,6 +83,7 @@ export class RegistroAuditoria {
       'inmueble',
       'lote-comptable',
       'envio-factura',
+      'rol',
     ],
     index: true,
   })
@@ -79,7 +95,8 @@ export class RegistroAuditoria {
     | 'lote-contabilidad'
     | 'inmueble'
     | 'lote-comptable'
-    | 'envio-factura';
+    | 'envio-factura'
+    | 'rol';
 
   @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;
@@ -91,6 +108,17 @@ export class RegistroAuditoria {
    */
   @Prop({ required: true, trim: true })
   entidadEtiqueta: string;
+
+  /**
+   * Which permission keys the write added and removed (the sets the delegation
+   * cap judged, sorted). Optional: entries written before it existed, and
+   * actions that touch no keys, simply do not carry it. A sub-schema rather
+   * than a nested path on purpose: a nested path would make Mongoose fill
+   * `{ agregadas: [], quitadas: [] }` into every old entry on read, and
+   * "no detail" would become indistinguishable from "nothing changed".
+   */
+  @Prop({ type: DetalleAuditoriaSchema, required: false })
+  detalle?: DetalleAuditoria;
 }
 
 export const RegistroAuditoriaSchema =
