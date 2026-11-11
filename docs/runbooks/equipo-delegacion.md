@@ -56,7 +56,8 @@ Windows PowerShell try `npm.cmd run ...` (backend `CLAUDE.md`, Gotchas).
    scope, coproperty code and keys, and warns about rows that lack some real key
    of an `x.gestionar` they hold; exit code 1 when something would be removed),
    then `... --env=<name> --aplicar --retirar-gestionar`. Rows with a warning are
-   skipped and reported, never half-edited. Before this step a rollback is clean;
+   skipped and reported, never half-edited. `--aplicar --retirar-gestionar` also
+   writes the marker that makes the pre-deploy modes refuse from then on. Before this step a rollback is clean;
    after it, a rollback strands former `gestionar` holders out of the four routes
    above.
 8. Rollback: frontend first, then backend.
@@ -77,7 +78,9 @@ a second pass finds nothing. It touches nothing else (not Administración or
 unknown keys, not `perfil`). A row or role left with no keys stays valid.
 
 Exit codes: read-only modes, 1 when something is pending; writing modes, 1 when
-a document moved under the script.
+a document moved under the script; 2 when a pre-deploy mode (default or
+`--aplicar`) found evidence that the backend already ran and did nothing (next
+section).
 
 ### Never run the pre-deploy modes after the deploy
 
@@ -85,14 +88,45 @@ After the deploy a Finanzas key on a `personal` row is a legitimate grant made
 from Equipo, and `recibos.aprobar` is a real key. Re-running the default mode
 would list them as pending and `--aplicar` would strip them. The same goes for
 the dead-`recibos.aprobar` rule once `--retirar-gestionar` has removed
-`recibos.gestionar`. The script cannot tell which side of the deploy it runs on.
+`recibos.gestionar`. The script cannot see the deploy itself, so it is only
+PARTIALLY guarded:
+
+**What it detects** (read before the default mode plans anything and before
+`--aplicar` writes anything; either is enough):
+
+- the marker `--aplicar --retirar-gestionar` leaves: one document
+  (`_id: 'claves-finanzas-latentes:retirar-gestionar'`) in the collection
+  `marcas_despliegue`, written before that mode touches its first row, even when
+  it then finds nothing to remove or hits conflicts;
+- any audit entry (`audit_log_entries`) with `entidadTipo: 'rol'` or carrying
+  `detalle`: only the new backend writes them (roles were not audited before,
+  and `detalle` is new).
+
+With evidence, `--aplicar` **refuses**: exit code **2**, a Spanish message naming
+the evidence, nothing written. The default mode stays read-only, prints the same
+evidence, says the pre-deploy modes no longer apply, lists no "pending" (those
+rows are legitimate now) and also exits 2. `--retirar-gestionar` (preview and
+`--aplicar`) is not guarded: it is the post-deploy step.
+
+**What it does NOT detect:** a deployed backend where nobody has yet created or
+edited a role or changed a member's keys from Equipo, and `--retirar-gestionar`
+has not run. In that window there is no audit entry and no marker, so the
+pre-deploy modes still run, and would strip any Finanzas key already granted
+(through the Usuarios screen of the platform, which no longer vetoes them) to a
+`personal` row. Likewise, a database restored or an environment where audit
+entries were purged looks pre-deploy. The deploy order in "Pasos por ambiente"
+stays the real protection; the guard only catches a late re-run. Running
+`--aplicar --retirar-gestionar` by mistake BEFORE the deploy would also write the
+marker and block the pre-deploy step: delete that one document by hand if that
+ever happens.
 
 ### Readiness cannot check this
 
 `GET /health/ready` cannot detect a missed run (backend rule 10): after the
 deploy a Finanzas key on a `personal` row is legitimate, so no indicator can tell
 a missed strip from a real grant. The only protection is this runbook and the
-deploy ticket with the step-1 output.
+deploy ticket with the step-1 output (plus the partial guard above, which stops a
+late `--aplicar`, not a missed one).
 
 ## Checking it by hand
 

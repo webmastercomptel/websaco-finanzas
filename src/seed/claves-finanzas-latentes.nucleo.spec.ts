@@ -14,6 +14,7 @@ import {
   quitarClavesFinancieras,
   type AlmacenClaves,
   type AsignacionLeida,
+  type EvidenciaDespliegue,
   type RolLeido,
 } from './claves-finanzas-latentes.nucleo';
 
@@ -52,6 +53,8 @@ function rol(permisos: string[], extra: Partial<RolLeido> = {}): RolLeido {
 function almacenEnMemoria(inicial: {
   asignaciones: AsignacionLeida[];
   roles: RolLeido[];
+  /** What the deploy left behind; absent = nothing, the pre-deploy state. */
+  evidencia?: Partial<EvidenciaDespliegue>;
 }) {
   const asignaciones = inicial.asignaciones.map((a) => ({
     ...a,
@@ -60,9 +63,22 @@ function almacenEnMemoria(inicial: {
   const roles = inicial.roles.map((r) => ({ ...r, permisos: [...r.permisos] }));
   const estado = {
     escrituras: 0,
+    marcasEscritas: 0,
     antesDeEscribir: undefined as undefined | (() => void),
   };
+  const evidencia: EvidenciaDespliegue = {
+    retiroEn: null,
+    entradasAuditoria: 0,
+    primeraEntradaAuditoria: null,
+    ...inicial.evidencia,
+  };
   const almacen: AlmacenClaves = {
+    leerEvidenciaDespliegue: () => Promise.resolve({ ...evidencia }),
+    marcarRetiroGestionar: () => {
+      estado.marcasEscritas += 1;
+      evidencia.retiroEn = new Date('2026-11-20T12:00:00Z');
+      return Promise.resolve();
+    },
     leerAsignaciones: () =>
       Promise.resolve(
         asignaciones.map((a) => ({ ...a, permisos: [...a.permisos] })),
@@ -554,6 +570,155 @@ describe('ejecutar: modo por defecto y --aplicar (S-M1.1, S-M1.2)', () => {
     expect(texto).toContain('COP-001');
     expect(texto).toContain('facturas.ver');
     expect(texto).toMatch(/ANTES del despliegue/);
+  });
+});
+
+describe('guarda: el modo previo al despliegue se niega si el backend nuevo ya corrió', () => {
+  const pendiente = (evidencia: Partial<EvidenciaDespliegue>) =>
+    almacenEnMemoria({
+      asignaciones: [
+        asignacion(['facturas.ver', 'pqr.ver'], { perfil: 'personal' }),
+        asignacion(['recibos.aprobar', 'facturas.gestionar']),
+      ],
+      roles: [rol(['recibos.crear'])],
+      evidencia,
+    });
+
+  const conMarca = { retiroEn: new Date('2026-11-18T10:00:00Z') };
+  const conAuditoria = {
+    entradasAuditoria: 3,
+    primeraEntradaAuditoria: new Date('2026-11-12T09:00:00Z'),
+  };
+
+  it.each([
+    ['la marca de --aplicar --retirar-gestionar', conMarca],
+    ['entradas de auditoría que solo escribe el backend nuevo', conAuditoria],
+    ['ambas', { ...conMarca, ...conAuditoria }],
+  ])(
+    '--aplicar se NIEGA con %s: código 2, no escribe nada y nombra la razón',
+    async (_nombre, evidencia) => {
+      const { almacen, asignaciones, roles, estado } = pendiente(evidencia);
+      const antes = JSON.stringify([asignaciones, roles]);
+
+      const resultado = await ejecutar(MODO_APLICAR, almacen);
+
+      expect(resultado.codigoSalida).toBe(2);
+      expect(resultado.rechazadoPorDespliegue).toBe(true);
+      expect(resultado.aplicados).toEqual([]);
+      expect(estado.escrituras).toBe(0);
+      expect(estado.marcasEscritas).toBe(0);
+      expect(JSON.stringify([asignaciones, roles])).toBe(antes);
+      const texto = informe(resultado).join('\n');
+      expect(texto).toMatch(/SE NIEGA/);
+      expect(texto).toMatch(/No se escribió nada/);
+      expect(texto).toContain('Código de salida: 2');
+    },
+  );
+
+  it('el informe de la negativa por marca nombra la marca y el de auditoría, la cantidad y la primera fecha', async () => {
+    const porMarca = informe(
+      await ejecutar(MODO_APLICAR, pendiente(conMarca).almacen),
+    ).join('\n');
+    expect(porMarca).toContain('--retirar-gestionar');
+    expect(porMarca).toContain('2026-11-18');
+
+    const porAuditoria = informe(
+      await ejecutar(MODO_APLICAR, pendiente(conAuditoria).almacen),
+    ).join('\n');
+    expect(porAuditoria).toMatch(/3 entrada/);
+    expect(porAuditoria).toContain('2026-11-12');
+    expect(porAuditoria).toMatch(/rol/);
+  });
+
+  it('el modo por defecto es de solo lectura, imprime la evidencia, dice que los modos previos ya no aplican y sale 2 sin listar pendientes', async () => {
+    const { almacen, estado } = pendiente({ ...conMarca, ...conAuditoria });
+
+    const resultado = await ejecutar(MODO_LISTAR, almacen);
+
+    expect(resultado.codigoSalida).toBe(2);
+    expect(resultado.conversion).toBeUndefined();
+    expect(estado.escrituras).toBe(0);
+    const texto = informe(resultado).join('\n');
+    expect(texto).toContain('2026-11-18');
+    expect(texto).toMatch(/3 entrada/);
+    expect(texto).toMatch(/ya no aplican/);
+    expect(texto).not.toMatch(/Pendientes:/);
+  });
+
+  it('sin evidencia el modo --aplicar sigue igual que antes: escribe y no marca nada', async () => {
+    const { almacen, estado } = pendiente({});
+
+    const resultado = await ejecutar(MODO_APLICAR, almacen);
+
+    expect(resultado.codigoSalida).toBe(0);
+    expect(resultado.rechazadoPorDespliegue).toBeFalsy();
+    expect(resultado.aplicados).toHaveLength(3);
+    expect(estado.marcasEscritas).toBe(0);
+  });
+
+  it('sin evidencia, el modo por defecto lista como siempre y avisa de qué detecta y qué no', async () => {
+    const { almacen } = pendiente({});
+
+    const resultado = await ejecutar(MODO_LISTAR, almacen);
+
+    expect(resultado.codigoSalida).toBe(1);
+    expect(resultado.conversion?.cambios).toHaveLength(3);
+    expect(informe(resultado).join('\n')).toMatch(/Sin evidencia/);
+  });
+
+  it('--aplicar --retirar-gestionar escribe la marca ANTES de tocar filas y la deja aunque haya conflictos o nada que retirar', async () => {
+    const { almacen, asignaciones, estado } = almacenEnMemoria({
+      asignaciones: [
+        asignacion(expandirGestionar(['facturas.gestionar'])),
+        asignacion(['pqr.ver']),
+      ],
+      roles: [],
+    });
+    estado.antesDeEscribir = () => {
+      expect(estado.marcasEscritas).toBe(1);
+      asignaciones[0].permisos.push('pqr.ver'); // forces a conflict
+    };
+
+    const resultado = await ejecutar(MODO_RETIRAR, almacen);
+
+    expect(resultado.conflictos).toHaveLength(1);
+    expect(estado.marcasEscritas).toBe(1);
+
+    const vacio = almacenEnMemoria({ asignaciones: [], roles: [] });
+    await ejecutar(MODO_RETIRAR, vacio.almacen);
+    expect(vacio.estado.marcasEscritas).toBe(1);
+  });
+
+  it('la vista previa de --retirar-gestionar no escribe marca ni se niega aunque haya evidencia', async () => {
+    const { almacen, estado } = almacenEnMemoria({
+      asignaciones: [asignacion(expandirGestionar(['facturas.gestionar']))],
+      roles: [],
+      evidencia: { ...conMarca, ...conAuditoria },
+    });
+
+    const resultado = await ejecutar(MODO_VISTA_PREVIA, almacen);
+
+    expect(resultado.codigoSalida).toBe(1);
+    expect(estado.marcasEscritas).toBe(0);
+    expect(estado.escrituras).toBe(0);
+  });
+
+  it('un --aplicar posterior a --aplicar --retirar-gestionar se niega (el flujo real) y deja las filas como el retiro las dejó', async () => {
+    const { almacen, asignaciones } = almacenEnMemoria({
+      asignaciones: [
+        asignacion(['recibos.aprobar'], { perfil: 'personal' }),
+        asignacion(expandirGestionar(['recibos.gestionar'])),
+      ],
+      roles: [],
+    });
+    await ejecutar(MODO_RETIRAR, almacen);
+    const despuesDelRetiro = JSON.stringify(asignaciones);
+
+    const reintento = await ejecutar(MODO_APLICAR, almacen);
+
+    expect(reintento.codigoSalida).toBe(2);
+    expect(JSON.stringify(asignaciones)).toBe(despuesDelRetiro);
+    expect(asignaciones[0].permisos).toEqual(['recibos.aprobar']);
   });
 });
 

@@ -159,11 +159,33 @@ export interface RolLeido {
 }
 
 /**
+ * What says the new backend already ran. Neither source is proof of the
+ * absence: see `hayEvidenciaDeDespliegue` for the blind spot.
+ */
+export interface EvidenciaDespliegue {
+  /** When `--aplicar --retirar-gestionar` started (the marker), or null. */
+  retiroEn: Date | null;
+  /**
+   * Audit entries only the new backend writes: `entidadTipo: 'rol'` (roles were
+   * not audited before) or any entry carrying `detalle`.
+   */
+  entradasAuditoria: number;
+  /** `createdAt` of the oldest such entry, or null when there are none. */
+  primeraEntradaAuditoria: Date | null;
+}
+
+/**
  * The only door to the database. `reemplazarPermisos` is the conditional write:
  * it applies only while the stored keys still equal `esperadas`, and answers
  * false when the document changed under the script (or is gone).
  */
 export interface AlmacenClaves {
+  leerEvidenciaDespliegue(): Promise<EvidenciaDespliegue>;
+  /**
+   * Records that the post-deploy cleanup was started, so a later pre-deploy
+   * `--aplicar` refuses. Idempotent: a second call keeps the first date.
+   */
+  marcarRetiroGestionar(): Promise<void>;
   leerAsignaciones(): Promise<AsignacionLeida[]>;
   leerRoles(): Promise<RolLeido[]>;
   reemplazarPermisos(
@@ -218,6 +240,16 @@ export interface PlanRetiro {
     fila: AsignacionLeida;
     faltantes: Array<{ gestionar: string; faltan: string[] }>;
   }>;
+}
+
+/**
+ * Whether the data shows the new backend (or the post-deploy cleanup) already
+ * ran. A heuristic with a known blind spot: right after the deploy, before
+ * anyone writes a role or a key change from Equipo, there is no audit entry and
+ * no marker yet, and nothing here can tell that state from the pre-deploy one.
+ */
+export function hayEvidenciaDeDespliegue(e: EvidenciaDespliegue): boolean {
+  return e.retiroEn !== null || e.entradasAuditoria > 0;
 }
 
 const diferencia = (a: readonly string[], b: readonly string[]): string[] => {
@@ -378,13 +410,23 @@ export interface ResultadoEjecucion {
   conversion?: PlanConversion;
   /** Present with `--retirar-gestionar`. */
   retiro?: PlanRetiro;
+  /** Present in the pre-deploy modes: what the guard looked at. */
+  evidencia?: EvidenciaDespliegue;
+  /**
+   * A pre-deploy mode found evidence that the new backend already ran: nothing
+   * was planned or written (the default listing reports it, `--aplicar` refuses).
+   */
+  rechazadoPorDespliegue?: boolean;
   aplicados: Cambio[];
   conflictos: Cambio[];
   /**
    * Read-only modes: 1 when something is pending (so a runbook can gate on it).
    * Writing modes: 1 when some document changed under the script.
+   * 2 in either pre-deploy mode when the deploy already happened (see
+   * `rechazadoPorDespliegue`): distinct, so a runbook can tell "refused" from
+   * "pending" and from "conflict".
    */
-  codigoSalida: 0 | 1;
+  codigoSalida: 0 | 1 | 2;
 }
 
 /**
@@ -396,13 +438,28 @@ export async function ejecutar(
   modo: ModoScript,
   almacen: AlmacenClaves,
 ): Promise<ResultadoEjecucion> {
-  const asignaciones = await almacen.leerAsignaciones();
   const resultado: ResultadoEjecucion = {
     modo,
     aplicados: [],
     conflictos: [],
     codigoSalida: 0,
   };
+
+  if (!modo.retirarGestionar) {
+    // The guard runs before anything is read or planned: after the deploy the
+    // pre-deploy rules would list (and `--aplicar` strip) legitimate grants.
+    resultado.evidencia = await almacen.leerEvidenciaDespliegue();
+    if (hayEvidenciaDeDespliegue(resultado.evidencia)) {
+      resultado.rechazadoPorDespliegue = true;
+      resultado.codigoSalida = 2;
+      return resultado;
+    }
+  } else if (modo.aplicar) {
+    // Before the first write, so a run that fails midway still leaves it.
+    await almacen.marcarRetiroGestionar();
+  }
+
+  const asignaciones = await almacen.leerAsignaciones();
 
   let cambios: Cambio[];
   if (modo.retirarGestionar) {
@@ -464,6 +521,25 @@ function seccion(
   return [`${titulo} (${delMotivo.length})`, ...delMotivo.map(lineaDeFila)];
 }
 
+const fechaIso = (fecha: Date | null): string =>
+  fecha ? fecha.toISOString().slice(0, 10) : 'fecha desconocida';
+
+/** Why the guard fired, one line per piece of evidence. */
+function lineasDeEvidencia(e: EvidenciaDespliegue): string[] {
+  const lineas: string[] = [];
+  if (e.retiroEn) {
+    lineas.push(
+      `  - Marca de --aplicar --retirar-gestionar escrita el ${fechaIso(e.retiroEn)}: el paso posterior al despliegue ya se ejecutó.`,
+    );
+  }
+  if (e.entradasAuditoria > 0) {
+    lineas.push(
+      `  - ${e.entradasAuditoria} entrada(s) de auditoría de las que solo escribe el backend nuevo (de un rol o con detalle de claves), la primera el ${fechaIso(e.primeraEntradaAuditoria)}.`,
+    );
+  }
+  return lineas;
+}
+
 /** The operator-facing report (Spanish, like the other scripts), line by line. */
 export function informe(resultado: ResultadoEjecucion): string[] {
   const { modo } = resultado;
@@ -475,6 +551,25 @@ export function informe(resultado: ResultadoEjecucion): string[] {
       ? 'APLICAR (escribe)'
       : 'LECTURA (solo lectura, no escribe nada)';
   const lineas = [`== Claves de Finanzas latentes: ${etiquetaModo} ==`];
+
+  if (resultado.rechazadoPorDespliegue && resultado.evidencia) {
+    lineas.push(
+      modo.aplicar
+        ? 'SE NIEGA: hay evidencia de que el backend nuevo ya corrió, y --aplicar (modo previo al despliegue) quitaría ahora claves legítimas de Finanzas en filas personal y roles.'
+        : 'Hay evidencia de que el backend nuevo ya corrió: los modos previos al despliegue (por defecto y --aplicar) ya no aplican.',
+      ...lineasDeEvidencia(resultado.evidencia),
+      'Lo único que sigue vigente es --retirar-gestionar (vista previa) y --aplicar --retirar-gestionar.',
+      'No se escribió nada.',
+      `Código de salida: ${resultado.codigoSalida}.`,
+    );
+    return lineas;
+  }
+
+  if (resultado.evidencia) {
+    lineas.push(
+      'Sin evidencia de que el backend nuevo ya corrió (ninguna marca de --retirar-gestionar ni auditoría de roles o con detalle). Ojo: esta comprobación no ve un despliegue reciente en el que nadie ha escrito aún un rol ni un cambio de claves; no sustituye a saber si el despliegue ya ocurrió.',
+    );
+  }
 
   if (modo.retirarGestionar) {
     lineas.push(

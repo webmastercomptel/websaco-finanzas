@@ -8,10 +8,11 @@ import { confirmScriptEnv } from '../common/scripts/load-script-env';
 
 import { NestFactory } from '@nestjs/core';
 import type { INestApplicationContext } from '@nestjs/common';
-import { getModelToken } from '@nestjs/mongoose';
-import { Types, type Model } from 'mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Types, type Connection, type Model } from 'mongoose';
 import { AppModule } from '../app.module';
 import { Rol } from '../database/schemas/administracion/rol.schema';
+import { RegistroAuditoria } from '../database/schemas/auditoria/registro-auditoria.schema';
 import { Account } from '../database/schemas/cuentas/account.schema';
 import { Asignacion } from '../database/schemas/cuentas/asignacion.schema';
 import { Copropiedad } from '../database/schemas/copropiedades/copropiedad.schema';
@@ -22,6 +23,7 @@ import {
   leerModo,
   type AlmacenClaves,
   type AsignacionLeida,
+  type EvidenciaDespliegue,
   type ModoScript,
   type RolLeido,
 } from './claves-finanzas-latentes.nucleo';
@@ -45,6 +47,20 @@ interface FilaRol {
   permisos?: string[];
 }
 
+/**
+ * Marker collection of this script. No schema and no model on purpose: nothing
+ * but this file reads or writes it, and the codebase has no migrations/markers
+ * collection to join (the other conversions are idempotent and leave no trace).
+ * One document, `_id: MARCA_RETIRO`.
+ */
+const COLECCION_MARCAS = 'marcas_despliegue';
+const MARCA_RETIRO = 'claves-finanzas-latentes:retirar-gestionar';
+
+interface FilaMarca {
+  _id: string;
+  escritaEn?: Date;
+}
+
 interface FilaConCodigo {
   _id: Types.ObjectId;
   codigo?: string;
@@ -64,6 +80,10 @@ function almacenMongo(app: INestApplicationContext): AlmacenClaves {
   const cuentas = coleccion(Account.name);
   const copropiedades = coleccion(Copropiedad.name);
   const entidades = coleccion(EntidadAdministradora.name);
+  const auditoria = coleccion(RegistroAuditoria.name);
+  const marcas = app
+    .get<Connection>(getConnectionToken())
+    .collection<FilaMarca>(COLECCION_MARCAS);
 
   let filas: FilaAsignacion[] | undefined;
   const leerFilas = async (): Promise<FilaAsignacion[]> => {
@@ -79,6 +99,37 @@ function almacenMongo(app: INestApplicationContext): AlmacenClaves {
     new Map((await lecturas).map((fila) => [clave(fila._id), valor(fila)]));
 
   return {
+    async leerEvidenciaDespliegue(): Promise<EvidenciaDespliegue> {
+      const marca = await marcas.findOne({ _id: MARCA_RETIRO });
+      // Only the new backend writes an entry about a role or with `detalle`.
+      const delBackendNuevo = {
+        $or: [{ entidadTipo: 'rol' }, { detalle: { $exists: true } }],
+      };
+      const [entradasAuditoria, primera] = await Promise.all([
+        auditoria.countDocuments(delBackendNuevo),
+        auditoria
+          .find<{ createdAt?: Date }>(delBackendNuevo, {
+            projection: { createdAt: 1 },
+          })
+          .sort({ createdAt: 1 })
+          .limit(1)
+          .toArray(),
+      ]);
+      return {
+        retiroEn: marca ? (marca.escritaEn ?? new Date(0)) : null,
+        entradasAuditoria,
+        primeraEntradaAuditoria: primera[0]?.createdAt ?? null,
+      };
+    },
+
+    async marcarRetiroGestionar(): Promise<void> {
+      await marcas.updateOne(
+        { _id: MARCA_RETIRO },
+        { $setOnInsert: { escritaEn: new Date() } },
+        { upsert: true },
+      );
+    },
+
     async leerAsignaciones(): Promise<AsignacionLeida[]> {
       const todas = await leerFilas();
       const unicos = (ids: Array<Types.ObjectId | null | undefined>) => [
@@ -193,16 +244,21 @@ const modo = leerModoODetener();
  *
  *   - default: lists what the pre-deploy conversion would change; writes
  *     nothing; exit code 1 when something is pending, 0 when nothing is.
+ *     Exit code 2 (and no list) when the data shows the new backend already
+ *     ran: the marker below, or an audit entry of a role / with `detalle`.
  *   - `--aplicar`: pre-deploy. Strips every Finanzas key from `personal`
  *     assignments (any scope, any estado) and from roles, expands each Finanzas
  *     `x.gestionar` additively on the other assignments (it stays), and removes
  *     a pre-existing dead `recibos.aprobar` from rows without
- *     `recibos.gestionar`. Run it BEFORE the backend deploy, never after.
+ *     `recibos.gestionar`. Run it BEFORE the backend deploy, never after: it
+ *     REFUSES (exit code 2, nothing written) when that evidence exists.
  *   - `--retirar-gestionar`: preview (read-only) of the post-deploy cleanup;
  *     lists what would go and warns about rows that lack a real key of the
  *     `x.gestionar` they hold. Exit code 1 when something would be removed.
  *   - `--aplicar --retirar-gestionar`: after the deploy, once a rollback is no
- *     longer wanted; removes the leftover `x.gestionar` (flagged rows skipped).
+ *     longer wanted; removes the leftover `x.gestionar` (flagged rows skipped)
+ *     and first writes the marker (`marcas_despliegue`) that makes the
+ *     pre-deploy modes refuse from then on.
  *
  * Every write is conditional on the array it read, so a row that changed under
  * the script is reported as a conflict, not overwritten. Idempotent. It also
