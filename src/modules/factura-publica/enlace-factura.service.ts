@@ -36,11 +36,9 @@ import { paginaIndividualDeFactura } from '../facturacion/factura-pdf.util';
 import type { FacturaLean } from '../facturacion/facturas.service';
 import {
   decisionAnulada,
+  FORMATO_TOKEN,
   VIGENCIA_ENLACE_FACTURA_MS,
 } from './factura-publica.constantes';
-
-/** A well-formed token: 32 random bytes in lowercase hex. */
-const FORMATO_TOKEN = /^[0-9a-f]{64}$/;
 
 const hashDe = (token: string): string =>
   createHash('sha256').update(token).digest('hex');

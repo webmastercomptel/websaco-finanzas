@@ -355,6 +355,9 @@ describe('inventario de rutas', () => {
    * - health: Cloud Run probes carry no credentials.
    * - auth/enlace/canjear: the person following an emailed link has no session
    *   yet; single purpose (token -> custom token), rate-limited, opaque 401.
+   * - publico/facturas/pdf: la persona sigue un enlace sin cuenta; un solo PDF
+   *   (el de la factura de su enlace), limitado por IP y por enlace, 404 opaco
+   *   para toda causa de rechazo.
    */
   it('las únicas rutas @Public son las justificadas', () => {
     const publicas: string[] = [];
@@ -376,6 +379,7 @@ describe('inventario de rutas', () => {
     }
     expect(publicas.sort()).toEqual([
       'EnlaceAccesoController.canjear',
+      'FacturaPublicaController.obtenerPdf',
       'HealthController.check',
       'HealthController.live',
       'HealthController.ready',

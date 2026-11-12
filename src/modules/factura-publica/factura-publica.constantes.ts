@@ -27,3 +27,6 @@ export const MENSAJE_OPACO = 'El enlace no es válido o ya no está disponible';
 
 /** A refusal never answers before this long, so timing does not tell the stage. */
 export const PISO_DE_TIEMPO_MS = 300;
+
+/** A well-formed token: 32 random bytes in lowercase hex. */
+export const FORMATO_TOKEN = /^[0-9a-f]{64}$/;
