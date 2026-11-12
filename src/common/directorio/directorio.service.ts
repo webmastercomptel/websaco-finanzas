@@ -118,9 +118,11 @@ export class DirectorioService {
    * address carried by the party's record (`correoProbado`, exact match of the
    * stored value: a padded legacy address is not a candidate). An account whose
    * address has an active revocation in this coproperty is dropped on BOTH
-   * routes. Queries: accounts by id, accounts by proven address (only when some
-   * party carries an address) and one batch of revocations, however many
-   * parties are asked for.
+   * routes. A proven address that is a generic inbox (`motivoCorreoGenerico`)
+   * reaches nobody by the address route. Queries: accounts by id, accounts by
+   * proven address (only when some party carries an address), the generic-inbox
+   * batch (only when some account proved one) and one batch of revocations,
+   * however many parties are asked for.
    */
   private async cuentasDePartes(
     copropiedadId: Types.ObjectId,
@@ -161,6 +163,14 @@ export class DirectorioService {
       for (const c of candidatas) {
         if (correoProbado(c)) probadas.set(c.email, c);
       }
+    }
+    // A generic inbox derives no residency (`motivoCorreoGenerico`, the same
+    // rule as the portal): only the proven route is cut, the legacy link stays.
+    if (probadas.size > 0) {
+      const genericos = await this.residencia.motivosCorreoGenerico([
+        ...probadas.keys(),
+      ]);
+      for (const correo of genericos.keys()) probadas.delete(correo);
     }
 
     for (const p of partes) {

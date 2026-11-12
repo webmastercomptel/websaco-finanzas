@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { ResidenciaService } from '../../common/acceso/residencia.service';
 import {
   CLAVE,
   COPRO_A,
@@ -346,5 +347,87 @@ describe('IngresoPortalService.emitirYEnviar', () => {
     await m.servicio.emitirYEnviar(CORREO, 'autoservicio', null);
 
     expect(m.enlaces.crear).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Generic inboxes, through the REAL `ResidenciaService` the portal access also
+ * uses, so the request step and the access can never disagree.
+ */
+describe('IngresoPortalService.solicitar - buzones genéricos', () => {
+  const cadena = (filas: Record<string, unknown>[]) => {
+    const c: Record<string, unknown> = {};
+    for (const m of ['collation', 'select', 'lean', 'sort']) c[m] = () => c;
+    c.exec = () => Promise.resolve(filas);
+    return { find: jest.fn(() => c) };
+  };
+
+  const residenciaReal = (
+    partes: number,
+    cuentas: Record<string, unknown>[] = [],
+    asignaciones: Record<string, unknown>[] = [],
+  ) => {
+    const copro = new Types.ObjectId(COPRO_A);
+    const terceros = Array.from({ length: partes }, () => ({
+      _id: new Types.ObjectId(),
+      copropiedadId: copro,
+      emails: [CORREO],
+    }));
+    return new ResidenciaService(
+      cadena(terceros) as never,
+      cadena(
+        terceros.map((t) => ({
+          _id: new Types.ObjectId(),
+          copropiedadId: copro,
+          titularId: t._id,
+          arrendatarioId: null,
+        })),
+      ) as never,
+      cadena([{ _id: copro, modulosContratados: ['finanzas'] }]) as never,
+      cadena([]) as never,
+      cadena(cuentas) as never,
+      cadena(asignaciones) as never,
+    );
+  };
+
+  it('3 terceros con la dirección: se envía el enlace', async () => {
+    const m = montar({ residenciaReal: residenciaReal(3) });
+
+    await m.servicio.solicitar(CORREO);
+
+    expect(m.correo.enviar).toHaveBeenCalledTimes(1);
+  });
+
+  it('4 terceros con la dirección: silencio, sin token ni correo, motivo correo-generico', async () => {
+    const m = montar({ residenciaReal: residenciaReal(4) });
+
+    await m.servicio.solicitar(CORREO);
+
+    expect(m.enlaces.crear).not.toHaveBeenCalled();
+    expect(m.correo.enviar).not.toHaveBeenCalled();
+    await expect(m.servicio.evaluarElegibilidad(CORREO)).resolves.toEqual({
+      elegible: false,
+      motivo: 'correo-generico',
+      copropiedadIds: [],
+    });
+  });
+
+  it('la dirección es la de una cuenta del personal: silencio, sin correo', async () => {
+    const cuentaId = new Types.ObjectId();
+    const m = montar({
+      residenciaReal: residenciaReal(
+        1,
+        [{ _id: cuentaId, email: CORREO, esAdministradorPlataforma: false }],
+        [{ accountId: cuentaId }],
+      ),
+    });
+
+    await m.servicio.solicitar(CORREO);
+
+    expect(m.enlaces.crear).not.toHaveBeenCalled();
+    expect(m.correo.enviar).not.toHaveBeenCalled();
+    expect((await m.servicio.evaluarElegibilidad(CORREO)).motivo).toBe(
+      'correo-generico',
+    );
   });
 });

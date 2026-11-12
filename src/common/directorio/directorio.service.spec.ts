@@ -66,6 +66,8 @@ function crear(opciones: {
   accesos?: Record<string, AccesoCopropiedad | null>;
   /** Claves with an active revocation in COP (what `clavesRevocadas` answers). */
   revocadas?: string[];
+  /** Generic inboxes (what `motivosCorreoGenerico` answers), by address. */
+  genericos?: Record<string, string>;
 }) {
   const inmuebles = consulta(opciones.inmuebles ?? []);
   const cuentas = consulta(opciones.cuentas ?? []);
@@ -82,6 +84,16 @@ function crear(opciones: {
       new Set(claves.filter((c) => (opciones.revocadas ?? []).includes(c))),
     ),
   );
+  const motivosCorreoGenerico = jest.fn((correos: readonly string[]) =>
+    Promise.resolve(
+      new Map(
+        correos.flatMap((c) => {
+          const motivo = opciones.genericos?.[c];
+          return motivo ? [[c, motivo] as const] : [];
+        }),
+      ),
+    ),
+  );
   const servicio = new DirectorioService(
     cuentas as never,
     asignaciones as never,
@@ -89,7 +101,7 @@ function crear(opciones: {
     copropiedades as never,
     { accesoA } as unknown as AccesoService,
     inmuebles as never,
-    { clavesRevocadas } as never,
+    { clavesRevocadas, motivosCorreoGenerico } as never,
   );
   return {
     servicio,
@@ -99,6 +111,7 @@ function crear(opciones: {
     inmuebles,
     accesoA,
     clavesRevocadas,
+    motivosCorreoGenerico,
   };
 }
 
@@ -911,5 +924,34 @@ describe('DirectorioService residentes por dirección probada', () => {
     // Legacy lookup by id plus one lookup by proven address.
     expect(cuentas.find).toHaveBeenCalledTimes(2);
     expect(clavesRevocadas).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DirectorioService con un buzón genérico', () => {
+  it('una dirección probada que es buzón genérico no llega a nadie por correo; el vínculo heredado sigue', async () => {
+    const porteria = oid();
+    const beto = oid();
+    const tPorteria = oid();
+    const tBeto = oid();
+    const { servicio, motivosCorreoGenerico } = crear({
+      terceros: [
+        { _id: tPorteria, accountId: null, emails: ['porteria@x.com'] },
+        { _id: tBeto, accountId: beto, emails: ['porteria@x.com'] },
+      ],
+      inmuebles: [{ titularId: tPorteria, arrendatarioId: tBeto }],
+      cuentas: [
+        cuenta(porteria, 'Porteria', {
+          email: 'porteria@x.com',
+          correoProbadoClave: claveCorreo('porteria@x.com'),
+        }),
+        cuenta(beto, 'Beto'),
+      ],
+      genericos: { 'porteria@x.com': 'correo-compartido' },
+    });
+
+    const resultado = await servicio.residentes(COP);
+
+    expect(resultado.map((r) => r.nombre)).toEqual(['Beto']);
+    expect(motivosCorreoGenerico).toHaveBeenCalledWith(['porteria@x.com']);
   });
 });

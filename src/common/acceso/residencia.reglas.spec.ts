@@ -1,7 +1,9 @@
 import { claveCorreo } from '../utils/email.utils';
 import {
+  MAX_TERCEROS_POR_CORREO,
   REVOCACION_DETIENE_CORREOS_FACTURA,
   coincideCorreo,
+  motivoCorreoGenerico,
   correoProbado,
   copropiedadAdmiteIngresoResidentes,
   revocacionAplica,
@@ -174,4 +176,27 @@ describe('flip points', () => {
   it('revoking the portal does not stop invoice e-mails (owner assumption 3)', () => {
     expect(REVOCACION_DETIENE_CORREOS_FACTURA).toBe(false);
   });
+});
+
+describe('motivoCorreoGenerico (buzones genéricos)', () => {
+  it('fija el tope en 3 terceros distintos', () => {
+    expect(MAX_TERCEROS_POR_CORREO).toBe(3);
+  });
+
+  it.each([
+    [1, false, null],
+    [3, false, null],
+    [4, false, 'correo-compartido'],
+    [10, false, 'correo-compartido'],
+    [1, true, 'correo-de-personal'],
+    // Staff is the reported reason when both hold.
+    [5, true, 'correo-de-personal'],
+  ] as const)(
+    '%i terceros, personal=%s -> %s',
+    (tercerosDistintos, esCorreoDePersonal, esperado) => {
+      expect(
+        motivoCorreoGenerico({ tercerosDistintos, esCorreoDePersonal }),
+      ).toBe(esperado);
+    },
+  );
 });

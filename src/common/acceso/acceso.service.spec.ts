@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 import { AccesoService } from './acceso.service';
+import { ResidenciaService } from './residencia.service';
 import { claveCorreo } from '../utils/email.utils';
 
 const oid = () => new Types.ObjectId();
@@ -1292,5 +1293,72 @@ describe('AccesoService residentes por dirección probada', () => {
     expect(residencia.copropiedadesPorCorreo).toHaveBeenCalledTimes(1);
     expect(residencia.copropiedadesPorCorreo).toHaveBeenCalledWith(CORREO);
     expect(residencia.revocacionesActivas).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** Generic inboxes (B1 review fix): the real `ResidenciaService` behind the access. */
+describe('AccesoService con un buzón genérico', () => {
+  const cadena = (filas: Fila[]) => {
+    const c: Record<string, unknown> = {};
+    for (const m of ['collation', 'select', 'lean', 'sort']) c[m] = () => c;
+    c.exec = () => Promise.resolve(filas);
+    return { find: jest.fn(() => c) };
+  };
+  const BUZON = 'porteria@example.com';
+  const probada = {
+    email: BUZON,
+    estado: 'active',
+    correoProbadoClave: claveCorreo(BUZON),
+  };
+
+  it('4 terceros con la dirección: no da residencia por correo, pero el vínculo heredado sigue', async () => {
+    const vinculado = oid();
+    const partes: Fila[] = [vinculado, oid(), oid(), oid()].map((id) => ({
+      _id: id,
+      copropiedadId: copA,
+      emails: [BUZON],
+    }));
+    const residencia = new ResidenciaService(
+      cadena(partes) as never,
+      cadena(
+        partes.map((p) => ({
+          _id: oid(),
+          copropiedadId: copA,
+          titularId: p._id,
+          arrendatarioId: null,
+        })),
+      ) as never,
+      cadena([{ _id: copA, modulosContratados: ['finanzas'] }]) as never,
+      cadena([]) as never,
+      cadena([]) as never,
+      cadena([]) as never,
+    );
+
+    // Proven address only: the inbox grants nothing.
+    const soloCorreo = servicio({
+      asignaciones: [],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      residencia: residencia as never,
+    });
+    await expect(
+      soloCorreo.copropiedadesDe(cuenta.toString(), false, probada),
+    ).resolves.toEqual([]);
+
+    // The legacy `Tercero.accountId` link on one of those parties still works.
+    const heredado = servicio({
+      asignaciones: [],
+      terceros: [{ _id: vinculado, copropiedadId: copA }],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      residencia: residencia as never,
+    });
+    const [resultado] = await heredado.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+    expect(resultado).toMatchObject({
+      copropiedadId: copA.toString(),
+      esResidente: true,
+    });
   });
 });

@@ -74,6 +74,8 @@ export interface Opciones {
   nombreTercero?: string | null;
   /** Creating the Firebase identity fails. */
   identidadFalla?: boolean;
+  /** A real `ResidenciaService` (over mocked models) instead of the stand-in. */
+  residenciaReal?: unknown;
   /** Writing the audit entry fails. */
   auditoriaFalla?: boolean;
 }
@@ -135,6 +137,9 @@ export function montar(over: Opciones = {}) {
       eventos.push('elegibilidad');
       return Promise.resolve(copropiedades);
     }),
+    motivosCorreoGenerico: jest.fn(() =>
+      Promise.resolve(new Map<string, string>()),
+    ),
     revocacionesActivas: jest
       .fn()
       .mockResolvedValue(new Set(over.revocadas ?? [])),
@@ -281,7 +286,7 @@ export function montar(over: Opciones = {}) {
   };
 
   const servicio = new IngresoPortalService(
-    residencia as never,
+    (over.residenciaReal ?? residencia) as never,
     enlaces as never,
     correo as never,
     config as never,

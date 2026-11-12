@@ -3,8 +3,8 @@ import { claveCorreo, normalizarEmail } from '../utils/email.utils';
 
 /**
  * Pure rules of the address-derived resident access. Nothing here reads a
- * database: `ResidenciaService` fetches, these functions decide. The four
- * owner assumptions that may flip are each ONE constant or ONE function below.
+ * database: `ResidenciaService` fetches, these functions decide. The owner
+ * assumptions that may flip are each ONE constant or ONE function below.
  */
 
 /**
@@ -115,6 +115,45 @@ export function copropiedadAdmiteIngresoResidentes(
   modulos: readonly string[],
 ): boolean {
   return modulos.includes('finanzas') || modulos.includes('administracion');
+}
+
+/**
+ * FLIP POINT A5 (decided without the owner, conservative): the cap of DISTINCT
+ * active party records, across all coproperties, that may carry one address
+ * before it is treated as a shared inbox (an administration or concierge
+ * mailbox typed by staff on many records). Above it the address grants no
+ * address-derived residency anywhere and gets no sign-in link. A person with
+ * one record holding many units counts as ONE.
+ */
+export const MAX_TERCEROS_POR_CORREO = 3;
+
+/**
+ * Why an address must not derive residency (`requiereCorreccion` reason code
+ * of the Residentes listing): it is the address of a staff Account, or it is
+ * on too many party records.
+ */
+export type MotivoCorreoGenerico = 'correo-de-personal' | 'correo-compartido';
+
+/**
+ * FLIP POINT A5: is this address a generic inbox? The ONE rule behind
+ * `ResidenciaService.tercerosPorCorreo` (and through it every address-derived
+ * residency: `AccesoService`, `PortalAccesoService`, the sign-in request and
+ * redeem) and `ResidenciaService.motivosCorreoGenerico` (`DirectorioService`,
+ * the Residentes listing), so the gate and the listing never disagree.
+ * `esCorreoDePersonal`: the address is the e-mail of an Account that is a
+ * platform admin or holds any active `Asignacion`. The legacy
+ * `Tercero.accountId` link is not judged here and keeps working. To relax it,
+ * raise the cap or drop the staff clause here, nowhere else.
+ */
+export function motivoCorreoGenerico(hechos: {
+  tercerosDistintos: number;
+  esCorreoDePersonal: boolean;
+}): MotivoCorreoGenerico | null {
+  if (hechos.esCorreoDePersonal) return 'correo-de-personal';
+  if (hechos.tercerosDistintos > MAX_TERCEROS_POR_CORREO) {
+    return 'correo-compartido';
+  }
+  return null;
 }
 
 /**

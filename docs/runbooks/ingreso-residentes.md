@@ -39,6 +39,13 @@ flow), `src/database/schemas/cuentas/enlace-ingreso.schema.ts` and
 - Access is derived per request from the records (see `CLAUDE.md`, «Resident access
   is DERIVED per request»). Nothing is cached, so removing the address from a
   record, a sale or a revocation takes effect on the next request.
+- A generic inbox never gets a link nor address-derived access: the e-mail of a
+  staff Account (platform admin or any active `Asignacion`), or an address on more
+  than 3 distinct active party records across all coproperties
+  (`MAX_TERCEROS_POR_CORREO`, `common/acceso/residencia.reglas.ts`). The request
+  still answers the same 202; `evaluarElegibilidad` reports the reason
+  `correo-generico` for the staff resend. To let such a person in, fix the records so each party carries
+  the person's own address. A legacy `Tercero.accountId` link is not affected.
 - Staff and resident access add up. Nothing here creates or changes an
   `Asignacion`, a role or a permission key.
 

@@ -41,7 +41,8 @@ import {
 import { clavesLimite, LIMITES_INGRESO } from './ingreso-portal.constantes';
 
 /** Why an address cannot receive a sign-in link. Staff see these; the public never does. */
-export type MotivoInelegible = 'sin-registro' | 'revocado' | 'cuenta-inactiva';
+export type MotivoInelegible =
+  'sin-registro' | 'correo-generico' | 'revocado' | 'cuenta-inactiva';
 
 export interface Elegibilidad {
   elegible: boolean;
@@ -129,13 +130,26 @@ export class IngresoPortalService {
    * coproperty that contracted a module, is not under an active revocation in
    * EVERY one of those coproperties, and its Account (if it has one) is active.
    * Reads the records on the spot: nothing is cached.
+   *
+   * A generic inbox (`motivoCorreoGenerico`) reaches nothing: the refusal is
+   * inside `copropiedadesPorCorreo`, the same query the portal access uses, so
+   * the sign-in and the access can never disagree. Only the reason code is
+   * asked for afterwards (`correo-generico`, for the staff resend);
+   * the public answer is the same 202 either way.
    */
   async evaluarElegibilidad(correo: string): Promise<Elegibilidad> {
     const normalizado = normalizarEmail(correo);
     const alcanzadas =
       await this.residencia.copropiedadesPorCorreo(normalizado);
     if (alcanzadas.size === 0) {
-      return { elegible: false, motivo: 'sin-registro', copropiedadIds: [] };
+      const genericos = await this.residencia.motivosCorreoGenerico([
+        normalizado,
+      ]);
+      return {
+        elegible: false,
+        motivo: genericos.has(normalizado) ? 'correo-generico' : 'sin-registro',
+        copropiedadIds: [],
+      };
     }
 
     const ids = [...alcanzadas.keys()];
