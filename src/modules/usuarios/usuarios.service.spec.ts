@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { UsuariosService } from './usuarios.service';
+import { AsignacionesUsuarioService } from './asignaciones-usuario.service';
 import type { FirebaseUsuariosService } from '../../common/firebase/firebase-usuarios.service';
 
 type Filtro = Record<string, unknown>;
@@ -68,8 +69,12 @@ const construirModelos = (
     cuentasCreadas,
     exists: jest.fn((filtro: Filtro) => {
       filtrosAccounts.push(filtro);
+      // A real collection also knows the accounts created during the test, so
+      // a retry after a failed creation meets the existing-email rule.
+      const yaCreada = cuentas.some((c) => c.email === filtro.email);
       return {
-        exec: () => Promise.resolve(opts.duplicada ? { _id: 'x' } : null),
+        exec: () =>
+          Promise.resolve(opts.duplicada || yaCreada ? { _id: 'x' } : null),
       };
     }),
     find: jest.fn((filtro?: Filtro) => {
@@ -146,16 +151,36 @@ const construirModelos = (
         exec: () => Promise.resolve(buscar()),
       };
     }),
-    create: jest.fn((doc: Record<string, unknown>) => {
-      if (opts.errorAlCrear !== undefined) {
-        return Promise.reject(opts.errorAlCrear);
-      }
-      asignacionesGuardadas.push(doc);
-      const creada = asignacionDoc(doc);
-      // Newest first, like the sorted reads: a later update sees this row.
-      asignaciones.unshift(creada);
-      return Promise.resolve(creada);
-    }),
+    // Both call shapes of Mongoose's `create`: one document (the legacy
+    // update path) and the array form with options, which is what takes a
+    // session (the transactional path).
+    create: jest.fn(
+      (
+        doc: Record<string, unknown> | Record<string, unknown>[],
+        _opciones?: { session?: unknown },
+      ) => {
+        if (opts.errorAlCrear !== undefined) {
+          return Promise.reject(opts.errorAlCrear);
+        }
+        const [uno] = Array.isArray(doc) ? doc : [doc];
+        asignacionesGuardadas.push(uno);
+        const creada = asignacionDoc(uno);
+        // Newest first, like the sorted reads: a later update sees this row.
+        asignaciones.unshift(creada);
+        return Promise.resolve(Array.isArray(doc) ? [creada] : creada);
+      },
+    ),
+    /** What a rolled-back transaction restores: the rows as they were. */
+    instantanea: () => {
+      const antes = [...asignaciones];
+      const guardadasAntes = [...asignacionesGuardadas];
+      return () => {
+        asignaciones.length = 0;
+        asignaciones.push(...antes);
+        asignacionesGuardadas.length = 0;
+        asignacionesGuardadas.push(...guardadasAntes);
+      };
+    },
   };
 
   return { accounts, asignacionesModel, asignacionesGuardadas };
@@ -193,6 +218,56 @@ const firebaseUsuariosCon = (
   };
 };
 
+/**
+ * The service under test, wired like the module does it: the real
+ * `AsignacionesUsuarioService` over the same assignments double, and a
+ * connection whose transactions undo what the callback wrote when it throws
+ * (what Mongo does, and what makes "the audit failed, no row" observable).
+ */
+const crearServicio = (
+  accounts: never,
+  asignacionesModel: never,
+  firebase: FirebaseUsuariosService,
+  auditoria: never,
+) => {
+  const modelo = asignacionesModel as unknown as {
+    instantanea: () => () => void;
+  };
+  const conexion = {
+    startSession: jest.fn(() =>
+      Promise.resolve({
+        endSession: jest.fn().mockResolvedValue(undefined),
+        withTransaction: async (fn: () => Promise<void>) => {
+          const deshacer = modelo.instantanea();
+          try {
+            await fn();
+          } catch (error) {
+            deshacer();
+            throw error;
+          }
+        },
+      }),
+    ),
+  };
+  const asignaciones = new AsignacionesUsuarioService(
+    asignacionesModel,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    auditoria,
+    conexion as never,
+  );
+  return new UsuariosService(
+    accounts,
+    asignacionesModel,
+    firebase,
+    auditoria,
+    asignaciones,
+    conexion as never,
+  );
+};
+
 describe('UsuariosService.create', () => {
   it('rechaza un correo local ya usado ANTES de tocar Firebase', async () => {
     // Si Firebase se llamara primero, un correo ya usado localmente crearía
@@ -201,7 +276,7 @@ describe('UsuariosService.create', () => {
       duplicada: true,
     });
     const { firebase, crear } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -224,7 +299,7 @@ describe('UsuariosService.create', () => {
   it('crea la identidad de Firebase y la cuenta local con el mismo uid', async () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase, crear } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -236,6 +311,7 @@ describe('UsuariosService.create', () => {
         nombre: 'Ana Pérez',
         email: 'Ana@Ejemplo.com',
         password: 'clave123',
+        esAdministradorPlataforma: true,
       },
       ACTOR,
     );
@@ -255,7 +331,7 @@ describe('UsuariosService.create', () => {
   it('un administrador de plataforma se crea sin asignación', async () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -281,7 +357,7 @@ describe('UsuariosService.create', () => {
   it('un usuario normal con alcance crea su asignación', async () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -302,13 +378,16 @@ describe('UsuariosService.create', () => {
     );
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        alcance: 'copropiedad',
-        // The tenancy law: stored as an ObjectId, never the raw string —
-        // see TenantContextService.resolveCoPropertyId's docblock.
-        copropiedadId: new Types.ObjectId(copId),
-        permisos: ['inmuebles.editar'],
-      }),
+      [
+        expect.objectContaining({
+          alcance: 'copropiedad',
+          // The tenancy law: stored as an ObjectId, never the raw string —
+          // see TenantContextService.resolveCoPropertyId's docblock.
+          copropiedadId: new Types.ObjectId(copId),
+          permisos: ['inmuebles.editar'],
+        }),
+      ],
+      expect.objectContaining({ session: expect.anything() }),
     );
   });
 
@@ -316,7 +395,7 @@ describe('UsuariosService.create', () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase } = firebaseUsuariosCon();
     const auditoria = mockAuditoria();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -328,6 +407,7 @@ describe('UsuariosService.create', () => {
         nombre: 'Ana Pérez',
         email: 'ana@ejemplo.com',
         password: 'clave123',
+        esAdministradorPlataforma: true,
       },
       ACTOR,
     );
@@ -357,7 +437,7 @@ describe('UsuariosService.create', () => {
     const auditoria = {
       registrar: jest.fn().mockRejectedValue(new Error('audit down')),
     };
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -370,6 +450,7 @@ describe('UsuariosService.create', () => {
           nombre: 'Ana',
           email: 'ana@ejemplo.com',
           password: 'clave123',
+          esAdministradorPlataforma: true,
         },
         ACTOR,
       ),
@@ -386,7 +467,7 @@ describe('UsuariosService.update', () => {
       cuentas: [cuenta],
     });
     const { firebase, establecerHabilitado } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -407,7 +488,7 @@ describe('UsuariosService.update', () => {
       cuentas: [cuenta],
     });
     const { firebase, establecerHabilitado } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -426,7 +507,7 @@ describe('UsuariosService.update', () => {
       cuentas: [cuenta],
     });
     const { firebase, actualizarPassword } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -447,7 +528,7 @@ describe('UsuariosService.update', () => {
   it('responde "no existe" para un id que no corresponde a ninguna cuenta', async () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -471,7 +552,7 @@ describe('UsuariosService.update', () => {
     const { accounts, asignacionesModel, asignacionesGuardadas } =
       construirModelos({ cuentas: [cuenta], asignaciones: [anterior] });
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -512,7 +593,7 @@ describe('UsuariosService.update', () => {
       asignaciones: [actual],
     });
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -546,7 +627,7 @@ describe('UsuariosService.update', () => {
       const { accounts, asignacionesModel } = construirModelos(opts);
       const { firebase } = firebaseUsuariosCon();
       return {
-        service: new UsuariosService(
+        service: crearServicio(
           accounts as never,
           asignacionesModel as never,
           firebase,
@@ -885,7 +966,7 @@ describe('UsuariosService.update', () => {
     });
     const { firebase } = firebaseUsuariosCon();
     const auditoria = mockAuditoria();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -913,7 +994,7 @@ describe('UsuariosService.update', () => {
     const auditoria = {
       registrar: jest.fn().mockRejectedValue(new Error('audit down')),
     };
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -939,7 +1020,7 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
   const servicio = () => {
     const { accounts, asignacionesModel } = construirModelos();
     const { firebase, crear } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -958,10 +1039,13 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
 
     expect(crear).toHaveBeenCalledTimes(1);
     expect(asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        perfil: 'personal',
-        permisos: ['facturas.ver', 'pqr.ver'],
-      }),
+      [
+        expect.objectContaining({
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'pqr.ver'],
+        }),
+      ],
+      expect.anything(),
     );
   });
 
@@ -1001,7 +1085,7 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
       asignaciones: [actual],
     });
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -1030,7 +1114,7 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
       asignaciones: [],
     });
     const { firebase, establecerHabilitado } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -1066,7 +1150,7 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
       asignaciones: [actual],
     });
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -1093,10 +1177,13 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
     await service.create({ ...base, permisos: ['facturas.ver'] }, ACTOR);
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        perfil: 'administrativo',
-        permisos: ['facturas.ver'],
-      }),
+      [
+        expect.objectContaining({
+          perfil: 'administrativo',
+          permisos: ['facturas.ver'],
+        }),
+      ],
+      expect.anything(),
     );
   });
 
@@ -1106,7 +1193,8 @@ describe('UsuariosService — claves de permiso: solo se rechazan las desconocid
     await service.create({ ...base, perfil: 'personal', permisos: [] }, ACTOR);
 
     expect(asignacionesModel.create).toHaveBeenCalledWith(
-      expect.objectContaining({ perfil: 'personal', permisos: [] }),
+      [expect.objectContaining({ perfil: 'personal', permisos: [] })],
+      expect.anything(),
     );
   });
 });
@@ -1115,7 +1203,7 @@ describe('UsuariosService.findAll — solo el equipo de la plataforma', () => {
   const servicioCon = (opts: Parameters<typeof construirModelos>[0] = {}) => {
     const { accounts, asignacionesModel } = construirModelos(opts);
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       asignacionesModel as never,
       firebase,
@@ -1210,7 +1298,7 @@ describe('UsuariosService — asignaciones[] (lista completa por cuenta)', () =>
     const { accounts } = construirModelos({ cuentas });
     const modelo = modeloPorCuenta(filas);
     const { firebase } = firebaseUsuariosCon();
-    const service = new UsuariosService(
+    const service = crearServicio(
       accounts as never,
       modelo as never,
       firebase,
@@ -1312,9 +1400,185 @@ describe('UsuariosService — asignaciones[] (lista completa por cuenta)', () =>
     ]);
 
     const creado = await service.create(
-      { nombre: 'Nuevo', email: 'nuevo@ejemplo.com', password: 'clave123' },
+      {
+        nombre: 'Nuevo',
+        email: 'nuevo@ejemplo.com',
+        password: 'clave123',
+        esAdministradorPlataforma: true,
+      },
       ACTOR,
     );
     expect(creado.asignaciones).toEqual([]);
+  });
+});
+
+describe('UsuariosService.create — la primera asignación y su auditoría, en una transacción (REQ-U9)', () => {
+  const COP = new Types.ObjectId().toString();
+  const base = {
+    nombre: 'Ana',
+    email: 'ana@ejemplo.com',
+    password: 'clave123',
+    alcance: 'copropiedad' as const,
+    copropiedadId: COP,
+    permisos: ['facturas.ver'],
+  };
+
+  const servicio = (opts: Parameters<typeof construirModelos>[0] = {}) => {
+    const { accounts, asignacionesModel } = construirModelos(opts);
+    const { firebase, crear } = firebaseUsuariosCon();
+    const auditoria = mockAuditoria();
+    const service = crearServicio(
+      accounts as never,
+      asignacionesModel as never,
+      firebase,
+      auditoria as never,
+    );
+    return { service, crear, accounts, asignacionesModel, auditoria };
+  };
+
+  it('la fila y la entrada comparten la sesión, y la entrada lleva detalle con todas las claves efectivas (S-U9.1)', async () => {
+    const { service, asignacionesModel, auditoria, accounts } = servicio();
+
+    await service.create(
+      { ...base, permisos: ['pqr.ver', 'facturas.ver'] },
+      ACTOR,
+    );
+
+    const [, opcionesCreate] = asignacionesModel.create.mock.calls[0] as [
+      unknown,
+      { session: unknown },
+    ];
+    const [entrada, sesionAudit] = auditoria.registrar.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(sesionAudit).toBe(opcionesCreate.session);
+    const cuentaCreada = await (
+      accounts.create.mock.results[0] as {
+        value: Promise<{ _id: { toString(): string } }>;
+      }
+    ).value;
+    expect(entrada).toEqual({
+      actorAccountId: ACTOR.accountId,
+      actorNombre: ACTOR.nombre,
+      accion: 'crear',
+      entidadTipo: 'usuario',
+      entidadId: cuentaCreada._id.toString(),
+      entidadEtiqueta: 'Ana',
+      detalle: { agregadas: ['facturas.ver', 'pqr.ver'], quitadas: [] },
+    });
+    expect(asignacionesModel.guardadas).toHaveLength(1);
+  });
+
+  it('una lista vacía es un valor real: la entrada lleva detalle con arreglos vacíos', async () => {
+    const { service, auditoria } = servicio();
+
+    await service.create({ ...base, permisos: [] }, ACTOR);
+
+    expect(auditoria.registrar.mock.calls[0][0]).toMatchObject({
+      detalle: { agregadas: [], quitadas: [] },
+    });
+  });
+
+  it('un administrador de plataforma sin asignación: ninguna fila y una entrada SIN detalle (S-U9.4)', async () => {
+    const { service, asignacionesModel, auditoria } = servicio();
+
+    await service.create(
+      {
+        nombre: 'Root',
+        email: 'root@ejemplo.com',
+        password: 'clave123',
+        esAdministradorPlataforma: true,
+      },
+      ACTOR,
+    );
+
+    expect(asignacionesModel.create).not.toHaveBeenCalled();
+    expect(auditoria.registrar).toHaveBeenCalledTimes(1);
+    expect(auditoria.registrar.mock.calls[0][0]).not.toHaveProperty('detalle');
+  });
+
+  it('si falla la auditoría no queda la fila; la identidad y la cuenta se quedan, inertes, y reintentar choca con el 409 del correo (S-U9.2)', async () => {
+    const { service, crear, accounts, asignacionesModel, auditoria } =
+      servicio();
+    auditoria.registrar.mockRejectedValueOnce(new Error('audit down'));
+
+    await expect(service.create(base, ACTOR)).rejects.toThrow('audit down');
+
+    expect(asignacionesModel.guardadas).toHaveLength(0);
+    expect(crear).toHaveBeenCalledTimes(1);
+    expect(accounts.create).toHaveBeenCalledTimes(1);
+
+    const reintento = service.create(base, ACTOR);
+    await expect(reintento).rejects.toBeInstanceOf(ConflictException);
+    await expect(reintento).rejects.toThrow(
+      'Ya existe una cuenta local con el correo ana@ejemplo.com',
+    );
+    expect(crear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([['tareas.volar'], ['inmuebles.aprobar'], ['facturas.gestionar']])(
+    'una clave que no está ofrecida (%s): 400 que la nombra, ANTES de cualquier llamada a Firebase (S-U9.3)',
+    async (clave) => {
+      const { service, crear, accounts, asignacionesModel } = servicio();
+
+      const intento = service.create(
+        { ...base, permisos: ['facturas.ver', clave] },
+        ACTOR,
+      );
+
+      await expect(intento).rejects.toBeInstanceOf(BadRequestException);
+      await expect(intento).rejects.toThrow(
+        `Permisos que no existen: ${clave}`,
+      );
+      expect(crear).not.toHaveBeenCalled();
+      expect(accounts.create).not.toHaveBeenCalled();
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['sin alcance', { alcance: undefined, copropiedadId: undefined }],
+    ['copropiedad sin id', { copropiedadId: undefined }],
+    [
+      'entidad sin id',
+      { alcance: 'entidad' as const, copropiedadId: undefined },
+    ],
+  ])(
+    'un usuario que no es administrador de plataforma, %s: 400 antes de Firebase (S-U9.5)',
+    async (_caso, cambio) => {
+      const { service, crear, accounts } = servicio();
+
+      await expect(
+        service.create({ ...base, ...cambio }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(crear).not.toHaveBeenCalled();
+      expect(accounts.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('la respuesta lleva la fila recién creada en asignaciones', async () => {
+    const { service } = servicio();
+
+    const usuario = await service.create(base, ACTOR);
+
+    expect(usuario.asignaciones).toHaveLength(1);
+    expect(usuario.asignaciones[0]).toMatchObject({
+      alcance: 'copropiedad',
+      permisos: ['facturas.ver'],
+      estado: 'activo',
+    });
+  });
+
+  it('una carrera con la clave única (E11000) responde 409 y no deja entrada', async () => {
+    const { service, auditoria } = servicio({
+      errorAlCrear: Object.assign(new Error('dup'), { code: 11000 }),
+    });
+
+    await expect(service.create(base, ACTOR)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(auditoria.registrar).not.toHaveBeenCalled();
   });
 });

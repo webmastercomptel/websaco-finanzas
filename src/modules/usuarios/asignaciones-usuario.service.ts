@@ -36,6 +36,7 @@ import {
   type CambioDeClaves,
 } from '../casl/delegacion';
 import { filtroListaExacta } from '../casl/filtro-lista-exacta';
+import type { PerfilAsignacion } from '../casl/permisos-catalogo';
 import type {
   ActualizarAsignacionUsuarioDto,
   AgregarAsignacionUsuarioDto,
@@ -109,6 +110,12 @@ export interface NuevaAsignacion {
   copropiedadId: Types.ObjectId | null;
   entidadId: Types.ObjectId | null;
   permisos: string[];
+  /**
+   * Defaults to `administrativo`, the only profile this screen writes. Only
+   * `UsuariosService.create` passes one, while `CrearUsuarioDto` still accepts
+   * `perfil`; it goes with that field.
+   */
+  perfil?: PerfilAsignacion;
 }
 
 /**
@@ -329,7 +336,8 @@ export class AsignacionesUsuarioService {
   }
 
   /**
-   * Inserts ONE new row, `administrativo`, active, with no roles. The array form
+   * Inserts ONE new row, `administrativo` unless told otherwise, active, with
+   * no roles. The array form
    * of `create` is what lets Mongoose take the session. Also used by
    * `UsuariosService.create` for the first assignment of a new account, inside
    * its own transaction. A concurrent insert of the same target (E11000) is a
@@ -348,7 +356,7 @@ export class AsignacionesUsuarioService {
             copropiedadId: datos.copropiedadId,
             entidadId: datos.entidadId,
             permisos: datos.permisos,
-            perfil: 'administrativo',
+            perfil: datos.perfil ?? 'administrativo',
             roleIds: [],
             estado: 'active',
           },

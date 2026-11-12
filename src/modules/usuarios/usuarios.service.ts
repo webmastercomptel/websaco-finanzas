@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
   Account,
   AccountDocument,
@@ -25,10 +25,12 @@ import type {
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { cambioDeClaves, exigirClavesConocidas } from '../casl/delegacion';
 import {
   permisosDesconocidos,
   type PerfilAsignacion,
 } from '../casl/permisos-catalogo';
+import { AsignacionesUsuarioService } from './asignaciones-usuario.service';
 
 /**
  * Rejects a permission list that names keys outside the catalog. That is the
@@ -73,7 +75,30 @@ export class UsuariosService {
     private readonly asignaciones: Model<AsignacionDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
     private readonly auditoria: AuditoriaService,
+    private readonly asignacionesUsuario: AsignacionesUsuarioService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
+
+  /**
+   * Same shape as the other transactional services: `withTransaction` may
+   * re-run the callback on a transient error, so what it does must be safe to
+   * repeat (the insert fails on the unique index, the audit entry is rolled back
+   * with it).
+   */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
 
   /**
    * Lists the platform's ADMINISTRATOR accounts and each one's primary
@@ -156,13 +181,23 @@ export class UsuariosService {
 
   /**
    * Provisions a new user: a Firebase sign-in identity, the local Account, and
-   * (unless they are a platform administrator) one assignment.
+   * (unless they are a platform administrator) their FIRST assignment, which is
+   * mandatory: "created with no assignment" is indistinguishable from "created
+   * and then forgotten".
    *
-   * Order matters. The Firebase identity is created FIRST, and if anything
-   * after that fails, the result is a Firebase user with no Account — which is
-   * exactly the "authenticated but powerless" state FirebaseAuthGuard already
-   * treats as safe and ordinary. There is no saga to roll it back, and none is
-   * needed: the failure mode this ordering produces is inert by construction.
+   * Order matters. Everything that can be refused is refused first (the keys
+   * must be offered, the assignment must name its target), so a refused request
+   * leaves nothing behind. The Firebase identity is created NEXT, then the
+   * Account; if anything after that fails, the result is an identity or an
+   * account with no assignment — exactly the "authenticated but powerless"
+   * state FirebaseAuthGuard already treats as safe and ordinary. There is no
+   * saga to roll it back, and none is needed: the failure mode this ordering
+   * produces is inert by construction, and the retry meets the existing-email
+   * 409 instead of creating a second identity.
+   *
+   * The assignment and its audit entry (with `detalle`) are written in ONE
+   * Mongo transaction, so a failed audit write leaves no row behind. A platform
+   * administrator has no assignment: its entry carries no `detalle`.
    */
   async create(
     dto: CrearUsuarioDto,
@@ -170,7 +205,11 @@ export class UsuariosService {
   ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
     const perfil = dto.perfil ?? 'administrativo';
-    exigirPermisosValidos(dto.permisos);
+    const permisos = dto.permisos ?? [];
+    // Every key here is NEW, so each must be offered: a grammar-valid key that
+    // no route checks (`inmuebles.aprobar`) would be stored with no trace in
+    // `detalle`.
+    exigirClavesConocidas(permisos);
 
     const yaExiste = await this.accounts.exists({ email: correo }).exec();
     if (yaExiste) {
@@ -178,6 +217,11 @@ export class UsuariosService {
         `Ya existe una cuenta local con el correo ${correo}`,
       );
     }
+
+    // Still before Firebase: a request with no target creates nothing.
+    const asignacion = dto.esAdministradorPlataforma
+      ? null
+      : this.destinoDeLaPrimeraAsignacion(dto);
 
     const { uid } = await this.firebaseUsuarios.crear({
       email: correo,
@@ -193,34 +237,60 @@ export class UsuariosService {
       estado: 'active',
     });
 
-    if (!dto.esAdministradorPlataforma && dto.alcance) {
-      await this.asignaciones.create({
-        accountId: cuenta._id,
-        alcance: dto.alcance,
-        copropiedadId:
-          dto.alcance === 'copropiedad' && dto.copropiedadId
-            ? new Types.ObjectId(dto.copropiedadId)
-            : null,
-        entidadId:
-          dto.alcance === 'entidad' && dto.entidadId
-            ? new Types.ObjectId(dto.entidadId)
-            : null,
-        permisos: dto.permisos ?? [],
-        perfil,
-        estado: 'active',
-      });
-    }
-
-    await this.auditoria.registrar({
+    const entrada = {
       actorAccountId: actor.accountId,
       actorNombre: actor.nombre,
-      accion: 'crear',
-      entidadTipo: 'usuario',
+      accion: 'crear' as const,
+      entidadTipo: 'usuario' as const,
       entidadId: cuenta._id.toString(),
       entidadEtiqueta: dto.nombre,
-    });
+    };
+
+    if (asignacion) {
+      await this.transaccion(async (session) => {
+        await this.asignacionesUsuario.insertar(
+          { accountId: cuenta._id, ...asignacion, permisos, perfil },
+          session,
+        );
+        await this.auditoria.registrar(
+          { ...entrada, detalle: cambioDeClaves([], permisos) },
+          session,
+        );
+      });
+    } else {
+      await this.auditoria.registrar(entrada);
+    }
 
     return this.findOne(cuenta._id.toString());
+  }
+
+  /**
+   * The target of the first assignment, as the ObjectIds the unique indexes key
+   * on, or 400 when the request does not name one. The DTO already demands it;
+   * this keeps the rule true for any caller, and BEFORE Firebase is touched.
+   */
+  private destinoDeLaPrimeraAsignacion(dto: CrearUsuarioDto): {
+    alcance: 'copropiedad' | 'entidad';
+    copropiedadId: Types.ObjectId | null;
+    entidadId: Types.ObjectId | null;
+  } {
+    if (dto.alcance === 'copropiedad' && dto.copropiedadId) {
+      return {
+        alcance: 'copropiedad',
+        copropiedadId: new Types.ObjectId(dto.copropiedadId),
+        entidadId: null,
+      };
+    }
+    if (dto.alcance === 'entidad' && dto.entidadId) {
+      return {
+        alcance: 'entidad',
+        copropiedadId: null,
+        entidadId: new Types.ObjectId(dto.entidadId),
+      };
+    }
+    throw new BadRequestException(
+      'Indica a dónde tendrá acceso: una copropiedad o una entidad administradora',
+    );
   }
 
   /**
