@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import { destinosDeUnidad } from '../../common/directorio/destinos-correo';
 import type { ResidenteDeInmueble } from '../../common/directorio/directorio.service';
 import { claveCorreo } from '../../common/utils/email.utils';
+import { toEnvioFactura } from './envio-facturas.mapper';
 import { EnlaceFacturaService } from '../factura-publica/enlace-factura.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { EnvioFacturasProcesoService } from './envio-facturas-proceso.service';
@@ -99,6 +100,7 @@ function montar(
     ),
   };
   const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
+  const cuentasColeccion = new ColeccionMemoria();
   const enlacesColeccion = new ColeccionMemoria(['tokenHash']);
   const enlaces = new EnlaceFacturaService(
     enlacesColeccion as never,
@@ -178,6 +180,7 @@ function montar(
     notificaciones as never,
     auditoria as never,
     config as never,
+    cuentasColeccion as never,
   );
 
   const marcarTodas = () =>
@@ -190,6 +193,7 @@ function montar(
 
   return {
     envios,
+    cuentasColeccion,
     partes: partesPorUnidad,
     enlacesColeccion,
     titularId,
@@ -1261,5 +1265,124 @@ describe('EnvioFacturasProcesoService — por dirección de la ficha', () => {
       expect(salida).not.toContain(dir);
     }
     expect(salida).not.toContain(claveCorreo('dos@x.com'));
+  });
+});
+
+describe('EnvioFacturasProcesoService — filas a medias del código anterior (puente heredado)', () => {
+  type Montaje = ReturnType<typeof montar>;
+  const destinatarios = (t: Montaje) =>
+    t.correo.enviar.mock.calls.map(([m]) => m.para);
+
+  /** A row the previous release left half-sent: its owner ACCOUNT was e-mailed. */
+  async function filaHeredada(
+    t: Montaje,
+    opciones: { loginDeLaCuenta: string; titular: string[] },
+  ) {
+    const cuenta = residente('propietario', 'Pedro Pérez');
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [{ ...cuenta, email: opciones.loginDeLaCuenta }],
+      {},
+      { titular: opciones.titular },
+    );
+    t.cuentasColeccion.insertar({
+      _id: new Types.ObjectId(cuenta.accountId),
+      email: opciones.loginDeLaCuenta,
+    });
+    await t.marcarTodas();
+    const fila = t.fila(unidad);
+    fila.notificadosIds = [new Types.ObjectId(cuenta.accountId)];
+    fila.correosEnviadosIds = [new Types.ObjectId(cuenta.accountId)];
+    return { unidad, fila };
+  }
+
+  it('la dirección que ya recibió la cuenta antigua no se repite: solo se envía la otra y la fila cierra', async () => {
+    const t = montar();
+    const { unidad, fila } = await filaHeredada(t, {
+      loginDeLaCuenta: 'a@x.com',
+      titular: ['a@x.com', 'b@x.com'],
+    });
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t)).toEqual(['b@x.com']);
+    expect(r).toMatchObject({ enviadas: 1, correosEnviados: 1 });
+    expect(fila.estado).toBe('enviado');
+    expect(fila.destinatariosTotal).toBe(2);
+    expect(fila.correosEntregados).toHaveLength(2);
+    expect(toEnvioFactura(fila as never).correosAceptados).toBe(2);
+    expect(t.notificaciones.crear).not.toHaveBeenCalled();
+    expect(t.fila(unidad).correosEnviadosIds).toHaveLength(1);
+  });
+
+  it('si el correo de acceso de la cuenta NO está en la ficha, no hay equivalencia: se envía a todas las direcciones', async () => {
+    const t = montar();
+    await filaHeredada(t, {
+      loginDeLaCuenta: 'login@x.com',
+      titular: ['a@x.com', 'b@x.com'],
+    });
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t).sort()).toEqual(['a@x.com', 'b@x.com']);
+    expect(r).toMatchObject({ enviadas: 1, correosEnviados: 2 });
+  });
+
+  it('A@X.com en la cuenta y a@x.com en la ficha son la misma dirección tras normalizar', async () => {
+    const t = montar();
+    await filaHeredada(t, {
+      loginDeLaCuenta: 'A@X.com',
+      titular: ['a@x.com'],
+    });
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ enviadas: 1, correosEnviados: 0 });
+  });
+
+  it('solo consulta las cuentas de las filas reclamadas que traen correosEnviadosIds', async () => {
+    const t = montar();
+    t.agregarUnidad('B-1', [], {}, { titular: ['n@x.com'] });
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+    expect(t.cuentasColeccion.escrituras).toEqual([]);
+    const consultas = jest.spyOn(t.cuentasColeccion, 'find');
+
+    const t2 = montar();
+    const { fila } = await filaHeredada(t2, {
+      loginDeLaCuenta: 'a@x.com',
+      titular: ['a@x.com'],
+    });
+    const consultas2 = jest.spyOn(t2.cuentasColeccion, 'find');
+    await t2.proceso.procesarPendientes(staff());
+
+    expect(consultas).not.toHaveBeenCalled();
+    expect(consultas2).toHaveBeenCalledTimes(1);
+    expect(consultas2.mock.calls[0][0]).toEqual({
+      _id: { $in: fila.correosEnviadosIds },
+    });
+  });
+
+  it('si no se pueden leer las cuentas heredadas la llamada falla, suelta las filas y no envía nada', async () => {
+    const t = montar();
+    const { unidad } = await filaHeredada(t, {
+      loginDeLaCuenta: 'a@x.com',
+      titular: ['a@x.com', 'b@x.com'],
+    });
+    jest.spyOn(t.cuentasColeccion, 'find').mockImplementation(() => {
+      throw new Error('mongo cortó');
+    });
+
+    await expect(t.proceso.procesarPendientes(staff())).rejects.toThrow(
+      'mongo cortó',
+    );
+
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+    expect(t.fila(unidad)).toMatchObject({
+      estado: 'pendiente_envio',
+      tokenEnvio: null,
+    });
   });
 });

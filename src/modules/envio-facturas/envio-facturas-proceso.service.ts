@@ -10,8 +10,13 @@ import {
   type ResidenteDeInmueble,
 } from '../../common/directorio/directorio.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
+import { claveCorreo } from '../../common/utils/email.utils';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import type { ResultadoProcesoEnvio } from '../../contracts';
+import {
+  Account,
+  type AccountDocument,
+} from '../../database/schemas/cuentas/account.schema';
 import {
   Copropiedad,
   type CopropiedadDocument,
@@ -71,6 +76,12 @@ interface ContextoProceso {
   destinos: Map<string, DestinoCorreo[]>;
   /** Validated origin the links are built from. */
   frontendUrl: string;
+  /**
+   * Legacy bridge: account id -> `clave` of its login address, for the accounts
+   * an earlier release already e-mailed (`correosEnviadosIds` of the claimed
+   * rows). Empty when no claimed row carries any.
+   */
+  heredadas: Map<string, string>;
 }
 
 /**
@@ -128,6 +139,8 @@ export class EnvioFacturasProcesoService {
     private readonly notificaciones: NotificacionesService,
     private readonly auditoria: AuditoriaService,
     private readonly config: ConfigService,
+    @InjectModel(Account.name)
+    private readonly cuentas: Model<AccountDocument>,
   ) {}
 
   /**
@@ -287,6 +300,7 @@ export class EnvioFacturasProcesoService {
       this.directorio.residentesDeInmuebles(copropiedadId, unidades),
       this.directorio.correosDeInmuebles(copropiedadId, unidades),
     ]);
+    const heredadas = await this.clavesHeredadas(filas);
     // `findById` is allowed here: the id IS the tenant.
     const copropiedad = await this.copropiedades
       .findById(copropiedadId)
@@ -302,6 +316,7 @@ export class EnvioFacturasProcesoService {
       destinos,
       // Validated by `procesarPendientes` before anything was claimed.
       frontendUrl: this.config.get<string>('app.frontendUrl')!.trim(),
+      heredadas,
     };
 
     const inicio = Date.now();
@@ -381,6 +396,7 @@ export class EnvioFacturasProcesoService {
       const entregadas = new Set(
         (fila.correosEntregados ?? []).map((e) => e.clave),
       );
+      await this.reconocerHeredadas(fila, destinos, entregadas, contexto);
       let correos = 0;
       for (const destino of destinos) {
         if (entregadas.has(destino.clave)) continue;
@@ -422,6 +438,68 @@ export class EnvioFacturasProcesoService {
     residentes: ResidenteDeInmueble[],
   ): ResidenteDeInmueble[] {
     return [...new Map(residentes.map((r) => [r.accountId, r])).values()];
+  }
+
+  /**
+   * Legacy bridge, step 1. The previous release recorded progress per ACCOUNT
+   * (`correosEnviadosIds`) and e-mailed the account's login address. For the
+   * claimed rows that carry such ids, ONE batch-scoped query reads those
+   * accounts' login addresses and turns them into `clave`s. A failure to read
+   * them propagates (the call fails, the rows are released and the screen
+   * retries): guessing "nobody was reached" would e-mail people twice.
+   */
+  private async clavesHeredadas(
+    filas: EnvioFacturaDocument[],
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Map(
+        filas.flatMap((f) =>
+          (f.correosEnviadosIds ?? []).map((id) => [String(id), id] as const),
+        ),
+      ).values(),
+    ];
+    if (ids.length === 0) return new Map();
+    const cuentas = await this.cuentas
+      .find({ _id: { $in: ids } })
+      .select('email')
+      .lean()
+      .exec();
+    return new Map(
+      cuentas
+        .filter((c) => !!c.email)
+        .map((c) => [String(c._id), claveCorreo(c.email)] as const),
+    );
+  }
+
+  /**
+   * Legacy bridge, step 2. An address of the record that equals (normalized) the
+   * login address of an account the old code already e-mailed counts as
+   * delivered: it is not e-mailed again and counts toward completion. It is
+   * stored as an entry so `correosAceptados` is honest, but it does NOT count
+   * toward this call's `correosEnviados`. A login address that is not on the
+   * record establishes nothing: that account was e-mailed at an address no
+   * longer (or never) a recipient of the record.
+   */
+  private async reconocerHeredadas(
+    fila: EnvioFacturaDocument,
+    destinos: DestinoCorreo[],
+    entregadas: Set<string>,
+    contexto: ContextoProceso,
+  ): Promise<void> {
+    for (const id of fila.correosEnviadosIds ?? []) {
+      const clave = contexto.heredadas.get(String(id));
+      if (!clave || entregadas.has(clave)) continue;
+      const destino = destinos.find((d) => d.clave === clave);
+      if (!destino) continue;
+      entregadas.add(clave);
+      try {
+        await this.registrarEntrega(fila, destino, contexto);
+      } catch (error: unknown) {
+        this.logger.error(
+          `No se pudo anotar una entrega heredada de ${fila._id.toString()} (${destino.rol}): ${error instanceof Error ? error.name : 'desconocido'}`,
+        );
+      }
+    }
   }
 
   /**
