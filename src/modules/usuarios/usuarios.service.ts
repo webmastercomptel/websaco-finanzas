@@ -186,7 +186,7 @@ export class UsuariosService {
    * and then forgotten".
    *
    * Order matters. Everything that can be refused is refused first (the keys
-   * must be offered, the assignment must name its target), so a refused request
+   * must be offered, the assignment must name a target that exists), so a refused request
    * leaves nothing behind. The Firebase identity is created NEXT, then the
    * Account; if anything after that fails, the result is an identity or an
    * account with no assignment — exactly the "authenticated but powerless"
@@ -218,10 +218,11 @@ export class UsuariosService {
       );
     }
 
-    // Still before Firebase: a request with no target creates nothing.
+    // Still before Firebase: a request with no target, or one naming a target
+    // that does not exist, creates nothing.
     const asignacion = dto.esAdministradorPlataforma
       ? null
-      : this.destinoDeLaPrimeraAsignacion(dto);
+      : await this.destinoDeLaPrimeraAsignacion(dto);
 
     const { uid } = await this.firebaseUsuarios.crear({
       email: correo,
@@ -266,31 +267,28 @@ export class UsuariosService {
 
   /**
    * The target of the first assignment, as the ObjectIds the unique indexes key
-   * on, or 400 when the request does not name one. The DTO already demands it;
-   * this keeps the rule true for any caller, and BEFORE Firebase is touched.
+   * on: 400 when the request does not name one or names a malformed id, 404 when
+   * it names one that does not exist (the same rule and messages as
+   * `POST /usuarios/:id/asignaciones`, through `resolverDestino`). The DTO
+   * already demands the fields; this keeps the rules true for any caller, and
+   * BEFORE Firebase is touched, so a refused request leaves no identity behind.
    */
-  private destinoDeLaPrimeraAsignacion(dto: CrearUsuarioDto): {
+  private async destinoDeLaPrimeraAsignacion(dto: CrearUsuarioDto): Promise<{
     alcance: 'copropiedad' | 'entidad';
     copropiedadId: Types.ObjectId | null;
     entidadId: Types.ObjectId | null;
-  } {
-    if (dto.alcance === 'copropiedad' && dto.copropiedadId) {
-      return {
-        alcance: 'copropiedad',
-        copropiedadId: new Types.ObjectId(dto.copropiedadId),
-        entidadId: null,
-      };
+  }> {
+    const nombraDestino =
+      (dto.alcance === 'copropiedad' && dto.copropiedadId) ||
+      (dto.alcance === 'entidad' && dto.entidadId);
+    if (!nombraDestino) {
+      throw new BadRequestException(
+        'Indica a dónde tendrá acceso: una copropiedad o una entidad administradora',
+      );
     }
-    if (dto.alcance === 'entidad' && dto.entidadId) {
-      return {
-        alcance: 'entidad',
-        copropiedadId: null,
-        entidadId: new Types.ObjectId(dto.entidadId),
-      };
-    }
-    throw new BadRequestException(
-      'Indica a dónde tendrá acceso: una copropiedad o una entidad administradora',
-    );
+    const { alcance, copropiedadId, entidadId } =
+      await this.asignacionesUsuario.resolverDestino(dto);
+    return { alcance, copropiedadId, entidadId };
   }
 
   /**

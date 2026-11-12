@@ -158,6 +158,18 @@ describe('ActualizarAsignacionUsuarioDto', () => {
     },
   );
 
+  it('`estado: null` es 400: null no cuenta como «viaja» (S-U4.10)', async () => {
+    expect(
+      await errores(ActualizarAsignacionUsuarioDto, { estado: null }),
+    ).not.toEqual([]);
+    expect(
+      await errores(ActualizarAsignacionUsuarioDto, {
+        estado: null,
+        permisos: ['pqr.ver'],
+      }),
+    ).toContain('estado');
+  });
+
   it("`estado: 'activa'` es 400 (S-U5.10)", async () => {
     expect(
       await errores(ActualizarAsignacionUsuarioDto, { estado: 'activa' }),

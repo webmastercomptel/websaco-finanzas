@@ -95,7 +95,7 @@ interface FilaLean {
 }
 
 /** The target a request names, resolved: the one id that matches its scope. */
-interface Destino {
+export interface Destino {
   alcance: 'copropiedad' | 'entidad';
   copropiedadId: Types.ObjectId | null;
   entidadId: Types.ObjectId | null;
@@ -198,10 +198,17 @@ export class AsignacionesUsuarioService {
    * target is accepted: it is inert on read, and the row can be prepared for
    * when it comes back. The coproperty and the entity are platform-level
    * records, so `findById` is the right lookup (no tenant to scope by).
+   *
+   * Public because `UsuariosService.create` judges the target of the first
+   * assignment with the same rule, BEFORE it writes the Firebase identity (this
+   * service never depends on `UsuariosService`, so there is no cycle). A
+   * malformed id is a 400 here as well, never a 500 from `new Types.ObjectId`.
    */
-  private async resolverDestino(
-    dto: AgregarAsignacionUsuarioDto,
-  ): Promise<Destino> {
+  async resolverDestino(dto: {
+    alcance?: 'copropiedad' | 'entidad';
+    copropiedadId?: string;
+    entidadId?: string;
+  }): Promise<Destino> {
     if (dto.alcance === 'copropiedad') {
       if (!dto.copropiedadId || !ID_HEX.test(dto.copropiedadId)) {
         throw new BadRequestException('Indica la copropiedad');

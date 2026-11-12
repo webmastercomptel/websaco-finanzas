@@ -7,6 +7,7 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
   ValidateIf,
@@ -15,6 +16,12 @@ import {
   PERFILES_ASIGNACION,
   type PerfilAsignacion,
 } from '../../casl/permisos-catalogo';
+
+/**
+ * 24 hex characters and nothing else. `@IsMongoId` also accepts a `0x` prefix
+ * plus 22 hex characters, which `new Types.ObjectId` then refuses with a 500.
+ */
+const ID_HEX = /^[0-9a-fA-F]{24}$/;
 
 /**
  * Creating a user provisions BOTH a Firebase sign-in identity and the local
@@ -53,11 +60,11 @@ export class CrearUsuarioDto {
   alcance?: 'copropiedad' | 'entidad';
 
   @ValidateIf((o: CrearUsuarioDto) => o.alcance === 'copropiedad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'copropiedadId no es un identificador válido' })
   copropiedadId?: string;
 
   @ValidateIf((o: CrearUsuarioDto) => o.alcance === 'entidad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'entidadId no es un identificador válido' })
   entidadId?: string;
 
   @IsOptional()

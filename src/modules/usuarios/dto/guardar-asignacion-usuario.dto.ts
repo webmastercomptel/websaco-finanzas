@@ -4,7 +4,6 @@ import {
   IsArray,
   IsIn,
   IsMongoId,
-  IsOptional,
   IsString,
   MaxLength,
   ValidateIf,
@@ -69,7 +68,12 @@ export class ActualizarAsignacionUsuarioDto {
   @MaxLength(80, { each: true })
   permisos?: string[];
 
-  @IsOptional()
+  /**
+   * Not `@IsOptional`: that skips `null` too, and `{"estado": null}` would
+   * satisfy "at least one must travel" while changing nothing. Only an absent
+   * property is skipped.
+   */
+  @ValidateIf((o: ActualizarAsignacionUsuarioDto) => o.estado !== undefined)
   @IsIn(['activo', 'inactivo'])
   estado?: 'activo' | 'inactivo';
 }

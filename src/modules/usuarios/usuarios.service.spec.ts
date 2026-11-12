@@ -229,7 +229,22 @@ const crearServicio = (
   asignacionesModel: never,
   firebase: FirebaseUsuariosService,
   auditoria: never,
+  opciones: { destinoExiste?: boolean } = {},
 ) => {
+  // The coproperty and the entity the assignment names: both exist unless the
+  // test says otherwise (`findById(...).select().lean().exec()`).
+  const modeloDestino = {
+    findById: jest.fn(() => ({
+      select: () => ({
+        lean: () => ({
+          exec: () =>
+            Promise.resolve(
+              opciones.destinoExiste === false ? null : { nombre: 'Destino' },
+            ),
+        }),
+      }),
+    })),
+  };
   const modelo = asignacionesModel as unknown as {
     instantanea: () => () => void;
   };
@@ -253,8 +268,8 @@ const crearServicio = (
     asignacionesModel,
     {} as never,
     {} as never,
-    {} as never,
-    {} as never,
+    modeloDestino as never,
+    modeloDestino as never,
     auditoria,
     conexion as never,
   );
@@ -1423,7 +1438,10 @@ describe('UsuariosService.create — la primera asignación y su auditoría, en 
     permisos: ['facturas.ver'],
   };
 
-  const servicio = (opts: Parameters<typeof construirModelos>[0] = {}) => {
+  const servicio = (
+    opts: Parameters<typeof construirModelos>[0] = {},
+    destinoExiste = true,
+  ) => {
     const { accounts, asignacionesModel } = construirModelos(opts);
     const { firebase, crear } = firebaseUsuariosCon();
     const auditoria = mockAuditoria();
@@ -1432,9 +1450,76 @@ describe('UsuariosService.create — la primera asignación y su auditoría, en 
       asignacionesModel as never,
       firebase,
       auditoria as never,
+      { destinoExiste },
     );
     return { service, crear, accounts, asignacionesModel, auditoria };
   };
+
+  it.each([
+    ['copropiedad', {}, 'La copropiedad no existe'],
+    [
+      'entidad',
+      {
+        alcance: 'entidad' as const,
+        copropiedadId: undefined,
+        entidadId: COP,
+      },
+      'La entidad no existe',
+    ],
+  ])(
+    'un destino bien formado que no existe (%s): 404 ANTES de Firebase, sin cuenta ni fila',
+    async (_caso, cambio, mensaje) => {
+      const { service, crear, accounts, asignacionesModel, auditoria } =
+        servicio({}, false);
+
+      const intento = service.create({ ...base, ...cambio }, ACTOR);
+
+      await expect(intento).rejects.toBeInstanceOf(NotFoundException);
+      await expect(intento).rejects.toThrow(mensaje);
+      expect(crear).not.toHaveBeenCalled();
+      expect(accounts.create).not.toHaveBeenCalled();
+      expect(asignacionesModel.create).not.toHaveBeenCalled();
+      expect(auditoria.registrar).not.toHaveBeenCalled();
+    },
+  );
+
+  it('un administrador de plataforma no consulta ningún destino', async () => {
+    const { service, crear } = servicio({}, false);
+
+    await service.create(
+      {
+        nombre: 'Root',
+        email: 'root@ejemplo.com',
+        password: 'clave123',
+        esAdministradorPlataforma: true,
+      },
+      ACTOR,
+    );
+
+    expect(crear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['copropiedad', { copropiedadId: `0x${'a'.repeat(22)}` }],
+    [
+      'entidad',
+      {
+        alcance: 'entidad' as const,
+        copropiedadId: undefined,
+        entidadId: `0x${'a'.repeat(22)}`,
+      },
+    ],
+  ])(
+    'un id con prefijo 0x (%s) que llegara al servicio es 400, nunca un 500 ni una llamada a Firebase',
+    async (_caso, cambio) => {
+      const { service, crear } = servicio();
+
+      await expect(
+        service.create({ ...base, ...cambio }, ACTOR),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(crear).not.toHaveBeenCalled();
+    },
+  );
 
   it('la fila y la entrada comparten la sesión, y la entrada lleva detalle con todas las claves efectivas (S-U9.1)', async () => {
     const { service, asignacionesModel, auditoria, accounts } = servicio();
