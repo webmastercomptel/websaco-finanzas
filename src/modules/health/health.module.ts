@@ -5,6 +5,7 @@ import { HealthController } from './health.controller';
 import { RedisHealthIndicator } from './redis.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 import { CorreoHealthIndicator } from './correo.health';
+import { FrontendUrlHealthIndicator } from './frontend-url.health';
 
 @Module({
   imports: [TerminusModule],
@@ -15,6 +16,7 @@ import { CorreoHealthIndicator } from './correo.health';
     RedisHealthIndicator,
     IntegracionComptableHealthIndicator,
     CorreoHealthIndicator,
+    FrontendUrlHealthIndicator,
   ],
 })
 export class HealthModule {}

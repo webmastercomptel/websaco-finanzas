@@ -29,6 +29,28 @@ export const MOTIVOS_ERROR_ENVIO = [
 export type MotivoErrorEnvio = (typeof MOTIVOS_ERROR_ENVIO)[number];
 
 /**
+ * One address an invoice e-mail was ACCEPTED for. Holds the `clave` (hash of the
+ * normalized address) and never the address itself, so the row is not a copy of
+ * anybody's inbox.
+ */
+@Schema({ _id: false })
+export class CorreoEntregado {
+  @Prop({ type: String, required: true })
+  clave: string;
+
+  @Prop({ type: String, enum: ['propietario', 'arrendatario'], required: true })
+  rol: 'propietario' | 'arrendatario';
+
+  @Prop({ type: SchemaTypes.ObjectId, ref: 'Tercero', required: true })
+  terceroId: Types.ObjectId;
+
+  @Prop({ type: Date, required: true })
+  aceptadoEn: Date;
+}
+export const CorreoEntregadoSchema =
+  SchemaFactory.createForClass(CorreoEntregado);
+
+/**
  * Bookkeeping of sending one invoice to the people who hold its unit. Created
  * ONLY by the explicit "mark for sending" action; nothing in the system creates
  * one on its own. Tenant-owned: every query carries `copropiedadId`.
@@ -114,7 +136,7 @@ export class EnvioFactura {
   @Prop({ type: Date, default: null })
   enviadoEn: Date | null;
 
-  /** How many people the row was addressed to at the last attempt. */
+  /** How many ADDRESSES the row was addressed to at the last attempt. */
   @Prop({ type: Number, default: 0 })
   destinatariosTotal: number;
 
@@ -122,9 +144,22 @@ export class EnvioFactura {
   @Prop({ type: [SchemaTypes.ObjectId], ref: 'Account', default: [] })
   notificadosIds: Types.ObjectId[];
 
-  /** Accounts whose email the provider already accepted. */
+  /**
+   * Accounts whose email the provider accepted under the old per-account flow.
+   * No longer written; read only to recognise addresses an earlier release
+   * already reached (see `correosEntregados`).
+   */
   @Prop({ type: [SchemaTypes.ObjectId], ref: 'Account', default: [] })
   correosEnviadosIds: Types.ObjectId[];
+
+  /**
+   * Addresses the provider accepted, one entry per `clave`: the progress of the
+   * send. Written with a conditional `$push` AFTER each acceptance (never
+   * `$addToSet`, which compares the whole subdocument and `aceptadoEn` always
+   * differs). "Mark again" keeps it, so a retry only reaches what is missing.
+   */
+  @Prop({ type: [CorreoEntregadoSchema], default: [] })
+  correosEntregados: CorreoEntregado[];
 
   /** Lease: the run holding the row, and the last time it proved it was alive. */
   @Prop({ type: String, default: null })

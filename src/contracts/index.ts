@@ -3716,10 +3716,16 @@ export interface EnvioFactura {
   liberadaEn: IsoDate | null;
   /** When every recipient had been reached; null until then. */
   enviadoEn: IsoDate | null;
-  /** Recipients of the last attempt, and how many were reached by each channel. */
+  /** E-mail ADDRESSES of the last attempt; `notificados` counts linked accounts notified in-app. */
   destinatarios: number;
   notificados: number;
+  /** Legacy meaning kept for old rows: accounts e-mailed by the previous per-account flow. */
   correosEnviados: number;
+  /**
+   * Distinct addresses the provider accepted on this row. Absent for a row only
+   * the previous flow wrote. "Accepted" is not "delivered": there is no bounce handling.
+   */
+  correosAceptados?: number;
   intentos: number;
   ultimoError: MotivoErrorEnvioFactura | null;
 }
@@ -3768,9 +3774,9 @@ export interface ResultadoProcesoEnvio {
   reintentables: number;
   /** Rows that ended in `error` (no recipients, voided, out of retries). */
   conError: number;
-  /** Individual people reached by this call. */
+  /** Addresses the provider accepted in THIS call. */
   correosEnviados: number;
-  /** Units that had NOBODY reachable this call (no account or no active party). */
+  /** Units with NO e-mail address on file for their owner or tenant this call. */
   unidadesSinDestinatario: string[];
   /** Queued rows ready to be processed now. */
   pendientes: number;

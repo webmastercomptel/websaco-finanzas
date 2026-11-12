@@ -1,5 +1,6 @@
 // src/modules/envio-facturas/envio-facturas-proceso.service.ts
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CorreoService } from '../../common/correo/correo.service';
@@ -25,6 +26,7 @@ import {
   type FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { diagnosticarFrontendUrl } from '../health/frontend-url.health';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import {
   construirAsuntoFactura,
@@ -115,6 +117,7 @@ export class EnvioFacturasProcesoService {
     private readonly enlaces: EnlaceAccesoService,
     private readonly notificaciones: NotificacionesService,
     private readonly auditoria: AuditoriaService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -129,6 +132,22 @@ export class EnvioFacturasProcesoService {
     if (!this.correo.estaConfigurado()) {
       throw new ConflictException(
         'El correo no está configurado en este entorno: no se puede enviar. Configure SENDGRID_API_KEY y SENDGRID_FROM_EMAIL.',
+      );
+    }
+    // Every link in the e-mail is built from FRONTEND_URL; without a usable one
+    // a row would end `enviado` with a dead button. The messages name the
+    // setting and never a value.
+    const diagnostico = diagnosticarFrontendUrl(
+      this.config.get<string>('app.frontendUrl'),
+    );
+    if (diagnostico === 'falta') {
+      throw new ConflictException(
+        'No se puede enviar: falta configurar FRONTEND_URL, la dirección pública de la aplicación, con la que se arman los enlaces de las facturas.',
+      );
+    }
+    if (diagnostico === 'malformada') {
+      throw new ConflictException(
+        'No se puede enviar: FRONTEND_URL debe ser solo la dirección pública (esquema y dominio, sin ruta ni parámetros).',
       );
     }
 

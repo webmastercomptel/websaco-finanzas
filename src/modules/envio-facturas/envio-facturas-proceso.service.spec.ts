@@ -37,7 +37,9 @@ interface Unidad {
 }
 
 /** Everything a spec needs, wired with in-memory collections and spies. */
-function montar(opciones: { correoConfigurado?: boolean } = {}) {
+function montar(
+  opciones: { correoConfigurado?: boolean; frontendUrl?: string | null } = {},
+) {
   const envios = new ColeccionMemoria(['copropiedadId', 'facturaId']);
   const facturas = new ColeccionMemoria();
   const unidades: Unidad[] = [];
@@ -94,6 +96,14 @@ function montar(opciones: { correoConfigurado?: boolean } = {}) {
     ),
   };
   const tenant = { resolveCoPropertyId: () => COP };
+  const frontendUrl =
+    opciones.frontendUrl === undefined
+      ? 'https://app.ejemplo.com'
+      : (opciones.frontendUrl ?? undefined);
+  const config = {
+    get: (clave: string) =>
+      clave === 'app.frontendUrl' ? frontendUrl : undefined,
+  };
   const copropiedades = {
     findById: () => ({
       select: () => ({
@@ -118,6 +128,7 @@ function montar(opciones: { correoConfigurado?: boolean } = {}) {
     enlaces as never,
     notificaciones as never,
     auditoria as never,
+    config as never,
   );
 
   const marcarTodas = () =>
@@ -495,6 +506,78 @@ describe('EnvioFacturasProcesoService', () => {
     expect(t.auditoria.registrar).not.toHaveBeenCalledWith(
       expect.objectContaining({ accion: 'enviar' }),
     );
+  });
+
+  describe('FRONTEND_URL es obligatoria para enviar', () => {
+    const MENSAJE_FALTA =
+      'No se puede enviar: falta configurar FRONTEND_URL, la dirección pública de la aplicación, con la que se arman los enlaces de las facturas.';
+    const MENSAJE_MALFORMADA =
+      'No se puede enviar: FRONTEND_URL debe ser solo la dirección pública (esquema y dominio, sin ruta ni parámetros).';
+
+    async function intentar(frontendUrl: string | null) {
+      const t = montar({ frontendUrl });
+      const unidad = t.agregarUnidad('A-101', [
+        residente('propietario', 'Pedro Pérez'),
+      ]);
+      await t.marcarTodas();
+      const error = await t.proceso.procesarPendientes(staff()).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      return { t, unidad, error };
+    }
+
+    it.each([
+      ['sin FRONTEND_URL', null, MENSAJE_FALTA],
+      ['con una ruta', 'https://app.ejemplo.com/app', MENSAJE_MALFORMADA],
+      ['con parámetros', 'https://app.ejemplo.com/?a=1', MENSAJE_MALFORMADA],
+      ['con un fragmento', 'https://app.ejemplo.com/#x', MENSAJE_MALFORMADA],
+      [
+        'con credenciales',
+        'https://usuario:clave@app.ejemplo.com',
+        MENSAJE_MALFORMADA,
+      ],
+    ])(
+      'SEC: 409 body never echoes configuration — %s responde 409 antes de reclamar y de auditar',
+      async (_n, valor, mensaje) => {
+        const { t, unidad, error } = await intentar(valor);
+
+        expect(error).toBeInstanceOf(ConflictException);
+        const cuerpo = JSON.stringify(
+          (error as ConflictException).getResponse(),
+        );
+        expect(cuerpo).toContain(mensaje);
+        expect(cuerpo).not.toContain('ejemplo.com');
+        expect(cuerpo).not.toContain('clave');
+        expect(t.fila(unidad)).toMatchObject({
+          estado: 'pendiente_envio',
+          tokenEnvio: null,
+        });
+        expect(t.fila(unidad).liberadaEn).toBeUndefined();
+        expect(t.auditoria.registrar).not.toHaveBeenCalledWith(
+          expect.objectContaining({ accion: 'enviar' }),
+        );
+        expect(t.correo.enviar).not.toHaveBeenCalled();
+      },
+    );
+
+    it('SEC: 409 body never echoes configuration — el 409 de SendGrid se evalúa primero y no cambia', async () => {
+      const t = montar({ correoConfigurado: false, frontendUrl: null });
+
+      const error = await t.proceso.procesarPendientes(staff()).catch((e) => e);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect(
+        JSON.stringify((error as ConflictException).getResponse()),
+      ).toContain('El correo no está configurado en este entorno');
+    });
+
+    it('con correo y un origen válido procesa con normalidad', async () => {
+      const { t, error } = await intentar('https://app.ejemplo.com');
+
+      expect(error).toBeNull();
+      expect(t.correo.enviar).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('una factura anulada después de marcarla no se envía y queda en error', async () => {
