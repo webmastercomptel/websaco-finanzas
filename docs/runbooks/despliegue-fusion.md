@@ -22,6 +22,9 @@ BUCKET=<FIREBASE_STORAGE_BUCKET value>
    If the release carries the team-delegation change, also run its permission-key
    conversion script here, BEFORE the backend starts: `equipo-delegacion.md`
    (`npm run revisar:claves-finanzas-latentes`). Not detectable by readiness.
+   The release that makes Usuarios manage a list of assignments has no manual
+   step but its own deploy order (backend, frontend, then the contract removal
+   a working day later), after the team-delegation one: `usuarios-asignaciones-suman.md`.
 3. **Bucket** settings: CORS, UBLA, public access prevention (section 5).
 4. **Env vars and secrets** on the service (section 3), before the new revision starts:
    readiness fails loudly on a half-set Comptable or SendGrid pair.
@@ -358,3 +361,4 @@ a frontend older than the backend keeps working, one newer than the backend does
 | Index scripts of section 7 | No: a missing unique index is silent (check by hand) |
 | Removing `WEBSACO3_*` | No (harmless if left) |
 | Permission-key conversion (`revisar:claves-finanzas-latentes`, read-only first, then `--aplicar`, BEFORE the backend deploy; `--retirar-gestionar` only after the release is accepted) | No: after the deploy a Finanzas key on a `personal` row is legitimate, so no indicator can tell a missed strip from a real grant. Full steps, freeze note and rollback: `equipo-delegacion.md` |
+| Usuarios assignments list (`usuarios-asignaciones-suman.md`): no per-environment step, only a deploy order: backend up to `eb7a248`, frontend, then backend `bbbff07` at least one working day later | Nothing to detect: a wrong order breaks saving in the platform Usuarios screen (400), not data |
