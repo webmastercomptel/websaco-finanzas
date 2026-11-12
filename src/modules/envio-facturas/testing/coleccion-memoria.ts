@@ -262,6 +262,45 @@ export class ColeccionMemoria {
     });
   }
 
+  /**
+   * Atomic find-and-modify: the match and the write happen in the same tick,
+   * like MongoDB's single-document write. With `upsert`, a miss inserts the
+   * filter's equality fields plus `$set` and `$setOnInsert`. Returns the
+   * document after the write (the only mode the link service uses).
+   */
+  findOneAndUpdate(
+    filtro: Record<string, unknown>,
+    update: Record<string, Record<string, unknown>>,
+    opciones: { upsert?: boolean } = {},
+  ) {
+    return consulta(async () => {
+      await ceder();
+      this.escrituras.push('findOneAndUpdate');
+      const existente = this.docs.find((d) => coincide(d, filtro));
+      if (existente) {
+        aplicar(existente, update);
+        return clonar(existente);
+      }
+      if (!opciones.upsert) return null;
+      const nuevo: Doc = {
+        _id: new Types.ObjectId(),
+        ...clonar(filtro),
+        ...clonar(update.$setOnInsert ?? {}),
+        ...clonar(update.$set ?? {}),
+      };
+      if (
+        this.unica.length > 0 &&
+        this.docs.some((d) => this.unica.every((k) => igual(d[k], nuevo[k])))
+      ) {
+        throw Object.assign(new Error('E11000 duplicate key'), {
+          code: 11000,
+        });
+      }
+      this.docs.push(nuevo);
+      return clonar(nuevo);
+    });
+  }
+
   /** Only `updateOne` upserts with `$setOnInsert`, the one shape the queue uses. */
   async bulkWrite(
     ops: {

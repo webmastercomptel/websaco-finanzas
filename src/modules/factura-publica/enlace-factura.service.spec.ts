@@ -189,7 +189,9 @@ describe('EnlaceFacturaSchema', () => {
       indices.find(([c]) => JSON.stringify(c) === JSON.stringify(campos))?.[1];
 
     expect(de({ tokenHash: 1 })).toMatchObject({ unique: true });
-    expect(de({ copropiedadId: 1, facturaId: 1, clave: 1 })).toBeDefined();
+    expect(de({ copropiedadId: 1, facturaId: 1, clave: 1 })).toMatchObject({
+      unique: true,
+    });
     expect(de({ expiraEn: 1 })).toMatchObject({
       expireAfterSeconds: RETENCION_TRAS_VENCER_S,
     });
@@ -225,15 +227,81 @@ describe('EnlaceFacturaService.emitir', () => {
     expect(lineasRegistradas()).not.toContain(emitido.token);
   });
 
-  it('dos direcciones de una factura dan dos filas con tokens distintos; la misma dirección dos veces, dos filas', async () => {
+  it('dos direcciones de una factura dan dos filas con tokens distintos', async () => {
     const m = await montarMundo();
 
     const a = await m.emitirPara('ana@x.com');
     const b = await m.emitirPara('otra@x.com');
-    const c = await m.emitirPara('ana@x.com');
 
-    expect(new Set([a.token, b.token, c.token]).size).toBe(3);
-    expect(m.colecciones.enlaces.docs).toHaveLength(3);
+    expect(a.token).not.toBe(b.token);
+    expect(m.colecciones.enlaces.docs).toHaveLength(2);
+  });
+
+  it('SEC: one link per (invoice, address) — emitir otra vez para la misma dirección rota el token en la MISMA fila: el viejo deja de servir, el nuevo sirve', async () => {
+    const m = await montarMundo();
+    const viejo = await m.emitirPara('ana@x.com');
+    jest.spyOn(Date, 'now').mockReturnValue(AHORA + 5 * DIA_MS);
+
+    const nuevo = await m.emitirPara('ana@x.com');
+
+    expect(nuevo.token).not.toBe(viejo.token);
+    expect(nuevo.id).toBe(viejo.id);
+    expect(m.colecciones.enlaces.docs).toHaveLength(1);
+    const [fila] = m.colecciones.enlaces.docs;
+    expect(fila.tokenHash).toBe(sha256(nuevo.token));
+    expect((fila.expiraEn as Date).getTime()).toBe(
+      AHORA + 5 * DIA_MS + VIGENCIA_ENLACE_FACTURA_MS,
+    );
+    expect(nuevo.expiraEn.getTime()).toBe(
+      AHORA + 5 * DIA_MS + VIGENCIA_ENLACE_FACTURA_MS,
+    );
+    expect(await m.servicio.resolver(viejo.token)).toBeNull();
+    expect(lineasRegistradas()).toContain('rechazado: desconocido');
+    expect(await m.servicio.resolver(nuevo.token)).not.toBeNull();
+    expect(JSON.stringify(m.colecciones.enlaces.docs)).not.toContain(
+      nuevo.token,
+    );
+  });
+
+  it('SEC: one link per (invoice, address) — dos emisiones simultáneas para la misma dirección dejan UNA fila y solo un token vale', async () => {
+    const m = await montarMundo();
+
+    const [a, b] = await Promise.all([
+      m.emitirPara('ana@x.com'),
+      m.emitirPara('ana@x.com'),
+    ]);
+
+    expect(m.colecciones.enlaces.docs).toHaveLength(1);
+    expect(a.id).toBe(b.id);
+    const sirven = [
+      (await m.servicio.resolver(a.token)) !== null,
+      (await m.servicio.resolver(b.token)) !== null,
+    ];
+    expect(sirven.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('volver a emitir tras una revocación deja la fila sin revocar, con el token nuevo', async () => {
+    const m = await montarMundo();
+    const viejo = await m.emitirPara('ana@x.com');
+    await m.servicio.revocarPorId(m.copropiedadId, viejo.id, viejo.token);
+
+    const nuevo = await m.emitirPara('ana@x.com');
+
+    expect(m.colecciones.enlaces.docs[0].revocadoEn).toBeNull();
+    expect(await m.servicio.resolver(nuevo.token)).not.toBeNull();
+    expect(await m.servicio.resolver(viejo.token)).toBeNull();
+  });
+
+  it('una revocación tardía del token anterior no mata el enlace ya rotado', async () => {
+    const m = await montarMundo();
+    const viejo = await m.emitirPara('ana@x.com');
+    const nuevo = await m.emitirPara('ana@x.com');
+
+    // The processor that minted `viejo` saw its e-mail refused, late.
+    await m.servicio.revocarPorId(m.copropiedadId, viejo.id, viejo.token);
+
+    expect(m.colecciones.enlaces.docs[0].revocadoEn).toBeNull();
+    expect(await m.servicio.resolver(nuevo.token)).not.toBeNull();
   });
 
   it('los enlaces ya emitidos conservan su vencimiento aunque pase el tiempo', async () => {

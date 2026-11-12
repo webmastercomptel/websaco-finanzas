@@ -34,7 +34,7 @@ frontend public page `/factura`.
    from.
 2. Nothing else: no migration, no seed. The only new indexes belong to the new
    collection `enlaces_factura` (`tokenHash` unique, `{copropiedadId, facturaId,
-   clave}`, and a TTL of 90 days after `expiraEn`) and the application creates
+   clave}` unique, and a TTL of 90 days after `expiraEn`) and the application creates
    them.
 
 Detected by readiness: `GET /health/ready` runs `frontend-url`. With mail
@@ -104,7 +104,9 @@ the per-address send is live**: e-mails would point at a missing page.
   handling.
 - If the process dies between the provider accepting an e-mail and the write
   of its entry, that one address may be e-mailed twice on the retry (each with
-  its own valid token).
+  its own token). Only the LATEST e-mail's link works: there is one link row per
+  (invoice, address), and every send to that address rotates its token and
+  resets its 30 days, so the link in an earlier e-mail to it stops working.
 - Redis down means every public PDF answers 429 (the limiter fails closed).
 - `clave` (the address hash) can be reversed with a dictionary; the collection
   keeps hashes up to 90 days after expiry.

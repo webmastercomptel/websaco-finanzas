@@ -552,7 +552,8 @@ export class EnvioFacturasProcesoService {
    * credential outlives an e-mail that never left. After an ACCEPTED send the
    * link is never revoked, even if recording it fails: the e-mail is out and
    * carries it (the retry may e-mail that address once more, the accepted
-   * trade-off in the class docblock).
+   * trade-off in the class docblock; that retry rotates the token of the same
+   * link row, so only the newer e-mail's link works).
    */
   private async enviarA(
     fila: EnvioFacturaDocument,
@@ -562,6 +563,7 @@ export class EnvioFacturasProcesoService {
   ): Promise<boolean> {
     const etiquetaFila = fila._id.toString();
     let enlaceId: string | null = null;
+    let tokenEnlace = '';
     let aceptado = false;
     try {
       const enlace = await this.enlaces.emitir({
@@ -572,6 +574,7 @@ export class EnvioFacturasProcesoService {
         rol: destino.rol,
       });
       enlaceId = enlace.id;
+      tokenEnlace = enlace.token;
       const { asunto, html } = construirCorreoFactura({
         nombreDestinatario: destino.nombre,
         nombreCopropiedad: contexto.nombreCopropiedad,
@@ -598,7 +601,7 @@ export class EnvioFacturasProcesoService {
         this.logger.error(
           `No se pudo enviar la factura ${etiquetaFila} (enlace ${enlaceId}, ${destino.rol}).`,
         );
-        await this.revocarSinFallar(contexto, enlaceId);
+        await this.revocarSinFallar(contexto, enlaceId, tokenEnlace);
       }
       return false;
     }
@@ -646,13 +649,16 @@ export class EnvioFacturasProcesoService {
       .exec();
   }
 
-  /** Best-effort revocation of a link whose e-mail was not accepted. */
+  /** Best-effort revocation of a link whose e-mail was not accepted, only
+   *  while the row still holds the token that e-mail carried (another attempt
+   *  may have rotated it since). */
   private async revocarSinFallar(
     contexto: ContextoProceso,
     enlaceId: string,
+    token: string,
   ): Promise<void> {
     try {
-      await this.enlaces.revocarPorId(contexto.copropiedadId, enlaceId);
+      await this.enlaces.revocarPorId(contexto.copropiedadId, enlaceId, token);
     } catch {
       this.logger.error(`No se pudo revocar el enlace ${enlaceId}.`);
     }

@@ -12,7 +12,9 @@ export const ROLES_ENLACE_FACTURA = ['propietario', 'arrendatario'] as const;
 export type RolEnlaceFactura = (typeof ROLES_ENLACE_FACTURA)[number];
 
 /**
- * Server-side record behind the public link of ONE (invoice, address) pair.
+ * Server-side record behind the public link of ONE (invoice, address) pair,
+ * and only one row per pair (unique index below): a new send rotates the
+ * token of that row.
  * The link carries a random 32-byte token; only its SHA-256 is stored, so a copy
  * of this collection cannot be turned into links. The row holds ids and
  * hashes only, never the token or the address: `clave` is the hash of the
@@ -72,8 +74,14 @@ export class EnlaceFactura {
 
 export const EnlaceFacturaSchema = SchemaFactory.createForClass(EnlaceFactura);
 
-// Revoke per invoice or per address, and the view package 4 will build.
-EnlaceFacturaSchema.index({ copropiedadId: 1, facturaId: 1, clave: 1 });
+// ONE link per (invoice, address): `emitir` upserts on this key and rotates
+// the token, so only the latest e-mail's link works. Also serves revocation per
+// invoice and the view package 4 will build. Unique from the collection's
+// first deploy, so no existing data can conflict.
+EnlaceFacturaSchema.index(
+  { copropiedadId: 1, facturaId: 1, clave: 1 },
+  { unique: true },
+);
 // Bounded growth, with a window to read `usos` after the link expired.
 EnlaceFacturaSchema.index(
   { expiraEn: 1 },

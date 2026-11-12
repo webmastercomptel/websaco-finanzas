@@ -1224,8 +1224,10 @@ describe('EnvioFacturasProcesoService — por dirección de la ficha', () => {
     const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
     await t.marcarTodas();
     jest
-      .spyOn(t.enlacesColeccion, 'create')
-      .mockRejectedValue(new Error('E11000 dup key { tokenHash: "abc" }'));
+      .spyOn(t.enlacesColeccion, 'findOneAndUpdate')
+      .mockImplementation(() => {
+        throw new Error('E11000 dup key { tokenHash: "abc" }');
+      });
 
     const r = await t.proceso.procesarPendientes(staff());
 

@@ -99,9 +99,17 @@ export class EnlaceFacturaService {
   ) {}
 
   /**
-   * Mints a link for one (invoice, address) pair. One new token per send
-   * attempt, so the e-mail that carries it is the only copy. Throws on a
-   * storage failure: the caller (the processor) decides what that means.
+   * Mints the link of one (invoice, address) pair. One new token per send
+   * attempt, so the e-mail that carries it is the only copy, and ONE row per
+   * pair: a single atomic upsert on the unique `{copropiedadId, facturaId,
+   * clave}` rotates the stored hash, resets the expiry and clears any
+   * revocation, so the link of an earlier e-mail to that address stops working
+   * and only the latest one does (a retry after a failed delivery record, or
+   * two overlapping processors, cannot leave two valid links). The usage
+   * counters are kept across rotations. Two concurrent first upserts cannot
+   * both insert: the filter is an equality match on exactly the unique key,
+   * which MongoDB (4.2+) retries as an update on a duplicate-key race. Throws
+   * on a storage failure: the caller (the processor) decides what that means.
    */
   async emitir(datos: {
     copropiedadId: Types.ObjectId;
@@ -112,17 +120,29 @@ export class EnlaceFacturaService {
   }): Promise<EnlaceEmitido> {
     const token = randomBytes(32).toString('hex');
     const expiraEn = new Date(Date.now() + VIGENCIA_ENLACE_FACTURA_MS);
-    const fila = await this.enlaces.create({
-      tokenHash: hashDe(token),
-      copropiedadId: datos.copropiedadId,
-      facturaId: datos.facturaId,
-      envioFacturaId: datos.envioFacturaId,
-      clave: datos.clave,
-      rol: datos.rol,
-      expiraEn,
-      usos: 0,
-      revocadoEn: null,
-    });
+    const fila = await this.enlaces
+      .findOneAndUpdate(
+        {
+          copropiedadId: datos.copropiedadId,
+          facturaId: datos.facturaId,
+          clave: datos.clave,
+        },
+        {
+          $set: {
+            tokenHash: hashDe(token),
+            envioFacturaId: datos.envioFacturaId,
+            rol: datos.rol,
+            expiraEn,
+            revocadoEn: null,
+          },
+          $setOnInsert: { usos: 0 },
+        },
+        { upsert: true, new: true, projection: { _id: 1 } },
+      )
+      .lean()
+      .exec();
+    // An upsert returning the new document always yields one; typed as nullable.
+    if (!fila) throw new Error('El enlace de la factura no quedó guardado');
     return { id: String(fila._id), token, expiraEn };
   }
 
@@ -216,15 +236,26 @@ export class EnlaceFacturaService {
     }
   }
 
-  /** Revokes one link of the coproperty; a second call keeps the first date. */
+  /**
+   * Revokes one link of the coproperty; a second call keeps the first date.
+   * With `token`, only while the row still holds THAT token: a processor
+   * revoking the link of its refused e-mail must not kill the token another
+   * attempt has since rotated into the same row.
+   */
   async revocarPorId(
     copropiedadId: Types.ObjectId,
     enlaceId: string,
+    token?: string,
   ): Promise<void> {
     if (!Types.ObjectId.isValid(enlaceId)) return;
     await this.enlaces
       .updateOne(
-        { _id: new Types.ObjectId(enlaceId), copropiedadId, revocadoEn: null },
+        {
+          _id: new Types.ObjectId(enlaceId),
+          copropiedadId,
+          revocadoEn: null,
+          ...(token === undefined ? {} : { tokenHash: hashDe(token) }),
+        },
         { $set: { revocadoEn: new Date(Date.now()) } },
       )
       .exec();
