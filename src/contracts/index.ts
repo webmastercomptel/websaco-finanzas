@@ -2233,12 +2233,11 @@ export interface ProgresoImportacion {
 /**
  * One grant, describing where a user may work and what they may do there.
  *
- * A simplification of the underlying model on purpose: `Asignacion` supports
- * several grants per account (a company plus one extra building outside it),
- * but this screen manages exactly one — the same shape the legacy system's
- * user form had (one row, one role, one coproperty or entity). Nothing in the
- * data model stops a second grant existing; there is just no screen for it
- * yet.
+ * `Asignacion` supports several grants per account (a company plus extra
+ * buildings), and the platform Usuarios screen lists all of them: see
+ * `AsignacionUsuario` and `Usuario.asignaciones`. This summary is the legacy
+ * single-row shape (`Usuario.asignacion`), kept while the previous frontend is
+ * still deployed.
  */
 export interface AsignacionResumen {
   alcance: 'copropiedad' | 'entidad';
@@ -2246,11 +2245,26 @@ export interface AsignacionResumen {
   copropiedadNombre: string | null;
   entidadId: string | null;
   entidadNombre: string | null;
-  /** Profile of the assignment; a legacy row with none reads as
-   *  `administrativo`. The edit form needs it to know which key blocks the
-   *  person may hold (`personal` never holds Finanzas keys). */
+  /** Who manages the row: `administrativo` from the platform Usuarios screen,
+   *  `personal` from Equipo. It never limits the keys: a `personal` row may
+   *  hold Finanzas keys. A legacy row with no profile reads as
+   *  `administrativo`. */
   perfil: 'administrativo' | 'personal';
   permisos: string[];
+}
+
+/**
+ * One row of an account as the platform Usuarios screen lists it: active AND
+ * inactive, of every profile. The target (`alcance` + id) never changes for a
+ * row; `permisos` is the stored list, unfiltered.
+ */
+export interface AsignacionUsuario extends AsignacionResumen {
+  /** The row's own id: what the per-row endpoints address. */
+  id: string;
+  estado: 'activo' | 'inactivo';
+  /** `roleIds.length` on a `copropiedad` row; always 0 on an `entidad` row,
+   *  where roles are ignored on read. */
+  cantidadRoles: number;
 }
 
 /**
@@ -2258,10 +2272,16 @@ export interface AsignacionResumen {
  * tenants are `Tercero` records and never reach this screen; see Tercero and
  * Account for why.
  *
- * `asignacion` is null for a platform administrator (they need none — see
+ * `asignaciones` is EVERY row of the account, oldest first (ties by id): a
+ * person holds a list of assignments that add up, and no row replaces another.
+ * It is `[]` for a platform administrator (they need none — see
  * `rulesFromPermissionKeys`) and for a person nobody has assigned anywhere
  * yet, which is a real, unremarkable state: "authenticated but powerless" is
  * the correct default the whole authorization layer is built around.
+ *
+ * `asignacion` is the legacy single primary (the newest ACTIVE row of any
+ * profile, null when there is none), kept only so the previous frontend keeps
+ * working; it goes away once that frontend does.
  */
 export interface Usuario {
   id: string;
@@ -2270,6 +2290,7 @@ export interface Usuario {
   esAdministradorPlataforma: boolean;
   estado: 'activo' | 'inactivo';
   asignacion: AsignacionResumen | null;
+  asignaciones: AsignacionUsuario[];
 }
 
 /**

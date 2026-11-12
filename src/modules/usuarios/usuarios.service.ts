@@ -129,16 +129,14 @@ export class UsuariosService {
       this.accounts.countDocuments(filtro).exec(),
     ]);
 
-    // One query for every assignment involved, then matched in memory —
-    // the same batching AccesoService uses, so a page of fifty users costs
-    // two round trips, not fifty-one.
-    const asignacionesPorCuenta = await this.asignacionesPrimariasDe(
-      cuentas.map((c) => c._id),
-    );
+    // One query for every row of every account of the page, then matched in
+    // memory — the same batching AccesoService uses, so a page of fifty users
+    // costs two round trips, not fifty-one.
+    const filasPorCuenta = await this.filasDe(cuentas.map((c) => c._id));
 
     return {
       items: cuentas.map((c) =>
-        toUsuario(c, asignacionesPorCuenta.get(c._id.toString()) ?? null),
+        toUsuario(c, filasPorCuenta.get(c._id.toString()) ?? []),
       ),
       total,
       pagina,
@@ -152,10 +150,8 @@ export class UsuariosService {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
     }
 
-    const asignacion = (await this.asignacionesPrimariasDe([cuenta._id])).get(
-      cuenta._id.toString(),
-    );
-    return toUsuario(cuenta, asignacion ?? null);
+    const filas = (await this.filasDe([cuenta._id])).get(cuenta._id.toString());
+    return toUsuario(cuenta, filas ?? []);
   }
 
   /**
@@ -414,24 +410,30 @@ export class UsuariosService {
     }
   }
 
-  /** The most recent active assignment for each account, keyed by account id. */
-  private async asignacionesPrimariasDe(
+  /**
+   * EVERY row of each account, active and inactive, of any profile, keyed by
+   * account id and oldest first (ties by id). One query feeds both
+   * `asignaciones` and the legacy `asignacion` (the newest ACTIVE row, derived
+   * by the mapper), so the two can never disagree.
+   */
+  private async filasDe(
     accountIds: Types.ObjectId[],
-  ): Promise<Map<string, AsignacionDocument>> {
+  ): Promise<Map<string, AsignacionDocument[]>> {
     if (accountIds.length === 0) return new Map();
 
     const filas = await this.asignaciones
-      .find({ accountId: { $in: accountIds }, estado: 'active' })
+      .find({ accountId: { $in: accountIds } })
       .populate('copropiedadId', 'nombre')
       .populate('entidadId', 'nombre')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1, _id: 1 })
       .exec();
 
-    const porCuenta = new Map<string, AsignacionDocument>();
+    const porCuenta = new Map<string, AsignacionDocument[]>();
     for (const fila of filas) {
       const clave = fila.accountId.toString();
-      // Sorted newest-first: the first one seen per account is the primary.
-      if (!porCuenta.has(clave)) porCuenta.set(clave, fila);
+      const lista = porCuenta.get(clave);
+      if (lista) lista.push(fila);
+      else porCuenta.set(clave, [fila]);
     }
     return porCuenta;
   }

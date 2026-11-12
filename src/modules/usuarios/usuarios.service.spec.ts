@@ -1166,3 +1166,155 @@ describe('UsuariosService.findAll — solo el equipo de la plataforma', () => {
     });
   });
 });
+
+describe('UsuariosService — asignaciones[] (lista completa por cuenta)', () => {
+  /**
+   * An assignments model that honours `accountId: { $in }` and records the
+   * query, so "no row leaks into another account's item" is observable. Rows
+   * come back in the order given, as the real query's sort would deliver them.
+   */
+  const modeloPorCuenta = (filas: ReturnType<typeof asignacionDoc>[]) => {
+    const consultas: { filtro: Filtro; orden?: unknown }[] = [];
+    const modelo = {
+      consultas,
+      distinct: jest.fn(() => ({
+        exec: () => Promise.resolve(filas.map((f) => f.accountId)),
+      })),
+      find: jest.fn((filtro: Filtro) => {
+        const consulta: { filtro: Filtro; orden?: unknown } = { filtro };
+        consultas.push(consulta);
+        const ids = (
+          (filtro.accountId as { $in: Types.ObjectId[] }).$in ?? []
+        ).map((i) => i.toString());
+        const resultado = filas.filter((f) =>
+          ids.includes(f.accountId.toString()),
+        );
+        const cadena = {
+          populate: () => cadena,
+          sort: (orden: unknown) => {
+            consulta.orden = orden;
+            return cadena;
+          },
+          exec: () => Promise.resolve(resultado),
+        };
+        return cadena;
+      }),
+    };
+    return modelo;
+  };
+
+  const servicioCon = (
+    cuentas: ReturnType<typeof cuentaDoc>[],
+    filas: ReturnType<typeof asignacionDoc>[],
+  ) => {
+    const { accounts } = construirModelos({ cuentas });
+    const modelo = modeloPorCuenta(filas);
+    const { firebase } = firebaseUsuariosCon();
+    const service = new UsuariosService(
+      accounts as never,
+      modelo as never,
+      firebase,
+      mockAuditoria() as never,
+    );
+    return { service, modelo };
+  };
+
+  const fila = (
+    cuenta: ReturnType<typeof cuentaDoc>,
+    over: Record<string, unknown> = {},
+  ) => asignacionDoc({ accountId: cuenta._id, ...over });
+
+  it('cada cuenta de la página recibe SU lista y ninguna se filtra a otra (S-U1.4)', async () => {
+    const ana = cuentaDoc({ email: 'ana@ejemplo.com' });
+    const beto = cuentaDoc({ email: 'beto@ejemplo.com' });
+    const root = cuentaDoc({
+      email: 'root@ejemplo.com',
+      esAdministradorPlataforma: true,
+    });
+    const deAna1 = fila(ana);
+    const deAna2 = fila(ana, { perfil: 'personal' });
+    const deBeto = fila(beto, { estado: 'inactive' });
+    const { service } = servicioCon(
+      [ana, beto, root],
+      [deAna1, deAna2, deBeto],
+    );
+
+    const { items } = await service.findAll({ estado: 'todos' } as never);
+
+    const porEmail = new Map(items.map((u) => [u.email, u]));
+    expect(porEmail.get('ana@ejemplo.com')?.asignaciones.map((a) => a.id)).toEqual(
+      [deAna1._id.toString(), deAna2._id.toString()],
+    );
+    expect(porEmail.get('beto@ejemplo.com')?.asignaciones.map((a) => a.id)).toEqual(
+      [deBeto._id.toString()],
+    );
+    expect(porEmail.get('root@ejemplo.com')?.asignaciones).toEqual([]);
+  });
+
+  it('una sola consulta de filas alimenta asignacion y asignaciones, ordenada por antigüedad y luego por id (S-U1.1)', async () => {
+    const ana = cuentaDoc();
+    const vieja = fila(ana);
+    const nuevaInactiva = fila(ana, { estado: 'inactive' });
+    const nuevaActiva = fila(ana, { perfil: 'personal' });
+    const { service, modelo } = servicioCon(
+      [ana],
+      [vieja, nuevaInactiva, nuevaActiva],
+    );
+
+    const usuario = await service.findOne(ana._id.toString());
+
+    // The old lookup was active-only; the new one reads every row, once.
+    expect(modelo.consultas).toHaveLength(1);
+    expect(modelo.consultas[0].filtro).toEqual({
+      accountId: { $in: [ana._id] },
+    });
+    expect(modelo.consultas[0].orden).toEqual({ createdAt: 1, _id: 1 });
+    expect(usuario.asignaciones).toHaveLength(3);
+    // `asignacion` stays the newest ACTIVE row of any profile.
+    expect(usuario.asignacion?.perfil).toBe('personal');
+  });
+
+  it('la página entera cuesta una sola consulta de filas', async () => {
+    const ana = cuentaDoc();
+    const beto = cuentaDoc();
+    const { service, modelo } = servicioCon(
+      [ana, beto],
+      [fila(ana), fila(beto)],
+    );
+
+    await service.findAll({ estado: 'todos' } as never);
+
+    expect(modelo.find).toHaveBeenCalledTimes(1);
+  });
+
+  it('un administrador de plataforma sin filas recibe [] y asignacion null (S-U1.5)', async () => {
+    const root = cuentaDoc({ esAdministradorPlataforma: true });
+    const { service } = servicioCon([root], []);
+
+    const usuario = await service.findOne(root._id.toString());
+
+    expect(usuario.asignaciones).toEqual([]);
+    expect(usuario.asignacion).toBeNull();
+  });
+
+  it('las respuestas de create y update también llevan asignaciones', async () => {
+    const ana = cuentaDoc();
+    const suya = fila(ana);
+    const { service } = servicioCon([ana], [suya]);
+
+    const actualizado = await service.update(
+      ana._id.toString(),
+      { nombre: 'Ana P.' },
+      ACTOR,
+    );
+    expect(actualizado.asignaciones.map((a) => a.id)).toEqual([
+      suya._id.toString(),
+    ]);
+
+    const creado = await service.create(
+      { nombre: 'Nuevo', email: 'nuevo@ejemplo.com', password: 'clave123' },
+      ACTOR,
+    );
+    expect(creado.asignaciones).toEqual([]);
+  });
+});
