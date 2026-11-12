@@ -523,3 +523,162 @@ describe('DirectorioService.residentesDeInmueble', () => {
     expect(terceros.find).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A model stub that APPLIES the filter (equality and `$in` on the keys the
+ * recipients resolver uses), so a test can prove what a query would match
+ * instead of trusting a fixed answer.
+ */
+const modeloFiltrante = (filas: Fila[]) => {
+  const coincide = (fila: Fila, filtro: Fila): boolean =>
+    Object.entries(filtro).every(([clave, esperado]) => {
+      const valor = fila[clave];
+      if (esperado && typeof esperado === 'object' && '$in' in esperado) {
+        const lista = (esperado as { $in: unknown[] }).$in.map(String);
+        return lista.includes(String(valor));
+      }
+      return String(valor) === String(esperado);
+    });
+  const find = jest.fn((filtro: Fila) => {
+    const resultado = filas.filter((f) => coincide(f, filtro));
+    const cadena = {
+      select: () => cadena,
+      lean: () => cadena,
+      exec: () => Promise.resolve(resultado),
+    };
+    return cadena;
+  });
+  return { find };
+};
+
+describe('DirectorioService.correosDeInmuebles', () => {
+  const COP_B = oid();
+
+  const montar = (opciones: { unidades?: Fila[]; terceros?: Fila[] }) => {
+    const inmuebles = modeloFiltrante(opciones.unidades ?? []);
+    const terceros = modeloFiltrante(opciones.terceros ?? []);
+    const servicio = new DirectorioService(
+      {} as never,
+      {} as never,
+      terceros as never,
+      {} as never,
+      {} as unknown as AccesoService,
+      inmuebles as never,
+    );
+    return { servicio, inmuebles, terceros };
+  };
+
+  const unidad = (extra: Fila = {}) => ({
+    _id: oid(),
+    copropiedadId: COP,
+    estado: 'active',
+    titularId: null,
+    arrendatarioId: null,
+    ...extra,
+  });
+  const tercero = (extra: Fila = {}) => ({
+    _id: oid(),
+    copropiedadId: COP,
+    estado: 'active',
+    nombre: 'Ana',
+    emails: ['ana@x.com'],
+    accountId: null,
+    ...extra,
+  });
+
+  it('devuelve las direcciones de la ficha del titular y del arrendatario, con una clave por cada inmueble pedido', async () => {
+    const titular = tercero({ nombre: 'Ana', emails: ['a@x.com', 'b@x.com'] });
+    const arrendatario = tercero({ nombre: 'Luis', emails: ['l@x.com'] });
+    const u1 = unidad({
+      titularId: titular._id,
+      arrendatarioId: arrendatario._id,
+    });
+    const u2 = unidad();
+    const { servicio } = montar({
+      unidades: [u1, u2],
+      terceros: [titular, arrendatario],
+    });
+
+    const mapa = await servicio.correosDeInmuebles(COP, [u1._id, u2._id]);
+
+    expect(mapa.get(u1._id.toString())?.map((d) => [d.email, d.rol])).toEqual([
+      ['a@x.com', 'propietario'],
+      ['b@x.com', 'propietario'],
+      ['l@x.com', 'arrendatario'],
+    ]);
+    expect(mapa.get(u2._id.toString())).toEqual([]);
+  });
+
+  it('el correo de acceso de una cuenta vinculada que no está en la ficha NO es un destino, y no se filtra por cuenta', async () => {
+    const titular = tercero({ emails: ['ficha@x.com'], accountId: oid() });
+    const u = unidad({ titularId: titular._id });
+    const { servicio, terceros } = montar({
+      unidades: [u],
+      terceros: [titular],
+    });
+
+    const mapa = await servicio.correosDeInmuebles(COP, [u._id]);
+
+    expect(mapa.get(u._id.toString())?.map((d) => d.email)).toEqual([
+      'ficha@x.com',
+    ]);
+    const filtro = terceros.find.mock.calls[0][0];
+    expect(filtro).not.toHaveProperty('accountId');
+    expect(filtro).toMatchObject({ copropiedadId: COP, estado: 'active' });
+  });
+
+  it('con arrendatario inactivo recibe solo el titular; con la unidad inactiva no hay destinos', async () => {
+    const titular = tercero({ emails: ['a@x.com'] });
+    const arrendatario = tercero({ emails: ['l@x.com'], estado: 'inactive' });
+    const activa = unidad({
+      titularId: titular._id,
+      arrendatarioId: arrendatario._id,
+    });
+    const inactiva = unidad({ titularId: titular._id, estado: 'inactive' });
+    const { servicio } = montar({
+      unidades: [activa, inactiva],
+      terceros: [titular, arrendatario],
+    });
+
+    const mapa = await servicio.correosDeInmuebles(COP, [
+      activa._id,
+      inactiva._id,
+    ]);
+
+    expect(mapa.get(activa._id.toString())?.map((d) => d.email)).toEqual([
+      'a@x.com',
+    ]);
+    expect(mapa.get(inactiva._id.toString())).toEqual([]);
+  });
+
+  it('SEC: correosDeInmuebles never crosses coproperty — un tercero de otra copropiedad no aporta nada y una unidad ajena no resuelve', async () => {
+    const ajeno = tercero({ copropiedadId: COP_B, emails: ['ajeno@x.com'] });
+    const uConAjeno = unidad({ titularId: ajeno._id });
+    const uDeOtraCop = unidad({ copropiedadId: COP_B, titularId: ajeno._id });
+    const { servicio, inmuebles, terceros } = montar({
+      unidades: [uConAjeno, uDeOtraCop],
+      terceros: [ajeno],
+    });
+
+    const mapa = await servicio.correosDeInmuebles(COP, [
+      uConAjeno._id,
+      uDeOtraCop._id,
+    ]);
+
+    expect(mapa.get(uConAjeno._id.toString())).toEqual([]);
+    expect(mapa.get(uDeOtraCop._id.toString())).toEqual([]);
+    expect(inmuebles.find.mock.calls[0][0]).toMatchObject({
+      copropiedadId: COP,
+    });
+    expect(terceros.find.mock.calls[0][0]).toMatchObject({
+      copropiedadId: COP,
+    });
+  });
+
+  it('sin inmuebles pedidos no consulta nada', async () => {
+    const { servicio, inmuebles } = montar({});
+
+    expect((await servicio.correosDeInmuebles(COP, [])).size).toBe(0);
+    expect(inmuebles.find).not.toHaveBeenCalled();
+  });
+});

@@ -25,6 +25,7 @@ import {
 import type { Subject } from '../../modules/casl/casl-ability.constants';
 import { puedeLeerMateria } from '../../modules/casl/permisos-catalogo';
 import { AccesoService } from '../acceso/acceso.service';
+import { type DestinoCorreo, destinosDeUnidad } from './destinos-correo';
 
 /** `personal` works in the building's back office; `residente` holds a unit. */
 export type PerfilDestinatario = 'residente' | 'personal';
@@ -229,6 +230,65 @@ export class DirectorioService {
           rol: 'arrendatario',
         });
       }
+    }
+    return resultado;
+  }
+
+  /**
+   * The e-mail addresses each of the given units' invoices go to: the `emails`
+   * stored on the unit's titular and arrendatario RECORDS, not the sign-ins of
+   * accounts (a party with no account is reachable; a login address that is
+   * not on the record is not an address). See `destinosDeUnidad` for the
+   * rules (owner first, deduplicated, invalid entries skipped).
+   *
+   * Every id of `inmuebleIds` is a key of the result, with `[]` when nobody
+   * can be reached. Both lookups carry `copropiedadId`, so an id or a party of
+   * another coproperty yields nothing, and an inactive unit or party
+   * contributes nothing (the same filter as `residentesDeInmuebles`). Two
+   * queries however many units are asked for.
+   */
+  async correosDeInmuebles(
+    copropiedadId: Types.ObjectId,
+    inmuebleIds: Types.ObjectId[],
+  ): Promise<Map<string, DestinoCorreo[]>> {
+    const resultado = new Map<string, DestinoCorreo[]>(
+      inmuebleIds.map((id) => [id.toString(), []]),
+    );
+    if (inmuebleIds.length === 0) return resultado;
+
+    const unidades = await this.inmuebles
+      .find({ _id: { $in: inmuebleIds }, copropiedadId, estado: 'active' })
+      .select('titularId arrendatarioId')
+      .lean()
+      .exec();
+
+    const terceroIds = new Map<string, Types.ObjectId>();
+    for (const u of unidades) {
+      for (const id of [u.titularId, u.arrendatarioId]) {
+        if (id) terceroIds.set(id.toString(), id);
+      }
+    }
+    if (terceroIds.size === 0) return resultado;
+
+    const terceros = await this.terceros
+      .find({
+        _id: { $in: [...terceroIds.values()] },
+        copropiedadId,
+        estado: 'active',
+      })
+      .select('nombre emails')
+      .lean()
+      .exec();
+    const porId = new Map(terceros.map((t) => [t._id.toString(), t]));
+
+    for (const u of unidades) {
+      resultado.set(
+        u._id.toString(),
+        destinosDeUnidad(
+          u.titularId ? porId.get(u.titularId.toString()) : null,
+          u.arrendatarioId ? porId.get(u.arrendatarioId.toString()) : null,
+        ),
+      );
     }
     return resultado;
   }
