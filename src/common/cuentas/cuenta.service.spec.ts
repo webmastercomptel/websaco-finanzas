@@ -16,7 +16,11 @@ interface Cuenta {
  * A minimal in-memory stand-in for the Account model: enough to observe
  * whether the stored binding changed, which is the whole point of these tests.
  */
-function crear(cuenta: Cuenta | null) {
+function crear(
+  cuenta: Cuenta | null,
+  /** Runs between the service's read and its conditional write (a race). */
+  antesDeEscribir?: (almacen: Cuenta) => void,
+) {
   const almacen = cuenta ? { ...cuenta } : null;
 
   const findOne = jest.fn((filtro: Record<string, unknown>) => ({
@@ -35,6 +39,7 @@ function crear(cuenta: Cuenta | null) {
   const findOneAndUpdate = jest.fn(
     (filtro: Record<string, unknown>, cambio: { $set: Partial<Cuenta> }) => ({
       exec: jest.fn().mockImplementation(() => {
+        if (almacen) antesDeEscribir?.(almacen);
         const coincide =
           almacen &&
           Object.entries(filtro).every(
@@ -94,6 +99,37 @@ describe('CuentaService.resolverPorToken', () => {
     expect(almacen?.firebaseUid).toBe('uid-nuevo');
   });
 
+  it('claims with a compare-and-set on the exact placeholder of the normalized e-mail', async () => {
+    const { servicio, findOneAndUpdate } = crear({
+      _id: CUENTA_ID,
+      firebaseUid: `pendiente:${EMAIL}`,
+      email: EMAIL,
+    });
+
+    await servicio.resolverPorToken('uid-nuevo', ' Persona@Example.com ');
+
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(findOneAndUpdate.mock.calls[0][0]).toEqual({
+      _id: CUENTA_ID,
+      firebaseUid: `pendiente:${EMAIL}`,
+    });
+  });
+
+  it('does not let a pendiente: value of another address be claimed', async () => {
+    const { servicio, almacen, findOneAndUpdate } = crear({
+      _id: CUENTA_ID,
+      firebaseUid: 'pendiente:otra@example.com',
+      email: EMAIL,
+    });
+
+    await expect(
+      servicio.resolverPorToken('uid-intruso', EMAIL),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(almacen?.firebaseUid).toBe('pendiente:otra@example.com');
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it('refuses a different uid carrying the e-mail of an already bound account, and leaves the binding alone', async () => {
     const { servicio, almacen, findOneAndUpdate } = crear({
       _id: CUENTA_ID,
@@ -127,18 +163,17 @@ describe('CuentaService.resolverPorToken', () => {
   });
 
   it('refuses the claim when another identity bound the account first (lost race)', async () => {
-    const { servicio, almacen, findOneAndUpdate } = crear({
-      _id: CUENTA_ID,
-      firebaseUid: `pendiente:${EMAIL}`,
-      email: EMAIL,
-    });
     // Between the read and the conditional write, somebody else claims it.
-    findOneAndUpdate.mockImplementationOnce(() => ({
-      exec: jest.fn().mockImplementation(() => {
-        if (almacen) almacen.firebaseUid = 'uid-primero';
-        return Promise.resolve(null);
-      }),
-    }));
+    const { servicio, almacen } = crear(
+      {
+        _id: CUENTA_ID,
+        firebaseUid: `pendiente:${EMAIL}`,
+        email: EMAIL,
+      },
+      (a) => {
+        a.firebaseUid = 'uid-primero';
+      },
+    );
 
     await expect(
       servicio.resolverPorToken('uid-segundo', EMAIL),

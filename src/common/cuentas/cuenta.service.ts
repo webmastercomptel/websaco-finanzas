@@ -7,9 +7,13 @@ import {
   AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
 
-/** An account created ahead of its first sign-in — see seed-admin.ts. */
-const esPendiente = (firebaseUid: string): boolean =>
-  firebaseUid.startsWith('pendiente:');
+/**
+ * The placeholder uid of an account created ahead of its first sign-in — see
+ * seed-admin.ts. Exact, per address: any other `pendiente:`-looking value is a
+ * stored uid like any other and is never claimable.
+ */
+const marcadorPendiente = (emailNormalizado: string): string =>
+  `pendiente:${emailNormalizado}`;
 
 @Injectable()
 export class CuentaService {
@@ -38,9 +42,9 @@ export class CuentaService {
    * or if the shared pool ever allows several accounts per address — a
    * different identity can carry the same email. Re-binding would then hand
    * the account (staff and platform admin included) to that identity and
-   * unbind its owner. Such a token is refused with the guard's opaque 401;
-   * reconnecting a person whose identity was genuinely recreated is an
-   * administrator's decision, not something a sign-in may do on its own.
+   * unbind its owner. Such a token is refused with the guard's opaque 401.
+   * There is no in-app re-bind: reconnecting a person whose identity was
+   * genuinely recreated is a manual update of the Account's `firebaseUid`.
    *
    * Never creates an account. Somebody with a valid token and no record here is
    * authenticated and has access to nothing — which is the correct answer, not
@@ -59,7 +63,8 @@ export class CuentaService {
     const porEmail = await this.accounts.findOne({ email: normalizado }).exec();
     if (!porEmail) return null;
 
-    if (!esPendiente(porEmail.firebaseUid)) {
+    const marcador = marcadorPendiente(normalizado);
+    if (porEmail.firebaseUid !== marcador) {
       return this.rechazarReclamo(porEmail._id);
     }
 
@@ -68,7 +73,7 @@ export class CuentaService {
     // for the same unclaimed account cannot both win.
     const reclamada = await this.accounts
       .findOneAndUpdate(
-        { _id: porEmail._id, firebaseUid: porEmail.firebaseUid },
+        { _id: porEmail._id, firebaseUid: marcador },
         { $set: { firebaseUid } },
         { new: true },
       )
