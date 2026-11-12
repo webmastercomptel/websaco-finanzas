@@ -1,6 +1,8 @@
+import { claveCorreo } from '../utils/email.utils';
 import {
   REVOCACION_DETIENE_CORREOS_FACTURA,
   coincideCorreo,
+  correoProbado,
   copropiedadAdmiteIngresoResidentes,
   revocacionAplica,
   unidadesDeTerceros,
@@ -130,6 +132,41 @@ describe('copropiedadAdmiteIngresoResidentes', () => {
 
   it('refuses a coproperty that contracted no module', () => {
     expect(copropiedadAdmiteIngresoResidentes([])).toBe(false);
+  });
+});
+
+describe('correoProbado', () => {
+  const email = 'ana@example.com';
+
+  it('is true only when the proof is for the current address of an active account', () => {
+    expect(
+      correoProbado({ email, correoProbadoClave: claveCorreo(email) }),
+    ).toBe(true);
+    expect(
+      correoProbado({
+        email,
+        estado: 'active',
+        correoProbadoClave: claveCorreo(email),
+      }),
+    ).toBe(true);
+  });
+
+  it('SEC: no proof, a proof for another address or an inactive account proves nothing', () => {
+    expect(correoProbado({ email, correoProbadoClave: null })).toBe(false);
+    expect(correoProbado({ email })).toBe(false);
+    expect(
+      correoProbado({
+        email,
+        correoProbadoClave: claveCorreo('otra@example.com'),
+      }),
+    ).toBe(false);
+    expect(
+      correoProbado({
+        email,
+        estado: 'inactive',
+        correoProbadoClave: claveCorreo(email),
+      }),
+    ).toBe(false);
   });
 });
 

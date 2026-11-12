@@ -1,5 +1,5 @@
 // src/common/acceso/residencia.reglas.ts
-import { normalizarEmail } from '../utils/email.utils';
+import { claveCorreo, normalizarEmail } from '../utils/email.utils';
 
 /**
  * Pure rules of the address-derived resident access. Nothing here reads a
@@ -115,4 +115,24 @@ export function copropiedadAdmiteIngresoResidentes(
   modulos: readonly string[],
 ): boolean {
   return modulos.includes('finanzas') || modulos.includes('administracion');
+}
+
+/**
+ * Does the Account currently prove the address it carries? Only when the proof
+ * (`correoProbadoClave`, set by a redeemed sign-in link) is for the Account's
+ * CURRENT address and the account is active: a proof for another `clave` (the
+ * address changed afterwards) grants nothing, and an address on a record is
+ * never enough on its own. `estado` is optional for callers that already
+ * refused an inactive account.
+ */
+export function correoProbado(cuenta: {
+  email: string;
+  estado?: string;
+  correoProbadoClave?: string | null;
+}): boolean {
+  if (cuenta.estado !== undefined && cuenta.estado !== 'active') return false;
+  return (
+    !!cuenta.correoProbadoClave &&
+    cuenta.correoProbadoClave === claveCorreo(cuenta.email)
+  );
 }

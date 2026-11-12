@@ -32,6 +32,7 @@ import {
 } from '../../database/schemas/cuentas/account.schema';
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
 import { claveCorreo } from '../utils/email.utils';
+import { correoProbado } from './residencia.reglas';
 import { ResidenciaService } from './residencia.service';
 import {
   moduloDePermiso,
@@ -244,14 +245,9 @@ export class AccesoService {
     if (!propia) return heredadas;
 
     const clave = claveCorreo(propia.email);
-    const activa = propia.estado === undefined || propia.estado === 'active';
-    const probada =
-      activa &&
-      !!propia.correoProbadoClave &&
-      propia.correoProbadoClave === clave;
 
     const alcanzadas = new Set(heredadas);
-    if (probada) {
+    if (correoProbado(propia)) {
       const porCorreo = await this.residencia.copropiedadesPorCorreo(
         propia.email,
       );
