@@ -10,6 +10,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { MAX_CORREOS_POR_TERCERO } from '../../../common/utils/email.utils';
 
 /**
  * Everything about a party except its person type and name, all optional.
@@ -79,7 +80,7 @@ class CamposTerceroDto {
    *  frontend splits a single comma-separated field into this list. */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(5)
+  @ArrayMaxSize(MAX_CORREOS_POR_TERCERO)
   @IsEmail({}, { each: true })
   @MaxLength(120, { each: true })
   emails?: string[];

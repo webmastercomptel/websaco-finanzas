@@ -23,7 +23,12 @@ import {
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { escapeRegex } from '../../common/utils/query.utils';
 import { resolverNombreTercero } from '../../common/utils/tercero-name.utils';
-import { parseEmails } from '../../common/utils/email.utils';
+import {
+  DemasiadosCorreosError,
+  MAX_CORREOS_POR_TERCERO,
+  normalizarEmail,
+  normalizarListaEmails,
+} from '../../common/utils/email.utils';
 import { CatalogosService } from '../catalogos/catalogos.service';
 import {
   ProgresoImportacionService,
@@ -132,8 +137,12 @@ interface ExistenteLeve {
   arrendatarioId?: Types.ObjectId | null;
 }
 
-/** The comparison form of an e-mail address: trimmed and case-folded. */
-const claveCorreo = (correo: string): string => correo.trim().toLowerCase();
+/** Row error for a party whose e-mail cell holds more distinct addresses than
+ *  a party may carry. */
+const errorDemasiadosCorreos = (parte: 'titular' | 'arrendatario'): Error =>
+  new Error(
+    `Correo del ${parte}: máximo ${MAX_CORREOS_POR_TERCERO} correos distintos`,
+  );
 
 const ERROR_ARRENDATARIO_ES_PROPIETARIO =
   'El arrendatario no puede ser el propietario';
@@ -719,7 +728,7 @@ export class InmueblesService {
           // The import creates ONE Tercero per e-mail and the next rows find
           // it, so a tenant shared by several units is new once and linked
           // after that.
-          const correos = planArrendatario.datos.emails.map(claveCorreo);
+          const correos = planArrendatario.datos.emails.map(normalizarEmail);
           if (correos.some((c) => correosArrendatariosNuevos.has(c))) {
             clasificacion.arrendatariosAVincular += 1;
           } else {
@@ -1046,13 +1055,16 @@ export class InmueblesService {
 
     let emails: string[];
     try {
-      emails = [...new Set(parseEmails(correoCrudo))];
+      emails = normalizarListaEmails(correoCrudo);
     } catch (err) {
+      if (err instanceof DemasiadosCorreosError) {
+        throw errorDemasiadosCorreos('arrendatario');
+      }
       throw new Error(`Correo del arrendatario: ${mensajeDeFila(err)}`);
     }
 
-    const correosTitular = (datosTitular.emails ?? []).map(claveCorreo);
-    if (emails.some((e) => correosTitular.includes(claveCorreo(e)))) {
+    const correosTitular = (datosTitular.emails ?? []).map(normalizarEmail);
+    if (emails.some((e) => correosTitular.includes(normalizarEmail(e)))) {
       throw new Error(ERROR_ARRENDATARIO_ES_PROPIETARIO);
     }
     const esElTitular = (id: Types.ObjectId): boolean =>
@@ -1098,11 +1110,11 @@ export class InmueblesService {
       if (esElTitular(actual._id)) {
         throw new Error(ERROR_ARRENDATARIO_ES_PROPIETARIO);
       }
-      const guardados = (actual.emails ?? []).map(claveCorreo).sort();
+      const guardados = (actual.emails ?? []).map(normalizarEmail).sort();
       const cambioTelefono = !!telefono && telefono !== actual.telefono;
       const cambioCorreos =
         emails.length > 0 &&
-        emails.map(claveCorreo).sort().join(',') !== guardados.join(',');
+        emails.map(normalizarEmail).sort().join(',') !== guardados.join(',');
       const sinCorreo = emails.length === 0 && guardados.length === 0;
       if (!cambioTelefono && !cambioCorreos) {
         return { tipo: 'ninguno', sinCorreo };
@@ -1325,14 +1337,19 @@ export class InmueblesService {
       ciudadDepartamento = encontrada.departamentoCodigo;
     }
 
-    return {
-      ciudad,
-      ciudadDepartamento,
-      emails:
-        fila.emailTitular === undefined
-          ? undefined
-          : parseEmails(fila.emailTitular),
-    };
+    let emails: string[] | undefined;
+    if (fila.emailTitular !== undefined) {
+      try {
+        emails = normalizarListaEmails(fila.emailTitular);
+      } catch (err) {
+        if (err instanceof DemasiadosCorreosError) {
+          throw errorDemasiadosCorreos('titular');
+        }
+        throw err;
+      }
+    }
+
+    return { ciudad, ciudadDepartamento, emails };
   }
 
   /**

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { CorreoService } from './correo.service';
 
@@ -213,6 +214,98 @@ describe('CorreoService — sin seguimiento de SendGrid', () => {
       html: '<a href="https://app.ejemplo.com/auth/enlace?token=t">Ver</a>',
     });
 
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trackingSettings: {
+          clickTracking: { enable: false, enableText: false },
+          openTracking: { enable: false },
+        },
+      }),
+    );
+  });
+});
+
+describe('CorreoService — registros sin direcciones completas', () => {
+  let errorSpy: jest.SpyInstance;
+  let todoLoRegistrado: () => string;
+
+  beforeEach(() => {
+    mockSend.mockReset().mockResolvedValue([{ statusCode: 202 }, {}]);
+    errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const otros = [
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(),
+      jest.spyOn(Logger.prototype, 'log').mockImplementation(),
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(),
+    ];
+    todoLoRegistrado = () =>
+      [errorSpy, ...otros]
+        .flatMap((espia) => espia.mock.calls as unknown[][])
+        .map((llamada) => JSON.stringify(llamada))
+        .join('\n');
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('SEC: CorreoService never logs a full address — un fallo de envío registra la dirección enmascarada', async () => {
+    mockSend.mockRejectedValue(new Error('boom'));
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({ para: 'ana@x.com', asunto: 'x', html: 'x' });
+
+    expect(todoLoRegistrado()).toContain('a***@x.com');
+    expect(todoLoRegistrado()).not.toContain('ana@x.com');
+  });
+
+  it('SEC: CorreoService never logs a full address — sin SendGrid configurado registra solo la dirección enmascarada', async () => {
+    const servicio = crear({});
+
+    const ok = await servicio.enviar({
+      para: 'ana@x.com',
+      asunto: 'x',
+      html: 'x',
+    });
+
+    expect(ok).toBe(false);
+    expect(todoLoRegistrado()).toContain('a***@x.com');
+    expect(todoLoRegistrado()).not.toContain('ana@x.com');
+  });
+
+  it('SEC: CorreoService never logs a full address — el texto de error del proveedor también se enmascara', async () => {
+    mockSend.mockRejectedValue(
+      new Error('The to address ana@x.com does not exist; retry ANA@X.COM'),
+    );
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({ para: 'ana@x.com', asunto: 'x', html: 'x' });
+
+    const registrado = todoLoRegistrado();
+    expect(registrado).not.toMatch(/ana@x\.com/i);
+    expect(registrado).toContain('a***@x.com');
+  });
+
+  it('una dirección sin arroba se registra como ***', async () => {
+    mockSend.mockRejectedValue(new Error('boom'));
+    const servicio = crear(CONFIGURADO);
+
+    await servicio.enviar({ para: 'sin-arroba', asunto: 'x', html: 'x' });
+
+    expect(todoLoRegistrado()).toContain('***');
+    expect(todoLoRegistrado()).not.toContain('sin-arroba');
+  });
+
+  it('un envío aceptado devuelve true, no registra nada y mantiene el seguimiento apagado', async () => {
+    const servicio = crear(CONFIGURADO);
+
+    const ok = await servicio.enviar({
+      para: 'ana@x.com',
+      asunto: 'x',
+      html: 'x',
+    });
+
+    expect(ok).toBe(true);
+    expect(todoLoRegistrado()).toBe('');
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({
         trackingSettings: {

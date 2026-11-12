@@ -9,7 +9,11 @@ import { ConfigService } from '@nestjs/config';
 // ES imports, which is exactly the form that breaks here.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import sgMail = require('@sendgrid/mail');
+import { enmascararEmail } from '../utils/email.utils';
 import { logoInlineCorreo, REFERENCIA_LOGO_CORREO } from './logo-correo';
+
+/** Anything shaped like an address inside a provider's error text. */
+const PATRON_DIRECCION = /[^\s@<>"'(),;:]+@[^\s@<>"'(),;]+/g;
 
 /**
  * A file attached to an outgoing email. With `idContenido` it is sent inline
@@ -66,7 +70,7 @@ export class CorreoService {
   async enviar(mensaje: MensajeCorreo): Promise<boolean> {
     if (!this.remitente) {
       this.logger.error(
-        `No se pudo enviar el correo a ${mensaje.para}: SendGrid no está configurado (SENDGRID_API_KEY / SENDGRID_FROM_EMAIL).`,
+        `No se pudo enviar el correo a ${enmascararEmail(mensaje.para)}: SendGrid no está configurado (SENDGRID_API_KEY / SENDGRID_FROM_EMAIL).`,
       );
       return false;
     }
@@ -96,10 +100,20 @@ export class CorreoService {
       return true;
     } catch (error: unknown) {
       this.logger.error(
-        `Falló el envío del correo a ${mensaje.para}: ${(error as Error).message}`,
+        `Falló el envío del correo a ${enmascararEmail(mensaje.para)}: ${this.sinDirecciones((error as Error).message)}`,
       );
       return false;
     }
+  }
+
+  /**
+   * Masks every address inside a provider's error text: SendGrid often echoes
+   * the recipient, and the log must never hold a complete address.
+   */
+  private sinDirecciones(texto: string): string {
+    return String(texto).replace(PATRON_DIRECCION, (direccion) =>
+      enmascararEmail(direccion),
+    );
   }
 
   /**
