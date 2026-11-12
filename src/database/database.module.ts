@@ -169,6 +169,10 @@ import {
   EnvioFactura,
   EnvioFacturaSchema,
 } from './schemas/facturacion/envio-factura.schema';
+import {
+  EnlaceFactura,
+  EnlaceFacturaSchema,
+} from './schemas/facturacion/enlace-factura.schema';
 
 import {
   ConsecutivoAdministracion,
@@ -321,6 +325,7 @@ const models = [
   { name: PlantillaDocumento.name, schema: PlantillaDocumentoSchema },
   { name: PublicacionLote.name, schema: PublicacionLoteSchema },
   { name: EnvioFactura.name, schema: EnvioFacturaSchema },
+  { name: EnlaceFactura.name, schema: EnlaceFacturaSchema },
 ];
 
 /**

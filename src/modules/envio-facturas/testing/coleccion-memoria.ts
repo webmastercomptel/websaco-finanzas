@@ -168,6 +168,32 @@ export class ColeccionMemoria {
     return q;
   }
 
+  findOne(filtro: Record<string, unknown> = {}) {
+    return consulta(async () => {
+      await ceder();
+      const d = this.docs.find((x) => coincide(x, filtro));
+      return d ? clonar(d) : null;
+    });
+  }
+
+  findById(id: unknown) {
+    return this.findOne({ _id: id });
+  }
+
+  /** Inserts one document; the keys of `unica` act as a unique index. */
+  async create(doc: Doc): Promise<Doc> {
+    await ceder();
+    const nuevo: Doc = { _id: new Types.ObjectId(), ...clonar(doc) };
+    if (
+      this.unica.length > 0 &&
+      this.docs.some((d) => this.unica.every((k) => igual(d[k], nuevo[k])))
+    ) {
+      throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+    }
+    this.docs.push(nuevo);
+    return clonar(nuevo);
+  }
+
   exists(filtro: Record<string, unknown>) {
     return consulta(async () => {
       await ceder();
