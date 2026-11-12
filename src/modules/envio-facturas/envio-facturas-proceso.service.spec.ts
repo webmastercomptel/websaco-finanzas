@@ -1,6 +1,10 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
+import { destinosDeUnidad } from '../../common/directorio/destinos-correo';
 import type { ResidenteDeInmueble } from '../../common/directorio/directorio.service';
+import { claveCorreo } from '../../common/utils/email.utils';
+import { EnlaceFacturaService } from '../factura-publica/enlace-factura.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { EnvioFacturasProcesoService } from './envio-facturas-proceso.service';
 import { MAX_INTENTOS, VIGENCIA_ENVIO_MS } from './envio-facturas.constantes';
@@ -44,11 +48,20 @@ function montar(
   const facturas = new ColeccionMemoria();
   const unidades: Unidad[] = [];
   const residentesPorUnidad = new Map<string, ResidenteDeInmueble[]>();
+  const partesPorUnidad = new Map<
+    string,
+    { titular: string[]; arrendatario: string[]; nombres: [string, string] }
+  >();
+  const titularId = new Types.ObjectId();
+  const arrendatarioId = new Types.ObjectId();
 
   const agregarUnidad = (
     codigo: string,
     residentes: ResidenteDeInmueble[],
     over: Record<string, unknown> = {},
+    /** Addresses on the records. By default each account's login is the
+     *  address of its party (one address per resident). */
+    direcciones: { titular?: string[]; arrendatario?: string[] } = {},
   ): Unidad => {
     const inmuebleId = new Types.ObjectId();
     const facturaId = new Types.ObjectId();
@@ -64,6 +77,16 @@ function montar(
       ...over,
     });
     residentesPorUnidad.set(inmuebleId.toString(), residentes);
+    const delRol = (rol: 'propietario' | 'arrendatario') =>
+      residentes.filter((r) => r.rol === rol).map((r) => r.email);
+    partesPorUnidad.set(inmuebleId.toString(), {
+      titular: direcciones.titular ?? delRol('propietario'),
+      arrendatario: direcciones.arrendatario ?? delRol('arrendatario'),
+      nombres: [
+        residentes.find((r) => r.rol === 'propietario')?.nombre ?? 'Titular',
+        residentes.find((r) => r.rol === 'arrendatario')?.nombre ?? 'Inquilino',
+      ],
+    });
     const unidad = { codigo, inmuebleId, facturaId, residentes };
     unidades.push(unidad);
     return unidad;
@@ -76,13 +99,39 @@ function montar(
     ),
   };
   const notificaciones = { crear: jest.fn().mockResolvedValue(true) };
-  const enlaces = {
-    construir: jest
-      .fn()
-      .mockResolvedValue('https://app.ejemplo.com/auth/enlace?token=t'),
-  };
+  const enlacesColeccion = new ColeccionMemoria(['tokenHash']);
+  const enlaces = new EnlaceFacturaService(
+    enlacesColeccion as never,
+    ...(Array(7).fill({}) as [never, never, never, never, never, never, never]),
+  );
+  jest.spyOn(enlaces, 'revocarPorId');
   const auditoria = { registrar: jest.fn().mockResolvedValue(undefined) };
   const directorio = {
+    correosDeInmuebles: jest.fn((_cop: Types.ObjectId, ids: Types.ObjectId[]) =>
+      Promise.resolve(
+        new Map(
+          ids.map((id) => {
+            const partes = partesPorUnidad.get(id.toString());
+            if (!partes) return [id.toString(), []];
+            return [
+              id.toString(),
+              destinosDeUnidad(
+                {
+                  _id: titularId,
+                  nombre: partes.nombres[0],
+                  emails: partes.titular,
+                },
+                {
+                  _id: arrendatarioId,
+                  nombre: partes.nombres[1],
+                  emails: partes.arrendatario,
+                },
+              ),
+            ];
+          }),
+        ),
+      ),
+    ),
     residentesDeInmuebles: jest.fn(
       (_cop: Types.ObjectId, ids: Types.ObjectId[]) =>
         Promise.resolve(
@@ -141,6 +190,10 @@ function montar(
 
   return {
     envios,
+    partes: partesPorUnidad,
+    enlacesColeccion,
+    titularId,
+    arrendatarioId,
     facturas,
     agregarUnidad,
     correo,
@@ -261,7 +314,7 @@ describe('EnvioFacturasProcesoService', () => {
     });
   });
 
-  it('el correo lleva un enlace al portal y no adjunta la factura ni muestra montos', async () => {
+  it('el correo lleva el enlace personal al PDF, no adjunta la factura ni muestra montos, y no lleva enlace de sesión', async () => {
     const t = montar();
     t.agregarUnidad('A-101', [residente('propietario', 'Pedro <b>Pérez</b>')]);
     await t.marcarTodas();
@@ -272,23 +325,13 @@ describe('EnvioFacturasProcesoService', () => {
     expect(mensaje).not.toHaveProperty('adjuntos');
     expect(mensaje.asunto).toBe('Tu factura FV-A-101 ya está disponible');
     expect(mensaje.html).toContain('FV-A-101');
-    expect(mensaje.html).toContain(
-      'https://app.ejemplo.com/auth/enlace?token=t',
+    expect(mensaje.html).toMatch(
+      /https:\/\/app\.ejemplo\.com\/factura#[0-9a-f]{64}/,
     );
+    expect(mensaje.html).not.toContain('/auth/enlace');
     expect(mensaje.html).toContain('octubre de 2026');
     expect(mensaje.html).not.toContain('<b>Pérez</b>'); // names are escaped
     expect(mensaje.html).not.toMatch(/\$|total|saldo/i);
-    const [, , destino, vigencia] = t.enlaces.construir.mock.calls[0] as [
-      string,
-      string,
-      string,
-      number,
-    ];
-    expect(destino).toMatch(
-      /^\/portal\/facturas\?inmuebleId=[0-9a-f]{24}&abrir=[0-9a-f]{24}$/,
-    );
-    // The link opens the owner's statement: 7 days, not a payment cycle.
-    expect(vigencia).toBe(7 * 24 * 60 * 60 * 1000);
   });
 
   describe('reintento tras corte no duplica', () => {
@@ -343,7 +386,14 @@ describe('EnvioFacturasProcesoService', () => {
       fila.envioIniciadoEn = new Date(Date.now() - VIGENCIA_ENVIO_MS - 1000);
       fila.liberadaEn = new Date(Date.now() - VIGENCIA_ENVIO_MS - 1000);
       fila.notificadosIds = [new Types.ObjectId(propietario.accountId)];
-      fila.correosEnviadosIds = [new Types.ObjectId(propietario.accountId)];
+      fila.correosEntregados = [
+        {
+          clave: claveCorreo(propietario.email),
+          rol: 'propietario',
+          terceroId: t.titularId,
+          aceptadoEn: new Date(),
+        },
+      ];
 
       const r = await t.proceso.procesarPendientes(staff());
 
@@ -354,7 +404,7 @@ describe('EnvioFacturasProcesoService', () => {
       });
       expect(t.correo.enviar).toHaveBeenCalledTimes(1);
       expect(t.correo.enviar.mock.calls[0][0].para).toBe(arrendatario.email);
-      expect(fila.correosEnviadosIds).toHaveLength(2);
+      expect(fila.correosEntregados).toHaveLength(2);
     });
 
     it('un candado vivo de otra corrida no se pisa: la fila se deja en paz', async () => {
@@ -775,5 +825,441 @@ describe('EnvioFacturasProcesoService', () => {
     }
     // The rows the other processor holds are left exactly as it has them.
     expect(robadas.every((f) => f.tokenEnvio === 'otro-procesador')).toBe(true);
+  });
+});
+
+describe('EnvioFacturasProcesoService — por dirección de la ficha', () => {
+  type Montaje = ReturnType<typeof montar>;
+  const TOKEN_EN_HTML = /\/factura#([0-9a-f]{64})/;
+  const tokenDe = (html: string): string => TOKEN_EN_HTML.exec(html)![1];
+  const destinatarios = (t: Montaje) =>
+    t.correo.enviar.mock.calls.map(([m]) => m.para);
+
+  let registros: jest.SpyInstance[];
+  const todoLoRegistrado = () =>
+    registros
+      .flatMap((r) => r.mock.calls as unknown[][])
+      .map((c) => JSON.stringify(c))
+      .join('\n');
+
+  beforeEach(() => {
+    registros = (['error', 'warn', 'log', 'debug', 'verbose'] as const).map(
+      (n) => jest.spyOn(Logger.prototype, n).mockImplementation(),
+    );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('3 direcciones del titular y 1 del arrendatario, sin cuentas: 4 correos, 4 entradas, fila enviada', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      {
+        titular: ['t1@x.com', 't2@x.com', 't3@x.com'],
+        arrendatario: ['a1@x.com'],
+      },
+    );
+    await t.marcarTodas();
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r).toMatchObject({
+      reclamadas: 1,
+      enviadas: 1,
+      correosEnviados: 4,
+      conError: 0,
+    });
+    expect(destinatarios(t).sort()).toEqual(
+      ['a1@x.com', 't1@x.com', 't2@x.com', 't3@x.com'].sort(),
+    );
+    expect(t.fila(unidad)).toMatchObject({
+      estado: 'enviado',
+      destinatariosTotal: 4,
+    });
+    expect(t.fila(unidad).correosEntregados).toHaveLength(4);
+    expect(
+      (t.fila(unidad).correosEntregados as { rol: string }[])
+        .map((e) => e.rol)
+        .sort(),
+    ).toEqual(['arrendatario', 'propietario', 'propietario', 'propietario']);
+  });
+
+  it('la entrada guardada lleva clave, rol, tercero y fecha, y ningún campo con la dirección', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['Ana@X.com'] });
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    const [entrada] = t.fila(unidad).correosEntregados as Record<
+      string,
+      unknown
+    >[];
+    expect(entrada).toMatchObject({
+      clave: claveCorreo('ana@x.com'),
+      rol: 'propietario',
+      terceroId: t.titularId,
+    });
+    expect(entrada.aceptadoEn).toBeInstanceOf(Date);
+    expect(JSON.stringify(entrada).toLowerCase()).not.toContain('ana@x.com');
+  });
+
+  it('si el proveedor rechaza 1 de 4: 3 entradas, sigue pendiente con backoff, y el reintento solo manda la que falta', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      {
+        titular: ['t1@x.com', 't2@x.com', 't3@x.com'],
+        arrendatario: ['a1@x.com'],
+      },
+    );
+    await t.marcarTodas();
+    t.correo.enviar.mockImplementation((m) =>
+      Promise.resolve(m.para !== 't2@x.com'),
+    );
+
+    const primera = await t.proceso.procesarPendientes(staff());
+
+    expect(primera).toMatchObject({ reintentables: 1, correosEnviados: 3 });
+    expect(t.fila(unidad)).toMatchObject({
+      estado: 'pendiente_envio',
+      intentos: 1,
+    });
+    expect(t.fila(unidad).correosEntregados).toHaveLength(3);
+    expect((t.fila(unidad).proximoIntentoEn as Date).getTime()).toBeGreaterThan(
+      Date.now(),
+    );
+
+    t.fila(unidad).proximoIntentoEn = null;
+    t.correo.enviar.mockClear();
+    t.correo.enviar.mockResolvedValue(true);
+    const segunda = await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t)).toEqual(['t2@x.com']);
+    expect(segunda).toMatchObject({ enviadas: 1, correosEnviados: 1 });
+    expect(t.fila(unidad).correosEntregados).toHaveLength(4);
+  });
+
+  it('una notificación interna que falla no frena los correos, pero la fila no queda enviada', async () => {
+    const t = montar();
+    const cuenta = residente('propietario', 'Pedro Pérez');
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [cuenta],
+      {},
+      { titular: ['a@x.com', 'b@x.com'] },
+    );
+    await t.marcarTodas();
+    t.notificaciones.crear.mockResolvedValue(false);
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t).sort()).toEqual(['a@x.com', 'b@x.com']);
+    expect(t.fila(unidad).correosEntregados).toHaveLength(2);
+    expect(t.fila(unidad).estado).not.toBe('enviado');
+  });
+
+  it('una cuenta y 2 direcciones: 1 aviso interno, 2 correos, y el correo de acceso de la cuenta no recibe nada', async () => {
+    const t = montar();
+    const cuenta = residente('propietario', 'Pedro Pérez');
+    t.agregarUnidad(
+      'A-101',
+      [cuenta],
+      {},
+      { titular: ['uno@x.com', 'dos@x.com'] },
+    );
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.notificaciones.crear).toHaveBeenCalledTimes(1);
+    expect(destinatarios(t).sort()).toEqual(['dos@x.com', 'uno@x.com']);
+    expect(destinatarios(t)).not.toContain(cuenta.email);
+  });
+
+  it('una cuenta con las llaves de Finanzas igual recibe el PDF en las direcciones de la ficha', async () => {
+    const t = montar();
+    const cuenta: ResidenteDeInmueble = {
+      ...residente('propietario', 'Pedro Pérez'),
+      perfil: 'personal',
+    };
+    t.agregarUnidad('A-101', [cuenta], {}, { titular: ['ficha@x.com'] });
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t)).toEqual(['ficha@x.com']);
+    expect(t.correo.enviar.mock.calls[0][0].html).toMatch(TOKEN_EN_HTML);
+  });
+
+  it('sin ninguna dirección y con una cuenta: error sin_destinatarios, la unidad se reporta y el aviso interno se crea una vez', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [residente('propietario', 'Pedro Pérez')],
+      {},
+      { titular: [] },
+    );
+    await t.marcarTodas();
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r).toMatchObject({
+      conError: 1,
+      enviadas: 0,
+      unidadesSinDestinatario: ['A-101'],
+    });
+    expect(t.fila(unidad)).toMatchObject({
+      estado: 'error',
+      ultimoError: 'sin_destinatarios',
+    });
+    expect(t.notificaciones.crear).toHaveBeenCalledTimes(1);
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+  });
+
+  it('sin dirección ni cuenta: error sin_destinatarios y no sale nada', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: [] });
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.fila(unidad).ultimoError).toBe('sin_destinatarios');
+    expect(t.notificaciones.crear).not.toHaveBeenCalled();
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+    expect(t.enlacesColeccion.docs).toHaveLength(0);
+  });
+
+  it('se agrega una dirección y se vuelve a marcar: se envía y el aviso interno anterior no se repite', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [residente('propietario', 'Pedro Pérez')],
+      {},
+      { titular: [] },
+    );
+    await t.marcarTodas();
+    await t.proceso.procesarPendientes(staff());
+    expect(t.fila(unidad).ultimoError).toBe('sin_destinatarios');
+    t.partes.get(unidad.inmuebleId.toString())!.titular = ['nueva@x.com'];
+
+    await t.marcarTodas();
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r.enviadas).toBe(1);
+    expect(destinatarios(t)).toEqual(['nueva@x.com']);
+    expect(t.fila(unidad).estado).toBe('enviado');
+    expect(t.notificaciones.crear).toHaveBeenCalledTimes(1);
+  });
+
+  it('una dirección agregada DESPUÉS de enviada la fila no envía nada (reenviar es otro paquete)', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
+    await t.marcarTodas();
+    await t.proceso.procesarPendientes(staff());
+    t.correo.enviar.mockClear();
+    t.partes.get(unidad.inmuebleId.toString())!.titular.push('b@x.com');
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r.reclamadas).toBe(0);
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+  });
+
+  it('una dirección quitada de la ficha antes del intento no se envía', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      { titular: ['a@x.com', 'b@x.com'] },
+    );
+    await t.marcarTodas();
+    t.partes.get(unidad.inmuebleId.toString())!.titular = ['a@x.com'];
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t)).toEqual(['a@x.com']);
+    expect(t.fila(unidad).destinatariosTotal).toBe(1);
+  });
+
+  it('la misma dirección en titular y arrendatario: un solo correo y una sola entrada, la del propietario', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      { titular: ['c@x.com'], arrendatario: ['C@X.com'] },
+    );
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t)).toEqual(['c@x.com']);
+    expect(t.fila(unidad).correosEntregados).toMatchObject([
+      { rol: 'propietario', terceroId: t.titularId },
+    ]);
+  });
+
+  it('una solicitud cortada tras 2 de 4 correos: la siguiente llamada manda exactamente los otros 2 y cierra', async () => {
+    const t = montar();
+    const direcciones = ['a@x.com', 'b@x.com', 'c@x.com', 'd@x.com'];
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: direcciones });
+    await t.marcarTodas();
+    const fila = t.fila(unidad);
+    fila.tokenEnvio = 'corrida-muerta';
+    fila.envioIniciadoEn = new Date(Date.now() - VIGENCIA_ENVIO_MS - 1000);
+    fila.correosEntregados = direcciones.slice(0, 2).map((d) => ({
+      clave: claveCorreo(d),
+      rol: 'propietario',
+      terceroId: t.titularId,
+      aceptadoEn: new Date(),
+    }));
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(destinatarios(t).sort()).toEqual(['c@x.com', 'd@x.com']);
+    expect(r).toMatchObject({ enviadas: 1, correosEnviados: 2 });
+    expect(fila.correosEntregados).toHaveLength(4);
+    expect(fila.estado).toBe('enviado');
+  });
+
+  it('una factura anulada no genera correo ni enlace', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
+    await t.marcarTodas();
+    t.facturas.docs[0].estado = 'anulada';
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.fila(unidad).ultimoError).toBe('factura_anulada');
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+    expect(t.enlacesColeccion.docs).toHaveLength(0);
+  });
+
+  it('SEC: no duplicate entry per clave under concurrency — si otro procesador ya registró la dirección mientras este esperaba al proveedor, el push condicional no duplica', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
+    await t.marcarTodas();
+    let soltar!: () => void;
+    const compuerta = new Promise<void>((resolver) => {
+      soltar = resolver;
+    });
+    t.correo.enviar.mockImplementation(async () => {
+      await compuerta;
+      return true;
+    });
+    const corrida = t.proceso.procesarPendientes(staff('Ana'));
+    while (t.correo.enviar.mock.calls.length === 0) {
+      await new Promise((r) => setImmediate(r));
+    }
+    // The other processor's acceptance of the same address lands first.
+    (t.fila(unidad).correosEntregados as unknown[]).push({
+      clave: claveCorreo('a@x.com'),
+      rol: 'propietario',
+      terceroId: t.titularId,
+      aceptadoEn: new Date(),
+    });
+
+    soltar();
+    await corrida;
+
+    expect(t.fila(unidad).correosEntregados).toHaveLength(1);
+  });
+
+  it('SEC: one token per (invoice, address) — cada correo va a UNA dirección y lleva un token distinto, con su propio registro', async () => {
+    const t = montar();
+    t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      { titular: ['a@x.com', 'b@x.com'], arrendatario: ['c@x.com'] },
+    );
+    await t.marcarTodas();
+
+    await t.proceso.procesarPendientes(staff());
+
+    const mensajes = t.correo.enviar.mock.calls.map(([m]) => m);
+    expect(mensajes.map((m) => m.para).sort()).toEqual([
+      'a@x.com',
+      'b@x.com',
+      'c@x.com',
+    ]);
+    for (const m of mensajes) expect(m.para).not.toMatch(/[,;\s]/);
+    const tokens = mensajes.map((m) => tokenDe(m.html));
+    expect(new Set(tokens).size).toBe(3);
+    expect(t.enlacesColeccion.docs).toHaveLength(3);
+    expect(
+      new Set(t.enlacesColeccion.docs.map((d) => String(d.clave))).size,
+    ).toBe(3);
+    const volcado = JSON.stringify(t.enlacesColeccion.docs);
+    for (const token of tokens) expect(volcado).not.toContain(token);
+  });
+
+  it('un correo que el proveedor rechaza revoca su enlace y no deja entrada', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
+    await t.marcarTodas();
+    t.correo.enviar.mockResolvedValue(false);
+
+    await t.proceso.procesarPendientes(staff());
+
+    expect(t.fila(unidad).correosEntregados).toEqual([]);
+    expect(t.enlacesColeccion.docs).toHaveLength(1);
+    expect(t.enlacesColeccion.docs[0].revocadoEn).toBeInstanceOf(Date);
+  });
+
+  it('si no se puede crear el enlace, no sale el correo, la fila se reintenta y el registro solo nombra la fila', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad('A-101', [], {}, { titular: ['a@x.com'] });
+    await t.marcarTodas();
+    jest
+      .spyOn(t.enlacesColeccion, 'create')
+      .mockRejectedValue(new Error('E11000 dup key { tokenHash: "abc" }'));
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r).toMatchObject({ reintentables: 1, enviadas: 0 });
+    expect(t.correo.enviar).not.toHaveBeenCalled();
+    expect(t.fila(unidad).estado).toBe('pendiente_envio');
+    const salida = todoLoRegistrado();
+    expect(salida).toContain(String(t.fila(unidad)._id));
+    expect(salida).not.toContain('a@x.com');
+    expect(salida).not.toContain('tokenHash');
+  });
+
+  it('SEC: processor logs carry no token or address — ni en éxito, ni con un correo rechazado', async () => {
+    const t = montar();
+    t.agregarUnidad(
+      'A-101',
+      [residente('propietario', 'Pedro Pérez')],
+      {},
+      { titular: ['uno@x.com', 'dos@x.com'], arrendatario: ['tres@x.com'] },
+    );
+    await t.marcarTodas();
+    t.correo.enviar.mockImplementation((m) =>
+      Promise.resolve(m.para !== 'dos@x.com'),
+    );
+
+    await t.proceso.procesarPendientes(staff());
+
+    const tokens = t.correo.enviar.mock.calls.map(([m]) => tokenDe(m.html));
+    const salida = todoLoRegistrado();
+    for (const token of tokens) {
+      expect(salida).not.toContain(token);
+      expect(salida).not.toContain(
+        createHash('sha256').update(token).digest('hex'),
+      );
+    }
+    for (const dir of ['uno@x.com', 'dos@x.com', 'tres@x.com']) {
+      expect(salida).not.toContain(dir);
+    }
+    expect(salida).not.toContain(claveCorreo('dos@x.com'));
   });
 });

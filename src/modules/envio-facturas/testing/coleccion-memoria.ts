@@ -45,7 +45,10 @@ function cumple(valor: unknown, condicion: unknown): boolean {
       case '$in':
         return (esperado as unknown[]).some((x) => igual(valor, x));
       case '$ne':
-        return !igual(valor, esperado);
+        // On an array path, `$ne` means NO element equals the value.
+        return Array.isArray(valor)
+          ? !valor.some((x) => igual(x, esperado))
+          : !igual(valor, esperado);
       case '$lt':
         return !esNulo(valor) && orden(valor) < orden(esperado);
       case '$lte':
@@ -71,8 +74,24 @@ export function coincide(doc: Doc, filtro: Record<string, unknown>): boolean {
         coincide(doc, f),
       );
     }
-    return cumple(doc[clave], condicion);
+    return cumple(valorDeRuta(doc, clave), condicion);
   });
+}
+
+/** `a.b` over arrays of subdocuments yields the array of their `b`. */
+function valorDeRuta(doc: Doc, ruta: string): unknown {
+  if (!ruta.includes('.')) return doc[ruta];
+  let actual: unknown = doc;
+  for (const parte of ruta.split('.')) {
+    if (Array.isArray(actual)) {
+      actual = actual.map((x) => (x as Doc | null)?.[parte]);
+    } else if (actual !== null && typeof actual === 'object') {
+      actual = (actual as Doc)[parte];
+    } else {
+      return undefined;
+    }
+  }
+  return actual;
 }
 
 function clonar<T>(valor: T): T {
@@ -97,7 +116,11 @@ function aplicar(doc: Doc, update: Record<string, unknown>): void {
     )) {
       if (op === '$set') doc[campo] = valor;
       else if (op === '$setOnInsert') continue;
-      else if (op === '$min') {
+      else if (op === '$push') {
+        const lista = (doc[campo] as unknown[] | undefined) ?? [];
+        lista.push(clonar(valor));
+        doc[campo] = lista;
+      } else if (op === '$min') {
         if (esNulo(doc[campo]) || orden(valor) < orden(doc[campo])) {
           doc[campo] = valor;
         }

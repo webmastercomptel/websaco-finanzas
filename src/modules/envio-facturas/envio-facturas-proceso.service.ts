@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CorreoService } from '../../common/correo/correo.service';
-import { EnlaceAccesoService } from '../../common/cuentas/enlace-acceso.service';
+import type { DestinoCorreo } from '../../common/directorio/destinos-correo';
 import {
   DirectorioService,
   type ResidenteDeInmueble,
@@ -26,11 +26,15 @@ import {
   type FacturaDocument,
 } from '../../database/schemas/facturacion/factura.schema';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { EnlaceFacturaService } from '../factura-publica/enlace-factura.service';
 import { diagnosticarFrontendUrl } from '../health/frontend-url.health';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import {
   construirAsuntoFactura,
   construirCorreoFactura,
+  construirEnlacePdf,
+  construirUrlPortal,
+  etiquetaFechaVencimiento,
   etiquetaPeriodo,
 } from './envio-factura-correo';
 import {
@@ -41,12 +45,8 @@ import {
   LIMITE_POR_LLAMADA,
   MAX_INTENTOS,
   PRESUPUESTO_MS,
-  VIGENCIA_ENLACE_MS,
 } from './envio-facturas.constantes';
 import { cuentaDe } from './envio-facturas.service';
-
-/** Which of the two progress arrays of a row. */
-type CampoProgreso = 'notificadosIds' | 'correosEnviadosIds';
 
 /** What one row ended up as in a call. */
 interface ResultadoFila {
@@ -65,7 +65,12 @@ interface ContextoProceso {
     string,
     { estado: string; numeroCompleto: string; periodoDesde?: Date }
   >;
+  /** Accounts to notify in-app, per unit. */
   residentes: Map<string, ResidenteDeInmueble[]>;
+  /** Addresses to e-mail, per unit (from the party RECORDS, not accounts). */
+  destinos: Map<string, DestinoCorreo[]>;
+  /** Validated origin the links are built from. */
+  frontendUrl: string;
 }
 
 /**
@@ -82,17 +87,22 @@ interface ContextoProceso {
  * - It delivers in batches of {@link ENVIOS_SIMULTANEOS} and renews the lease of
  *   the rest after each batch (the heartbeat); a call that stops early releases
  *   what it did not reach, and one that died leaves its rows to expire.
- * - Progress is recorded per (invoice, recipient) with `$addToSet` AFTER each
- *   delivery succeeded, so processing again only reaches whoever is missing: a
- *   retry after a cut request never notifies anybody twice.
+ * - Progress is recorded per ADDRESS (`correosEntregados`, a conditional
+ *   `$push` on `clave`) and per account for the in-app notice (`$addToSet`),
+ *   AFTER each delivery succeeded, so processing again only reaches whoever is
+ *   missing: a retry after a cut request never e-mails an address twice.
  * - A failing recipient is logged and left pending; the others still get theirs.
  *   The row retries with a growing backoff and, after {@link MAX_INTENTOS}
  *   failures, waits in `error` for a human to queue it again.
  *
- * WHO receives it: owner AND tenant of the unit (`DirectorioService`). A unit with
- * no tenant, or a party with no account or no active sign-in, is simply not in
- * the list; a unit with NOBODY reachable ends in `error: sin_destinatarios`, which
- * is reported, never thrown. The notice carries a link, never the PDF or amounts.
+ * WHO receives it. E-mail: every valid address on the records of the unit's
+ * owner AND tenant (`DirectorioService.correosDeInmuebles`), whether or not any of
+ * them has an account; each address gets its own e-mail with its own personal
+ * link to the PDF (`EnlaceFacturaService`). In-app notice: the accounts linked to
+ * those parties (`residentesDeInmuebles`), unchanged. A unit with NO address on
+ * file ends in `error: sin_destinatarios` (its linked accounts still get their
+ * notice), which is reported, never thrown. The e-mail carries a link, never the
+ * PDF or amounts, and no sign-in link.
  *
  * Trade-off, stated plainly: progress is written after the send, so a crash in
  * the instant between the provider accepting an email and the write can send
@@ -114,7 +124,7 @@ export class EnvioFacturasProcesoService {
     private readonly tenant: TenantContextService,
     private readonly directorio: DirectorioService,
     private readonly correo: CorreoService,
-    private readonly enlaces: EnlaceAccesoService,
+    private readonly enlaces: EnlaceFacturaService,
     private readonly notificaciones: NotificacionesService,
     private readonly auditoria: AuditoriaService,
     private readonly config: ConfigService,
@@ -273,10 +283,10 @@ export class EnvioFacturasProcesoService {
         filas.map((f) => [f.inmuebleId.toString(), f.inmuebleId]),
       ).values(),
     ];
-    const residentes = await this.directorio.residentesDeInmuebles(
-      copropiedadId,
-      unidades,
-    );
+    const [residentes, destinos] = await Promise.all([
+      this.directorio.residentesDeInmuebles(copropiedadId, unidades),
+      this.directorio.correosDeInmuebles(copropiedadId, unidades),
+    ]);
     // `findById` is allowed here: the id IS the tenant.
     const copropiedad = await this.copropiedades
       .findById(copropiedadId)
@@ -289,6 +299,9 @@ export class EnvioFacturasProcesoService {
       nombreCopropiedad: copropiedad?.nombre ?? '',
       facturas: new Map(facturas.map((f) => [f._id.toString(), f])),
       residentes,
+      destinos,
+      // Validated by `procesarPendientes` before anything was claimed.
+      frontendUrl: this.config.get<string>('app.frontendUrl')!.trim(),
     };
 
     const inicio = Date.now();
@@ -344,10 +357,19 @@ export class EnvioFacturasProcesoService {
       }
       await this.liberar(fila, contexto);
 
-      const elegibles = this.sinRepetidos(
+      const cuentas = this.sinRepetidos(
         contexto.residentes.get(fila.inmuebleId.toString()) ?? [],
       );
-      if (elegibles.length === 0) {
+      const destinos = contexto.destinos.get(fila.inmuebleId.toString()) ?? [];
+
+      // In-app notices first (idempotent per account), whether or not the unit
+      // has any address: linked accounts keep their notice.
+      const notificados = new Set(fila.notificadosIds.map(String));
+      for (const cuenta of cuentas) {
+        await this.notificar(fila, cuenta, factura, contexto, notificados);
+      }
+
+      if (destinos.length === 0) {
         const r = await this.cerrarConError(
           fila,
           contexto,
@@ -356,29 +378,27 @@ export class EnvioFacturasProcesoService {
         return { ...r, sinDestinatario: fila.codigoInmueble };
       }
 
-      const notificados = new Set(fila.notificadosIds.map(String));
-      const enviados = new Set(fila.correosEnviadosIds.map(String));
+      const entregadas = new Set(
+        (fila.correosEntregados ?? []).map((e) => e.clave),
+      );
       let correos = 0;
-      for (const residente of elegibles) {
-        correos += await this.entregarA(
-          fila,
-          residente,
-          factura,
-          contexto,
-          notificados,
-          enviados,
-        );
+      for (const destino of destinos) {
+        if (entregadas.has(destino.clave)) continue;
+        if (await this.enviarA(fila, destino, factura, contexto)) {
+          entregadas.add(destino.clave);
+          correos += 1;
+        }
       }
 
-      const completo = elegibles.every(
-        (r) => notificados.has(r.accountId) && enviados.has(r.accountId),
-      );
+      const completo =
+        cuentas.every((c) => notificados.has(c.accountId)) &&
+        destinos.every((d) => entregadas.has(d.clave));
       if (completo) {
-        await this.cerrarEnviada(fila, contexto, elegibles.length);
+        await this.cerrarEnviada(fila, contexto, destinos.length);
         return { tipo: 'enviada', correos };
       }
       return {
-        ...(await this.cerrarConFallo(fila, contexto, elegibles.length)),
+        ...(await this.cerrarConFallo(fila, contexto, destinos.length)),
         correos,
       };
     } catch (error: unknown) {
@@ -405,93 +425,159 @@ export class EnvioFacturasProcesoService {
   }
 
   /**
-   * One recipient: the in-app entry (if missing), then the email (if missing).
-   * Returns how many emails the provider accepted (0 or 1). Never throws; whatever
-   * failed simply stays unrecorded and pending.
+   * The in-app notice of one linked account (if missing). Never throws; a notice
+   * that could not be stored simply stays unrecorded and pending.
    */
-  private async entregarA(
+  private async notificar(
     fila: EnvioFacturaDocument,
-    residente: ResidenteDeInmueble,
-    factura: { numeroCompleto: string; periodoDesde?: Date },
+    cuenta: ResidenteDeInmueble,
+    factura: { numeroCompleto: string },
     contexto: ContextoProceso,
     notificados: Set<string>,
-    enviados: Set<string>,
-  ): Promise<number> {
+  ): Promise<void> {
+    if (notificados.has(cuenta.accountId)) return;
     // Account id, never the address: the log is not a place for personal data.
-    const etiqueta = `${fila._id.toString()} a la cuenta ${residente.accountId}`;
+    const etiqueta = `${fila._id.toString()} a la cuenta ${cuenta.accountId}`;
     try {
-      if (!notificados.has(residente.accountId)) {
-        const guardada = await this.notificaciones.crear({
-          copropiedadId: contexto.copropiedadId,
-          accountId: residente.accountId,
-          tipo: 'pago',
-          titulo: construirAsuntoFactura(factura.numeroCompleto),
-        });
-        // Not stored = still pending: the row is retried, never faked as sent.
-        if (guardada) {
-          await this.registrar(
-            fila,
-            'notificadosIds',
-            residente.accountId,
-            contexto,
-          );
-          notificados.add(residente.accountId);
-        }
-      }
-
-      if (enviados.has(residente.accountId)) return 0;
-      const enlace = await this.enlaces.construir(
-        residente.accountId,
-        contexto.copropiedadId.toString(),
-        `/portal/facturas?inmuebleId=${fila.inmuebleId.toString()}&abrir=${fila.facturaId.toString()}`,
-        VIGENCIA_ENLACE_MS,
+      const guardada = await this.notificaciones.crear({
+        copropiedadId: contexto.copropiedadId,
+        accountId: cuenta.accountId,
+        tipo: 'pago',
+        titulo: construirAsuntoFactura(factura.numeroCompleto),
+      });
+      // Not stored = still pending: the row is retried, never faked as sent.
+      if (!guardada) return;
+      await this.envios
+        .updateOne(
+          { _id: fila._id, copropiedadId: contexto.copropiedadId },
+          {
+            $addToSet: { notificadosIds: new Types.ObjectId(cuenta.accountId) },
+          },
+        )
+        .exec();
+      notificados.add(cuenta.accountId);
+    } catch (error: unknown) {
+      this.logger.error(
+        `No se pudo avisar a ${etiqueta}: ${(error as Error).name}`,
       );
+    }
+  }
+
+  /**
+   * One ADDRESS of the record: mints its own link, sends its own e-mail and
+   * records the acceptance. Answers whether the provider accepted it. Never
+   * throws, and logs only the row id, the link id and the role: never the
+   * address, the token or its hash (an error's class name is logged, not its
+   * message, which could echo a filter or a key).
+   *
+   * A refused or failed send revokes the link it just minted (best effort), so no
+   * credential outlives an e-mail that never left. After an ACCEPTED send the
+   * link is never revoked, even if recording it fails: the e-mail is out and
+   * carries it (the retry may e-mail that address once more, the accepted
+   * trade-off in the class docblock).
+   */
+  private async enviarA(
+    fila: EnvioFacturaDocument,
+    destino: DestinoCorreo,
+    factura: { numeroCompleto: string; periodoDesde?: Date },
+    contexto: ContextoProceso,
+  ): Promise<boolean> {
+    const etiquetaFila = fila._id.toString();
+    let enlaceId: string | null = null;
+    let aceptado = false;
+    try {
+      const enlace = await this.enlaces.emitir({
+        copropiedadId: contexto.copropiedadId,
+        facturaId: fila.facturaId,
+        envioFacturaId: fila._id,
+        clave: destino.clave,
+        rol: destino.rol,
+      });
+      enlaceId = enlace.id;
       const { asunto, html } = construirCorreoFactura({
-        nombreDestinatario: residente.nombre,
+        nombreDestinatario: destino.nombre,
         nombreCopropiedad: contexto.nombreCopropiedad,
         numeroCompleto: factura.numeroCompleto,
         codigoInmueble: fila.codigoInmueble,
         periodo: etiquetaPeriodo(factura.periodoDesde),
-        enlace,
+        enlacePdf: construirEnlacePdf(contexto.frontendUrl, enlace.token),
+        venceEl: etiquetaFechaVencimiento(enlace.expiraEn),
+        urlPortal: construirUrlPortal(contexto.frontendUrl),
       });
-      const aceptado = await this.correo.enviar({
-        para: residente.email,
+      aceptado = await this.correo.enviar({
+        para: destino.email,
         asunto,
         html,
       });
-      if (!aceptado) {
-        this.logger.error(`No se pudo enviar la factura ${etiqueta}.`);
-        return 0;
-      }
-      await this.registrar(
-        fila,
-        'correosEnviadosIds',
-        residente.accountId,
-        contexto,
-      );
-      enviados.add(residente.accountId);
-      return 1;
     } catch (error: unknown) {
       this.logger.error(
-        `No se pudo entregar la factura ${etiqueta}: ${(error as Error).message}`,
+        `No se pudo preparar la factura ${etiquetaFila} (${destino.rol}): ${error instanceof Error ? error.name : 'desconocido'}`,
       );
-      return 0;
     }
+
+    if (!aceptado) {
+      if (enlaceId) {
+        this.logger.error(
+          `No se pudo enviar la factura ${etiquetaFila} (enlace ${enlaceId}, ${destino.rol}).`,
+        );
+        await this.revocarSinFallar(contexto, enlaceId);
+      }
+      return false;
+    }
+
+    try {
+      await this.registrarEntrega(fila, destino, contexto);
+    } catch (error: unknown) {
+      this.logger.error(
+        `No se pudo anotar la entrega de ${etiquetaFila} (enlace ${enlaceId}, ${destino.rol}): ${error instanceof Error ? error.name : 'desconocido'}`,
+      );
+      return false;
+    }
+    return true;
   }
 
-  /** Records one recipient as reached. Idempotent: `$addToSet` never duplicates. */
-  private async registrar(
+  /**
+   * Records one address as reached. Conditional on the `clave` not being there
+   * yet, so two processors accepting the same address leave ONE entry (a plain
+   * `$addToSet` would not: `aceptadoEn` makes each subdocument unique). The
+   * entry holds the `clave`, never the address.
+   */
+  private async registrarEntrega(
     fila: EnvioFacturaDocument,
-    campo: CampoProgreso,
-    accountId: string,
+    destino: DestinoCorreo,
     contexto: ContextoProceso,
   ): Promise<void> {
     await this.envios
       .updateOne(
-        { _id: fila._id, copropiedadId: contexto.copropiedadId },
-        { $addToSet: { [campo]: new Types.ObjectId(accountId) } },
+        {
+          _id: fila._id,
+          copropiedadId: contexto.copropiedadId,
+          'correosEntregados.clave': { $ne: destino.clave },
+        },
+        {
+          $push: {
+            correosEntregados: {
+              clave: destino.clave,
+              rol: destino.rol,
+              terceroId: destino.terceroId,
+              aceptadoEn: new Date(),
+            },
+          },
+        },
       )
       .exec();
+  }
+
+  /** Best-effort revocation of a link whose e-mail was not accepted. */
+  private async revocarSinFallar(
+    contexto: ContextoProceso,
+    enlaceId: string,
+  ): Promise<void> {
+    try {
+      await this.enlaces.revocarPorId(contexto.copropiedadId, enlaceId);
+    } catch {
+      this.logger.error(`No se pudo revocar el enlace ${enlaceId}.`);
+    }
   }
 
   /** Every recipient reached: the row is `enviado` and the lease is released. */
