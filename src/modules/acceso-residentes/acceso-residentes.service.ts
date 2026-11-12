@@ -30,10 +30,6 @@ import {
   type AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
 import {
-  Asignacion,
-  type AsignacionDocument,
-} from '../../database/schemas/cuentas/asignacion.schema';
-import {
   Tercero,
   type TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
@@ -100,9 +96,10 @@ const mensajeDe = (error: unknown): string =>
  * - The address comes only from the party's own record (see
  *   `CrearAccesoResidenteDto`).
  * - An existing account is never taken over silently. One party, one explicit
- *   `vincularExistente`, and never an account that holds any `Asignacion` or is
- *   a platform administrator (linking would hand a staff member a resident view
- *   they did not ask for, decided by someone else).
+ *   `vincularExistente`, and never a platform administrator or an inactive
+ *   account. An account that holds an `Asignacion` (staff) CAN be linked:
+ *   permissions add up, so the link adds a resident view and removes nothing
+ *   from the staff side.
  * - Firebase is only reached through `FirebaseUsuariosService`, with a random
  *   password nobody sees; unlinking never disables or removes the identity.
  *
@@ -124,8 +121,6 @@ export class AccesoResidentesService {
     private readonly inmuebles: Model<InmuebleDocument>,
     @InjectModel(Account.name)
     private readonly cuentas: Model<AccountDocument>,
-    @InjectModel(Asignacion.name)
-    private readonly asignaciones: Model<AsignacionDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
     private readonly tenant: TenantContextService,
     private readonly invitaciones: InvitacionAccesoService,
@@ -419,14 +414,6 @@ export class AccesoResidentesService {
     if (cuenta.estado !== 'active') {
       throw new ConflictException(
         'Esa cuenta está inactiva: solo la administración de la plataforma puede reactivarla',
-      );
-    }
-    const esPersonal = await this.asignaciones
-      .exists({ accountId: cuenta._id })
-      .exec();
-    if (esPersonal) {
-      throw new ConflictException(
-        'Esa cuenta pertenece a personal de una copropiedad y no puede vincularse como residente desde aquí',
       );
     }
     const otro = await this.terceros

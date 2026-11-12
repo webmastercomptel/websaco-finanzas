@@ -163,7 +163,6 @@ interface Opciones {
   cuentas?: CuentaFake[];
   asignaciones?: AsignacionFake[];
   roles?: RolFake[];
-  terceros?: Array<{ accountId: Types.ObjectId }>;
   correoConfigurado?: boolean;
   enlace?: string | null;
   /** The link stub withholds the link from an account with Finanzas keys, as the real service does. */
@@ -273,16 +272,6 @@ function montar(opciones: Opciones = {}) {
         ),
     ),
   };
-  const tercerosModel = {
-    exists: jest.fn((f: { accountId: Types.ObjectId }) =>
-      consulta(
-        () =>
-          (opciones.terceros ?? []).find((t) =>
-            mismo(t.accountId, f.accountId),
-          ) ?? null,
-      ),
-    ),
-  };
   const firebase = {
     crear: jest.fn((d: { email: string; password: string; nombre: string }) => {
       passwords.push(d.password);
@@ -388,7 +377,6 @@ function montar(opciones: Opciones = {}) {
     asignacionesModel as never,
     cuentasModel as never,
     rolesModel as never,
-    tercerosModel as never,
     firebase as never,
     tenant as never,
     invitaciones,
@@ -1221,21 +1209,40 @@ describe('EquipoService.actualizar', () => {
       ),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(c2.nombreCompleto).toBe('Persona Uno');
+  });
 
-    const c3 = cuenta({ email: 'residente@correo.co' });
-    const a3 = asignacion(c3._id);
-    const m3 = montar({
-      cuentas: [c3],
-      asignaciones: [a3],
-      terceros: [{ accountId: c3._id }],
-    });
+  it('un miembro que ademas es residente (vinculo heredado o direccion probada) con una sola asignacion SI se renombra (S-A6.1, S-A6.3)', async () => {
+    // Staff and resident are the same person whose permissions add up: being a
+    // resident (a `Tercero.accountId` link, which this service no longer reads,
+    // or an address proof on the Account) is not "used elsewhere".
+    const c = cuenta({ email: 'residente@correo.co' }) as CuentaFake & {
+      correoProbadoClave?: string;
+    };
+    c.correoProbadoClave = 'a'.repeat(64);
+    const a = asignacion(c._id);
+    const m = montar({ cuentas: [c], asignaciones: [a] });
+
+    await m.servicio.actualizar(
+      a._id.toString(),
+      { nombre: 'Nombre Nuevo' },
+      caller(),
+    );
+
+    expect(c.nombreCompleto).toBe('Nombre Nuevo');
+  });
+
+  it('un miembro que ademas es residente con una SEGUNDA asignacion sigue sin poder renombrarse, con la frase de siempre (S-A6.2)', async () => {
+    const c = cuenta({ email: 'doble@correo.co' });
+    const a = asignacion(c._id);
+    const otraObra = asignacion(c._id, { copropiedadId: OTRA_COP });
+    const m = montar({ cuentas: [c], asignaciones: [a, otraObra] });
+
     await expect(
-      m3.servicio.actualizar(
-        a3._id.toString(),
-        { nombre: 'Intento' },
-        caller(),
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
+      m.servicio.actualizar(a._id.toString(), { nombre: 'Intento' }, caller()),
+    ).rejects.toThrow(
+      'Esa cuenta se usa en otras copropiedades: el nombre se cambia desde la consola de la plataforma',
+    );
+    expect(c.nombreCompleto).toBe('Persona Uno');
   });
 });
 

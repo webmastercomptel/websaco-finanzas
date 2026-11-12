@@ -30,10 +30,6 @@ import {
   Asignacion,
   type AsignacionDocument,
 } from '../../database/schemas/cuentas/asignacion.schema';
-import {
-  Tercero,
-  type TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
 import { InvitacionAccesoService } from '../acceso-residentes/invitacion-acceso.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import {
@@ -129,8 +125,6 @@ export class EquipoService {
     @InjectModel(Account.name)
     private readonly cuentas: Model<AccountDocument>,
     @InjectModel(Rol.name) private readonly roles: Model<RolDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros: Model<TerceroDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
     private readonly tenant: TenantContextService,
     private readonly invitaciones: InvitacionAccesoService,
@@ -737,20 +731,22 @@ export class EquipoService {
     return this.obtener(id);
   }
 
-  /** The account is this building's alone: no other access, no resident link. */
+  /**
+   * The account is this building's alone: no other access. Being a resident
+   * (a `Tercero.accountId` link or a proven address) is NOT a reason to refuse:
+   * it is the same person, whom permissions add up for, and renaming the
+   * Account changes nothing about what either side may do.
+   */
   private async exigirCuentaExclusiva(
     asignacion: AsignacionLean,
   ): Promise<void> {
-    const [otras, residente] = await Promise.all([
-      this.asignaciones
-        .exists({
-          accountId: asignacion.accountId,
-          _id: { $ne: asignacion._id },
-        })
-        .exec(),
-      this.terceros.exists({ accountId: asignacion.accountId }).exec(),
-    ]);
-    if (otras || residente) {
+    const otras = await this.asignaciones
+      .exists({
+        accountId: asignacion.accountId,
+        _id: { $ne: asignacion._id },
+      })
+      .exec();
+    if (otras) {
       throw new ConflictException(
         'Esa cuenta se usa en otras copropiedades: el nombre se cambia desde la consola de la plataforma',
       );

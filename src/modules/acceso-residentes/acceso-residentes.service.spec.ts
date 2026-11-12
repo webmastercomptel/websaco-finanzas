@@ -256,7 +256,6 @@ function montar(opciones: Opciones = {}) {
     tercerosModel as never,
     inmueblesModel as never,
     cuentasModel as never,
-    asignacionesModel as never,
     firebase as never,
     tenant as never,
     invitaciones,
@@ -520,10 +519,29 @@ describe('AccesoResidentesService.crearAcceso con una cuenta que ya existe', () 
     expect(m.auditoria.registrar).toHaveBeenCalledTimes(1);
   });
 
-  it('rechaza (409) vincular una cuenta de personal, aun con el indicador', async () => {
+  it('vincula una cuenta que tiene una Asignacion: los permisos suman y la vinculacion no toca la asignacion (S-A5.4)', async () => {
     const t = tercero();
     const c = cuenta();
     const m = montar({ terceros: [t], cuentas: [c], personal: [c._id] });
+
+    const r = await m.servicio.crearAcceso(
+      t._id.toString(),
+      { vincularExistente: true },
+      USER,
+    );
+
+    expect(r.cuentaExistente).toBe(true);
+    expect(t.accountId).toEqual(c._id);
+    expect(m.asignacionesModel.create).not.toHaveBeenCalled();
+    expect(m.firebase.crear).not.toHaveBeenCalled();
+  });
+
+  it('rechaza (409) vincular una cuenta inactiva (S-A5.6)', async () => {
+    const t = tercero();
+    const m = montar({
+      terceros: [t],
+      cuentas: [cuenta({ estado: 'inactive' })],
+    });
 
     await expect(
       m.servicio.crearAcceso(
@@ -794,7 +812,7 @@ describe('AccesoResidentesService.aprovisionar', () => {
     expect(m.firebase.crear).toHaveBeenCalledTimes(1);
   });
 
-  it('nunca vincula una cuenta de personal ni de administrador de plataforma', async () => {
+  it('el aprovisionamiento masivo nunca vincula una cuenta que ya existe, sea de personal o de administrador de plataforma', async () => {
     const staff = cuenta({ email: 'r0@correo.co' });
     const root = cuenta({
       email: 'r1@correo.co',
