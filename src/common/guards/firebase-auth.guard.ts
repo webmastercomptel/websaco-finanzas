@@ -144,6 +144,7 @@ export class FirebaseAuthGuard implements CanActivate {
       email: string;
       nombreCompleto: string;
       esAdministradorPlataforma: boolean;
+      correoProbadoClave?: string | null;
     },
     request: Request,
   ): Promise<IRequestUser> {
@@ -154,6 +155,7 @@ export class FirebaseAuthGuard implements CanActivate {
       accountId,
       nombre: cuenta.nombreCompleto,
       isPlatformAdmin: cuenta.esAdministradorPlataforma,
+      correoProbadoClave: cuenta.correoProbadoClave ?? null,
       permissions: [],
     };
 
@@ -165,6 +167,9 @@ export class FirebaseAuthGuard implements CanActivate {
       accountId,
       solicitada,
       cuenta.esAdministradorPlataforma,
+      // The Account is already in hand (and active): the resident derivation
+      // reads its proof from here instead of re-reading it.
+      { email: cuenta.email, correoProbadoClave: cuenta.correoProbadoClave },
     );
     if (!acceso) {
       this.logger.warn(

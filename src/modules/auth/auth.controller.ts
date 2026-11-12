@@ -34,6 +34,9 @@ export class AuthController {
       ? await this.acceso.copropiedadesDe(
           user.accountId,
           esAdministradorPlataforma,
+          // The Account's proof travels on the request user, so `/auth/me`
+          // derives residency without re-reading the Account.
+          { email: user.email, correoProbadoClave: user.correoProbadoClave },
         )
       : [];
     // A platform administrator's own flag already says enough; no need to

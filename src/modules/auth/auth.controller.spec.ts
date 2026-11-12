@@ -211,6 +211,8 @@ describe('AuthController.me', () => {
       filas([]) as never,
       filas([]) as never,
       filas([]) as never,
+      filas([]) as never,
+      {} as never,
     );
     const controller = new AuthController(acceso);
 
@@ -243,7 +245,24 @@ describe('AuthController.me', () => {
 
     await controller.me(user({ accountId: 'acc-1', isPlatformAdmin: true }));
 
-    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', true);
+    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', true, {
+      email: 'santiago@comptel.com',
+      correoProbadoClave: undefined,
+    });
+  });
+
+  it('pasa la prueba de dirección de la cuenta que el guard ya cargó, sin releerla', async () => {
+    const { servicio, copropiedadesDe } = accesoQueDevuelve([]);
+    const controller = new AuthController(servicio);
+
+    await controller.me(
+      user({ accountId: 'acc-1', correoProbadoClave: 'a'.repeat(64) }),
+    );
+
+    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', false, {
+      email: 'santiago@comptel.com',
+      correoProbadoClave: 'a'.repeat(64),
+    });
   });
 
   it('devuelve el alcance de la asignación primaria de una cuenta normal', async () => {
