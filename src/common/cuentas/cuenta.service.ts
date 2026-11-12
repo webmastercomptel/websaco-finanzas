@@ -83,7 +83,7 @@ export class CuentaService {
     // Logged because it happens once per person and explains why the record
     // suddenly has a uid it did not have yesterday.
     this.logger.log(
-      `Cuenta ${String(reclamada._id)} vinculada a la identidad ${firebaseUid}.`,
+      `Cuenta ${String(reclamada._id)} vinculada a su identidad en el primer ingreso.`,
     );
     return reclamada;
   }

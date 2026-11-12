@@ -61,10 +61,11 @@ function crear(
 
 describe('CuentaService.resolverPorToken', () => {
   let warn: jest.SpyInstance;
+  let log: jest.SpyInstance;
 
   beforeEach(() => {
     warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
-    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
+    log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -130,7 +131,7 @@ describe('CuentaService.resolverPorToken', () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('refuses a different uid carrying the e-mail of an already bound account, and leaves the binding alone', async () => {
+  it('SEC: resolverPorToken never rebinds a bound account by email (a different uid carrying the address is refused and the binding stays)', async () => {
     const { servicio, almacen, findOneAndUpdate } = crear({
       _id: CUENTA_ID,
       firebaseUid: 'uid-legitimo',
@@ -160,6 +161,39 @@ describe('CuentaService.resolverPorToken', () => {
     const mensaje = String(warn.mock.calls[0][0]);
     expect(mensaje).toContain(CUENTA_ID.toString());
     expect(mensaje).not.toContain(EMAIL);
+  });
+
+  it('SEC: first-claim log carries no address', async () => {
+    const { servicio } = crear({
+      _id: CUENTA_ID,
+      firebaseUid: `pendiente:${EMAIL}`,
+      email: EMAIL,
+    });
+
+    await servicio.resolverPorToken('uid-nuevo', ' Persona@Example.com ');
+
+    expect(log).toHaveBeenCalledTimes(1);
+    const mensaje = String(log.mock.calls[0][0]);
+    expect(mensaje).toContain(CUENTA_ID.toString());
+    expect(mensaje.toLowerCase()).not.toContain('persona@example.com');
+    expect(mensaje).not.toContain('uid-nuevo');
+  });
+
+  it('SEC: two simultaneous claims of a pendiente: account bind exactly one identity', async () => {
+    const { servicio, almacen } = crear({
+      _id: CUENTA_ID,
+      firebaseUid: `pendiente:${EMAIL}`,
+      email: EMAIL,
+    });
+
+    const resultados = await Promise.allSettled([
+      servicio.resolverPorToken('uid-a', EMAIL),
+      servicio.resolverPorToken('uid-b', EMAIL),
+    ]);
+
+    expect(resultados.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(resultados.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    expect(['uid-a', 'uid-b']).toContain(almacen?.firebaseUid);
   });
 
   it('refuses the claim when another identity bound the account first (lost race)', async () => {
