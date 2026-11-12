@@ -31,6 +31,7 @@ import {
   type ZonaDocument,
 } from '../../database/schemas/administracion/zona.schema';
 import {
+  cuentaParaAccesoDe,
   PortalAccesoService,
   type UnidadPortal,
 } from '../portal/portal-acceso.service';
@@ -511,6 +512,7 @@ export class ReservasService {
     const unidades = await this.portalAcceso.unidadesDe(
       autorId.toString(),
       copropiedadId.toString(),
+      cuentaParaAccesoDe(user),
     );
     const unidad = this.resolverUnidad(dto.inmueble, unidades);
 

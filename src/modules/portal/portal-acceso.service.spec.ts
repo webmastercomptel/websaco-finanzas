@@ -1,5 +1,8 @@
 import { Types } from 'mongoose';
-import { PortalAccesoService } from './portal-acceso.service';
+import {
+  cuentaParaAccesoDe,
+  PortalAccesoService,
+} from './portal-acceso.service';
 import { claveCorreo } from '../../common/utils/email.utils';
 
 const COP = new Types.ObjectId();
@@ -415,5 +418,60 @@ describe('PortalAccesoService unidades por dirección probada', () => {
     await expect(
       service.unidadesDe(CUENTA.toString(), COP.toString()),
     ).resolves.toHaveLength(1);
+  });
+});
+
+describe('PortalAccesoService con la cuenta de la petición', () => {
+  const P1 = new Types.ObjectId();
+  const U101 = new Types.ObjectId();
+  const probada = {
+    email: CORREO,
+    correoProbadoClave: claveCorreo(CORREO),
+  };
+
+  it('no relee la cuenta cuando el guard ya la trae (sin findById)', async () => {
+    const cuentas = cuentasCon(null);
+    const residencia = residenciaCon({
+      [CORREO]: [{ id: P1.toString(), copropiedadId: COP.toString() }],
+    });
+    const service = new PortalAccesoService(
+      tercerosCon(null) as never,
+      inmueblesCon([
+        { _id: U101, codigo: '101', titularId: P1, arrendatarioId: null },
+      ]) as never,
+      cuentas as never,
+      residencia as never,
+    );
+
+    await expect(
+      service.unidadesDe(CUENTA.toString(), COP.toString(), probada),
+    ).resolves.toEqual([
+      { inmuebleId: U101.toString(), codigo: '101', rol: 'propietario' },
+    ]);
+    await expect(
+      service.rolEn(
+        CUENTA.toString(),
+        COP.toString(),
+        U101.toString(),
+        probada,
+      ),
+    ).resolves.toBe('propietario');
+    expect(cuentas.findById).not.toHaveBeenCalled();
+    expect(residencia.revocacionesActivas).toHaveBeenCalledWith(
+      claveCorreo(CORREO),
+      [COP.toString()],
+    );
+  });
+
+  it('cuentaParaAccesoDe: la toma del usuario de la petición solo si trae la prueba', () => {
+    expect(
+      cuentaParaAccesoDe({
+        uid: 'u',
+        email: CORREO,
+        correoProbadoClave: null,
+      }),
+    ).toEqual({ email: CORREO, correoProbadoClave: null });
+    // Without the field the caller cannot tell "no proof" from "not loaded".
+    expect(cuentaParaAccesoDe({ uid: 'u', email: CORREO })).toBeUndefined();
   });
 });

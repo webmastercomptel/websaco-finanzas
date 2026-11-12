@@ -25,6 +25,7 @@ const CUENTA = new Types.ObjectId();
 const user: IRequestUser = {
   uid: 'u',
   email: 'r@b.co',
+  correoProbadoClave: null,
   accountId: CUENTA.toString(),
   nombre: 'Rosa',
   copropiedadId: COPROPIEDAD.toString(),
@@ -212,6 +213,7 @@ describe('FacturacionBloquePortalService — listar', () => {
     expect(portalAcceso.unidadesDe).toHaveBeenCalledWith(
       CUENTA.toString(),
       COPROPIEDAD.toString(),
+      { email: 'r@b.co', correoProbadoClave: null },
     );
     const filtro = llamada(documentos.find)[0] as Record<string, unknown>;
     expect(filtro.copropiedadId).toBe(COPROPIEDAD);
@@ -458,6 +460,7 @@ describe('FacturacionBloquePortalService — descargar', () => {
       CUENTA.toString(),
       COPROPIEDAD.toString(),
       u.inmuebleId,
+      { email: 'r@b.co', correoProbadoClave: null },
     );
   });
 

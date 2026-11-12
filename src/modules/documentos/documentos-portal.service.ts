@@ -20,7 +20,10 @@ import {
   type ArchivoDocumentoDocument,
 } from '../../database/schemas/administracion/documento-archivo.schema';
 import type { CarpetaDocumentoDocument } from '../../database/schemas/administracion/documento-carpeta.schema';
-import { PortalAccesoService } from '../portal/portal-acceso.service';
+import {
+  cuentaParaAccesoDe,
+  PortalAccesoService,
+} from '../portal/portal-acceso.service';
 import { CarpetasService, type MapaCarpetas } from './carpetas.service';
 import { residentePuedeLeer, type TipoResidente } from './documentos-acceso';
 import { DocumentosAlmacenService } from './documentos-almacen.service';
@@ -70,6 +73,7 @@ export class DocumentosPortalService {
     const unidades = await this.portalAcceso.unidadesDe(
       this.cuenta(user),
       copropiedadId.toString(),
+      cuentaParaAccesoDe(user),
     );
     return new Set(unidades.map((u) => u.rol));
   }

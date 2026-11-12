@@ -11,6 +11,7 @@ const CUENTA = new Types.ObjectId();
 const user: IRequestUser = {
   uid: 'u',
   email: 'r@x.co',
+  correoProbadoClave: null,
   accountId: CUENTA.toString(),
   esResidente: true,
   copropiedadId: COPROPIEDAD.toString(),
@@ -176,6 +177,7 @@ describe('DocumentosPortalService.listarCarpetas', () => {
     expect(portalAcceso.unidadesDe).toHaveBeenCalledWith(
       CUENTA.toString(),
       COPROPIEDAD.toString(),
+      { email: 'r@x.co', correoProbadoClave: null },
     );
   });
 

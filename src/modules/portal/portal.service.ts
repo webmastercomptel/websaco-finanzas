@@ -26,6 +26,7 @@ import type {
   ListarFacturasPortalDto,
 } from './dto/portal.dto';
 import {
+  cuentaParaAccesoDe,
   PortalAccesoService,
   type RolPortal,
   type UnidadPortal,
@@ -57,7 +58,11 @@ export class PortalService {
 
   /** The caller's own units and their role on each. */
   unidades(user: IRequestUser): Promise<UnidadPortal[]> {
-    return this.acceso.unidadesDe(user.accountId!, user.copropiedadId!);
+    return this.acceso.unidadesDe(
+      user.accountId!,
+      user.copropiedadId!,
+      cuentaParaAccesoDe(user),
+    );
   }
 
   /**
@@ -174,6 +179,7 @@ export class PortalService {
       user.accountId!,
       user.copropiedadId!,
       inmuebleId,
+      cuentaParaAccesoDe(user),
     );
     if (!rol) throw this.noEncontrado();
     return rol;

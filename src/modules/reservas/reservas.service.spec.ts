@@ -80,6 +80,7 @@ const unidad = (codigo: string): UnidadPortal => ({
 const residente = (): IRequestUser => ({
   uid: 'uid-r',
   email: 'r@x.co',
+  correoProbadoClave: null,
   nombre: 'Ana Residente',
   accountId: CUENTA.toString(),
   esResidente: true,
@@ -188,6 +189,7 @@ describe('ReservasService.crearComoResidente', () => {
     expect(portalAcceso.unidadesDe).toHaveBeenCalledWith(
       CUENTA.toString(),
       COPROPIEDAD.toString(),
+      { email: 'r@x.co', correoProbadoClave: null },
     );
   });
 

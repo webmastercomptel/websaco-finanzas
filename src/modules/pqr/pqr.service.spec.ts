@@ -67,6 +67,7 @@ const staff: IRequestUser = {
 const residente: IRequestUser = {
   uid: 'u-res',
   email: 'r@x.co',
+  correoProbadoClave: null,
   nombre: 'Juan Pérez',
   accountId: CUENTA.toString(),
   esResidente: true,
@@ -434,6 +435,7 @@ describe('PqrService — residente: crearComoResidente', () => {
     expect(portalAcceso.unidadesDe).toHaveBeenCalledWith(
       CUENTA.toString(),
       COPROPIEDAD.toString(),
+      { email: 'r@x.co', correoProbadoClave: null },
     );
     expect(pqrs).toHaveBeenCalledWith(
       expect.objectContaining({

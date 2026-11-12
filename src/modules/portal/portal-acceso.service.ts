@@ -19,6 +19,8 @@ import {
   unidadesDeTerceros,
 } from '../../common/acceso/residencia.reglas';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
+import type { CuentaParaAcceso } from '../../common/acceso/acceso.service';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { claveCorreo } from '../../common/utils/email.utils';
 
 /** How a resident relates to one unit. The role is per unit, not per person. */
@@ -29,6 +31,19 @@ export interface UnidadPortal {
   inmuebleId: string;
   codigo: string;
   rol: RolPortal;
+}
+
+/**
+ * The Account slice the auth guard already put on the request (address and
+ * proof), so a portal request costs no re-read of the Account. Undefined when
+ * the request user does not carry the proof field at all: "not loaded" must
+ * not read as "no proof", so the service then re-reads the Account.
+ */
+export function cuentaParaAccesoDe(
+  user: IRequestUser,
+): CuentaParaAcceso | undefined {
+  if (user.correoProbadoClave === undefined) return undefined;
+  return { email: user.email, correoProbadoClave: user.correoProbadoClave };
 }
 
 /**
@@ -59,10 +74,15 @@ export class PortalAccesoService {
     private readonly residencia: ResidenciaService,
   ) {}
 
-  /** Active units of the coproperty held by this account, ordered by code. */
+  /**
+   * Active units of the coproperty held by this account, ordered by code.
+   * `cuenta`: the Account as the request already holds it
+   * (`cuentaParaAccesoDe`); without it the Account is re-read by `_id`.
+   */
   async unidadesDe(
     accountId: string,
     copropiedadId: string,
+    cuentaDePeticion?: CuentaParaAcceso,
   ): Promise<UnidadPortal[]> {
     const copropiedad = new Types.ObjectId(copropiedadId);
 
@@ -78,11 +98,13 @@ export class PortalAccesoService {
       .exec();
 
     // The Account carries the address, its proof and the revocation key.
-    const cuenta = await this.cuentas
-      .findById(accountId)
-      .select('email estado correoProbadoClave')
-      .lean()
-      .exec();
+    const cuenta =
+      cuentaDePeticion ??
+      (await this.cuentas
+        .findById(accountId)
+        .select('email estado correoProbadoClave')
+        .lean()
+        .exec());
 
     // Proven route: parties of THIS coproperty that carry the proven address.
     const partes = new Set<string>(vinculado ? [vinculado._id.toString()] : []);
@@ -142,8 +164,9 @@ export class PortalAccesoService {
     accountId: string,
     copropiedadId: string,
     inmuebleId: string,
+    cuenta?: CuentaParaAcceso,
   ): Promise<RolPortal | null> {
-    const unidades = await this.unidadesDe(accountId, copropiedadId);
+    const unidades = await this.unidadesDe(accountId, copropiedadId, cuenta);
     return unidades.find((u) => u.inmuebleId === inmuebleId)?.rol ?? null;
   }
 }
