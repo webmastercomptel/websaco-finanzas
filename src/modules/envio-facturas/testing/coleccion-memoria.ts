@@ -29,6 +29,16 @@ function orden(v: unknown): number {
   return Number(v);
 }
 
+/** Three-way comparison; ObjectIds compare by their (fixed-width) hex form. */
+function comparar(a: unknown, b: unknown): number {
+  if (a instanceof Types.ObjectId && b instanceof Types.ObjectId) {
+    const x = a.toHexString();
+    const y = b.toHexString();
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+  return orden(a) - orden(b);
+}
+
 function cumple(valor: unknown, condicion: unknown): boolean {
   const esOperador =
     condicion !== null &&
@@ -50,11 +60,11 @@ function cumple(valor: unknown, condicion: unknown): boolean {
           ? !valor.some((x) => igual(x, esperado))
           : !igual(valor, esperado);
       case '$lt':
-        return !esNulo(valor) && orden(valor) < orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) < 0;
       case '$lte':
-        return !esNulo(valor) && orden(valor) <= orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) <= 0;
       case '$gt':
-        return !esNulo(valor) && orden(valor) > orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) > 0;
       default:
         throw new Error(`Operador de filtro no soportado: ${op}`);
     }
