@@ -25,6 +25,9 @@ import {
 import type { Subject } from '../../modules/casl/casl-ability.constants';
 import { puedeLeerMateria } from '../../modules/casl/permisos-catalogo';
 import { AccesoService } from '../acceso/acceso.service';
+import { correoProbado } from '../acceso/residencia.reglas';
+import { ResidenciaService } from '../acceso/residencia.service';
+import { claveCorreo, normalizarEmail } from '../utils/email.utils';
 import { type DestinoCorreo, destinosDeUnidad } from './destinos-correo';
 
 /** `personal` works in the building's back office; `residente` holds a unit. */
@@ -80,6 +83,7 @@ export class DirectorioService {
     private readonly acceso: AccesoService,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
+    private readonly residencia: ResidenciaService,
   ) {}
 
   /** The active accounts among `ids`, keyed by id. */
@@ -108,20 +112,113 @@ export class DirectorioService {
   }
 
   /**
-   * Current owners and tenants of the coproperty who have a sign-in: a linked
-   * Tercero that is the `titularId` or `arrendatarioId` of an active unit here.
+   * The ACTIVE accounts behind each of these parties, keyed by party id, by the
+   * same two routes as the portal (`AccesoService`/`PortalAccesoService`):
+   * the legacy link (`Tercero.accountId`) and an account that PROVED an
+   * address carried by the party's record (`correoProbado`, exact match of the
+   * stored value: a padded legacy address is not a candidate). An account whose
+   * address has an active revocation in this coproperty is dropped on BOTH
+   * routes. Queries: accounts by id, accounts by proven address (only when some
+   * party carries an address) and one batch of revocations, however many
+   * parties are asked for.
+   */
+  private async cuentasDePartes(
+    copropiedadId: Types.ObjectId,
+    partes: Array<{
+      _id: Types.ObjectId;
+      accountId?: Types.ObjectId | null;
+      emails?: string[] | null;
+    }>,
+  ): Promise<Map<string, AccountDocument[]>> {
+    const porParte = new Map<string, AccountDocument[]>();
+
+    // One account may be linked to several parties: ask for it once.
+    const idsHeredados = new Map<string, Types.ObjectId>();
+    for (const p of partes) {
+      if (p.accountId) idsHeredados.set(p.accountId.toString(), p.accountId);
+    }
+    const heredadas = await this.cuentasActivas([...idsHeredados.values()]);
+
+    // Exact stored values only (`coincideCorreo`: no padding), lowercased.
+    const direccionesDe = (p: { emails?: string[] | null }): string[] =>
+      (p.emails ?? [])
+        .filter((e) => e.length > 0 && e === e.trim())
+        .map((e) => normalizarEmail(e));
+    const direcciones = [...new Set(partes.flatMap(direccionesDe))];
+    const probadas = new Map<string, AccountDocument>();
+    if (direcciones.length > 0) {
+      const candidatas = await this.cuentas
+        .find({
+          email: { $in: direcciones },
+          estado: 'active',
+          correoProbadoClave: { $ne: null },
+        })
+        .select(
+          'email nombreCompleto esAdministradorPlataforma correoProbadoClave',
+        )
+        .lean()
+        .exec();
+      for (const c of candidatas) {
+        if (correoProbado(c)) probadas.set(c.email, c);
+      }
+    }
+
+    for (const p of partes) {
+      const cuentas = new Map<string, AccountDocument>();
+      const heredada = p.accountId
+        ? heredadas.get(p.accountId.toString())
+        : undefined;
+      if (heredada) cuentas.set(heredada._id.toString(), heredada);
+      for (const direccion of direccionesDe(p)) {
+        const probada = probadas.get(direccion);
+        if (probada) cuentas.set(probada._id.toString(), probada);
+      }
+      if (cuentas.size > 0) {
+        porParte.set(p._id.toString(), [...cuentas.values()]);
+      }
+    }
+
+    const claves = new Map<string, string>();
+    for (const cuentas of porParte.values()) {
+      for (const c of cuentas) {
+        claves.set(c._id.toString(), claveCorreo(c.email));
+      }
+    }
+    const revocadas = await this.residencia.clavesRevocadas(
+      [...new Set(claves.values())],
+      copropiedadId.toString(),
+    );
+    if (revocadas.size > 0) {
+      for (const [parteId, cuentas] of [...porParte]) {
+        const vigentes = cuentas.filter(
+          (c) => !revocadas.has(claves.get(c._id.toString()) ?? ''),
+        );
+        if (vigentes.length > 0) porParte.set(parteId, vigentes);
+        else porParte.delete(parteId);
+      }
+    }
+    return porParte;
+  }
+
+  /**
+   * Current owners and tenants of the coproperty who can sign in: an active
+   * account that is a resident by the portal's own derivation, either linked
+   * to a party (`Tercero.accountId`) or having proved an address on the record
+   * of a party that is the `titularId` or `arrendatarioId` of an active unit
+   * here, and with no active revocation of that address in this coproperty.
    * A former holder stays linked after a sale or lease end, and must stop
    * receiving residents' notices (same rule as `AccesoService` for the portal).
+   * Each account is listed once.
    */
   async residentes(copropiedadId: Types.ObjectId): Promise<Destinatario[]> {
-    const vinculados = await this.terceros
-      .find({ copropiedadId, estado: 'active', accountId: { $ne: null } })
-      .select('_id accountId')
+    const partes = await this.terceros
+      .find({ copropiedadId, estado: 'active' })
+      .select('_id accountId emails')
       .lean()
       .exec();
-    if (vinculados.length === 0) return [];
+    if (partes.length === 0) return [];
 
-    const terceroIds = vinculados.map((t) => t._id);
+    const terceroIds = partes.map((t) => t._id);
     const unidades = await this.inmuebles
       .find({
         copropiedadId,
@@ -140,14 +237,15 @@ export class DirectorioService {
       if (u.arrendatarioId) titulares.add(u.arrendatarioId.toString());
     }
 
-    const ids = new Map<string, Types.ObjectId>();
-    for (const t of vinculados) {
-      if (t.accountId && titulares.has(t._id.toString())) {
-        ids.set(t.accountId.toString(), t.accountId);
-      }
+    const cuentas = await this.cuentasDePartes(
+      copropiedadId,
+      partes.filter((t) => titulares.has(t._id.toString())),
+    );
+    const unicas = new Map<string, AccountDocument>();
+    for (const lista of cuentas.values()) {
+      for (const c of lista) unicas.set(c._id.toString(), c);
     }
-    const cuentas = await this.cuentasActivas([...ids.values()]);
-    return [...cuentas.values()].map((c) => this.aDestinatario(c, 'residente'));
+    return [...unicas.values()].map((c) => this.aDestinatario(c, 'residente'));
   }
 
   /**
@@ -156,13 +254,19 @@ export class DirectorioService {
    * `arrendatarioId` (tenant), each tagged with the role they hold ON THAT UNIT
    * (the same person can own one unit and rent another).
    *
+   * Accounts are found by the same two routes as the portal
+   * (`cuentasDePartes`): the legacy link and a proven address on the party's
+   * record, minus the addresses revoked in this coproperty.
+   *
    * Every id of `inmuebleIds` is a key of the result, with `[]` when nobody is
-   * reachable: a party without an account, an inactive party or account, or an
-   * inactive/foreign unit is omitted instead of failing, because one unit with
-   * nobody to tell must never block the others. The lookup is always bounded by
-   * `copropiedadId` (unit AND parties), so an id of another coproperty yields
-   * nothing. If owner and tenant ever resolve to the same account the owner wins
-   * and it is listed once. Three queries however many units are asked for.
+   * reachable: a party without an account, an inactive party or account, a
+   * revoked address, or an inactive/foreign unit is omitted instead of failing,
+   * because one unit with nobody to tell must never block the others. The
+   * lookup is always bounded by `copropiedadId` (unit AND parties), so an id of
+   * another coproperty yields nothing. If owner and tenant ever resolve to the
+   * same account the owner wins and it is listed once. A constant number of
+   * queries however many units are asked for (units, parties, accounts by id,
+   * accounts by proven address, revocations).
    */
   async residentesDeInmuebles(
     copropiedadId: Types.ObjectId,
@@ -192,41 +296,32 @@ export class DirectorioService {
         _id: { $in: [...terceroIds.values()] },
         copropiedadId,
         estado: 'active',
-        accountId: { $ne: null },
       })
-      .select('accountId')
+      .select('accountId emails')
       .lean()
       .exec();
-    const cuentaDeTercero = new Map<string, Types.ObjectId>();
-    for (const t of terceros) {
-      if (t.accountId) cuentaDeTercero.set(t._id.toString(), t.accountId);
-    }
-    const cuentas = await this.cuentasActivas([...cuentaDeTercero.values()]);
+    const cuentasDeParte = await this.cuentasDePartes(copropiedadId, terceros);
 
-    const alcanzable = (terceroId: Types.ObjectId | null | undefined) => {
-      const cuentaId = terceroId
-        ? cuentaDeTercero.get(terceroId.toString())
-        : undefined;
-      return cuentaId ? cuentas.get(cuentaId.toString()) : undefined;
-    };
+    const alcanzables = (terceroId: Types.ObjectId | null | undefined) =>
+      terceroId ? (cuentasDeParte.get(terceroId.toString()) ?? []) : [];
 
     for (const u of unidades) {
       const lista = resultado.get(u._id.toString());
       if (!lista) continue;
-      const propietario = alcanzable(u.titularId);
-      if (propietario) {
+      // Several addresses of one party are several accounts. If the owner and
+      // the tenant resolve to the same account, the owner wins.
+      const propietarios = alcanzables(u.titularId);
+      for (const c of propietarios) {
         lista.push({
-          ...this.aDestinatario(propietario, 'residente'),
+          ...this.aDestinatario(c, 'residente'),
           rol: 'propietario',
         });
       }
-      const arrendatario = alcanzable(u.arrendatarioId);
-      if (
-        arrendatario &&
-        arrendatario._id.toString() !== propietario?._id.toString()
-      ) {
+      const yaEstan = new Set(propietarios.map((c) => c._id.toString()));
+      for (const c of alcanzables(u.arrendatarioId)) {
+        if (yaEstan.has(c._id.toString())) continue;
         lista.push({
-          ...this.aDestinatario(arrendatario, 'residente'),
+          ...this.aDestinatario(c, 'residente'),
           rol: 'arrendatario',
         });
       }

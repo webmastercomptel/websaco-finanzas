@@ -232,6 +232,38 @@ describe('ResidenciaService.copropiedadesPorCorreo', () => {
   });
 });
 
+describe('ResidenciaService.clavesRevocadas', () => {
+  it('returns the claves with an active revocation in THAT coproperty, ignoring lifted rows and other coproperties', async () => {
+    const { servicio, revocaciones } = crear({
+      revocaciones: [
+        { copropiedadId: COP_A, clave: 'k1', activa: true },
+        { copropiedadId: COP_A, clave: 'k2', activa: false },
+        { copropiedadId: COP_B, clave: 'k3', activa: true },
+      ],
+    });
+
+    const claves = await servicio.clavesRevocadas(
+      ['k1', 'k2', 'k3'],
+      COP_A.toString(),
+    );
+
+    expect([...claves]).toEqual(['k1']);
+    expect(revocaciones.find).toHaveBeenCalledWith({
+      clave: { $in: ['k1', 'k2', 'k3'] },
+      activa: true,
+    });
+  });
+
+  it('asks nothing when there is no clave to judge', async () => {
+    const { servicio, revocaciones } = crear();
+
+    await expect(
+      servicio.clavesRevocadas([], COP_A.toString()),
+    ).resolves.toEqual(new Set());
+    expect(revocaciones.find).not.toHaveBeenCalled();
+  });
+});
+
 describe('ResidenciaService.revocacionesActivas', () => {
   it('returns the coproperties with an active revocation, ignoring lifted rows', async () => {
     const { servicio, revocaciones } = crear({

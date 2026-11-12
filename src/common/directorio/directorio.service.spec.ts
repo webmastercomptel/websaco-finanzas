@@ -4,6 +4,7 @@ import type {
   AccesoService,
 } from '../acceso/acceso.service';
 import { DirectorioService } from './directorio.service';
+import { claveCorreo } from '../utils/email.utils';
 
 const oid = () => new Types.ObjectId();
 const COP = oid();
@@ -63,6 +64,8 @@ function crear(opciones: {
   copropiedad?: Fila;
   inmuebles?: Fila[];
   accesos?: Record<string, AccesoCopropiedad | null>;
+  /** Claves with an active revocation in COP (what `clavesRevocadas` answers). */
+  revocadas?: string[];
 }) {
   const inmuebles = consulta(opciones.inmuebles ?? []);
   const cuentas = consulta(opciones.cuentas ?? []);
@@ -74,6 +77,11 @@ function crear(opciones: {
   const accesoA = jest.fn((accountId: string) =>
     Promise.resolve(opciones.accesos?.[accountId] ?? null),
   );
+  const clavesRevocadas = jest.fn((claves: readonly string[]) =>
+    Promise.resolve(
+      new Set(claves.filter((c) => (opciones.revocadas ?? []).includes(c))),
+    ),
+  );
   const servicio = new DirectorioService(
     cuentas as never,
     asignaciones as never,
@@ -81,8 +89,17 @@ function crear(opciones: {
     copropiedades as never,
     { accesoA } as unknown as AccesoService,
     inmuebles as never,
+    { clavesRevocadas } as never,
   );
-  return { servicio, cuentas, asignaciones, terceros, inmuebles, accesoA };
+  return {
+    servicio,
+    cuentas,
+    asignaciones,
+    terceros,
+    inmuebles,
+    accesoA,
+    clavesRevocadas,
+  };
 }
 
 describe('DirectorioService.residentes', () => {
@@ -104,7 +121,6 @@ describe('DirectorioService.residentes', () => {
     expect(terceros.find).toHaveBeenCalledWith({
       copropiedadId: COP,
       estado: 'active',
-      accountId: { $ne: null },
     });
     expect(cuentas.find).toHaveBeenCalledWith({
       _id: { $in: [ana] },
@@ -451,7 +467,7 @@ describe('DirectorioService.residentesDeInmuebles', () => {
     expect(terceros.find).not.toHaveBeenCalled();
   });
 
-  it('acota los terceros a la copropiedad y a los activos con cuenta', async () => {
+  it('acota los terceros a la copropiedad y a los activos', async () => {
     const tPropietario = oid();
     const { servicio, terceros } = crear({
       inmuebles: [{ _id: U1, titularId: tPropietario, arrendatarioId: null }],
@@ -463,7 +479,6 @@ describe('DirectorioService.residentesDeInmuebles', () => {
       _id: { $in: [tPropietario] },
       copropiedadId: COP,
       estado: 'active',
-      accountId: { $ne: null },
     });
   });
 
@@ -555,6 +570,10 @@ describe('DirectorioService.correosDeInmuebles', () => {
   const COP_B = oid();
 
   const montar = (opciones: { unidades?: Fila[]; terceros?: Fila[] }) => {
+    const residencia = {
+      clavesRevocadas: jest.fn(() => Promise.resolve(new Set<string>())),
+      revocacionesActivas: jest.fn(() => Promise.resolve(new Set<string>())),
+    };
     const inmuebles = modeloFiltrante(opciones.unidades ?? []);
     const terceros = modeloFiltrante(opciones.terceros ?? []);
     const servicio = new DirectorioService(
@@ -564,8 +583,9 @@ describe('DirectorioService.correosDeInmuebles', () => {
       {} as never,
       {} as unknown as AccesoService,
       inmuebles as never,
+      residencia as never,
     );
-    return { servicio, inmuebles, terceros };
+    return { servicio, inmuebles, terceros, residencia };
   };
 
   const unidad = (extra: Fila = {}) => ({
@@ -675,10 +695,221 @@ describe('DirectorioService.correosDeInmuebles', () => {
     });
   });
 
+  it('SEC: revoking the portal does not stop invoice e-mails (REVOCACION_DETIENE_CORREOS_FACTURA es false)', async () => {
+    const titular = tercero({ emails: ['ana@x.com'] });
+    const u = unidad({ titularId: titular._id });
+    const { servicio, residencia } = montar({
+      unidades: [u],
+      terceros: [titular],
+    });
+    // Even if every address were revoked, the invoice recipients come from the
+    // records alone.
+    residencia.clavesRevocadas.mockResolvedValue(
+      new Set([claveCorreo('ana@x.com')]),
+    );
+    residencia.revocacionesActivas.mockResolvedValue(new Set([COP.toString()]));
+
+    const mapa = await servicio.correosDeInmuebles(COP, [u._id]);
+
+    expect(mapa.get(u._id.toString())?.map((d) => d.email)).toEqual([
+      'ana@x.com',
+    ]);
+    expect(residencia.clavesRevocadas).not.toHaveBeenCalled();
+    expect(residencia.revocacionesActivas).not.toHaveBeenCalled();
+  });
+
   it('sin inmuebles pedidos no consulta nada', async () => {
     const { servicio, inmuebles } = montar({});
 
     expect((await servicio.correosDeInmuebles(COP, [])).size).toBe(0);
     expect(inmuebles.find).not.toHaveBeenCalled();
+  });
+});
+
+/** Notices follow the same derivation as the portal (REQ-N1). */
+describe('DirectorioService residentes por dirección probada', () => {
+  const U1 = oid();
+  const claveAna = claveCorreo('ana@x.com');
+  const probada = (id: Types.ObjectId, nombre: string, correo: string) =>
+    cuenta(id, nombre, {
+      email: correo,
+      correoProbadoClave: claveCorreo(correo),
+    });
+
+  it('un residente probado cuya dirección está en el titular de una unidad vigente recibe los avisos (S-N1.1)', async () => {
+    const ana = oid();
+    const t = oid();
+    const { servicio, cuentas } = crear({
+      terceros: [{ _id: t, accountId: null, emails: ['Ana@X.com'] }],
+      inmuebles: [{ titularId: t, arrendatarioId: null }],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com')],
+    });
+
+    const resultado = await servicio.residentes(COP);
+
+    expect(resultado).toEqual([
+      {
+        accountId: ana.toString(),
+        email: 'ana@x.com',
+        nombre: 'Ana',
+        perfil: 'residente',
+      },
+    ]);
+    expect(cuentas.find).toHaveBeenCalledWith({
+      email: { $in: ['ana@x.com'] },
+      estado: 'active',
+      correoProbadoClave: { $ne: null },
+    });
+  });
+
+  it('la dirección revocada no recibe avisos, ni por prueba ni por vínculo heredado (S-N1.2)', async () => {
+    const ana = oid();
+    const beto = oid();
+    const tAna = oid();
+    const tBeto = oid();
+    const { servicio, clavesRevocadas } = crear({
+      terceros: [
+        { _id: tAna, accountId: null, emails: ['ana@x.com'] },
+        { _id: tBeto, accountId: beto, emails: [] },
+      ],
+      inmuebles: [{ titularId: tAna, arrendatarioId: tBeto }],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com'), cuenta(beto, 'Beto')],
+      revocadas: [claveAna, claveCorreo('beto@ejemplo.com')],
+    });
+
+    await expect(servicio.residentes(COP)).resolves.toEqual([]);
+    expect(clavesRevocadas).toHaveBeenCalledWith(
+      expect.arrayContaining([claveAna, claveCorreo('beto@ejemplo.com')]),
+      COP.toString(),
+    );
+  });
+
+  it('el vínculo heredado sin revocación sigue recibiendo avisos (S-N1.3)', async () => {
+    const beto = oid();
+    const tBeto = oid();
+    const { servicio } = crear({
+      terceros: [{ _id: tBeto, accountId: beto }],
+      inmuebles: [{ titularId: tBeto, arrendatarioId: null }],
+      cuentas: [cuenta(beto, 'Beto')],
+    });
+
+    const resultado = await servicio.residentes(COP);
+
+    expect(resultado.map((r) => r.nombre)).toEqual(['Beto']);
+  });
+
+  it('una prueba cuya dirección ya no está en el registro no recibe avisos (S-N1.4)', async () => {
+    const ana = oid();
+    const t = oid();
+    const { servicio, cuentas } = crear({
+      terceros: [{ _id: t, accountId: null, emails: ['otra@x.com'] }],
+      inmuebles: [{ titularId: t, arrendatarioId: null }],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com')],
+    });
+
+    // The stub answers every query with the same rows; the rule keeps only
+    // accounts whose own address is on a holder's record.
+    await expect(servicio.residentes(COP)).resolves.toEqual([]);
+    expect(cuentas.find).toHaveBeenCalledWith(
+      expect.objectContaining({ email: { $in: ['otra@x.com'] } }),
+    );
+  });
+
+  it('una prueba de otra dirección o una dirección guardada con espacios no cuentan', async () => {
+    const ana = oid();
+    const t = oid();
+    const { servicio, cuentas } = crear({
+      terceros: [{ _id: t, accountId: null, emails: [' ana@x.com '] }],
+      inmuebles: [{ titularId: t, arrendatarioId: null }],
+      cuentas: [
+        cuenta(ana, 'Ana', {
+          email: 'ana@x.com',
+          correoProbadoClave: claveCorreo('otra@x.com'),
+        }),
+      ],
+    });
+
+    await expect(servicio.residentes(COP)).resolves.toEqual([]);
+    // The padded value is not even a candidate address.
+    expect(cuentas.find).not.toHaveBeenCalled();
+  });
+
+  it('una cuenta con vínculo heredado y prueba aparece una sola vez (S-N1.5)', async () => {
+    const ana = oid();
+    const t = oid();
+    const { servicio } = crear({
+      terceros: [{ _id: t, accountId: ana, emails: ['ana@x.com'] }],
+      inmuebles: [{ titularId: t, arrendatarioId: null }],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com')],
+    });
+
+    const resultado = await servicio.residentes(COP);
+
+    expect(resultado).toHaveLength(1);
+  });
+
+  it('por unidad: el propietario probado y el arrendatario heredado, cada uno con su rol; la misma cuenta en ambos lados va como propietario', async () => {
+    const ana = oid();
+    const beto = oid();
+    const tA = oid();
+    const tB = oid();
+    const { servicio } = crear({
+      inmuebles: [{ _id: U1, titularId: tA, arrendatarioId: tB }],
+      terceros: [
+        { _id: tA, accountId: null, emails: ['ana@x.com'] },
+        { _id: tB, accountId: beto, emails: ['ana@x.com'] },
+      ],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com'), cuenta(beto, 'Beto')],
+    });
+
+    const lista = (await servicio.residentesDeInmuebles(COP, [U1])).get(
+      U1.toString(),
+    );
+
+    expect(lista?.map((r) => [r.nombre, r.rol])).toEqual([
+      ['Ana', 'propietario'],
+      ['Beto', 'arrendatario'],
+    ]);
+  });
+
+  it('por unidad: dos direcciones del mismo propietario son dos cuentas y las revocadas se omiten', async () => {
+    const ana = oid();
+    const ana2 = oid();
+    const t = oid();
+    const { servicio } = crear({
+      inmuebles: [{ _id: U1, titularId: t, arrendatarioId: null }],
+      terceros: [{ _id: t, accountId: null, emails: ['ana@x.com', 'b@x.com'] }],
+      cuentas: [
+        probada(ana, 'Ana', 'ana@x.com'),
+        probada(ana2, 'Bea', 'b@x.com'),
+      ],
+      revocadas: [claveCorreo('b@x.com')],
+    });
+
+    const lista = (await servicio.residentesDeInmuebles(COP, [U1])).get(
+      U1.toString(),
+    );
+
+    expect(lista?.map((r) => r.nombre)).toEqual(['Ana']);
+  });
+
+  it('por unidad: el costo es constante en el número de unidades (terceros, cuentas y revocaciones, una vez cada uno)', async () => {
+    const ana = oid();
+    const t = oid();
+    const { servicio, terceros, cuentas, clavesRevocadas } = crear({
+      inmuebles: [
+        { _id: U1, titularId: t, arrendatarioId: null },
+        { _id: oid(), titularId: t, arrendatarioId: null },
+      ],
+      terceros: [{ _id: t, accountId: ana, emails: ['ana@x.com'] }],
+      cuentas: [probada(ana, 'Ana', 'ana@x.com')],
+    });
+
+    await servicio.residentesDeInmuebles(COP, [U1]);
+
+    expect(terceros.find).toHaveBeenCalledTimes(1);
+    // Legacy lookup by id plus one lookup by proven address.
+    expect(cuentas.find).toHaveBeenCalledTimes(2);
+    expect(clavesRevocadas).toHaveBeenCalledTimes(1);
   });
 });

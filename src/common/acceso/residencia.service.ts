@@ -162,6 +162,35 @@ export class ResidenciaService {
   }
 
   /**
+   * Of these addresses (`clave`), the ones with an active revocation in ONE
+   * coproperty: the batch form of `revocacionesActivas` for callers that judge
+   * many accounts at once (the notice audiences). Same rule, one query.
+   */
+  async clavesRevocadas(
+    claves: readonly string[],
+    copropiedadId: string,
+  ): Promise<Set<string>> {
+    const revocadas = new Set<string>();
+    if (claves.length === 0) return revocadas;
+
+    const filas = await this.revocaciones
+      .find({ clave: { $in: [...claves] }, activa: true })
+      .select('clave copropiedadId activa')
+      .lean()
+      .exec();
+    for (const fila of filas) {
+      const revocacion = {
+        copropiedadId: fila.copropiedadId.toString(),
+        activa: fila.activa,
+      };
+      if (revocacionAplica(revocacion, copropiedadId)) {
+        revocadas.add(fila.clave);
+      }
+    }
+    return revocadas;
+  }
+
+  /**
    * Which of `copropiedadIds` have an active revocation for the address
    * (`clave`). Reads by `{clave, activa}` and lets the one rule
    * (`revocacionAplica`) decide per coproperty, so flipping the revocation

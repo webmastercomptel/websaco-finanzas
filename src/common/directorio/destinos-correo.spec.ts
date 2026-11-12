@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { claveCorreo } from '../utils/email.utils';
 import { destinosDeUnidad, ROLES_QUE_RECIBEN } from './destinos-correo';
+import { REVOCACION_DETIENE_CORREOS_FACTURA } from '../acceso/residencia.reglas';
 
 const parte = (nombre: string, emails: string[]) => ({
   _id: new Types.ObjectId(),
@@ -106,5 +107,19 @@ describe('destinosDeUnidad', () => {
         (d) => d.email,
       ),
     ).toEqual(['a@x.com']);
+  });
+});
+
+describe('destinosDeUnidad y la revocación del portal', () => {
+  it('SEC: revoking the portal does not stop invoice e-mails', () => {
+    // The recipients come from the two records alone: the function has no
+    // revocation input, and the flip point stays off until the owner flips it.
+    expect(REVOCACION_DETIENE_CORREOS_FACTURA).toBe(false);
+    expect(destinosDeUnidad.length).toBeLessThanOrEqual(3);
+    expect(
+      destinosDeUnidad(parte('Ana', ['revocada@x.com']), null).map(
+        (d) => d.email,
+      ),
+    ).toEqual(['revocada@x.com']);
   });
 });
