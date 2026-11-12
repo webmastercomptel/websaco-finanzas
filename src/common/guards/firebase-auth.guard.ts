@@ -119,8 +119,11 @@ export class FirebaseAuthGuard implements CanActivate {
   /** A verified identity with no standing in this system. */
   private sinAcceso(decoded: DecodedIdToken): IRequestUser {
     const email = decoded.email?.trim().toLowerCase() ?? '';
+    // No identifier at all: there is no account id to name, and neither the
+    // address nor the provider uid (a resident's uid embeds a hash of theirs)
+    // belongs in a log line.
     this.logger.debug(
-      `Sin cuenta local para "${email}". Autenticado, sin acceso a nada.`,
+      'Token válido sin cuenta local: autenticado, sin acceso.',
     );
     return { uid: decoded.uid, email, permissions: [] };
   }
@@ -173,7 +176,7 @@ export class FirebaseAuthGuard implements CanActivate {
     );
     if (!acceso) {
       this.logger.warn(
-        `Cuenta ${cuenta.email} pidió la copropiedad ${solicitada} sin tenerla asignada.`,
+        `Cuenta ${accountId} pidió la copropiedad ${solicitada} sin tenerla asignada.`,
       );
       throw new ForbiddenException('No tenés acceso a esta copropiedad');
     }

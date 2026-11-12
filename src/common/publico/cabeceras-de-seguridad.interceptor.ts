@@ -1,4 +1,4 @@
-// src/modules/factura-publica/cabeceras-de-seguridad.interceptor.ts
+// src/common/publico/cabeceras-de-seguridad.interceptor.ts
 import {
   CallHandler,
   ExecutionContext,
@@ -8,9 +8,10 @@ import {
 import type { Response } from 'express';
 import type { Observable } from 'rxjs';
 
-/** Sent on EVERY answer of the public invoice route, success or refusal: the
- *  page is a personal document behind a bearer link, never to be cached,
- *  indexed, sniffed or leaked through a `Referer`. */
+/** Sent on EVERY answer of the public routes (the invoice PDF link and the
+ *  resident sign-in), success or refusal: the page is a personal document or
+ *  credential behind a bearer link, never to be cached, indexed, sniffed or
+ *  leaked through a `Referer`. */
 export const CABECERAS_DE_SEGURIDAD = {
   'Cache-Control': 'no-store',
   Pragma: 'no-cache',

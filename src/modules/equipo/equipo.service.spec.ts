@@ -278,7 +278,7 @@ function montar(opciones: Opciones = {}) {
       if (identidades.has(d.email)) {
         return Promise.reject(
           new ConflictException(
-            `Ya existe una cuenta de Firebase con el correo ${d.email}.`,
+            'Ya existe una cuenta de Firebase con ese correo.',
           ),
         );
       }

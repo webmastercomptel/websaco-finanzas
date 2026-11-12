@@ -1,4 +1,4 @@
-// src/modules/factura-publica/piso-de-tiempo.ts
+// src/common/publico/piso-de-tiempo.ts
 
 /**
  * Waits until `ms` have passed since `inicioMs` (a `Date.now()` taken when the

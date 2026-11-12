@@ -2,6 +2,7 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import type { Auth } from 'firebase-admin/auth';
 import { FIREBASE_AUTH } from './firebase.constants';
+import { UID_RESIDENTE_REGEX } from './uid-residente';
 
 /**
  * The ONE deliberate exception to "this project only ever verifies
@@ -11,9 +12,10 @@ import { FIREBASE_AUTH } from './firebase.constants';
  * local access record in the same step, rather than sending someone to a
  * separate Firebase console.
  *
- * The exception is kept as narrow as the job requires: two operations,
- * nothing else. In particular there is no `eliminar()` and there must never
- * be one — the same audit law that forbids deleting a financial document
+ * The exception is kept as narrow as the job requires: create an identity
+ * (with a password for staff, uid-only for residents who enter by link), and
+ * enable/disable/set a password. Nothing else. In particular there is no
+ * `eliminar()` and there must never be one — the same audit law that forbids deleting a financial document
  * forbids deleting an identity. A person is retired by disabling them, never
  * by removing the record of who they were.
  *
@@ -54,9 +56,34 @@ export class FirebaseUsuariosService {
         // means to grant the same person access has to say so explicitly by
         // choosing a different resolution — this is not it.
         throw new ConflictException(
-          `Ya existe una cuenta de Firebase con el correo ${datos.email}.`,
+          'Ya existe una cuenta de Firebase con ese correo.',
         );
       }
+      throw err;
+    }
+  }
+
+  /**
+   * Provisions the sign-in identity of a resident who enters by e-mail link:
+   * an identity with a uid and NOTHING else (no e-mail, no password, no display
+   * name). It cannot sign in by itself; the only way in is a custom token the
+   * backend mints for that uid after the person proved their address.
+   *
+   * Idempotent on purpose: the uid is derived from the address, so
+   * `auth/uid-already-exists` means a concurrent redeem or a retry after a crash
+   * between Firebase and Mongo already made it, and reusing it is exactly right.
+   * Never looks anyone up by e-mail, and refuses any uid that is not the
+   * `rc1_` + SHA-256 shape, so this method cannot create an arbitrary
+   * identity (it is not a general-purpose `createUser`).
+   */
+  async crearIdentidadResidente(uid: string): Promise<void> {
+    if (!UID_RESIDENTE_REGEX.test(uid)) {
+      throw new Error('Identificador de residente inválido');
+    }
+    try {
+      await this.auth.createUser({ uid });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'auth/uid-already-exists') return;
       throw err;
     }
   }

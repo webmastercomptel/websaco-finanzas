@@ -83,7 +83,7 @@ export class InvitacionAccesoService {
       };
     } catch (error: unknown) {
       this.logger.error(
-        `No se pudo preparar la invitación a ${solicitud.email}: ${(error as Error).message}`,
+        `No se pudo preparar la invitación de la cuenta ${solicitud.accountId}: ${(error as Error).message}`,
       );
       return { invitacionEnviada: false, enlaceIncluido: false };
     }

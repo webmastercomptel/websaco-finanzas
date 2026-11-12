@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import { Public } from '../casl/check-ability.decorator';
-import { CabecerasDeSeguridadInterceptor } from './cabeceras-de-seguridad.interceptor';
+import { CabecerasDeSeguridadInterceptor } from '../../common/publico/cabeceras-de-seguridad.interceptor';
 import { ObtenerFacturaPublicaDto } from './dto/obtener-factura-publica.dto';
 import { EnlaceFacturaService } from './enlace-factura.service';
 import {
@@ -23,7 +23,7 @@ import {
   MENSAJE_OPACO,
   PISO_DE_TIEMPO_MS,
 } from './factura-publica.constantes';
-import { esperarPisoDeTiempo } from './piso-de-tiempo';
+import { esperarPisoDeTiempo } from '../../common/publico/piso-de-tiempo';
 
 /** Attempts per client address and per token, per window. `req.ip` is the real
  *  client only because `configureApp` trusts exactly TRUST_PROXY_HOPS proxies.

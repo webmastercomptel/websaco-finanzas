@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { InvitacionAccesoService } from './invitacion-acceso.service';
 
@@ -94,5 +95,24 @@ describe('InvitacionAccesoService', () => {
       invitacionEnviada: false,
       enlaceIncluido: false,
     });
+  });
+
+  it('SEC: auth path logs carry no address', async () => {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    try {
+      const m = montar();
+      m.enlaces.construir.mockRejectedValueOnce(new Error('boom'));
+
+      await m.servicio.enviar(solicitud);
+
+      expect(error).toHaveBeenCalledTimes(1);
+      const mensaje = String((error.mock.calls as unknown[][])[0][0]);
+      expect(mensaje).not.toContain(solicitud.email);
+      expect(mensaje).toContain(solicitud.accountId);
+    } finally {
+      error.mockRestore();
+    }
   });
 });

@@ -21,7 +21,7 @@ import { PUBLIC_KEY } from '../casl/check-ability.decorator';
 import {
   CABECERAS_DE_SEGURIDAD,
   CabecerasDeSeguridadInterceptor,
-} from './cabeceras-de-seguridad.interceptor';
+} from '../../common/publico/cabeceras-de-seguridad.interceptor';
 import { FacturaPublicaController } from './factura-publica.controller';
 import { MENSAJE_OPACO, PISO_DE_TIEMPO_MS } from './factura-publica.constantes';
 

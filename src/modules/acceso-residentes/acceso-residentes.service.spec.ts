@@ -215,7 +215,7 @@ function montar(opciones: Opciones = {}) {
         passwords.push(d.password);
         if (identidades.has(d.email)) {
           throw new ConflictException(
-            `Ya existe una cuenta de Firebase con el correo ${d.email}.`,
+            'Ya existe una cuenta de Firebase con ese correo.',
           );
         }
         identidades.add(d.email);

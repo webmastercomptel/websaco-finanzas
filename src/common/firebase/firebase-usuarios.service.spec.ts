@@ -1,6 +1,8 @@
 import { ConflictException } from '@nestjs/common';
 import type { Auth } from 'firebase-admin/auth';
+import { claveCorreo } from '../utils/email.utils';
 import { FirebaseUsuariosService } from './firebase-usuarios.service';
+import { uidDeResidente } from './uid-residente';
 
 /**
  * Returns the mocks alongside the typed `Auth` double, never read back off
@@ -58,6 +60,25 @@ describe('FirebaseUsuariosService.crear', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('SEC: el 409 de correo duplicado no lleva la dirección', async () => {
+    const { auth } = authCon({
+      crear: jest.fn().mockRejectedValue({ code: 'auth/email-already-exists' }),
+    });
+    const service = new FirebaseUsuariosService(auth);
+
+    const error: unknown = await service
+      .crear({ email: 'ya@existe.com', password: 'clave123', nombre: 'X' })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    const mensaje = (error as ConflictException).message;
+    expect(mensaje).toBe('Ya existe una cuenta de Firebase con ese correo.');
+    expect(mensaje).not.toContain('ya@existe.com');
+    expect(
+      JSON.stringify((error as ConflictException).getResponse()),
+    ).not.toContain('ya@existe.com');
+  });
+
   it('deja pasar cualquier otro error tal cual', async () => {
     const { auth } = authCon({
       crear: jest.fn().mockRejectedValue(new Error('fuera de línea')),
@@ -107,5 +128,78 @@ describe('FirebaseUsuariosService.actualizarPassword', () => {
     expect(updateUser).toHaveBeenCalledWith('uid-1', {
       password: 'nueva-clave',
     });
+  });
+});
+
+describe('FirebaseUsuariosService.crearIdentidadResidente', () => {
+  const uid = uidDeResidente('ana@ejemplo.com');
+
+  it('SEC: createUser receives only the uid', async () => {
+    const { auth, createUser } = authCon();
+    const service = new FirebaseUsuariosService(auth);
+
+    await service.crearIdentidadResidente(uid);
+
+    expect(createUser).toHaveBeenCalledTimes(1);
+    expect(createUser).toHaveBeenCalledWith({ uid });
+    const args = (createUser.mock.calls as unknown[][])[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(args)).toEqual(['uid']);
+  });
+
+  it('SEC: resident uid carries no address', () => {
+    expect(uid).toMatch(/^rc1_[0-9a-f]{64}$/);
+    expect(uid).toBe(`rc1_${claveCorreo('ana@ejemplo.com')}`);
+    expect(uid).not.toContain('ana');
+    expect(uid).not.toContain('ejemplo');
+    // The same address in any spelling lands on the same identity.
+    expect(uidDeResidente('  ANA@Ejemplo.COM ')).toBe(uid);
+  });
+
+  it('auth/uid-already-exists cuenta como éxito (carrera o reintento tras un fallo)', async () => {
+    const { auth } = authCon({
+      crear: jest.fn().mockRejectedValue({ code: 'auth/uid-already-exists' }),
+    });
+    const service = new FirebaseUsuariosService(auth);
+
+    await expect(service.crearIdentidadResidente(uid)).resolves.toBeUndefined();
+  });
+
+  it('deja pasar cualquier otro error', async () => {
+    const { auth } = authCon({
+      crear: jest.fn().mockRejectedValue(new Error('fuera de línea')),
+    });
+    const service = new FirebaseUsuariosService(auth);
+
+    await expect(service.crearIdentidadResidente(uid)).rejects.toThrow(
+      'fuera de línea',
+    );
+  });
+
+  it('SEC: rechaza un uid que no sea rc1_ + 64 hex, sin llamar a Firebase', async () => {
+    const { auth, createUser } = authCon();
+    const service = new FirebaseUsuariosService(auth);
+
+    await expect(
+      service.crearIdentidadResidente('ana@ejemplo.com'),
+    ).rejects.toThrow();
+    await expect(service.crearIdentidadResidente('rc1_abc')).rejects.toThrow();
+    await expect(service.crearIdentidadResidente('')).rejects.toThrow();
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('SEC: nunca consulta por correo', async () => {
+    const getUserByEmail = jest.fn();
+    const createUser = jest.fn().mockResolvedValue({ uid });
+    const service = new FirebaseUsuariosService({
+      createUser,
+      getUserByEmail,
+    } as unknown as Auth);
+
+    await service.crearIdentidadResidente(uid);
+
+    expect(getUserByEmail).not.toHaveBeenCalled();
   });
 });
