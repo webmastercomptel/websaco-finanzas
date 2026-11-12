@@ -1,99 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { claveCorreo } from '../../common/utils/email.utils';
-import { IngresoPortalService } from './ingreso-portal.service';
-
-const CORREO = 'ana@example.com';
-const CLAVE = claveCorreo(CORREO);
-const TOKEN = 'ab'.repeat(32);
-const COPRO_A = new Types.ObjectId().toString();
-const COPRO_B = new Types.ObjectId().toString();
-
-interface Opciones {
-  /** What `copropiedadesPorCorreo` answers: coproperty id -> party ids. */
-  copropiedades?: Map<string, string[]>;
-  /** Coproperties with an active revocation. */
-  revocadas?: string[];
-  /** The Account of the address, if any. */
-  cuenta?: { estado: 'active' | 'inactive' } | null;
-  /** `permitir` answers in call order; default true. */
-  permisos?: boolean[] | ((clave: string) => boolean);
-  configurado?: boolean;
-  enviado?: boolean;
-  frontendUrl?: string | undefined;
-  crearFalla?: boolean;
-}
-
-function montar(over: Opciones = {}) {
-  const copropiedades =
-    over.copropiedades ??
-    new Map([[COPRO_A, [new Types.ObjectId().toString()]]]);
-  const residencia = {
-    copropiedadesPorCorreo: jest.fn().mockResolvedValue(copropiedades),
-    revocacionesActivas: jest
-      .fn()
-      .mockResolvedValue(new Set(over.revocadas ?? [])),
-  };
-  const enlaces = {
-    crear: over.crearFalla
-      ? jest.fn().mockRejectedValue(new Error('E11000 dup key: { tokenHash }'))
-      : jest.fn().mockResolvedValue({ token: TOKEN, expiraEn: new Date() }),
-  };
-  const correo = {
-    estaConfigurado: jest.fn(() => over.configurado ?? true),
-    enviar: jest.fn().mockResolvedValue(over.enviado ?? true),
-  };
-  const config = {
-    get: jest.fn((clave: string) =>
-      clave === 'app.frontendUrl'
-        ? 'frontendUrl' in over
-          ? over.frontendUrl
-          : 'https://app.ejemplo.com'
-        : undefined,
-    ),
-  };
-  const llamadasPermitir: string[] = [];
-  const respuestas = Array.isArray(over.permisos) ? [...over.permisos] : [];
-  const limite = {
-    permitir: jest.fn((clave: string) => {
-      llamadasPermitir.push(clave);
-      if (typeof over.permisos === 'function') {
-        return Promise.resolve(over.permisos(clave));
-      }
-      return Promise.resolve(
-        respuestas.length > 0 ? respuestas.shift()! : true,
-      );
-    }),
-  };
-  const cuentas = {
-    findOne: jest.fn(() => ({
-      select: () => ({
-        lean: () => ({
-          exec: () =>
-            Promise.resolve(over.cuenta === undefined ? null : over.cuenta),
-        }),
-      }),
-    })),
-  };
-  const servicio = new IngresoPortalService(
-    residencia as never,
-    enlaces as never,
-    correo as never,
-    config as never,
-    limite as never,
-    cuentas as never,
-  );
-  return {
-    servicio,
-    residencia,
-    enlaces,
-    correo,
-    config,
-    limite,
-    cuentas,
-    llamadasPermitir,
-  };
-}
+import {
+  CLAVE,
+  COPRO_A,
+  COPRO_B,
+  CORREO,
+  montar,
+  TOKEN,
+} from './testing/montar-servicio';
 
 describe('IngresoPortalService.solicitar - eligibility', () => {
   it('SEC: mail goes only to an eligible address (titular or arrendatario of an active unit)', async () => {

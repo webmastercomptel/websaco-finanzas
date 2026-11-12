@@ -2317,6 +2317,19 @@ export interface EnlaceCanjeado {
   destino: string;
 }
 
+/**
+ * Response of `POST /auth/portal/canjear` (public), the explicit redeem of a
+ * resident's sign-in link. `sesion`: sign in with `signInWithCustomToken` and
+ * go to the portal (the landing path is the page's own constant, never read
+ * from here). `confirmado`: the address is proven but this account signs in
+ * with its password (staff with Finanzas keys, platform admins); NO token of any
+ * kind travels in that answer. Nothing else about the account, the party, the
+ * units or the address is ever returned.
+ */
+export type CanjeIngresoPortal =
+  | { resultado: 'sesion'; customToken: string }
+  | { resultado: 'confirmado' };
+
 /* ── Consulta de Movimiento Contable (§12) ────────────────────── */
 
 /** One debit or credit line within a journal entry card. */
