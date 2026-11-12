@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   GUARDS_METADATA,
   HTTP_CODE_METADATA,
+  INTERCEPTORS_METADATA,
   METHOD_METADATA,
   PATH_METADATA,
 } from '@nestjs/common/constants';
@@ -12,9 +13,15 @@ import {
   NotFoundException,
   RequestMethod,
   StreamableFile,
+  type ExecutionContext,
 } from '@nestjs/common';
+import { of } from 'rxjs';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import { PUBLIC_KEY } from '../casl/check-ability.decorator';
+import {
+  CABECERAS_DE_SEGURIDAD,
+  CabecerasDeSeguridadInterceptor,
+} from './cabeceras-de-seguridad.interceptor';
 import { FacturaPublicaController } from './factura-publica.controller';
 import { MENSAJE_OPACO, PISO_DE_TIEMPO_MS } from './factura-publica.constantes';
 
@@ -49,11 +56,9 @@ function montar(opciones: { resolucion?: Resolucion; limite?: unknown } = {}) {
       return Promise.resolve(n <= maximo);
     }),
   };
-  const res = { set: jest.fn(), send: jest.fn() };
   return {
     servicio,
     limite: limite as { permitir: jest.Mock },
-    res,
     controlador: new FacturaPublicaController(
       servicio as never,
       limite as never,
@@ -70,15 +75,13 @@ async function correr(
   token: string = TOKEN,
   peticion: object = req(),
 ) {
-  const promesa = m.controlador
-    .obtenerPdf({ token }, peticion as never, m.res as never)
-    .then(
-      (archivo) => ({
-        error: null as unknown,
-        archivo,
-      }),
-      (error: unknown) => ({ error, archivo: undefined }),
-    );
+  const promesa = m.controlador.obtenerPdf({ token }, peticion as never).then(
+    (archivo) => ({
+      error: null as unknown,
+      archivo,
+    }),
+    (error: unknown) => ({ error, archivo: undefined }),
+  );
   await jest.advanceTimersByTimeAsync(PISO_DE_TIEMPO_MS);
   return promesa;
 }
@@ -86,12 +89,6 @@ async function correr(
 /** The bytes a returned file carries (a Buffer-backed stream reads at once). */
 const bytesDe = (archivo: StreamableFile | undefined): Buffer =>
   archivo!.getStream().read() as Buffer;
-
-const cabeceras = (m: Montaje): Record<string, string> =>
-  Object.assign(
-    {},
-    ...m.res.set.mock.calls.map((c) => c[0] as Record<string, string>),
-  ) as Record<string, string>;
 
 let registros: jest.SpyInstance[];
 const todoLoRegistrado = () =>
@@ -132,6 +129,42 @@ describe('FacturaPublicaController — política de ruta', () => {
     ).toBeUndefined();
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(200);
   });
+
+  it('SEC: las cabeceras de seguridad las pone un interceptor de la clase, así llegan también al 400 del pipe', () => {
+    expect(
+      Reflect.getMetadata(INTERCEPTORS_METADATA, FacturaPublicaController),
+    ).toEqual([CabecerasDeSeguridadInterceptor]);
+  });
+});
+
+describe('CabecerasDeSeguridadInterceptor', () => {
+  it('pone exactamente las cabeceras de seguridad ANTES de llamar al handler', () => {
+    const res = { set: jest.fn<void, [Record<string, string>]>() };
+    const contexto = {
+      switchToHttp: () => ({ getResponse: () => res }),
+    } as unknown as ExecutionContext;
+    const handle = jest.fn(() => {
+      // Already set when the handler (and the pipe before it) runs.
+      expect(res.set).toHaveBeenCalledTimes(1);
+      return of(undefined);
+    });
+
+    new CabecerasDeSeguridadInterceptor().intercept(contexto, { handle });
+
+    expect(handle).toHaveBeenCalledTimes(1);
+    const puestas = res.set.mock.calls[0][0];
+    expect(puestas).toEqual({
+      'Cache-Control': 'no-store',
+      Pragma: 'no-cache',
+      'Referrer-Policy': 'no-referrer',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    expect(Object.keys(puestas).map((k) => k.toLowerCase())).not.toContain(
+      'set-cookie',
+    );
+    expect(puestas).toBe(CABECERAS_DE_SEGURIDAD);
+  });
 });
 
 describe('FacturaPublicaController.obtenerPdf — éxito', () => {
@@ -141,8 +174,6 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
     const { error, archivo } = await correr(m);
 
     expect(error).toBeNull();
-    // Returned, never written by hand: see the HTTP spec for why.
-    expect(m.res.send).not.toHaveBeenCalled();
     expect(archivo).toBeInstanceOf(StreamableFile);
     expect(bytesDe(archivo)).toEqual(Buffer.from(PDF));
     expect(archivo!.getHeaders()).toEqual({
@@ -150,17 +181,6 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
       disposition: 'inline; filename="factura-FV-0001.pdf"',
       length: PDF.length,
     });
-    const h = cabeceras(m);
-    expect(h).toEqual({
-      'Cache-Control': 'no-store',
-      Pragma: 'no-cache',
-      'Referrer-Policy': 'no-referrer',
-      'X-Robots-Tag': 'noindex, nofollow',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    expect(Object.keys(h).map((k) => k.toLowerCase())).not.toContain(
-      'set-cookie',
-    );
     expect(m.servicio.resolver).toHaveBeenCalledWith(TOKEN);
   });
 
@@ -232,20 +252,20 @@ describe('FacturaPublicaController.obtenerPdf — rechazo uniforme', () => {
   async function respuestaDe(
     token: string,
     resolucion: Resolucion,
-  ): Promise<{ estado: number; cuerpo: unknown; cabeceras: object }> {
+  ): Promise<{ estado: number; cuerpo: unknown }> {
     const m = montar({ resolucion });
     const { error } = await correr(m, token);
     expect(error).toBeInstanceOf(HttpException);
     const e = error as HttpException;
-    expect(m.res.send).not.toHaveBeenCalled();
     return {
       estado: e.getStatus(),
       cuerpo: e.getResponse(),
-      cabeceras: cabeceras(m),
     };
   }
 
-  it('SEC: uniform refusal is byte-identical — misma respuesta (estado, cuerpo, cabeceras) para toda causa', async () => {
+  // The headers are the interceptor's, identical for every answer by
+  // construction (see the HTTP spec).
+  it('SEC: uniform refusal is byte-identical — misma respuesta (estado, cuerpo) para toda causa', async () => {
     const respuestas = [];
     for (const [, token, resolucion] of causas) {
       respuestas.push(await respuestaDe(token, resolucion));
@@ -254,9 +274,6 @@ describe('FacturaPublicaController.obtenerPdf — rechazo uniforme', () => {
     for (const r of respuestas) expect(r).toEqual(respuestas[0]);
     expect(respuestas[0].estado).toBe(404);
     expect(respuestas[0].cuerpo).toMatchObject({ message: MENSAJE_OPACO });
-    expect(respuestas[0].cabeceras).toMatchObject({
-      'Cache-Control': 'no-store',
-    });
   });
 
   it('SEC: no enumeration via status or body — ni el número de factura, ni ids, ni el texto del personal llegan al cliente', async () => {
@@ -282,7 +299,7 @@ describe('FacturaPublicaController.obtenerPdf — rechazo uniforme', () => {
       const m = montar({ resolucion });
       let respondio = false;
       const promesa = m.controlador
-        .obtenerPdf({ token }, req() as never, m.res as never)
+        .obtenerPdf({ token }, req() as never)
         .catch(() => undefined)
         .then(() => {
           respondio = true;
@@ -337,7 +354,6 @@ describe('FacturaPublicaController.obtenerPdf — límites', () => {
 
     expect((error as HttpException).getStatus()).toBe(429);
     expect(m.servicio.resolver).not.toHaveBeenCalled();
-    expect(m.res.send).not.toHaveBeenCalled();
   });
 
   it('SEC: rate limit fails closed, per IP and per token — claves por IP y por hash del token, sin cubo global ni token crudo', async () => {
@@ -387,7 +403,6 @@ describe('FacturaPublicaController.obtenerPdf — límites', () => {
     expect(ra.getStatus()).toBe(429);
     expect(rb.getStatus()).toBe(429);
     expect(ra.getResponse()).toEqual(rb.getResponse());
-    expect(cabeceras(a)['Cache-Control']).toBe('no-store');
   });
 });
 

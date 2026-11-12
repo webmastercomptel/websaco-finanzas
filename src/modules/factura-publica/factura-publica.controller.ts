@@ -10,12 +10,12 @@ import {
   NotFoundException,
   Post,
   Req,
-  Res,
   StreamableFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import type { Response } from 'express';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import { Public } from '../casl/check-ability.decorator';
+import { CabecerasDeSeguridadInterceptor } from './cabeceras-de-seguridad.interceptor';
 import { ObtenerFacturaPublicaDto } from './dto/obtener-factura-publica.dto';
 import { EnlaceFacturaService } from './enlace-factura.service';
 import {
@@ -32,17 +32,6 @@ import { esperarPisoDeTiempo } from './piso-de-tiempo';
 const LIMITE_POR_IP = 30;
 const LIMITE_POR_TOKEN = 10;
 const VENTANA_MS = 60_000;
-
-/** Sent on EVERY answer of this route, success or refusal: the page is a
- *  personal document behind a bearer link, never to be cached, indexed,
- *  sniffed or leaked through a `Referer`. */
-const CABECERAS_DE_SEGURIDAD = {
-  'Cache-Control': 'no-store',
-  Pragma: 'no-cache',
-  'Referrer-Policy': 'no-referrer',
-  'X-Robots-Tag': 'noindex, nofollow',
-  'X-Content-Type-Options': 'nosniff',
-};
 
 /** The file name comes from the invoice number alone, reduced to a safe set. */
 function nombreDeArchivo(numeroCompleto: string): string {
@@ -63,13 +52,15 @@ function nombreDeArchivo(numeroCompleto: string): string {
  * fixed message, answered no sooner than `PISO_DE_TIEMPO_MS`, so neither the
  * status, the body, the headers nor the timing say which check refused. The
  * limiter fails closed. The tenant is the link's own; this route reads no
- * header, cookie or tenant context.
+ * header, cookie or tenant context. The security headers of every answer,
+ * the 400 included, come from `CabecerasDeSeguridadInterceptor`.
  *
  * Logging: the service logs refusals with the link id and an internal reason;
  * this controller logs only a successful serve (link id and send id). Never
  * the token, its hash, an address or the IP.
  */
 @Controller('publico/facturas')
+@UseInterceptors(CabecerasDeSeguridadInterceptor)
 export class FacturaPublicaController {
   private readonly logger = new Logger(FacturaPublicaController.name);
 
@@ -84,11 +75,8 @@ export class FacturaPublicaController {
   async obtenerPdf(
     @Body() dto: ObtenerFacturaPublicaDto,
     @Req() req: { ip?: string },
-    @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile> {
     const inicio = Date.now();
-    // Set before anything can throw, so a refusal and a 429 carry them too.
-    res.set(CABECERAS_DE_SEGURIDAD);
 
     const ip = req.ip ?? 'desconocida';
     if (
@@ -129,10 +117,10 @@ export class FacturaPublicaController {
     this.logger.log(
       `enlace ${resuelto.enlaceId} servido (envío ${resuelto.envioFacturaId})`,
     );
-    // Returned, never `res.send`: with `passthrough` Nest still writes the
-    // handler's value, and the global envelope would be written onto an
-    // already-sent response (ERR_HTTP_HEADERS_SENT, reported to Sentry). The
-    // envelope interceptor lets a StreamableFile through untouched.
+    // Returned, never written with `res.send`: Nest writes the handler's value
+    // anyway, and the global envelope landed on an already-sent response
+    // (ERR_HTTP_HEADERS_SENT, reported to Sentry). The envelope interceptor
+    // lets a StreamableFile through untouched.
     return new StreamableFile(Buffer.from(resuelto.bytes), {
       type: 'application/pdf',
       disposition: `inline; filename="${nombreDeArchivo(resuelto.numeroCompleto)}"`,

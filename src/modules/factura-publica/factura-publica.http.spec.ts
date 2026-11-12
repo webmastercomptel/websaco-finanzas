@@ -140,4 +140,19 @@ describe('POST /publico/facturas/pdf sobre una app HTTP real', () => {
     expect(res.status).toBe(429);
     esperarCabecerasDeSeguridad(res);
   });
+
+  it.each([
+    ['token no textual', { token: {} }],
+    ['sin token', {}],
+    ['campo extra', { token: TOKEN, facturaId: 'x' }],
+  ])(
+    'el 400 por la forma del cuerpo (%s) también lleva las cabeceras de seguridad',
+    async (_nombre, cuerpo) => {
+      const res = await request(servidor()).post(RUTA).send(cuerpo);
+
+      expect(res.status).toBe(400);
+      esperarCabecerasDeSeguridad(res);
+      expect(enlaces.resolver).not.toHaveBeenCalled();
+    },
+  );
 });
