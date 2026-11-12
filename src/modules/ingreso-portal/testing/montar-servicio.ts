@@ -70,6 +70,54 @@ export interface Opciones {
   tokenFalla?: boolean;
   /** A real in-memory store for the Account (filters and updates evaluated). */
   cuentasEnMemoria?: ColeccionMemoria;
+  /** The name of the party that carries the address; null = no such party. */
+  nombreTercero?: string | null;
+  /** Creating the Firebase identity fails. */
+  identidadFalla?: boolean;
+  /** Writing the audit entry fails. */
+  auditoriaFalla?: boolean;
+}
+
+/** A Mongo session that undoes what was written through it when the callback throws. */
+export class SesionFalsa {
+  readonly deshacer: (() => void)[] = [];
+
+  async withTransaction(fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (error: unknown) {
+      for (const deshacer of [...this.deshacer].reverse()) deshacer();
+      throw error;
+    }
+  }
+
+  endSession(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+/** `Model.create([doc], { session })` over the in-memory store, with undo. */
+function adaptarCuentas(memoria: ColeccionMemoria) {
+  return {
+    findOne: (filtro: Record<string, unknown>) => memoria.findOne(filtro),
+    updateOne: (
+      filtro: Record<string, unknown>,
+      cambio: Record<string, unknown>,
+    ) => memoria.updateOne(filtro, cambio),
+    create: async (
+      docs: Record<string, unknown>[],
+      opciones?: { session?: SesionFalsa },
+    ) => {
+      const creada = await memoria.create(docs[0]);
+      opciones?.session?.deshacer.push(() => {
+        const i = memoria.docs.findIndex(
+          (d) => String(d._id) === String(creada._id),
+        );
+        if (i >= 0) memoria.docs.splice(i, 1);
+      });
+      return [creada];
+    },
+  };
 }
 
 export function montar(over: Opciones = {}) {
@@ -78,7 +126,11 @@ export function montar(over: Opciones = {}) {
   const copropiedades =
     over.copropiedades ??
     new Map([[COPRO_A, [new Types.ObjectId().toString()]]]);
+  const terceroId = new Types.ObjectId().toString();
   const residencia = {
+    tercerosPorCorreo: jest.fn(() =>
+      Promise.resolve([{ id: terceroId, copropiedadId: COPRO_A }]),
+    ),
     copropiedadesPorCorreo: jest.fn(() => {
       eventos.push('elegibilidad');
       return Promise.resolve(copropiedades);
@@ -151,9 +203,12 @@ export function montar(over: Opciones = {}) {
     }),
   };
   // Typed as mocks so specs can assert on them (the in-memory store is cast).
-  const cuentas = (over.cuentasEnMemoria ?? cuentasSimuladas) as unknown as {
+  const cuentas = (over.cuentasEnMemoria
+    ? adaptarCuentas(over.cuentasEnMemoria)
+    : cuentasSimuladas) as unknown as {
     findOne: jest.Mock;
     updateOne: jest.Mock;
+    create: jest.Mock;
   };
   const acceso = {
     copropiedadesDe: jest.fn(() => {
@@ -176,6 +231,55 @@ export function montar(over: Opciones = {}) {
     }),
   };
 
+  // First-use collaborators.
+  const nombreTercero =
+    over.nombreTercero === undefined ? 'Ana Propietaria' : over.nombreTercero;
+  const terceros = {
+    findOne: jest.fn(() => {
+      const cadena = {
+        select: () => cadena,
+        lean: () => cadena,
+        exec: () =>
+          Promise.resolve(
+            nombreTercero === null ? null : { nombre: nombreTercero },
+          ),
+      };
+      return cadena;
+    }),
+  };
+  const firebase = {
+    crearIdentidadResidente: jest.fn((uid: string) => {
+      eventos.push('identidad');
+      void uid;
+      return over.identidadFalla
+        ? Promise.reject(new Error('firebase down'))
+        : Promise.resolve();
+    }),
+  };
+  const entradasAuditoria: Record<string, unknown>[] = [];
+  const auditoria = {
+    registrar: jest.fn(
+      (entrada: Record<string, unknown>, session?: SesionFalsa) => {
+        eventos.push('auditoria');
+        if (over.auditoriaFalla) return Promise.reject(new Error('audit down'));
+        entradasAuditoria.push(entrada);
+        session?.deshacer.push(() => {
+          entradasAuditoria.splice(entradasAuditoria.indexOf(entrada), 1);
+        });
+        return Promise.resolve();
+      },
+    ),
+  };
+  const sesiones: SesionFalsa[] = [];
+  const connection = {
+    startSession: jest.fn(() => {
+      eventos.push('transaccion');
+      const sesion = new SesionFalsa();
+      sesiones.push(sesion);
+      return Promise.resolve(sesion);
+    }),
+  };
+
   const servicio = new IngresoPortalService(
     residencia as never,
     enlaces as never,
@@ -186,6 +290,10 @@ export function montar(over: Opciones = {}) {
     asignaciones as never,
     acceso as never,
     auth as never,
+    terceros as never,
+    firebase as never,
+    auditoria as never,
+    connection as never,
   );
   return {
     servicio,
@@ -198,6 +306,13 @@ export function montar(over: Opciones = {}) {
     asignaciones,
     acceso,
     auth,
+    terceros,
+    firebase,
+    auditoria,
+    entradasAuditoria,
+    connection,
+    sesiones,
+    terceroId,
     llamadasPermitir,
     actualizaciones,
     eventos,

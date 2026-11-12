@@ -2327,8 +2327,7 @@ export interface EnlaceCanjeado {
  * units or the address is ever returned.
  */
 export type CanjeIngresoPortal =
-  | { resultado: 'sesion'; customToken: string }
-  | { resultado: 'confirmado' };
+  { resultado: 'sesion'; customToken: string } | { resultado: 'confirmado' };
 
 /* ── Consulta de Movimiento Contable (§12) ────────────────────── */
 
@@ -2636,7 +2635,8 @@ export interface RegistroAuditoriaContract {
     | 'retirar'
     | 'marcar-envio'
     | 'enviar'
-    | 'eliminar';
+    | 'eliminar'
+    | 'restablecer';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -2646,7 +2646,8 @@ export interface RegistroAuditoriaContract {
     | 'inmueble'
     | 'lote-comptable'
     | 'envio-factura'
-    | 'rol';
+    | 'rol'
+    | 'acceso-residente';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;

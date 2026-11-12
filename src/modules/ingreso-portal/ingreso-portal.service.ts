@@ -1,14 +1,16 @@
 // src/modules/ingreso-portal/ingreso-portal.service.ts
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { Auth } from 'firebase-admin/auth';
-import { Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AccesoService } from '../../common/acceso/acceso.service';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
 import { CorreoService } from '../../common/correo/correo.service';
 import { cuentaAdmiteSesionPorEnlace } from '../../common/cuentas/politica-enlace';
 import { FIREBASE_AUTH } from '../../common/firebase/firebase.constants';
+import { FirebaseUsuariosService } from '../../common/firebase/firebase-usuarios.service';
+import { uidDeResidente } from '../../common/firebase/uid-residente';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import {
   claveCorreo,
@@ -23,8 +25,13 @@ import {
   Asignacion,
   type AsignacionDocument,
 } from '../../database/schemas/cuentas/asignacion.schema';
+import {
+  Tercero,
+  type TerceroDocument,
+} from '../../database/schemas/terceros/tercero.schema';
 import type { OrigenEnlaceIngreso } from '../../database/schemas/cuentas/enlace-ingreso.schema';
 import type { CanjeIngresoPortal } from '../../contracts';
+import { AuditoriaService } from '../auditoria/auditoria.service';
 import { diagnosticarFrontendUrl } from '../health/frontend-url.health';
 import { construirCorreoIngreso } from './correo-ingreso';
 import {
@@ -84,6 +91,11 @@ export class IngresoPortalService {
     private readonly asignaciones: Model<AsignacionDocument>,
     private readonly acceso: AccesoService,
     @Inject(FIREBASE_AUTH) private readonly auth: Auth,
+    @InjectModel(Tercero.name)
+    private readonly terceros: Model<TerceroDocument>,
+    private readonly firebase: FirebaseUsuariosService,
+    private readonly auditoria: AuditoriaService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -222,17 +234,114 @@ export class IngresoPortalService {
   }
 
   /**
-   * First-use Account of a resident whose address has none. Implemented in the
-   * next unit (identity through `FirebaseUsuariosService`, then the Account and
-   * its audit entry in one transaction); the redeem depends on this signature
-   * only. Until then it refuses, so nothing can half-create an Account.
+   * First-use Account of a resident whose address has none.
+   *
+   * Order, and why it is safe to repeat or race:
+   *  1. The name of a party that carries the address in one of the coproperties
+   *     where it qualified (a read; nothing is created for an address that
+   *     stopped being on a record).
+   *  2. The Firebase identity, ONLY through `FirebaseUsuariosService`: uid
+   *     `rc1_` + `claveCorreo`, no e-mail, no password. Deterministic and
+   *     `uid-already-exists` counts as success, so a retry after a crash or a
+   *     concurrent redeem reuses the same inert identity.
+   *  3. The Account and its audit entry in ONE Mongo transaction (a failed audit
+   *     write saves no Account; the identity may stay, inert). The unique
+   *     `email` index decides a race: the loser's insert hits E11000, it
+   *     re-reads the winner's Account and goes on as an existing one.
+   * No `Asignacion`, no `Tercero.accountId`, no role, no password.
    */
   async crearCuentaPrimerUso(
-    _correo: string,
-    _copropiedadIds: string[],
+    correo: string,
+    copropiedadIds: string[],
   ): Promise<CuentaDeIngreso> {
-    await Promise.resolve();
-    throw new Error('crearCuentaPrimerUso: aún no disponible');
+    const nombre = await this.nombreDeTercero(correo, copropiedadIds);
+    if (!nombre) throw new Error('Sin ficha que respalde el correo');
+
+    const firebaseUid = uidDeResidente(correo);
+    await this.firebase.crearIdentidadResidente(firebaseUid);
+
+    try {
+      return await this.transaccion(async (session) => {
+        const [creada] = await this.cuentas.create(
+          [
+            {
+              firebaseUid,
+              email: correo,
+              nombreCompleto: nombre,
+              esAdministradorPlataforma: false,
+              estado: 'active',
+            },
+          ],
+          { session },
+        );
+        await this.auditoria.registrar(
+          {
+            actorAccountId: creada._id.toString(),
+            actorNombre: nombre,
+            accion: 'crear',
+            entidadTipo: 'acceso-residente',
+            entidadId: creada._id.toString(),
+            // Party and coproperties by name/id only: no address, no unit.
+            entidadEtiqueta: `Ingreso de residente: ${nombre} (copropiedad ${copropiedadIds.join(', ')})`,
+          },
+          session,
+        );
+        return {
+          _id: creada._id,
+          email: creada.email,
+          firebaseUid: creada.firebaseUid,
+          estado: 'active' as const,
+          esAdministradorPlataforma: false,
+          correoProbadoClave: null,
+        };
+      });
+    } catch (error: unknown) {
+      if ((error as { code?: number })?.code !== 11000) throw error;
+      // Lost the race for the address: the winner's Account is the one.
+      const ganadora = await this.cuentas
+        .findOne({ email: correo })
+        .lean()
+        .exec();
+      if (!ganadora) throw error;
+      return ganadora;
+    }
+  }
+
+  /** A party's name for the Account: one that carries the address, in a coproperty where it qualified. */
+  private async nombreDeTercero(
+    correo: string,
+    copropiedadIds: string[],
+  ): Promise<string | null> {
+    const partes = await this.residencia.tercerosPorCorreo(correo);
+    const parte = partes.find((p) => copropiedadIds.includes(p.copropiedadId));
+    if (!parte) return null;
+    // `_id` AND `copropiedadId` from the matched record: a name is never read
+    // across coproperties.
+    const ficha = await this.terceros
+      .findOne({
+        _id: new Types.ObjectId(parte.id),
+        copropiedadId: new Types.ObjectId(parte.copropiedadId),
+      })
+      .select('nombre')
+      .lean()
+      .exec();
+    return ficha?.nombre ?? null;
+  }
+
+  /** `withTransaction` may re-run the callback on a transient error: every write in it is safe to repeat. */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
   }
 
   /**
