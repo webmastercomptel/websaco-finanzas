@@ -137,6 +137,31 @@ describe('DocumentosActorService.deCuentas', () => {
     expect(mapa.get(CUENTA.toString())?.gestiona).toBe(true);
   });
 
+  it('pasa a AccesoService la cuenta que ya leyó, sin otra lectura por cuenta', async () => {
+    const { servicio, acceso, modeloCuentas } = montar(
+      [],
+      [
+        {
+          _id: CUENTA,
+          email: 'p@x.co',
+          estado: 'active',
+          correoProbadoClave: null,
+          esAdministradorPlataforma: false,
+        },
+      ],
+    );
+
+    await servicio.deCuentas([CUENTA.toString()], COPROPIEDAD);
+
+    expect(acceso.accesoA).toHaveBeenCalledWith(
+      CUENTA.toString(),
+      COPROPIEDAD.toString(),
+      false,
+      { email: 'p@x.co', estado: 'active', correoProbadoClave: null },
+    );
+    expect(modeloCuentas.find).toHaveBeenCalledTimes(1);
+  });
+
   it('ignora ids mal formados y no consulta con lista vacía', async () => {
     const { servicio, modeloAsignaciones } = montar();
     const mapa = await servicio.deCuentas(['no-es-id'], COPROPIEDAD);

@@ -100,10 +100,12 @@ export class DocumentosActorService {
       this.rolesDe(validos, copropiedadId),
       this.cuentas
         .find({ _id: { $in: validos.map((id) => new Types.ObjectId(id)) } })
-        .select('esAdministradorPlataforma')
+        .select('esAdministradorPlataforma email estado correoProbadoClave')
         .lean()
         .exec(),
     ]);
+    // Handed to `accesoA` so the access derivation re-reads no Account.
+    const leidas = new Map(cuentas.map((c) => [c._id.toString(), c]));
     const admins = new Set(
       cuentas
         .filter((c) => c.esAdministradorPlataforma)
@@ -111,7 +113,19 @@ export class DocumentosActorService {
     );
 
     for (const id of validos) {
-      const acceso = await this.acceso.accesoA(id, copropiedadId.toString());
+      const leida = leidas.get(id);
+      const acceso = await this.acceso.accesoA(
+        id,
+        copropiedadId.toString(),
+        false,
+        leida
+          ? {
+              email: leida.email,
+              estado: leida.estado,
+              correoProbadoClave: leida.correoProbadoClave,
+            }
+          : undefined,
+      );
       actores.set(id, {
         roleIds: roles.get(id) ?? new Set(),
         gestiona:

@@ -86,14 +86,20 @@ export class DirectorioService {
     private readonly residencia: ResidenciaService,
   ) {}
 
-  /** The active accounts among `ids`, keyed by id. */
+  /**
+   * The active accounts among `ids`, keyed by id. `correoProbadoClave` is
+   * read too, so the account can be handed to `AccesoService.accesoA` and the
+   * access derivation re-reads nothing.
+   */
   private async cuentasActivas(
     ids: Types.ObjectId[],
   ): Promise<Map<string, AccountDocument>> {
     if (ids.length === 0) return new Map();
     const encontradas = await this.cuentas
       .find({ _id: { $in: ids }, estado: 'active' })
-      .select('email nombreCompleto esAdministradorPlataforma')
+      .select(
+        'email nombreCompleto esAdministradorPlataforma correoProbadoClave',
+      )
       .lean()
       .exec();
     return new Map(encontradas.map((c) => [c._id.toString(), c]));
@@ -452,7 +458,12 @@ export class DirectorioService {
 
     const resultado: Destinatario[] = [];
     for (const [id, cuenta] of cuentas) {
-      const acceso = await this.acceso.accesoA(id, copropiedadId.toString());
+      const acceso = await this.acceso.accesoA(
+        id,
+        copropiedadId.toString(),
+        false,
+        { email: cuenta.email, correoProbadoClave: cuenta.correoProbadoClave },
+      );
       if (!acceso) continue;
       if (
         cuenta.esAdministradorPlataforma ||
@@ -503,6 +514,8 @@ export class DirectorioService {
     const acceso = await this.acceso.accesoA(
       accountId,
       copropiedadId.toString(),
+      false,
+      { email: cuenta.email, correoProbadoClave: cuenta.correoProbadoClave },
     );
     if (!acceso) return null;
 

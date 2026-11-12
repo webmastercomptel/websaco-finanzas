@@ -955,3 +955,27 @@ describe('DirectorioService con un buzón genérico', () => {
     expect(motivosCorreoGenerico).toHaveBeenCalledWith(['porteria@x.com']);
   });
 });
+
+describe('DirectorioService pasa la cuenta que ya tiene a AccesoService', () => {
+  it('personalQuePuedeLeer y destinatarioDe no hacen que se relea la cuenta', async () => {
+    const id = oid();
+    const { servicio, accesoA } = crear({
+      asignaciones: [{ accountId: id }],
+      cuentas: [cuenta(id, 'Mara', { correoProbadoClave: null })],
+      accesos: { [id.toString()]: acceso(['tareas.ver']) },
+    });
+
+    await servicio.personalQuePuedeLeer(COP, 'Tarea');
+    await servicio.destinatarioDe(id.toString(), COP, 'Tarea');
+
+    expect(accesoA).toHaveBeenCalledTimes(2);
+    for (const llamada of accesoA.mock.calls as unknown[][]) {
+      expect(llamada).toEqual([
+        id.toString(),
+        COP.toString(),
+        false,
+        { email: 'mara@ejemplo.com', correoProbadoClave: null },
+      ]);
+    }
+  });
+});
