@@ -158,7 +158,7 @@ describe('CuentaService.resolverPorToken', () => {
     ).rejects.toThrow();
 
     expect(warn).toHaveBeenCalledTimes(1);
-    const mensaje = String(warn.mock.calls[0][0]);
+    const mensaje = String((warn.mock.calls as unknown[][])[0][0]);
     expect(mensaje).toContain(CUENTA_ID.toString());
     expect(mensaje).not.toContain(EMAIL);
   });
@@ -173,7 +173,7 @@ describe('CuentaService.resolverPorToken', () => {
     await servicio.resolverPorToken('uid-nuevo', ' Persona@Example.com ');
 
     expect(log).toHaveBeenCalledTimes(1);
-    const mensaje = String(log.mock.calls[0][0]);
+    const mensaje = String((log.mock.calls as unknown[][])[0][0]);
     expect(mensaje).toContain(CUENTA_ID.toString());
     expect(mensaje.toLowerCase()).not.toContain('persona@example.com');
     expect(mensaje).not.toContain('uid-nuevo');

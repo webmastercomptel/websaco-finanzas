@@ -327,13 +327,13 @@ describe('PortalAccesoService unidades por dirección probada', () => {
 
     const deA = await servicio(
       sinVinculo(),
-      inmuebles as never,
+      inmuebles,
       cuentaDe('a@example.com'),
       residencia,
     ).unidadesDe(CUENTA.toString(), COP.toString());
     const deB = await servicio(
       sinVinculo(),
-      inmuebles as never,
+      inmuebles,
       cuentaDe('b@example.com'),
       residencia,
     ).unidadesDe(CUENTA.toString(), COP.toString());
