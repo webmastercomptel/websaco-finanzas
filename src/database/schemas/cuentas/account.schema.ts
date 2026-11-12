@@ -53,6 +53,24 @@ export class Account {
    */
   @Prop({ required: true, enum: ['active', 'inactive'], default: 'active' })
   estado: 'active' | 'inactive';
+
+  /**
+   * Proof that the person controls `email`: `claveCorreo(email)` at the moment
+   * a sign-in link e-mailed to that address was redeemed. It only counts while
+   * it still equals `claveCorreo(email)` (a proof for another address grants
+   * nothing), and it is what lets the address on a holder record reach the
+   * resident portal. Null until the first successful redeem.
+   */
+  @Prop({ type: String, default: null })
+  correoProbadoClave: string | null;
+
+  /** When the address was first proven; later redeems keep it. */
+  @Prop({ type: Date, default: null })
+  correoProbadoEn: Date | null;
+
+  /** The last successful portal sign-in link redeem; feeds Residentes' «Entró». */
+  @Prop({ type: Date, default: null })
+  ultimoIngresoPortalEn: Date | null;
 }
 
 export const AccountSchema = SchemaFactory.createForClass(Account);

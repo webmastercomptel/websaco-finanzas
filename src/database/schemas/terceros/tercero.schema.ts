@@ -107,8 +107,12 @@ export class Tercero {
    * reason `fiscalResponsibilities` is: squeezing several values into one
    * string is how the second one gets lost. Empty, never null, so callers
    * never have to branch on absence before mapping over it.
+   *
+   * Every element is trimmed on the way in: the address is an identity for the
+   * resident portal (`ResidenciaService`), so a padded value would never match.
+   * Case is kept as typed; matching goes through the `emails_ci` index below.
    */
-  @Prop({ type: [String], default: [] })
+  @Prop({ type: [{ type: String, trim: true }], default: [] })
   emails: string[];
 
   /**
@@ -229,4 +233,18 @@ TerceroSchema.index(
     unique: true,
     partialFilterExpression: { accountId: { $type: 'objectId' } },
   },
+);
+
+// Finds the holder records that carry an address, case-insensitively: the
+// resident portal asks "which parties have this e-mail" on every request of a
+// proven account. Collation strength 2 (case-insensitive) rather than a
+// normalized shadow field, so there is no backfill and no manual step: the
+// application builds the index at boot, it is new and non-unique (no
+// IndexOptionsConflict case), and the query is still correct, only slower,
+// if it was never built. `ResidenciaService` rechecks every candidate in
+// memory (`coincideCorreo`) because a collation can equate strings that are
+// different addresses.
+TerceroSchema.index(
+  { emails: 1 },
+  { name: 'emails_ci', collation: { locale: 'en', strength: 2 } },
 );

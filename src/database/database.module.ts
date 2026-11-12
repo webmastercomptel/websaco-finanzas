@@ -184,6 +184,11 @@ import {
   EnlaceAccesoSchema,
 } from './schemas/cuentas/enlace-acceso.schema';
 
+import {
+  RevocacionPortal,
+  RevocacionPortalSchema,
+} from './schemas/cuentas/revocacion-portal.schema';
+
 import { Rol, RolSchema } from './schemas/administracion/rol.schema';
 
 import {
@@ -258,6 +263,7 @@ const models = [
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },
+  { name: RevocacionPortal.name, schema: RevocacionPortalSchema },
   {
     name: ConsecutivoAdministracion.name,
     schema: ConsecutivoAdministracionSchema,
