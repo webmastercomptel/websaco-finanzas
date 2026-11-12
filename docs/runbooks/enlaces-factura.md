@@ -81,6 +81,14 @@ route (step 1 above) also kills every link already sent. The service methods
 they have no HTTP route yet. There is no per-address revocation: removing or
 editing the address on the record already kills its links.
 
+**A mass revocation stops the links that exist now, not future e-mails.** A
+later send for the same (invoice, address) (the retry of a row half-sent, for
+instance) upserts that address's row: it issues a NEW token, resets the 30
+days and clears the revocation flag (`revocadoEn: null`, see
+`EnlaceFacturaService.emitir`). To stop future e-mails the address must be
+removed from the party record (editing the record revokes its links) or
+sending must be paused (do not call `procesar-pendientes`).
+
 Never run a script against a database without reading the target first, and
 prefer a single coproperty when the incident is local.
 
