@@ -419,7 +419,7 @@ export class EnvioFacturasProcesoService {
       };
     } catch (error: unknown) {
       this.logger.error(
-        `No se pudo procesar el envío ${etiqueta}: ${(error as Error).message}`,
+        `No se pudo procesar el envío ${etiqueta}: ${error instanceof Error ? error.name : 'desconocido'}`,
       );
       try {
         return await this.cerrarConFallo(

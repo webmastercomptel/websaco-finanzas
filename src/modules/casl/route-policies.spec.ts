@@ -355,9 +355,9 @@ describe('inventario de rutas', () => {
    * - health: Cloud Run probes carry no credentials.
    * - auth/enlace/canjear: the person following an emailed link has no session
    *   yet; single purpose (token -> custom token), rate-limited, opaque 401.
-   * - publico/facturas/pdf: la persona sigue un enlace sin cuenta; un solo PDF
-   *   (el de la factura de su enlace), limitado por IP y por enlace, 404 opaco
-   *   para toda causa de rechazo.
+   * - publico/facturas/pdf: the person following an emailed link has no
+   *   account; it serves one PDF only (the invoice the link names), rate-limited
+   *   per IP and per link, with one opaque 404 for every kind of refusal.
    */
   it('las únicas rutas @Public son las justificadas', () => {
     const publicas: string[] = [];

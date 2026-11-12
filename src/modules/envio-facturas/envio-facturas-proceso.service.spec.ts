@@ -1268,6 +1268,33 @@ describe('EnvioFacturasProcesoService — por dirección de la ficha', () => {
     }
     expect(salida).not.toContain(claveCorreo('dos@x.com'));
   });
+
+  it('SEC: el catch general de una fila registra solo la clase del error, nunca su mensaje', async () => {
+    const t = montar();
+    const unidad = t.agregarUnidad(
+      'A-101',
+      [],
+      {},
+      { titular: ['secreta@x.com'] },
+    );
+    await t.marcarTodas();
+    // A provider message may echo the address it refused.
+    jest
+      .spyOn(
+        t.proceso as unknown as { cerrarEnviada: () => Promise<void> },
+        'cerrarEnviada',
+      )
+      .mockRejectedValue(new TypeError('rechazado: secreta@x.com'));
+
+    const r = await t.proceso.procesarPendientes(staff());
+
+    expect(r).toMatchObject({ enviadas: 0 });
+    const salida = todoLoRegistrado();
+    expect(salida).toContain('TypeError');
+    expect(salida).toContain(String(t.fila(unidad)._id));
+    expect(salida).not.toContain('rechazado');
+    expect(salida).not.toContain('secreta@x.com');
+  });
 });
 
 describe('EnvioFacturasProcesoService — filas a medias del código anterior (puente heredado)', () => {
