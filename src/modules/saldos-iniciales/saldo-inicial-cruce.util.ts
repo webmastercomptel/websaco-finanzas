@@ -65,18 +65,43 @@ export async function resolverSaldosInicialesPorNumero(
 }
 
 /**
+ * The account codes of the coproperty's chart flagged `requiereDocumentoCruce`,
+ * or `null` when the chart is empty/unavailable — in which case the flags are
+ * unknowable and `documentoCruceDeMovimiento` must not strip anything. A
+ * non-empty chart with NO flagged account yields an empty Set (strip all).
+ */
+export function cuentasConDocumentoCruce(
+  cuentas: { codigo: string; requiereDocumentoCruce: boolean }[],
+): Set<string> | null {
+  if (cuentas.length === 0) return null;
+  return new Set(
+    cuentas.filter((c) => c.requiereDocumentoCruce).map((c) => c.codigo),
+  );
+}
+
+/**
  * The documento cruce to DISPLAY/EXPORT for one stored movimiento line: for a
  * Saldo Inicial (`'SI'`) the original document, otherwise what was stored.
  * `null` when the line carries no documento cruce at all.
+ *
+ * `cuentasConCruce` applies the accounting rule at READ time, so asientos
+ * already posted (before the poster stopped tagging unflagged accounts) read
+ * correctly with no data migration: a line whose account is not flagged
+ * `requiereDocumentoCruce` shows none, since the accounting software rejects
+ * a cruce on an unflagged account. `null`/omitted = chart unavailable, show
+ * what was stored (see `cuentasConDocumentoCruce`).
  */
 export function documentoCruceDeMovimiento(
   mov: {
+    cuenta?: string;
     tipoDocumento?: 'FV' | 'ND' | 'SI' | null;
     numeroDocumento?: number | null;
   },
   saldosInicialesPorNumero: Map<number, DocumentoCruceSaldoInicial>,
+  cuentasConCruce?: ReadonlySet<string> | null,
 ): { tipo: string; numero: string | number } | null {
   if (!mov.tipoDocumento || mov.numeroDocumento == null) return null;
+  if (cuentasConCruce && !cuentasConCruce.has(mov.cuenta ?? '')) return null;
   if (mov.tipoDocumento === 'SI') {
     const original = saldosInicialesPorNumero.get(mov.numeroDocumento);
     if (original) return original;

@@ -46,7 +46,10 @@ import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
-import { resolverSaldosInicialesPorNumero } from '../saldos-iniciales/saldo-inicial-cruce.util';
+import {
+  cuentasConDocumentoCruce,
+  resolverSaldosInicialesPorNumero,
+} from '../saldos-iniciales/saldo-inicial-cruce.util';
 import {
   CuentaContable,
   CuentaContableDocument,
@@ -143,10 +146,8 @@ export class MovimientoContableService {
     const cuentaCodigos = [
       ...new Set(asientos.flatMap((a) => a.movimientos.map((e) => e.cuenta))),
     ];
-    const nombrePorCuenta = await this.resolveNombresCuenta(
-      cuentaCodigos,
-      copropiedadId,
-    );
+    const { nombrePorCuenta, cuentasConCruce } =
+      await this.resolverPlanDeCuentas(cuentaCodigos, copropiedadId);
 
     const saldosInicialesPorNumero = await resolverSaldosInicialesPorNumero(
       this.saldosIniciales,
@@ -174,6 +175,7 @@ export class MovimientoContableService {
         { ...meta, numeroDocumento, codigoDocumento },
         nombrePorCuenta,
         saldosInicialesPorNumero,
+        cuentasConCruce,
       );
     });
 
@@ -226,23 +228,34 @@ export class MovimientoContableService {
     return result;
   }
 
-  /** Batch-resolve account code -> name from the coproperty's chart of
-   *  accounts. A code with no chart entry is simply absent from the map —
-   *  the caller falls back to the code itself. */
-  private async resolveNombresCuenta(
+  /** Reads the coproperty's chart once: account code -> name (a code with no
+   *  chart entry is simply absent — the caller falls back to the code) and
+   *  the set of accounts flagged `requiereDocumentoCruce`, so a line on any
+   *  other account is displayed without documento cruce (same rule as the
+   *  accounting export; `null` when the chart is empty = show what was
+   *  stored). The whole chart is read (not just `codigos`) because the flag
+   *  set must be complete to be trusted. */
+  private async resolverPlanDeCuentas(
     codigos: string[],
     copropiedadId: Types.ObjectId,
-  ): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
-    if (codigos.length === 0) return map;
-
-    const cuentas = await this.cuentasContables
-      .find({ copropiedadId, codigo: { $in: codigos } })
-      .exec();
-    for (const c of cuentas) {
-      map.set(c.codigo, c.nombre);
+  ): Promise<{
+    nombrePorCuenta: Map<string, string>;
+    cuentasConCruce: Set<string> | null;
+  }> {
+    const nombrePorCuenta = new Map<string, string>();
+    if (codigos.length === 0) {
+      return { nombrePorCuenta, cuentasConCruce: null };
     }
-    return map;
+
+    const cuentas = await this.cuentasContables.find({ copropiedadId }).exec();
+    const pedidos = new Set(codigos);
+    for (const c of cuentas) {
+      if (pedidos.has(c.codigo)) nombrePorCuenta.set(c.codigo, c.nombre);
+    }
+    return {
+      nombrePorCuenta,
+      cuentasConCruce: cuentasConDocumentoCruce(cuentas),
+    };
   }
 
   /** Build a Map<anchorId, {fullNumber, inmuebleId}> for all anchor types

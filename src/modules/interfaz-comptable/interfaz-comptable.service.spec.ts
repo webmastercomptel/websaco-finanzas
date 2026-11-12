@@ -298,6 +298,7 @@ function crear(escenario: Escenario = {}) {
     ),
     resolveConceptos: jest.fn(() => Promise.resolve(new Map())),
     resolverSaldosIniciales: jest.fn(() => Promise.resolve(new Map())),
+    resolverCuentasConCruce: jest.fn(() => Promise.resolve(null)),
   };
   const comptable = {
     configurado: jest.fn(() => escenario.configurado ?? true),

@@ -939,6 +939,10 @@ export class InterfazComptableService {
         copropiedadId,
         session,
       );
+    const cuentasConCruce = await this.resolucion.resolverCuentasConCruce(
+      copropiedadId,
+      session,
+    );
     return construirPayloadComptable(
       asientos,
       {
@@ -946,6 +950,7 @@ export class InterfazComptableService {
         anchorMap,
         conceptoMap,
         saldosInicialesPorNumero,
+        cuentasConCruce,
       },
       titulares,
       origen,

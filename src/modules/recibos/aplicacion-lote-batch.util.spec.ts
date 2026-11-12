@@ -487,6 +487,94 @@ describe('construirEscrituraFilaAplicacion', () => {
     ).toBe(true);
   });
 
+  it('intereses de mora con usaCuentasOrden: el crédito al ingreso 41355402 (cuenta NO marcada) sale sin documento cruce; la cartera (marcada) conserva su factura', () => {
+    const marcas = (requiereDocumentoCruce: boolean) => ({
+      requiereTercero: false,
+      centroUtilidad: false,
+      centroDestino: false,
+      flujoCaja: false,
+      requiereDocumentoCruce,
+    });
+    const escritura = construirEscrituraFilaAplicacion({
+      ...ctxBase(),
+      copropiedad: {
+        cuentaContableCartera: '13050501',
+        cuentaAnticipos: '280505',
+        descuentosCuentaDebito: '530505',
+        usaCuentasOrden: true,
+        cuentaOrdenDebito: '83000001',
+        cuentaOrdenCredito: '93000001',
+        centroCostoDefecto: null,
+        flujoCajaCodigo: null,
+        cuentaBancariaDefecto: null,
+      },
+      cuentasContablesPorCodigo: new Map([
+        ['13050501', marcas(true)],
+        ['41355402', marcas(false)],
+        ['111005', marcas(false)],
+        ['83000001', marcas(false)],
+        ['93000001', marcas(false)],
+      ]),
+      resultadoFifo: resultadoFifoBase({
+        resumen: [{ tipo: 'FV', numero: 42, completa: true }],
+        montoAplicadoMora: 40000,
+        desglose: [
+          {
+            cuenta: '13050501',
+            monto: 60000,
+            tipoDocumento: 'FV',
+            numeroDocumento: 42,
+          },
+          {
+            // `cuentaCarteraDeLinea`: intereses + usaCuentasOrden → ingreso.
+            cuenta: '41355402',
+            monto: 40000,
+            tipoDocumento: 'FV',
+            numeroDocumento: 42,
+          },
+        ],
+        aplicaciones: [
+          {
+            tipo: 'FV',
+            documentId: new Types.ObjectId(),
+            numeroDocumento: 42,
+            montoAplicado: 100000,
+            montoDescuento: 0,
+            detalleConceptos: [],
+            saldoTotalDocumentoDelta: -100000,
+            saldoCarteraDeltas: [],
+            carteraPorDocumentoDeltas: [],
+          },
+        ],
+        montoSinAplicar: 0,
+      }),
+    });
+
+    const movimientos = escritura.asientoContable.movimientos as {
+      cuenta: string;
+      tipoDocumento?: string | null;
+      numeroDocumento?: number | null;
+    }[];
+    const ingreso = movimientos.filter((m) => m.cuenta === '41355402');
+    const cartera = movimientos.filter((m) => m.cuenta === '13050501');
+    expect(ingreso.length).toBeGreaterThan(0);
+    for (const m of ingreso) {
+      expect(m.tipoDocumento ?? null).toBeNull();
+      expect(m.numeroDocumento ?? null).toBeNull();
+    }
+    expect(cartera.length).toBeGreaterThan(0);
+    for (const m of cartera) {
+      expect(m.tipoDocumento).toBe('FV');
+      expect(m.numeroDocumento).toBe(42);
+    }
+    // Ninguna línea fuera de las cuentas marcadas lleva cruce.
+    expect(
+      movimientos
+        .filter((m) => m.cuenta !== '13050501')
+        .every((m) => (m.tipoDocumento ?? null) === null),
+    ).toBe(true);
+  });
+
   it('el Recibo, SaldoDocumentoOrigen y AsientoContable comparten el mismo reciboId pre-generado', () => {
     const escritura = construirEscrituraFilaAplicacion({
       ...ctxBase(),

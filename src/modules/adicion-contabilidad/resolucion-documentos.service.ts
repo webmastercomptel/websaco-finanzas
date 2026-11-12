@@ -35,6 +35,11 @@ import {
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
 import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
+  cuentasConDocumentoCruce,
   resolverSaldosInicialesPorNumero,
   type DocumentoCruceSaldoInicial,
 } from '../saldos-iniciales/saldo-inicial-cruce.util';
@@ -129,7 +134,26 @@ export class ResolucionDocumentosService {
     private readonly saldosInicialesAnticipo?: Model<SaldoInicialAnticipoDocument>,
     @InjectModel(SaldoInicial.name)
     private readonly saldosIniciales?: Model<SaldoInicialDocument>,
+    // APPENDED last, optional, same convention: the chart of accounts, to
+    // export a documento cruce only on accounts flagged for it.
+    @InjectModel(CuentaContable.name)
+    private readonly cuentasContables?: Model<CuentaContableDocument>,
   ) {}
+
+  /** Account codes flagged `requiereDocumentoCruce` in the coproperty's
+   *  chart, or `null` when the chart is unavailable/empty (nothing is then
+   *  stripped) — see `cuentasConDocumentoCruce`. */
+  async resolverCuentasConCruce(
+    copropiedadId: Types.ObjectId,
+    session: ClientSession | null,
+  ): Promise<Set<string> | null> {
+    if (!this.cuentasContables) return null;
+    const cuentas = await this.cuentasContables
+      .find({ copropiedadId }, { codigo: 1, requiereDocumentoCruce: 1 })
+      .session(session)
+      .exec();
+    return cuentasConDocumentoCruce(cuentas);
+  }
 
   /** Batch-resolves `{prefix, number}` for every anchor document referenced
    *  by this batch of asientos — same fan-out-by-type shape as

@@ -287,7 +287,9 @@ export interface ContextoAuxiliares {
  * `this.asientos.create(...)` — same call-site shape everywhere — keeps "what
  * marks a movement with tercero/centro/flujo" in a single, independently
  * testable place. An account absent from `cuentasPorCodigo` (unconfigured, or
- * `CUENTA_SIN_ASIGNAR`) gets nothing added, same as today.
+ * `CUENTA_SIN_ASIGNAR`) gets nothing added, same as today, and loses any
+ * pre-tagged documento cruce (it cannot be flagged) — unless the map is
+ * empty, meaning no chart was available, in which case nothing is stripped.
  *
  * Pure and synchronous, same reasoning as every builder above.
  */
@@ -296,22 +298,39 @@ export function enriquecerMovimientosConAuxiliares(
   cuentasPorCodigo: Map<string, MarcasCuentaContable>,
   contexto: ContextoAuxiliares,
 ): Movimiento[] {
+  // An EMPTY map means "no chart available" (a caller whose `cuentasContables`
+  // model was never injected — the test-only case): the flags are unknowable,
+  // so nothing is stripped and behaviour stays exactly as before. Only with a
+  // real chart is the rule enforced: a documento cruce rides ONLY on accounts
+  // flagged for it.
+  const hayPlanDeCuentas = cuentasPorCodigo.size > 0;
   return movimientos.map((movimiento) => {
     const marcas = cuentasPorCodigo.get(movimiento.cuenta);
-    if (!marcas) return movimiento;
-    // `?? contexto.documentoCruce` only fills in when the caller hasn't
-    // already tagged this exact line with its own document (the per-línea
-    // case) — never overwrites one that's already there.
-    const tipoDocumento =
-      movimiento.tipoDocumento ??
-      (marcas.requiereDocumentoCruce
-        ? (contexto.documentoCruce?.tipo ?? null)
-        : null);
-    const numeroDocumento =
-      movimiento.numeroDocumento ??
-      (marcas.requiereDocumentoCruce
-        ? (contexto.documentoCruce?.numero ?? null)
-        : null);
+    if (!marcas) {
+      // Account not in the chart (unconfigured / `CUENTA_SIN_ASIGNAR`): it
+      // cannot be flagged, and the accounting software rejects a documento
+      // cruce on an unflagged account — strip it, touch nothing else.
+      if (
+        hayPlanDeCuentas &&
+        (movimiento.tipoDocumento != null || movimiento.numeroDocumento != null)
+      ) {
+        return { ...movimiento, tipoDocumento: null, numeroDocumento: null };
+      }
+      return movimiento;
+    }
+    // A movement carries tipoDocumento/numeroDocumento IF AND ONLY IF its
+    // account is flagged `requiereDocumentoCruce`. Flagged: the caller's own
+    // per-línea tag wins (a Recibo settling several Facturas), else the
+    // uniform `contexto.documentoCruce`. Unflagged: always null, even when a
+    // caller pre-tagged the line (a per-línea desglose line crediting an
+    // income account under `usaCuentasOrden` carries the paid factura, but
+    // that income account takes no documento cruce).
+    const tipoDocumento = marcas.requiereDocumentoCruce
+      ? (movimiento.tipoDocumento ?? contexto.documentoCruce?.tipo ?? null)
+      : null;
+    const numeroDocumento = marcas.requiereDocumentoCruce
+      ? (movimiento.numeroDocumento ?? contexto.documentoCruce?.numero ?? null)
+      : null;
     return {
       ...movimiento,
       tercero: marcas.requiereTercero

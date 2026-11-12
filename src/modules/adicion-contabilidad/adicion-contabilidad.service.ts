@@ -52,6 +52,10 @@ import {
   NotaAnticipoDocument,
 } from '../../database/schemas/notas-anticipo/nota-anticipo.schema';
 import {
+  CuentaContable,
+  CuentaContableDocument,
+} from '../../database/schemas/contabilidad/cuenta-contable.schema';
+import {
   SaldoInicial,
   SaldoInicialDocument,
 } from '../../database/schemas/saldos-iniciales/saldo-inicial.schema';
@@ -152,6 +156,11 @@ export class AdicionContabilidadService {
     @InjectModel(Copropiedad.name)
     private readonly copropiedades?: Model<CopropiedadDocument>,
     private readonly auditoria?: AuditoriaService,
+    // APPENDED last, optional, same convention: the chart of accounts, so the
+    // "número doc cruce" column is exported only for accounts flagged
+    // `requiereDocumentoCruce` (also covers asientos posted before that rule).
+    @InjectModel(CuentaContable.name)
+    cuentasContables?: Model<CuentaContableDocument>,
   ) {
     // Built from this service's own models rather than injected, so the
     // positional constructor (and every test written against it) stays
@@ -165,6 +174,7 @@ export class AdicionContabilidadService {
       notasAnticipo,
       saldosInicialesAnticipo,
       saldosIniciales,
+      cuentasContables,
     );
   }
 
@@ -461,6 +471,13 @@ export class AdicionContabilidadService {
         session,
       );
 
+    // Which accounts may carry a documento cruce (null = chart unavailable,
+    // nothing is stripped).
+    const cuentasConCruce = await this.resolucion.resolverCuentasConCruce(
+      copropiedadId,
+      session,
+    );
+
     // The tipo exported is the coproperty's own código from its Tabla de
     // Documentos — never the internal key (`tipoDocumentoDe`), which only
     // picks the comprobante row below.
@@ -509,8 +526,11 @@ export class AdicionContabilidadService {
           // export the original document number (e.g. 2941). Free text
           // there, so the column carries a string.
           numeroDocCruce:
-            documentoCruceDeMovimiento(entry, saldosInicialesPorNumero)
-              ?.numero ?? null,
+            documentoCruceDeMovimiento(
+              entry,
+              saldosInicialesPorNumero,
+              cuentasConCruce,
+            )?.numero ?? null,
         });
       }
     }

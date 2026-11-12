@@ -564,6 +564,111 @@ describe('enriquecerMovimientosConAuxiliares', () => {
     expect(resultado.centroCosto ?? null).toBeNull();
     expect(resultado.flujoCaja ?? null).toBeNull();
   });
+
+  describe('documento cruce solo en cuentas marcadas', () => {
+    const marcas = (requiereDocumentoCruce: boolean) => ({
+      requiereTercero: false,
+      centroUtilidad: false,
+      centroDestino: false,
+      flujoCaja: false,
+      requiereDocumentoCruce,
+    });
+    const plan = new Map([
+      ['41355402', marcas(false)],
+      ['13050501', marcas(true)],
+    ]);
+    const contexto = {
+      terceroCode: null,
+      centroCosto: null,
+      flujoCajaCodigo: null,
+    };
+
+    it('quita el cruce pre-etiquetado de una cuenta NO marcada (ingreso 41355402)', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [
+          movimientoBase({
+            cuenta: '41355402',
+            tipo: 'credito',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          }),
+        ],
+        plan,
+        contexto,
+      );
+      expect(r.tipoDocumento).toBeNull();
+      expect(r.numeroDocumento).toBeNull();
+    });
+
+    it('conserva el cruce por línea de una cuenta marcada (cartera 13050501)', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [
+          movimientoBase({
+            cuenta: '13050501',
+            tipo: 'credito',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          }),
+        ],
+        plan,
+        { ...contexto, documentoCruce: { tipo: 'ND', numero: 5 } },
+      );
+      expect(r.tipoDocumento).toBe('FV');
+      expect(r.numeroDocumento).toBe(77);
+    });
+
+    it('una cuenta marcada sin etiqueta cae al documentoCruce del contexto', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [movimientoBase({ cuenta: '13050501' })],
+        plan,
+        { ...contexto, documentoCruce: { tipo: 'FV', numero: 9 } },
+      );
+      expect(r.tipoDocumento).toBe('FV');
+      expect(r.numeroDocumento).toBe(9);
+    });
+
+    it('una cuenta NO marcada no toma el documentoCruce del contexto', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [movimientoBase({ cuenta: '41355402' })],
+        plan,
+        { ...contexto, documentoCruce: { tipo: 'FV', numero: 9 } },
+      );
+      expect(r.tipoDocumento ?? null).toBeNull();
+      expect(r.numeroDocumento ?? null).toBeNull();
+    });
+
+    it('una cuenta fuera del plan (con plan cargado) pierde el cruce', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [
+          movimientoBase({
+            cuenta: 'SIN-CUENTA-ASIGNADA',
+            tipoDocumento: 'FV',
+            numeroDocumento: 3,
+          }),
+        ],
+        plan,
+        contexto,
+      );
+      expect(r.tipoDocumento).toBeNull();
+      expect(r.numeroDocumento).toBeNull();
+    });
+
+    it('con el mapa vacío (sin plan disponible) no toca el cruce', () => {
+      const [r] = enriquecerMovimientosConAuxiliares(
+        [
+          movimientoBase({
+            cuenta: '41355402',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          }),
+        ],
+        new Map(),
+        contexto,
+      );
+      expect(r.tipoDocumento).toBe('FV');
+      expect(r.numeroDocumento).toBe(77);
+    });
+  });
 });
 
 describe('construirAsientoCruce', () => {

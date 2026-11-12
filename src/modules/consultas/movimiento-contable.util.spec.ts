@@ -274,6 +274,47 @@ describe('resolverMovimientoContable', () => {
     expect(result.lineas[1].documentoCruce).toEqual({ tipo: 'FV', numero: 7 });
   });
 
+  it('oculta el documento cruce de una cuenta no marcada (ingreso 41355402) y conserva el de la marcada', () => {
+    const asiento = asientoBase({
+      reciboId: id(),
+      movimientos: [
+        {
+          cuenta: '13050501',
+          tipo: 'credito',
+          monto: 100,
+          descripcion: 'x',
+          tipoDocumento: 'FV',
+          numeroDocumento: 7,
+        },
+        {
+          cuenta: '41355402',
+          tipo: 'credito',
+          monto: 50,
+          descripcion: 'y',
+          tipoDocumento: 'FV',
+          numeroDocumento: 7,
+        },
+      ],
+    });
+
+    const result = resolverMovimientoContable(
+      asiento,
+      {
+        inmuebleCodigo: '301',
+        propietario: null,
+        nit: null,
+        numeroDocumento: 'RC-1',
+        codigoDocumento: 'FV',
+      },
+      new Map(),
+      new Map(),
+      new Set(['13050501']),
+    );
+
+    expect(result.lineas[0].documentoCruce).toEqual({ tipo: 'FV', numero: 7 });
+    expect(result.lineas[1].documentoCruce).toBeNull();
+  });
+
   it('inmuebleCodigo is null when inmueble was deleted', () => {
     const asiento = asientoBase({ facturaId: id() });
 
