@@ -648,17 +648,22 @@ describe('EnlaceFacturaService.registrarUso y revocación', () => {
     expect(await m.servicio.resolver(b.token)).not.toBeNull();
   });
 
-  it('revocarPorFactura y revocarPorClave revocan solo lo que nombran', async () => {
+  it('revocarPorFactura revoca todos los enlaces de esa factura y ninguno de otra (REQ-L7)', async () => {
     const m = await montarMundo();
     const a = await m.emitirPara('ana@x.com');
     const b = await m.emitirPara('otra@x.com');
-
-    await m.servicio.revocarPorClave(m.copropiedadId, claveCorreo('ana@x.com'));
-    expect(await m.servicio.resolver(a.token)).toBeNull();
-    expect(await m.servicio.resolver(b.token)).not.toBeNull();
+    const otra = await m.emitirPara('ana@x.com', 'propietario', {
+      facturaId: oid(),
+    });
 
     await m.servicio.revocarPorFactura(m.copropiedadId, m.factura._id);
+
+    expect(await m.servicio.resolver(a.token)).toBeNull();
     expect(await m.servicio.resolver(b.token)).toBeNull();
+    const filaOtra = m.colecciones.enlaces.docs.find(
+      (d) => String(d._id) === otra.id,
+    );
+    expect(filaOtra?.revocadoEn).toBeNull();
   });
 
   it('revocar dos veces conserva el primer revocadoEn', async () => {

@@ -261,7 +261,10 @@ export class EnlaceFacturaService {
       .exec();
   }
 
-  /** Revokes every open link of an invoice. */
+  /**
+   * Revokes every open link of an invoice. Required by the spec (REQ-L7) for
+   * package 4 and the runbook; it has no route and no caller in this change.
+   */
   async revocarPorFactura(
     copropiedadId: Types.ObjectId,
     facturaId: Types.ObjectId,
@@ -269,19 +272,6 @@ export class EnlaceFacturaService {
     await this.enlaces
       .updateMany(
         { copropiedadId, facturaId, revocadoEn: null },
-        { $set: { revocadoEn: new Date(Date.now()) } },
-      )
-      .exec();
-  }
-
-  /** Revokes every open link addressed to one address (by its `clave`). */
-  async revocarPorClave(
-    copropiedadId: Types.ObjectId,
-    clave: string,
-  ): Promise<void> {
-    await this.enlaces
-      .updateMany(
-        { copropiedadId, clave, revocadoEn: null },
         { $set: { revocadoEn: new Date(Date.now()) } },
       )
       .exec();

@@ -77,8 +77,9 @@ db.enlaces_factura.updateMany(
 
 A revoked link answers the same 404 as an unknown one. Reverting the public
 route (step 1 above) also kills every link already sent. The service methods
-`revocarPorId`, `revocarPorFactura` and `revocarPorClave` do the same per link,
-per invoice and per address; they have no HTTP route yet.
+`revocarPorId` and `revocarPorFactura` do the same per link and per invoice;
+they have no HTTP route yet. There is no per-address revocation: removing or
+editing the address on the record already kills its links.
 
 Never run a script against a database without reading the target first, and
 prefer a single coproperty when the incident is local.
