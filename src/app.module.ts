@@ -59,6 +59,7 @@ import { BusquedaAdministracionModule } from './modules/busqueda-administracion/
 import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
 import { EnvioFacturasModule } from './modules/envio-facturas/envio-facturas.module';
 import { FacturaPublicaModule } from './modules/factura-publica/factura-publica.module';
+import { IngresoPortalModule } from './modules/ingreso-portal/ingreso-portal.module';
 import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-comptable.module';
 
 /**
@@ -144,6 +145,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     InterfazComptableModule,
     EnvioFacturasModule,
     FacturaPublicaModule,
+    IngresoPortalModule,
   ],
   // Reports server-side failures when SENTRY_DSN is set (a no-op otherwise).
   providers: [{ provide: APP_FILTER, useClass: FiltroExcepcionesSentry }],

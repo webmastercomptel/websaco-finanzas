@@ -358,6 +358,13 @@ describe('inventario de rutas', () => {
    * - publico/facturas/pdf: the person following an emailed link has no
    *   account; it serves one PDF only (the invoice the link names), rate-limited
    *   per IP and per link, with one opaque 404 for every kind of refusal.
+   * - auth/portal/solicitar: a resident asking for a sign-in link has no session
+   *   yet; single purpose (address in, e-mail out), rate-limited per IP and per
+   *   address, and ONE 202 at a fixed time whatever the address is (no
+   *   enumeration).
+   * - auth/portal/canjear: the explicit redeem of that link; single purpose
+   *   (token -> custom token or confirmation), rate-limited per IP and per
+   *   token hash, one opaque 401 for every refusal.
    */
   it('las únicas rutas @Public son las justificadas', () => {
     const publicas: string[] = [];
@@ -383,6 +390,8 @@ describe('inventario de rutas', () => {
       'HealthController.check',
       'HealthController.live',
       'HealthController.ready',
+      'IngresoPortalController.canjear',
+      'IngresoPortalController.solicitar',
     ]);
   });
 });
