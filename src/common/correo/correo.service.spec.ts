@@ -285,6 +285,33 @@ describe('CorreoService — registros sin direcciones completas', () => {
     expect(registrado).toContain('a***@x.com');
   });
 
+  it('SEC: con sinRegistrarDestinatario ningún registro nombra al destinatario, ni enmascarado', async () => {
+    mockSend.mockRejectedValue(
+      new Error('The to address ana@x.com does not exist'),
+    );
+    const fallo = crear(CONFIGURADO);
+    const sinConfigurar = crear({});
+
+    await fallo.enviar({
+      para: 'ana@x.com',
+      asunto: 'x',
+      html: 'x',
+      sinRegistrarDestinatario: true,
+    });
+    await sinConfigurar.enviar({
+      para: 'ana@x.com',
+      asunto: 'x',
+      html: 'x',
+      sinRegistrarDestinatario: true,
+    });
+
+    const registrado = todoLoRegistrado();
+    expect(registrado).not.toBe('');
+    expect(registrado.toLowerCase()).not.toContain('ana@x.com');
+    expect(registrado).not.toContain('a***@x.com');
+    expect(registrado).not.toContain('does not exist');
+  });
+
   it('una dirección sin arroba se registra como ***', async () => {
     mockSend.mockRejectedValue(new Error('boom'));
     const servicio = crear(CONFIGURADO);

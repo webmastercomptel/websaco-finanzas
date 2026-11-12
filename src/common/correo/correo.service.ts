@@ -32,6 +32,13 @@ export interface MensajeCorreo {
   asunto: string;
   html: string;
   adjuntos?: AdjuntoCorreo[];
+  /**
+   * When true no log line names the recipient (not even masked) and the
+   * provider's error text is left out of the log, since it often echoes the
+   * address. For flows where the fact that an address was written to at all is
+   * sensitive, like the resident sign-in request.
+   */
+  sinRegistrarDestinatario?: boolean;
 }
 
 /**
@@ -70,7 +77,7 @@ export class CorreoService {
   async enviar(mensaje: MensajeCorreo): Promise<boolean> {
     if (!this.remitente) {
       this.logger.error(
-        `No se pudo enviar el correo a ${enmascararEmail(mensaje.para)}: SendGrid no está configurado (SENDGRID_API_KEY / SENDGRID_FROM_EMAIL).`,
+        `No se pudo enviar el correo${this.destinatarioParaRegistro(mensaje)}: SendGrid no está configurado (SENDGRID_API_KEY / SENDGRID_FROM_EMAIL).`,
       );
       return false;
     }
@@ -100,10 +107,19 @@ export class CorreoService {
       return true;
     } catch (error: unknown) {
       this.logger.error(
-        `Falló el envío del correo a ${enmascararEmail(mensaje.para)}: ${this.sinDirecciones((error as Error).message)}`,
+        mensaje.sinRegistrarDestinatario
+          ? 'Falló el envío de un correo (destinatario y detalle omitidos a propósito).'
+          : `Falló el envío del correo${this.destinatarioParaRegistro(mensaje)}: ${this.sinDirecciones((error as Error).message)}`,
       );
       return false;
     }
+  }
+
+  /** " a a***@x.com", or nothing when the message asks not to be traced. */
+  private destinatarioParaRegistro(mensaje: MensajeCorreo): string {
+    return mensaje.sinRegistrarDestinatario
+      ? ''
+      : ` a ${enmascararEmail(mensaje.para)}`;
   }
 
   /**
