@@ -2231,36 +2231,27 @@ export interface ProgresoImportacion {
  */
 
 /**
- * One grant, describing where a user may work and what they may do there.
- *
- * `Asignacion` supports several grants per account (a company plus extra
- * buildings), and the platform Usuarios screen lists all of them: see
- * `AsignacionUsuario` and `Usuario.asignaciones`. This summary is the legacy
- * single-row shape (`Usuario.asignacion`), kept while the previous frontend is
- * still deployed.
+ * One row of an account (an `Asignacion`) as the platform Usuarios screen lists
+ * it: where the person may work and what they may do there. A person holds a
+ * LIST of these that add up (a company plus extra buildings, several
+ * buildings...), active AND inactive, of every profile; none replaces another.
+ * The target (`alcance` + id) never changes for a row; `permisos` is the stored
+ * list, unfiltered (it may hold keys no catalog offers any more).
  */
-export interface AsignacionResumen {
+export interface AsignacionUsuario {
+  /** The row's own id: what the per-row endpoints address. */
+  id: string;
   alcance: 'copropiedad' | 'entidad';
   copropiedadId: string | null;
   copropiedadNombre: string | null;
   entidadId: string | null;
   entidadNombre: string | null;
   /** Who manages the row: `administrativo` from the platform Usuarios screen,
-   *  `personal` from Equipo. It never limits the keys: a `personal` row may
-   *  hold Finanzas keys. A legacy row with no profile reads as
-   *  `administrativo`. */
+   *  `personal` from Equipo (read-only there). It never limits the keys: a
+   *  `personal` row may hold Finanzas keys. A legacy row with no profile reads
+   *  as `administrativo`. */
   perfil: 'administrativo' | 'personal';
   permisos: string[];
-}
-
-/**
- * One row of an account as the platform Usuarios screen lists it: active AND
- * inactive, of every profile. The target (`alcance` + id) never changes for a
- * row; `permisos` is the stored list, unfiltered.
- */
-export interface AsignacionUsuario extends AsignacionResumen {
-  /** The row's own id: what the per-row endpoints address. */
-  id: string;
   estado: 'activo' | 'inactivo';
   /** `roleIds.length` on a `copropiedad` row; always 0 on an `entidad` row,
    *  where roles are ignored on read. */
@@ -2272,16 +2263,13 @@ export interface AsignacionUsuario extends AsignacionResumen {
  * tenants are `Tercero` records and never reach this screen; see Tercero and
  * Account for why.
  *
- * `asignaciones` is EVERY row of the account, oldest first (ties by id): a
- * person holds a list of assignments that add up, and no row replaces another.
- * It is `[]` for a platform administrator (they need none — see
- * `rulesFromPermissionKeys`) and for a person nobody has assigned anywhere
- * yet, which is a real, unremarkable state: "authenticated but powerless" is
- * the correct default the whole authorization layer is built around.
- *
- * `asignacion` is the legacy single primary (the newest ACTIVE row of any
- * profile, null when there is none), kept only so the previous frontend keeps
- * working; it goes away once that frontend does.
+ * `asignaciones` is EVERY row of the account, oldest first (ties by id), and
+ * the only representation of them: a person holds a list of assignments that
+ * add up, and no row is "the" primary or replaces another. It is `[]` for a
+ * platform administrator (they need none — see `rulesFromPermissionKeys`) and
+ * for a person nobody has assigned anywhere yet, which is a real, unremarkable
+ * state: "authenticated but powerless" is the correct default the whole
+ * authorization layer is built around.
  */
 export interface Usuario {
   id: string;
@@ -2289,7 +2277,6 @@ export interface Usuario {
   email: string;
   esAdministradorPlataforma: boolean;
   estado: 'activo' | 'inactivo';
-  asignacion: AsignacionResumen | null;
   asignaciones: AsignacionUsuario[];
 }
 
@@ -2310,10 +2297,11 @@ export interface AuthMe {
   esAdministradorPlataforma: boolean;
   copropiedades: CopropiedadAccesible[];
   /**
-   * Scope of the caller's primary assignment — enough for the header to
-   * label who is signed in, without the names/permissions `AsignacionResumen`
-   * carries. Null for a platform administrator (that flag already says
-   * enough) and for a person with no assignment yet.
+   * Scope of one active assignment of the caller (the first the database
+   * returns, which is arbitrary once there are several) — enough for the
+   * header to label who is signed in, without the names or permissions of
+   * `AsignacionUsuario`. Null for a platform administrator (that flag already
+   * says enough) and for a person with no active assignment.
    */
   alcance: 'copropiedad' | 'entidad' | null;
 }

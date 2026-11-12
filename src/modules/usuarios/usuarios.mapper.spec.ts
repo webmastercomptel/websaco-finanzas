@@ -1,33 +1,5 @@
 import { Types } from 'mongoose';
-import {
-  toAsignacionResumen,
-  toAsignacionUsuario,
-  toUsuario,
-} from './usuarios.mapper';
-
-const asignacion = (over: Record<string, unknown> = {}) =>
-  ({
-    alcance: 'copropiedad',
-    copropiedadId: new Types.ObjectId(),
-    entidadId: null,
-    permisos: ['pqr.ver'],
-    ...over,
-  }) as never;
-
-describe('toAsignacionResumen — perfil', () => {
-  it('expone el perfil de la asignación', () => {
-    expect(toAsignacionResumen(asignacion({ perfil: 'personal' })).perfil).toBe(
-      'personal',
-    );
-    expect(
-      toAsignacionResumen(asignacion({ perfil: 'administrativo' })).perfil,
-    ).toBe('administrativo');
-  });
-
-  it('una fila antigua sin perfil se lee como administrativo', () => {
-    expect(toAsignacionResumen(asignacion()).perfil).toBe('administrativo');
-  });
-});
+import { toAsignacionUsuario, toUsuario } from './usuarios.mapper';
 
 /** A row as Mongoose hands it back after `.populate(..., 'nombre')`. */
 const fila = (over: Record<string, unknown> = {}) => {
@@ -151,7 +123,7 @@ describe('toAsignacionUsuario', () => {
   });
 });
 
-describe('toUsuario — asignaciones y asignacion', () => {
+describe('toUsuario — asignaciones', () => {
   const cuenta = {
     _id: new Types.ObjectId(),
     nombreCompleto: 'Ana Pérez',
@@ -174,32 +146,30 @@ describe('toUsuario — asignaciones y asignacion', () => {
     ]);
   });
 
-  it('asignacion es la fila ACTIVA más nueva (la última de la lista) y es igual a la de siempre (S-U1.1)', () => {
-    const vieja = fila({ estado: 'active' });
-    const nueva = fila({ estado: 'active', perfil: 'personal' });
-    const inactivaMasNueva = fila({ estado: 'inactive' });
-
+  it('no lleva la clave `asignacion`: asignaciones[] es la única representación (S-X2.1, S-X2.2)', () => {
     const usuario = toUsuario(cuenta, [
-      vieja,
-      nueva,
-      inactivaMasNueva,
+      fila({ estado: 'active' }),
+      fila({ estado: 'inactive' }),
     ] as never);
 
-    expect(usuario.asignacion).toEqual(toAsignacionResumen(nueva as never));
-    expect(usuario.asignacion?.perfil).toBe('personal');
+    expect(usuario).not.toHaveProperty('asignacion');
+    expect(Object.keys(usuario).sort()).toEqual([
+      'asignaciones',
+      'email',
+      'esAdministradorPlataforma',
+      'estado',
+      'id',
+      'nombre',
+    ]);
   });
 
-  it('sin filas: asignacion null y asignaciones [] (S-U1.5)', () => {
-    const usuario = toUsuario(cuenta, []);
-
-    expect(usuario.asignacion).toBeNull();
-    expect(usuario.asignaciones).toEqual([]);
+  it('sin filas: asignaciones [] (S-U1.5)', () => {
+    expect(toUsuario(cuenta, []).asignaciones).toEqual([]);
   });
 
-  it('solo filas inactivas: asignacion null pero asignaciones las lista', () => {
+  it('solo filas inactivas: asignaciones las lista todas', () => {
     const usuario = toUsuario(cuenta, [fila({ estado: 'inactive' })] as never);
 
-    expect(usuario.asignacion).toBeNull();
     expect(usuario.asignaciones).toHaveLength(1);
   });
 });

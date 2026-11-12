@@ -2,7 +2,6 @@
 import { Types } from 'mongoose';
 import type {
   Usuario as UsuarioContract,
-  AsignacionResumen,
   AsignacionUsuario,
 } from '../../contracts';
 import type { AccountDocument } from '../../database/schemas/cuentas/account.schema';
@@ -14,28 +13,6 @@ const nombreDe = (ref: unknown): { id: string; nombre: string } | null => {
   if (typeof ref !== 'object' || !('nombre' in ref)) return null;
   const r = ref as { _id: Types.ObjectId; nombre: string };
   return { id: r._id.toString(), nombre: r.nombre };
-};
-
-/**
- * Maps one assignment to the Spanish contract. Persistence and the API are
- * both Spanish — see "the contract law" in CLAUDE.md.
- */
-export const toAsignacionResumen = (
-  doc: AsignacionDocument,
-): AsignacionResumen => {
-  const copropiedad =
-    doc.alcance === 'copropiedad' ? nombreDe(doc.copropiedadId) : null;
-  const entidad = doc.alcance === 'entidad' ? nombreDe(doc.entidadId) : null;
-
-  return {
-    alcance: doc.alcance,
-    copropiedadId: copropiedad?.id ?? null,
-    copropiedadNombre: copropiedad?.nombre ?? null,
-    entidadId: entidad?.id ?? null,
-    entidadNombre: entidad?.nombre ?? null,
-    perfil: doc.perfil ?? 'administrativo',
-    permisos: doc.permisos,
-  };
 };
 
 /**
@@ -98,21 +75,19 @@ export const toAsignacionUsuario = (
 
 /**
  * Maps an account and ALL its rows to the Spanish contract. `filas` arrive
- * oldest first (the order `asignaciones` keeps); the legacy `asignacion` is the
- * newest ACTIVE one, i.e. the last active row of that list.
+ * oldest first, and that order is kept in `asignaciones`, the only
+ * representation of them (there is no "primary" row).
  */
 export const toUsuario = (
   cuenta: AccountDocument,
   filas: readonly AsignacionDocument[],
 ): UsuarioContract => {
-  const primaria = filas.findLast((f) => f.estado === 'active');
   return {
     id: cuenta._id.toString(),
     nombre: cuenta.nombreCompleto,
     email: cuenta.email,
     esAdministradorPlataforma: cuenta.esAdministradorPlataforma,
     estado: cuenta.estado === 'active' ? 'activo' : 'inactivo',
-    asignacion: primaria ? toAsignacionResumen(primaria) : null,
     asignaciones: filas.map(toAsignacionUsuario),
   };
 };

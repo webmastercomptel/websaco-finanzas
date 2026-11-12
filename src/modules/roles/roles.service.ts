@@ -327,8 +327,9 @@ export class RolesService {
   /**
    * The keys of a role reach every active holder, so changing them changes the
    * access of rows the team screens must not touch: an `administrativo` row
-   * (only a platform admin edits those; one moved from `personal` in the
-   * Usuarios screen keeps its `roleIds`) and any account of a platform admin.
+   * (only a platform admin edits those; a legacy one may still carry role ids,
+   * since nothing writes them on such a row any more) and any account of a
+   * platform admin.
    * Refused when ANY active holder in this coproperty is one of them; a platform
    * admin is exempt. Only called when the keys really change: a rename, or the
    * same keys sent again, changes nobody's access.

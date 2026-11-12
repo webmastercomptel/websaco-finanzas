@@ -26,41 +26,7 @@ import type {
 } from './dto/guardar-usuario.dto';
 import { AuditoriaService } from '../auditoria/auditoria.service';
 import { cambioDeClaves, exigirClavesConocidas } from '../casl/delegacion';
-import {
-  permisosDesconocidos,
-  type PerfilAsignacion,
-} from '../casl/permisos-catalogo';
 import { AsignacionesUsuarioService } from './asignaciones-usuario.service';
-
-/**
- * Rejects a permission list that names keys outside the catalog. That is the
- * ONLY rule: the console is platform-admin only, so there is no delegation cap
- * here, and the profile never limits the keys (a `personal` row may hold
- * Finanzas keys; `perfil` only says who manages the row). It judges what the
- * request SENDS, never what is stored, so a legacy key already on a row never
- * blocks saving it. Runs before any side effect, so a refused request leaves
- * nothing half-created.
- */
-const exigirPermisosValidos = (
-  permisos: readonly string[] | undefined,
-): void => {
-  if (!permisos || permisos.length === 0) return;
-  const desconocidos = permisosDesconocidos(permisos);
-  if (desconocidos.length > 0) {
-    throw new BadRequestException(
-      `Permisos que no existen: ${desconocidos.join(', ')}`,
-    );
-  }
-};
-
-/** Mongo's unique-index violation (E11000). */
-const CLAVE_DUPLICADA = 11000;
-
-/** ObjectId equality where null/undefined both mean "no target". */
-const igualId = (
-  a: Types.ObjectId | null | undefined,
-  b: Types.ObjectId | null,
-): boolean => (a == null || b == null ? a == null && b == null : a.equals(b));
 
 /** A Firebase uid an administrator has not yet claimed — see seed-admin.ts. */
 const esIdentidadReal = (firebaseUid: string): boolean =>
@@ -101,8 +67,8 @@ export class UsuariosService {
   }
 
   /**
-   * Lists the platform's ADMINISTRATOR accounts and each one's primary
-   * assignment: platform admins and anyone holding an `administrativo`
+   * Lists the platform's ADMINISTRATOR accounts with every assignment they
+   * hold (`asignaciones`): platform admins and anyone holding an `administrativo`
    * assignment (a legacy row with no profile counts as one) — building
    * administrators and accountants, the only people created on this screen.
    * Operational staff (`personal`) are created and managed by each building
@@ -204,7 +170,6 @@ export class UsuariosService {
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
-    const perfil = dto.perfil ?? 'administrativo';
     const permisos = dto.permisos ?? [];
     // Every key here is NEW, so each must be offered: a grammar-valid key that
     // no route checks (`inmuebles.aprobar`) would be stored with no trace in
@@ -250,7 +215,7 @@ export class UsuariosService {
     if (asignacion) {
       await this.transaccion(async (session) => {
         await this.asignacionesUsuario.insertar(
-          { accountId: cuenta._id, ...asignacion, permisos, perfil },
+          { accountId: cuenta._id, ...asignacion, permisos },
           session,
         );
         await this.auditoria.registrar(
@@ -292,19 +257,21 @@ export class UsuariosService {
   }
 
   /**
-   * Edits a user. Deactivating one (`estado: 'inactivo'`) disables the
+   * Edits a user's ACCOUNT: name, platform-admin flag, state and password. It
+   * never reads or writes an assignment row (those are managed one at a time by
+   * `AsignacionesUsuarioService`), so a save cannot replace, move or retire any
+   * of them. Deactivating the account (`estado: 'inactivo'`) disables the
    * Firebase identity too — see FirebaseUsuariosService.establecerHabilitado
-   * for why that is an immediate lockout and not a courtesy. There is no
-   * delete: identities and assignments are retired, never removed, for the
-   * same reason a financial document never is.
+   * for why that is an immediate lockout and not a courtesy: it is the switch
+   * over every row, which keep their own `estado`. There is no delete:
+   * identities and assignments are retired, never removed, for the same reason
+   * a financial document never is.
    */
   async update(
     id: string,
     dto: ActualizarUsuarioDto,
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
-    exigirPermisosValidos(dto.permisos);
-
     const cuenta = await this.accounts.findById(id).exec();
     if (!cuenta) {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
@@ -338,10 +305,6 @@ export class UsuariosService {
 
     await cuenta.save();
 
-    if (dto.alcance !== undefined) {
-      await this.actualizarAsignacionPrimaria(cuenta._id, dto);
-    }
-
     await this.auditoria.registrar({
       actorAccountId: actor.accountId,
       actorNombre: actor.nombre,
@@ -355,134 +318,8 @@ export class UsuariosService {
   }
 
   /**
-   * Replaces the primary assignment with one matching the new scope/target, or
-   * updates permissions in place when the target did not change.
-   *
-   * The old grant is deactivated, never deleted, when the target changes —
-   * Asignacion carries the same audit law as everywhere else: "who could
-   * touch this building last March" has to stay answerable. It is retired only
-   * AFTER the new grant is written (reusing an existing row for that target
-   * when there is one), so a failure cannot strand the account with no access.
-   *
-   * Known limitation: the primary is still "newest active by createdAt", and a
-   * reactivated row keeps its old createdAt, so with several active rows it may
-   * not be the one read back as primary.
-   */
-  private async actualizarAsignacionPrimaria(
-    accountId: Types.ObjectId,
-    dto: ActualizarUsuarioDto,
-  ): Promise<void> {
-    const actual = await this.asignaciones
-      .findOne({ accountId, estado: 'active' })
-      .sort({ createdAt: -1 })
-      .exec();
-
-    const copropiedadId =
-      dto.alcance === 'copropiedad' && dto.copropiedadId
-        ? new Types.ObjectId(dto.copropiedadId)
-        : null;
-    const entidadId =
-      dto.alcance === 'entidad' && dto.entidadId
-        ? new Types.ObjectId(dto.entidadId)
-        : null;
-
-    // ObjectId equality, never string equality: @IsMongoId accepts uppercase
-    // hex, and the same target spelled differently must not read as a move.
-    const mismoObjetivo =
-      actual != null &&
-      actual.alcance === dto.alcance &&
-      (dto.alcance === 'copropiedad'
-        ? igualId(actual.copropiedadId, copropiedadId)
-        : igualId(actual.entidadId, entidadId));
-
-    const perfil: PerfilAsignacion =
-      dto.perfil ?? actual?.perfil ?? 'administrativo';
-
-    if (mismoObjetivo) {
-      // Same target: changing what someone may do there is not the same
-      // event as changing WHERE they may do it, and does not need a new row.
-      actual.permisos = dto.permisos ?? actual.permisos;
-      actual.perfil = perfil;
-      await actual.save();
-      return;
-    }
-
-    const permisos = dto.permisos ?? [];
-
-    // The unique indexes ignore `estado`, so an INACTIVE row for the new target
-    // (an earlier A → B → A move, or one created and retired from /equipo)
-    // still occupies the slot: reuse it instead of inserting a second one.
-    const objetivo = copropiedadId
-      ? { copropiedadId }
-      : entidadId
-        ? { entidadId }
-        : null;
-    const existente = objetivo
-      ? await this.asignaciones
-          .findOne({ accountId, alcance: dto.alcance, ...objetivo })
-          .exec()
-      : null;
-
-    if (existente && actual && existente._id.equals(actual._id)) {
-      // Second guard: the lookup found the row we are about to retire, so this
-      // is the same target after all. Edit in place; never deactivate it.
-      actual.permisos = dto.permisos ?? actual.permisos;
-      actual.perfil = perfil;
-      await actual.save();
-      return;
-    }
-    if (existente && existente.estado === 'active') {
-      // Only an INACTIVE row may be reactivated. An active one for that target
-      // (e.g. granted from /equipo, with its own roles) is somebody's live
-      // access: rewriting it here would silently change it.
-      throw new ConflictException(
-        'La persona ya tiene un acceso activo a ese destino: edítalo desde allí',
-      );
-    }
-
-    // Write the NEW grant first and retire the old one only afterwards, so a
-    // failed write can never leave the account with no active access.
-    try {
-      if (existente) {
-        // Scope and target already match: that is what the lookup above keyed on.
-        existente.estado = 'active';
-        existente.permisos = permisos;
-        existente.perfil = perfil;
-        // A fresh row carries no roles; a reactivated one must not silently
-        // regain those of its earlier life.
-        existente.roleIds = [];
-        await existente.save();
-      } else {
-        await this.asignaciones.create({
-          accountId,
-          alcance: dto.alcance,
-          copropiedadId,
-          entidadId,
-          permisos,
-          perfil,
-          estado: 'active',
-        });
-      }
-    } catch (error: unknown) {
-      if ((error as { code?: number }).code === CLAVE_DUPLICADA) {
-        throw new ConflictException(
-          'Otra solicitud creó ese acceso al mismo tiempo: vuelve a intentarlo',
-        );
-      }
-      throw error;
-    }
-
-    if (actual) {
-      actual.estado = 'inactive';
-      await actual.save();
-    }
-  }
-
-  /**
    * EVERY row of each account, active and inactive, of any profile, keyed by
-   * account id and oldest first (ties by id). One query feeds both
-   * `asignaciones` and the legacy `asignacion` (the newest ACTIVE row, derived
-   * by the mapper), so the two can never disagree.
+   * account id and oldest first (ties by id): the whole of `asignaciones`.
    */
   private async filasDe(
     accountIds: Types.ObjectId[],

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { CrearUsuarioDto } from './guardar-usuario.dto';
+import { ActualizarUsuarioDto, CrearUsuarioDto } from './guardar-usuario.dto';
 
 /** Same options as the global ValidationPipe in main.ts. */
 const errores = async <T extends object>(
@@ -61,5 +61,66 @@ describe('CrearUsuarioDto — destino de la primera asignación', () => {
         entidadId: ID_CON_PREFIJO,
       }),
     ).toContain('entidadId');
+  });
+});
+
+describe('CrearUsuarioDto — perfil', () => {
+  const base = {
+    nombre: 'Ana',
+    email: 'ana@ejemplo.com',
+    password: 'clave123',
+    alcance: 'copropiedad',
+    copropiedadId: ID,
+  };
+
+  it('`perfil` es 400: Usuarios solo escribe filas administrativas (S-X1.8)', async () => {
+    expect(
+      await errores(CrearUsuarioDto, { ...base, perfil: 'personal' }),
+    ).toContain('perfil');
+    expect(
+      await errores(CrearUsuarioDto, { ...base, perfil: 'administrativo' }),
+    ).toContain('perfil');
+  });
+
+  it('sin `perfil` el cuerpo sigue siendo válido', async () => {
+    expect(
+      await errores(CrearUsuarioDto, { ...base, permisos: ['pqr.ver'] }),
+    ).toEqual([]);
+  });
+});
+
+describe('ActualizarUsuarioDto — solo la cuenta (REQ-X1)', () => {
+  it('acepta nombre, esAdministradorPlataforma, estado y nuevaPassword', async () => {
+    expect(
+      await errores(ActualizarUsuarioDto, {
+        nombre: 'Ana P.',
+        esAdministradorPlataforma: false,
+        estado: 'inactivo',
+        nuevaPassword: 'otra123',
+      }),
+    ).toEqual([]);
+    expect(await errores(ActualizarUsuarioDto, { nombre: 'Ana' })).toEqual([]);
+    expect(await errores(ActualizarUsuarioDto, {})).toEqual([]);
+  });
+
+  it.each([
+    ['alcance', 'copropiedad'],
+    ['copropiedadId', ID],
+    ['entidadId', ID],
+    ['permisos', ['facturas.ver']],
+    ['perfil', 'personal'],
+  ])(
+    'rechaza con 400 `%s`: los accesos se gestionan en /usuarios/:id/asignaciones (S-X1.3 a S-X1.5)',
+    async (campo, valor) => {
+      expect(
+        await errores(ActualizarUsuarioDto, { nombre: 'Ana', [campo]: valor }),
+      ).toContain(campo);
+    },
+  );
+
+  it('`nuevaPassword` de 5 caracteres es 400 (S-X1.6)', async () => {
+    expect(
+      await errores(ActualizarUsuarioDto, { nuevaPassword: '12345' }),
+    ).toContain('nuevaPassword');
   });
 });
