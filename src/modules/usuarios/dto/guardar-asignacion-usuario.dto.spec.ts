@@ -78,6 +78,25 @@ describe('AgregarAsignacionUsuarioDto', () => {
     ).toContain('copropiedadId');
   });
 
+  it.each(['0x' + 'a'.repeat(22), '0h' + 'a'.repeat(22)])(
+    'un id con prefijo `%s` es 400 (@IsMongoId lo deja pasar)',
+    async (prefijado) => {
+      expect(
+        await errores(AgregarAsignacionUsuarioDto, {
+          ...copropiedad,
+          copropiedadId: prefijado,
+        }),
+      ).toContain('copropiedadId');
+      expect(
+        await errores(AgregarAsignacionUsuarioDto, {
+          alcance: 'entidad',
+          entidadId: prefijado,
+          permisos: [],
+        }),
+      ).toContain('entidadId');
+    },
+  );
+
   it('el alcance debe ser copropiedad o entidad', async () => {
     expect(
       await errores(AgregarAsignacionUsuarioDto, {

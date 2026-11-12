@@ -3,12 +3,18 @@ import {
   ArrayMaxSize,
   IsArray,
   IsIn,
-  IsMongoId,
   IsString,
+  Matches,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
 import { MAX_CLAVES_ASIGNABLES } from '../../casl/permisos-catalogo';
+
+/**
+ * 24 hex characters and nothing else. `@IsMongoId` also accepts a `0x` prefix
+ * plus 22 hex characters, which `new Types.ObjectId` then refuses with a 500.
+ */
+const ID_HEX = /^[0-9a-fA-F]{24}$/;
 
 /**
  * Adds ONE assignment to an account, from the platform Usuarios screen.
@@ -28,11 +34,11 @@ export class AgregarAsignacionUsuarioDto {
   alcance: 'copropiedad' | 'entidad';
 
   @ValidateIf((o: AgregarAsignacionUsuarioDto) => o.alcance === 'copropiedad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'copropiedadId no es un identificador válido' })
   copropiedadId?: string;
 
   @ValidateIf((o: AgregarAsignacionUsuarioDto) => o.alcance === 'entidad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'entidadId no es un identificador válido' })
   entidadId?: string;
 
   @IsArray()
