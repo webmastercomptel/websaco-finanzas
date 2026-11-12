@@ -382,3 +382,41 @@ describe('inventario de rutas', () => {
     ]);
   });
 });
+
+/**
+ * The two per-assignment routes of the platform Usuarios screen. They inherit
+ * the class-level `FirebaseAuthGuard` + `PlatformAdminGuard` of
+ * `UsuariosController`, which is the whole of their protection: no CASL rule
+ * could stand for "deciding who else may operate the system".
+ */
+describe('rutas de asignaciones de /usuarios', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { UsuariosController } = require('../usuarios/usuarios.controller') as {
+    UsuariosController: Ctor;
+  };
+
+  it.each(['agregarAsignacion', 'actualizarAsignacion'])(
+    '%s es una ruta de administrador de plataforma, con la autenticación primero (S-U3.15)',
+    (nombre) => {
+      const rutas = new Map(routesOf(UsuariosController));
+      const handler = rutas.get(nombre);
+
+      expect(handler).toBeDefined();
+      expect(guardNames(UsuariosController, handler!)).toEqual([
+        'FirebaseAuthGuard',
+        'PlatformAdminGuard',
+      ]);
+      expect(routeProblem(UsuariosController, handler!)).toBeNull();
+    },
+  );
+
+  it('cuelgan de `:id/asignaciones` sin chocar con `:id`', () => {
+    const rutas = new Map(routesOf(UsuariosController));
+    expect(
+      Reflect.getMetadata(PATH_METADATA, rutas.get('agregarAsignacion')!),
+    ).toBe(':id/asignaciones');
+    expect(
+      Reflect.getMetadata(PATH_METADATA, rutas.get('actualizarAsignacion')!),
+    ).toBe(':id/asignaciones/:asignacionId');
+  });
+});

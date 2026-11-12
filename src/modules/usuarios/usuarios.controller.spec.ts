@@ -1,8 +1,14 @@
 import { UsuariosController } from './usuarios.controller';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 
-function makeController(usuarios: Record<string, unknown>) {
-  return new UsuariosController(usuarios as never);
+function makeController(
+  usuarios: Record<string, unknown>,
+  asignacionesUsuario: Record<string, unknown> = {},
+) {
+  return new UsuariosController(
+    usuarios as never,
+    asignacionesUsuario as never,
+  );
 }
 
 const USER: IRequestUser = {
@@ -78,5 +84,92 @@ describe('UsuariosController.permisosFinanzas', () => {
     expect(rutas.indexOf('permisosFinanzas')).toBeLessThan(
       rutas.indexOf('findOne'),
     );
+  });
+});
+
+describe('UsuariosController — asignaciones de una cuenta', () => {
+  const USUARIO = { id: 'u-1', asignaciones: [{ id: 'a-1' }] };
+
+  it('POST /:id/asignaciones delega con el actor autenticado y devuelve el Usuario completo', async () => {
+    const calls: string[] = [];
+    const asignacionesUsuario = {
+      agregar: jest.fn(() => {
+        calls.push('agregar');
+        return Promise.resolve();
+      }),
+    };
+    const usuarios = {
+      findOne: jest.fn(() => {
+        calls.push('findOne');
+        return Promise.resolve(USUARIO);
+      }),
+    };
+    const controller = makeController(usuarios, asignacionesUsuario);
+    const dto = {
+      alcance: 'copropiedad' as const,
+      copropiedadId: 'c-1',
+      permisos: ['facturas.ver'],
+    };
+
+    const respuesta = await controller.agregarAsignacion('u-1', dto, USER);
+
+    expect(asignacionesUsuario.agregar).toHaveBeenCalledWith('u-1', dto, {
+      accountId: 'account-real-1',
+      nombre: 'Admin Real',
+    });
+    expect(usuarios.findOne).toHaveBeenCalledWith('u-1');
+    // The response is read AFTER the write, so it carries the new row.
+    expect(calls).toEqual(['agregar', 'findOne']);
+    expect(respuesta).toBe(USUARIO);
+  });
+
+  it('PATCH /:id/asignaciones/:asignacionId delega con ambos ids y devuelve el Usuario completo', async () => {
+    const calls: string[] = [];
+    const asignacionesUsuario = {
+      actualizar: jest.fn(() => {
+        calls.push('actualizar');
+        return Promise.resolve();
+      }),
+    };
+    const usuarios = {
+      findOne: jest.fn(() => {
+        calls.push('findOne');
+        return Promise.resolve(USUARIO);
+      }),
+    };
+    const controller = makeController(usuarios, asignacionesUsuario);
+
+    const respuesta = await controller.actualizarAsignacion(
+      'u-1',
+      'a-1',
+      { estado: 'inactivo' },
+      { ...USER, nombre: undefined },
+    );
+
+    expect(asignacionesUsuario.actualizar).toHaveBeenCalledWith(
+      'u-1',
+      'a-1',
+      { estado: 'inactivo' },
+      { accountId: 'account-real-1', nombre: USER.email },
+    );
+    expect(calls).toEqual(['actualizar', 'findOne']);
+    expect(respuesta).toBe(USUARIO);
+  });
+
+  it('un rechazo del servicio se propaga y no se lee el Usuario', async () => {
+    const asignacionesUsuario = {
+      agregar: jest.fn(() => Promise.reject(new Error('409'))),
+    };
+    const usuarios = { findOne: jest.fn() };
+    const controller = makeController(usuarios, asignacionesUsuario);
+
+    await expect(
+      controller.agregarAsignacion(
+        'u-1',
+        { alcance: 'entidad', entidadId: 'e-1', permisos: [] },
+        USER,
+      ),
+    ).rejects.toThrow('409');
+    expect(usuarios.findOne).not.toHaveBeenCalled();
   });
 });

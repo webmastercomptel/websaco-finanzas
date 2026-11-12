@@ -1242,12 +1242,12 @@ describe('UsuariosService — asignaciones[] (lista completa por cuenta)', () =>
     const { items } = await service.findAll({ estado: 'todos' } as never);
 
     const porEmail = new Map(items.map((u) => [u.email, u]));
-    expect(porEmail.get('ana@ejemplo.com')?.asignaciones.map((a) => a.id)).toEqual(
-      [deAna1._id.toString(), deAna2._id.toString()],
-    );
-    expect(porEmail.get('beto@ejemplo.com')?.asignaciones.map((a) => a.id)).toEqual(
-      [deBeto._id.toString()],
-    );
+    expect(
+      porEmail.get('ana@ejemplo.com')?.asignaciones.map((a) => a.id),
+    ).toEqual([deAna1._id.toString(), deAna2._id.toString()]);
+    expect(
+      porEmail.get('beto@ejemplo.com')?.asignaciones.map((a) => a.id),
+    ).toEqual([deBeto._id.toString()]);
     expect(porEmail.get('root@ejemplo.com')?.asignaciones).toEqual([]);
   });
 

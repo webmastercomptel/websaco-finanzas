@@ -65,9 +65,9 @@ describe('toAsignacionUsuario', () => {
   });
 
   it('una fila inactiva se lee como inactivo', () => {
-    expect(toAsignacionUsuario(fila({ estado: 'inactive' }) as never).estado).toBe(
-      'inactivo',
-    );
+    expect(
+      toAsignacionUsuario(fila({ estado: 'inactive' }) as never).estado,
+    ).toBe('inactivo');
   });
 
   it('una fila antigua sin perfil se lee como administrativo (S-U1.2)', () => {

@@ -53,7 +53,8 @@ const destinoDe = (
   const ref: unknown = doc[ruta];
   const poblado = nombreDe(ref);
   if (poblado) return poblado;
-  if (ref instanceof Types.ObjectId) return { id: ref.toString(), nombre: null };
+  if (ref instanceof Types.ObjectId)
+    return { id: ref.toString(), nombre: null };
   const original: unknown =
     typeof doc.populated === 'function' ? doc.populated(ruta) : undefined;
   return {

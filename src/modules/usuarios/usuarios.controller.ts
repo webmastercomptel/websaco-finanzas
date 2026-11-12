@@ -14,11 +14,16 @@ import { PlatformAdminGuard } from '../../common/guards/platform-admin.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { UsuariosService } from './usuarios.service';
+import { AsignacionesUsuarioService } from './asignaciones-usuario.service';
 import { ListarUsuariosDto } from './dto/listar-usuarios.dto';
 import {
   ActualizarUsuarioDto,
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
+import {
+  ActualizarAsignacionUsuarioDto,
+  AgregarAsignacionUsuarioDto,
+} from './dto/guardar-asignacion-usuario.dto';
 import { PERMISOS_FINANZAS } from '../casl/permisos-catalogo';
 import type { PermisosFinanzas, Usuario, Paginado } from '../../contracts';
 
@@ -39,7 +44,10 @@ import type { PermisosFinanzas, Usuario, Paginado } from '../../contracts';
 @Controller('usuarios')
 @UseGuards(FirebaseAuthGuard, PlatformAdminGuard)
 export class UsuariosController {
-  constructor(private readonly usuarios: UsuariosService) {}
+  constructor(
+    private readonly usuarios: UsuariosService,
+    private readonly asignacionesUsuario: AsignacionesUsuarioService,
+  ) {}
 
   @Get()
   findAll(@Query() query: ListarUsuariosDto): Promise<Paginado<Usuario>> {
@@ -82,5 +90,38 @@ export class UsuariosController {
       accountId: user.accountId!,
       nombre: user.nombre ?? user.email,
     });
+  }
+
+  /**
+   * Adds ONE assignment to the account. The person's other rows are never read
+   * or changed (the assignments add up). Answers with the whole `Usuario`, read
+   * after the write, so the detail screen re-renders from one object.
+   */
+  @Post(':id/asignaciones')
+  async agregarAsignacion(
+    @Param('id') id: string,
+    @Body() dto: AgregarAsignacionUsuarioDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Usuario> {
+    await this.asignacionesUsuario.agregar(id, dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
+    return this.usuarios.findOne(id);
+  }
+
+  /** Edits the keys and/or the state of ONE assignment row of the account. */
+  @Patch(':id/asignaciones/:asignacionId')
+  async actualizarAsignacion(
+    @Param('id') id: string,
+    @Param('asignacionId') asignacionId: string,
+    @Body() dto: ActualizarAsignacionUsuarioDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Usuario> {
+    await this.asignacionesUsuario.actualizar(id, asignacionId, dto, {
+      accountId: user.accountId!,
+      nombre: user.nombre ?? user.email,
+    });
+    return this.usuarios.findOne(id);
   }
 }

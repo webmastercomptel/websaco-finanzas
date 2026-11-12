@@ -41,7 +41,10 @@ describe('CatalogoPermisosController.finanzas', () => {
   });
 
   it('es el mismo conjunto, en el mismo orden, que `/usuarios/permisos-finanzas` (contrato)', () => {
-    const deUsuarios = new UsuariosController({} as never).permisosFinanzas();
+    const deUsuarios = new UsuariosController(
+      {} as never,
+      {} as never,
+    ).permisosFinanzas();
 
     expect(controller.finanzas()).toEqual(deUsuarios);
   });
