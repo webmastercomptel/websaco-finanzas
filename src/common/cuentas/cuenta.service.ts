@@ -1,11 +1,15 @@
 // src/common/cuentas/cuenta.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import {
   Account,
   AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
+
+/** An account created ahead of its first sign-in — see seed-admin.ts. */
+const esPendiente = (firebaseUid: string): boolean =>
+  firebaseUid.startsWith('pendiente:');
 
 @Injectable()
 export class CuentaService {
@@ -23,15 +27,20 @@ export class CuentaService {
    *
    *  1. By provider uid — the stable key. Once bound, it survives the person
    *     changing their email address.
-   *  2. By email, only when no uid matches. This is how an account created in
-   *     advance by an administrator, who typed an address and nothing else,
-   *     gets claimed the first time that person signs in. The uid is written
-   *     then, and from that point step 1 answers.
+   *  2. By email, only when no uid matches, and only to CLAIM an account that
+   *     is not bound to anyone yet (the `pendiente:` placeholder written by
+   *     `seed:admin`). The uid is written then, and from that point step 1
+   *     answers.
    *
-   * The email fallback is safe here because the identity provider allows one
-   * account per address: nobody can obtain a token for an address that already
-   * belongs to someone else. It is a claim of a record prepared for you, not a
-   * way to become somebody.
+   * An account already bound to a real uid is NEVER re-bound by email. The
+   * provider's one-account-per-address rule only holds while the original
+   * identity still exists with that address: once it is deleted or renamed —
+   * or if the shared pool ever allows several accounts per address — a
+   * different identity can carry the same email. Re-binding would then hand
+   * the account (staff and platform admin included) to that identity and
+   * unbind its owner. Such a token is refused with the guard's opaque 401;
+   * reconnecting a person whose identity was genuinely recreated is an
+   * administrator's decision, not something a sign-in may do on its own.
    *
    * Never creates an account. Somebody with a valid token and no record here is
    * authenticated and has access to nothing — which is the correct answer, not
@@ -50,15 +59,39 @@ export class CuentaService {
     const porEmail = await this.accounts.findOne({ email: normalizado }).exec();
     if (!porEmail) return null;
 
-    // First sign-in: bind the account to the identity that just proved it owns
-    // the address. Logged because it happens once per person and explains why
-    // the record suddenly has a uid it did not have yesterday.
-    porEmail.firebaseUid = firebaseUid;
-    await porEmail.save();
-    this.logger.log(
-      `Cuenta ${normalizado} vinculada a la identidad ${firebaseUid}.`,
-    );
+    if (!esPendiente(porEmail.firebaseUid)) {
+      return this.rechazarReclamo(porEmail._id);
+    }
 
-    return porEmail;
+    // First sign-in: bind the account to the identity that just proved it owns
+    // the address. Compare-and-set on the placeholder, so two identities racing
+    // for the same unclaimed account cannot both win.
+    const reclamada = await this.accounts
+      .findOneAndUpdate(
+        { _id: porEmail._id, firebaseUid: porEmail.firebaseUid },
+        { $set: { firebaseUid } },
+        { new: true },
+      )
+      .exec();
+    if (!reclamada) return this.rechazarReclamo(porEmail._id);
+
+    // Logged because it happens once per person and explains why the record
+    // suddenly has a uid it did not have yesterday.
+    this.logger.log(
+      `Cuenta ${String(reclamada._id)} vinculada a la identidad ${firebaseUid}.`,
+    );
+    return reclamada;
+  }
+
+  /**
+   * A token whose email matches an account bound to another identity. Same
+   * opaque 401 as any invalid token; the log names the account id, never the
+   * address.
+   */
+  private rechazarReclamo(cuentaId: unknown): never {
+    this.logger.warn(
+      `Rechazado: otra identidad reclamó por correo la cuenta ya vinculada ${String(cuentaId)}.`,
+    );
+    throw new UnauthorizedException('Token de autenticación inválido');
   }
 }
