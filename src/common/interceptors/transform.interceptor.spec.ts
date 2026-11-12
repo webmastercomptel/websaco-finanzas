@@ -1,4 +1,5 @@
 import { firstValueFrom, of } from 'rxjs';
+import { StreamableFile } from '@nestjs/common';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { TransformInterceptor } from './transform.interceptor';
 
@@ -68,5 +69,13 @@ describe('TransformInterceptor', () => {
       statusCode: 200,
       data: aMano,
     });
+  });
+
+  it('deja pasar un StreamableFile intacto: un archivo no lleva sobre', async () => {
+    // Envolverlo haría que Nest lo serialice como JSON en lugar de enviar
+    // los bytes.
+    const archivo = new StreamableFile(Buffer.from('%PDF'));
+
+    await expect(envolver(archivo)).resolves.toBe(archivo);
   });
 });

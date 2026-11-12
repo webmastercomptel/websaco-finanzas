@@ -11,6 +11,7 @@ import {
   Post,
   Req,
   Res,
+  StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
@@ -84,7 +85,7 @@ export class FacturaPublicaController {
     @Body() dto: ObtenerFacturaPublicaDto,
     @Req() req: { ip?: string },
     @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
+  ): Promise<StreamableFile> {
     const inicio = Date.now();
     // Set before anything can throw, so a refusal and a 429 carry them too.
     res.set(CABECERAS_DE_SEGURIDAD);
@@ -128,11 +129,14 @@ export class FacturaPublicaController {
     this.logger.log(
       `enlace ${resuelto.enlaceId} servido (envío ${resuelto.envioFacturaId})`,
     );
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="${nombreDeArchivo(resuelto.numeroCompleto)}"`,
+    // Returned, never `res.send`: with `passthrough` Nest still writes the
+    // handler's value, and the global envelope would be written onto an
+    // already-sent response (ERR_HTTP_HEADERS_SENT, reported to Sentry). The
+    // envelope interceptor lets a StreamableFile through untouched.
+    return new StreamableFile(Buffer.from(resuelto.bytes), {
+      type: 'application/pdf',
+      disposition: `inline; filename="${nombreDeArchivo(resuelto.numeroCompleto)}"`,
     });
-    res.send(Buffer.from(resuelto.bytes));
   }
 
   private async rechazar(inicio: number): Promise<never> {

@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
+  StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { map, type Observable } from 'rxjs';
@@ -30,20 +31,29 @@ export interface Envelope<T> {
  * The status code is read off the outgoing response rather than assumed to be
  * 200: a `@HttpCode(202)` or the 201 Nest assigns to POST must be reported
  * honestly here, or the body contradicts the header.
+ *
+ * A `StreamableFile` passes through untouched: a file download has no
+ * envelope, and wrapping it would make Nest serialise the stream as JSON.
  */
 @Injectable()
 export class TransformInterceptor<T> implements NestInterceptor<
   T,
-  Envelope<T>
+  Envelope<T> | StreamableFile
 > {
   intercept(
     context: ExecutionContext,
     next: CallHandler<T>,
-  ): Observable<Envelope<T>> {
+  ): Observable<Envelope<T> | StreamableFile> {
     const response = context.switchToHttp().getResponse<Response>();
 
     return next
       .handle()
-      .pipe(map((data) => ({ statusCode: response.statusCode, data })));
+      .pipe(
+        map((data) =>
+          data instanceof StreamableFile
+            ? data
+            : { statusCode: response.statusCode, data },
+        ),
+      );
   }
 }

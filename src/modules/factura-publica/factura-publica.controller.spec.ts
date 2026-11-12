@@ -11,6 +11,7 @@ import {
   Logger,
   NotFoundException,
   RequestMethod,
+  StreamableFile,
 } from '@nestjs/common';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import { PUBLIC_KEY } from '../casl/check-ability.decorator';
@@ -72,12 +73,19 @@ async function correr(
   const promesa = m.controlador
     .obtenerPdf({ token }, peticion as never, m.res as never)
     .then(
-      () => ({ error: null as unknown }),
-      (error: unknown) => ({ error }),
+      (archivo) => ({
+        error: null as unknown,
+        archivo,
+      }),
+      (error: unknown) => ({ error, archivo: undefined }),
     );
   await jest.advanceTimersByTimeAsync(PISO_DE_TIEMPO_MS);
   return promesa;
 }
+
+/** The bytes a returned file carries (a Buffer-backed stream reads at once). */
+const bytesDe = (archivo: StreamableFile | undefined): Buffer =>
+  archivo!.getStream().read() as Buffer;
 
 const cabeceras = (m: Montaje): Record<string, string> =>
   Object.assign(
@@ -130,15 +138,20 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
   it('SEC: success exposes only the PDF — 200, solo los bytes, cabeceras exactas, sin cookie ni sobre', async () => {
     const m = montar();
 
-    const { error } = await correr(m);
+    const { error, archivo } = await correr(m);
 
     expect(error).toBeNull();
-    expect(m.res.send).toHaveBeenCalledTimes(1);
-    expect(m.res.send).toHaveBeenCalledWith(Buffer.from(PDF));
+    // Returned, never written by hand: see the HTTP spec for why.
+    expect(m.res.send).not.toHaveBeenCalled();
+    expect(archivo).toBeInstanceOf(StreamableFile);
+    expect(bytesDe(archivo)).toEqual(Buffer.from(PDF));
+    expect(archivo!.getHeaders()).toEqual({
+      type: 'application/pdf',
+      disposition: 'inline; filename="factura-FV-0001.pdf"',
+      length: PDF.length,
+    });
     const h = cabeceras(m);
     expect(h).toEqual({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': 'inline; filename="factura-FV-0001.pdf"',
       'Cache-Control': 'no-store',
       Pragma: 'no-cache',
       'Referrer-Policy': 'no-referrer',
@@ -154,7 +167,7 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
   it('SEC: success exposes only the PDF — Authorization y X-CoProperty-Id del cliente se ignoran: solo cuenta el token', async () => {
     const m = montar();
 
-    await correr(
+    const { archivo } = await correr(
       m,
       TOKEN,
       req(IP, {
@@ -168,7 +181,7 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
 
     expect(m.servicio.resolver).toHaveBeenCalledTimes(1);
     expect(m.servicio.resolver).toHaveBeenCalledWith(TOKEN);
-    expect(m.res.send).toHaveBeenCalledWith(Buffer.from(PDF));
+    expect(bytesDe(archivo)).toEqual(Buffer.from(PDF));
   });
 
   it('el nombre de archivo sale solo del número de factura, saneado a [A-Za-z0-9-]', async () => {
@@ -176,9 +189,9 @@ describe('FacturaPublicaController.obtenerPdf — éxito', () => {
       resolucion: { ...RESUELTO, numeroCompleto: 'a"b\r\nc/ñ' },
     });
 
-    await correr(m);
+    const { archivo } = await correr(m);
 
-    expect(cabeceras(m)['Content-Disposition']).toBe(
+    expect(archivo!.getHeaders().disposition).toBe(
       'inline; filename="factura-a-b-c.pdf"',
     );
   });
