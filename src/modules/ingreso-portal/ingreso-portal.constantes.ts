@@ -1,4 +1,5 @@
 // src/modules/ingreso-portal/ingreso-portal.constantes.ts
+import { createHash } from 'node:crypto';
 import { segmentoIp } from '../../common/publico/segmento-ip';
 
 /**
@@ -43,14 +44,41 @@ export const MENSAJE_DEMASIADOS_INTENTOS =
 export const LIMITES_INGRESO = {
   /** Per client IP on the request route; over it the route answers 429. */
   solicitudPorIp: { limite: 10, ventanaMs: 60_000 },
-  /** Per address (by `clave`), request and staff resend: both windows apply. */
-  correoCorta: { limite: 3, ventanaMs: 15 * 60 * 1000 },
-  correoLarga: { limite: 10, ventanaMs: 24 * 60 * 60 * 1000 },
+  /**
+   * Per (address, client source): the TIGHT window of a self-service request,
+   * counted before any lookup so known and unknown addresses cost the same.
+   * One source (an IPv4 address or an IPv6 /64) can therefore trigger at most
+   * 5 links a day for an address, well below the per-address cap below, so it
+   * cannot exhaust that cap and lock the owner out.
+   */
+  correoOrigenCorta: { limite: 3, ventanaMs: 15 * 60 * 1000 },
+  correoOrigenLarga: { limite: 5, ventanaMs: 24 * 60 * 60 * 1000 },
+  /**
+   * Per address (by `clave`), self-service only, taken only AFTER the address
+   * proved eligible: it caps how many links reach one inbox from all sources
+   * together. Well above the per-source windows (6 sources are needed to fill
+   * the daily one).
+   */
+  correoCorta: { limite: 10, ventanaMs: 15 * 60 * 1000 },
+  correoLarga: { limite: 30, ventanaMs: 24 * 60 * 60 * 1000 },
+  /**
+   * Per address, the staff resend's OWN counter (spec REQ-R2 values: the 4th
+   * resend in 15 minutes is `motivo: 'limite'`). Separate from self-service,
+   * so a stranger flooding the public route never blocks staff.
+   */
+  reenvioCorta: { limite: 3, ventanaMs: 15 * 60 * 1000 },
+  reenvioLarga: { limite: 10, ventanaMs: 24 * 60 * 60 * 1000 },
   /** Per client IP on the redeem route. */
   canjePorIp: { limite: 20, ventanaMs: 60_000 },
   /** Per token (by its hash) on the redeem route. */
   canjePorToken: { limite: 5, ventanaMs: 60_000 },
 } as const;
+
+/** SHA-256 of the address key and the client source (`segmentoIp`). */
+const digestoOrigen = (clave: string, ip: string | undefined): string =>
+  createHash('sha256')
+    .update(`${clave}|${segmentoIp(ip)}`)
+    .digest('hex');
 
 /**
  * Redis key builders. The variable part is an IP (an IPv6 one counted as its
@@ -59,8 +87,17 @@ export const LIMITES_INGRESO = {
 export const clavesLimite = {
   solicitudIp: (ip: string | undefined): string =>
     `limite:ingreso-solicitar:ip:${segmentoIp(ip)}`,
+  /** (address, source) as ONE digest: neither the address nor the IP is in the key. */
+  correoOrigenCorta: (clave: string, ip: string | undefined): string =>
+    `limite:ingreso-correo-origen:15m:${digestoOrigen(clave, ip)}`,
+  correoOrigenLarga: (clave: string, ip: string | undefined): string =>
+    `limite:ingreso-correo-origen:24h:${digestoOrigen(clave, ip)}`,
   correoCorta: (clave: string): string => `limite:ingreso-correo:15m:${clave}`,
   correoLarga: (clave: string): string => `limite:ingreso-correo:24h:${clave}`,
+  reenvioCorta: (clave: string): string =>
+    `limite:ingreso-reenvio:15m:${clave}`,
+  reenvioLarga: (clave: string): string =>
+    `limite:ingreso-reenvio:24h:${clave}`,
   canjeIp: (ip: string | undefined): string =>
     `limite:ingreso-canjear:ip:${segmentoIp(ip)}`,
   canjeToken: (hashDelToken: string): string =>

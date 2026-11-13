@@ -179,7 +179,7 @@ describe('IngresoPortalController.solicitar', () => {
     const promesa = m.controlador.solicitar({ correo: CORREO }, req);
     await jest.advanceTimersByTimeAsync(0);
 
-    expect(m.servicio.solicitar).toHaveBeenCalledWith(CORREO);
+    expect(m.servicio.solicitar).toHaveBeenCalledWith(CORREO, IP);
     await jest.advanceTimersByTimeAsync(PISO_SOLICITUD_MS);
     await expect(promesa).resolves.toEqual({ mensaje: MENSAJE_SOLICITUD });
   });

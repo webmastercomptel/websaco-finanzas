@@ -86,7 +86,7 @@ export class IngresoPortalController {
     // Started, never awaited: its duration must not reach the client. The
     // service catches its own errors; the `catch` is only a seatbelt so a bug
     // there can never become an unhandled rejection or a different answer.
-    void this.servicio.solicitar(dto.correo).catch(() => undefined);
+    void this.servicio.solicitar(dto.correo, req.ip).catch(() => undefined);
 
     await esperarPisoDeTiempo(inicio, PISO_SOLICITUD_MS);
     return { mensaje: MENSAJE_SOLICITUD };

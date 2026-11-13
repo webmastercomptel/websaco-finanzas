@@ -33,9 +33,14 @@ flow), `src/database/schemas/cuentas/enlace-ingreso.schema.ts` and
   Every refusal is the same 401, never sooner than 300 ms.
 - Both routes are `@Public` (pinned in `casl/route-policies.spec.ts`), carry
   `no-store`, `no-referrer`, `noindex` and `nosniff` on every answer including the
-  400, and are limited through Redis (request: 10 per minute per IP, plus 3 per 15
-  minutes and 10 per 24 hours per address; redeem: 20 per minute per IP and 5 per
-  minute per token hash). When Redis is down they answer 429 by design.
+  400, and are limited through Redis (request: 10 per minute per IP; then, in the
+  background, 3 per 15 minutes and 5 per 24 hours per (address, source), counted
+  before any lookup, and, only for an eligible address, 10 per 15 minutes and 30
+  per 24 hours per address from all sources; redeem: 20 per minute per IP and 5
+  per minute per token hash). A source is an IPv4 address or an IPv6 /64, so one
+  source cannot exhaust an address's cap and lock its owner out. The staff resend
+  has its own per-address counter (3 per 15 minutes, 10 per 24 hours), so a flood
+  of public requests never blocks it. When Redis is down they answer 429 by design.
 - Access is derived per request from the records (see `CLAUDE.md`, «Resident access
   is DERIVED per request»). Nothing is cached, so removing the address from a
   record, a sale or a revocation takes effect on the next request.

@@ -51,6 +51,11 @@ export interface Opciones {
   cuenta?: Partial<CuentaDePrueba> | null;
   /** `permitir` answers in call order; default true. */
   permisos?: boolean[] | ((clave: string) => boolean);
+  /**
+   * A counting limiter shared across calls (fixed window, no clock): each key
+   * answers true while its count is within the limit it is asked with.
+   */
+  contador?: Map<string, number>;
   configurado?: boolean;
   enviado?: boolean;
   frontendUrl?: string | undefined;
@@ -178,8 +183,13 @@ export function montar(over: Opciones = {}) {
   const llamadasPermitir: string[] = [];
   const respuestas = Array.isArray(over.permisos) ? [...over.permisos] : [];
   const limite = {
-    permitir: jest.fn((clave: string) => {
+    permitir: jest.fn((clave: string, maximo: number) => {
       llamadasPermitir.push(clave);
+      if (over.contador) {
+        const n = (over.contador.get(clave) ?? 0) + 1;
+        over.contador.set(clave, n);
+        return Promise.resolve(n <= maximo);
+      }
       if (typeof over.permisos === 'function') {
         return Promise.resolve(over.permisos(clave));
       }

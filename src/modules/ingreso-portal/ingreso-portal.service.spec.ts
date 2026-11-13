@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
@@ -158,84 +159,173 @@ describe('IngresoPortalService.solicitar - eligibility', () => {
 });
 
 describe('IngresoPortalService.solicitar - limits', () => {
-  it('SEC: address counter is blind to being known', async () => {
+  const IP = '203.0.113.7';
+  const QUINCE = 15 * 60 * 1000;
+  const DIA = 24 * 60 * 60 * 1000;
+  const sha = (texto: string): string =>
+    createHash('sha256').update(texto).digest('hex');
+  const ORIGEN = sha(`${CLAVE}|${IP}`);
+
+  it('SEC: address counter is blind to being known (the per-source window runs before any lookup)', async () => {
     const conocido = montar();
     const desconocido = montar({ copropiedades: new Map() });
 
-    await conocido.servicio.solicitar(CORREO);
-    await desconocido.servicio.solicitar(CORREO);
+    await conocido.servicio.solicitar(CORREO, IP);
+    await desconocido.servicio.solicitar(CORREO, IP);
 
-    expect(desconocido.llamadasPermitir).toEqual(conocido.llamadasPermitir);
-    expect(conocido.llamadasPermitir).toEqual([
-      `limite:ingreso-correo:15m:${CLAVE}`,
-      `limite:ingreso-correo:24h:${CLAVE}`,
-    ]);
+    const antes = [
+      `limite:ingreso-correo-origen:15m:${ORIGEN}`,
+      `limite:ingreso-correo-origen:24h:${ORIGEN}`,
+    ];
+    expect(desconocido.llamadasPermitir).toEqual(antes);
+    expect(conocido.llamadasPermitir.slice(0, 2)).toEqual(antes);
     expect(conocido.limite.permitir).toHaveBeenNthCalledWith(
       1,
       expect.any(String),
       3,
-      15 * 60 * 1000,
+      QUINCE,
     );
     expect(conocido.limite.permitir).toHaveBeenNthCalledWith(
       2,
       expect.any(String),
-      10,
-      24 * 60 * 60 * 1000,
+      5,
+      DIA,
     );
   });
 
-  it('both windows are counted even when the short one is already over', async () => {
+  it('the per-address windows are taken only AFTER eligibility, and are well above the per-source ones', async () => {
+    const m = montar();
+
+    await m.servicio.solicitar(CORREO, IP);
+
+    expect(m.llamadasPermitir.slice(2)).toEqual([
+      `limite:ingreso-correo:15m:${CLAVE}`,
+      `limite:ingreso-correo:24h:${CLAVE}`,
+    ]);
+    expect(m.limite.permitir).toHaveBeenNthCalledWith(
+      3,
+      expect.any(String),
+      10,
+      QUINCE,
+    );
+    expect(m.limite.permitir).toHaveBeenNthCalledWith(
+      4,
+      expect.any(String),
+      30,
+      DIA,
+    );
+    expect(m.correo.enviar).toHaveBeenCalledTimes(1);
+  });
+
+  it('SEC: an ineligible address never touches the per-address windows', async () => {
+    const m = montar({ revocadas: [COPRO_A] });
+
+    await m.servicio.solicitar(CORREO, IP);
+
+    expect(m.llamadasPermitir).toHaveLength(2);
+    expect(m.llamadasPermitir.some((k) => k.includes(CLAVE))).toBe(false);
+  });
+
+  it('both per-source windows are counted even when the short one is already over', async () => {
     const m = montar({ permisos: [false, true] });
 
-    await m.servicio.solicitar(CORREO);
+    await m.servicio.solicitar(CORREO, IP);
 
     expect(m.limite.permitir).toHaveBeenCalledTimes(2);
+    expect(m.residencia.copropiedadesPorCorreo).not.toHaveBeenCalled();
     expect(m.enlaces.crear).not.toHaveBeenCalled();
   });
 
-  it('over the short window: silent, no lookup of the address', async () => {
-    const m = montar({ permisos: [false, true] });
+  it('over the per-source 24 hour window: silent, no lookup', async () => {
+    const m = montar({ permisos: [true, false] });
 
-    await m.servicio.solicitar(CORREO);
+    await m.servicio.solicitar(CORREO, IP);
 
     expect(m.residencia.copropiedadesPorCorreo).not.toHaveBeenCalled();
     expect(m.correo.enviar).not.toHaveBeenCalled();
   });
 
-  it('over the 24 hour window (spaced to stay under 15 minutes): silent', async () => {
-    const m = montar({ permisos: [true, false] });
+  it('over a per-address window: both counted, silent, nothing minted', async () => {
+    const m = montar({ permisos: [true, true, false, true] });
 
-    await m.servicio.solicitar(CORREO);
+    await m.servicio.solicitar(CORREO, IP);
 
-    expect(m.correo.enviar).not.toHaveBeenCalled();
+    expect(m.limite.permitir).toHaveBeenCalledTimes(4);
     expect(m.enlaces.crear).not.toHaveBeenCalled();
+    expect(m.correo.enviar).not.toHaveBeenCalled();
   });
 
   it('Redis down at this step (the limiter answers false): silent, nothing sent', async () => {
     const m = montar({ permisos: () => false });
 
-    await m.servicio.solicitar(CORREO);
+    await m.servicio.solicitar(CORREO, IP);
 
     expect(m.correo.enviar).not.toHaveBeenCalled();
   });
 
-  it('no limiter key holds the address', async () => {
+  it('SEC: one source cannot lock an address out (a flood from one IP leaves the address served from another)', async () => {
+    const contador = new Map<string, number>();
+    const atacante = montar({ contador });
+    for (let i = 0; i < 50; i += 1) {
+      await atacante.servicio.solicitar(CORREO, IP);
+    }
+    // A /64 rotating its low bits is ONE source.
+    for (let i = 0; i < 20; i += 1) {
+      await atacante.servicio.solicitar(CORREO, `2001:db8:1:2::${i + 1}`);
+    }
+    // 3 from the IPv4 source and 3 from the /64 (their short windows).
+    expect(atacante.correo.enviar).toHaveBeenCalledTimes(6);
+
+    const victima = montar({ contador });
+    await victima.servicio.solicitar(CORREO, '198.51.100.20');
+    expect(victima.correo.enviar).toHaveBeenCalledTimes(1);
+  });
+
+  it('the per-address cap still holds across many sources', async () => {
+    const contador = new Map<string, number>();
+    const m = montar({ contador });
+    for (let i = 0; i < 12; i += 1) {
+      await m.servicio.solicitar(CORREO, `198.51.100.${i + 1}`);
+    }
+    expect(m.correo.enviar).toHaveBeenCalledTimes(10);
+  });
+
+  it('no limiter key holds the address or the IP', async () => {
     const m = montar();
 
-    await m.servicio.solicitar(CORREO);
+    await m.servicio.solicitar(CORREO, IP);
+    await m.servicio.tomarCupoReenvio(CORREO);
 
+    expect(m.llamadasPermitir).toHaveLength(6);
     for (const clave of m.llamadasPermitir) {
       expect(clave.toLowerCase()).not.toContain('ana');
       expect(clave.toLowerCase()).not.toContain('example');
-      expect(clave).toContain(CLAVE);
+      expect(clave).not.toContain('203.0.113');
+      expect(clave).toMatch(/:[0-9a-f]{64}$/);
     }
   });
 
-  it('tomarCupoCorreo is the shared counter of the staff resend', async () => {
-    const m = montar({ permisos: [true, true, true, false] });
+  it('SEC: the staff resend has its own counter: self-service exhaustion never blocks it', async () => {
+    const contador = new Map<string, number>();
+    const m = montar({ contador });
+    for (let i = 0; i < 40; i += 1) {
+      await m.servicio.solicitar(CORREO, `198.51.100.${i + 1}`);
+    }
 
-    expect(await m.servicio.tomarCupoCorreo(CORREO)).toBe(true);
-    expect(await m.servicio.tomarCupoCorreo(CORREO)).toBe(false);
+    expect(await m.servicio.tomarCupoReenvio(CORREO)).toBe(true);
+    expect(m.llamadasPermitir.slice(-2)).toEqual([
+      `limite:ingreso-reenvio:15m:${CLAVE}`,
+      `limite:ingreso-reenvio:24h:${CLAVE}`,
+    ]);
+  });
+
+  it('tomarCupoReenvio keeps the spec outcome: the 4th staff resend in 15 minutes is over the limit', async () => {
+    const m = montar({ contador: new Map() });
+
+    for (let i = 0; i < 3; i += 1) {
+      expect(await m.servicio.tomarCupoReenvio(CORREO)).toBe(true);
+    }
+    expect(await m.servicio.tomarCupoReenvio(CORREO)).toBe(false);
   });
 });
 

@@ -100,28 +100,82 @@ export class IngresoPortalService {
   ) {}
 
   /**
-   * Counts one request for the address against both per-address windows (3 per
-   * 15 minutes, 10 per 24 hours) and says whether it is still within them.
-   * Shared by the self-service request and the staff resend. It is called the
-   * same way for known and unknown addresses (it runs BEFORE any lookup), and
-   * both windows are always counted, so the number of Redis calls never depends
-   * on the address. The key is built from `claveCorreo`, never the address.
-   * The limiter fails closed: Redis down answers false.
+   * Counts both windows of a pair and says whether it is within both. Both are
+   * ALWAYS counted (no short-circuit), so the number of Redis calls of a step
+   * never depends on its earlier answer. The limiter fails closed: Redis down
+   * answers false.
+   */
+  private async tomarVentanas(
+    corta: { clave: string; limite: number; ventanaMs: number },
+    larga: { clave: string; limite: number; ventanaMs: number },
+  ): Promise<boolean> {
+    const dentroCorta = await this.limite.permitir(
+      corta.clave,
+      corta.limite,
+      corta.ventanaMs,
+    );
+    const dentroLarga = await this.limite.permitir(
+      larga.clave,
+      larga.limite,
+      larga.ventanaMs,
+    );
+    return dentroCorta && dentroLarga;
+  }
+
+  /**
+   * The tight per-(address, source) windows of a self-service request (3 per
+   * 15 minutes, 5 per 24 hours per IPv4 address or IPv6 /64). Runs BEFORE any
+   * lookup and the same way for known and unknown addresses. The key is ONE
+   * digest of `claveCorreo` and the source: neither the address nor the IP.
+   */
+  private tomarCupoOrigen(
+    correo: string,
+    ip: string | undefined,
+  ): Promise<boolean> {
+    const clave = claveCorreo(correo);
+    const { correoOrigenCorta, correoOrigenLarga } = LIMITES_INGRESO;
+    return this.tomarVentanas(
+      {
+        clave: clavesLimite.correoOrigenCorta(clave, ip),
+        ...correoOrigenCorta,
+      },
+      {
+        clave: clavesLimite.correoOrigenLarga(clave, ip),
+        ...correoOrigenLarga,
+      },
+    );
+  }
+
+  /**
+   * The per-address windows of self-service (10 per 15 minutes, 30 per 24
+   * hours from all sources together). Taken only AFTER the address proved
+   * eligible, so requests for an address that gets nothing never spend them;
+   * this leaks nothing: the work runs after the fixed 202, and no answer of
+   * any route reads these counters (the staff resend has its own). The key is
+   * built from `claveCorreo`, never the address.
    */
   async tomarCupoCorreo(correo: string): Promise<boolean> {
     const clave = claveCorreo(correo);
     const { correoCorta, correoLarga } = LIMITES_INGRESO;
-    const corta = await this.limite.permitir(
-      clavesLimite.correoCorta(clave),
-      correoCorta.limite,
-      correoCorta.ventanaMs,
+    return this.tomarVentanas(
+      { clave: clavesLimite.correoCorta(clave), ...correoCorta },
+      { clave: clavesLimite.correoLarga(clave), ...correoLarga },
     );
-    const larga = await this.limite.permitir(
-      clavesLimite.correoLarga(clave),
-      correoLarga.limite,
-      correoLarga.ventanaMs,
+  }
+
+  /**
+   * The staff resend's OWN per-address counter (3 per 15 minutes, 10 per 24
+   * hours: over it the resend answers `motivo: 'limite'`). Separate from the
+   * self-service windows on purpose: a stranger flooding the public route must
+   * never be able to stop staff from sending the link.
+   */
+  async tomarCupoReenvio(correo: string): Promise<boolean> {
+    const clave = claveCorreo(correo);
+    const { reenvioCorta, reenvioLarga } = LIMITES_INGRESO;
+    return this.tomarVentanas(
+      { clave: clavesLimite.reenvioCorta(clave), ...reenvioCorta },
+      { clave: clavesLimite.reenvioLarga(clave), ...reenvioLarga },
     );
-    return corta && larga;
   }
 
   /**
@@ -211,23 +265,32 @@ export class IngresoPortalService {
   }
 
   /**
-   * The work behind `POST /auth/portal/solicitar`. Order: shape, per-address
-   * counter, eligibility, then mint and send. Any refusal returns quietly; any
-   * error is caught and logged as a reason code.
+   * The work behind `POST /auth/portal/solicitar`. Order: shape, the
+   * per-(address, source) windows (before any lookup), eligibility, the
+   * per-address windows (only for an eligible address), then mint and send.
+   * Any refusal returns quietly; any error is caught and logged as a reason
+   * code. `ip` is the client address the route saw; it only feeds a digest.
    */
-  async solicitar(correo: string): Promise<void> {
+  async solicitar(correo: string, ip?: string): Promise<void> {
     try {
       const normalizado = normalizarEmail(correo);
       // Not an address: nothing to count, look up or send.
       if (!esEmailValido(normalizado)) return;
 
-      if (!(await this.tomarCupoCorreo(normalizado))) {
-        this.logger.debug('Ingreso: solicitud sin cupo (motivo=limite).');
+      if (!(await this.tomarCupoOrigen(normalizado, ip))) {
+        this.logger.debug(
+          'Ingreso: solicitud sin cupo (motivo=limite-origen).',
+        );
         return;
       }
 
       const elegibilidad = await this.evaluarElegibilidad(normalizado);
       if (!elegibilidad.elegible) return;
+
+      if (!(await this.tomarCupoCorreo(normalizado))) {
+        this.logger.debug('Ingreso: solicitud sin cupo (motivo=limite).');
+        return;
+      }
 
       const resultado = await this.emitirYEnviar(
         normalizado,
