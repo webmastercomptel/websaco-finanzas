@@ -1330,8 +1330,6 @@ describe('AccesoService con un buzón genérico', () => {
       ) as never,
       cadena([{ _id: copA, modulosContratados: ['finanzas'] }]) as never,
       cadena([]) as never,
-      cadena([]) as never,
-      cadena([]) as never,
     );
 
     // Proven address only: the inbox grants nothing.

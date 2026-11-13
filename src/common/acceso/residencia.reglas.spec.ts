@@ -184,19 +184,17 @@ describe('motivoCorreoGenerico (buzones genéricos)', () => {
   });
 
   it.each([
-    [1, false, null],
-    [3, false, null],
-    [4, false, 'correo-compartido'],
-    [10, false, 'correo-compartido'],
-    [1, true, 'correo-de-personal'],
-    // Staff is the reported reason when both hold.
-    [5, true, 'correo-de-personal'],
-  ] as const)(
-    '%i terceros, personal=%s -> %s',
-    (tercerosDistintos, esCorreoDePersonal, esperado) => {
-      expect(
-        motivoCorreoGenerico({ tercerosDistintos, esCorreoDePersonal }),
-      ).toBe(esperado);
-    },
-  );
+    [1, null],
+    [3, null],
+    [4, 'correo-compartido'],
+    [10, 'correo-compartido'],
+  ] as const)('%i terceros -> %s', (tercerosDistintos, esperado) => {
+    expect(motivoCorreoGenerico({ tercerosDistintos })).toBe(esperado);
+  });
+
+  it('ser personal no vuelve genérica una dirección: el acceso de personal y el de residente se suman', () => {
+    // The rule takes no staff fact at all: the only reason left is sharing.
+    const hechos = { tercerosDistintos: 1, esCorreoDePersonal: true };
+    expect(motivoCorreoGenerico(hechos)).toBeNull();
+  });
 });

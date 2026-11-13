@@ -129,10 +129,11 @@ export const MAX_TERCEROS_POR_CORREO = 3;
 
 /**
  * Why an address must not derive residency (`requiereCorreccion` reason code
- * of the Residentes listing): it is the address of a staff Account, or it is
- * on too many party records.
+ * of the Residentes listing): it is on too many party records. Being the
+ * address of a staff Account is NOT a reason: staff and resident access add up
+ * (owner's decision), so a staff member who owns or rents a unit keeps both.
  */
-export type MotivoCorreoGenerico = 'correo-de-personal' | 'correo-compartido';
+export type MotivoCorreoGenerico = 'correo-compartido';
 
 /**
  * FLIP POINT A5: is this address a generic inbox? The ONE rule behind
@@ -140,16 +141,16 @@ export type MotivoCorreoGenerico = 'correo-de-personal' | 'correo-compartido';
  * residency: `AccesoService`, `PortalAccesoService`, the sign-in request and
  * redeem) and `ResidenciaService.motivosCorreoGenerico` (`DirectorioService`,
  * the Residentes listing), so the gate and the listing never disagree.
- * `esCorreoDePersonal`: the address is the e-mail of an Account that is a
- * platform admin or holds any active `Asignacion`. The legacy
+ * Only the count of distinct active parties decides: whether the address
+ * belongs to staff is deliberately not a fact here (staff and resident access
+ * add up; whether staff gets a passwordless SESSION is the separate link
+ * policy, `common/cuentas/politica-enlace.ts`). The legacy
  * `Tercero.accountId` link is not judged here and keeps working. To relax it,
- * raise the cap or drop the staff clause here, nowhere else.
+ * raise the cap here, nowhere else.
  */
 export function motivoCorreoGenerico(hechos: {
   tercerosDistintos: number;
-  esCorreoDePersonal: boolean;
 }): MotivoCorreoGenerico | null {
-  if (hechos.esCorreoDePersonal) return 'correo-de-personal';
   if (hechos.tercerosDistintos > MAX_TERCEROS_POR_CORREO) {
     return 'correo-compartido';
   }

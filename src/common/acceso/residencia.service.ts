@@ -18,14 +18,6 @@ import {
   Tercero,
   TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
-import {
-  Account,
-  AccountDocument,
-} from '../../database/schemas/cuentas/account.schema';
-import {
-  Asignacion,
-  AsignacionDocument,
-} from '../../database/schemas/cuentas/asignacion.schema';
 import { modulosEfectivos } from '../licencia/modulos';
 import { normalizarEmail } from '../utils/email.utils';
 import {
@@ -64,10 +56,6 @@ export class ResidenciaService {
     private readonly copropiedades: Model<CopropiedadDocument>,
     @InjectModel(RevocacionPortal.name)
     private readonly revocaciones: Model<RevocacionPortalDocument>,
-    @InjectModel(Account.name)
-    private readonly cuentas: Model<AccountDocument>,
-    @InjectModel(Asignacion.name)
-    private readonly asignaciones: Model<AsignacionDocument>,
   ) {}
 
   /**
@@ -77,8 +65,8 @@ export class ResidenciaService {
    * which drops a collation false positive and a legacy padded value. Without
    * the index the query is a collection scan, never a wrong answer.
    *
-   * A generic inbox (`motivoCorreoGenerico`: a staff Account's address, or one
-   * on more than `MAX_TERCEROS_POR_CORREO` parties) answers NOTHING, so every
+   * A generic inbox (`motivoCorreoGenerico`: an address on more than
+   * `MAX_TERCEROS_POR_CORREO` parties) answers NOTHING, so every
    * caller that derives residency from an address (`copropiedadesPorCorreo`,
    * `PortalAccesoService`, the sign-in request and redeem) refuses it alike.
    */
@@ -90,11 +78,7 @@ export class ResidenciaService {
     const propias = partes.get(normalizado) ?? [];
     if (propias.length === 0) return [];
 
-    const personal = await this.correosDePersonal([normalizado]);
-    const motivo = motivoCorreoGenerico({
-      tercerosDistintos: propias.length,
-      esCorreoDePersonal: personal.has(normalizado),
-    });
+    const motivo = motivoCorreoGenerico({ tercerosDistintos: propias.length });
     return motivo === null ? propias : [];
   }
 
@@ -102,8 +86,7 @@ export class ResidenciaService {
    * Of these addresses, the generic inboxes and why (keys normalized): the
    * batch form of the rule `tercerosPorCorreo` applies, for callers that judge
    * many addresses at once (`DirectorioService`, the Residentes listing's
-   * `requiereCorreccion`). Constant queries however many addresses: parties,
-   * accounts, and assignments only when some account is not a platform admin.
+   * `requiereCorreccion`). One query however many addresses.
    */
   async motivosCorreoGenerico(
     correos: readonly string[],
@@ -115,11 +98,9 @@ export class ResidenciaService {
     if (normalizados.length === 0) return resultado;
 
     const partes = await this.partesConCorreo(normalizados);
-    const personal = await this.correosDePersonal(normalizados);
     for (const correo of normalizados) {
       const motivo = motivoCorreoGenerico({
         tercerosDistintos: partes.get(correo)?.length ?? 0,
-        esCorreoDePersonal: personal.has(correo),
       });
       if (motivo !== null) resultado.set(correo, motivo);
     }
@@ -161,49 +142,6 @@ export class ResidenciaService {
       resultado.set(correo, lista);
     }
     return resultado;
-  }
-
-  /**
-   * Of these (normalized) addresses, those that are the e-mail of a staff
-   * Account: a platform admin, or an Account holding any active `Asignacion`.
-   * The Account's own `estado` is not judged: an inactive staff address is
-   * still not a resident's own inbox.
-   */
-  private async correosDePersonal(
-    normalizados: readonly string[],
-  ): Promise<Set<string>> {
-    const pedidas = new Set(normalizados);
-    const personal = new Set<string>();
-    const cuentas = await this.cuentas
-      .find({ email: { $in: [...normalizados] } })
-      .select('_id email esAdministradorPlataforma')
-      .lean()
-      .exec();
-
-    const porRevisar = new Map<string, string>();
-    for (const c of cuentas) {
-      const correo = normalizarEmail(c.email);
-      if (!pedidas.has(correo)) continue;
-      if (c.esAdministradorPlataforma) personal.add(correo);
-      else porRevisar.set(c._id.toString(), correo);
-    }
-    if (porRevisar.size === 0) return personal;
-
-    const activas = await this.asignaciones
-      .find({
-        accountId: {
-          $in: [...porRevisar.keys()].map((id) => new Types.ObjectId(id)),
-        },
-        estado: 'active',
-      })
-      .select('accountId')
-      .lean()
-      .exec();
-    for (const a of activas) {
-      const correo = porRevisar.get(a.accountId.toString());
-      if (correo) personal.add(correo);
-    }
-    return personal;
   }
 
   /**

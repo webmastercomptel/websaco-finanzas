@@ -362,11 +362,7 @@ describe('IngresoPortalService.solicitar - buzones genéricos', () => {
     return { find: jest.fn(() => c) };
   };
 
-  const residenciaReal = (
-    partes: number,
-    cuentas: Record<string, unknown>[] = [],
-    asignaciones: Record<string, unknown>[] = [],
-  ) => {
+  const residenciaReal = (partes: number) => {
     const copro = new Types.ObjectId(COPRO_A);
     const terceros = Array.from({ length: partes }, () => ({
       _id: new Types.ObjectId(),
@@ -385,8 +381,6 @@ describe('IngresoPortalService.solicitar - buzones genéricos', () => {
       ) as never,
       cadena([{ _id: copro, modulosContratados: ['finanzas'] }]) as never,
       cadena([]) as never,
-      cadena(cuentas) as never,
-      cadena(asignaciones) as never,
     );
   };
 
@@ -412,22 +406,31 @@ describe('IngresoPortalService.solicitar - buzones genéricos', () => {
     });
   });
 
-  it('la dirección es la de una cuenta del personal: silencio, sin correo', async () => {
-    const cuentaId = new Types.ObjectId();
+  it('la dirección de un miembro del personal, titular en UNA ficha: se envía el enlace (los accesos se suman)', async () => {
+    // A staff Account with that address and an active assignment: the
+    // residency rule never asks, so nothing about it can refuse the link.
     const m = montar({
-      residenciaReal: residenciaReal(
-        1,
-        [{ _id: cuentaId, email: CORREO, esAdministradorPlataforma: false }],
-        [{ accountId: cuentaId }],
-      ),
+      residenciaReal: residenciaReal(1),
+      cuenta: { estado: 'active' },
+      noPersonal: true,
     });
 
     await m.servicio.solicitar(CORREO);
 
-    expect(m.enlaces.crear).not.toHaveBeenCalled();
-    expect(m.correo.enviar).not.toHaveBeenCalled();
-    expect((await m.servicio.evaluarElegibilidad(CORREO)).motivo).toBe(
-      'correo-generico',
-    );
+    expect(m.correo.enviar).toHaveBeenCalledTimes(1);
+    expect((await m.servicio.evaluarElegibilidad(CORREO)).elegible).toBe(true);
+  });
+
+  it('SEC: ese miembro del personal canjea el enlace SIN sesión (confirmado): la política de sesión sigue aparte', async () => {
+    const m = montar({
+      residenciaReal: residenciaReal(1),
+      cuenta: { estado: 'active' },
+      noPersonal: true,
+    });
+
+    await expect(m.servicio.canjear(TOKEN)).resolves.toEqual({
+      resultado: 'confirmado',
+    });
+    expect(m.auth.createCustomToken).not.toHaveBeenCalled();
   });
 });

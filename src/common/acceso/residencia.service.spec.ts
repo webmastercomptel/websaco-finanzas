@@ -34,8 +34,6 @@ interface Piezas {
   inmuebles?: Fila[];
   copropiedades?: Fila[];
   revocaciones?: Fila[];
-  cuentas?: Fila[];
-  asignaciones?: Fila[];
 }
 
 function crear(p: Piezas = {}) {
@@ -43,15 +41,11 @@ function crear(p: Piezas = {}) {
   const inmuebles = modelo(p.inmuebles ?? []);
   const copropiedades = modelo(p.copropiedades ?? []);
   const revocaciones = modelo(p.revocaciones ?? []);
-  const cuentas = modelo(p.cuentas ?? []);
-  const asignaciones = modelo(p.asignaciones ?? []);
   const servicio = new ResidenciaService(
     terceros as never,
     inmuebles as never,
     copropiedades as never,
     revocaciones as never,
-    cuentas as never,
-    asignaciones as never,
   );
   return {
     servicio,
@@ -59,8 +53,6 @@ function crear(p: Piezas = {}) {
     inmuebles,
     copropiedades,
     revocaciones,
-    cuentas,
-    asignaciones,
   };
 }
 
@@ -120,73 +112,23 @@ describe('ResidenciaService: buzones genéricos', () => {
     expect(inmuebles.find).not.toHaveBeenCalled();
   });
 
-  it('la dirección es la de una cuenta con una asignación activa: no hay residencia por correo', async () => {
+  it('la dirección de un miembro del personal en UNA ficha como titular: el acceso por correo funciona (se suman)', async () => {
+    // Being staff never removes residency: the rule reads no account or
+    // assignment at all, only how many parties carry the address.
     const partes = partesCon('admin@example.com', 1);
-    const cuentaId = new Types.ObjectId();
-    const { servicio, asignaciones } = crear({
-      terceros: partes,
-      inmuebles: unidadesDe(partes),
-      copropiedades: COPROS_VIGENTES,
-      cuentas: [
-        {
-          _id: cuentaId,
-          email: 'admin@example.com',
-          esAdministradorPlataforma: false,
-        },
-      ],
-      asignaciones: [{ accountId: cuentaId }],
-    });
-
-    await expect(
-      servicio.tercerosPorCorreo('admin@example.com'),
-    ).resolves.toEqual([]);
-    expect(asignaciones.find).toHaveBeenCalledWith({
-      accountId: { $in: [cuentaId] },
-      estado: 'active',
-    });
-  });
-
-  it('la dirección es la de un administrador de plataforma: no hay residencia por correo', async () => {
-    const partes = partesCon('root@example.com', 1);
-    const { servicio, asignaciones } = crear({
-      terceros: partes,
-      inmuebles: unidadesDe(partes),
-      copropiedades: COPROS_VIGENTES,
-      cuentas: [
-        {
-          _id: new Types.ObjectId(),
-          email: 'root@example.com',
-          esAdministradorPlataforma: true,
-        },
-      ],
-    });
-
-    await expect(
-      servicio.copropiedadesPorCorreo('root@example.com'),
-    ).resolves.toEqual(new Map());
-    // Platform admin decides without asking for assignments.
-    expect(asignaciones.find).not.toHaveBeenCalled();
-  });
-
-  it('una cuenta SIN asignación activa con esa dirección no la vuelve genérica', async () => {
-    const partes = partesCon('ana@example.com', 1);
     const { servicio } = crear({
       terceros: partes,
       inmuebles: unidadesDe(partes),
       copropiedades: COPROS_VIGENTES,
-      cuentas: [
-        {
-          _id: new Types.ObjectId(),
-          email: 'ana@example.com',
-          esAdministradorPlataforma: false,
-        },
-      ],
-      asignaciones: [],
     });
 
     await expect(
-      servicio.tercerosPorCorreo('ana@example.com'),
+      servicio.tercerosPorCorreo('admin@example.com'),
     ).resolves.toHaveLength(1);
+    const mapa = await servicio.copropiedadesPorCorreo('admin@example.com');
+    expect(mapa.get(COP_A.toString())).toEqual([
+      (partes[0]._id as Types.ObjectId).toString(),
+    ]);
   });
 
   it('un tercero con 10 inmuebles cuenta como UNO: el acceso funciona', async () => {
@@ -211,17 +153,12 @@ describe('ResidenciaService: buzones genéricos', () => {
 
   it('motivosCorreoGenerico marca por dirección, en lote, sin revelar nada más', async () => {
     const compartidas = partesCon('porteria@example.com', 4);
-    const cuentaId = new Types.ObjectId();
     const { servicio, terceros } = crear({
-      terceros: [...compartidas, ...partesCon('ana@example.com', 2)],
-      cuentas: [
-        {
-          _id: cuentaId,
-          email: 'admin@example.com',
-          esAdministradorPlataforma: false,
-        },
+      terceros: [
+        ...compartidas,
+        ...partesCon('ana@example.com', 2),
+        ...partesCon('admin@example.com', 1),
       ],
-      asignaciones: [{ accountId: cuentaId }],
     });
 
     const motivos = await servicio.motivosCorreoGenerico([
@@ -233,7 +170,6 @@ describe('ResidenciaService: buzones genéricos', () => {
 
     expect(Object.fromEntries(motivos)).toEqual({
       'porteria@example.com': 'correo-compartido',
-      'admin@example.com': 'correo-de-personal',
     });
     expect(terceros.find).toHaveBeenCalledTimes(1);
   });
