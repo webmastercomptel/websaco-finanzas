@@ -1,6 +1,7 @@
 import { claveCorreo } from '../utils/email.utils';
 import {
   MAX_TERCEROS_POR_CORREO,
+  REGLA_BUZON_COMPARTIDO_ACTIVA,
   REVOCACION_DETIENE_CORREOS_FACTURA,
   coincideCorreo,
   motivoCorreoGenerico,
@@ -183,13 +184,11 @@ describe('motivoCorreoGenerico (buzones genéricos)', () => {
     expect(MAX_TERCEROS_POR_CORREO).toBe(3);
   });
 
-  it.each([
-    [1, null],
-    [3, null],
-    [4, 'correo-compartido'],
-    [10, 'correo-compartido'],
-  ] as const)('%i terceros -> %s', (tercerosDistintos, esperado) => {
-    expect(motivoCorreoGenerico({ tercerosDistintos })).toBe(esperado);
+  it('la regla está apagada por decisión del dueño (2026-11-12): ningún correo es genérico', () => {
+    expect(REGLA_BUZON_COMPARTIDO_ACTIVA).toBe(false);
+    for (const tercerosDistintos of [1, 3, 4, 10, 500]) {
+      expect(motivoCorreoGenerico({ tercerosDistintos })).toBeNull();
+    }
   });
 
   it('ser personal no vuelve genérica una dirección: el acceso de personal y el de residente se suman', () => {

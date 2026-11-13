@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
 import { ResidenciaService } from './residencia.service';
+import { REGLA_BUZON_COMPARTIDO_ACTIVA } from './residencia.reglas';
+const itConRegla = REGLA_BUZON_COMPARTIDO_ACTIVA ? it : it.skip;
 
 type Fila = Record<string, unknown>;
 
@@ -96,21 +98,27 @@ describe('ResidenciaService: buzones genéricos', () => {
     expect(mapa.size).toBe(2);
   });
 
-  it('4 terceros comparten la dirección: no hay residencia por correo', async () => {
-    const partes = partesCon('porteria@example.com', 4);
-    const { servicio, inmuebles } = crear({
-      terceros: partes,
-      inmuebles: unidadesDe(partes),
-      copropiedades: COPROS_VIGENTES,
-    });
+  // Pinned while the shared-inbox rule is ON; it is OFF since 2026-11-12.
+  itConRegla(
+    '4 terceros comparten la dirección: no hay residencia por correo',
+    async () => {
+      const partes = partesCon('porteria@example.com', 4);
+      const { servicio, inmuebles } = crear({
+        terceros: partes,
+        inmuebles: unidadesDe(partes),
+        copropiedades: COPROS_VIGENTES,
+      });
 
-    await expect(
-      servicio.tercerosPorCorreo('porteria@example.com'),
-    ).resolves.toEqual([]);
-    const mapa = await servicio.copropiedadesPorCorreo('porteria@example.com');
-    expect(mapa.size).toBe(0);
-    expect(inmuebles.find).not.toHaveBeenCalled();
-  });
+      await expect(
+        servicio.tercerosPorCorreo('porteria@example.com'),
+      ).resolves.toEqual([]);
+      const mapa = await servicio.copropiedadesPorCorreo(
+        'porteria@example.com',
+      );
+      expect(mapa.size).toBe(0);
+      expect(inmuebles.find).not.toHaveBeenCalled();
+    },
+  );
 
   it('la dirección de un miembro del personal en UNA ficha como titular: el acceso por correo funciona (se suman)', async () => {
     // Being staff never removes residency: the rule reads no account or
@@ -151,28 +159,32 @@ describe('ResidenciaService: buzones genéricos', () => {
     });
   });
 
-  it('motivosCorreoGenerico marca por dirección, en lote, sin revelar nada más', async () => {
-    const compartidas = partesCon('porteria@example.com', 4);
-    const { servicio, terceros } = crear({
-      terceros: [
-        ...compartidas,
-        ...partesCon('ana@example.com', 2),
-        ...partesCon('admin@example.com', 1),
-      ],
-    });
+  // Pinned while the shared-inbox rule is ON; it is OFF since 2026-11-12.
+  itConRegla(
+    'motivosCorreoGenerico marca por dirección, en lote, sin revelar nada más',
+    async () => {
+      const compartidas = partesCon('porteria@example.com', 4);
+      const { servicio, terceros } = crear({
+        terceros: [
+          ...compartidas,
+          ...partesCon('ana@example.com', 2),
+          ...partesCon('admin@example.com', 1),
+        ],
+      });
 
-    const motivos = await servicio.motivosCorreoGenerico([
-      'PORTERIA@example.com',
-      'ana@example.com',
-      'admin@example.com',
-      '  ',
-    ]);
+      const motivos = await servicio.motivosCorreoGenerico([
+        'PORTERIA@example.com',
+        'ana@example.com',
+        'admin@example.com',
+        '  ',
+      ]);
 
-    expect(Object.fromEntries(motivos)).toEqual({
-      'porteria@example.com': 'correo-compartido',
-    });
-    expect(terceros.find).toHaveBeenCalledTimes(1);
-  });
+      expect(Object.fromEntries(motivos)).toEqual({
+        'porteria@example.com': 'correo-compartido',
+      });
+      expect(terceros.find).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('ResidenciaService.tercerosPorCorreo', () => {

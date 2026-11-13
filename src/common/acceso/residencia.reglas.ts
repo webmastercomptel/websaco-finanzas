@@ -128,6 +128,14 @@ export function copropiedadAdmiteIngresoResidentes(
 export const MAX_TERCEROS_POR_CORREO = 3;
 
 /**
+ * The shared-inbox rule is OFF (owner's decision, 2026-11-12): an address on
+ * many records is the normal case of a property manager typed next to the
+ * owners' own addresses, and that manager must reach the portal. To be
+ * re-assessed in an audit around 2027-02; turning it back on is this flag.
+ */
+export const REGLA_BUZON_COMPARTIDO_ACTIVA = false;
+
+/**
  * Why an address must not derive residency (`requiereCorreccion` reason code
  * of the Residentes listing): it is on too many party records. Being the
  * address of a staff Account is NOT a reason: staff and resident access add up
@@ -151,6 +159,7 @@ export type MotivoCorreoGenerico = 'correo-compartido';
 export function motivoCorreoGenerico(hechos: {
   tercerosDistintos: number;
 }): MotivoCorreoGenerico | null {
+  if (!REGLA_BUZON_COMPARTIDO_ACTIVA) return null;
   if (hechos.tercerosDistintos > MAX_TERCEROS_POR_CORREO) {
     return 'correo-compartido';
   }

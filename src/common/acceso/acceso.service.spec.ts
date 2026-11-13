@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { AccesoService } from './acceso.service';
 import { ResidenciaService } from './residencia.service';
 import { claveCorreo } from '../utils/email.utils';
+import { REGLA_BUZON_COMPARTIDO_ACTIVA } from './residencia.reglas';
+const itConRegla = REGLA_BUZON_COMPARTIDO_ACTIVA ? it : it.skip;
 
 const oid = () => new Types.ObjectId();
 
@@ -1311,52 +1313,56 @@ describe('AccesoService con un buzón genérico', () => {
     correoProbadoClave: claveCorreo(BUZON),
   };
 
-  it('4 terceros con la dirección: no da residencia por correo, pero el vínculo heredado sigue', async () => {
-    const vinculado = oid();
-    const partes: Fila[] = [vinculado, oid(), oid(), oid()].map((id) => ({
-      _id: id,
-      copropiedadId: copA,
-      emails: [BUZON],
-    }));
-    const residencia = new ResidenciaService(
-      cadena(partes) as never,
-      cadena(
-        partes.map((p) => ({
-          _id: oid(),
-          copropiedadId: copA,
-          titularId: p._id,
-          arrendatarioId: null,
-        })),
-      ) as never,
-      cadena([{ _id: copA, modulosContratados: ['finanzas'] }]) as never,
-      cadena([]) as never,
-    );
+  // Pinned while the shared-inbox rule is ON; it is OFF since 2026-11-12.
+  itConRegla(
+    '4 terceros con la dirección: no da residencia por correo, pero el vínculo heredado sigue',
+    async () => {
+      const vinculado = oid();
+      const partes: Fila[] = [vinculado, oid(), oid(), oid()].map((id) => ({
+        _id: id,
+        copropiedadId: copA,
+        emails: [BUZON],
+      }));
+      const residencia = new ResidenciaService(
+        cadena(partes) as never,
+        cadena(
+          partes.map((p) => ({
+            _id: oid(),
+            copropiedadId: copA,
+            titularId: p._id,
+            arrendatarioId: null,
+          })),
+        ) as never,
+        cadena([{ _id: copA, modulosContratados: ['finanzas'] }]) as never,
+        cadena([]) as never,
+      );
 
-    // Proven address only: the inbox grants nothing.
-    const soloCorreo = servicio({
-      asignaciones: [],
-      copropiedades: [copropiedad(copA, 'COP-A')],
-      residencia: residencia as never,
-    });
-    await expect(
-      soloCorreo.copropiedadesDe(cuenta.toString(), false, probada),
-    ).resolves.toEqual([]);
+      // Proven address only: the inbox grants nothing.
+      const soloCorreo = servicio({
+        asignaciones: [],
+        copropiedades: [copropiedad(copA, 'COP-A')],
+        residencia: residencia as never,
+      });
+      await expect(
+        soloCorreo.copropiedadesDe(cuenta.toString(), false, probada),
+      ).resolves.toEqual([]);
 
-    // The legacy `Tercero.accountId` link on one of those parties still works.
-    const heredado = servicio({
-      asignaciones: [],
-      terceros: [{ _id: vinculado, copropiedadId: copA }],
-      copropiedades: [copropiedad(copA, 'COP-A')],
-      residencia: residencia as never,
-    });
-    const [resultado] = await heredado.copropiedadesDe(
-      cuenta.toString(),
-      false,
-      probada,
-    );
-    expect(resultado).toMatchObject({
-      copropiedadId: copA.toString(),
-      esResidente: true,
-    });
-  });
+      // The legacy `Tercero.accountId` link on one of those parties still works.
+      const heredado = servicio({
+        asignaciones: [],
+        terceros: [{ _id: vinculado, copropiedadId: copA }],
+        copropiedades: [copropiedad(copA, 'COP-A')],
+        residencia: residencia as never,
+      });
+      const [resultado] = await heredado.copropiedadesDe(
+        cuenta.toString(),
+        false,
+        probada,
+      );
+      expect(resultado).toMatchObject({
+        copropiedadId: copA.toString(),
+        esResidente: true,
+      });
+    },
+  );
 });

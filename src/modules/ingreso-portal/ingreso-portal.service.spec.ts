@@ -12,6 +12,8 @@ import {
   montar,
   TOKEN,
 } from './testing/montar-servicio';
+import { REGLA_BUZON_COMPARTIDO_ACTIVA } from '../../common/acceso/residencia.reglas';
+const itConRegla = REGLA_BUZON_COMPARTIDO_ACTIVA ? it : it.skip;
 
 describe('IngresoPortalService.solicitar - eligibility', () => {
   it('SEC: mail goes only to an eligible address (titular or arrendatario of an active unit)', async () => {
@@ -546,19 +548,23 @@ describe('IngresoPortalService.solicitar - buzones genéricos', () => {
     expect(m.correo.enviar).toHaveBeenCalledTimes(1);
   });
 
-  it('4 terceros con la dirección: silencio, sin token ni correo, motivo correo-generico', async () => {
-    const m = montar({ residenciaReal: residenciaReal(4) });
+  // Pinned while the shared-inbox rule is ON; it is OFF since 2026-11-12.
+  itConRegla(
+    '4 terceros con la dirección: silencio, sin token ni correo, motivo correo-generico',
+    async () => {
+      const m = montar({ residenciaReal: residenciaReal(4) });
 
-    await m.servicio.solicitar(CORREO);
+      await m.servicio.solicitar(CORREO);
 
-    expect(m.enlaces.crear).not.toHaveBeenCalled();
-    expect(m.correo.enviar).not.toHaveBeenCalled();
-    await expect(m.servicio.evaluarElegibilidad(CORREO)).resolves.toEqual({
-      elegible: false,
-      motivo: 'correo-generico',
-      copropiedadIds: [],
-    });
-  });
+      expect(m.enlaces.crear).not.toHaveBeenCalled();
+      expect(m.correo.enviar).not.toHaveBeenCalled();
+      await expect(m.servicio.evaluarElegibilidad(CORREO)).resolves.toEqual({
+        elegible: false,
+        motivo: 'correo-generico',
+        copropiedadIds: [],
+      });
+    },
+  );
 
   it('la dirección de un miembro del personal, titular en UNA ficha: se envía el enlace (los accesos se suman)', async () => {
     // A staff Account with that address and an active assignment: the
