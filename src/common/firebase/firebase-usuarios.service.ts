@@ -1,5 +1,5 @@
 // src/common/firebase/firebase-usuarios.service.ts
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import type { Auth } from 'firebase-admin/auth';
 import { FIREBASE_AUTH } from './firebase.constants';
 import { UID_RESIDENTE_REGEX } from './uid-residente';
@@ -26,6 +26,8 @@ import { UID_RESIDENTE_REGEX } from './uid-residente';
  */
 @Injectable()
 export class FirebaseUsuariosService {
+  private readonly logger = new Logger(FirebaseUsuariosService.name);
+
   constructor(@Inject(FIREBASE_AUTH) private readonly auth: Auth) {}
 
   /**
@@ -70,8 +72,15 @@ export class FirebaseUsuariosService {
    * backend mints for that uid after the person proved their address.
    *
    * Idempotent on purpose: the uid is derived from the address, so
-   * `auth/uid-already-exists` means a concurrent redeem or a retry after a crash
-   * between Firebase and Mongo already made it, and reusing it is exactly right.
+   * `auth/uid-already-exists` normally means a concurrent redeem or a retry
+   * after a crash between Firebase and Mongo already made it, and reusing it is
+   * right. But it is not accepted blindly: the existing identity is read (by
+   * uid, never by e-mail) and reused only when it is as EMPTY as the one this
+   * method creates (no e-mail, no password, no provider). Anything else (an
+   * identity someone shaped by hand, or a pool shared with another system) is
+   * refused, which the redeem turns into its one opaque 401; the log line names
+   * no uid or address. `passwordHash` is usually absent from `getUser`; a
+   * password still shows up as a `password` entry in `providerData`.
    * Never looks anyone up by e-mail, and refuses any uid that is not the
    * `rc1_` + SHA-256 shape, so this method cannot create an arbitrary
    * identity (it is not a general-purpose `createUser`).
@@ -83,8 +92,20 @@ export class FirebaseUsuariosService {
     try {
       await this.auth.createUser({ uid });
     } catch (err) {
-      if ((err as { code?: string }).code === 'auth/uid-already-exists') return;
-      throw err;
+      if ((err as { code?: string }).code !== 'auth/uid-already-exists') {
+        throw err;
+      }
+      const existente = await this.auth.getUser(uid);
+      const vacia =
+        !existente.email &&
+        !existente.passwordHash &&
+        (existente.providerData ?? []).length === 0;
+      if (!vacia) {
+        this.logger.warn(
+          'Identidad de residente ya existente y no vacía: se rechaza (motivo=identidad-ocupada).',
+        );
+        throw new Error('Identidad de residente no utilizable');
+      }
     }
   }
 

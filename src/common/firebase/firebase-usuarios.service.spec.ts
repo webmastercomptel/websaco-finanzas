@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import type { Auth } from 'firebase-admin/auth';
 import { claveCorreo } from '../utils/email.utils';
 import { FirebaseUsuariosService } from './firebase-usuarios.service';
@@ -158,14 +158,63 @@ describe('FirebaseUsuariosService.crearIdentidadResidente', () => {
     expect(uidDeResidente('  ANA@Ejemplo.COM ')).toBe(uid);
   });
 
-  it('auth/uid-already-exists cuenta como éxito (carrera o reintento tras un fallo)', async () => {
-    const { auth } = authCon({
-      crear: jest.fn().mockRejectedValue({ code: 'auth/uid-already-exists' }),
+  /** An Auth double whose createUser says the uid exists and getUser answers `registro`. */
+  const yaExiste = (registro: Record<string, unknown>) => {
+    const createUser = jest
+      .fn()
+      .mockRejectedValue({ code: 'auth/uid-already-exists' });
+    const getUser = jest.fn().mockResolvedValue({ uid, ...registro });
+    const getUserByEmail = jest.fn();
+    return {
+      service: new FirebaseUsuariosService({
+        createUser,
+        getUser,
+        getUserByEmail,
+      } as unknown as Auth),
+      getUser,
+      getUserByEmail,
+    };
+  };
+
+  it('auth/uid-already-exists con una identidad VACÍA (como la que crea este servicio) cuenta como éxito', async () => {
+    const { service, getUser, getUserByEmail } = yaExiste({
+      providerData: [],
     });
-    const service = new FirebaseUsuariosService(auth);
 
     await expect(service.crearIdentidadResidente(uid)).resolves.toBeUndefined();
+    expect(getUser).toHaveBeenCalledWith(uid);
+    expect(getUserByEmail).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['con correo', { email: 'otra@ejemplo.com', providerData: [] }],
+    ['con contraseña', { passwordHash: 'hash', providerData: [] }],
+    [
+      'con un proveedor',
+      { providerData: [{ providerId: 'password', uid: 'x' }] },
+    ],
+  ])(
+    'SEC: auth/uid-already-exists con una identidad %s se rechaza y el registro no nombra a nadie',
+    async (_caso, registro) => {
+      const espia = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        const { service } = yaExiste(registro);
+
+        await expect(service.crearIdentidadResidente(uid)).rejects.toThrow(
+          'Identidad de residente no utilizable',
+        );
+        const salida = espia.mock.calls.map((c) => c.join(' ')).join(' | ');
+        expect(espia).toHaveBeenCalledTimes(1);
+        expect(salida).not.toContain(uid);
+        expect(salida).not.toContain('ejemplo');
+        expect(salida).not.toContain('hash');
+      } finally {
+        espia.mockRestore();
+      }
+    },
+  );
 
   it('deja pasar cualquier otro error', async () => {
     const { auth } = authCon({
