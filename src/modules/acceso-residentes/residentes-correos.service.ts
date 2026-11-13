@@ -1,5 +1,11 @@
 // src/modules/acceso-residentes/residentes-correos.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
@@ -10,6 +16,7 @@ import type {
   Paginado,
   ResidenteCorreo,
   ResultadoAccionResidenteCorreo,
+  ResultadoReenvioEnlace,
   UnidadDeResidente,
 } from '../../contracts';
 import {
@@ -29,6 +36,10 @@ import {
   type TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import {
+  IngresoPortalService,
+  type MotivoInelegible,
+} from '../ingreso-portal/ingreso-portal.service';
 import type { AccionResidenteCorreoDto } from './dto/accion-residente-correo.dto';
 import type { ListarResidentesCorreosDto } from './dto/listar-residentes-correos.dto';
 import {
@@ -44,6 +55,19 @@ import {
 const CLAVE_DUPLICADA = 11000;
 
 /**
+ * Why a resend is refused, in the words staff read (a 409). Staff are
+ * authenticated, so unlike the public route the reason is named.
+ */
+const FRASE_INELEGIBLE: Record<MotivoInelegible, string> = {
+  revocado: 'Esa persona no puede entrar: su acceso está revocado.',
+  'cuenta-inactiva': 'Esa persona no puede entrar: su cuenta está inactiva.',
+  'sin-registro':
+    'Esa persona no puede entrar: su correo no está en una ficha con una unidad activa.',
+  'correo-generico':
+    'Esa persona no puede entrar: su correo está en demasiadas fichas. Corrígelo en Terceros.',
+};
+
+/**
  * Residentes, per ADDRESS: who can enter the portal of the active coproperty,
  * and the staff operations on it (resend the sign-in link, revoke, re-allow).
  * Granting is not here: anyone with an address on a record enters by
@@ -55,6 +79,8 @@ const CLAVE_DUPLICADA = 11000;
  */
 @Injectable()
 export class ResidentesCorreosService {
+  private readonly logger = new Logger(ResidentesCorreosService.name);
+
   constructor(
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
@@ -68,6 +94,7 @@ export class ResidentesCorreosService {
     private readonly revocaciones: Model<RevocacionPortalDocument>,
     private readonly auditoria: AuditoriaService,
     @InjectConnection() private readonly connection: Connection,
+    private readonly ingreso: IngresoPortalService,
   ) {}
 
   /**
@@ -375,5 +402,90 @@ export class ResidentesCorreosService {
       );
     });
     return { terceroId: dto.terceroId, clave: dto.clave };
+  }
+
+  /**
+   * Staff resend of the sign-in link to ONE address of a listed party. The
+   * address is re-resolved from the party's record in the ACTIVE coproperty
+   * (404 when the pair is no longer there), so the e-mail can only go to an
+   * address that record carries. It reuses the self-service issuance path
+   * (`IngresoPortalService`: insert the new link, send, kill the older ones
+   * only after the provider accepted, void the new one otherwise) with the
+   * staff origin, and its OWN per-address counter, so a stranger flooding the
+   * public route can never stop staff from sending.
+   *
+   * The caller is authenticated, so the outcome is explicit: sent; 409 with the
+   * reason (revoked here, revoked everywhere, inactive account, no unit,
+   * shared inbox); `motivo: 'limite'`; `motivo: 'sin-correo-configurado'`; 502
+   * when the provider refused. Eligibility is asked before the counter, so a
+   * refusal spends nothing. The audit entry (`enviar`) is written only for a
+   * send that went out; a failure to write it cannot unsend the e-mail, so it
+   * is logged by party id and the send is still reported.
+   */
+  async reenviar(
+    dto: AccionResidenteCorreoDto,
+    user: IRequestUser,
+  ): Promise<ResultadoReenvioEnlace> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const { nombre, correo } = await this.resolverDireccion(
+      dto,
+      copropiedadId,
+      false,
+    );
+
+    // Revoked in the coproperty staff are looking at: the reason they expect,
+    // even if the address is still eligible somewhere else.
+    const revocadas = await this.residencia.revocacionesActivas(dto.clave, [
+      copropiedadId.toString(),
+    ]);
+    if (revocadas.size > 0) {
+      throw new ConflictException(FRASE_INELEGIBLE.revocado);
+    }
+
+    const elegibilidad = await this.ingreso.evaluarElegibilidad(correo);
+    if (!elegibilidad.elegible) {
+      throw new ConflictException(
+        FRASE_INELEGIBLE[elegibilidad.motivo ?? 'sin-registro'],
+      );
+    }
+
+    if (!(await this.ingreso.tomarCupoReenvio(correo))) {
+      return { enviado: false, motivo: 'limite' };
+    }
+
+    const resultado = await this.ingreso.emitirYEnviar(
+      correo,
+      'personal',
+      new Types.ObjectId(user.accountId),
+    );
+    if (resultado === 'sin-correo-configurado') {
+      return { enviado: false, motivo: 'sin-correo-configurado' };
+    }
+    if (resultado === 'fallo') {
+      throw new BadGatewayException(
+        'No pudimos enviar el correo. Inténtalo de nuevo en unos minutos.',
+      );
+    }
+
+    try {
+      await this.transaccion((session) =>
+        this.auditoria.registrar(
+          {
+            actorAccountId: user.accountId!,
+            actorNombre: user.nombre ?? user.email,
+            accion: 'enviar',
+            entidadTipo: 'acceso-residente',
+            entidadId: dto.terceroId,
+            entidadEtiqueta: `Enlace de ingreso reenviado: ${nombre} (copropiedad ${copropiedadId.toString()})`,
+          },
+          session,
+        ),
+      );
+    } catch (error: unknown) {
+      this.logger.error(
+        `Residentes: se reenvió el enlace del tercero ${dto.terceroId} pero no se pudo auditar (tipo=${(error as Error)?.name ?? 'desconocido'}).`,
+      );
+    }
+    return { enviado: true };
   }
 }

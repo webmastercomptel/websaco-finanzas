@@ -99,6 +99,8 @@ export interface Opciones {
   revocaciones?: Record<string, unknown>[];
   /** Writing the audit entry fails. */
   auditoriaFalla?: boolean;
+  /** The sign-in service the resend delegates to (a real one over its own stand-ins). */
+  ingreso?: unknown;
 }
 
 export function montar(opciones: Opciones = {}) {
@@ -250,6 +252,11 @@ export function montar(opciones: Opciones = {}) {
     motivosCorreoGenerico: jest.fn(() =>
       Promise.resolve(new Map(opciones.genericos ?? [])),
     ),
+    revocacionesActivas: jest.fn((clave: string, ids: readonly string[]) =>
+      Promise.resolve(
+        new Set((opciones.revocadas ?? []).includes(clave) ? ids : []),
+      ),
+    ),
   };
 
   const entradasAuditoria: Record<string, unknown>[] = [];
@@ -285,6 +292,7 @@ export function montar(opciones: Opciones = {}) {
     modeloRevocaciones as never,
     auditoria as never,
     connection as never,
+    (opciones.ingreso ?? {}) as never,
   );
   return {
     servicio,
