@@ -1,13 +1,15 @@
 // src/modules/acceso-residentes/residentes-correos.service.ts
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
+import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { claveCorreo, normalizarEmail } from '../../common/utils/email.utils';
 import type {
   Paginado,
   ResidenteCorreo,
+  ResultadoAccionResidenteCorreo,
   UnidadDeResidente,
 } from '../../contracts';
 import {
@@ -19,9 +21,15 @@ import {
   type AccountDocument,
 } from '../../database/schemas/cuentas/account.schema';
 import {
+  RevocacionPortal,
+  type RevocacionPortalDocument,
+} from '../../database/schemas/cuentas/revocacion-portal.schema';
+import {
   Tercero,
   type TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
+import { AuditoriaService } from '../auditoria/auditoria.service';
+import type { AccionResidenteCorreoDto } from './dto/accion-residente-correo.dto';
 import type { ListarResidentesCorreosDto } from './dto/listar-residentes-correos.dto';
 import {
   construirFilasResidentes,
@@ -31,6 +39,9 @@ import {
   type CuentaParaFila,
   type TerceroParaFila,
 } from './residentes-correos.mapper';
+
+/** Mongo duplicate-key error code. */
+const CLAVE_DUPLICADA = 11000;
 
 /**
  * Residentes, per ADDRESS: who can enter the portal of the active coproperty,
@@ -53,6 +64,10 @@ export class ResidentesCorreosService {
     private readonly cuentas: Model<AccountDocument>,
     private readonly tenant: TenantContextService,
     private readonly residencia: ResidenciaService,
+    @InjectModel(RevocacionPortal.name)
+    private readonly revocaciones: Model<RevocacionPortalDocument>,
+    private readonly auditoria: AuditoriaService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
@@ -186,5 +201,179 @@ export class ResidentesCorreosService {
       pagina,
       porPagina,
     );
+  }
+
+  /**
+   * The party of the ACTIVE coproperty a row names, and the address behind its
+   * `clave`, re-resolved from the record, never taken from the caller. A
+   * foreign party, an unknown id and a `clave` that is not on that record are
+   * all the same 404, so an action can never be aimed at an address or a
+   * tenant of the caller's choosing.
+   *
+   * `admiteHeredado`: revoke and re-allow also accept the address of the
+   * account linked to the party by the legacy `accountId` even when the record
+   * no longer carries it (that access exists and must be revocable). A resend
+   * does not: it only ever mails an address that is on the record.
+   */
+  private async resolverDireccion(
+    dto: AccionResidenteCorreoDto,
+    copropiedadId: Types.ObjectId,
+    admiteHeredado: boolean,
+  ): Promise<{ nombre: string; correo: string }> {
+    const noEncontrado = (): NotFoundException =>
+      new NotFoundException('Residente no encontrado');
+    if (!Types.ObjectId.isValid(dto.terceroId)) throw noEncontrado();
+
+    const tercero = await this.terceros
+      .findOne({
+        _id: new Types.ObjectId(dto.terceroId),
+        copropiedadId,
+        estado: 'active',
+      })
+      .select('nombre emails accountId')
+      .lean()
+      .exec();
+    if (!tercero) throw noEncontrado();
+
+    const enFicha = direccionesDeTercero(tercero.emails).find(
+      (d) => d.clave === dto.clave,
+    );
+    if (enFicha) return { nombre: tercero.nombre, correo: enFicha.correo };
+
+    if (admiteHeredado && tercero.accountId) {
+      const vinculada = await this.cuentas
+        .findOne({ _id: tercero.accountId })
+        .select('email')
+        .lean()
+        .exec();
+      if (vinculada && claveCorreo(vinculada.email) === dto.clave) {
+        return { nombre: tercero.nombre, correo: vinculada.email };
+      }
+    }
+    throw noEncontrado();
+  }
+
+  /** Audit label: names the party and the coproperty, never an address or a unit. */
+  private etiqueta(nombre: string, copropiedadId: Types.ObjectId): string {
+    return `Acceso de residente: ${nombre} (copropiedad ${copropiedadId.toString()})`;
+  }
+
+  /** `withTransaction` may re-run the callback on a transient error: every write in it is safe to repeat. */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Revokes the portal of ONE address in the ACTIVE coproperty: one active
+   * `revocaciones_portal` row keyed by `clave` plus the audit entry
+   * (`retirar`), in one transaction, so a failed audit write leaves no
+   * revocation. It takes effect on the next request of whoever holds the
+   * address (nothing is cached) and cuts the legacy link through the same
+   * rule.
+   *
+   * It touches no Firebase identity, no `Asignacion`, no `Tercero.accountId`,
+   * no other coproperty and no invoice recipient. The partial unique index on
+   * the active row decides a repeat: the second insert is E11000, which means
+   * "already revoked" (200, no audit, the first who/when stays).
+   */
+  async revocar(
+    dto: AccionResidenteCorreoDto,
+    user: IRequestUser,
+  ): Promise<ResultadoAccionResidenteCorreo> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const { nombre } = await this.resolverDireccion(dto, copropiedadId, true);
+    const resultado = { terceroId: dto.terceroId, clave: dto.clave };
+
+    try {
+      await this.transaccion(async (session) => {
+        const [fila] = await this.revocaciones.create(
+          [
+            {
+              copropiedadId,
+              clave: dto.clave,
+              activa: true,
+              revocadaPor: new Types.ObjectId(user.accountId),
+              revocadaEn: new Date(),
+            },
+          ],
+          { session },
+        );
+        await this.auditoria.registrar(
+          {
+            actorAccountId: user.accountId!,
+            actorNombre: user.nombre ?? user.email,
+            accion: 'retirar',
+            entidadTipo: 'acceso-residente',
+            entidadId: fila._id.toString(),
+            entidadEtiqueta: this.etiqueta(nombre, copropiedadId),
+          },
+          session,
+        );
+      });
+    } catch (error: unknown) {
+      if ((error as { code?: number })?.code === CLAVE_DUPLICADA) {
+        return resultado;
+      }
+      throw error;
+    }
+    return resultado;
+  }
+
+  /**
+   * Lifts the active revocation of the address in the ACTIVE coproperty: ONE
+   * conditional update (`activa: true` -> false, with who and when), so the
+   * history stays and a repeat finds nothing to lift (200, no write, no
+   * audit). The audit entry (`restablecer`) is written in the same
+   * transaction. Access returns on the next request if the address still
+   * qualifies and has a proof; nothing is redeemed again and no link is
+   * touched.
+   */
+  async permitir(
+    dto: AccionResidenteCorreoDto,
+    user: IRequestUser,
+  ): Promise<ResultadoAccionResidenteCorreo> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const { nombre } = await this.resolverDireccion(dto, copropiedadId, true);
+
+    await this.transaccion(async (session) => {
+      const levantada = await this.revocaciones
+        .findOneAndUpdate(
+          { copropiedadId, clave: dto.clave, activa: true },
+          {
+            $set: {
+              activa: false,
+              levantadaPor: new Types.ObjectId(user.accountId),
+              levantadaEn: new Date(),
+            },
+          },
+          { session, new: true },
+        )
+        .lean()
+        .exec();
+      if (!levantada) return;
+      await this.auditoria.registrar(
+        {
+          actorAccountId: user.accountId!,
+          actorNombre: user.nombre ?? user.email,
+          accion: 'restablecer',
+          entidadTipo: 'acceso-residente',
+          entidadId: levantada._id.toString(),
+          entidadEtiqueta: this.etiqueta(nombre, copropiedadId),
+        },
+        session,
+      );
+    });
+    return { terceroId: dto.terceroId, clave: dto.clave };
   }
 }
