@@ -27,6 +27,11 @@ import {
   PISO_DE_TIEMPO_MS,
 } from './factura-publica.constantes';
 import { esperarPisoDeTiempo } from '../../common/publico/piso-de-tiempo';
+import { IngresoPortalService } from '../ingreso-portal/ingreso-portal.service';
+import {
+  MENSAJE_SOLICITUD,
+  PISO_SOLICITUD_MS,
+} from '../ingreso-portal/ingreso-portal.constantes';
 import { segmentoIp } from '../../common/publico/segmento-ip';
 
 /** Attempts per client address and per token, per window. `req.ip` is the real
@@ -71,6 +76,7 @@ export class FacturaPublicaController {
   constructor(
     private readonly enlaces: EnlaceFacturaService,
     private readonly limite: LimiteIntentosService,
+    private readonly ingreso: IngresoPortalService,
   ) {}
 
   @Post('pdf')
@@ -130,12 +136,49 @@ export class FacturaPublicaController {
     return resumen;
   }
 
-  /** The per-IP limit, the token format and the per-token limit, in that order. */
+  /**
+   * «Entrar a mi portal» from the invoice page: asks for a portal sign-in link
+   * for the ADDRESS this invoice link was sent to, without the person typing
+   * it. The sign-in link is e-mailed to that address by the regular request
+   * flow (`IngresoPortalService.solicitar`: same eligibility, counters and
+   * e-mail), so forwarding the invoice e-mail gives nobody portal access.
+   * After the shared limits, the answer is ALWAYS the request route's own
+   * 202 at its fixed time, whatever the link or the address; the work runs
+   * after it and never throws.
+   */
+  @Post('ingreso')
+  @HttpCode(202)
+  @Public()
+  async pedirIngreso(
+    @Body() dto: ObtenerFacturaPublicaDto,
+    @Req() req: { ip?: string },
+  ): Promise<{ mensaje: string }> {
+    const inicio = Date.now();
+    const formatoValido = await this.pasarLimites(dto, req, inicio, false);
+    // Started, never awaited, never throws: nothing about the link reaches the answer.
+    if (formatoValido) {
+      void this.enlaces
+        .correoDelEnlace(dto.token)
+        .then((correo) =>
+          correo ? this.ingreso.solicitar(correo, req.ip) : undefined,
+        )
+        .catch(() => undefined);
+    }
+    await esperarPisoDeTiempo(inicio, PISO_SOLICITUD_MS);
+    return { mensaje: MENSAJE_SOLICITUD };
+  }
+
+  /**
+   * The per-IP limit, the token format and the per-token limit, in that order.
+   * A malformed token is the opaque 404 (`rechazarFormato`), or, for the
+   * sign-in route, simply goes nowhere (its answer never varies).
+   */
   private async pasarLimites(
     dto: ObtenerFacturaPublicaDto,
     req: { ip?: string },
     inicio: number,
-  ): Promise<void> {
+    rechazarFormato = true,
+  ): Promise<boolean> {
     // An IPv6 client counts as its /64 (`segmentoIp`).
     if (
       !(await this.limite.permitir(
@@ -149,7 +192,10 @@ export class FacturaPublicaController {
 
     // A malformed string is covered by the IP counter alone: it never creates
     // a per-token key.
-    if (!FORMATO_TOKEN.test(dto.token)) await this.rechazar(inicio);
+    if (!FORMATO_TOKEN.test(dto.token)) {
+      if (rechazarFormato) await this.rechazar(inicio);
+      return false;
+    }
 
     const hashDelToken = createHash('sha256').update(dto.token).digest('hex');
     if (
@@ -161,6 +207,7 @@ export class FacturaPublicaController {
     ) {
       throw this.demasiadosIntentos();
     }
+    return true;
   }
 
   private async rechazar(inicio: number): Promise<never> {

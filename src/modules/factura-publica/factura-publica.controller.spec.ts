@@ -62,6 +62,7 @@ function montar(opciones: { resolucion?: Resolucion; limite?: unknown } = {}) {
     controlador: new FacturaPublicaController(
       servicio as never,
       limite as never,
+      { solicitar: jest.fn() } as never,
     ),
   };
 }
@@ -482,6 +483,7 @@ describe('FacturaPublicaController.obtenerResumen', () => {
       controlador: new FacturaPublicaController(
         servicio as never,
         limite as never,
+        { solicitar: jest.fn() } as never,
       ),
     };
   }
@@ -545,5 +547,57 @@ describe('FacturaPublicaController.obtenerResumen', () => {
       `limite:factura-publica:ip:${IP}`,
       `limite:factura-publica:token:${sha256(TOKEN)}`,
     ]);
+  });
+});
+
+describe('FacturaPublicaController.pedirIngreso', () => {
+  function montarIngreso(correo: string | null) {
+    const servicio = {
+      correoDelEnlace: jest.fn(() => Promise.resolve(correo)),
+    };
+    const limite = { permitir: jest.fn(() => Promise.resolve(true)) };
+    const ingreso = { solicitar: jest.fn(() => Promise.resolve()) };
+    return {
+      servicio,
+      ingreso,
+      controlador: new FacturaPublicaController(
+        servicio as never,
+        limite as never,
+        ingreso as never,
+      ),
+    };
+  }
+
+  async function pedir(m: ReturnType<typeof montarIngreso>, token = TOKEN) {
+    jest.useFakeTimers();
+    try {
+      const p = m.controlador.pedirIngreso({ token }, req());
+      await jest.advanceTimersByTimeAsync(1500);
+      return await p;
+    } finally {
+      jest.useRealTimers();
+    }
+  }
+
+  it('SEC: pide el enlace de entrada para la dirección del enlace, sin devolverla', async () => {
+    const m = montarIngreso('ana@x.com');
+    const r = await pedir(m);
+    expect(r).toEqual({
+      mensaje:
+        'Si tu correo está registrado, te enviamos un enlace para entrar.',
+    });
+    expect(JSON.stringify(r)).not.toContain('ana@x.com');
+    expect(m.ingreso.solicitar).toHaveBeenCalledWith('ana@x.com', IP);
+  });
+
+  it('SEC: un enlace inválido o mal formado responde lo mismo y no pide nada', async () => {
+    const invalido = montarIngreso(null);
+    const malFormado = montarIngreso('ana@x.com');
+    const a = await pedir(invalido);
+    const b = await pedir(malFormado, 'hola');
+    expect(a).toEqual(b);
+    expect(invalido.ingreso.solicitar).not.toHaveBeenCalled();
+    expect(malFormado.servicio.correoDelEnlace).not.toHaveBeenCalled();
+    expect(malFormado.ingreso.solicitar).not.toHaveBeenCalled();
   });
 });

@@ -210,7 +210,19 @@ export class EnlaceFacturaService {
     };
   }
 
-  /** Every refusal of a link, shared by the PDF and the summary. */
+  /**
+   * The address of a still-valid link (same checks as the PDF), so the public
+   * page can ask for a portal sign-in link for it. Only ever handed to
+   * `IngresoPortalService.solicitar`, which e-mails THAT address: the holder of
+   * the invoice link never sees it and gains nothing unless they read that
+   * inbox. Never returned to the client, never logged.
+   */
+  async correoDelEnlace(token: string): Promise<string | null> {
+    const validado = await this.validar(token);
+    return validado ? validado.correo : null;
+  }
+
+  /** Every refusal of a link, shared by the PDF, the summary and the sign-in. */
   private async validar(token: string) {
     let enlaceId: string | undefined;
     try {
@@ -264,17 +276,16 @@ export class EnlaceFacturaService {
         .exec();
       if (!liberada) return this.rechazar('factura sin liberar', enlaceId);
 
-      if (
-        !(await this.sigueSiendoDestinatario(
-          copropiedadId,
-          factura.inmuebleId,
-          enlace.clave,
-        ))
-      ) {
+      const destino = await this.destinoActual(
+        copropiedadId,
+        factura.inmuebleId,
+        enlace.clave,
+      );
+      if (!destino) {
         return this.rechazar('la dirección ya no es destinataria', enlaceId);
       }
 
-      return { enlace, factura, enlaceId };
+      return { enlace, factura, enlaceId, correo: destino.email };
     } catch (error: unknown) {
       // Only the error CLASS is logged: its message can carry an invoice id or
       // a storage path.
@@ -330,21 +341,21 @@ export class EnlaceFacturaService {
    * current titular and arrendatario (active unit, active parties, same
    * coproperty), by the same function the sender uses.
    */
-  private async sigueSiendoDestinatario(
+  private async destinoActual(
     copropiedadId: Types.ObjectId,
     inmuebleId: Types.ObjectId,
     clave: string,
-  ): Promise<boolean> {
+  ): Promise<{ email: string } | null> {
     const unidad = await this.inmuebles
       .findOne({ _id: inmuebleId, copropiedadId, estado: 'active' })
       .select('titularId arrendatarioId')
       .lean()
       .exec();
-    if (!unidad) return false;
+    if (!unidad) return null;
     const ids = [unidad.titularId, unidad.arrendatarioId].filter(
       (id): id is Types.ObjectId => !!id,
     );
-    if (ids.length === 0) return false;
+    if (ids.length === 0) return null;
     const partes = await this.terceros
       .find({ _id: { $in: ids }, copropiedadId, estado: 'active' })
       .select('nombre emails')
@@ -355,7 +366,7 @@ export class EnlaceFacturaService {
       unidad.titularId ? porId.get(String(unidad.titularId)) : null,
       unidad.arrendatarioId ? porId.get(String(unidad.arrendatarioId)) : null,
     );
-    return destinos.some((d) => d.clave === clave);
+    return destinos.find((d) => d.clave === clave) ?? null;
   }
 
   /** Best effort: a failed write is logged with the link id and still serves. */

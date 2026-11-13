@@ -9,6 +9,7 @@ import { LimiteIntentosService } from '../../common/redis/limite-intentos.servic
 import { FiltroExcepcionesSentry } from '../../common/sentry/filtro-sentry';
 import { EnlaceFacturaService } from './enlace-factura.service';
 import { FacturaPublicaController } from './factura-publica.controller';
+import { IngresoPortalService } from '../ingreso-portal/ingreso-portal.service';
 import { MENSAJE_OPACO, PISO_DE_TIEMPO_MS } from './factura-publica.constantes';
 
 jest.mock('@sentry/node', () => ({ captureException: jest.fn() }));
@@ -41,6 +42,7 @@ const limite = {
   providers: [
     { provide: EnlaceFacturaService, useValue: enlaces },
     { provide: LimiteIntentosService, useValue: limite },
+    { provide: IngresoPortalService, useValue: { solicitar: jest.fn() } },
     // The same global filter `app.module.ts` registers.
     { provide: APP_FILTER, useClass: FiltroExcepcionesSentry },
   ],

@@ -1,5 +1,6 @@
 // src/modules/factura-publica/factura-publica.module.ts
 import { Module } from '@nestjs/common';
+import { IngresoPortalModule } from '../ingreso-portal/ingreso-portal.module';
 import { EnlaceFacturaService } from './enlace-factura.service';
 import { FacturaPublicaController } from './factura-publica.controller';
 
@@ -13,6 +14,7 @@ import { FacturaPublicaController } from './factura-publica.controller';
  * the tenant of the link row.
  */
 @Module({
+  imports: [IngresoPortalModule],
   controllers: [FacturaPublicaController],
   providers: [EnlaceFacturaService],
   exports: [EnlaceFacturaService],

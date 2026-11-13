@@ -393,6 +393,7 @@ describe('inventario de rutas', () => {
       'EnlaceAccesoController.canjear',
       'FacturaPublicaController.obtenerPdf',
       'FacturaPublicaController.obtenerResumen',
+      'FacturaPublicaController.pedirIngreso',
       'HealthController.check',
       'HealthController.live',
       'HealthController.ready',
