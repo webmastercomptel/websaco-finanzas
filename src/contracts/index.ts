@@ -3658,49 +3658,6 @@ export interface UnidadDeResidente {
 }
 
 /**
- * Where a resident stands. There is deliberately no "invitado": nothing records
- * whether an invitation was ever opened, so the state would be a guess.
- */
-export type EstadoAccesoResidente =
-  'sinCuenta' | 'conCuenta' | 'cuentaInactiva';
-
-/** One owner or tenant of the coproperty and whether they can sign in. */
-export interface ResidenteAcceso {
-  terceroId: string;
-  nombre: string;
-  /** The address an invitation would go to (first valid one of the party); null when none. */
-  email: string | null;
-  estadoAcceso: EstadoAccesoResidente;
-  unidades: UnidadDeResidente[];
-  /** True when access can be created in bulk: no account yet and a usable address. */
-  aprovisionable: boolean;
-}
-
-/** Response of `POST /residentes/:terceroId/acceso`. */
-export interface AccesoResidenteCreado extends ResultadoInvitacion {
-  terceroId: string;
-  /** True when an existing account was linked (explicit `vincularExistente`) instead of created. */
-  cuentaExistente: boolean;
-}
-
-/** Response of `POST /residentes/aprovisionar`: one page of a resumable run. */
-export interface AprovisionamientoResidentes {
-  /** Parties examined in this call (creados + omitidos + errores). */
-  procesados: number;
-  creados: number;
-  omitidos: Array<{ terceroId: string; motivo: string }>;
-  errores: Array<{ terceroId: string; mensaje: string }>;
-  /** Parties still to examine after this page; the screen repeats until it is 0. */
-  pendientes: number;
-  /** Pass it as `desde` on the next call; null when nothing is left. */
-  siguienteDesde: string | null;
-  /** Invitation emails accepted by the provider in this call. */
-  invitacionesEnviadas: number;
-  /** False when mail is not configured: identities were created but nobody was told. */
-  correoConfigurado: boolean;
-}
-
-/**
  * Where one ADDRESS of a resident stands in the portal (the new Residentes
  * list, one row per party and address). Precedence: `revocado` (an active
  * revocation of the address in this coproperty) > `ingreso` (the Account of

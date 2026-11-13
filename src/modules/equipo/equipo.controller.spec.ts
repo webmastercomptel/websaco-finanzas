@@ -12,7 +12,6 @@ import {
   type RequiredRule,
 } from '../casl/check-ability.decorator';
 import { guardDejaPasar } from '../casl/testing/politica-de-ruta';
-import { AccesoResidentesController } from '../acceso-residentes/acceso-residentes.controller';
 import { EquipoController } from './equipo.controller';
 
 const proto = EquipoController.prototype as unknown as Record<string, object>;
@@ -141,9 +140,4 @@ describe('EquipoController — licencia: finanzas o administracion', () => {
     },
   );
 
-  it('Residentes no cambia: solo con administracion', () => {
-    expect(Reflect.getMetadata(MODULO_KEY, AccesoResidentesController)).toBe(
-      'administracion',
-    );
-  });
 });

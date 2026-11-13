@@ -2,8 +2,6 @@
 import { Module } from '@nestjs/common';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { IngresoPortalModule } from '../ingreso-portal/ingreso-portal.module';
-import { AccesoResidentesController } from './acceso-residentes.controller';
-import { AccesoResidentesService } from './acceso-residentes.service';
 import { InvitacionAccesoService } from './invitacion-acceso.service';
 import { ResidentesCorreosController } from './residentes-correos.controller';
 import { ResidentesCorreosService } from './residentes-correos.service';
@@ -16,11 +14,8 @@ import { ResidentesCorreosService } from './residentes-correos.service';
  */
 @Module({
   imports: [AuditoriaModule, IngresoPortalModule],
-  // The static `residentes/correos` controller is registered first so its
-  // literal segment is matched before `residentes/:terceroId/...`.
-  controllers: [ResidentesCorreosController, AccesoResidentesController],
+  controllers: [ResidentesCorreosController],
   providers: [
-    AccesoResidentesService,
     InvitacionAccesoService,
     ResidentesCorreosService,
   ],

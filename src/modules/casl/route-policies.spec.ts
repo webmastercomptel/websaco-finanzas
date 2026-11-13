@@ -310,8 +310,7 @@ describe('inventario de rutas', () => {
    * - equipo / roles: a team is managed whichever product the building bought.
    * - catalogo-permisos: the Finanzas key list those two screens draw.
    * - residentes/correos: owners and tenants get invoices under either
-   *   product, so their portal access is managed under either. The old
-   *   `/residentes` grant routes stay Administración only until removed.
+   *   product, so their portal access is managed under either.
    */
   it('las únicas rutas compartidas entre módulos (@ModuloAlguno) son las justificadas', () => {
     const compartidas: string[] = [];
