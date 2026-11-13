@@ -309,7 +309,9 @@ describe('inventario de rutas', () => {
    * - portal unidades: every resident form starts from it, no financial data.
    * - equipo / roles: a team is managed whichever product the building bought.
    * - catalogo-permisos: the Finanzas key list those two screens draw.
-   * `/residentes` is NOT in the list: it stays Administración only.
+   * - residentes/correos: owners and tenants get invoices under either
+   *   product, so their portal access is managed under either. The old
+   *   `/residentes` grant routes stay Administración only until removed.
    */
   it('las únicas rutas compartidas entre módulos (@ModuloAlguno) son las justificadas', () => {
     const compartidas: string[] = [];
@@ -341,6 +343,10 @@ describe('inventario de rutas', () => {
       'EquipoController.obtener',
       'EquipoController.reenviarInvitacion',
       'PortalController.unidades',
+      'ResidentesCorreosController.listar',
+      'ResidentesCorreosController.permitir',
+      'ResidentesCorreosController.reenviar',
+      'ResidentesCorreosController.revocar',
       'RolesController.create',
       'RolesController.findAll',
       'RolesController.permisos',
