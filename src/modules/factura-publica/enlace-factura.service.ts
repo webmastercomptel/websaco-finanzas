@@ -33,7 +33,6 @@ import {
   type TerceroDocument,
 } from '../../database/schemas/terceros/tercero.schema';
 import { paginaIndividualDeFactura } from '../facturacion/factura-pdf.util';
-import type { FacturaLean } from '../facturacion/facturas.service';
 import {
   decisionAnulada,
   FORMATO_TOKEN,
@@ -57,6 +56,21 @@ export interface EnlaceResuelto {
   numeroCompleto: string;
   enlaceId: string;
   envioFacturaId: string;
+}
+
+/**
+ * The fixed facts of the link's invoice, shown above the PDF buttons. Only
+ * what is already printed on the PDF; deliberately NOT the live balance (it
+ * changes with every payment and is debt information the portal guards).
+ */
+export interface ResumenFacturaPublica {
+  numeroCompleto: string;
+  codigoInmueble: string;
+  periodoDesde: string;
+  periodoHasta: string;
+  fechaVencimiento: string;
+  total: number;
+  anulada: boolean;
 }
 
 /**
@@ -152,6 +166,52 @@ export class EnlaceFacturaService {
    * built, so a refusal never writes.
    */
   async resolver(token: string): Promise<EnlaceResuelto | null> {
+    const validado = await this.validar(token);
+    if (!validado) return null;
+    const { enlace, factura, enlaceId } = validado;
+    try {
+      const bytes = await paginaIndividualDeFactura(
+        String(enlace.facturaId),
+        factura,
+        this.presentacionDocumento,
+        this.storage,
+      );
+
+      await this.registrarUso(enlaceId, enlace._id);
+      return {
+        bytes,
+        numeroCompleto: factura.numeroCompleto,
+        enlaceId,
+        envioFacturaId: String(enlace.envioFacturaId),
+      };
+    } catch (error: unknown) {
+      const clase = error instanceof Error ? error.name : 'desconocido';
+      return this.rechazar(`excepción (${clase})`, enlaceId);
+    }
+  }
+
+  /**
+   * The summary of the link's invoice, under EXACTLY the same checks as the
+   * PDF (same refusals, same `null`). Writes no usage: only the PDF counts as
+   * an opening.
+   */
+  async resumen(token: string): Promise<ResumenFacturaPublica | null> {
+    const validado = await this.validar(token);
+    if (!validado) return null;
+    const { factura } = validado;
+    return {
+      numeroCompleto: factura.numeroCompleto,
+      codigoInmueble: factura.codigoInmueble,
+      periodoDesde: new Date(factura.periodoDesde).toISOString(),
+      periodoHasta: new Date(factura.periodoHasta).toISOString(),
+      fechaVencimiento: new Date(factura.fechaVencimiento).toISOString(),
+      total: factura.total,
+      anulada: factura.estado !== 'emitida',
+    };
+  }
+
+  /** Every refusal of a link, shared by the PDF and the summary. */
+  private async validar(token: string) {
     let enlaceId: string | undefined;
     try {
       if (typeof token !== 'string' || !FORMATO_TOKEN.test(token)) {
@@ -186,7 +246,7 @@ export class EnlaceFacturaService {
       const factura = await this.facturas
         .findOne({ _id: enlace.facturaId, copropiedadId })
         .select(
-          'estado inmuebleId loteId numeroCompleto printSnapshot paginaEnLote',
+          'estado inmuebleId loteId numeroCompleto printSnapshot paginaEnLote codigoInmueble periodoDesde periodoHasta fechaVencimiento total',
         )
         .lean()
         .exec();
@@ -214,20 +274,7 @@ export class EnlaceFacturaService {
         return this.rechazar('la dirección ya no es destinataria', enlaceId);
       }
 
-      const bytes = await paginaIndividualDeFactura(
-        String(enlace.facturaId),
-        factura as unknown as FacturaLean,
-        this.presentacionDocumento,
-        this.storage,
-      );
-
-      await this.registrarUso(enlaceId, enlace._id);
-      return {
-        bytes,
-        numeroCompleto: factura.numeroCompleto,
-        enlaceId,
-        envioFacturaId: String(enlace.envioFacturaId),
-      };
+      return { enlace, factura, enlaceId };
     } catch (error: unknown) {
       // Only the error CLASS is logged: its message can carry an invoice id or
       // a storage path.

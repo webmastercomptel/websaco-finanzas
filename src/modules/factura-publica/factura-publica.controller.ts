@@ -17,7 +17,10 @@ import { LimiteIntentosService } from '../../common/redis/limite-intentos.servic
 import { Public } from '../casl/check-ability.decorator';
 import { CabecerasDeSeguridadInterceptor } from '../../common/publico/cabeceras-de-seguridad.interceptor';
 import { ObtenerFacturaPublicaDto } from './dto/obtener-factura-publica.dto';
-import { EnlaceFacturaService } from './enlace-factura.service';
+import {
+  EnlaceFacturaService,
+  type ResumenFacturaPublica,
+} from './enlace-factura.service';
 import {
   FORMATO_TOKEN,
   MENSAJE_OPACO,
@@ -78,32 +81,7 @@ export class FacturaPublicaController {
     @Req() req: { ip?: string },
   ): Promise<StreamableFile> {
     const inicio = Date.now();
-
-    // An IPv6 client counts as its /64 (`segmentoIp`).
-    if (
-      !(await this.limite.permitir(
-        `limite:factura-publica:ip:${segmentoIp(req.ip)}`,
-        LIMITE_POR_IP,
-        VENTANA_MS,
-      ))
-    ) {
-      throw this.demasiadosIntentos();
-    }
-
-    // A malformed string is covered by the IP counter alone: it never creates
-    // a per-token key.
-    if (!FORMATO_TOKEN.test(dto.token)) return this.rechazar(inicio);
-
-    const hashDelToken = createHash('sha256').update(dto.token).digest('hex');
-    if (
-      !(await this.limite.permitir(
-        `limite:factura-publica:token:${hashDelToken}`,
-        LIMITE_POR_TOKEN,
-        VENTANA_MS,
-      ))
-    ) {
-      throw this.demasiadosIntentos();
-    }
+    await this.pasarLimites(dto, req, inicio);
 
     let resuelto: Awaited<ReturnType<EnlaceFacturaService['resolver']>> = null;
     try {
@@ -126,6 +104,63 @@ export class FacturaPublicaController {
       type: 'application/pdf',
       disposition: `inline; filename="${nombreDeArchivo(resuelto.numeroCompleto)}"`,
     });
+  }
+
+  /**
+   * The fixed facts of the same invoice (number, unit, period, due date,
+   * total), for the page to show above the PDF buttons. Same limits, same
+   * refusals, same opaque 404 and time floor as the PDF; no live balance.
+   */
+  @Post('resumen')
+  @HttpCode(200)
+  @Public()
+  async obtenerResumen(
+    @Body() dto: ObtenerFacturaPublicaDto,
+    @Req() req: { ip?: string },
+  ): Promise<ResumenFacturaPublica> {
+    const inicio = Date.now();
+    await this.pasarLimites(dto, req, inicio);
+    let resumen: ResumenFacturaPublica | null = null;
+    try {
+      resumen = await this.enlaces.resumen(dto.token);
+    } catch {
+      resumen = null;
+    }
+    if (!resumen) return this.rechazar(inicio);
+    return resumen;
+  }
+
+  /** The per-IP limit, the token format and the per-token limit, in that order. */
+  private async pasarLimites(
+    dto: ObtenerFacturaPublicaDto,
+    req: { ip?: string },
+    inicio: number,
+  ): Promise<void> {
+    // An IPv6 client counts as its /64 (`segmentoIp`).
+    if (
+      !(await this.limite.permitir(
+        `limite:factura-publica:ip:${segmentoIp(req.ip)}`,
+        LIMITE_POR_IP,
+        VENTANA_MS,
+      ))
+    ) {
+      throw this.demasiadosIntentos();
+    }
+
+    // A malformed string is covered by the IP counter alone: it never creates
+    // a per-token key.
+    if (!FORMATO_TOKEN.test(dto.token)) await this.rechazar(inicio);
+
+    const hashDelToken = createHash('sha256').update(dto.token).digest('hex');
+    if (
+      !(await this.limite.permitir(
+        `limite:factura-publica:token:${hashDelToken}`,
+        LIMITE_POR_TOKEN,
+        VENTANA_MS,
+      ))
+    ) {
+      throw this.demasiadosIntentos();
+    }
   }
 
   private async rechazar(inicio: number): Promise<never> {

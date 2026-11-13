@@ -299,7 +299,7 @@ describe('FacturaPublicaController.obtenerPdf — rechazo uniforme', () => {
       const m = montar({ resolucion });
       let respondio = false;
       const promesa = m.controlador
-        .obtenerPdf({ token }, req() as never)
+        .obtenerPdf({ token }, req())
         .catch(() => undefined)
         .then(() => {
           respondio = true;
@@ -445,5 +445,105 @@ describe('FacturaPublicaController.obtenerPdf — registros', () => {
     const salida = todoLoRegistrado();
     expect(salida).toContain('enl-1');
     expect(salida).toContain('env-1');
+  });
+});
+
+describe('FacturaPublicaController.obtenerResumen', () => {
+  const RESUMEN = {
+    numeroCompleto: 'FV-0001',
+    codigoInmueble: 'T4-304',
+    periodoDesde: '2026-11-01T00:00:00.000Z',
+    periodoHasta: '2026-11-30T00:00:00.000Z',
+    fechaVencimiento: '2026-12-10T00:00:00.000Z',
+    total: 350000,
+    anulada: false,
+  };
+
+  function montarResumen(resumen: unknown) {
+    const contadores = new Map<string, number>();
+    const servicio = {
+      resolver: jest.fn(),
+      resumen: jest.fn(() =>
+        resumen instanceof Error
+          ? Promise.reject(resumen)
+          : Promise.resolve(resumen),
+      ),
+    };
+    const limite = {
+      permitir: jest.fn((clave: string, maximo: number) => {
+        const n = (contadores.get(clave) ?? 0) + 1;
+        contadores.set(clave, n);
+        return Promise.resolve(n <= maximo);
+      }),
+    };
+    return {
+      servicio,
+      limite,
+      controlador: new FacturaPublicaController(
+        servicio as never,
+        limite as never,
+      ),
+    };
+  }
+
+  it('es POST /publico/facturas/resumen, @Public y responde 200', () => {
+    const proto = FacturaPublicaController.prototype as unknown as Record<
+      string,
+      object
+    >;
+    const handler = proto.obtenerResumen;
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('resumen');
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(
+      RequestMethod.POST,
+    );
+    expect(Reflect.getMetadata(PUBLIC_KEY, handler)).toBe(true);
+    expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler)).toBe(200);
+    expect(Reflect.getMetadata(GUARDS_METADATA, handler)).toBeUndefined();
+  });
+
+  it('devuelve solo los datos fijos de la factura, sin saldo', async () => {
+    const m = montarResumen(RESUMEN);
+    const r = await m.controlador.obtenerResumen({ token: TOKEN }, req());
+    expect(r).toEqual(RESUMEN);
+    expect(Object.keys(r)).not.toContain('saldoPendiente');
+    expect(m.servicio.resolver).not.toHaveBeenCalled();
+  });
+
+  it('SEC: rechazo uniforme — el mismo 404 opaco que el PDF, nunca antes de 300 ms', async () => {
+    jest.useFakeTimers();
+    try {
+      for (const resumen of [null, new Error('factura 65f0a1')]) {
+        const m = montarResumen(resumen);
+        let error: unknown = null;
+        const p = m.controlador
+          .obtenerResumen({ token: TOKEN }, req())
+          .catch((e: unknown) => {
+            error = e;
+          });
+        await jest.advanceTimersByTimeAsync(PISO_DE_TIEMPO_MS - 1);
+        expect(error).toBeNull();
+        await jest.advanceTimersByTimeAsync(1);
+        await p;
+        expect((error as HttpException).getStatus()).toBe(404);
+        expect(
+          JSON.stringify((error as HttpException).getResponse()),
+        ).not.toContain('65f0a1');
+        expect((error as HttpException).getResponse()).toMatchObject({
+          message: MENSAJE_OPACO,
+        });
+      }
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('SEC: comparte los límites por IP y por token con el PDF', async () => {
+    const m = montarResumen(RESUMEN);
+    await m.controlador.obtenerResumen({ token: TOKEN }, req());
+    const claves = m.limite.permitir.mock.calls.map((c) => c[0]);
+    expect(claves).toEqual([
+      `limite:factura-publica:ip:${IP}`,
+      `limite:factura-publica:token:${sha256(TOKEN)}`,
+    ]);
   });
 });

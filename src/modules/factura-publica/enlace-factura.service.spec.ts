@@ -70,6 +70,11 @@ async function montarMundo() {
     numeroCompleto: 'FV-0001',
     printSnapshot: { ok: true },
     paginaEnLote: 2,
+    codigoInmueble: 'T4-304',
+    periodoDesde: new Date('2026-11-01T00:00:00.000Z'),
+    periodoHasta: new Date('2026-11-30T00:00:00.000Z'),
+    fechaVencimiento: new Date('2026-12-10T00:00:00.000Z'),
+    total: 350000,
   };
   const envio = {
     _id: oid(),
@@ -685,5 +690,33 @@ describe('EnlaceFacturaService.registrarUso y revocación', () => {
     await m.servicio.revocarPorId(oid(), a.id);
 
     expect(m.colecciones.enlaces.docs[0].revocadoEn).toBeNull();
+  });
+});
+
+describe('EnlaceFacturaService.resumen', () => {
+  it('devuelve los datos fijos de SU factura, sin saldo, y no cuenta como apertura', async () => {
+    const m = await montarMundo();
+    const { token } = await m.emitirPara('ana@x.com');
+
+    const resumen = await m.servicio.resumen(token);
+
+    expect(resumen).toEqual({
+      numeroCompleto: 'FV-0001',
+      codigoInmueble: 'T4-304',
+      periodoDesde: '2026-11-01T00:00:00.000Z',
+      periodoHasta: '2026-11-30T00:00:00.000Z',
+      fechaVencimiento: '2026-12-10T00:00:00.000Z',
+      total: 350000,
+      anulada: false,
+    });
+    expect(m.colecciones.enlaces.docs[0].usos).toBe(0);
+  });
+
+  it('se niega con las mismas reglas que el PDF: vencido o desconocido -> null', async () => {
+    const m = await montarMundo();
+    const { token, expiraEn } = await m.emitirPara('ana@x.com');
+    expect(await m.servicio.resumen(sha256('otro'))).toBeNull();
+    jest.spyOn(Date, 'now').mockReturnValue(expiraEn.getTime() + 1000);
+    expect(await m.servicio.resumen(token)).toBeNull();
   });
 });

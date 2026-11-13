@@ -392,6 +392,7 @@ describe('inventario de rutas', () => {
     expect(publicas.sort()).toEqual([
       'EnlaceAccesoController.canjear',
       'FacturaPublicaController.obtenerPdf',
+      'FacturaPublicaController.obtenerResumen',
       'HealthController.check',
       'HealthController.live',
       'HealthController.ready',
