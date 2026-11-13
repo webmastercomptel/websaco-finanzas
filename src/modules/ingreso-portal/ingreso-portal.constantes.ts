@@ -1,4 +1,5 @@
 // src/modules/ingreso-portal/ingreso-portal.constantes.ts
+import { segmentoIp } from '../../common/publico/segmento-ip';
 
 /**
  * How long a sign-in link works from the moment it is minted. Flip point for
@@ -51,12 +52,17 @@ export const LIMITES_INGRESO = {
   canjePorToken: { limite: 5, ventanaMs: 60_000 },
 } as const;
 
-/** Redis key builders. The variable part is an IP or a hash, never an address. */
+/**
+ * Redis key builders. The variable part is an IP (an IPv6 one counted as its
+ * /64, `segmentoIp`) or a hash, never an address.
+ */
 export const clavesLimite = {
-  solicitudIp: (ip: string): string => `limite:ingreso-solicitar:ip:${ip}`,
+  solicitudIp: (ip: string | undefined): string =>
+    `limite:ingreso-solicitar:ip:${segmentoIp(ip)}`,
   correoCorta: (clave: string): string => `limite:ingreso-correo:15m:${clave}`,
   correoLarga: (clave: string): string => `limite:ingreso-correo:24h:${clave}`,
-  canjeIp: (ip: string): string => `limite:ingreso-canjear:ip:${ip}`,
+  canjeIp: (ip: string | undefined): string =>
+    `limite:ingreso-canjear:ip:${segmentoIp(ip)}`,
   canjeToken: (hashDelToken: string): string =>
     `limite:ingreso-canjear:token:${hashDelToken}`,
 };

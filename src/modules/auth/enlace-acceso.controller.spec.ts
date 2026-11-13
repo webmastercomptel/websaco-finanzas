@@ -103,6 +103,23 @@ describe('EnlaceAccesoController.canjear', () => {
     );
   });
 
+  it('SEC: una /64 de IPv6 es un solo contador por IP', async () => {
+    const { controlador, limite } = montar({ permitidos: [false, false] });
+
+    await controlador
+      .canjear({ token: TOKEN }, { ip: '2001:db8:1:2:aaaa::1' })
+      .catch(() => undefined);
+    await controlador
+      .canjear({ token: TOKEN }, { ip: '2001:db8:1:2:bbbb::2' })
+      .catch(() => undefined);
+
+    const claves = limite.permitir.mock.calls.map((c: unknown[]) => c[0]);
+    expect(claves).toEqual([
+      'limite:enlace-canjear:ip:v6-20010db800010002',
+      'limite:enlace-canjear:ip:v6-20010db800010002',
+    ]);
+  });
+
   it('no hay cubeta global: el tráfico inválido de otras direcciones no deja afuera a los demás residentes', async () => {
     // Before: one shared bucket counted every request, valid or not, so
     // ~10 req/s of garbage from anywhere locked every resident out.

@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { EnlaceAccesoService } from '../../common/cuentas/enlace-acceso.service';
+import { segmentoIp } from '../../common/publico/segmento-ip';
 import { LimiteIntentosService } from '../../common/redis/limite-intentos.service';
 import type { EnlaceCanjeado } from '../../contracts';
 import { Public } from '../casl/check-ability.decorator';
@@ -55,9 +56,9 @@ export class EnlaceAccesoController {
     @Body() dto: CanjearEnlaceDto,
     @Req() req: { ip?: string },
   ): Promise<EnlaceCanjeado> {
-    const ip = req.ip ?? 'desconocida';
+    // An IPv6 client counts as its /64 (`segmentoIp`).
     const porIp = await this.limite.permitir(
-      `limite:enlace-canjear:ip:${ip}`,
+      `limite:enlace-canjear:ip:${segmentoIp(req.ip)}`,
       LIMITE_POR_IP,
       VENTANA_MS,
     );

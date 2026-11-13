@@ -241,6 +241,42 @@ describe('IngresoPortalController.solicitar', () => {
       m.llamadas.every((k) => k.startsWith('limite:ingreso-solicitar:ip:')),
     ).toBe(true);
   });
+
+  it('SEC: una /64 de IPv6 es UN contador en las dos rutas (rotar la parte baja no da cupo nuevo)', async () => {
+    const m = montar();
+
+    await enTiempo(
+      () =>
+        m.controlador.solicitar(
+          { correo: CORREO },
+          { ip: '2001:db8:1:2:aaaa::1' },
+        ),
+      PISO_SOLICITUD_MS,
+    );
+    await enTiempo(
+      () =>
+        m.controlador.solicitar(
+          { correo: CORREO },
+          { ip: '2001:db8:1:2:bbbb::9' },
+        ),
+      PISO_SOLICITUD_MS,
+    );
+    await enTiempo(
+      () =>
+        m.controlador
+          .canjear({ token: 'malformado' }, { ip: '2001:db8:1:2::77' })
+          .catch(() => undefined),
+      PISO_CANJE_MS,
+    );
+
+    expect(m.llamadas).toEqual([
+      'limite:ingreso-solicitar:ip:v6-20010db800010002',
+      'limite:ingreso-solicitar:ip:v6-20010db800010002',
+      'limite:ingreso-canjear:ip:v6-20010db800010002',
+    ]);
+    // IPv4 keys are unchanged.
+    expect(m.servicio.solicitar).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('IngresoPortalController.canjear', () => {

@@ -24,6 +24,7 @@ import {
   PISO_DE_TIEMPO_MS,
 } from './factura-publica.constantes';
 import { esperarPisoDeTiempo } from '../../common/publico/piso-de-tiempo';
+import { segmentoIp } from '../../common/publico/segmento-ip';
 
 /** Attempts per client address and per token, per window. `req.ip` is the real
  *  client only because `configureApp` trusts exactly TRUST_PROXY_HOPS proxies.
@@ -78,10 +79,10 @@ export class FacturaPublicaController {
   ): Promise<StreamableFile> {
     const inicio = Date.now();
 
-    const ip = req.ip ?? 'desconocida';
+    // An IPv6 client counts as its /64 (`segmentoIp`).
     if (
       !(await this.limite.permitir(
-        `limite:factura-publica:ip:${ip}`,
+        `limite:factura-publica:ip:${segmentoIp(req.ip)}`,
         LIMITE_POR_IP,
         VENTANA_MS,
       ))

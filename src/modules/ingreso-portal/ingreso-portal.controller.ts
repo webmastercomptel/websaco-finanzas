@@ -75,7 +75,7 @@ export class IngresoPortalController {
     const { solicitudPorIp } = LIMITES_INGRESO;
     if (
       !(await this.limite.permitir(
-        clavesLimite.solicitudIp(req.ip ?? 'desconocida'),
+        clavesLimite.solicitudIp(req.ip),
         solicitudPorIp.limite,
         solicitudPorIp.ventanaMs,
       ))
@@ -104,7 +104,7 @@ export class IngresoPortalController {
     const { canjePorIp, canjePorToken } = LIMITES_INGRESO;
     if (
       !(await this.limite.permitir(
-        clavesLimite.canjeIp(req.ip ?? 'desconocida'),
+        clavesLimite.canjeIp(req.ip),
         canjePorIp.limite,
         canjePorIp.ventanaMs,
       ))

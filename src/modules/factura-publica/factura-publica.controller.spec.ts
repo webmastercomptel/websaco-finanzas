@@ -368,6 +368,18 @@ describe('FacturaPublicaController.obtenerPdf — límites', () => {
     expect(JSON.stringify(m.limite.permitir.mock.calls)).not.toContain(TOKEN);
   });
 
+  it('SEC: una /64 de IPv6 es un solo contador por IP', async () => {
+    const m = montar();
+
+    await correr(m, 'hola', { ip: '2001:db8:1:2:aaaa::1' });
+    await correr(m, 'hola', { ip: '2001:db8:1:2:bbbb::2' });
+
+    expect(m.limite.permitir.mock.calls).toEqual([
+      ['limite:factura-publica:ip:v6-20010db800010002', 30, 60_000],
+      ['limite:factura-publica:ip:v6-20010db800010002', 30, 60_000],
+    ]);
+  });
+
   it('un texto mal formado consume el contador de la IP y no crea clave de token', async () => {
     const m = montar();
 
