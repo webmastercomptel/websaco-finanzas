@@ -166,11 +166,13 @@ describe('EnlaceIngresoService.consumir', () => {
   beforeEach(() => jest.useFakeTimers().setSystemTime(AHORA));
   afterEach(() => jest.useRealTimers());
 
-  it('SEC: a token is consumed exactly once', async () => {
+  it('SEC: a token opens a session at most 3 times (a mail scanner may spend one)', async () => {
     const { servicio } = montar();
     const { token } = await servicio.crear({ correo: CORREO });
 
     const primero = await servicio.consumir(token);
+    expect(await servicio.consumir(token)).not.toBeNull();
+    expect(await servicio.consumir(token)).not.toBeNull();
     const segundo = await servicio.consumir(token);
 
     expect(primero).toEqual({
@@ -182,7 +184,7 @@ describe('EnlaceIngresoService.consumir', () => {
     expect(segundo).toBeNull();
   });
 
-  it('SEC: simultaneous consumes of one token let exactly one through', async () => {
+  it('SEC: simultaneous consumes of one token let at most 3 through', async () => {
     const { servicio } = montar();
     const { token } = await servicio.crear({ correo: CORREO });
 
@@ -193,7 +195,7 @@ describe('EnlaceIngresoService.consumir', () => {
       servicio.consumir(token),
     ]);
 
-    expect(resultados.filter((r) => r !== null)).toHaveLength(1);
+    expect(resultados.filter((r) => r !== null)).toHaveLength(3);
   });
 
   it('filters on an unused, unexpired row in the same atomic write', async () => {
@@ -208,13 +210,14 @@ describe('EnlaceIngresoService.consumir', () => {
     expect(findOneAndUpdate).toHaveBeenCalledTimes(1);
     const [filtro, cambio] = findOneAndUpdate.mock.calls[0] as [
       Record<string, unknown>,
-      { $set: Record<string, unknown> },
+      { $inc: Record<string, unknown> },
     ];
     expect(filtro.tokenHash).toBe(sha256(token));
     expect(filtro.usadoEn).toBeNull();
     expect(filtro.expiraEn).toEqual({ $gt: expect.any(Date) as unknown });
-    expect(Object.keys(cambio)).toEqual(['$set']);
-    expect(cambio.$set.usadoEn).toBeInstanceOf(Date);
+    expect(filtro.canjes).toEqual({ $lt: 3 });
+    expect(Object.keys(cambio)).toEqual(['$inc']);
+    expect(cambio.$inc.canjes).toBe(1);
   });
 
   it('accepts at 14:59 and refuses at 15:01 even if the TTL has not run', async () => {

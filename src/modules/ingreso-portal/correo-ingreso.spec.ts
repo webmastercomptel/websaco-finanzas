@@ -21,12 +21,12 @@ describe('construirCorreoIngreso', () => {
     expect(html).not.toContain('?');
   });
 
-  it('says the link works once and for how long, derived from the constant', () => {
+  it('says for how long the link works, derived from the constant', () => {
     const { html } = construirCorreoIngreso({ enlace: ENLACE });
 
     expect(VIGENCIA_ENLACE_INGRESO_MS).toBe(15 * 60 * 1000);
     expect(html).toContain(
-      'Este enlace sirve una sola vez y vence en 15 minutos.',
+      'Este enlace es solo para ti y vence en 15 minutos.',
     );
     expect(html).toContain('Si no fuiste tú, puedes ignorar este mensaje');
   });
@@ -70,5 +70,18 @@ describe('construirCorreoIngreso', () => {
 
     expect(a.html).not.toBe(b.html);
     expect(a.asunto).toBe(b.asunto);
+  });
+});
+
+describe('construirCorreoIngreso — cuenta que entra con contraseña', () => {
+  it('pide confirmar el correo y explica que se entra con contraseña', () => {
+    const { asunto, html } = construirCorreoIngreso({
+      enlace: 'https://app.test/ingreso#tok',
+      conContrasena: true,
+    });
+    expect(asunto).toBe('Confirma tu correo en WebSaco');
+    expect(html).toContain('Confirmar mi correo');
+    expect(html).toContain('entra con su correo y contraseña');
+    expect(html).not.toContain('no necesitas contraseña');
   });
 });

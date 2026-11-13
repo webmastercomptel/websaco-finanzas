@@ -61,6 +61,16 @@ export class EnlaceIngreso {
   /** Set by the atomic consume, or by a newer link for the same address. */
   @Prop({ type: Date, default: null })
   usadoEn: Date | null;
+
+  /**
+   * Successful redeems so far. A link opens a session up to
+   * `MAX_CANJES_ENLACE_INGRESO` times within its life: the page redeems on
+   * load, and a mail scanner that opens the link first must not spend it
+   * before the person does. `usadoEn` still closes a link for good (voided,
+   * superseded by a newer one).
+   */
+  @Prop({ type: Number, default: 0 })
+  canjes: number;
 }
 
 export const EnlaceIngresoSchema = SchemaFactory.createForClass(EnlaceIngreso);

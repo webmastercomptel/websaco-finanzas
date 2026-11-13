@@ -24,6 +24,14 @@ export const PISO_CANJE_MS = 300;
 /** A well-formed token: 32 random bytes in lowercase hex. */
 export const FORMATO_TOKEN_INGRESO = /^[0-9a-f]{64}$/;
 
+/**
+ * How many times one sign-in link may open a session within its life (owner's
+ * decision, 2026-11-13): the page redeems as soon as it opens, so a mail
+ * scanner that opens the link first (Outlook Safe Links and the like) must
+ * not leave the person with a spent link.
+ */
+export const MAX_CANJES_ENLACE_INGRESO = 3;
+
 /** The one body of every request answer. */
 export const MENSAJE_SOLICITUD =
   'Si tu correo está registrado, te enviamos un enlace para entrar.';

@@ -19,6 +19,7 @@ describe('EnlaceIngresoSchema', () => {
       .sort();
     expect(campos).toEqual(
       [
+        'canjes',
         'clave',
         'correo',
         'createdAt',

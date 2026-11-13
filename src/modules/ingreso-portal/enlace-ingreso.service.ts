@@ -11,6 +11,7 @@ import {
 } from '../../database/schemas/cuentas/enlace-ingreso.schema';
 import {
   FORMATO_TOKEN_INGRESO,
+  MAX_CANJES_ENLACE_INGRESO,
   VIGENCIA_ENLACE_INGRESO_MS,
 } from './ingreso-portal.constantes';
 
@@ -101,6 +102,7 @@ export class EnlaceIngresoService {
       solicitadoPor: datos.solicitadoPor ?? null,
       expiraEn,
       usadoEn: null,
+      canjes: 0,
     });
     return { id: _id, clave, token, expiraEn };
   }
@@ -146,8 +148,10 @@ export class EnlaceIngresoService {
           tokenHash: hashDe(token),
           usadoEn: null,
           expiraEn: { $gt: ahora },
+          // Every row is written with `canjes: 0` (the collection is new).
+          canjes: { $lt: MAX_CANJES_ENLACE_INGRESO },
         },
-        { $set: { usadoEn: ahora } },
+        { $inc: { canjes: 1 } },
         { new: true },
       )
       .lean()

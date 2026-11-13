@@ -8,6 +8,13 @@ export interface DatosCorreoIngreso {
   enlace: string;
   /** Lifetime to announce; defaults to the real one so text and rule agree. */
   vigenciaMs?: number;
+  /**
+   * The account behind the address signs in with its password (staff with
+   * Finanzas keys, a platform-managed access or a platform admin: the shared
+   * link policy). The same link then only CONFIRMS the address, so the copy
+   * says so instead of promising a session it will not open.
+   */
+  conContrasena?: boolean;
 }
 
 /**
@@ -29,6 +36,26 @@ export const construirCorreoIngreso = (
   const minutos = Math.round(
     (datos.vigenciaMs ?? VIGENCIA_ENLACE_INGRESO_MS) / 60_000,
   );
+  if (datos.conContrasena) {
+    return {
+      asunto: 'Confirma tu correo en WebSaco',
+      html: renderPlantillaCorreo({
+        heading: 'Confirma tu correo',
+        bodyHtml: `
+        <p style="margin: 0 0 20px;">
+          Este correo pertenece a una cuenta del equipo de administración de WebSaco. Por seguridad, esa cuenta entra con su correo y contraseña.
+        </p>
+        <p style="margin: 0 0 20px;">
+          Usa el botón de abajo para confirmar tu correo: así, cuando entres con tu contraseña, también verás tus inmuebles como propietario o arrendatario. El enlace vence en ${minutos} minutos.
+        </p>
+        <p style="margin: 0 0 20px; font-size: 13px;">
+          Si no fuiste tú, puedes ignorar este mensaje: no pasa nada si no lo usas.
+        </p>
+      `,
+        cta: { url: datos.enlace, label: 'Confirmar mi correo' },
+      }),
+    };
+  }
   return {
     asunto: 'Tu enlace para entrar a WebSaco',
     html: renderPlantillaCorreo({
@@ -38,7 +65,7 @@ export const construirCorreoIngreso = (
           Pediste entrar a tu portal de WebSaco. Usa el botón de abajo para entrar: no necesitas contraseña.
         </p>
         <p style="margin: 0 0 20px;">
-          Este enlace sirve una sola vez y vence en ${minutos} minutos.
+          Este enlace es solo para ti y vence en ${minutos} minutos.
         </p>
         <p style="margin: 0 0 20px; font-size: 13px;">
           Si no fuiste tú, puedes ignorar este mensaje: no pasa nada si no lo usas.

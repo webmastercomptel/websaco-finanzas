@@ -252,6 +252,15 @@ export class IngresoPortalService {
     }
 
     const normalizado = normalizarEmail(correo);
+    // An account that only gets `confirmado` at redeem is told so up front.
+    const existente = await this.cuentas
+      .findOne({ email: normalizado })
+      .lean()
+      .exec();
+    const conContrasena =
+      !!existente &&
+      existente.estado === 'active' &&
+      !(await this.admiteSesion(existente));
     const emitido = await this.enlaces.crear({
       correo: normalizado,
       origen,
@@ -261,6 +270,7 @@ export class IngresoPortalService {
     try {
       const { asunto, html } = construirCorreoIngreso({
         enlace: construirEnlaceIngreso(frontendUrl!, emitido.token),
+        conContrasena,
       });
       enviado = await this.correo.enviar({
         para: normalizado,
