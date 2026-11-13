@@ -37,7 +37,7 @@ flow), `src/database/schemas/cuentas/enlace-ingreso.schema.ts` and
   `no-store`, `no-referrer`, `noindex` and `nosniff` on every answer including the
   400, and are limited through Redis (request: 10 per minute per IP; then, in the
   background, 3 per 15 minutes and 20 per 24 hours per (address, source), counted
-  before any lookup, and, only for an eligible address, 10 per 15 minutes and 30
+  before any lookup, and, only for an eligible address, 10 per 15 minutes and 60
   per 24 hours per address from all sources; redeem: 20 per minute per IP and 5
   per minute per token hash). A source is an IPv4 address or an IPv6 /64, so one
   source cannot exhaust an address's cap and lock its owner out. The staff resend
