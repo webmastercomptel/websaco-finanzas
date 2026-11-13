@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { Types } from 'mongoose';
 import { ResidenciaService } from '../../common/acceso/residencia.service';
+import { ColeccionMemoria } from '../envio-facturas/testing/coleccion-memoria';
+import { EnlaceIngresoService } from './enlace-ingreso.service';
 import {
   CLAVE,
   COPRO_A,
@@ -404,6 +406,68 @@ describe('IngresoPortalService.solicitar - silence', () => {
     expect(mala.enlaces.crear).not.toHaveBeenCalled();
     expect(falta.correo.enviar).not.toHaveBeenCalled();
     sinRastro();
+  });
+});
+
+describe('IngresoPortalService.emitirYEnviar - older links die only after a sent e-mail', () => {
+  const tokenDelCorreo = (enviar: jest.Mock): string => {
+    const html = String((enviar.mock.calls as [{ html: string }][])[0][0].html);
+    const encontrado = /\/ingreso#([0-9a-f]{64})/.exec(html);
+    if (!encontrado) throw new Error('sin enlace en el correo');
+    return encontrado[1];
+  };
+
+  const conEnlaceVivo = async () => {
+    const almacen = new EnlaceIngresoService(
+      new ColeccionMemoria(['tokenHash']) as never,
+    );
+    const viejo = await almacen.crear({ correo: CORREO });
+    await almacen.confirmarEnvio(viejo);
+    return { almacen, viejo };
+  };
+
+  it('SEC: the provider fails: the older link is still redeemable and the new one never is', async () => {
+    const { almacen, viejo } = await conEnlaceVivo();
+    const m = montar({ enlacesReales: almacen, enviado: false });
+
+    await m.servicio.solicitar(CORREO);
+
+    const nuevo = tokenDelCorreo(m.correo.enviar);
+    expect(await almacen.consumir(nuevo)).toBeNull();
+    expect(await almacen.consumir(viejo.token)).not.toBeNull();
+  });
+
+  it('SEC: the provider throws: same outcome, and the request stays silent', async () => {
+    const { almacen, viejo } = await conEnlaceVivo();
+    const m = montar({ enlacesReales: almacen, envioLanza: true });
+
+    await expect(m.servicio.solicitar(CORREO)).resolves.toBeUndefined();
+
+    const nuevo = tokenDelCorreo(m.correo.enviar);
+    expect(await almacen.consumir(nuevo)).toBeNull();
+    expect(await almacen.consumir(viejo.token)).not.toBeNull();
+  });
+
+  it('the provider accepts: only the new link is redeemable', async () => {
+    const { almacen, viejo } = await conEnlaceVivo();
+    const m = montar({ enlacesReales: almacen });
+
+    await m.servicio.solicitar(CORREO);
+
+    const nuevo = tokenDelCorreo(m.correo.enviar);
+    expect(await almacen.consumir(viejo.token)).toBeNull();
+    expect(await almacen.consumir(nuevo)).not.toBeNull();
+  });
+
+  it('order: mint, send, and only then confirm (never confirm a failed send)', async () => {
+    const bien = montar();
+    const mal = montar({ enviado: false });
+
+    await bien.servicio.emitirYEnviar(CORREO, 'autoservicio', null);
+    await mal.servicio.emitirYEnviar(CORREO, 'autoservicio', null);
+
+    expect(bien.eventos).toEqual(['crear', 'enviar', 'confirmar']);
+    expect(mal.eventos).toEqual(['crear', 'enviar', 'anular']);
   });
 });
 

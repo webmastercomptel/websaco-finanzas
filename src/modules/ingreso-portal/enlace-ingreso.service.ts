@@ -18,8 +18,11 @@ const hashDe = (token: string): string =>
   createHash('sha256').update(token).digest('hex');
 
 /** What `crear` hands to the mailer. `token` exists only here and in the
- *  e-mail it is about to travel in; it is never persisted. */
+ *  e-mail it is about to travel in; it is never persisted. `id` and `clave`
+ *  name the row for `confirmarEnvio` / `anular`. */
 export interface EnlaceIngresoEmitido {
+  id: Types.ObjectId;
+  clave: string;
   token: string;
   expiraEn: Date;
 }
@@ -58,9 +61,12 @@ export const construirEnlaceIngreso = (
  * - Single use: `consumir` is ONE conditional `findOneAndUpdate`, so of any
  *   number of concurrent redeems exactly one gets the row.
  * - A newer link for an address kills that address's older unused ones, so only
- *   the latest e-mail works. The newest is decided by `_id` order, which is a
- *   total order: of several simultaneous requests exactly one survives, and no
- *   interleaving can leave two live links or zero.
+ *   the latest e-mail works, but only once ITS e-mail went out
+ *   (`confirmarEnvio`): minting alone kills nothing, and a link whose e-mail
+ *   failed is voided (`anular`) and leaves the older ones alone, so a failed
+ *   send never strands the person with no working link. The newest is decided
+ *   by `_id` order, a total order: of several sent links exactly the newest
+ *   survives, whatever order their confirmations land in.
  *
  * Nothing here logs: the token, its hash and the address never reach a log line.
  */
@@ -71,7 +77,10 @@ export class EnlaceIngresoService {
     private readonly enlaces: Model<EnlaceIngresoDocument>,
   ) {}
 
-  /** Mints a link for `correo` and invalidates that address's earlier unused ones. */
+  /**
+   * Mints a link for `correo`. It kills nothing: the caller confirms it once
+   * the e-mail went out (`confirmarEnvio`) or voids it (`anular`).
+   */
   async crear(datos: {
     correo: string;
     origen?: OrigenEnlaceIngreso;
@@ -80,12 +89,9 @@ export class EnlaceIngresoService {
     const correo = normalizarEmail(datos.correo);
     const clave = claveCorreo(correo);
     const token = randomBytes(32).toString('hex');
-    const ahora = Date.now();
-    const expiraEn = new Date(ahora + VIGENCIA_ENLACE_INGRESO_MS);
+    const expiraEn = new Date(Date.now() + VIGENCIA_ENLACE_INGRESO_MS);
     const _id = new Types.ObjectId();
 
-    // Insert FIRST, then kill the older ones: the new link is never absent
-    // from the store while the old ones are already dead.
     await this.enlaces.create({
       _id,
       tokenHash: hashDe(token),
@@ -96,14 +102,34 @@ export class EnlaceIngresoService {
       expiraEn,
       usadoEn: null,
     });
+    return { id: _id, clave, token, expiraEn };
+  }
+
+  /**
+   * The e-mail of this link went out: kill the address's OLDER unused links in
+   * one atomic `updateMany` (`_id` below the new one, so the new one is never
+   * touched and a later link is never killed by an earlier confirmation).
+   */
+  async confirmarEnvio(emitido: EnlaceIngresoEmitido): Promise<void> {
     await this.enlaces
       .updateMany(
-        { clave, usadoEn: null, _id: { $lt: _id } },
-        { $set: { usadoEn: new Date(ahora) } },
+        { clave: emitido.clave, usadoEn: null, _id: { $lt: emitido.id } },
+        { $set: { usadoEn: new Date() } },
       )
       .exec();
+  }
 
-    return { token, expiraEn };
+  /**
+   * The e-mail of this link did not go out: mark the NEW row spent so it can
+   * never be redeemed. The older links are left as they were.
+   */
+  async anular(emitido: EnlaceIngresoEmitido): Promise<void> {
+    await this.enlaces
+      .updateOne(
+        { _id: emitido.id, usadoEn: null },
+        { $set: { usadoEn: new Date() } },
+      )
+      .exec();
   }
 
   /**

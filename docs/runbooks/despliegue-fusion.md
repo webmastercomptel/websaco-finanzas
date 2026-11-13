@@ -123,7 +123,35 @@ gcloud run services describe $SERVICE --region $REGION --format=yaml > service-b
 | Concurrency | keep 80 | DECISION; the ingest is capped per process (429 when another is running) and per coproperty (Redis lock), so heavy work does not scale with concurrency |
 | Min instances | 0 | DECISION (budget reference ~30,000 COP/month). Consequence: no instance, no `@Cron`; the start-up catch-up pass covers it. Revisit only if the cleanups turn out late |
 | Max instances | 20 | DECISION. Each instance opens Redis connections (section 12): check the plan limit before letting 20 spin up |
-| CPU throttling | on (default) | DECISION. Background work only happens inside requests (lote jobs are awaited by the request) |
+| CPU throttling | on (default) | DECISION, **now contradicted, see below**. Was: "background work only happens inside requests (lote jobs are awaited by the request)" |
+
+**CPU throttling vs. the resident sign-in request (open, decide before deploying
+`modules/ingreso-portal/`).** `POST /auth/portal/solicitar` answers its 202 at a
+fixed 1,500 ms and does its work (Redis counters, Mongo lookups, minting the link,
+the SendGrid call, then killing the older links) WITHOUT awaiting it, so part or
+all of it runs after the response left. With CPU throttling on, Cloud Run gives an
+instance CPU only while it is serving a request, so that tail can stall until the
+next request arrives, or be lost when the instance scales to zero (min instances
+is 0). The person then gets no e-mail and nothing says why. A minted link whose
+e-mail never went out is not confirmed, so older links keep working; it is not
+voided either until the send step resumes (it expires after 15 minutes). Two ways
+out, neither applied yet (no deploy config is changed by this note):
+
+1. **CPU always allocated** for the service (`gcloud run services update $SERVICE
+   --no-cpu-throttling`). The background work then always finishes. Cost: the
+   instance is billed for CPU for its whole lifetime, not only during requests;
+   with min instances 0 an idle service still scales to zero.
+2. **Await the work inside the request, keeping the fixed floor.** The route waits
+   for the work, then for the floor, and answers. Every answer stays identical
+   only if the floor is ABOVE the slowest work, i.e. above SendGrid's p99 plus the
+   lookups (today 1,500 ms is not measured against it); a send slower than the
+   floor would make that answer later than the others and reveal that the address
+   is on a record. So the floor would have to rise (e.g. 3-5 s, to be measured),
+   and a send over it must still be cut off (time out and answer at the floor).
+   No billing change; every request gets slower for everyone.
+
+Until one is chosen, treat lost sign-in e-mails under low traffic as this, not as a
+SendGrid fault.
 
 ```bash
 gcloud run services update $SERVICE --region $REGION \

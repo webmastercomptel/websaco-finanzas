@@ -83,6 +83,10 @@ export interface Opciones {
   residenciaReal?: unknown;
   /** Writing the audit entry fails. */
   auditoriaFalla?: boolean;
+  /** A real `EnlaceIngresoService` (over an in-memory store) instead of the stand-in. */
+  enlacesReales?: unknown;
+  /** The provider throws instead of answering. */
+  envioLanza?: boolean;
 }
 
 /** A Mongo session that undoes what was written through it when the callback throws. */
@@ -152,7 +156,23 @@ export function montar(over: Opciones = {}) {
   const enlaces = {
     crear: over.crearFalla
       ? jest.fn().mockRejectedValue(new Error('E11000 dup key: { tokenHash }'))
-      : jest.fn().mockResolvedValue({ token: TOKEN, expiraEn: new Date() }),
+      : jest.fn(() => {
+          eventos.push('crear');
+          return Promise.resolve({
+            id: new Types.ObjectId(),
+            clave: CLAVE,
+            token: TOKEN,
+            expiraEn: new Date(),
+          });
+        }),
+    confirmarEnvio: jest.fn(() => {
+      eventos.push('confirmar');
+      return Promise.resolve();
+    }),
+    anular: jest.fn(() => {
+      eventos.push('anular');
+      return Promise.resolve();
+    }),
     consumir: jest.fn(() => {
       eventos.push('consumir');
       return Promise.resolve(
@@ -169,7 +189,13 @@ export function montar(over: Opciones = {}) {
   };
   const correo = {
     estaConfigurado: jest.fn(() => over.configurado ?? true),
-    enviar: jest.fn().mockResolvedValue(over.enviado ?? true),
+    enviar: jest.fn((mensaje: Record<string, unknown>) => {
+      void mensaje;
+      eventos.push('enviar');
+      return over.envioLanza
+        ? Promise.reject(new Error('socket hang up'))
+        : Promise.resolve(over.enviado ?? true);
+    }),
   };
   const config = {
     get: jest.fn((clave: string) =>
@@ -297,7 +323,7 @@ export function montar(over: Opciones = {}) {
 
   const servicio = new IngresoPortalService(
     (over.residenciaReal ?? residencia) as never,
-    enlaces as never,
+    (over.enlacesReales ?? enlaces) as never,
     correo as never,
     config as never,
     limite as never,

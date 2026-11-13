@@ -75,11 +75,23 @@ describe('EnlaceIngresoService.crear', () => {
     expect(String(coleccion.docs[0].solicitadoPor)).toBe(String(personal));
   });
 
-  it('two requests for one address leave the first invalid and the second the only live one', async () => {
+  it('minting alone kills nothing: an earlier link stays live until the new one is confirmed sent', async () => {
     const { servicio } = montar();
 
     const primero = await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(primero);
+    await servicio.crear({ correo: CORREO });
+
+    expect(await servicio.consumir(primero.token)).not.toBeNull();
+  });
+
+  it('two requests for one address, both sent: the first invalid and the second the only live one', async () => {
+    const { servicio } = montar();
+
+    const primero = await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(primero);
     const segundo = await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(segundo);
 
     expect(primero.token).not.toBe(segundo.token);
     expect(await servicio.consumir(primero.token)).toBeNull();
@@ -90,21 +102,63 @@ describe('EnlaceIngresoService.crear', () => {
     const { servicio } = montar();
 
     const ajeno = await servicio.crear({ correo: OTRO });
-    await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(ajeno);
+    const propio = await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(propio);
 
     expect(await servicio.consumir(ajeno.token)).not.toBeNull();
   });
 
-  it('simultaneous creations for one address leave exactly one live link', async () => {
+  it('confirming kills older unused links in ONE updateMany that excludes the new one', async () => {
     const { coleccion, servicio } = montar();
+    const nuevo = await servicio.crear({ correo: CORREO });
+    const espia = jest.spyOn(coleccion, 'updateMany');
 
-    await Promise.all([
-      servicio.crear({ correo: CORREO }),
-      servicio.crear({ correo: CORREO }),
-      servicio.crear({ correo: CORREO }),
-    ]);
+    await servicio.confirmarEnvio(nuevo);
 
-    expect(coleccion.docs.filter((d) => d.usadoEn === null)).toHaveLength(1);
+    expect(espia).toHaveBeenCalledTimes(1);
+    expect(espia.mock.calls[0][0]).toEqual({
+      clave: claveCorreo(CORREO),
+      usadoEn: null,
+      _id: { $lt: nuevo.id },
+    });
+  });
+
+  it.each([
+    ['in order', [0, 1, 2]],
+    ['in reverse', [2, 1, 0]],
+    ['mixed', [1, 2, 0]],
+  ])(
+    'simultaneous links confirmed %s leave exactly one live link, the newest',
+    async (_caso, orden) => {
+      const { coleccion, servicio } = montar();
+
+      const emitidos = await Promise.all([
+        servicio.crear({ correo: CORREO }),
+        servicio.crear({ correo: CORREO }),
+        servicio.crear({ correo: CORREO }),
+      ]);
+      await Promise.all(orden.map((i) => servicio.confirmarEnvio(emitidos[i])));
+
+      const vivas = coleccion.docs.filter((d) => d.usadoEn === null);
+      expect(vivas).toHaveLength(1);
+      const masNuevo = [...emitidos].sort((x, y) =>
+        String(x.id).localeCompare(String(y.id)),
+      )[2];
+      expect(String(vivas[0]._id)).toBe(String(masNuevo.id));
+    },
+  );
+
+  it('SEC: a voided link can never be redeemed, and the older live one stays redeemable', async () => {
+    const { servicio } = montar();
+    const viejo = await servicio.crear({ correo: CORREO });
+    await servicio.confirmarEnvio(viejo);
+
+    const nuevo = await servicio.crear({ correo: CORREO });
+    await servicio.anular(nuevo);
+
+    expect(await servicio.consumir(nuevo.token)).toBeNull();
+    expect(await servicio.consumir(viejo.token)).not.toBeNull();
   });
 });
 

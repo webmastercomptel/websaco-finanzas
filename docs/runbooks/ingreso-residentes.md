@@ -20,7 +20,9 @@ flow), `src/database/schemas/cuentas/enlace-ingreso.schema.ts` and
   every coproperty where it qualifies, and its Account (if any) active.
 - The link is `<FRONTEND_URL>/ingreso#<token>`: 32 random bytes in the URL fragment,
   only their SHA-256 stored (`enlaces_ingreso`), valid 15 minutes, single use. A
-  newer link for an address kills that address's earlier unused ones. Opening the
+  newer link for an address kills that address's earlier unused ones, but only
+  once its own e-mail was accepted by SendGrid; if the send fails, the new link is
+  voided and the older ones keep working. Opening the
   page consumes nothing; the person presses «Entrar», which POSTs the token to
   `POST /api/v1/auth/portal/canjear`.
 - The redeem consumes the link first (one atomic write), checks the address again,

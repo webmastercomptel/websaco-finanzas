@@ -232,6 +232,11 @@ export class IngresoPortalService {
    * and limits are the caller's. Nothing is minted when mail cannot go out (an
    * issued link is a live credential; none is made for nothing). The address
    * already is the one on a record; it is the only recipient (`to`).
+   *
+   * Order: insert the new link, send, and only when the provider accepted it
+   * kill the address's older links (`confirmarEnvio`). A failed or throwing
+   * send voids the NEW link (`anular`) and leaves the older ones working, so
+   * a provider outage never leaves the person without a live link.
    */
   async emitirYEnviar(
     correo: string,
@@ -247,21 +252,29 @@ export class IngresoPortalService {
     }
 
     const normalizado = normalizarEmail(correo);
-    const { token } = await this.enlaces.crear({
+    const emitido = await this.enlaces.crear({
       correo: normalizado,
       origen,
       solicitadoPor,
     });
-    const { asunto, html } = construirCorreoIngreso({
-      enlace: construirEnlaceIngreso(frontendUrl!, token),
-    });
-    const enviado = await this.correo.enviar({
-      para: normalizado,
-      asunto,
-      html,
-      sinRegistrarDestinatario: true,
-    });
-    return enviado ? 'enviado' : 'fallo';
+    let enviado = false;
+    try {
+      const { asunto, html } = construirCorreoIngreso({
+        enlace: construirEnlaceIngreso(frontendUrl!, emitido.token),
+      });
+      enviado = await this.correo.enviar({
+        para: normalizado,
+        asunto,
+        html,
+        sinRegistrarDestinatario: true,
+      });
+    } finally {
+      // Runs on a throw too: a link whose e-mail did not go out is never left live.
+      if (!enviado) await this.enlaces.anular(emitido);
+    }
+    if (!enviado) return 'fallo';
+    await this.enlaces.confirmarEnvio(emitido);
+    return 'enviado';
   }
 
   /**
