@@ -48,26 +48,27 @@ export const LIMITES_INGRESO = {
    * Per (address, client source): the TIGHT window of a self-service request,
    * counted before any lookup so known and unknown addresses cost the same.
    * One source (an IPv4 address or an IPv6 /64) can therefore trigger at most
-   * 5 links a day for an address, well below the per-address cap below, so it
+   * 20 links a day for an address, well below the per-address cap below, so it
    * cannot exhaust that cap and lock the owner out.
    */
   correoOrigenCorta: { limite: 3, ventanaMs: 15 * 60 * 1000 },
-  correoOrigenLarga: { limite: 5, ventanaMs: 24 * 60 * 60 * 1000 },
+  correoOrigenLarga: { limite: 20, ventanaMs: 24 * 60 * 60 * 1000 },
   /**
    * Per address (by `clave`), self-service only, taken only AFTER the address
    * proved eligible: it caps how many links reach one inbox from all sources
-   * together. Well above the per-source windows (6 sources are needed to fill
-   * the daily one).
+   * together. Well above the per-source windows (3 sources are needed to fill
+   * the daily one). Raised on 2026-11-12 at the owner's request: the short
+   * window stops bursts, the daily caps only exist to stop abuse.
    */
   correoCorta: { limite: 10, ventanaMs: 15 * 60 * 1000 },
-  correoLarga: { limite: 30, ventanaMs: 24 * 60 * 60 * 1000 },
+  correoLarga: { limite: 60, ventanaMs: 24 * 60 * 60 * 1000 },
   /**
    * Per address, the staff resend's OWN counter (spec REQ-R2 values: the 4th
    * resend in 15 minutes is `motivo: 'limite'`). Separate from self-service,
    * so a stranger flooding the public route never blocks staff.
    */
   reenvioCorta: { limite: 3, ventanaMs: 15 * 60 * 1000 },
-  reenvioLarga: { limite: 10, ventanaMs: 24 * 60 * 60 * 1000 },
+  reenvioLarga: { limite: 20, ventanaMs: 24 * 60 * 60 * 1000 },
   /** Per client IP on the redeem route. */
   canjePorIp: { limite: 20, ventanaMs: 60_000 },
   /** Per token (by its hash) on the redeem route. */

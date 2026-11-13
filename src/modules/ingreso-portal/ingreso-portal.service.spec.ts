@@ -192,7 +192,7 @@ describe('IngresoPortalService.solicitar - limits', () => {
     expect(conocido.limite.permitir).toHaveBeenNthCalledWith(
       2,
       expect.any(String),
-      5,
+      20,
       DIA,
     );
   });
@@ -215,7 +215,7 @@ describe('IngresoPortalService.solicitar - limits', () => {
     expect(m.limite.permitir).toHaveBeenNthCalledWith(
       4,
       expect.any(String),
-      30,
+      60,
       DIA,
     );
     expect(m.correo.enviar).toHaveBeenCalledTimes(1);
