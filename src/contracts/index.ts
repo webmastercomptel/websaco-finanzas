@@ -917,6 +917,15 @@ export interface ResultadoReinicioCiclo {
   lotesComptableRetirados: number;
   /** `LoteComptable` rows deleted here, every state. */
   lotesComptableEliminados: number;
+  /** Withdrawn lotes of this coproperty Comptable deleted from its own list
+   *  after the withdrawal (this run's and earlier ones). */
+  lotesComptablePurgados: number;
+  /** Why that purge failed (the reset still happened), or null. */
+  avisoComptable: string | null;
+  /** "Envío a residentes" rows (`EnvioFactura`) deleted. */
+  enviosFacturaEliminados: number;
+  /** Residents' public invoice links (`EnlaceFactura`) deleted. */
+  enlacesFacturaEliminados: number;
   saldosInicialesEliminados: number;
   lotesSaldoInicialEliminados: number;
   saldoTotalDocumentoEliminado: number;

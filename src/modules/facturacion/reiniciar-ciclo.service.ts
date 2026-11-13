@@ -132,7 +132,19 @@ import {
   ConsecutivoLoteComptable,
   ConsecutivoLoteComptableDocument,
 } from '../../database/schemas/contabilidad/consecutivo-lote-comptable.schema';
-import { ComptableClient } from '../interfaz-comptable/comptable.client';
+import {
+  EnvioFactura,
+  EnvioFacturaDocument,
+} from '../../database/schemas/facturacion/envio-factura.schema';
+import {
+  EnlaceFactura,
+  EnlaceFacturaDocument,
+} from '../../database/schemas/facturacion/enlace-factura.schema';
+import { VIGENCIA_ENVIO_MS } from '../envio-facturas/envio-facturas.constantes';
+import {
+  ComptableClient,
+  type ResultadoComptable,
+} from '../interfaz-comptable/comptable.client';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { DocumentoStorageService } from '../../common/storage/documento-storage.service';
 import { prefijoDocumentosGenerados } from '../../common/documentos/prefijo-documentos-generados';
@@ -179,6 +191,11 @@ const ETIQUETA_IMPORTACION: Partial<Record<TipoImportacion, string>> = {
  *  may carry connection strings or request details). */
 const mensajeDe = (err: unknown): string =>
   err instanceof Error ? err.message : 'error desconocido';
+
+/** The sentence the screen and the audit entry show when the withdrawn
+ *  lotes could not be deleted in Comptable (their asientos already were). */
+const avisoPurga = (motivo: string): string =>
+  `Los lotes retirados no se pudieron borrar en Comptable (${motivo}): sus asientos ya no están allá, pero siguen listados en Comptable como retirados. Volver a reiniciar el ciclo lo intenta de nuevo.`;
 
 /**
  * Wipes EVERY financial document of the ACTIVE coproperty —
@@ -230,8 +247,15 @@ const mensajeDe = (err: unknown): string =>
  * "Interfaz a Comptable" lotes (`LoteComptable`) are wiped and their
  * consecutivo rewound like the CSV ones, but only after every lote still in
  * Comptable was withdrawn there (`retirarLotesDeComptable`) — it would
- * otherwise receive the replayed cycle's accounting a second time. That
- * withdrawal is the one step of the reset that reaches outside this system.
+ * otherwise receive the replayed cycle's accounting a second time. Then
+ * Comptable is asked to delete the withdrawn lotes of this coproperty from
+ * its list (`purgarLotesRetiradosEnComptable`, best-effort, reported as
+ * `avisoComptable`). Those two calls are the only steps of the reset that
+ * reach outside this system.
+ *
+ * "Envío a residentes" rows (`EnvioFactura`) and the residents' invoice links
+ * (`EnlaceFactura`) are wiped too, and a send in progress (a live lease)
+ * blocks the reset like the jobs above.
  *
  * `PublicacionLote`
  * (the outbox to the other system) is deliberately NOT handled yet because
@@ -333,6 +357,10 @@ export class ReiniciarCicloService {
     @InjectModel(ConsecutivoLoteComptable.name)
     private readonly consecutivoLoteComptable: Model<ConsecutivoLoteComptableDocument>,
     private readonly comptable: ComptableClient,
+    @InjectModel(EnvioFactura.name)
+    private readonly enviosFactura: Model<EnvioFacturaDocument>,
+    @InjectModel(EnlaceFactura.name)
+    private readonly enlacesFactura: Model<EnlaceFacturaDocument>,
   ) {}
 
   private readonly logger = new Logger(ReiniciarCicloService.name);
@@ -355,9 +383,19 @@ export class ReiniciarCicloService {
       accountId,
     );
 
+    // Then the withdrawn lotes themselves leave Comptable's list (those of
+    // this run and of earlier withdrawals alike). Best-effort: everything is
+    // already out of Comptable's books, so a failure only leaves history rows
+    // there, reported as `avisoComptable` instead of blocking the reset.
+    const { lotesComptablePurgados, avisoComptable } =
+      await this.purgarLotesRetiradosEnComptable(copropiedadId, accountId);
+
     let borrado: Omit<
       ResultadoReinicioCiclo,
-      'archivosPdfEliminados' | 'lotesComptableRetirados'
+      | 'archivosPdfEliminados'
+      | 'lotesComptableRetirados'
+      | 'lotesComptablePurgados'
+      | 'avisoComptable'
     >;
     try {
       borrado = await this.borrarYReiniciar(copropiedadId);
@@ -395,6 +433,8 @@ export class ReiniciarCicloService {
     const resultado: ResultadoReinicioCiclo = {
       ...borrado,
       lotesComptableRetirados,
+      lotesComptablePurgados,
+      avisoComptable,
       archivosPdfEliminados,
     };
 
@@ -417,7 +457,10 @@ export class ReiniciarCicloService {
   ): Promise<
     Omit<
       ResultadoReinicioCiclo,
-      'archivosPdfEliminados' | 'lotesComptableRetirados'
+      | 'archivosPdfEliminados'
+      | 'lotesComptableRetirados'
+      | 'lotesComptablePurgados'
+      | 'avisoComptable'
     >
   > {
     const prefijoPdfs = prefijoDocumentosGenerados(copropiedadId);
@@ -441,6 +484,8 @@ export class ReiniciarCicloService {
       lotesSaldoInicialAnticipoEliminados,
       presentacionesEliminadas,
       progresosImportacionEliminados,
+      enviosFacturaEliminados,
+      enlacesFacturaEliminados,
     ] = await Promise.all([
       this.aplicaciones.deleteMany({ copropiedadId }).exec(),
       this.notasCredito.deleteMany({ copropiedadId }).exec(),
@@ -473,6 +518,12 @@ export class ReiniciarCicloService {
           tipo: { $in: TIPOS_IMPORTACION_FINANCIERA },
         })
         .exec(),
+      // "Envío a residentes" lists `EnvioFactura` rows, not Facturas: left
+      // behind, they keep showing (and could re-send) wiped invoices, and
+      // since the counters rewind, the same numbers would soon name other
+      // invoices. The residents' public links point at the same invoices.
+      this.enviosFactura.deleteMany({ copropiedadId }).exec(),
+      this.enlacesFactura.deleteMany({ copropiedadId }).exec(),
     ]);
 
     const [
@@ -578,7 +629,75 @@ export class ReiniciarCicloService {
       presentacionesEliminadas: presentacionesEliminadas.deletedCount,
       progresosImportacionEliminados:
         progresosImportacionEliminados.deletedCount,
+      enviosFacturaEliminados: enviosFacturaEliminados.deletedCount,
+      enlacesFacturaEliminados: enlacesFacturaEliminados.deletedCount,
     };
+  }
+
+  /**
+   * Asks Comptable to delete the lotes of this coproperty it holds as
+   * withdrawn, so none stays listed there after the reset (owner,
+   * 2026-11-13). Runs only after `retirarLotesDeComptable` succeeded. Skipped
+   * silently where there is no Comptable (no connection on this server, or
+   * no Empresa on the coproperty). Never throws: any failure becomes the
+   * returned `avisoComptable`, shown on the screen and in the audit entry.
+   */
+  private async purgarLotesRetiradosEnComptable(
+    copropiedadId: Types.ObjectId,
+    accountId: string,
+  ): Promise<{
+    lotesComptablePurgados: number;
+    avisoComptable: string | null;
+  }> {
+    const sinAviso = { lotesComptablePurgados: 0, avisoComptable: null };
+    if (!this.comptable.configurado()) return sinAviso;
+
+    let resultado: ResultadoComptable<{ eliminados: number }>;
+    try {
+      const [cuenta, copropiedad] = await Promise.all([
+        this.cuentas.findById(accountId).exec(),
+        this.copropiedades.findById(copropiedadId).exec(),
+      ]);
+      const empresaId = copropiedad?.comptableEmpresaId ?? null;
+      if (!empresaId) return sinAviso;
+      resultado = await this.comptable.purgarLotesRetirados(
+        empresaId,
+        copropiedadId.toString(),
+        {
+          accountId,
+          nombre: cuenta?.nombreCompleto ?? 'Administrador de plataforma',
+        },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Reinicio de ciclo ${copropiedadId.toString()}: no se pudieron borrar en Comptable los lotes retirados (${mensajeDe(err)}).`,
+      );
+      return {
+        lotesComptablePurgados: 0,
+        avisoComptable: avisoPurga('ocurrió un error inesperado'),
+      };
+    }
+
+    if (resultado.tipo === 'ok') {
+      return {
+        lotesComptablePurgados: resultado.datos.eliminados ?? 0,
+        avisoComptable: null,
+      };
+    }
+    const motivo =
+      resultado.tipo === 'timeout'
+        ? 'Comptable no respondió a tiempo'
+        : resultado.tipo === 'red'
+          ? 'no se pudo conectar con Comptable'
+          : resultado.tipo === 'firma'
+            ? 'Comptable rechazó la firma de WebSACO Finanzas'
+            : resultado.tipo === 'noEncontrado'
+              ? 'Comptable todavía no tiene la opción de borrar lotes retirados'
+              : 'Comptable no dio una respuesta clara';
+    this.logger.warn(
+      `Reinicio de ciclo ${copropiedadId.toString()}: purga de lotes retirados en Comptable falló (${resultado.tipo}).`,
+    );
+    return { lotesComptablePurgados: 0, avisoComptable: avisoPurga(motivo) };
   }
 
   /**
@@ -751,6 +870,23 @@ export class ReiniciarCicloService {
         `No se puede reiniciar el ciclo: hay una importación de ${ETIQUETA_IMPORTACION[importando.tipo] ?? importando.tipo} en curso. Esperá a que termine e intentá de nuevo.`,
       );
     }
+
+    // An "Envío a residentes" send holds its rows under a lease while it
+    // e-mails them; wiping them mid-send would still deliver invoices that no
+    // longer exist. An expired lease is a dead run's leftover: not a block.
+    const enviando = await this.enviosFactura
+      .findOne({
+        copropiedadId,
+        estado: 'pendiente_envio',
+        tokenEnvio: { $ne: null },
+        envioIniciadoEn: { $gte: new Date(Date.now() - VIGENCIA_ENVIO_MS) },
+      })
+      .exec();
+    if (enviando) {
+      throw new ConflictException(
+        'No se puede reiniciar el ciclo: hay un envío de facturas a residentes en curso. Esperá a que termine e intentá de nuevo.',
+      );
+    }
   }
 
   /**
@@ -809,12 +945,17 @@ export class ReiniciarCicloService {
         [copropiedad?.codigo, copropiedad?.nombre].filter(Boolean).join(' ') ||
         copropiedadId.toString();
       const conteos = Object.entries(resultado)
-        .filter(([, cantidad]) => cantidad > 0)
+        .filter(
+          (par): par is [string, number] =>
+            typeof par[1] === 'number' && par[1] > 0,
+        )
         .map(([clave, cantidad]) => `${clave}: ${cantidad}`)
         .join(', ');
-      const nota = almacenamientoLimpio
-        ? ''
-        : ' (los archivos PDF NO se pudieron borrar del almacenamiento)';
+      const nota =
+        (almacenamientoLimpio
+          ? ''
+          : ' (los archivos PDF NO se pudieron borrar del almacenamiento)') +
+        (resultado.avisoComptable ? ` — ${resultado.avisoComptable}` : '');
 
       await this.auditoria.registrar({
         actorAccountId: accountId,

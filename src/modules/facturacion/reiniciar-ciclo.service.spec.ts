@@ -50,6 +50,10 @@ const makeModelos = (over: {
   comptableConfigurado?: boolean;
   /** Answer of `retirarLote`, per lote number (default `{ tipo: 'ok' }`). */
   respuestasRetiro?: Record<number, Record<string, unknown>>;
+  /** Answer of `purgarLotesRetirados` (default ok, `eliminados: 0`). */
+  respuestaPurga?: Record<string, unknown>;
+  /** An "Envío a residentes" row under a live lease (a send running). */
+  envioEnCurso?: boolean;
   deletedCounts?: Partial<{
     presentaciones: number;
     progresosImportacion: number;
@@ -73,6 +77,8 @@ const makeModelos = (over: {
     saldoTotalDocumento: number;
     saldosInicialesAnticipo: number;
     lotesSaldoInicialAnticipo: number;
+    enviosFactura: number;
+    enlacesFactura: number;
   }>;
 }) => {
   const counts = {
@@ -98,6 +104,8 @@ const makeModelos = (over: {
     saldoTotalDocumento: 0,
     saldosInicialesAnticipo: 0,
     lotesSaldoInicialAnticipo: 0,
+    enviosFactura: 0,
+    enlacesFactura: 0,
     ...over.deletedCounts,
   };
 
@@ -165,7 +173,23 @@ const makeModelos = (over: {
         (lote && over.respuestasRetiro?.[lote.numero]) ?? { tipo: 'ok' },
       );
     }),
+    purgarLotesRetirados: jest.fn(() =>
+      Promise.resolve(
+        over.respuestaPurga ?? {
+          tipo: 'ok',
+          status: 200,
+          datos: { eliminados: 0 },
+        },
+      ),
+    ),
   };
+  const enviosFactura = {
+    ...deleteManyMock(counts.enviosFactura),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(over.envioEnCurso ? { _id: 'e1' } : null),
+    })),
+  };
+  const enlacesFactura = deleteManyMock(counts.enlacesFactura);
   const storage = {
     eliminarPrefijo: jest.fn(() =>
       over.storageFalla
@@ -274,6 +298,8 @@ const makeModelos = (over: {
     lotesComptable,
     consecutivoLoteComptable,
     comptable,
+    enviosFactura,
+    enlacesFactura,
   };
 };
 
@@ -319,6 +345,8 @@ const makeService = (
     modelos.lotesComptable as never,
     modelos.consecutivoLoteComptable as never,
     modelos.comptable as never,
+    modelos.enviosFactura as never,
+    modelos.enlacesFactura as never,
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
@@ -365,7 +393,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
         presentaciones: 20,
         progresosImportacion: 21,
         lotesComptable: 23,
+        enviosFactura: 24,
+        enlacesFactura: 25,
       },
+      respuestaPurga: { tipo: 'ok', status: 200, datos: { eliminados: 26 } },
     });
     const service = makeService(modelos);
 
@@ -417,6 +448,10 @@ describe('ReiniciarCicloService.reiniciar', () => {
       lotesContabilidadEliminados: 14,
       lotesComptableEliminados: 23,
       lotesComptableRetirados: 0,
+      lotesComptablePurgados: 26,
+      avisoComptable: null,
+      enviosFacturaEliminados: 24,
+      enlacesFacturaEliminados: 25,
       saldosInicialesEliminados: 15,
       lotesSaldoInicialEliminados: 16,
       saldoTotalDocumentoEliminado: 17,
@@ -521,6 +556,59 @@ describe('ReiniciarCicloService.reiniciar', () => {
       );
       expect(modelos.comptable.retirarLote).not.toHaveBeenCalled();
       expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('después de retirar, borra en Comptable los lotes retirados de la copropiedad', async () => {
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1],
+        respuestaPurga: { tipo: 'ok', status: 200, datos: { eliminados: 4 } },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.comptable.purgarLotesRetirados).toHaveBeenCalledWith(
+        'emp-1',
+        COP.toString(),
+        { accountId: CUENTA, nombre: 'Admin Plataforma' },
+      );
+      expect(
+        modelos.comptable.purgarLotesRetirados.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(
+        modelos.comptable.retirarLote.mock.invocationCallOrder[0],
+      );
+      expect(resultado.lotesComptablePurgados).toBe(4);
+      expect(resultado.avisoComptable).toBeNull();
+    });
+
+    it('si Comptable no deja borrar los retirados, el reinicio sigue y lo avisa', async () => {
+      const modelos = makeModelos({ respuestaPurga: { tipo: 'timeout' } });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.facturas.deleteMany).toHaveBeenCalled();
+      expect(resultado.lotesComptablePurgados).toBe(0);
+      expect(resultado.avisoComptable).toContain(
+        'Comptable no respondió a tiempo',
+      );
+      expect(modelos.auditoria.registrar).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entidadEtiqueta: expect.stringContaining(
+            'siguen listados en Comptable',
+          ) as string,
+        }),
+      );
+    });
+
+    it('una copropiedad sin Empresa de Comptable no llama a Comptable ni avisa', async () => {
+      const modelos = makeModelos({ comptableEmpresaId: null });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.comptable.purgarLotesRetirados).not.toHaveBeenCalled();
+      expect(resultado.avisoComptable).toBeNull();
     });
 
     it('sin lotes vivos no llama a Comptable', async () => {
@@ -752,6 +840,8 @@ describe('ReiniciarCicloService.reiniciar', () => {
       m.lotesSaldoInicialAnticipo.deleteMany,
       m.presentaciones.deleteMany,
       m.progresosImportacion.deleteMany,
+      m.enviosFactura.deleteMany,
+      m.enlacesFactura.deleteMany,
       m.consecutivoLote.updateOne,
       m.consecutivoDocumento.updateMany,
       m.consecutivoLoteRecibos.updateOne,
@@ -891,6 +981,30 @@ describe('ReiniciarCicloService.reiniciar', () => {
       const limite = filtro.updatedAt.$gte.getTime();
       expect(limite).toBeLessThanOrEqual(antes - 15 * 60 * 1000 + 1000);
       expect(limite).toBeGreaterThan(antes - 15 * 60 * 1000 - 5000);
+    });
+
+    it('rechaza y no borra nada mientras hay un envío de facturas a residentes en curso', async () => {
+      const modelos = makeModelos({ envioEnCurso: true });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow(
+        /envío de facturas a residentes en curso/,
+      );
+      const filtro = (
+        modelos.enviosFactura.findOne.mock.calls[0] as unknown as [
+          Record<string, unknown>,
+        ]
+      )[0];
+      expect(filtro).toEqual(
+        expect.objectContaining({
+          copropiedadId: COP,
+          estado: 'pendiente_envio',
+          tokenEnvio: { $ne: null },
+        }),
+      );
+      for (const escritura of todoLoQueEscribe(modelos)) {
+        expect(escritura).not.toHaveBeenCalled();
+      }
     });
   });
 
