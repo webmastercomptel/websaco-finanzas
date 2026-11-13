@@ -912,6 +912,11 @@ export interface ResultadoReinicioCiclo {
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
   lotesContabilidadEliminados: number;
+  /** "Interfaz a Comptable" lotes withdrawn from Comptable by this reset
+   *  (`enviado`/`pendiente` ones), before anything was deleted here. */
+  lotesComptableRetirados: number;
+  /** `LoteComptable` rows deleted here, every state. */
+  lotesComptableEliminados: number;
   saldosInicialesEliminados: number;
   lotesSaldoInicialEliminados: number;
   saldoTotalDocumentoEliminado: number;

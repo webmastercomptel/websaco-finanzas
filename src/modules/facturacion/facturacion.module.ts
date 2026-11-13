@@ -16,6 +16,7 @@ import {
   NOMBRE_COLA_CONSOLIDACION,
 } from './colas/consolidacion.constants';
 import { NOMBRE_COLA_APLICACION_LOTE_RECIBOS } from '../recibos/colas/aplicacion-lote-recibos.constants';
+import { ComptableClientModule } from '../interfaz-comptable/comptable-client.module';
 
 @Module({
   imports: [
@@ -28,6 +29,11 @@ import { NOMBRE_COLA_APLICACION_LOTE_RECIBOS } from '../recibos/colas/aplicacion
     // unfinished (LoteRecibos has no persisted in-progress marker). The
     // processor and QueueEvents stay in RecibosModule; no cycle introduced.
     BullModule.registerQueue({ name: NOMBRE_COLA_APLICACION_LOTE_RECIBOS }),
+    // The bare signed Comptable client (no dependencies of its own), used
+    // ONLY by ReiniciarCicloService to withdraw Interfaz a Comptable lotes
+    // before a reset. Not InterfazComptableModule: that one imports this
+    // module back (LotesFacturacionService), which would be a real cycle.
+    ComptableClientModule,
   ],
   controllers: [FacturasController, LotesController, ReiniciarCicloController],
   providers: [
