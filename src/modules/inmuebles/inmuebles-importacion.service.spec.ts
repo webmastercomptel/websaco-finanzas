@@ -2531,3 +2531,131 @@ describe('InmueblesService.importar — arrendatario', () => {
     expect(inmuebles.escrituras[0]).not.toHaveProperty('resideEnElInmueble');
   });
 });
+
+describe('InmueblesService.importar — correos deduplicados y con tope de 5 por persona', () => {
+  const SEIS = 'a@x.co, b@x.co, c@x.co, d@x.co, e@x.co, f@x.co';
+
+  it('deduplica la celda del titular sin distinguir mayúsculas y conserva la primera grafía', async () => {
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmueblesModeloCon(), terceros);
+
+    await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana Pérez',
+          emailTitular: 'a@x.com; A@x.com, b@x.com',
+        }),
+      ],
+    });
+
+    expect(terceros.creados[0]).toMatchObject({
+      emails: ['a@x.com', 'b@x.com'],
+    });
+  });
+
+  it('acepta 5 correos distintos en la celda del titular y 7 entradas con 5 distintos', async () => {
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmueblesModeloCon(), terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          nombreTitular: 'Ana Pérez',
+          emailTitular: 'a@x.co,b@x.co,c@x.co,d@x.co,e@x.co,A@x.co,B@x.co',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.creados[0]).toMatchObject({
+      emails: ['a@x.co', 'b@x.co', 'c@x.co', 'd@x.co', 'e@x.co'],
+    });
+  });
+
+  it('6 correos distintos del titular son error de esa fila, no escriben nada y la siguiente fila se importa', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({ codigo: '301', nombreTitular: 'Ana Pérez', emailTitular: SEIS }),
+        fila({ codigo: '302' }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0]).toMatchObject({
+      fila: 1,
+      codigo: '301',
+      mensaje: 'Correo del titular: máximo 5 correos distintos',
+    });
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.escrituras.map((e) => e.codigo)).toEqual(['302']);
+  });
+
+  it('6 correos distintos del arrendatario son error de esa fila y no escriben nada de ella', async () => {
+    const inmuebles = inmueblesModeloCon();
+    const terceros = tercerosModeloCon();
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          arrendatarioNombre: 'Luis Gómez',
+          arrendatarioCorreo: SEIS,
+        }),
+        fila({ codigo: '302' }),
+      ],
+    });
+
+    expect(resultado.errores).toHaveLength(1);
+    expect(resultado.errores[0]).toMatchObject({
+      codigo: '301',
+      mensaje: 'Correo del arrendatario: máximo 5 correos distintos',
+    });
+    expect(terceros.create).not.toHaveBeenCalled();
+    expect(inmuebles.escrituras.map((e) => e.codigo)).toEqual(['302']);
+  });
+
+  it('reimportar un inmueble cuyo titular guarda 7 correos con una celda de 2 se acepta: el tope juzga la celda, no lo guardado', async () => {
+    const inmuebles = inmueblesModeloCon([
+      { id: 'inm-1', codigo: '301', titularId: 'ter-1' },
+    ]);
+    const terceros = tercerosModeloCon(
+      { '123': 'ter-1' },
+      {
+        'ter-1': {
+          emails: [
+            '1@x.co',
+            '2@x.co',
+            '3@x.co',
+            '4@x.co',
+            '5@x.co',
+            '6@x.co',
+            '7@x.co',
+          ],
+        },
+      },
+    );
+    const service = nuevoServicio(inmuebles, terceros);
+
+    const resultado = await service.importar({
+      filas: [
+        fila({
+          codigo: '301',
+          numeroIdentificacionTitular: '123',
+          emailTitular: 'a@x.co, b@x.co',
+        }),
+      ],
+    });
+
+    expect(resultado.errores).toEqual([]);
+    expect(terceros.actualizaciones[0].cambios).toMatchObject({
+      emails: ['a@x.co', 'b@x.co'],
+    });
+  });
+});

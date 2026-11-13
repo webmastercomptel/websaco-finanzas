@@ -7,8 +7,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { FirebaseUsuariosService } from '../../common/firebase/firebase-usuarios.service';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
@@ -30,13 +30,15 @@ import {
   Asignacion,
   type AsignacionDocument,
 } from '../../database/schemas/cuentas/asignacion.schema';
-import {
-  Tercero,
-  type TerceroDocument,
-} from '../../database/schemas/terceros/tercero.schema';
 import { InvitacionAccesoService } from '../acceso-residentes/invitacion-acceso.service';
 import { AuditoriaService } from '../auditoria/auditoria.service';
-import { esPermisoAdministracion } from '../casl/permisos-catalogo';
+import {
+  clavesEfectivas,
+  exigirClavesConocidas,
+  exigirDelegacion,
+  type CambioDeClaves,
+} from '../casl/delegacion';
+import { filtroListaExacta } from '../casl/filtro-lista-exacta';
 import { CODIGO_CUENTA_EXISTENTE } from '../../common/firebase/codigos-cuenta';
 import type { ListarEquipoDto } from './dto/listar-equipo.dto';
 import type {
@@ -73,6 +75,10 @@ interface Concesion {
 
 const unicos = <T>(valores: readonly T[]): T[] => [...new Set(valores)];
 
+/** The 409 every conditional write answers when the row moved under it. */
+const MENSAJE_ACCESO_CAMBIO =
+  'El acceso cambió mientras se procesaba: vuelve a intentarlo';
+
 /**
  * The coproperty's own staff: accounts with an assignment of scope
  * `copropiedad` on the ACTIVE coproperty.
@@ -83,12 +89,25 @@ const unicos = <T>(valores: readonly T[]): T[] => [...new Set(valores)];
  * - Everything created here is `perfil: 'personal'`. Never `administrativo`,
  *   never an `entidad` scope, never a platform administrator. Those are made and
  *   changed in the platform console (`/usuarios`).
- * - Least privilege: every key a new member ends up with (direct keys and the
- *   keys of the roles attached) must already be one the CALLER holds, so nobody
- *   can mint a stronger account than their own. Platform administrators are
- *   exempt (they hold everything). Creating staff never grants Finanzas keys.
+ * - The delegation cap ("you give, and take away, only what you hold"): a
+ *   member's EFFECTIVE keys are their direct keys plus the keys of their roles
+ *   (roles of this coproperty only), and every key that CHANGES between before
+ *   and after must be one the CALLER holds, by exact key. Adding, removing,
+ *   attaching or detaching a role, and deactivating (which removes everything)
+ *   are all the same rule, so nobody can mint a stronger account than their own
+ *   nor strip a colleague of access they could not have given. Keys that do not
+ *   change are never judged. Platform administrators are exempt from the cap
+ *   (not from the catalog). Finanzas and Administración keys are treated alike;
+ *   what is not offered by either catalog is a 400 when NEW and ignored when it
+ *   merely travels back (see `casl/delegacion.ts`).
+ * - Writes that depend on a check are conditional on the row still being what
+ *   the check read, so a concurrent grant cannot slip past it (409).
  * - Roles must be roles of THIS coproperty.
- * - The caller cannot edit or deactivate themselves, and cannot touch a
+ * - Every write of a member and its audit entry commit or roll back together
+ *   (one Mongo transaction), so a failed audit write leaves no change behind and
+ *   a retry cannot skip the entry. The Firebase identity and the Account of a new
+ *   person cannot join it and are written first.
+ * - The caller cannot add, edit or deactivate themselves, and cannot touch a
  *   platform administrator or an `administrativo` assignment.
  * - Deactivating only switches this building's assignment off. The Account and
  *   the Firebase identity are never touched: the person may work elsewhere.
@@ -106,12 +125,11 @@ export class EquipoService {
     @InjectModel(Account.name)
     private readonly cuentas: Model<AccountDocument>,
     @InjectModel(Rol.name) private readonly roles: Model<RolDocument>,
-    @InjectModel(Tercero.name)
-    private readonly terceros: Model<TerceroDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
     private readonly tenant: TenantContextService,
     private readonly invitaciones: InvitacionAccesoService,
     private readonly auditoria: AuditoriaService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /* ── Reads ─────────────────────────────────────────────── */
@@ -225,73 +243,86 @@ export class EquipoService {
     return toMiembroEquipo(asignacion, cuenta, roles);
   }
 
-  /* ── The ceiling ───────────────────────────────────────── */
+  /* ── The delegation cap ────────────────────────────────── */
 
   /**
-   * Validates and resolves what a request wants to grant, BEFORE any side
-   * effect. Order matters for the status code: a key that cannot be assigned at
-   * all (a Finanzas key, a typo) is a 400 whoever asks; a valid key the caller
-   * does not hold is a 403 naming it.
+   * The keys each of the given roles carries, bounded to THIS coproperty: a role
+   * of another building is simply absent from the map, which is what the read
+   * side (`AccesoService`) does with it too. One query for any number of ids, so
+   * `actualizar` can load the member's current roles and the requested ones
+   * together.
+   */
+  private async clavesDeRoles(
+    ids: readonly Types.ObjectId[],
+    copropiedadId: Types.ObjectId,
+  ): Promise<Map<string, string[]>> {
+    const distintos = [
+      ...new Map(ids.map((id) => [id.toString(), id])).values(),
+    ];
+    if (distintos.length === 0) return new Map();
+    const encontrados = await this.roles
+      .find({ _id: { $in: distintos }, copropiedadId })
+      .select('permisos')
+      .lean()
+      .exec();
+    return new Map(
+      encontrados.map((r) => [r._id.toString(), r.permisos ?? []]),
+    );
+  }
+
+  /**
+   * The offered keys a member ends up with: direct keys plus the keys of the
+   * roles, de-duplicated. A role that no longer resolves contributes nothing,
+   * exactly as on the read side. This is the set the cap judges and the audit
+   * records.
+   */
+  private efectivas(
+    permisos: readonly string[],
+    roleIds: readonly Types.ObjectId[],
+    clavesDeRol: ReadonlyMap<string, string[]>,
+  ): string[] {
+    return clavesEfectivas(
+      permisos,
+      ...roleIds.map((id) => clavesDeRol.get(id.toString()) ?? []),
+    );
+  }
+
+  /**
+   * Validates what a request wants to set, BEFORE any side effect, and loads the
+   * keys of every role involved (the requested ones and, for an update, the ones
+   * the member has now). It does NOT apply the cap: the callers know the
+   * "before" set. Only requests, never keys, fail here: a role that is not of
+   * this coproperty is a 400. (Unknown keys are the callers' 400, which needs
+   * the member's current keys; both are decided before any 403.)
    */
   private async resolverConcesion(
     rolIds: string[] | undefined,
     permisos: string[] | undefined,
     copropiedadId: Types.ObjectId,
-    user: IRequestUser,
-  ): Promise<{ permisos?: string[]; roleIds?: Types.ObjectId[] }> {
-    const resultado: { permisos?: string[]; roleIds?: Types.ObjectId[] } = {};
-    const aOtorgar: string[] = [];
-
-    if (permisos !== undefined) {
-      const directos = unicos(permisos);
-      const noAsignables = directos.filter((p) => !esPermisoAdministracion(p));
-      if (noAsignables.length > 0) {
-        throw new BadRequestException(
-          `Permisos que el equipo no puede recibir: ${noAsignables.join(', ')}`,
-        );
-      }
-      resultado.permisos = directos;
-      aOtorgar.push(...directos);
-    }
-
-    if (rolIds !== undefined) {
-      const ids = unicos(rolIds);
-      const encontrados =
-        ids.length === 0
-          ? []
-          : await this.roles
-              .find({
-                _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
-                copropiedadId,
-              })
-              .select('permisos')
-              .lean()
-              .exec();
-      if (encontrados.length !== ids.length) {
-        throw new BadRequestException(
-          'Uno o más roles no existen en esta copropiedad',
-        );
-      }
-      resultado.roleIds = encontrados.map((r) => r._id);
-      // Only Administración keys of a role are ever effective (AccesoService
-      // drops the rest on read), so only those count as "granted" here.
-      aOtorgar.push(
-        ...encontrados.flatMap((r) =>
-          (r.permisos ?? []).filter(esPermisoAdministracion),
-        ),
+    rolesActuales: readonly Types.ObjectId[] = [],
+  ): Promise<{
+    permisos?: string[];
+    roleIds?: Types.ObjectId[];
+    clavesDeRol: Map<string, string[]>;
+  }> {
+    const pedidos =
+      rolIds === undefined
+        ? undefined
+        : unicos(rolIds).map((id) => new Types.ObjectId(id));
+    const clavesDeRol = await this.clavesDeRoles(
+      [...(pedidos ?? []), ...rolesActuales],
+      copropiedadId,
+    );
+    if (pedidos?.some((id) => !clavesDeRol.has(id.toString()))) {
+      throw new BadRequestException(
+        'Uno o más roles no existen en esta copropiedad',
       );
     }
-
-    if (!user.isPlatformAdmin) {
-      const propios = new Set(user.permissions ?? []);
-      const faltantes = unicos(aOtorgar).filter((p) => !propios.has(p));
-      if (faltantes.length > 0) {
-        throw new ForbiddenException(
-          `No puedes otorgar permisos que no tienes: ${faltantes.join(', ')}`,
-        );
-      }
-    }
-    return resultado;
+    return {
+      permisos: permisos === undefined ? undefined : unicos(permisos),
+      roleIds: pedidos,
+      clavesDeRol,
+    };
   }
 
   /**
@@ -312,6 +343,27 @@ export class EquipoService {
       throw new ForbiddenException(
         'Los administradores de la copropiedad se gestionan desde la consola de la plataforma',
       );
+    }
+  }
+
+  /**
+   * Same shape as the other transactional services (`inmuebles-baja`):
+   * `withTransaction` may re-run the callback on a transient error, so what it
+   * does must be safe to repeat (every write here is conditional or an upsert of
+   * the same state).
+   */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
     }
   }
 
@@ -341,9 +393,10 @@ export class EquipoService {
    * Gives a person staff access (`personal`) to the active coproperty,
    * creating their sign-in when the email is new.
    *
-   * Order: validate everything, then Firebase identity, Account, Assignment.
-   * Whatever fails after the identity exists leaves something inert (an
-   * account with no assignment grants nothing), and the retry meets the
+   * Order: validate everything, then Firebase identity and Account (neither can
+   * join a Mongo transaction), then the Assignment together with its audit entry
+   * in one transaction. Whatever fails after the identity exists leaves something
+   * inert (an account with no assignment grants nothing), and the retry meets the
    * existing-account rule instead of creating a second identity.
    */
   async crear(
@@ -355,27 +408,36 @@ export class EquipoService {
       dto.rolIds,
       dto.permisos,
       copropiedadId,
-      user,
     );
-    if (
-      (concesion.permisos?.length ?? 0) + (concesion.roleIds?.length ?? 0) ===
-      0
-    ) {
-      throw new BadRequestException('Indica al menos un rol o un permiso');
-    }
     const grant: Concesion = {
       permisos: concesion.permisos ?? [],
       roleIds: concesion.roleIds ?? [],
     };
+    // Every key here is NEW (the "before" of a creation is empty, also when an
+    // inactive row is reactivated: its old keys are replaced, never merged).
+    exigirClavesConocidas(grant.permisos);
+    if (grant.permisos.length + grant.roleIds.length === 0) {
+      throw new BadRequestException('Indica al menos un rol o un permiso');
+    }
+    const cambio = exigirDelegacion(
+      user,
+      [],
+      this.efectivas(grant.permisos, grant.roleIds, concesion.clavesDeRol),
+    );
 
     const email = dto.email.trim().toLowerCase();
     const existente = await this.cuentas.findOne({ email }).exec();
 
     let cuenta: AccountDocument;
-    let asignacionId: Types.ObjectId;
     const cuentaExistente = existente !== null;
 
     if (existente) {
+      // Same rule as update and deactivate: nobody grants themselves access
+      // (an entity-scope caller or an inactive own row would otherwise be able
+      // to create or reactivate their own assignment here).
+      if (existente._id.toString() === user.accountId) {
+        throw new ForbiddenException('No puedes modificar tu propio acceso');
+      }
       if (dto.vincularExistente !== true) {
         throw new ConflictException({
           code: CODIGO_CUENTA_EXISTENTE,
@@ -394,7 +456,6 @@ export class EquipoService {
         );
       }
       cuenta = existente;
-      asignacionId = await this.asignarAExistente(cuenta, grant, copropiedadId);
     } else {
       // Random and never shown: the person gets in through the invitation link
       // and chooses their own password.
@@ -414,19 +475,25 @@ export class EquipoService {
       } catch (error: unknown) {
         this.relanzar(error);
       }
-      asignacionId = await this.crearAsignacion(
-        cuenta._id,
-        grant,
-        copropiedadId,
-      );
     }
 
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'crear',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
+    const cuentaId = cuenta._id;
+    const asignacionId = await this.transaccion(async (session) => {
+      const id = cuentaExistente
+        ? await this.asignarAExistente(cuenta, grant, copropiedadId, session)
+        : await this.crearAsignacion(cuentaId, grant, copropiedadId, session);
+      await this.auditoria.registrar(
+        {
+          ...this.actor(user),
+          accion: 'crear',
+          entidadTipo: 'usuario',
+          entidadId: cuentaId.toString(),
+          entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
+          detalle: cambio,
+        },
+        session,
+      );
+      return id;
     });
 
     const invitacion = await this.invitaciones.enviar({
@@ -464,18 +531,25 @@ export class EquipoService {
     accountId: Types.ObjectId,
     grant: Concesion,
     copropiedadId: Types.ObjectId,
+    session: ClientSession,
   ): Promise<Types.ObjectId> {
     try {
-      const creada = await this.asignaciones.create({
-        accountId,
-        perfil: 'personal',
-        alcance: 'copropiedad',
-        copropiedadId,
-        entidadId: null,
-        permisos: grant.permisos,
-        roleIds: grant.roleIds,
-        estado: 'active',
-      });
+      // The array form is what lets Mongoose take options (the session).
+      const [creada] = await this.asignaciones.create(
+        [
+          {
+            accountId,
+            perfil: 'personal',
+            alcance: 'copropiedad',
+            copropiedadId,
+            entidadId: null,
+            permisos: grant.permisos,
+            roleIds: grant.roleIds,
+            estado: 'active',
+          },
+        ],
+        { session },
+      );
       return creada._id;
     } catch (error: unknown) {
       this.relanzar(error);
@@ -491,6 +565,7 @@ export class EquipoService {
     cuenta: AccountDocument,
     grant: Concesion,
     copropiedadId: Types.ObjectId,
+    session: ClientSession,
   ): Promise<Types.ObjectId> {
     const previa = (await this.asignaciones
       .findOne({
@@ -502,7 +577,7 @@ export class EquipoService {
       .exec()) as AsignacionLean | null;
 
     if (!previa) {
-      return this.crearAsignacion(cuenta._id, grant, copropiedadId);
+      return this.crearAsignacion(cuenta._id, grant, copropiedadId, session);
     }
     if (previa.estado === 'active') {
       throw new ConflictException(
@@ -530,21 +605,26 @@ export class EquipoService {
             roleIds: grant.roleIds,
           },
         },
+        { session },
       )
       .exec();
     if (res.matchedCount === 0) {
-      throw new ConflictException(
-        'El acceso cambió mientras se procesaba: vuelve a intentarlo',
-      );
+      throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
     }
     return previa._id;
   }
 
   /**
-   * Replaces a member's roles and/or direct keys, or renames them. The new
-   * grant is held to the same ceiling as a creation. Renaming touches the
-   * Account, which is shared by every building the person works in, so it is
-   * allowed only when this is their only access anywhere.
+   * Replaces a member's roles and/or direct keys, or renames them. The change
+   * is held to the delegation cap: the symmetric difference of the member's
+   * effective keys before and after must be keys the caller holds (adding,
+   * removing, attaching and detaching a role all count; keys that stay do not).
+   * The write applies only while `permisos` and `roleIds` are still what the
+   * check read, otherwise 409 and nothing is written (no rename, no audit), so
+   * a concurrent grant cannot slip past the check. A rename alone touches no
+   * keys: no cap, no conditional write. Renaming touches the Account, which is
+   * shared by every building the person works in, so it is allowed only when
+   * this is their only access anywhere.
    */
   async actualizar(
     id: string,
@@ -562,79 +642,111 @@ export class EquipoService {
       );
     }
 
-    const concesion = await this.resolverConcesion(
-      dto.rolIds,
-      dto.permisos,
-      copropiedadId,
-      user,
-    );
-    const permisos = concesion.permisos ?? asignacion.permisos;
-    const roleIds = concesion.roleIds ?? asignacion.roleIds ?? [];
-    if (permisos.length + roleIds.length === 0) {
-      throw new BadRequestException('Indica al menos un rol o un permiso');
+    const permisosActuales = asignacion.permisos ?? [];
+    const rolesActuales = asignacion.roleIds ?? [];
+    const tocaClaves = dto.permisos !== undefined || dto.rolIds !== undefined;
+    let cambio: CambioDeClaves = { agregadas: [], quitadas: [] };
+    const cambios: Record<string, unknown> = {};
+
+    if (tocaClaves) {
+      const concesion = await this.resolverConcesion(
+        dto.rolIds,
+        dto.permisos,
+        copropiedadId,
+        rolesActuales,
+      );
+      const permisos = concesion.permisos ?? permisosActuales;
+      const roleIds = concesion.roleIds ?? rolesActuales;
+      // A key already stored travels back untouched; only NEW ones must exist.
+      exigirClavesConocidas(permisos, permisosActuales);
+      if (permisos.length + roleIds.length === 0) {
+        throw new BadRequestException('Indica al menos un rol o un permiso');
+      }
+      cambio = exigirDelegacion(
+        user,
+        this.efectivas(permisosActuales, rolesActuales, concesion.clavesDeRol),
+        this.efectivas(permisos, roleIds, concesion.clavesDeRol),
+      );
+      if (concesion.permisos !== undefined) cambios.permisos = permisos;
+      if (concesion.roleIds !== undefined) cambios.roleIds = roleIds;
     }
 
-    if (dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto) {
+    const nombreNuevo =
+      dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto
+        ? dto.nombre
+        : undefined;
+    if (nombreNuevo !== undefined) {
       await this.exigirCuentaExclusiva(asignacion);
     }
 
-    const cambios: Record<string, unknown> = {};
-    if (concesion.permisos !== undefined) cambios.permisos = concesion.permisos;
-    if (concesion.roleIds !== undefined) cambios.roleIds = concesion.roleIds;
-    if (Object.keys(cambios).length > 0) {
-      const res = await this.asignaciones
-        .updateOne(
-          {
-            _id: asignacion._id,
-            copropiedadId,
-            alcance: 'copropiedad',
-            perfil: 'personal',
-          },
-          { $set: cambios },
-        )
-        .exec();
-      if (res.matchedCount === 0) {
-        throw new ConflictException(
-          'El acceso cambió mientras se procesaba: vuelve a intentarlo',
-        );
+    // Keys, name and audit entry are one unit: a refused or failed step undoes
+    // the others, so no change is ever saved without its entry (nor the reverse).
+    await this.transaccion(async (session) => {
+      if (Object.keys(cambios).length > 0) {
+        const res = await this.asignaciones
+          .updateOne(
+            {
+              _id: asignacion._id,
+              copropiedadId,
+              alcance: 'copropiedad',
+              perfil: 'personal',
+              estado: 'active',
+              $and: [
+                filtroListaExacta('permisos', permisosActuales),
+                filtroListaExacta('roleIds', rolesActuales),
+              ],
+            },
+            { $set: cambios },
+            { session },
+          )
+          .exec();
+        if (res.matchedCount === 0) {
+          throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
+        }
       }
-    }
-    if (dto.nombre !== undefined && dto.nombre !== cuenta.nombreCompleto) {
-      await this.cuentas
-        .updateOne(
-          { _id: cuenta._id },
-          { $set: { nombreCompleto: dto.nombre } },
-        )
-        .exec();
-    }
-
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'actualizar',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(
-        dto.nombre ?? cuenta.nombreCompleto,
-        copropiedadId,
-      ),
+      if (nombreNuevo !== undefined) {
+        await this.cuentas
+          .updateOne(
+            { _id: cuenta._id },
+            { $set: { nombreCompleto: nombreNuevo } },
+            { session },
+          )
+          .exec();
+      }
+      await this.auditoria.registrar(
+        {
+          ...this.actor(user),
+          accion: 'actualizar',
+          entidadTipo: 'usuario',
+          entidadId: cuenta._id.toString(),
+          entidadEtiqueta: this.etiqueta(
+            dto.nombre ?? cuenta.nombreCompleto,
+            copropiedadId,
+          ),
+          detalle: cambio,
+        },
+        session,
+      );
     });
     return this.obtener(id);
   }
 
-  /** The account is this building's alone: no other access, no resident link. */
+  /**
+   * The account is this building's alone: no other access. Being a resident
+   * (a `Tercero.accountId` link or a proven address) is NOT a reason to refuse:
+   * it is the same person, whom permissions add up for, and renaming the
+   * Account changes nothing about what either side may do.
+   */
   private async exigirCuentaExclusiva(
     asignacion: AsignacionLean,
   ): Promise<void> {
-    const [otras, residente] = await Promise.all([
-      this.asignaciones
-        .exists({
-          accountId: asignacion.accountId,
-          _id: { $ne: asignacion._id },
-        })
-        .exec(),
-      this.terceros.exists({ accountId: asignacion.accountId }).exec(),
-    ]);
-    if (otras || residente) {
+    const otras = await this.asignaciones
+      .exists({
+        accountId: asignacion.accountId,
+        _id: { $ne: asignacion._id },
+      })
+      .exec();
+    if (otras) {
       throw new ConflictException(
         'Esa cuenta se usa en otras copropiedades: el nombre se cambia desde la consola de la plataforma',
       );
@@ -646,6 +758,15 @@ export class EquipoService {
    * Firebase identity stay as they are (the person may work in other
    * buildings); access ends on the very next request, because the auth guard
    * re-derives it from live assignments each time.
+   *
+   * Deactivating removes every key the member has, so it is the delegation cap
+   * with `after = []`: the caller must hold all of the member's effective keys
+   * (direct and through roles), otherwise a junior could strip a richer
+   * colleague of access they could not have given. A member whose effective set
+   * is empty (only legacy or not-offered keys) can always be deactivated. The
+   * write is conditional on the row still being active with the same keys it was
+   * checked against. An already inactive member answers 200 with no check, no
+   * write and no audit entry.
    */
   async desactivar(id: string, user: IRequestUser): Promise<{ id: string }> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
@@ -655,28 +776,48 @@ export class EquipoService {
     this.exigirNoSerYo(asignacion, user);
     if (asignacion.estado === 'inactive') return { id };
 
-    const res = await this.asignaciones
-      .updateOne(
+    const permisosActuales = asignacion.permisos ?? [];
+    const rolesActuales = asignacion.roleIds ?? [];
+    const clavesDeRol = await this.clavesDeRoles(rolesActuales, copropiedadId);
+    const cambio = exigirDelegacion(
+      user,
+      this.efectivas(permisosActuales, rolesActuales, clavesDeRol),
+      [],
+      'No puedes desactivar a alguien con permisos que tú no tienes',
+    );
+
+    await this.transaccion(async (session) => {
+      const res = await this.asignaciones
+        .updateOne(
+          {
+            _id: asignacion._id,
+            copropiedadId,
+            alcance: 'copropiedad',
+            perfil: 'personal',
+            estado: 'active',
+            $and: [
+              filtroListaExacta('permisos', permisosActuales),
+              filtroListaExacta('roleIds', rolesActuales),
+            ],
+          },
+          { $set: { estado: 'inactive' } },
+          { session },
+        )
+        .exec();
+      if (res.matchedCount === 0) {
+        throw new ConflictException(MENSAJE_ACCESO_CAMBIO);
+      }
+      await this.auditoria.registrar(
         {
-          _id: asignacion._id,
-          copropiedadId,
-          alcance: 'copropiedad',
-          perfil: 'personal',
+          ...this.actor(user),
+          accion: 'retirar',
+          entidadTipo: 'usuario',
+          entidadId: cuenta._id.toString(),
+          entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
+          detalle: cambio,
         },
-        { $set: { estado: 'inactive' } },
-      )
-      .exec();
-    if (res.matchedCount === 0) {
-      throw new ConflictException(
-        'El acceso cambió mientras se procesaba: vuelve a intentarlo',
+        session,
       );
-    }
-    await this.auditoria.registrar({
-      ...this.actor(user),
-      accion: 'retirar',
-      entidadTipo: 'usuario',
-      entidadId: cuenta._id.toString(),
-      entidadEtiqueta: this.etiqueta(cuenta.nombreCompleto, copropiedadId),
     });
     return { id };
   }

@@ -45,9 +45,10 @@ export class Asignacion {
 
   /**
    * What kind of user holds this grant. `administrativo` runs the coproperty;
-   * `personal` is operational staff and can NEVER hold Finanzas permissions
-   * (hard ceiling, enforced when writing and again when reading). Legacy rows
-   * lack the key and read as `administrativo`.
+   * `personal` is the team member added from /equipo. The profile only says WHO
+   * MANAGES the row (and drives the header label, notice recipients and the
+   * sign-in-link rule): it never limits which permission keys the row holds, on
+   * write or on read. Legacy rows lack the key and read as `administrativo`.
    */
   @Prop({
     required: true,

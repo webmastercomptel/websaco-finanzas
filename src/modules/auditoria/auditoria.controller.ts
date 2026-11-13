@@ -33,6 +33,13 @@ export class AuditoriaController {
         entidadTipo: r.entidadTipo,
         entidadEtiqueta: r.entidadEtiqueta,
         fecha: (r as unknown as { createdAt: Date }).createdAt.toISOString(),
+        // Plain arrays, not the Mongoose wrappers; `null` when the entry has none.
+        detalle: r.detalle
+          ? {
+              agregadas: [...r.detalle.agregadas],
+              quitadas: [...r.detalle.quitadas],
+            }
+          : null,
       })),
       total,
       pagina,

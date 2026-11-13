@@ -43,8 +43,11 @@ export class LimiteIntentosService {
       if (!Number.isFinite(intentos)) return false;
       return intentos <= limite;
     } catch (error: unknown) {
+      // Only the key's family (everything before its last `:`): the last
+      // segment is an IP, a hash or a token digest, none of which belongs in a log.
+      const familia = clave.slice(0, Math.max(clave.lastIndexOf(':'), 0));
       this.logger.error(
-        `No se pudo contar el intento ${clave}: ${(error as Error).message}`,
+        `No se pudo contar el intento ${familia}: ${(error as Error).message}`,
       );
       return false;
     }

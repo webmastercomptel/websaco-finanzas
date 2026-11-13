@@ -29,6 +29,16 @@ function orden(v: unknown): number {
   return Number(v);
 }
 
+/** Three-way comparison; ObjectIds compare by their (fixed-width) hex form. */
+function comparar(a: unknown, b: unknown): number {
+  if (a instanceof Types.ObjectId && b instanceof Types.ObjectId) {
+    const x = a.toHexString();
+    const y = b.toHexString();
+    return x < y ? -1 : x > y ? 1 : 0;
+  }
+  return orden(a) - orden(b);
+}
+
 function cumple(valor: unknown, condicion: unknown): boolean {
   const esOperador =
     condicion !== null &&
@@ -45,13 +55,16 @@ function cumple(valor: unknown, condicion: unknown): boolean {
       case '$in':
         return (esperado as unknown[]).some((x) => igual(valor, x));
       case '$ne':
-        return !igual(valor, esperado);
+        // On an array path, `$ne` means NO element equals the value.
+        return Array.isArray(valor)
+          ? !valor.some((x) => igual(x, esperado))
+          : !igual(valor, esperado);
       case '$lt':
-        return !esNulo(valor) && orden(valor) < orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) < 0;
       case '$lte':
-        return !esNulo(valor) && orden(valor) <= orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) <= 0;
       case '$gt':
-        return !esNulo(valor) && orden(valor) > orden(esperado);
+        return !esNulo(valor) && comparar(valor, esperado) > 0;
       default:
         throw new Error(`Operador de filtro no soportado: ${op}`);
     }
@@ -71,8 +84,24 @@ export function coincide(doc: Doc, filtro: Record<string, unknown>): boolean {
         coincide(doc, f),
       );
     }
-    return cumple(doc[clave], condicion);
+    return cumple(valorDeRuta(doc, clave), condicion);
   });
+}
+
+/** `a.b` over arrays of subdocuments yields the array of their `b`. */
+function valorDeRuta(doc: Doc, ruta: string): unknown {
+  if (!ruta.includes('.')) return doc[ruta];
+  let actual: unknown = doc;
+  for (const parte of ruta.split('.')) {
+    if (Array.isArray(actual)) {
+      actual = actual.map((x) => (x as Doc | null)?.[parte]);
+    } else if (actual !== null && typeof actual === 'object') {
+      actual = (actual as Doc)[parte];
+    } else {
+      return undefined;
+    }
+  }
+  return actual;
 }
 
 function clonar<T>(valor: T): T {
@@ -97,7 +126,11 @@ function aplicar(doc: Doc, update: Record<string, unknown>): void {
     )) {
       if (op === '$set') doc[campo] = valor;
       else if (op === '$setOnInsert') continue;
-      else if (op === '$min') {
+      else if (op === '$push') {
+        const lista = (doc[campo] as unknown[] | undefined) ?? [];
+        lista.push(clonar(valor));
+        doc[campo] = lista;
+      } else if (op === '$min') {
         if (esNulo(doc[campo]) || orden(valor) < orden(doc[campo])) {
           doc[campo] = valor;
         }
@@ -168,6 +201,32 @@ export class ColeccionMemoria {
     return q;
   }
 
+  findOne(filtro: Record<string, unknown> = {}) {
+    return consulta(async () => {
+      await ceder();
+      const d = this.docs.find((x) => coincide(x, filtro));
+      return d ? clonar(d) : null;
+    });
+  }
+
+  findById(id: unknown) {
+    return this.findOne({ _id: id });
+  }
+
+  /** Inserts one document; the keys of `unica` act as a unique index. */
+  async create(doc: Doc): Promise<Doc> {
+    await ceder();
+    const nuevo: Doc = { _id: new Types.ObjectId(), ...clonar(doc) };
+    if (
+      this.unica.length > 0 &&
+      this.docs.some((d) => this.unica.every((k) => igual(d[k], nuevo[k])))
+    ) {
+      throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 });
+    }
+    this.docs.push(nuevo);
+    return clonar(nuevo);
+  }
+
   exists(filtro: Record<string, unknown>) {
     return consulta(async () => {
       await ceder();
@@ -210,6 +269,45 @@ export class ColeccionMemoria {
       if (!d) return { matchedCount: 0, modifiedCount: 0 };
       aplicar(d, update);
       return { matchedCount: 1, modifiedCount: 1 };
+    });
+  }
+
+  /**
+   * Atomic find-and-modify: the match and the write happen in the same tick,
+   * like MongoDB's single-document write. With `upsert`, a miss inserts the
+   * filter's equality fields plus `$set` and `$setOnInsert`. Returns the
+   * document after the write (the only mode the link service uses).
+   */
+  findOneAndUpdate(
+    filtro: Record<string, unknown>,
+    update: Record<string, Record<string, unknown>>,
+    opciones: { upsert?: boolean } = {},
+  ) {
+    return consulta(async () => {
+      await ceder();
+      this.escrituras.push('findOneAndUpdate');
+      const existente = this.docs.find((d) => coincide(d, filtro));
+      if (existente) {
+        aplicar(existente, update);
+        return clonar(existente);
+      }
+      if (!opciones.upsert) return null;
+      const nuevo: Doc = {
+        _id: new Types.ObjectId(),
+        ...clonar(filtro),
+        ...clonar(update.$setOnInsert ?? {}),
+        ...clonar(update.$set ?? {}),
+      };
+      if (
+        this.unica.length > 0 &&
+        this.docs.some((d) => this.unica.every((k) => igual(d[k], nuevo[k])))
+      ) {
+        throw Object.assign(new Error('E11000 duplicate key'), {
+          code: 11000,
+        });
+      }
+      this.docs.push(nuevo);
+      return clonar(nuevo);
     });
   }
 

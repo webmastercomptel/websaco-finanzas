@@ -32,16 +32,6 @@ export const MAX_INTENTOS = 5;
 export const esperaTrasFallo = (intentos: number): number =>
   Math.min(60_000 * 2 ** Math.max(0, intentos - 1), 30 * 60_000);
 
-/**
- * How long the access link of the notice works: 7 days, like every other access
- * link. It is reusable until then and it opens the OWNER's session, statement of
- * account included, so any forwarded or archived copy of the email is a
- * credential for that long. After it expires the resident signs in normally
- * ("forgot password") or staff sends again. Still refused for anybody holding a
- * Finanzas permission (see `EnlaceAccesoService`).
- */
-export const VIGENCIA_ENLACE_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** Longest queue page staff can ask for. */
 export const MAX_POR_PAGINA = 100;
 

@@ -5,18 +5,18 @@ import { HydratedDocument, Types } from 'mongoose';
 export type RolDocument = HydratedDocument<Rol>;
 
 /**
- * A named bundle of Administración permission keys, owned by ONE coproperty
- * (the building's administrator edits it and assigns it to staff).
+ * A named bundle of permission keys, owned by ONE coproperty (the building's
+ * administrator edits it and assigns it to staff).
  *
  * It is not a second authorization system: an `Asignacion` of that coproperty
  * lists role ids, and `AccesoService` unions the role's keys into the
  * assignment's own `permisos` when resolving access. Everything downstream still
  * sees one flat key list translated by `permission-map.ts`.
  *
- * Roles may only hold Administración keys (checked when writing and again when
- * reading). Finanzas permissions are granted directly on the `Asignacion` by the
- * platform administrator, so whoever edits roles can never widen anyone's
- * access to the financial side.
+ * A role may hold any offered key, Finanzas and Administración alike. What stops
+ * whoever edits roles from widening anyone's access is the delegation cap on the
+ * write (`RolesService`, `casl/delegacion.ts`): they can only put into a role, or
+ * take out of it, keys they hold themselves.
  */
 @Schema({ timestamps: true, collection: 'adm_roles', versionKey: false })
 export class Rol {

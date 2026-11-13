@@ -301,11 +301,12 @@ export class InmueblesController {
 
   /**
    * Hard delete — refused when the unit already has a Factura. See
-   * `InmueblesEliminacionService`.
+   * `InmueblesEliminacionService`. Gated by `purge` (`inmuebles.depurar`), the
+   * guarded pre-document delete, never `remove`.
    */
   @Delete(':id')
   @HttpCode(204)
-  @CheckAbility({ action: 'manage', subject: 'Inmueble' })
+  @CheckAbility({ action: 'purge', subject: 'Inmueble' })
   eliminar(@Param('id') id: string): Promise<void> {
     return this.eliminacion.eliminar(id);
   }

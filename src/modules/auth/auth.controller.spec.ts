@@ -157,10 +157,9 @@ describe('AuthController.me', () => {
     expect(resultado.copropiedades[0].permisos).toEqual([]);
   });
 
-  it('personal nunca ve claves de finanzas en auth/me', async () => {
-    // Con el AccesoService real: el techo del perfil `personal` quita las
-    // claves de Finanzas guardadas, y lo que sale por auth/me es lo ya
-    // recortado, no lo almacenado.
+  it('personal ve en auth/me sus claves de Finanzas, y no las claves muertas', async () => {
+    // Con el AccesoService real: el perfil no recorta nada; solo se descartan
+    // las claves desconocidas (un `gestionar` de Finanzas guardado de antes).
     const copId = new Types.ObjectId();
     const filas = (rows: Array<Record<string, unknown>>) => ({
       findOne: jest.fn().mockReturnValue({
@@ -192,7 +191,12 @@ describe('AuthController.me', () => {
           alcance: 'copropiedad',
           copropiedadId: copId,
           perfil: 'personal',
-          permisos: ['facturas.ver', 'tareas.ver', 'pqr.ver'],
+          permisos: [
+            'facturas.ver',
+            'facturas.gestionar',
+            'tareas.ver',
+            'pqr.ver',
+          ],
         },
       ]) as never,
       filas([
@@ -207,6 +211,8 @@ describe('AuthController.me', () => {
       filas([]) as never,
       filas([]) as never,
       filas([]) as never,
+      filas([]) as never,
+      {} as never,
     );
     const controller = new AuthController(acceso);
 
@@ -215,8 +221,11 @@ describe('AuthController.me', () => {
     );
 
     const permisos = resultado.copropiedades[0].permisos;
-    expect(permisos).toEqual(expect.arrayContaining(['tareas.ver', 'pqr.ver']));
-    expect(permisos).not.toContain('facturas.ver');
+    expect([...permisos].sort()).toEqual([
+      'facturas.ver',
+      'pqr.ver',
+      'tareas.ver',
+    ]);
   });
 
   it('sin cuenta local no consulta asignaciones', async () => {
@@ -236,7 +245,24 @@ describe('AuthController.me', () => {
 
     await controller.me(user({ accountId: 'acc-1', isPlatformAdmin: true }));
 
-    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', true);
+    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', true, {
+      email: 'santiago@comptel.com',
+      correoProbadoClave: undefined,
+    });
+  });
+
+  it('pasa la prueba de dirección de la cuenta que el guard ya cargó, sin releerla', async () => {
+    const { servicio, copropiedadesDe } = accesoQueDevuelve([]);
+    const controller = new AuthController(servicio);
+
+    await controller.me(
+      user({ accountId: 'acc-1', correoProbadoClave: 'a'.repeat(64) }),
+    );
+
+    expect(copropiedadesDe).toHaveBeenCalledWith('acc-1', false, {
+      email: 'santiago@comptel.com',
+      correoProbadoClave: 'a'.repeat(64),
+    });
   });
 
   it('devuelve el alcance de la asignación primaria de una cuenta normal', async () => {

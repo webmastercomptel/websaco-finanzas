@@ -35,6 +35,7 @@ import { AccesoResidentesModule } from './modules/acceso-residentes/acceso-resid
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { CatalogoPermisosModule } from './modules/catalogo-permisos/catalogo-permisos.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { TareasModule } from './modules/tareas/tareas.module';
 import { MantenimientosModule } from './modules/mantenimientos/mantenimientos.module';
@@ -57,6 +58,8 @@ import { BusquedaModule } from './modules/busqueda/busqueda.module';
 import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
 import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
 import { EnvioFacturasModule } from './modules/envio-facturas/envio-facturas.module';
+import { FacturaPublicaModule } from './modules/factura-publica/factura-publica.module';
+import { IngresoPortalModule } from './modules/ingreso-portal/ingreso-portal.module';
 import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-comptable.module';
 
 /**
@@ -117,6 +120,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     ConsultasModule,
     PortalModule,
     RolesModule,
+    CatalogoPermisosModule,
     NotificacionesModule,
     TareasModule,
     MantenimientosModule,
@@ -140,6 +144,8 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     PanelAdministracionModule,
     InterfazComptableModule,
     EnvioFacturasModule,
+    FacturaPublicaModule,
+    IngresoPortalModule,
   ],
   // Reports server-side failures when SENTRY_DSN is set (a no-op otherwise).
   providers: [{ provide: APP_FILTER, useClass: FiltroExcepcionesSentry }],

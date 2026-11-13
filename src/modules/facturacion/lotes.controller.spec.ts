@@ -13,6 +13,7 @@ jest.mock('../../common/pdf/consulta-facturacion-pdf', () => ({
   generarPdfConsultaFacturacion: jest.fn(),
 }));
 
+import { describirRutaGuardada } from '../casl/testing/politica-de-ruta';
 import { LotesController } from './lotes.controller';
 
 const COPROPERTY_ID = new Types.ObjectId('507f1f77bcf86cd799439011');
@@ -222,4 +223,27 @@ describe('LotesController: acciones de PDF solo para un lote consolidado (S5)', 
 
     expect(generacion.confirmar).toHaveBeenCalledTimes(1);
   });
+});
+
+describirRutaGuardada('DELETE /lotes/:id (cancelar un lote antes de emitir)', {
+  controlador: LotesController,
+  handler: 'cancelar',
+  regla: { action: 'purge', subject: 'Factura' },
+  claveQueAbre: 'facturas.depurar',
+  clavesQueNoAbren: [
+    'facturas.ver',
+    'facturas.crear',
+    'facturas.editar',
+    'facturas.anular',
+    'facturas.aprobar',
+  ],
+  clavesConvertidas: [
+    'facturas.ver',
+    'facturas.crear',
+    'facturas.editar',
+    'facturas.anular',
+    'facturas.aprobar',
+    'facturas.depurar',
+  ],
+  gestionarViejo: 'facturas.gestionar',
 });

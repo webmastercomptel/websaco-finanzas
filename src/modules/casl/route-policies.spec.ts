@@ -304,11 +304,72 @@ describe('inventario de rutas', () => {
   });
 
   /**
+   * Every route open to EITHER product (`@ModuloAlguno`). Sharing a route is a
+   * commercial decision, so a new one fails here until it is added on purpose:
+   * - portal unidades: every resident form starts from it, no financial data.
+   * - equipo / roles: a team is managed whichever product the building bought.
+   * - catalogo-permisos: the Finanzas key list those two screens draw.
+   * - residentes/correos: owners and tenants get invoices under either
+   *   product, so their portal access is managed under either.
+   */
+  it('las únicas rutas compartidas entre módulos (@ModuloAlguno) son las justificadas', () => {
+    const compartidas: string[] = [];
+    for (const file of files) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require(file) as Record<string, unknown>;
+      for (const exported of Object.values(mod)) {
+        if (typeof exported !== 'function') continue;
+        const controller = exported as unknown as Ctor;
+        if (Reflect.getMetadata(PATH_METADATA, controller) === undefined) {
+          continue;
+        }
+        for (const [name, handler] of routesOf(controller)) {
+          const modulo =
+            (Reflect.getMetadata(MODULO_KEY, handler) as unknown) ??
+            (Reflect.getMetadata(MODULO_KEY, controller) as unknown);
+          if (Array.isArray(modulo)) {
+            compartidas.push(`${controller.name}.${name}`);
+          }
+        }
+      }
+    }
+    expect(compartidas.sort()).toEqual([
+      'CatalogoPermisosController.finanzas',
+      'EquipoController.actualizar',
+      'EquipoController.crear',
+      'EquipoController.desactivar',
+      'EquipoController.listar',
+      'EquipoController.obtener',
+      'EquipoController.reenviarInvitacion',
+      'PortalController.unidades',
+      'ResidentesCorreosController.listar',
+      'ResidentesCorreosController.permitir',
+      'ResidentesCorreosController.reenviar',
+      'ResidentesCorreosController.revocar',
+      'RolesController.create',
+      'RolesController.findAll',
+      'RolesController.permisos',
+      'RolesController.remove',
+      'RolesController.update',
+    ]);
+  });
+
+  /**
    * Every unauthenticated route, each with why it must be open. A new @Public
    * route fails here until it is added on purpose.
    * - health: Cloud Run probes carry no credentials.
    * - auth/enlace/canjear: the person following an emailed link has no session
    *   yet; single purpose (token -> custom token), rate-limited, opaque 401.
+   * - publico/facturas/pdf: the person following an emailed link has no
+   *   account; it serves one PDF only (the invoice the link names), rate-limited
+   *   per IP and per link, with one opaque 404 for every kind of refusal.
+   * - auth/portal/solicitar: a resident asking for a sign-in link has no session
+   *   yet; single purpose (address in, e-mail out), rate-limited per IP and per
+   *   address, and ONE 202 at a fixed time whatever the address is (no
+   *   enumeration).
+   * - auth/portal/canjear: the explicit redeem of that link; single purpose
+   *   (token -> custom token or confirmation), rate-limited per IP and per
+   *   token hash, one opaque 401 for every refusal.
    */
   it('las únicas rutas @Public son las justificadas', () => {
     const publicas: string[] = [];
@@ -330,9 +391,52 @@ describe('inventario de rutas', () => {
     }
     expect(publicas.sort()).toEqual([
       'EnlaceAccesoController.canjear',
+      'FacturaPublicaController.obtenerPdf',
+      'FacturaPublicaController.obtenerResumen',
+      'FacturaPublicaController.pedirIngreso',
       'HealthController.check',
       'HealthController.live',
       'HealthController.ready',
+      'IngresoPortalController.canjear',
+      'IngresoPortalController.solicitar',
     ]);
+  });
+});
+
+/**
+ * The two per-assignment routes of the platform Usuarios screen. They inherit
+ * the class-level `FirebaseAuthGuard` + `PlatformAdminGuard` of
+ * `UsuariosController`, which is the whole of their protection: no CASL rule
+ * could stand for "deciding who else may operate the system".
+ */
+describe('rutas de asignaciones de /usuarios', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { UsuariosController } = require('../usuarios/usuarios.controller') as {
+    UsuariosController: Ctor;
+  };
+
+  it.each(['agregarAsignacion', 'actualizarAsignacion'])(
+    '%s es una ruta de administrador de plataforma, con la autenticación primero (S-U3.15)',
+    (nombre) => {
+      const rutas = new Map(routesOf(UsuariosController));
+      const handler = rutas.get(nombre);
+
+      expect(handler).toBeDefined();
+      expect(guardNames(UsuariosController, handler!)).toEqual([
+        'FirebaseAuthGuard',
+        'PlatformAdminGuard',
+      ]);
+      expect(routeProblem(UsuariosController, handler!)).toBeNull();
+    },
+  );
+
+  it('cuelgan de `:id/asignaciones` sin chocar con `:id`', () => {
+    const rutas = new Map(routesOf(UsuariosController));
+    expect(
+      Reflect.getMetadata(PATH_METADATA, rutas.get('agregarAsignacion')!),
+    ).toBe(':id/asignaciones');
+    expect(
+      Reflect.getMetadata(PATH_METADATA, rutas.get('actualizarAsignacion')!),
+    ).toBe(':id/asignaciones/:asignacionId');
   });
 });

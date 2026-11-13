@@ -165,6 +165,44 @@ describe('EnvioFacturasService.marcar', () => {
     expect(t.envios.docs[0].correosEnviadosIds).toHaveLength(1);
   });
 
+  it('una fila nueva nace con el registro de entregas por dirección vacío', async () => {
+    const t = montar();
+    const a = t.factura('A-101');
+
+    await t.servicio.marcar({ facturaIds: [a.toString()] }, staff());
+
+    expect(t.envios.docs[0].correosEntregados).toEqual([]);
+  });
+
+  it('volver a marcar conserva correosEntregados, notificadosIds y correosEnviadosIds', async () => {
+    const t = montar();
+    const a = t.factura('A-101');
+    await t.servicio.marcar({ facturaIds: [a.toString()] }, staff());
+    const cuenta = new Types.ObjectId();
+    const entregado = {
+      clave: 'c'.repeat(64),
+      rol: 'propietario',
+      terceroId: new Types.ObjectId(),
+      aceptadoEn: new Date('2026-11-10T10:00:00Z'),
+    };
+    Object.assign(t.envios.docs[0], {
+      estado: 'error',
+      ultimoError: 'sin_destinatarios',
+      correosEntregados: [entregado],
+      notificadosIds: [cuenta],
+      correosEnviadosIds: [cuenta],
+    });
+
+    await t.servicio.marcar({ facturaIds: [a.toString()] }, staff());
+
+    expect(t.envios.docs[0]).toMatchObject({
+      estado: 'pendiente_envio',
+      correosEntregados: [entregado],
+    });
+    expect(t.envios.docs[0].notificadosIds).toEqual([cuenta]);
+    expect(t.envios.docs[0].correosEnviadosIds).toEqual([cuenta]);
+  });
+
   it('las facturas anuladas se omiten y se cuentan', async () => {
     const t = montar();
     t.factura('A-101');

@@ -136,9 +136,12 @@ export const envValidationSchema = Joi.object({
   SENDGRID_FROM_NAME: Joi.string().empty('').default('WebSaco'),
 
   // Public address of the web app, used to build the links in emails (sign-in
-  // links, "open this task"). Optional: without it those emails go out with no
-  // link, never with a wrong one. https is mandatory in production because the
-  // link carries a credential; scheme + host only, no path.
+  // links, "open this task", the invoice PDF link). Optional for the other
+  // emails: without it those go out with no link, never with a wrong one. The
+  // invoice send is stricter: `procesar-pendientes` answers 409 without a usable
+  // value and `/health/ready` (frontend-url) fails when mail is configured and
+  // it is missing or malformed. https is mandatory in production because the
+  // link carries a credential; scheme + host only, no path, query or fragment.
   FRONTEND_URL: Joi.string()
     .when('NODE_ENV', {
       is: 'production',

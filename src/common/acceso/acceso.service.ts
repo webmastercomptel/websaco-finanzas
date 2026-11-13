@@ -26,22 +26,44 @@ import {
   Rol,
   RolDocument,
 } from '../../database/schemas/administracion/rol.schema';
+import {
+  Account,
+  AccountDocument,
+} from '../../database/schemas/cuentas/account.schema';
 import { modulosEfectivos, type ModuloProducto } from '../licencia/modulos';
+import { claveCorreo } from '../utils/email.utils';
+import { correoProbado } from './residencia.reglas';
+import { ResidenciaService } from './residencia.service';
 import {
   moduloDePermiso,
-  sinPermisosVetados,
   type PerfilAsignacion,
 } from '../../modules/casl/permisos-catalogo';
 
 /**
- * Permissions an assignment really grants: the hard ceiling is applied on
- * read too, so a row written before the ceiling existed (or edited straight in
- * the database) can never hand Finanzas to operational staff.
+ * Only KNOWN keys (`moduloDePermiso !== null`, Finanzas and Administración)
+ * are returned, whatever their `perfil`: the profile never cuts permissions.
+ * An unknown stored key grants nothing (`rulesFromPermissionKeys` skips it), so
+ * listing it would only show the frontend a dead key: the clearest case is a
+ * Finanzas `x.gestionar` saved before that verb was retired.
+ *
+ * A key of a module the coproperty did not contract stays in the list: it is
+ * inert (every route carries its `@Modulo`), and contracting the module later
+ * activates it with no data change.
  */
-const permisosEfectivosDe = (a: {
-  perfil?: PerfilAsignacion;
-  permisos: string[];
-}): string[] => sinPermisosVetados(a.perfil ?? 'administrativo', a.permisos);
+const clavesConocidas = (claves: readonly string[]): string[] =>
+  claves.filter((clave) => moduloDePermiso(clave) !== null);
+
+/**
+ * The slice of the Account the resident derivation reads: its address and the
+ * proof fields. Callers that already hold the Account (the auth guard,
+ * `/auth/me`) pass it so a request costs no extra read; `estado` is optional
+ * because those callers have already refused an inactive account.
+ */
+export interface CuentaParaAcceso {
+  email: string;
+  estado?: string;
+  correoProbadoClave?: string | null;
+}
 
 /** One coproperty a caller may operate, with the permissions that apply there. */
 export interface AccesoCopropiedad {
@@ -87,16 +109,19 @@ export class AccesoService {
     private readonly roles: Model<RolDocument>,
     @InjectModel(Inmueble.name)
     private readonly inmuebles: Model<InmuebleDocument>,
+    @InjectModel(Account.name)
+    private readonly cuentas: Model<AccountDocument>,
+    private readonly residencia: ResidenciaService,
   ) {}
 
   /**
-   * Administración keys and the display name contributed by the roles of each
-   * direct grant, keyed by coproperty id. Three filters keep a role from ever widening access beyond
-   * its purpose: only roles the grant names, only roles of the grant's own
-   * coproperty (the query returns by id, so this is checked here, not trusted),
-   * and only Administración keys — a Finanzas or unknown key inside a role is
-   * dropped, whatever got it there. One query for all grants, none when no grant
-   * names a role.
+   * Known keys (Finanzas and Administración) and the display name contributed
+   * by the roles of each direct grant, keyed by coproperty id. Three filters
+   * keep a role from ever widening access beyond its purpose: only roles the
+   * grant names, only roles of the grant's own coproperty (the query returns by
+   * id, so this is checked here, not trusted), and only known keys — an unknown
+   * key inside a role is dropped, whatever got it there. One query for all
+   * grants, none when no grant names a role.
    */
   private async permisosDeRoles(
     directas: Array<{
@@ -129,7 +154,7 @@ export class AccesoService {
         // The label shows one role: the first valid one the grant names.
         nombre ??= rol.nombre?.trim() || null;
         for (const clave of rol.permisos ?? []) {
-          if (moduloDePermiso(clave) === 'administracion') claves.add(clave);
+          if (moduloDePermiso(clave) !== null) claves.add(clave);
         }
       }
       aportes.set(propia, { claves: [...claves], nombre });
@@ -143,8 +168,11 @@ export class AccesoService {
    * unit of that same coproperty. Being linked is not enough: after a sale or
    * the end of a lease the Tercero stays linked, and the former holder must lose
    * the portal with it. One extra query, only when the account is linked.
+   *
+   * This is the LEGACY route only (`Tercero.accountId`); `copropiedadesComoResidente`
+   * unions it with the proven-address route and subtracts the revoked ones.
    */
-  private async copropiedadesComoResidente(
+  private async copropiedadesPorVinculo(
     accountId: string,
   ): Promise<Set<string>> {
     const vinculados = await this.terceros
@@ -181,6 +209,58 @@ export class AccesoService {
     return resultado;
   }
 
+  /** The Account as the access derivation needs it (see `CuentaParaAcceso`). */
+  private async releerCuenta(
+    accountId: string,
+  ): Promise<CuentaParaAcceso | null> {
+    return this.cuentas
+      .findById(accountId)
+      .select('email estado correoProbadoClave')
+      .lean()
+      .exec();
+  }
+
+  /**
+   * Ids of the coproperties where this account is a RESIDENT right now:
+   * (legacy link UNION proven own address) MINUS the ones with an active
+   * revocation for its address. Derived on every request from the live records;
+   * nothing is cached, so editing a record, a sale or a revocation takes effect
+   * on the next call and no cleanup ever runs.
+   *
+   * - Proven means `correoProbadoClave === claveCorreo(Account.email)` on an
+   *   ACTIVE account: no proof, or a proof for another address, grants nothing.
+   *   The caller passes the Account it already holds (the guard, `/auth/me`);
+   *   otherwise it is re-read by `_id`, one query.
+   * - The revocation is keyed on `claveCorreo(Account.email)` and cuts BOTH
+   *   routes, so the legacy `Tercero.accountId` link is never cleared and a
+   *   re-allow restores it. It runs only when some coproperty is reached.
+   * - An account with no link and no proof costs no residency query at all.
+   */
+  private async copropiedadesComoResidente(
+    accountId: string,
+    cuenta?: CuentaParaAcceso,
+  ): Promise<Set<string>> {
+    const heredadas = await this.copropiedadesPorVinculo(accountId);
+    const propia = cuenta ?? (await this.releerCuenta(accountId));
+    if (!propia) return heredadas;
+
+    const clave = claveCorreo(propia.email);
+
+    const alcanzadas = new Set(heredadas);
+    if (correoProbado(propia)) {
+      const porCorreo = await this.residencia.copropiedadesPorCorreo(
+        propia.email,
+      );
+      for (const id of porCorreo.keys()) alcanzadas.add(id);
+    }
+    if (alcanzadas.size === 0) return alcanzadas;
+
+    const revocadas = await this.residencia.revocacionesActivas(clave, [
+      ...alcanzadas,
+    ]);
+    return new Set([...alcanzadas].filter((id) => !revocadas.has(id)));
+  }
+
   /**
    * Every coproperty this account may operate, with effective permissions.
    *
@@ -196,6 +276,7 @@ export class AccesoService {
   async copropiedadesDe(
     accountId: string,
     isPlatformAdmin = false,
+    cuenta?: CuentaParaAcceso,
   ): Promise<AccesoCopropiedad[]> {
     if (isPlatformAdmin) return this.todasLasCopropiedades();
 
@@ -207,7 +288,7 @@ export class AccesoService {
     // Coproperties where this account is a unit holder (owner or tenant) are
     // reachable too, with NO permissions: residents never pass CASL, they use
     // the portal routes.
-    const residente = await this.copropiedadesComoResidente(accountId);
+    const residente = await this.copropiedadesComoResidente(accountId, cuenta);
     if (asignaciones.length === 0 && residente.size === 0) return [];
 
     // Permissions keyed by coproperty, accumulated across both routes.
@@ -235,14 +316,9 @@ export class AccesoService {
       if (!a.copropiedadId) continue;
       const id = a.copropiedadId.toString();
       const delRol = deRoles.get(id);
-      // The ceiling applies to the union, so a role can never lift it either.
-      acumular(
-        id,
-        permisosEfectivosDe({
-          perfil: a.perfil,
-          permisos: [...a.permisos, ...(delRol?.claves ?? [])],
-        }),
-      );
+      // Direct keys plus those of the roles the grant names (already known
+      // keys): the union is what the member holds here, whatever the profile.
+      acumular(id, [...clavesConocidas(a.permisos), ...(delRol?.claves ?? [])]);
       anotarPerfil(id, a.perfil ?? 'administrativo');
       if (delRol?.nombre) rolNombrePorCopropiedad.set(id, delRol.nombre);
     }
@@ -288,7 +364,7 @@ export class AccesoService {
         for (const a of deEntidadesActivas) {
           permisosPorEntidad.set(
             a.entidadId!.toString(),
-            permisosEfectivosDe(a),
+            clavesConocidas(a.permisos),
           );
           perfilPorEntidad.set(
             a.entidadId!.toString(),
@@ -342,10 +418,15 @@ export class AccesoService {
     accountId: string,
     copropiedadId: string,
     isPlatformAdmin = false,
+    cuenta?: CuentaParaAcceso,
   ): Promise<AccesoCopropiedad | null> {
     if (!Types.ObjectId.isValid(copropiedadId)) return null;
 
-    const permitidas = await this.copropiedadesDe(accountId, isPlatformAdmin);
+    const permitidas = await this.copropiedadesDe(
+      accountId,
+      isPlatformAdmin,
+      cuenta,
+    );
     return permitidas.find((c) => c.copropiedadId === copropiedadId) ?? null;
   }
 

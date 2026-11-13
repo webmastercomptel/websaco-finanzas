@@ -169,6 +169,10 @@ import {
   EnvioFactura,
   EnvioFacturaSchema,
 } from './schemas/facturacion/envio-factura.schema';
+import {
+  EnlaceFactura,
+  EnlaceFacturaSchema,
+} from './schemas/facturacion/enlace-factura.schema';
 
 import {
   ConsecutivoAdministracion,
@@ -179,6 +183,16 @@ import {
   EnlaceAcceso,
   EnlaceAccesoSchema,
 } from './schemas/cuentas/enlace-acceso.schema';
+
+import {
+  EnlaceIngreso,
+  EnlaceIngresoSchema,
+} from './schemas/cuentas/enlace-ingreso.schema';
+
+import {
+  RevocacionPortal,
+  RevocacionPortalSchema,
+} from './schemas/cuentas/revocacion-portal.schema';
 
 import { Rol, RolSchema } from './schemas/administracion/rol.schema';
 
@@ -254,6 +268,8 @@ const models = [
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },
+  { name: EnlaceIngreso.name, schema: EnlaceIngresoSchema },
+  { name: RevocacionPortal.name, schema: RevocacionPortalSchema },
   {
     name: ConsecutivoAdministracion.name,
     schema: ConsecutivoAdministracionSchema,
@@ -321,6 +337,7 @@ const models = [
   { name: PlantillaDocumento.name, schema: PlantillaDocumentoSchema },
   { name: PublicacionLote.name, schema: PublicacionLoteSchema },
   { name: EnvioFactura.name, schema: EnvioFacturaSchema },
+  { name: EnlaceFactura.name, schema: EnlaceFacturaSchema },
 ];
 
 /**

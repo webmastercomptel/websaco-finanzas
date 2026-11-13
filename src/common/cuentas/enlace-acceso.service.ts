@@ -17,9 +17,9 @@ import {
   EnlaceAcceso,
   type EnlaceAccesoDocument,
 } from '../../database/schemas/cuentas/enlace-acceso.schema';
-import { moduloDePermiso } from '../../modules/casl/permisos-catalogo';
 import { AccesoService } from '../acceso/acceso.service';
 import { FIREBASE_AUTH } from '../firebase/firebase.constants';
+import { cuentaAdmiteSesionPorEnlace } from './politica-enlace';
 
 /** How long a link works: long enough to click an old email, short enough to bound a forwarded one. */
 const VIGENCIA_MS = 7 * 24 * 60 * 60 * 1000;
@@ -42,7 +42,9 @@ const hashDe = (token: string): string =>
  *   building: `X-CoProperty-Id` can then name any coproperty the account
  *   reaches, so the check must cover all of them. A forwarded email must not be
  *   a way into the financial side; those people sign in normally. Residents and
- *   operational staff are the audience.
+ *   team members with no Finanzas key (Administración keys only) are the
+ *   audience: since a `personal` member can now hold Finanzas keys, the first
+ *   Finanzas key granted anywhere ends the link, built or already emailed.
  * - Checked twice: when the link is built, and again when it is redeemed, so a
  *   permission granted after the email went out removes the link's power.
  * - Only the SHA-256 of the token is stored, and the landing path must be a
@@ -69,22 +71,41 @@ export class EnlaceAccesoService {
     @Inject(FIREBASE_AUTH) private readonly auth: Auth,
   ) {}
 
-  /** The account may use a link into this coproperty (see the class docblock). */
+  /**
+   * The account may use a link into this coproperty: the shared session policy
+   * (`cuentaAdmiteSesionPorEnlace`, see the class docblock) plus the clause
+   * that is this link's own: the account must already reach THIS coproperty.
+   */
   private async cuentaPuedeUsarEnlace(
     cuenta: AccountDocument | null,
     copropiedadId: string,
   ): Promise<boolean> {
-    if (!cuenta || cuenta.estado !== 'active') return false;
-    if (cuenta.esAdministradorPlataforma) return false;
+    if (!cuenta) return false;
+    // Inactive and platform-admin accounts need no further query.
+    if (
+      !cuentaAdmiteSesionPorEnlace({
+        cuenta,
+        accesos: [],
+        tieneNoPersonal: false,
+      })
+    ) {
+      return false;
+    }
 
     // Every coproperty the account reaches, not only the link's: the session
     // the link opens is not pinned to one building.
-    const accesos = await this.acceso.copropiedadesDe(cuenta._id.toString());
-    if (!accesos.some((a) => a.copropiedadId === copropiedadId)) return false;
-    const tieneFinanzas = accesos.some((a) =>
-      a.permissions.some((p) => moduloDePermiso(p) === 'finanzas'),
+    const accesos = await this.acceso.copropiedadesDe(
+      cuenta._id.toString(),
+      false,
+      cuenta,
     );
-    if (tieneFinanzas) return false;
+    if (!accesos.some((a) => a.copropiedadId === copropiedadId)) return false;
+    // Any Finanzas key ends it, before the second query.
+    if (
+      !cuentaAdmiteSesionPorEnlace({ cuenta, accesos, tieneNoPersonal: false })
+    ) {
+      return false;
+    }
 
     // An administrativo (or company-wide) grant can receive Finanzas keys at
     // any moment; such accounts sign in with their password, never a link.
@@ -95,7 +116,11 @@ export class EnlaceAccesoService {
         perfil: { $ne: 'personal' },
       })
       .exec();
-    return !administrativo;
+    return cuentaAdmiteSesionPorEnlace({
+      cuenta,
+      accesos,
+      tieneNoPersonal: !!administrativo,
+    });
   }
 
   /** Builds `<frontend>/auth/enlace?token=…`, or null when a link must not be issued. */

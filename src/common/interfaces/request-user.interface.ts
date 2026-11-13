@@ -20,6 +20,12 @@ export interface IRequestUser {
   accountId?: string;
   /** Display name, used to stamp authorship on financial documents. */
   nombre?: string;
+  /**
+   * The Account's address proof (`Account.correoProbadoClave`), carried so the
+   * per-request resident derivation (`AccesoService`) needs no re-read of the
+   * Account. Never exposed in an API response.
+   */
+  correoProbadoClave?: string | null;
   /** Platform root: bypasses ability checks entirely. */
   isPlatformAdmin?: boolean;
   /** The active coproperty for this request (from X-CoProperty-Id). */

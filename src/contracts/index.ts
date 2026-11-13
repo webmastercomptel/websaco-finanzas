@@ -1999,8 +1999,8 @@ export interface CopropiedadAccesible extends CopropiedadResumen {
   /** The caller holds a unit here as owner or tenant (portal access). */
   esResidente: boolean;
   /**
-   * The caller's EFFECTIVE permission keys here (after the profile ceiling and
-   * the role merge — exactly what the guards evaluate). Empty for a
+   * The caller's EFFECTIVE permission keys here (direct keys plus those of the
+   * roles it names, unknown keys dropped — exactly what the guards evaluate). Empty for a
    * resident-only account and for a platform administrator (that one is told
    * apart by `AuthMe.esAdministradorPlataforma`). A courtesy for the client to
    * filter its menu: the server revalidates every request, so exposing it
@@ -2231,26 +2231,31 @@ export interface ProgresoImportacion {
  */
 
 /**
- * One grant, describing where a user may work and what they may do there.
- *
- * A simplification of the underlying model on purpose: `Asignacion` supports
- * several grants per account (a company plus one extra building outside it),
- * but this screen manages exactly one — the same shape the legacy system's
- * user form had (one row, one role, one coproperty or entity). Nothing in the
- * data model stops a second grant existing; there is just no screen for it
- * yet.
+ * One row of an account (an `Asignacion`) as the platform Usuarios screen lists
+ * it: where the person may work and what they may do there. A person holds a
+ * LIST of these that add up (a company plus extra buildings, several
+ * buildings...), active AND inactive, of every profile; none replaces another.
+ * The target (`alcance` + id) never changes for a row; `permisos` is the stored
+ * list, unfiltered (it may hold keys no catalog offers any more).
  */
-export interface AsignacionResumen {
+export interface AsignacionUsuario {
+  /** The row's own id: what the per-row endpoints address. */
+  id: string;
   alcance: 'copropiedad' | 'entidad';
   copropiedadId: string | null;
   copropiedadNombre: string | null;
   entidadId: string | null;
   entidadNombre: string | null;
-  /** Profile of the assignment; a legacy row with none reads as
-   *  `administrativo`. The edit form needs it to know which key blocks the
-   *  person may hold (`personal` never holds Finanzas keys). */
+  /** Who manages the row: `administrativo` from the platform Usuarios screen,
+   *  `personal` from Equipo (read-only there). It never limits the keys: a
+   *  `personal` row may hold Finanzas keys. A legacy row with no profile reads
+   *  as `administrativo`. */
   perfil: 'administrativo' | 'personal';
   permisos: string[];
+  estado: 'activo' | 'inactivo';
+  /** `roleIds.length` on a `copropiedad` row; always 0 on an `entidad` row,
+   *  where roles are ignored on read. */
+  cantidadRoles: number;
 }
 
 /**
@@ -2258,10 +2263,13 @@ export interface AsignacionResumen {
  * tenants are `Tercero` records and never reach this screen; see Tercero and
  * Account for why.
  *
- * `asignacion` is null for a platform administrator (they need none — see
- * `rulesFromPermissionKeys`) and for a person nobody has assigned anywhere
- * yet, which is a real, unremarkable state: "authenticated but powerless" is
- * the correct default the whole authorization layer is built around.
+ * `asignaciones` is EVERY row of the account, oldest first (ties by id), and
+ * the only representation of them: a person holds a list of assignments that
+ * add up, and no row is "the" primary or replaces another. It is `[]` for a
+ * platform administrator (they need none — see `rulesFromPermissionKeys`) and
+ * for a person nobody has assigned anywhere yet, which is a real, unremarkable
+ * state: "authenticated but powerless" is the correct default the whole
+ * authorization layer is built around.
  */
 export interface Usuario {
   id: string;
@@ -2269,7 +2277,7 @@ export interface Usuario {
   email: string;
   esAdministradorPlataforma: boolean;
   estado: 'activo' | 'inactivo';
-  asignacion: AsignacionResumen | null;
+  asignaciones: AsignacionUsuario[];
 }
 
 /**
@@ -2289,10 +2297,11 @@ export interface AuthMe {
   esAdministradorPlataforma: boolean;
   copropiedades: CopropiedadAccesible[];
   /**
-   * Scope of the caller's primary assignment — enough for the header to
-   * label who is signed in, without the names/permissions `AsignacionResumen`
-   * carries. Null for a platform administrator (that flag already says
-   * enough) and for a person with no assignment yet.
+   * Scope of one active assignment of the caller (the first the database
+   * returns, which is arbitrary once there are several) — enough for the
+   * header to label who is signed in, without the names or permissions of
+   * `AsignacionUsuario`. Null for a platform administrator (that flag already
+   * says enough) and for a person with no active assignment.
    */
   alcance: 'copropiedad' | 'entidad' | null;
 }
@@ -2307,6 +2316,18 @@ export interface EnlaceCanjeado {
   copropiedadId: string;
   destino: string;
 }
+
+/**
+ * Response of `POST /auth/portal/canjear` (public), the explicit redeem of a
+ * resident's sign-in link. `sesion`: sign in with `signInWithCustomToken` and
+ * go to the portal (the landing path is the page's own constant, never read
+ * from here). `confirmado`: the address is proven but this account signs in
+ * with its password (staff with Finanzas keys, platform admins); NO token of any
+ * kind travels in that answer. Nothing else about the account, the party, the
+ * units or the address is ever returned.
+ */
+export type CanjeIngresoPortal =
+  { resultado: 'sesion'; customToken: string } | { resultado: 'confirmado' };
 
 /* ── Consulta de Movimiento Contable (§12) ────────────────────── */
 
@@ -2613,7 +2634,9 @@ export interface RegistroAuditoriaContract {
     | 'dar-de-baja'
     | 'retirar'
     | 'marcar-envio'
-    | 'enviar';
+    | 'enviar'
+    | 'eliminar'
+    | 'restablecer';
   entidadTipo:
     | 'entidad-administradora'
     | 'copropiedad'
@@ -2622,10 +2645,18 @@ export interface RegistroAuditoriaContract {
     | 'lote-contabilidad'
     | 'inmueble'
     | 'lote-comptable'
-    | 'envio-factura';
+    | 'envio-factura'
+    | 'rol'
+    | 'acceso-residente';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
+  /**
+   * Permission keys the write added and removed (Equipo and Roles). `null` on
+   * entries that carry none: those written before it existed and every action
+   * that touches no keys.
+   */
+  detalle?: { agregadas: string[]; quitadas: string[] } | null;
 }
 
 /** Dashboard KPIs for the super-admin panel. */
@@ -2894,7 +2925,9 @@ export interface Permiso {
 /**
  * The Finanzas `modulo.accion` keys that exist for real (some route requires
  * what they grant), for the permission matrix of `/usuarios`: any other
- * module x verb pair is drawn as a dash. `GET usuarios/permisos-finanzas`.
+ * module x verb pair is drawn as a dash. Served by `GET usuarios/permisos-finanzas`
+ * (platform admin) and by `GET catalogo-permisos/finanzas` (the team screens of a
+ * building, under either licence): the same list.
  */
 export interface PermisosFinanzas {
   claves: string[];
@@ -3597,7 +3630,7 @@ export interface MiembroEquipo {
   perfil: 'administrativo' | 'personal';
   estado: 'activo' | 'inactivo';
   roles: RolDeMiembro[];
-  /** Administración keys granted directly (the roles' keys are not repeated here). */
+  /** Keys granted directly, of any module (the roles' keys are not repeated here). */
   permisos: string[];
   esAdministradorPlataforma: boolean;
   /**
@@ -3625,46 +3658,56 @@ export interface UnidadDeResidente {
 }
 
 /**
- * Where a resident stands. There is deliberately no "invitado": nothing records
- * whether an invitation was ever opened, so the state would be a guess.
+ * Where one ADDRESS of a resident stands in the portal (the new Residentes
+ * list, one row per party and address). Precedence: `revocado` (an active
+ * revocation of the address in this coproperty) > `ingreso` (the Account of
+ * that address proved it) > `heredado` (a legacy `Tercero.accountId` link whose
+ * account has that address) > `sin-ingreso`.
  */
-export type EstadoAccesoResidente =
-  'sinCuenta' | 'conCuenta' | 'cuentaInactiva';
+export type EstadoResidenteCorreo =
+  'sin-ingreso' | 'ingreso' | 'revocado' | 'heredado';
 
-/** One owner or tenant of the coproperty and whether they can sign in. */
-export interface ResidenteAcceso {
+/**
+ * Why a row asks staff to fix the record. `correo-con-espacios`: the stored
+ * value has padding and matches nothing until its party is saved again.
+ * `correo-compartido`: the address is on more party records than a person
+ * reasonably has, so it derives no residency (a shared inbox).
+ */
+export type MotivoCorreccionResidente =
+  'correo-con-espacios' | 'correo-compartido';
+
+/**
+ * One address of one owner or tenant of the active coproperty
+ * (`GET /residentes/correos`). The address is shown to staff only; `clave` is
+ * its identity in every action. The Account id never leaves.
+ */
+export interface ResidenteCorreo {
   terceroId: string;
   nombre: string;
-  /** The address an invitation would go to (first valid one of the party); null when none. */
-  email: string | null;
-  estadoAcceso: EstadoAccesoResidente;
+  correo: string;
+  /** `claveCorreo(correo)`: what the resend, revoke and re-allow name. */
+  clave: string;
   unidades: UnidadDeResidente[];
-  /** True when access can be created in bulk: no account yet and a usable address. */
-  aprovisionable: boolean;
+  estado: EstadoResidenteCorreo;
+  /** Last portal entry (ISO), when the Account of that address proved it; else null. */
+  ultimoIngresoEn: string | null;
+  requiereCorreccion: boolean;
+  motivoCorreccion: MotivoCorreccionResidente | null;
 }
 
-/** Response of `POST /residentes/:terceroId/acceso`. */
-export interface AccesoResidenteCreado extends ResultadoInvitacion {
+/**
+ * Response of `POST /residentes/correos/reenviar`. `enviado: false` carries the
+ * reason; any other refusal (revoked, not eligible) is a 409 with its sentence.
+ */
+export interface ResultadoReenvioEnlace {
+  enviado: boolean;
+  motivo?: 'sin-correo-configurado' | 'limite';
+}
+
+/** Response of `POST /residentes/correos/revocar` and `/permitir`. */
+export interface ResultadoAccionResidenteCorreo {
   terceroId: string;
-  /** True when an existing account was linked (explicit `vincularExistente`) instead of created. */
-  cuentaExistente: boolean;
-}
-
-/** Response of `POST /residentes/aprovisionar`: one page of a resumable run. */
-export interface AprovisionamientoResidentes {
-  /** Parties examined in this call (creados + omitidos + errores). */
-  procesados: number;
-  creados: number;
-  omitidos: Array<{ terceroId: string; motivo: string }>;
-  errores: Array<{ terceroId: string; mensaje: string }>;
-  /** Parties still to examine after this page; the screen repeats until it is 0. */
-  pendientes: number;
-  /** Pass it as `desde` on the next call; null when nothing is left. */
-  siguienteDesde: string | null;
-  /** Invitation emails accepted by the provider in this call. */
-  invitacionesEnviadas: number;
-  /** False when mail is not configured: identities were created but nobody was told. */
-  correoConfigurado: boolean;
+  clave: string;
 }
 
 /* ── Envío de facturas a propietarios y arrendatarios ─────────────── */
@@ -3697,10 +3740,16 @@ export interface EnvioFactura {
   liberadaEn: IsoDate | null;
   /** When every recipient had been reached; null until then. */
   enviadoEn: IsoDate | null;
-  /** Recipients of the last attempt, and how many were reached by each channel. */
+  /** E-mail ADDRESSES of the last attempt; `notificados` counts linked accounts notified in-app. */
   destinatarios: number;
   notificados: number;
+  /** Legacy meaning kept for old rows: accounts e-mailed by the previous per-account flow. */
   correosEnviados: number;
+  /**
+   * Distinct addresses the provider accepted on this row. Absent for a row only
+   * the previous flow wrote. "Accepted" is not "delivered": there is no bounce handling.
+   */
+  correosAceptados?: number;
   intentos: number;
   ultimoError: MotivoErrorEnvioFactura | null;
 }
@@ -3749,9 +3798,9 @@ export interface ResultadoProcesoEnvio {
   reintentables: number;
   /** Rows that ended in `error` (no recipients, voided, out of retries). */
   conError: number;
-  /** Individual people reached by this call. */
+  /** Addresses the provider accepted in THIS call. */
   correosEnviados: number;
-  /** Units that had NOBODY reachable this call (no account or no active party). */
+  /** Units with NO e-mail address on file for their owner or tenant this call. */
   unidadesSinDestinatario: string[];
   /** Queued rows ready to be processed now. */
   pendientes: number;

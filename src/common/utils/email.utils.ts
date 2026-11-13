@@ -1,4 +1,5 @@
 // src/common/utils/email.utils.ts
+import { createHash } from 'node:crypto';
 
 // Same shape class-validator's own `IsEmail` accepts by default — kept as a
 // plain regex here because the bulk import validates outside the DTO
@@ -52,4 +53,71 @@ export function parseEmails(valor: string | undefined): string[] {
  */
 export function formatEmails(emails: readonly string[] | undefined): string {
   return (emails ?? []).join(', ');
+}
+
+/**
+ * How many addresses one party (`Tercero`) may carry. The DTO's
+ * `@ArrayMaxSize` and the import share this constant; the frontend mirrors it.
+ * It is enforced when addresses are WRITTEN: legacy lists above it are read
+ * whole by the invoice recipients resolver.
+ */
+export const MAX_CORREOS_POR_TERCERO = 5;
+
+/** Thrown by `normalizarListaEmails` when a cell holds too many DISTINCT
+ *  addresses, so a caller can tell it from a malformed one and name the party. */
+export class DemasiadosCorreosError extends Error {
+  constructor() {
+    super(`Máximo ${MAX_CORREOS_POR_TERCERO} correos`);
+    this.name = 'DemasiadosCorreosError';
+  }
+}
+
+/** The one normal form of an address: trimmed and lowercased. */
+export function normalizarEmail(valor: string): string {
+  return valor.trim().toLowerCase();
+}
+
+/**
+ * The only identity of an address in stored records: SHA-256 hex of the
+ * normalized address under a versioned prefix. It keeps addresses out of logs
+ * and delivery records; it is pseudonymization, not anonymity (an unsalted
+ * hash of an e-mail can be reversed with a dictionary).
+ */
+export function claveCorreo(email: string): string {
+  return createHash('sha256')
+    .update(`correo:v1:${normalizarEmail(email)}`)
+    .digest('hex');
+}
+
+/**
+ * `parseEmails` plus the rules every write path needs: case-insensitive
+ * deduplication (first spelling kept, order kept) and a cap of
+ * `MAX_CORREOS_POR_TERCERO` DISTINCT addresses, counted after deduplication.
+ * Throws `DemasiadosCorreosError` over the cap and the usual «"x" no es un
+ * correo válido» error for a malformed entry.
+ */
+export function normalizarListaEmails(valor: string | undefined): string[] {
+  const vistos = new Set<string>();
+  const unicos: string[] = [];
+  for (const correo of parseEmails(valor)) {
+    const normal = normalizarEmail(correo);
+    if (vistos.has(normal)) continue;
+    vistos.add(normal);
+    unicos.push(correo);
+  }
+  if (unicos.length > MAX_CORREOS_POR_TERCERO) {
+    throw new DemasiadosCorreosError();
+  }
+  return unicos;
+}
+
+/**
+ * Masks an address for logs: first character of the local part, `***`, then
+ * the domain (`juan@x.co` -> `j***@x.co`). A value without `@` (or with an
+ * empty local part) becomes `***`, never raw.
+ */
+export function enmascararEmail(email: string): string {
+  const arroba = email.lastIndexOf('@');
+  if (arroba < 1) return '***';
+  return `${email.charAt(0)}***${email.slice(arroba)}`;
 }

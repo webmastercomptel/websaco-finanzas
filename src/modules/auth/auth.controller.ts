@@ -34,6 +34,9 @@ export class AuthController {
       ? await this.acceso.copropiedadesDe(
           user.accountId,
           esAdministradorPlataforma,
+          // The Account's proof travels on the request user, so `/auth/me`
+          // derives residency without re-reading the Account.
+          { email: user.email, correoProbadoClave: user.correoProbadoClave },
         )
       : [];
     // A platform administrator's own flag already says enough; no need to
@@ -54,7 +57,7 @@ export class AuthController {
         nombre: c.nombre,
         modulos: c.modulos,
         esResidente: c.esResidente,
-        // Already the effective set (ceiling applied) — never recompute here,
+        // Already the effective set (role merge applied) — never recompute here,
         // or the menu could disagree with the guard.
         permisos: c.permissions,
         perfil: c.perfil ?? null,

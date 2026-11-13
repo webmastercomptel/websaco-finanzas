@@ -12,20 +12,29 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
-import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
+import { CheckAbility, ModuloAlguno } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import type { Permiso, Rol } from '../../contracts';
 import { ActualizarRolDto, CrearRolDto } from './dto/guardar-rol.dto';
 import { RolesService } from './roles.service';
 
 /**
- * Roles of the active coproperty: named bundles of Administración permissions.
- * Each verb asks for its own action: `roles.ver` (read) opens the two reads
- * and nothing else; `roles.gestionar` (manage) covers all of them.
+ * Roles of the active coproperty: named bundles of permissions of any offered
+ * module (Finanzas and Administración keys alike). Each verb asks for its own
+ * action: `roles.ver` (read) opens the two reads and nothing else;
+ * `roles.gestionar` (manage) covers all of them. Which keys a caller may put in
+ * a role, or take out of one, is the delegation cap in the service ("you give
+ * only what you hold"), not this controller's business; every write receives
+ * the caller so it can be judged and audited. `GET /roles/permisos` still lists
+ * the Administración catalog only; the Finanzas list is served by
+ * `GET /catalogo-permisos/finanzas`.
+ *
+ * Licence: either module opens the door (`@ModuloAlguno`), as for `/equipo`; the
+ * `roles.*` keys are still required.
  */
 @Controller('roles')
 @UseGuards(FirebaseAuthGuard, PoliciesGuard)
-@Modulo('administracion')
+@ModuloAlguno('finanzas', 'administracion')
 export class RolesController {
   constructor(private readonly roles: RolesService) {}
 
@@ -63,7 +72,10 @@ export class RolesController {
 
   @Delete(':id')
   @CheckAbility({ action: 'remove', subject: 'Rol' })
-  remove(@Param('id') id: string): Promise<{ id: string }> {
-    return this.roles.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<{ id: string }> {
+    return this.roles.remove(id, user);
   }
 }

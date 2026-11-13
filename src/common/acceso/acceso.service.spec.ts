@@ -1,5 +1,9 @@
 import { Types } from 'mongoose';
 import { AccesoService } from './acceso.service';
+import { ResidenciaService } from './residencia.service';
+import { claveCorreo } from '../utils/email.utils';
+import { REGLA_BUZON_COMPARTIDO_ACTIVA } from './residencia.reglas';
+const itConRegla = REGLA_BUZON_COMPARTIDO_ACTIVA ? it : it.skip;
 
 const oid = () => new Types.ObjectId();
 
@@ -30,6 +34,42 @@ const consulta = (filas: Fila[]) => ({
   }),
 });
 
+/** The Account every default fixture signs in with: no proof, active. */
+const CORREO = 'persona@example.com';
+const cuentaSinPruebas = {
+  email: CORREO,
+  estado: 'active',
+  correoProbadoClave: null,
+};
+
+/** Model stub for `findById(id).select().lean().exec()`. */
+const cuentasCon = (fila: Fila | null) => ({
+  findById: jest.fn().mockReturnValue({
+    select: jest.fn().mockReturnValue({
+      lean: jest.fn().mockReturnValue({ exec: () => Promise.resolve(fila) }),
+    }),
+  }),
+});
+
+/**
+ * Stand-in for `ResidenciaService`: `porCorreo` is what the address reaches
+ * (coproperties) and `revocadas` the coproperties with an active revocation
+ * for the address, whatever the address.
+ */
+const residenciaCon = (
+  porCorreo: Types.ObjectId[] = [],
+  revocadas: Types.ObjectId[] = [],
+) => ({
+  copropiedadesPorCorreo: jest.fn((_correo: string) =>
+    Promise.resolve(new Map(porCorreo.map((c) => [c.toString(), ['p']]))),
+  ),
+  revocacionesActivas: jest.fn((_clave: string, ids: readonly string[]) =>
+    Promise.resolve(
+      new Set(ids.filter((id) => revocadas.some((r) => r.toString() === id))),
+    ),
+  ),
+});
+
 const servicio = (opts: {
   asignaciones?: Fila[];
   copropiedades?: Fila[];
@@ -41,6 +81,9 @@ const servicio = (opts: {
    * owner) in its own coproperty, so a "resident" fixture means a current one.
    */
   inmuebles?: Fila[];
+  /** The Account the service re-reads when the caller passes none. */
+  cuenta?: Fila | null;
+  residencia?: ReturnType<typeof residenciaCon>;
 }) => {
   const terceros = (opts.terceros ?? []).map((t): Fila => ({
     _id: oid(),
@@ -62,6 +105,10 @@ const servicio = (opts: {
       ? consulta(opts.roles ?? [])
       : opts.roles) as never,
     consulta(inmuebles) as never,
+    cuentasCon(
+      opts.cuenta === undefined ? cuentaSinPruebas : opts.cuenta,
+    ) as never,
+    (opts.residencia ?? residenciaCon()) as never,
   );
 };
 
@@ -105,6 +152,63 @@ describe('AccesoService.copropiedadesDe', () => {
       codigo: 'COP-A',
       permissions: ['facturas.ver'],
     });
+  });
+
+  it('una clave directa desconocida no se devuelve: un `gestionar` de Finanzas guardado no llega a /auth/me', async () => {
+    // Finanzas `x.gestionar` stopped being a key: it grants nothing, so the
+    // frontend must never be shown a dead key. Known keys next to it survive.
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          permisos: ['facturas.gestionar', 'facturas.ver', 'inventada.ver'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['facturas.ver']);
+  });
+
+  it('lo mismo vale para una asignación por entidad', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          permisos: ['recibos.gestionar', 'recibos.aprobar'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
+      copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual(['recibos.aprobar']);
+  });
+
+  it('las claves de Administración con `gestionar` se conservan', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          permisos: ['pqr.gestionar', 'tareas.gestionar'],
+        },
+      ],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([
+      'pqr.gestionar',
+      'tareas.gestionar',
+    ]);
   });
 
   it('una asignación a una entidad alcanza todos sus edificios', async () => {
@@ -343,6 +447,8 @@ describe('AccesoService residentes (portal)', () => {
       terceros as never,
       consulta([]) as never,
       consulta([]) as never,
+      cuentasCon(cuentaSinPruebas) as never,
+      residenciaCon() as never,
     );
 
     await service.copropiedadesDe(cuenta.toString());
@@ -422,6 +528,8 @@ describe('AccesoService residentes: tenencia VIGENTE, no solo vínculo', () => {
       consulta([{ _id: tercero, copropiedadId: copA }]) as never,
       consulta([]) as never,
       inmuebles as never,
+      cuentasCon(cuentaSinPruebas) as never,
+      residenciaCon() as never,
     );
 
     await service.copropiedadesDe(cuenta.toString());
@@ -480,16 +588,54 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
     expect(resultado.permissions).toEqual(['facturas.ver']);
   });
 
-  it('un rol no puede aportar permisos de finanzas ni claves desconocidas', async () => {
+  it('un rol aporta sus claves de Finanzas y de Administración, pero no las desconocidas', async () => {
     const service = servicio({
       asignaciones: [directa({ permisos: [] })],
       copropiedades: [copropiedad(copA, 'COP-A')],
-      roles: [rol(rolA, ['facturas.anular', 'pqr.ver', 'inventada.ver'])],
+      roles: [
+        rol(rolA, [
+          'facturas.anular',
+          'pqr.ver',
+          'inventada.ver',
+          'facturas.gestionar',
+        ]),
+      ],
     });
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual(['pqr.ver']);
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.anular',
+      'pqr.ver',
+    ]);
+  });
+
+  it('un rol de OTRA copropiedad no aporta ni sus claves de Finanzas', async () => {
+    const service = servicio({
+      asignaciones: [directa({ permisos: [] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['facturas.anular'], copB)],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.permissions).toEqual([]);
+  });
+
+  it('une sin duplicados una clave que está en la asignación y en el rol', async () => {
+    const service = servicio({
+      asignaciones: [directa({ permisos: ['facturas.ver', 'pqr.ver'] })],
+      copropiedades: [copropiedad(copA, 'COP-A')],
+      roles: [rol(rolA, ['facturas.ver', 'tareas.ver'])],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.ver',
+      'pqr.ver',
+      'tareas.ver',
+    ]);
   });
 
   it('el personal conserva los permisos de Administración de su rol', async () => {
@@ -538,15 +684,15 @@ describe('AccesoService roles (paquetes de permisos de Administración)', () => 
   });
 });
 
-describe('AccesoService techo duro al leer', () => {
-  it('una asignación de perfil personal pierde las claves de finanzas aunque estén guardadas', async () => {
+describe('AccesoService: el perfil no recorta permisos al leer', () => {
+  it('una asignación de perfil personal conserva sus claves de Finanzas', async () => {
     const service = servicio({
       asignaciones: [
         {
           alcance: 'copropiedad',
           copropiedadId: copA,
           perfil: 'personal',
-          permisos: ['facturas.ver', 'recibos.crear'],
+          permisos: ['facturas.ver', 'recibos.crear', 'pqr.ver'],
         },
       ],
       copropiedades: [copropiedad(copA, 'COP-A')],
@@ -554,10 +700,14 @@ describe('AccesoService techo duro al leer', () => {
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual([]);
+    expect(resultado.permissions).toEqual([
+      'facturas.ver',
+      'recibos.crear',
+      'pqr.ver',
+    ]);
   });
 
-  it('el recorte también aplica a un grant por entidad', async () => {
+  it('un grant por entidad de perfil personal llega a cada edificio administrado', async () => {
     const service = servicio({
       asignaciones: [
         {
@@ -568,12 +718,71 @@ describe('AccesoService techo duro al leer', () => {
         },
       ],
       entidades: [{ _id: entidadA }],
+      copropiedades: [
+        copropiedad(copA, 'COP-A', entidadA),
+        copropiedad(copB, 'COP-B', entidadA),
+      ],
+    });
+
+    const resultado = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.map((c) => c.permissions)).toEqual([
+      ['facturas.ver'],
+      ['facturas.ver'],
+    ]);
+  });
+
+  it('una fila directa y un grant por entidad sobre el mismo edificio se unen sin duplicados', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'recibos.crear'],
+        },
+        {
+          alcance: 'entidad',
+          entidadId: entidadA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'facturas.anular'],
+        },
+      ],
+      entidades: [{ _id: entidadA }],
       copropiedades: [copropiedad(copA, 'COP-A', entidadA)],
     });
 
     const [resultado] = await service.copropiedadesDe(cuenta.toString());
 
-    expect(resultado.permissions).toEqual([]);
+    expect([...resultado.permissions].sort()).toEqual([
+      'facturas.anular',
+      'facturas.ver',
+      'recibos.crear',
+    ]);
+  });
+
+  it('la clave de un módulo no contratado se conserva en la lista (la ruta responde 403 por licencia)', async () => {
+    const service = servicio({
+      asignaciones: [
+        {
+          alcance: 'copropiedad',
+          copropiedadId: copA,
+          perfil: 'personal',
+          permisos: ['facturas.ver', 'pqr.ver'],
+        },
+      ],
+      copropiedades: [
+        {
+          ...copropiedad(copA, 'COP-A'),
+          modulosContratados: ['administracion'],
+        },
+      ],
+    });
+
+    const [resultado] = await service.copropiedadesDe(cuenta.toString());
+
+    expect(resultado.modulos).toEqual(['administracion']);
+    expect(resultado.permissions).toEqual(['facturas.ver', 'pqr.ver']);
   });
 
   it('una asignación sin perfil (legado) se trata como administrativa', async () => {
@@ -752,4 +961,408 @@ describe('AccesoService perfil y nombre del rol (rótulo del encabezado)', () =>
     expect(resultado.perfil).toBeNull();
     expect(resultado.rolNombre).toBeNull();
   });
+});
+
+/** Address proof: legacy-or-proof minus revoked (REQ-A1, A2, A5, V). */
+describe('AccesoService residentes por dirección probada', () => {
+  const claveDe = claveCorreo(CORREO);
+  const probada = {
+    email: CORREO,
+    estado: 'active',
+    correoProbadoClave: claveDe,
+  };
+  const sinAsignaciones = { asignaciones: [] as Fila[] };
+  const copias = (...ids: Types.ObjectId[]) =>
+    ids.map((id) => copropiedad(id, `COP-${id.toString().slice(-3)}`));
+
+  it('una dirección probada que figura en un titular activo es residente (S-A1.1, S-A1.10)', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia: residenciaCon([copA]),
+    });
+
+    const [resultado] = await service.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+
+    expect(resultado).toMatchObject({
+      copropiedadId: copA.toString(),
+      esResidente: true,
+      permissions: [],
+      perfil: null,
+    });
+  });
+
+  it('prueba pero la dirección no está en ningún registro vigente: no es residente (S-A1.2)', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      residencia: residenciaCon([]),
+    });
+
+    await expect(
+      service.copropiedadesDe(cuenta.toString(), false, probada),
+    ).resolves.toEqual([]);
+  });
+
+  it('SEC: no proof or stale proof grants nothing (S-A1.3, S-A1.11)', async () => {
+    const residencia = residenciaCon([copA]);
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia,
+    });
+
+    // The address is on a holder record, but never redeemed.
+    await expect(
+      service.copropiedadesDe(cuenta.toString(), false, {
+        email: CORREO,
+        correoProbadoClave: null,
+      }),
+    ).resolves.toEqual([]);
+
+    // A proof for another address (the e-mail changed afterwards).
+    await expect(
+      service.copropiedadesDe(cuenta.toString(), false, {
+        email: CORREO,
+        correoProbadoClave: claveCorreo('anterior@example.com'),
+      }),
+    ).resolves.toEqual([]);
+
+    expect(residencia.copropiedadesPorCorreo).not.toHaveBeenCalled();
+  });
+
+  it('una cuenta inactiva no tiene acceso por dirección (S-A1.6)', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia: residenciaCon([copA]),
+    });
+
+    await expect(
+      service.copropiedadesDe(cuenta.toString(), false, {
+        ...probada,
+        estado: 'inactive',
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it('una copropiedad inactiva no aparece (S-A1.5)', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: [], // describir() only returns ACTIVE coproperties
+      residencia: residenciaCon([copA]),
+    });
+
+    await expect(
+      service.copropiedadesDe(cuenta.toString(), false, probada),
+    ).resolves.toEqual([]);
+  });
+
+  it('la misma dirección en A y B: residente de ambas, la licencia Finanzas basta (S-A1.7, S-A1.8)', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: [
+        { ...copropiedad(copA, 'COP-A'), modulosContratados: ['finanzas'] },
+        {
+          ...copropiedad(copB, 'COP-B'),
+          modulosContratados: ['administracion'],
+        },
+      ],
+      residencia: residenciaCon([copA, copB]),
+    });
+
+    const resultado = await service.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+
+    expect(resultado.map((c) => [c.codigo, c.esResidente, c.modulos])).toEqual([
+      ['COP-A', true, ['finanzas']],
+      ['COP-B', true, ['administracion']],
+    ]);
+  });
+
+  it('SEC: revoked user cannot regain access by editing the record (S-V3.1..3.3)', async () => {
+    // Revoked in A by the address's clave. The record is edited: the address
+    // leaves, then comes back (even with another letter case). The revocation
+    // is keyed by clave, not by party or record, so nothing lifts it.
+    const revocadasEnA = [copA];
+    const sinDireccion = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia: residenciaCon([], revocadasEnA),
+    });
+    await expect(
+      sinDireccion.copropiedadesDe(cuenta.toString(), false, probada),
+    ).resolves.toEqual([]);
+
+    const residencia = residenciaCon([copA], revocadasEnA);
+    const devuelta = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia,
+    });
+    await expect(
+      devuelta.copropiedadesDe(cuenta.toString(), false, {
+        ...probada,
+        email: 'PERSONA@Example.com',
+        correoProbadoClave: claveCorreo('PERSONA@Example.com'),
+      }),
+    ).resolves.toEqual([]);
+    expect(residencia.revocacionesActivas).toHaveBeenCalledWith(
+      claveDe,
+      expect.any(Array),
+    );
+  });
+
+  it('revocada en A, residente en C: la sesión conserva solo C (S-A1.4, S-V2.2)', async () => {
+    // The stub returns what it is given, so it holds only what the real
+    // lookup would be asked for: the unrevoked coproperty.
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copC),
+      residencia: residenciaCon([copA, copC], [copA]),
+    });
+
+    const resultado = await service.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+
+    expect(resultado.map((c) => c.copropiedadId)).toEqual([copC.toString()]);
+  });
+
+  it('la revocación corta también el vínculo heredado Tercero.accountId y levantarla lo restaura sin revincular (S-S4.3, S-V4.6)', async () => {
+    const tercero = oid();
+    const fila = {
+      terceros: [{ _id: tercero, copropiedadId: copA }],
+      copropiedades: copias(copA),
+    };
+
+    const revocada = servicio({
+      ...fila,
+      residencia: residenciaCon([], [copA]),
+    });
+    await expect(
+      revocada.copropiedadesDe(cuenta.toString(), false, cuentaSinPruebas),
+    ).resolves.toEqual([]);
+
+    const levantada = servicio({ ...fila, residencia: residenciaCon([], []) });
+    const [resultado] = await levantada.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      cuentaSinPruebas,
+    );
+    expect(resultado.esResidente).toBe(true);
+  });
+
+  it('el vínculo heredado y la prueba se unen sin duplicar la copropiedad (S-A3.5)', async () => {
+    const service = servicio({
+      terceros: [{ _id: oid(), copropiedadId: copA }],
+      copropiedades: copias(copA),
+      residencia: residenciaCon([copA]),
+    });
+
+    const resultado = await service.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].esResidente).toBe(true);
+  });
+
+  it('personal y residente suman: conserva sus claves y revocar el lado residente no las toca (S-A5.1..5.3)', async () => {
+    const asignacion = {
+      alcance: 'copropiedad',
+      copropiedadId: copA,
+      perfil: 'personal',
+      permisos: ['pqr.ver'],
+    };
+    const conResidencia = servicio({
+      asignaciones: [asignacion],
+      copropiedades: copias(copA, copB),
+      residencia: residenciaCon([copA, copB]),
+    });
+    const suma = await conResidencia.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+    expect(
+      suma.map((c) => [c.copropiedadId, c.esResidente, c.permissions]),
+    ).toEqual([
+      [copA.toString(), true, ['pqr.ver']],
+      [copB.toString(), true, []],
+    ]);
+
+    const revocadaEnA = servicio({
+      asignaciones: [asignacion],
+      copropiedades: copias(copA, copB),
+      residencia: residenciaCon([copA, copB], [copA]),
+    });
+    const despues = await revocadaEnA.copropiedadesDe(
+      cuenta.toString(),
+      false,
+      probada,
+    );
+    expect(
+      despues.map((c) => [c.copropiedadId, c.esResidente, c.permissions]),
+    ).toEqual([
+      [copA.toString(), false, ['pqr.ver']],
+      [copB.toString(), true, []],
+    ]);
+  });
+
+  it('un administrador de plataforma no gana ni pierde nada por la prueba (S-A5.5)', async () => {
+    const residencia = residenciaCon([copA]);
+    const service = servicio({
+      copropiedades: copias(copA),
+      residencia,
+    });
+
+    const [resultado] = await service.copropiedadesDe(
+      cuenta.toString(),
+      true,
+      probada,
+    );
+
+    expect(resultado.esResidente).toBe(false);
+    expect(residencia.copropiedadesPorCorreo).not.toHaveBeenCalled();
+  });
+
+  it('sin la cuenta en la mano, la relee por _id (accesoA de otros llamadores)', async () => {
+    const residencia = residenciaCon([copA]);
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      cuenta: probada,
+      residencia,
+    });
+
+    const acceso = await service.accesoA(cuenta.toString(), copA.toString());
+
+    expect(acceso?.esResidente).toBe(true);
+  });
+
+  it('accesoA usa la cuenta que el guard ya tiene, sin releerla', async () => {
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      cuenta: null,
+      residencia: residenciaCon([copA]),
+    });
+
+    const acceso = await service.accesoA(
+      cuenta.toString(),
+      copA.toString(),
+      false,
+      probada,
+    );
+
+    expect(acceso?.esResidente).toBe(true);
+  });
+
+  it('D2 y R7: una cuenta sin prueba ni vínculo no cuesta ninguna consulta de residencia', async () => {
+    const residencia = residenciaCon([copA]);
+    const service = servicio({
+      ...sinAsignaciones,
+      residencia,
+    });
+
+    await service.copropiedadesDe(cuenta.toString(), false, cuentaSinPruebas);
+
+    expect(residencia.copropiedadesPorCorreo).not.toHaveBeenCalled();
+    expect(residencia.revocacionesActivas).not.toHaveBeenCalled();
+  });
+
+  it('D2 y R7: una cuenta probada cuesta una consulta de direcciones y una de revocaciones', async () => {
+    const residencia = residenciaCon([copA]);
+    const service = servicio({
+      ...sinAsignaciones,
+      copropiedades: copias(copA),
+      residencia,
+    });
+
+    await service.copropiedadesDe(cuenta.toString(), false, probada);
+
+    expect(residencia.copropiedadesPorCorreo).toHaveBeenCalledTimes(1);
+    expect(residencia.copropiedadesPorCorreo).toHaveBeenCalledWith(CORREO);
+    expect(residencia.revocacionesActivas).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** Generic inboxes (B1 review fix): the real `ResidenciaService` behind the access. */
+describe('AccesoService con un buzón genérico', () => {
+  const cadena = (filas: Fila[]) => {
+    const c: Record<string, unknown> = {};
+    for (const m of ['collation', 'select', 'lean', 'sort']) c[m] = () => c;
+    c.exec = () => Promise.resolve(filas);
+    return { find: jest.fn(() => c) };
+  };
+  const BUZON = 'porteria@example.com';
+  const probada = {
+    email: BUZON,
+    estado: 'active',
+    correoProbadoClave: claveCorreo(BUZON),
+  };
+
+  // Pinned while the shared-inbox rule is ON; it is OFF since 2026-11-12.
+  itConRegla(
+    '4 terceros con la dirección: no da residencia por correo, pero el vínculo heredado sigue',
+    async () => {
+      const vinculado = oid();
+      const partes: Fila[] = [vinculado, oid(), oid(), oid()].map((id) => ({
+        _id: id,
+        copropiedadId: copA,
+        emails: [BUZON],
+      }));
+      const residencia = new ResidenciaService(
+        cadena(partes) as never,
+        cadena(
+          partes.map((p) => ({
+            _id: oid(),
+            copropiedadId: copA,
+            titularId: p._id,
+            arrendatarioId: null,
+          })),
+        ) as never,
+        cadena([{ _id: copA, modulosContratados: ['finanzas'] }]) as never,
+        cadena([]) as never,
+      );
+
+      // Proven address only: the inbox grants nothing.
+      const soloCorreo = servicio({
+        asignaciones: [],
+        copropiedades: [copropiedad(copA, 'COP-A')],
+        residencia: residencia as never,
+      });
+      await expect(
+        soloCorreo.copropiedadesDe(cuenta.toString(), false, probada),
+      ).resolves.toEqual([]);
+
+      // The legacy `Tercero.accountId` link on one of those parties still works.
+      const heredado = servicio({
+        asignaciones: [],
+        terceros: [{ _id: vinculado, copropiedadId: copA }],
+        copropiedades: [copropiedad(copA, 'COP-A')],
+        residencia: residencia as never,
+      });
+      const [resultado] = await heredado.copropiedadesDe(
+        cuenta.toString(),
+        false,
+        probada,
+      );
+      expect(resultado).toMatchObject({
+        copropiedadId: copA.toString(),
+        esResidente: true,
+      });
+    },
+  );
 });

@@ -1,9 +1,11 @@
 // src/modules/casl/permisos-catalogo.ts
 //
-// Which product module owns each permission key, and the hard ceiling that
-// keeps operational staff out of Finanzas. Pure functions over the same maps
+// Which product module owns each permission key, which Finanzas keys exist for
+// real, and the Administración catalog. Pure functions over the same maps
 // `permission-map.ts` uses to build abilities, so the two can never disagree
-// about what a key means.
+// about what a key means. Any assignment may hold any known key, whatever its
+// profile: `perfil` only says who may manage the row (see `PERFILES_ASIGNACION`); what a team member may be given is decided by the
+// delegation cap (`delegacion.ts`), not by this file.
 import type { ModuloProducto } from '../../common/licencia/modulos';
 import {
   createAppAbility,
@@ -17,7 +19,13 @@ import {
   VERB_TO_ACTION,
 } from './permission-map';
 
-/** `administrativo` runs the coproperty; `personal` is operational staff. */
+/**
+ * `administrativo` runs the coproperty; `personal` is the team member added from
+ * `/equipo`. The profile says WHO MANAGES the row (only a platform admin edits an
+ * `administrativo` one, `/equipo` manages `personal` ones) and drives the header
+ * label, notice recipients and the sign-in-link rule. It never limits which
+ * permission keys the row may hold.
+ */
 export const PERFILES_ASIGNACION = ['administrativo', 'personal'] as const;
 export type PerfilAsignacion = (typeof PERFILES_ASIGNACION)[number];
 
@@ -40,7 +48,8 @@ const MODULO_DE_SEGMENTO: Record<string, ModuloProducto> = {
 /**
  * The module that owns a `modulo.verbo` key, or null when the key is unknown.
  * Finanzas keys are checked against the grammar (segment + verb of
- * `VERB_TO_ACTION`); Administración keys against the CATALOG below, the one
+ * `VERB_TO_ACTION`, which has no `gestionar`: `facturas.gestionar` is
+ * unknown); Administración keys against the CATALOG below, the one
  * definition the role editor, `/equipo` and `AccesoService` all share — so
  * a grammatical but uncatalogued key (`usuarios.gestionar`, `config.anular`)
  * is unknown everywhere, never assignable through one path and not another.
@@ -49,12 +58,14 @@ export function moduloDePermiso(clave: string): ModuloProducto | null {
   const partes = clave.split('.');
   if (partes.length !== 2) return null;
   const [segmento, verbo] = partes;
+  // Own properties only: `constructor.ver` or `facturas.__proto__` would
+  // otherwise resolve through Object.prototype and read as a known key.
+  if (!Object.hasOwn(MODULO_DE_SEGMENTO, segmento)) return null;
   const modulo = MODULO_DE_SEGMENTO[segmento];
-  if (!modulo) return null;
   if (modulo === 'administracion') {
     return esPermisoAdministracion(clave) ? modulo : null;
   }
-  return verbo in VERB_TO_ACTION ? modulo : null;
+  return Object.hasOwn(VERB_TO_ACTION, verbo) ? modulo : null;
 }
 
 type SujetoFinanciero =
@@ -62,10 +73,11 @@ type SujetoFinanciero =
 
 /**
  * The CASL actions that some route REALLY requires on each financial subject
- * (`@CheckAbility` / `@CheckAnyAbility`), except `manage`, which every subject
- * with at least one action gets through its `gestionar` key. The permission
- * matrix offers a `modulo.verbo` key only when its subject appears here with
- * the verb's action — «un inmueble no se aprueba».
+ * (`@CheckAbility` / `@CheckAnyAbility`). The permission matrix offers a
+ * `modulo.verbo` key only when its subject appears here with the verb's action
+ * — «un inmueble no se aprueba». No route may require `manage` on a financial
+ * subject (Finanzas has no `gestionar` verb): `permisos-finanzas.spec.ts` fails
+ * if one does.
  *
  * Hand-kept, pinned by `permisos-finanzas.spec.ts`, which scans every
  * controller and fails when a route asks for something not listed (nobody could
@@ -74,17 +86,26 @@ type SujetoFinanciero =
  * grants the same thing, so they offer the same actions. `Anulacion` has no
  * route at all yet; `export` is required by none (exports are `read`).
  *
+ * `purge` is the guarded hard delete of pre-document data (verb `depurar`):
+ * a charge concept nobody used, a unit with no Factura, a lote before it issued
+ * anything. `Recibo` has `approve` for applying a batch of receipts, a release
+ * decision like `facturas.aprobar`.
+ *
+ * A new action here is granted to nobody automatically: once `gestionar` is not
+ * a key, the one-off conversion (or a platform admin ticking the box) decides
+ * who receives it.
+ *
  * `Record<SujetoFinanciero, …>` makes a new financial subject a compile error
  * here until it is classified.
  */
 const ACCIONES_REALES_FINANZAS: Readonly<
   Record<SujetoFinanciero, readonly Action[]>
 > = {
-  Inmueble: ['read', 'create', 'update'],
+  Inmueble: ['read', 'create', 'update', 'purge'],
   Tercero: ['read', 'create', 'update'],
-  ConceptoCobro: ['read', 'create', 'update'],
-  Factura: ['read', 'create', 'update', 'annul', 'approve'],
-  Recibo: ['read', 'create', 'annul'],
+  ConceptoCobro: ['read', 'create', 'update', 'purge'],
+  Factura: ['read', 'create', 'update', 'annul', 'approve', 'purge'],
+  Recibo: ['read', 'create', 'annul', 'approve'],
   NotaCredito: ['read', 'create', 'update', 'annul'],
   NotaContable: ['read', 'create', 'annul'],
   OtraNota: ['read', 'create', 'annul'],
@@ -99,19 +120,19 @@ const ACCIONES_REALES_FINANZAS: Readonly<
 
 /**
  * The Finanzas `modulo.verbo` keys that exist for real: the ones whose action
- * some route requires, plus `gestionar` for every module that has any. This is
- * what the permission matrix draws; every other module x verb pair is a dash.
- * Granting a key outside it is still accepted (the grammar in
- * `moduloDePermiso` is unchanged and old data stays valid): it just does
- * nothing anybody checks.
+ * some route requires. This is what the permission matrix draws; every other
+ * module x verb pair is a dash. There is no `gestionar` key in Finanzas: each
+ * permission is one exact action, so it can be held, given and taken away on
+ * its own. Granting a key outside this list is still accepted where the grammar
+ * in `moduloDePermiso` allows it (old data stays valid): it just does nothing
+ * anybody checks.
  */
 export const PERMISOS_FINANZAS: readonly string[] = Object.entries(
   MODULE_TO_SUBJECT,
 ).flatMap(([modulo, sujeto]) => {
   const acciones = ACCIONES_REALES_FINANZAS[sujeto];
-  if (acciones.length === 0) return [];
   return Object.entries(VERB_TO_ACTION)
-    .filter(([, accion]) => accion === 'manage' || acciones.includes(accion))
+    .filter(([, accion]) => acciones.includes(accion))
     .map(([verbo]) => `${modulo}.${verbo}`);
 });
 
@@ -320,6 +341,26 @@ const CLAVES_ADMINISTRACION: ReadonlySet<string> = new Set(
   PERMISOS_ADMINISTRACION.map((p) => p.id),
 );
 
+/**
+ * Room, on top of the offered catalog, for keys that travel back untouched in a
+ * save: up to 17 leftover Finanzas `x.gestionar` before the post-deploy cleanup
+ * (`--retirar-gestionar`), plus older keys that are not offered. Not a
+ * quota: the request is still judged key by key.
+ */
+export const MARGEN_CLAVES_HEREDADAS = 30;
+
+/**
+ * Most permission keys a body of `/equipo` or `/roles` may carry. DERIVED from
+ * the catalogs (never a literal), so a catalog that grows can never leave a
+ * request that ticks every box over the limit: it is the Finanzas catalog plus
+ * the Administración one plus the margin above (116 today: 56 + 30 + 30).
+ * `permisos-catalogo.spec.ts` pins that it stays at least the offered size.
+ */
+export const MAX_CLAVES_ASIGNABLES: number =
+  PERMISOS_FINANZAS.length +
+  PERMISOS_ADMINISTRACION.length +
+  MARGEN_CLAVES_HEREDADAS;
+
 /** Whether `clave` is one of the permissions a role may bundle. */
 export function esPermisoAdministracion(clave: string): boolean {
   return CLAVES_ADMINISTRACION.has(clave);
@@ -344,26 +385,4 @@ export function puedeLeerMateria(
 /** Keys that are not in the catalog (typos, removed verbs, invented modules). */
 export function permisosDesconocidos(claves: readonly string[]): string[] {
   return claves.filter((c) => moduloDePermiso(c) === null);
-}
-
-/**
- * Keys this profile may never hold. Operational staff never touch Finanzas,
- * whatever a role editor sends: this is the ceiling, enforced on write and
- * again on read.
- */
-export function permisosVetadosParaPerfil(
-  perfil: PerfilAsignacion,
-  claves: readonly string[],
-): string[] {
-  if (perfil !== 'personal') return [];
-  return claves.filter((c) => moduloDePermiso(c) === 'finanzas');
-}
-
-/** The keys that survive the ceiling for this profile (applied when reading). */
-export function sinPermisosVetados(
-  perfil: PerfilAsignacion,
-  claves: readonly string[],
-): string[] {
-  const vetados = new Set(permisosVetadosParaPerfil(perfil, claves));
-  return claves.filter((c) => !vetados.has(c));
 }

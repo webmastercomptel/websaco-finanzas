@@ -19,6 +19,12 @@ BUCKET=<FIREBASE_STORAGE_BUCKET value>
 
 1. **Pre-flight** (section 10), including a rollback target noted down.
 2. **Mongo indexes** that boot cannot create safely (section 7).
+   If the release carries the team-delegation change, also run its permission-key
+   conversion script here, BEFORE the backend starts: `equipo-delegacion.md`
+   (`npm run revisar:claves-finanzas-latentes`). Not detectable by readiness.
+   The release that makes Usuarios manage a list of assignments has no manual
+   step but its own deploy order (backend, frontend, then the contract removal
+   a working day later), after the team-delegation one: `usuarios-asignaciones-suman.md`.
 3. **Bucket** settings: CORS, UBLA, public access prevention (section 5).
 4. **Env vars and secrets** on the service (section 3), before the new revision starts:
    readiness fails loudly on a half-set Comptable or SendGrid pair.
@@ -117,7 +123,35 @@ gcloud run services describe $SERVICE --region $REGION --format=yaml > service-b
 | Concurrency | keep 80 | DECISION; the ingest is capped per process (429 when another is running) and per coproperty (Redis lock), so heavy work does not scale with concurrency |
 | Min instances | 0 | DECISION (budget reference ~30,000 COP/month). Consequence: no instance, no `@Cron`; the start-up catch-up pass covers it. Revisit only if the cleanups turn out late |
 | Max instances | 20 | DECISION. Each instance opens Redis connections (section 12): check the plan limit before letting 20 spin up |
-| CPU throttling | on (default) | DECISION. Background work only happens inside requests (lote jobs are awaited by the request) |
+| CPU throttling | on (default) | DECISION, **now contradicted, see below**. Was: "background work only happens inside requests (lote jobs are awaited by the request)" |
+
+**CPU throttling vs. the resident sign-in request (open, decide before deploying
+`modules/ingreso-portal/`).** `POST /auth/portal/solicitar` answers its 202 at a
+fixed 1,500 ms and does its work (Redis counters, Mongo lookups, minting the link,
+the SendGrid call, then killing the older links) WITHOUT awaiting it, so part or
+all of it runs after the response left. With CPU throttling on, Cloud Run gives an
+instance CPU only while it is serving a request, so that tail can stall until the
+next request arrives, or be lost when the instance scales to zero (min instances
+is 0). The person then gets no e-mail and nothing says why. A minted link whose
+e-mail never went out is not confirmed, so older links keep working; it is not
+voided either until the send step resumes (it expires after 15 minutes). Two ways
+out, neither applied yet (no deploy config is changed by this note):
+
+1. **CPU always allocated** for the service (`gcloud run services update $SERVICE
+   --no-cpu-throttling`). The background work then always finishes. Cost: the
+   instance is billed for CPU for its whole lifetime, not only during requests;
+   with min instances 0 an idle service still scales to zero.
+2. **Await the work inside the request, keeping the fixed floor.** The route waits
+   for the work, then for the floor, and answers. Every answer stays identical
+   only if the floor is ABOVE the slowest work, i.e. above SendGrid's p99 plus the
+   lookups (today 1,500 ms is not measured against it); a send slower than the
+   floor would make that answer later than the others and reveal that the address
+   is on a record. So the floor would have to rise (e.g. 3-5 s, to be measured),
+   and a send over it must still be cut off (time out and answer at the floor).
+   No billing change; every request gets slower for everyone.
+
+Until one is chosen, treat lost sign-in e-mails under low traffic as this, not as a
+SendGrid fault.
 
 ```bash
 gcloud run services update $SERVICE --region $REGION \
@@ -354,3 +388,5 @@ a frontend older than the backend keeps working, one newer than the backend does
 | `SENTRY_DSN`, `APP_ROLE`, `NODE_OPTIONS` | No: all optional, default behaviour unchanged |
 | Index scripts of section 7 | No: a missing unique index is silent (check by hand) |
 | Removing `WEBSACO3_*` | No (harmless if left) |
+| Permission-key conversion (`revisar:claves-finanzas-latentes`, read-only first, then `--aplicar`, BEFORE the backend deploy; `--retirar-gestionar` only after the release is accepted) | No: after the deploy a Finanzas key on a `personal` row is legitimate, so no indicator can tell a missed strip from a real grant. Full steps, freeze note and rollback: `equipo-delegacion.md` |
+| Usuarios assignments list (`usuarios-asignaciones-suman.md`): no per-environment step, only a deploy order: backend up to `eb7a248`, frontend, then backend `bbbff07` at least one working day later | Nothing to detect: a wrong order breaks saving in the platform Usuarios screen (400), not data |

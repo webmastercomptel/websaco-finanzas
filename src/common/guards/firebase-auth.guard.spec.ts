@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  Logger,
   UnauthorizedException,
   type ExecutionContext,
 } from '@nestjs/common';
@@ -266,5 +267,50 @@ describe('FirebaseAuthGuard — copropiedad activa', () => {
     await guard.canActivate(context);
 
     expect(accesoA).not.toHaveBeenCalled();
+  });
+});
+
+describe('FirebaseAuthGuard — registros', () => {
+  const NIVELES = ['log', 'debug', 'warn', 'error', 'verbose'] as const;
+  const espias = NIVELES.map((nivel) =>
+    jest.spyOn(Logger.prototype, nivel).mockImplementation(() => undefined),
+  );
+  afterAll(() => espias.forEach((e) => e.mockRestore()));
+  beforeEach(() => espias.forEach((e) => e.mockClear()));
+
+  const todoLoRegistrado = (): string =>
+    espias
+      .flatMap((e) => e.mock.calls as unknown[][])
+      .map((llamada) => llamada.map(String).join(' '))
+      .join(' | ');
+
+  it('SEC: auth path logs carry no address', async () => {
+    // Sin cuenta local: antes se imprimía la dirección del token.
+    const sinCuenta = harness({ headers: bearer(), cuenta: null });
+    await sinCuenta.guard.canActivate(sinCuenta.context);
+
+    // Copropiedad no asignada: antes se imprimía el correo de la cuenta.
+    const sinAsignar = harness({
+      headers: { ...bearer(), 'x-coproperty-id': 'cop-ajena' },
+      acceso: null,
+    });
+    await expect(
+      sinAsignar.guard.canActivate(sinAsignar.context),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    // Token rechazado: el motivo del proveedor puede nombrar la dirección.
+    const rechazado = harness({
+      headers: bearer(),
+      verify: jest.fn().mockRejectedValue(new Error('token vencido')),
+    });
+    await expect(
+      rechazado.guard.canActivate(rechazado.context),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    const salida = todoLoRegistrado();
+    expect(salida).not.toBe('');
+    expect(salida.toLowerCase()).not.toContain(EMAIL);
+    expect(salida).toContain('acc-1');
+    expect(salida).toContain('cop-ajena');
   });
 });

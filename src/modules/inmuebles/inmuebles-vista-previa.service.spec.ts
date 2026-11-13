@@ -898,3 +898,27 @@ describe('InmueblesService.previsualizarImportacion — arrendatario', () => {
     expect(vista.aCrear).toBe(1);
   });
 });
+
+describe('InmueblesService.previsualizarImportacion — tope de 5 correos por persona', () => {
+  const SEIS = 'a@x.co, b@x.co, c@x.co, d@x.co, e@x.co, f@x.co';
+
+  it('reporta el mismo error de fila que importar y no escribe nada', async () => {
+    const filas = [
+      fila({ codigo: '301', nombreTitular: 'Ana', emailTitular: SEIS }),
+      fila({
+        codigo: '302',
+        arrendatarioNombre: 'Luis',
+        arrendatarioCorreo: SEIS,
+      }),
+    ];
+
+    const vista = await montar([]).service.previsualizarImportacion({ filas });
+    const real = await montar([]).service.importar({ filas });
+
+    expect(vista.errores.map((e) => e.mensaje)).toEqual([
+      'Correo del titular: máximo 5 correos distintos',
+      'Correo del arrendatario: máximo 5 correos distintos',
+    ]);
+    expect(vista.errores).toEqual(real.errores);
+  });
+});

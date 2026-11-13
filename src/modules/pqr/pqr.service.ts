@@ -23,6 +23,7 @@ import {
   type TecnicoDocument,
 } from '../../database/schemas/administracion/tecnico.schema';
 import {
+  cuentaParaAccesoDe,
   PortalAccesoService,
   type UnidadPortal,
 } from '../portal/portal-acceso.service';
@@ -319,6 +320,7 @@ export class PqrService {
     const unidades = await this.portalAcceso.unidadesDe(
       autorId.toString(),
       copropiedadId.toString(),
+      cuentaParaAccesoDe(user),
     );
     const unidad = this.resolverUnidad(dto.unidad, unidades);
     return this.guardar(

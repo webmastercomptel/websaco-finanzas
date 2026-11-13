@@ -153,6 +153,7 @@ export class EnvioFacturasService {
                     destinatariosTotal: 0,
                     notificadosIds: [],
                     correosEnviadosIds: [],
+                    correosEntregados: [],
                     tokenEnvio: null,
                     envioIniciadoEn: null,
                     intentos: 0,

@@ -49,6 +49,110 @@ describe('AuditoriaService', () => {
       });
     });
 
+    it('persists and passes on the detalle with the added and removed keys', async () => {
+      registros.create.mockResolvedValueOnce({});
+
+      await service.registrar({
+        actorAccountId: '64f1a2b3c4d5e6f7a8b9c0d1',
+        actorNombre: 'Ana',
+        accion: 'actualizar',
+        entidadTipo: 'usuario',
+        entidadId: '64f1a2b3c4d5e6f7a8b9c0d2',
+        entidadEtiqueta: 'Ben',
+        detalle: { agregadas: ['facturas.ver'], quitadas: ['pqr.ver'] },
+      });
+
+      expect(registros.create).toHaveBeenCalledWith({
+        actorAccountId: '64f1a2b3c4d5e6f7a8b9c0d1',
+        actorNombre: 'Ana',
+        accion: 'actualizar',
+        entidadTipo: 'usuario',
+        entidadId: '64f1a2b3c4d5e6f7a8b9c0d2',
+        entidadEtiqueta: 'Ben',
+        detalle: { agregadas: ['facturas.ver'], quitadas: ['pqr.ver'] },
+      });
+    });
+
+    it('writes the detalle inside the caller transaction too', async () => {
+      registros.create.mockResolvedValueOnce([{}]);
+      const session = { id: 'sesion' };
+
+      await service.registrar(
+        {
+          actorAccountId: 'a',
+          actorNombre: 'Ana',
+          accion: 'crear',
+          entidadTipo: 'rol',
+          entidadId: 'r',
+          entidadEtiqueta: 'Rol X',
+          detalle: { agregadas: ['pqr.ver'], quitadas: [] },
+        },
+        session as never,
+      );
+
+      expect(registros.create).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            detalle: { agregadas: ['pqr.ver'], quitadas: [] },
+          }),
+        ],
+        { session },
+      );
+    });
+
+    it('keeps an empty detalle (rename only): both lists empty are still written', async () => {
+      registros.create.mockResolvedValueOnce({});
+
+      await service.registrar({
+        actorAccountId: 'a',
+        actorNombre: 'Ana',
+        accion: 'actualizar',
+        entidadTipo: 'usuario',
+        entidadId: 'e',
+        entidadEtiqueta: 'Ben',
+        detalle: { agregadas: [], quitadas: [] },
+      });
+
+      expect(registros.create).toHaveBeenCalledWith(
+        expect.objectContaining({ detalle: { agregadas: [], quitadas: [] } }),
+      );
+    });
+
+    it('accepts the eliminar action and the rol entity type', async () => {
+      registros.create.mockResolvedValueOnce({});
+
+      await service.registrar({
+        actorAccountId: 'a',
+        actorNombre: 'Ana',
+        accion: 'eliminar',
+        entidadTipo: 'rol',
+        entidadId: 'r',
+        entidadEtiqueta: 'Rol X',
+      });
+
+      expect(registros.create).toHaveBeenCalledWith(
+        expect.objectContaining({ accion: 'eliminar', entidadTipo: 'rol' }),
+      );
+    });
+
+    it('an entry without detalle stays valid and carries no detalle key at all', async () => {
+      registros.create.mockResolvedValueOnce({});
+
+      await service.registrar({
+        actorAccountId: 'a',
+        actorNombre: 'Ana',
+        accion: 'crear',
+        entidadTipo: 'copropiedad',
+        entidadId: 'e',
+        entidadEtiqueta: 'C',
+      });
+
+      const [escrito] = registros.create.mock.calls[0] as [
+        Record<string, unknown>,
+      ];
+      expect(Object.keys(escrito)).not.toContain('detalle');
+    });
+
     it('propagates write failures', async () => {
       registros.create.mockRejectedValueOnce(new Error('write failed'));
 

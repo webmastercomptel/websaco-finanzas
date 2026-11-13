@@ -74,9 +74,10 @@ async function seedAdmin(): Promise<void> {
     }
 
     await accounts.create({
-      // Empty until the person signs in and CuentaService binds the real one.
-      // Not a placeholder value: an invented uid would match nobody and would
-      // quietly shadow the correct binding.
+      // Placeholder, not a real uid: `pendiente:<email>` marks the account as
+      // unclaimed. On first sign-in CuentaService replaces it with the real
+      // uid, and only for exactly this value — nothing else is claimable by
+      // e-mail.
       firebaseUid: `pendiente:${email}`,
       email,
       nombreCompleto: 'Administrador de plataforma',

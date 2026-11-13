@@ -18,7 +18,10 @@ import {
   DocumentoBloque,
   type DocumentoBloqueDocument,
 } from '../../database/schemas/administracion/documento-bloque.schema';
-import { PortalAccesoService } from '../portal/portal-acceso.service';
+import {
+  cuentaParaAccesoDe,
+  PortalAccesoService,
+} from '../portal/portal-acceso.service';
 import { puedeVerTipo, TIPOS_DE_RESIDENTE } from './facturacion-bloque-acceso';
 import { FacturacionBloqueAlmacenService } from './facturacion-bloque-almacen.service';
 import { toMiDocumento } from './facturacion-bloque.mapper';
@@ -72,6 +75,7 @@ export class FacturacionBloquePortalService {
     const unidades = await this.portalAcceso.unidadesDe(
       this.cuenta(user),
       copropiedadId.toString(),
+      cuentaParaAccesoDe(user),
     );
     if (unidades.length === 0) return [];
     const rolPorUnidad = new Map(unidades.map((u) => [u.inmuebleId, u.rol]));
@@ -138,6 +142,7 @@ export class FacturacionBloquePortalService {
       cuenta,
       copropiedadId.toString(),
       documento.inmuebleId.toString(),
+      cuentaParaAccesoDe(user),
     );
     if (!rol || !puedeVerTipo(rol, documento.tipo)) throw noEncontrado();
 

@@ -4,6 +4,7 @@ import type {
 } from '@nestjs/terminus';
 import { HealthController } from './health.controller';
 import type { CorreoHealthIndicator } from './correo.health';
+import type { FrontendUrlHealthIndicator } from './frontend-url.health';
 import type { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 import type { RedisHealthIndicator } from './redis.health';
 
@@ -15,6 +16,7 @@ describe('HealthController', () => {
     Pick<IntegracionComptableHealthIndicator, 'check'>
   >;
   let correo: jest.Mocked<Pick<CorreoHealthIndicator, 'check'>>;
+  let frontendUrl: jest.Mocked<Pick<FrontendUrlHealthIndicator, 'check'>>;
   let controller: HealthController;
 
   beforeEach(() => {
@@ -37,12 +39,17 @@ describe('HealthController', () => {
       check: jest.fn().mockReturnValue({ correo: { status: 'up' } }),
     };
 
+    frontendUrl = {
+      check: jest.fn().mockReturnValue({ 'frontend-url': { status: 'up' } }),
+    };
+
     controller = new HealthController(
       health as unknown as HealthCheckService,
       mongoose as unknown as MongooseHealthIndicator,
       redis as unknown as RedisHealthIndicator,
       integracionComptable as unknown as IntegracionComptableHealthIndicator,
       correo as unknown as CorreoHealthIndicator,
+      frontendUrl as unknown as FrontendUrlHealthIndicator,
     );
   });
 
@@ -58,18 +65,20 @@ describe('HealthController', () => {
 
     expect(health.check).toHaveBeenCalledTimes(1);
     const checks = health.check.mock.calls[0][0] as Array<() => unknown>;
-    expect(checks).toHaveLength(4);
+    expect(checks).toHaveLength(5);
 
     await checks[0]();
     await checks[1]();
     await checks[2]();
     await checks[3]();
+    await checks[4]();
     expect(mongoose.pingCheck).toHaveBeenCalledWith('mongodb');
     expect(redis.pingCheck).toHaveBeenCalledWith('redis');
     expect(integracionComptable.check).toHaveBeenCalledWith(
       'integracion-comptable',
     );
     expect(correo.check).toHaveBeenCalledWith('correo');
+    expect(frontendUrl.check).toHaveBeenCalledWith('frontend-url');
   });
 
   it('el endpoint por defecto (el del HEALTHCHECK del Dockerfile) solo chequea Mongo y Redis: una config mala no se arregla reiniciando', async () => {

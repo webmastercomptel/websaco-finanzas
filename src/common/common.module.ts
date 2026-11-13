@@ -23,6 +23,7 @@ import { FirebaseAuthGuard } from './guards/firebase-auth.guard';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { TenantContextService } from './tenant/tenant-context.service';
 import { AccesoService } from './acceso/acceso.service';
+import { ResidenciaService } from './acceso/residencia.service';
 import { CuentaService } from './cuentas/cuenta.service';
 import { EnlaceAccesoService } from './cuentas/enlace-acceso.service';
 import { DirectorioService } from './directorio/directorio.service';
@@ -59,6 +60,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     FirebaseUsuariosService,
     TenantContextService,
     AccesoService,
+    ResidenciaService,
     CuentaService,
     EnlaceAccesoService,
     DirectorioService,
@@ -83,6 +85,7 @@ import { DocumentoStorageService } from './storage/documento-storage.service';
     FirebaseUsuariosService,
     TenantContextService,
     AccesoService,
+    ResidenciaService,
     CuentaService,
     EnlaceAccesoService,
     DirectorioService,

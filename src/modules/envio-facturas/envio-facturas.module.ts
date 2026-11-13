@@ -1,6 +1,7 @@
 // src/modules/envio-facturas/envio-facturas.module.ts
 import { Module } from '@nestjs/common';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
+import { FacturaPublicaModule } from '../factura-publica/factura-publica.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { EnvioFacturasController } from './envio-facturas.controller';
 import { EnvioFacturasProcesoService } from './envio-facturas-proceso.service';
@@ -12,13 +13,14 @@ import { EnvioFacturasService } from './envio-facturas.service';
  * delivered inside the request (no queue, no worker, no scheduler).
  *
  * Models come from the @Global DatabaseModule; the tenant context, the
- * directory, mail and access links from CommonModule. Imports the inbox and the
- * audit trail. No other module imports this one, and it imports no financial
- * module: it only points at the invoice by id. It replaces the retired HMAC
- * publication to the old building-management system.
+ * directory and mail from CommonModule. Imports the inbox, the audit trail and
+ * the public invoice links (minted per address). No other module imports this
+ * one, and it imports no financial module: it only points at the invoice by id.
+ * It replaces the retired HMAC publication to the old building-management
+ * system.
  */
 @Module({
-  imports: [NotificacionesModule, AuditoriaModule],
+  imports: [NotificacionesModule, AuditoriaModule, FacturaPublicaModule],
   controllers: [EnvioFacturasController],
   providers: [EnvioFacturasService, EnvioFacturasProcesoService],
 })

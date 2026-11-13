@@ -5,8 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import {
   Account,
   AccountDocument,
@@ -25,35 +25,8 @@ import type {
   CrearUsuarioDto,
 } from './dto/guardar-usuario.dto';
 import { AuditoriaService } from '../auditoria/auditoria.service';
-import {
-  permisosDesconocidos,
-  permisosVetadosParaPerfil,
-  type PerfilAsignacion,
-} from '../casl/permisos-catalogo';
-
-/**
- * Rejects a permission list that names keys outside the catalog, or that gives
- * operational staff anything of Finanzas (the hard ceiling). Runs before any
- * side effect, so a refused request leaves nothing half-created.
- */
-const exigirPermisosValidos = (
-  perfil: PerfilAsignacion,
-  permisos: readonly string[] | undefined,
-): void => {
-  if (!permisos || permisos.length === 0) return;
-  const desconocidos = permisosDesconocidos(permisos);
-  if (desconocidos.length > 0) {
-    throw new BadRequestException(
-      `Permisos que no existen: ${desconocidos.join(', ')}`,
-    );
-  }
-  const vetados = permisosVetadosParaPerfil(perfil, permisos);
-  if (vetados.length > 0) {
-    throw new BadRequestException(
-      `El personal operativo no puede tener permisos de Finanzas: ${vetados.join(', ')}`,
-    );
-  }
-};
+import { cambioDeClaves, exigirClavesConocidas } from '../casl/delegacion';
+import { AsignacionesUsuarioService } from './asignaciones-usuario.service';
 
 /** A Firebase uid an administrator has not yet claimed — see seed-admin.ts. */
 const esIdentidadReal = (firebaseUid: string): boolean =>
@@ -68,11 +41,34 @@ export class UsuariosService {
     private readonly asignaciones: Model<AsignacionDocument>,
     private readonly firebaseUsuarios: FirebaseUsuariosService,
     private readonly auditoria: AuditoriaService,
+    private readonly asignacionesUsuario: AsignacionesUsuarioService,
+    @InjectConnection() private readonly connection: Connection,
   ) {}
 
   /**
-   * Lists the platform's ADMINISTRATOR accounts and each one's primary
-   * assignment: platform admins and anyone holding an `administrativo`
+   * Same shape as the other transactional services: `withTransaction` may
+   * re-run the callback on a transient error, so what it does must be safe to
+   * repeat (the insert fails on the unique index, the audit entry is rolled back
+   * with it).
+   */
+  private async transaccion<T>(
+    fn: (session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const session = await this.connection.startSession();
+    try {
+      let resultado!: T;
+      await session.withTransaction(async () => {
+        resultado = await fn(session);
+      });
+      return resultado;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  /**
+   * Lists the platform's ADMINISTRATOR accounts with every assignment they
+   * hold (`asignaciones`): platform admins and anyone holding an `administrativo`
    * assignment (a legacy row with no profile counts as one) — building
    * administrators and accountants, the only people created on this screen.
    * Operational staff (`personal`) are created and managed by each building
@@ -124,16 +120,14 @@ export class UsuariosService {
       this.accounts.countDocuments(filtro).exec(),
     ]);
 
-    // One query for every assignment involved, then matched in memory —
-    // the same batching AccesoService uses, so a page of fifty users costs
-    // two round trips, not fifty-one.
-    const asignacionesPorCuenta = await this.asignacionesPrimariasDe(
-      cuentas.map((c) => c._id),
-    );
+    // One query for every row of every account of the page, then matched in
+    // memory — the same batching AccesoService uses, so a page of fifty users
+    // costs two round trips, not fifty-one.
+    const filasPorCuenta = await this.filasDe(cuentas.map((c) => c._id));
 
     return {
       items: cuentas.map((c) =>
-        toUsuario(c, asignacionesPorCuenta.get(c._id.toString()) ?? null),
+        toUsuario(c, filasPorCuenta.get(c._id.toString()) ?? []),
       ),
       total,
       pagina,
@@ -147,29 +141,40 @@ export class UsuariosService {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
     }
 
-    const asignacion = (await this.asignacionesPrimariasDe([cuenta._id])).get(
-      cuenta._id.toString(),
-    );
-    return toUsuario(cuenta, asignacion ?? null);
+    const filas = (await this.filasDe([cuenta._id])).get(cuenta._id.toString());
+    return toUsuario(cuenta, filas ?? []);
   }
 
   /**
    * Provisions a new user: a Firebase sign-in identity, the local Account, and
-   * (unless they are a platform administrator) one assignment.
+   * (unless they are a platform administrator) their FIRST assignment, which is
+   * mandatory: "created with no assignment" is indistinguishable from "created
+   * and then forgotten".
    *
-   * Order matters. The Firebase identity is created FIRST, and if anything
-   * after that fails, the result is a Firebase user with no Account — which is
-   * exactly the "authenticated but powerless" state FirebaseAuthGuard already
-   * treats as safe and ordinary. There is no saga to roll it back, and none is
-   * needed: the failure mode this ordering produces is inert by construction.
+   * Order matters. Everything that can be refused is refused first (the keys
+   * must be offered, the assignment must name a target that exists), so a refused request
+   * leaves nothing behind. The Firebase identity is created NEXT, then the
+   * Account; if anything after that fails, the result is an identity or an
+   * account with no assignment — exactly the "authenticated but powerless"
+   * state FirebaseAuthGuard already treats as safe and ordinary. There is no
+   * saga to roll it back, and none is needed: the failure mode this ordering
+   * produces is inert by construction, and the retry meets the existing-email
+   * 409 instead of creating a second identity.
+   *
+   * The assignment and its audit entry (with `detalle`) are written in ONE
+   * Mongo transaction, so a failed audit write leaves no row behind. A platform
+   * administrator has no assignment: its entry carries no `detalle`.
    */
   async create(
     dto: CrearUsuarioDto,
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
     const correo = dto.email.trim().toLowerCase();
-    const perfil = dto.perfil ?? 'administrativo';
-    exigirPermisosValidos(perfil, dto.permisos);
+    const permisos = dto.permisos ?? [];
+    // Every key here is NEW, so each must be offered: a grammar-valid key that
+    // no route checks (`inmuebles.aprobar`) would be stored with no trace in
+    // `detalle`.
+    exigirClavesConocidas(permisos);
 
     const yaExiste = await this.accounts.exists({ email: correo }).exec();
     if (yaExiste) {
@@ -177,6 +182,12 @@ export class UsuariosService {
         `Ya existe una cuenta local con el correo ${correo}`,
       );
     }
+
+    // Still before Firebase: a request with no target, or one naming a target
+    // that does not exist, creates nothing.
+    const asignacion = dto.esAdministradorPlataforma
+      ? null
+      : await this.destinoDeLaPrimeraAsignacion(dto);
 
     const { uid } = await this.firebaseUsuarios.crear({
       email: correo,
@@ -192,56 +203,75 @@ export class UsuariosService {
       estado: 'active',
     });
 
-    if (!dto.esAdministradorPlataforma && dto.alcance) {
-      await this.asignaciones.create({
-        accountId: cuenta._id,
-        alcance: dto.alcance,
-        copropiedadId:
-          dto.alcance === 'copropiedad' && dto.copropiedadId
-            ? new Types.ObjectId(dto.copropiedadId)
-            : null,
-        entidadId:
-          dto.alcance === 'entidad' && dto.entidadId
-            ? new Types.ObjectId(dto.entidadId)
-            : null,
-        permisos: dto.permisos ?? [],
-        perfil,
-        estado: 'active',
-      });
-    }
-
-    await this.auditoria.registrar({
+    const entrada = {
       actorAccountId: actor.accountId,
       actorNombre: actor.nombre,
-      accion: 'crear',
-      entidadTipo: 'usuario',
+      accion: 'crear' as const,
+      entidadTipo: 'usuario' as const,
       entidadId: cuenta._id.toString(),
       entidadEtiqueta: dto.nombre,
-    });
+    };
+
+    if (asignacion) {
+      await this.transaccion(async (session) => {
+        await this.asignacionesUsuario.insertar(
+          { accountId: cuenta._id, ...asignacion, permisos },
+          session,
+        );
+        await this.auditoria.registrar(
+          { ...entrada, detalle: cambioDeClaves([], permisos) },
+          session,
+        );
+      });
+    } else {
+      await this.auditoria.registrar(entrada);
+    }
 
     return this.findOne(cuenta._id.toString());
   }
 
   /**
-   * Edits a user. Deactivating one (`estado: 'inactivo'`) disables the
+   * The target of the first assignment, as the ObjectIds the unique indexes key
+   * on: 400 when the request does not name one or names a malformed id, 404 when
+   * it names one that does not exist (the same rule and messages as
+   * `POST /usuarios/:id/asignaciones`, through `resolverDestino`). The DTO
+   * already demands the fields; this keeps the rules true for any caller, and
+   * BEFORE Firebase is touched, so a refused request leaves no identity behind.
+   */
+  private async destinoDeLaPrimeraAsignacion(dto: CrearUsuarioDto): Promise<{
+    alcance: 'copropiedad' | 'entidad';
+    copropiedadId: Types.ObjectId | null;
+    entidadId: Types.ObjectId | null;
+  }> {
+    const nombraDestino =
+      (dto.alcance === 'copropiedad' && dto.copropiedadId) ||
+      (dto.alcance === 'entidad' && dto.entidadId);
+    if (!nombraDestino) {
+      throw new BadRequestException(
+        'Indica a dónde tendrá acceso: una copropiedad o una entidad administradora',
+      );
+    }
+    const { alcance, copropiedadId, entidadId } =
+      await this.asignacionesUsuario.resolverDestino(dto);
+    return { alcance, copropiedadId, entidadId };
+  }
+
+  /**
+   * Edits a user's ACCOUNT: name, platform-admin flag, state and password. It
+   * never reads or writes an assignment row (those are managed one at a time by
+   * `AsignacionesUsuarioService`), so a save cannot replace, move or retire any
+   * of them. Deactivating the account (`estado: 'inactivo'`) disables the
    * Firebase identity too — see FirebaseUsuariosService.establecerHabilitado
-   * for why that is an immediate lockout and not a courtesy. There is no
-   * delete: identities and assignments are retired, never removed, for the
-   * same reason a financial document never is.
+   * for why that is an immediate lockout and not a courtesy: it is the switch
+   * over every row, which keep their own `estado`. There is no delete:
+   * identities and assignments are retired, never removed, for the same reason
+   * a financial document never is.
    */
   async update(
     id: string,
     dto: ActualizarUsuarioDto,
     actor: { accountId: string; nombre: string },
   ): Promise<UsuarioContract> {
-    // Only what the request itself says is checkable here; the combination with
-    // the stored profile is checked when the assignment is written.
-    if (dto.perfil !== undefined) {
-      exigirPermisosValidos(dto.perfil, dto.permisos);
-    } else {
-      exigirPermisosValidos('administrativo', dto.permisos);
-    }
-
     const cuenta = await this.accounts.findById(id).exec();
     if (!cuenta) {
       throw new NotFoundException(`No se encontró el usuario ${id}`);
@@ -275,10 +305,6 @@ export class UsuariosService {
 
     await cuenta.save();
 
-    if (dto.alcance !== undefined) {
-      await this.actualizarAsignacionPrimaria(cuenta._id, dto);
-    }
-
     await this.auditoria.registrar({
       actorAccountId: actor.accountId,
       actorNombre: actor.nombre,
@@ -292,87 +318,27 @@ export class UsuariosService {
   }
 
   /**
-   * Replaces the primary assignment with one matching the new scope/target, or
-   * updates permissions in place when the target did not change.
-   *
-   * The old grant is deactivated, never deleted, when the target changes —
-   * Asignacion carries the same audit law as everywhere else: "who could
-   * touch this building last March" has to stay answerable.
+   * EVERY row of each account, active and inactive, of any profile, keyed by
+   * account id and oldest first (ties by id): the whole of `asignaciones`.
    */
-  private async actualizarAsignacionPrimaria(
-    accountId: Types.ObjectId,
-    dto: ActualizarUsuarioDto,
-  ): Promise<void> {
-    const actual = await this.asignaciones
-      .findOne({ accountId, estado: 'active' })
-      .sort({ createdAt: -1 })
-      .exec();
-
-    const mismoObjetivo =
-      actual != null &&
-      actual.alcance === dto.alcance &&
-      (dto.alcance === 'copropiedad'
-        ? actual.copropiedadId?.toString() === dto.copropiedadId
-        : actual.entidadId?.toString() === dto.entidadId);
-
-    // The profile that will apply, and the permissions it will hold: checked
-    // against the ceiling before anything is written.
-    const perfil: PerfilAsignacion =
-      dto.perfil ?? actual?.perfil ?? 'administrativo';
-    exigirPermisosValidos(
-      perfil,
-      dto.permisos ?? (mismoObjetivo ? actual.permisos : []),
-    );
-
-    if (mismoObjetivo) {
-      // Same target: changing what someone may do there is not the same
-      // event as changing WHERE they may do it, and does not need a new row.
-      actual.permisos = dto.permisos ?? actual.permisos;
-      actual.perfil = perfil;
-      await actual.save();
-      return;
-    }
-
-    if (actual) {
-      actual.estado = 'inactive';
-      await actual.save();
-    }
-
-    await this.asignaciones.create({
-      accountId,
-      alcance: dto.alcance,
-      copropiedadId:
-        dto.alcance === 'copropiedad' && dto.copropiedadId
-          ? new Types.ObjectId(dto.copropiedadId)
-          : null,
-      entidadId:
-        dto.alcance === 'entidad' && dto.entidadId
-          ? new Types.ObjectId(dto.entidadId)
-          : null,
-      permisos: dto.permisos ?? [],
-      perfil,
-      estado: 'active',
-    });
-  }
-
-  /** The most recent active assignment for each account, keyed by account id. */
-  private async asignacionesPrimariasDe(
+  private async filasDe(
     accountIds: Types.ObjectId[],
-  ): Promise<Map<string, AsignacionDocument>> {
+  ): Promise<Map<string, AsignacionDocument[]>> {
     if (accountIds.length === 0) return new Map();
 
     const filas = await this.asignaciones
-      .find({ accountId: { $in: accountIds }, estado: 'active' })
+      .find({ accountId: { $in: accountIds } })
       .populate('copropiedadId', 'nombre')
       .populate('entidadId', 'nombre')
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1, _id: 1 })
       .exec();
 
-    const porCuenta = new Map<string, AsignacionDocument>();
+    const porCuenta = new Map<string, AsignacionDocument[]>();
     for (const fila of filas) {
       const clave = fila.accountId.toString();
-      // Sorted newest-first: the first one seen per account is the primary.
-      if (!porCuenta.has(clave)) porCuenta.set(clave, fila);
+      const lista = porCuenta.get(clave);
+      if (lista) lista.push(fila);
+      else porCuenta.set(clave, [fila]);
     }
     return porCuenta;
   }

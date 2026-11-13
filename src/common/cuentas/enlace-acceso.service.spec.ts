@@ -218,6 +218,38 @@ describe('EnlaceAccesoService — alcance entre copropiedades', () => {
     expect(auth.createCustomToken).not.toHaveBeenCalled();
   });
 
+  it('un enlace enviado cuando solo tenía tareas.ver deja de servir al recibir facturas.ver en B (S-K1.4)', async () => {
+    const { servicio, crearEnlace, accesoService, auth, enlaces } = crear({
+      acceso: acceso(['tareas.ver']),
+    });
+
+    // 1. The email goes out: Administración keys only, a link is issued.
+    const url = await servicio.construir(
+      CUENTA_ID.toString(),
+      COPROPIEDAD_ID.toString(),
+      '/tareas',
+    );
+    expect(url).toEqual(expect.stringContaining('/auth/enlace?token='));
+    const [guardado] = crearEnlace.mock.calls[0] as [Record<string, unknown>];
+
+    // 2. Afterwards a Finanzas key is granted in ANOTHER building. The profile
+    //    no longer hides it: the read side lists it for a `personal` member.
+    accesoService.copropiedadesDe.mockResolvedValue([
+      acceso(['tareas.ver']),
+      acceso(['facturas.ver'], OTRA),
+    ]);
+    enlaces.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue({
+        accountId: CUENTA_ID,
+        copropiedadId: COPROPIEDAD_ID,
+        destino: guardado.destino,
+      }),
+    });
+
+    await expect(servicio.canjear('abc')).resolves.toBeNull();
+    expect(auth.createCustomToken).not.toHaveBeenCalled();
+  });
+
   it('no emite enlace a una cuenta con una asignación administrativa en cualquier lugar', async () => {
     const { servicio, crearEnlace, asignaciones } = crear({
       acceso: acceso(['tareas.ver']),

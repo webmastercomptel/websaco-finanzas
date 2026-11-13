@@ -4,17 +4,19 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
-  IsMongoId,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import {
-  PERFILES_ASIGNACION,
-  type PerfilAsignacion,
-} from '../../casl/permisos-catalogo';
+
+/**
+ * 24 hex characters and nothing else. `@IsMongoId` also accepts a `0x` prefix
+ * plus 22 hex characters, which `new Types.ObjectId` then refuses with a 500.
+ */
+const ID_HEX = /^[0-9a-fA-F]{24}$/;
 
 /**
  * Creating a user provisions BOTH a Firebase sign-in identity and the local
@@ -28,6 +30,10 @@ import {
  * somewhere: "created with no assignment" is indistinguishable from "created
  * and then forgotten," and the form should not allow shipping that by
  * accident.
+ *
+ * There is no `perfil`: this screen only ever writes `administrativo` rows (the
+ * `personal` ones belong to Equipo), so a body carrying it answers 400 through
+ * the global whitelist.
  */
 export class CrearUsuarioDto {
   @IsString()
@@ -53,30 +59,31 @@ export class CrearUsuarioDto {
   alcance?: 'copropiedad' | 'entidad';
 
   @ValidateIf((o: CrearUsuarioDto) => o.alcance === 'copropiedad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'copropiedadId no es un identificador válido' })
   copropiedadId?: string;
 
   @ValidateIf((o: CrearUsuarioDto) => o.alcance === 'entidad')
-  @IsMongoId()
+  @Matches(ID_HEX, { message: 'entidadId no es un identificador válido' })
   entidadId?: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   permisos?: string[];
-  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
-  @IsIn(PERFILES_ASIGNACION)
-  perfil?: PerfilAsignacion;
 }
 
 /**
- * Editing a user. Every field optional except that a scope, once given,
- * still needs its target — the same reasoning as creation.
+ * Editing a user's ACCOUNT, nothing else. The assignments are managed one row
+ * at a time through `POST /usuarios/:id/asignaciones` and
+ * `PATCH /usuarios/:id/asignaciones/:asignacionId`, so `alcance`, the target
+ * ids, `permisos` and `perfil` are not accepted here (the global whitelist
+ * answers 400): a save of the account can never replace, move or retire a row.
  *
  * `estado` here is the only way a user account is retired: `inactivo` mirrors
  * to Firebase as `disabled: true` (see UsuariosService.update), an immediate
  * lockout, never a deletion — the same audit law as everywhere else applies
- * to identities too.
+ * to identities too. It acts on the identity, not on the rows, which keep their
+ * own `estado`.
  *
  * `nuevaPassword` is a distinct, optional action bundled into the same PATCH
  * for convenience: a platform administrator resetting a forgotten password on
@@ -93,26 +100,6 @@ export class ActualizarUsuarioDto {
   @IsOptional()
   @IsBoolean()
   esAdministradorPlataforma?: boolean;
-
-  @IsOptional()
-  @IsIn(['copropiedad', 'entidad'])
-  alcance?: 'copropiedad' | 'entidad';
-
-  @ValidateIf((o: ActualizarUsuarioDto) => o.alcance === 'copropiedad')
-  @IsMongoId()
-  copropiedadId?: string;
-
-  @ValidateIf((o: ActualizarUsuarioDto) => o.alcance === 'entidad')
-  @IsMongoId()
-  entidadId?: string;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  permisos?: string[];
-  /** `personal` (operational staff) can never hold Finanzas permissions. */ @IsOptional()
-  @IsIn(PERFILES_ASIGNACION)
-  perfil?: PerfilAsignacion;
 
   @IsOptional()
   @IsIn(['activo', 'inactivo'])

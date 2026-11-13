@@ -8,6 +8,7 @@ import {
 import { Public } from '../casl/check-ability.decorator';
 import { RedisHealthIndicator } from './redis.health';
 import { CorreoHealthIndicator } from './correo.health';
+import { FrontendUrlHealthIndicator } from './frontend-url.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 
 @Controller('health')
@@ -19,6 +20,7 @@ export class HealthController {
     private redis: RedisHealthIndicator,
     private integracionComptable: IntegracionComptableHealthIndicator,
     private correo: CorreoHealthIndicator,
+    private frontendUrl: FrontendUrlHealthIndicator,
   ) {}
 
   /**
@@ -56,6 +58,7 @@ export class HealthController {
       () => this.redis.pingCheck('redis'),
       () => this.integracionComptable.check('integracion-comptable'),
       () => this.correo.check('correo'),
+      () => this.frontendUrl.check('frontend-url'),
     ]);
   }
 

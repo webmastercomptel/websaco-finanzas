@@ -19,11 +19,7 @@ import {
 } from '../casl/check-ability.decorator';
 import { CaslAbilityFactory } from '../casl/casl-ability.factory';
 import { rulesFromPermissionKeys } from '../casl/permission-map';
-import {
-  PERMISOS_ADMINISTRACION,
-  sinPermisosVetados,
-  type PerfilAsignacion,
-} from '../casl/permisos-catalogo';
+import { PERMISOS_ADMINISTRACION } from '../casl/permisos-catalogo';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { FacturacionBloqueController } from './facturacion-bloque.controller';
 
@@ -122,25 +118,32 @@ describe('FacturacionBloqueController — política de acceso', () => {
   });
 });
 
-describe('FacturacionBloqueController — techo de Finanzas (perfil personal)', () => {
+describe('FacturacionBloqueController — acceso por claves de Finanzas', () => {
   const guard = new PoliciesGuard(new Reflector(), new CaslAbilityFactory());
   const rutas = Object.getOwnPropertyNames(prototipo).filter(
     (n) => n !== 'constructor',
   ) as Array<keyof FacturacionBloqueController>;
 
-  /** Runs the real guard as it runs per request, after the ceiling trimmed the keys. */
+  /**
+   * Runs the real guard as it runs per request. The keys are the plain keys
+   * the caller holds: there is no profile ceiling any more, so a `personal`
+   * member holding the invoice keys is exactly as entitled as anybody else.
+   */
   const pasa = (
     handler: keyof FacturacionBloqueController,
-    perfil: PerfilAsignacion,
     claves: string[],
+    modulos: Array<'finanzas' | 'administracion'> = [
+      'finanzas',
+      'administracion',
+    ],
   ): boolean => {
     const user: IRequestUser = {
       uid: 'u',
       email: 'a@b.co',
       accountId: 'cuenta-1',
       copropiedadId: 'c1',
-      modulos: ['finanzas', 'administracion'],
-      permissions: sinPermisosVetados(perfil, claves),
+      modulos,
+      permissions: claves,
     };
     const contexto = {
       getHandler: () => prototipo[handler],
@@ -158,29 +161,34 @@ describe('FacturacionBloqueController — techo de Finanzas (perfil personal)', 
   const todasLasDeAdministracion = PERMISOS_ADMINISTRACION.map((p) => p.id);
 
   it.each(rutas)(
-    'personal con TODAS las claves de Administración recibe 403 en %s',
+    'quien solo tiene claves de Administración (cualquier perfil) recibe 403 en %s',
     (ruta) => {
-      expect(pasa(ruta, 'personal', todasLasDeAdministracion)).toBe(false);
+      expect(pasa(ruta, todasLasDeAdministracion)).toBe(false);
     },
   );
 
   it.each(rutas)(
-    'personal con claves de facturas (recortadas por el techo) recibe 403 en %s',
+    'quien tiene facturas.crear y facturas.aprobar entra a %s, sea del personal o administrativo',
     (ruta) => {
-      expect(
-        pasa(ruta, 'personal', ['facturas.crear', 'facturas.aprobar']),
-      ).toBe(false);
+      expect(pasa(ruta, ['facturas.crear', 'facturas.aprobar'])).toBe(true);
     },
   );
 
-  it.each(rutas)(
-    'administrativo con facturas.crear y facturas.aprobar entra a %s',
-    (ruta) => {
-      expect(
-        pasa(ruta, 'administrativo', ['facturas.crear', 'facturas.aprobar']),
-      ).toBe(true);
-    },
-  );
+  it('crear alcanza para listar, ver, subir y descargar; enviar y borrar piden aprobar', () => {
+    for (const ruta of ['listar', 'crear', 'detalle', 'descargar'] as const) {
+      expect(pasa(ruta, ['facturas.crear'])).toBe(true);
+    }
+    for (const ruta of ['enviar', 'eliminar'] as const) {
+      expect(pasa(ruta, ['facturas.crear'])).toBe(false);
+      expect(pasa(ruta, ['facturas.aprobar'])).toBe(true);
+    }
+  });
+
+  it('sin la licencia de Administración la ruta responde 403 aunque tenga las claves', () => {
+    expect(
+      pasa('listar', ['facturas.crear', 'facturas.aprobar'], ['finanzas']),
+    ).toBe(false);
+  });
 });
 
 describe('FacturacionBloqueController — delegación', () => {

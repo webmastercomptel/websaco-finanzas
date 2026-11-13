@@ -82,8 +82,13 @@ export class LoteRecibosController {
     return { ok: true };
   }
 
+  /**
+   * Applying a batch creates the real Recibos, so it is a release decision like
+   * `facturas.aprobar`: `approve` (`recibos.aprobar`), not the `create` that
+   * loading the batch needs.
+   */
   @Post(':id/aplicar')
-  @CheckAbility({ action: 'manage', subject: 'Recibo' })
+  @CheckAbility({ action: 'approve', subject: 'Recibo' })
   aplicar(
     @CurrentUser() user: IRequestUser,
     @Param('id') id: string,
