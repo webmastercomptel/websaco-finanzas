@@ -3700,6 +3700,59 @@ export interface AprovisionamientoResidentes {
   correoConfigurado: boolean;
 }
 
+/**
+ * Where one ADDRESS of a resident stands in the portal (the new Residentes
+ * list, one row per party and address). Precedence: `revocado` (an active
+ * revocation of the address in this coproperty) > `ingreso` (the Account of
+ * that address proved it) > `heredado` (a legacy `Tercero.accountId` link whose
+ * account has that address) > `sin-ingreso`.
+ */
+export type EstadoResidenteCorreo =
+  'sin-ingreso' | 'ingreso' | 'revocado' | 'heredado';
+
+/**
+ * Why a row asks staff to fix the record. `correo-con-espacios`: the stored
+ * value has padding and matches nothing until its party is saved again.
+ * `correo-compartido`: the address is on more party records than a person
+ * reasonably has, so it derives no residency (a shared inbox).
+ */
+export type MotivoCorreccionResidente =
+  'correo-con-espacios' | 'correo-compartido';
+
+/**
+ * One address of one owner or tenant of the active coproperty
+ * (`GET /residentes/correos`). The address is shown to staff only; `clave` is
+ * its identity in every action. The Account id never leaves.
+ */
+export interface ResidenteCorreo {
+  terceroId: string;
+  nombre: string;
+  correo: string;
+  /** `claveCorreo(correo)`: what the resend, revoke and re-allow name. */
+  clave: string;
+  unidades: UnidadDeResidente[];
+  estado: EstadoResidenteCorreo;
+  /** Last portal entry (ISO), when the Account of that address proved it; else null. */
+  ultimoIngresoEn: string | null;
+  requiereCorreccion: boolean;
+  motivoCorreccion: MotivoCorreccionResidente | null;
+}
+
+/**
+ * Response of `POST /residentes/correos/reenviar`. `enviado: false` carries the
+ * reason; any other refusal (revoked, not eligible) is a 409 with its sentence.
+ */
+export interface ResultadoReenvioEnlace {
+  enviado: boolean;
+  motivo?: 'sin-correo-configurado' | 'limite';
+}
+
+/** Response of `POST /residentes/correos/revocar` and `/permitir`. */
+export interface ResultadoAccionResidenteCorreo {
+  terceroId: string;
+  clave: string;
+}
+
 /* ── Envío de facturas a propietarios y arrendatarios ─────────────── */
 
 /** Pipeline state of an invoice that was marked for sending (`generado` = no row). */
