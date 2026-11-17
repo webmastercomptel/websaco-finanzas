@@ -1,3 +1,4 @@
+import { Types } from 'mongoose';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ActualizarPqrDto } from './actualizar-pqr.dto';
@@ -5,6 +6,7 @@ import { CrearAdjuntoPqrDto } from './guardar-adjunto.dto';
 import { CerrarPqrDto } from './cerrar-pqr.dto';
 import { ClasificarPqrDto } from './clasificar-pqr.dto';
 import { CrearPqrDto } from './guardar-pqr.dto';
+import { CrearTareaPqrDto } from './guardar-tarea-pqr.dto';
 import { CrearPqrPortalDto } from './guardar-pqr-portal.dto';
 import { CrearSeguimientoDto } from './guardar-seguimiento.dto';
 import { ListarPqrDto } from './listar-pqr.dto';
@@ -260,5 +262,56 @@ describe('CrearAdjuntoPqrDto — tipos permitidos', () => {
         tamanoBytes: 10,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('CrearTareaPqrDto', () => {
+  const valida = {
+    titulo: 'Revisar',
+    asignadosIds: [new Types.ObjectId().toString()],
+  };
+
+  it('acepta el mínimo', async () => {
+    expect(await invalidas(CrearTareaPqrDto, valida)).toEqual([]);
+  });
+
+  it('rechaza asignadosIds vacío con el mensaje en español', async () => {
+    const errores = await validate(
+      plainToInstance(CrearTareaPqrDto, { ...valida, asignadosIds: [] }),
+    );
+    expect(errores[0].constraints?.arrayMinSize).toBe(
+      'Elige al menos un colaborador.',
+    );
+  });
+
+  it('rechaza colaboradores repetidos con el mensaje en español', async () => {
+    const id = new Types.ObjectId().toString();
+    const errores = await validate(
+      plainToInstance(CrearTareaPqrDto, { ...valida, asignadosIds: [id, id] }),
+    );
+    expect(errores[0].constraints?.arrayUnique).toBe(
+      'Hay colaboradores repetidos.',
+    );
+  });
+
+  it('rechaza asignadosIds ausente con el mensaje en español', async () => {
+    const errores = await validate(
+      plainToInstance(CrearTareaPqrDto, { titulo: 'Revisar' }),
+    );
+    expect(errores[0].constraints?.isArray).toBe(
+      'Elige al menos un colaborador.',
+    );
+  });
+
+  it.each([
+    { titulo: '' },
+    { titulo: 'x'.repeat(201) },
+    { descripcion: 'x'.repeat(5001) },
+    { categoria: 'otra' },
+    { asignadosIds: ['no-id'] },
+    { fechaLimite: 'mañana' },
+  ])('rechaza %j', async (cambio) => {
+    const malas = await invalidas(CrearTareaPqrDto, { ...valida, ...cambio });
+    expect(malas.length).toBeGreaterThan(0);
   });
 });

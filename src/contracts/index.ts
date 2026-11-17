@@ -3017,6 +3017,18 @@ export interface Tarea {
   fechaLimite?: string;
   historial?: TareaActividad[];
   observaciones?: TareaObservacion[];
+  /** The PQRS it was created from, or null for a free-standing task. */
+  pqr: { id: string; codigo: string } | null;
+}
+
+/** A task linked to a PQRS, as the PQRS detail lists it. */
+export interface TareaDePqr {
+  id: string;
+  titulo: string;
+  estado: 'pendiente' | 'en_progreso' | 'completado';
+  /** Assignee names. */
+  asignados: string[];
+  fechaLimite: string | null;
 }
 
 /** A maintenance job of the active coproperty (list row and detail). */

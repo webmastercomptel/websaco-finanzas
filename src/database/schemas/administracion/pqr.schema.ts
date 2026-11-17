@@ -68,6 +68,10 @@ export const TIPOS_EVENTO_PQR = [
   'respuesta',
   'cerrada',
   'migrada',
+  'tarea_creada',
+  'tarea_completada',
+  'tarea_eliminada',
+  'aviso_tecnico',
 ] as const;
 export type TipoEventoPqr = (typeof TIPOS_EVENTO_PQR)[number];
 

@@ -17,7 +17,16 @@ import {
   Copropiedad,
   type CopropiedadDocument,
 } from '../../database/schemas/copropiedades/copropiedad.schema';
-import type { Tarea as TareaContrato, TareaAsignable } from '../../contracts';
+import type {
+  Tarea as TareaContrato,
+  TareaAsignable,
+  TareaDePqr,
+} from '../../contracts';
+import {
+  Pqr,
+  type PqrDocument,
+} from '../../database/schemas/administracion/pqr.schema';
+import { evento } from '../pqr/pqr-etapas';
 import { iniciales } from '../../common/utils/mapper.utils';
 import { CorreoService } from '../../common/correo/correo.service';
 import { EnlaceAccesoService } from '../../common/cuentas/enlace-acceso.service';
@@ -67,6 +76,8 @@ export class TareasService {
     private readonly tareas: Model<TareaDocument>,
     @InjectModel(Copropiedad.name)
     private readonly copropiedades: Model<CopropiedadDocument>,
+    @InjectModel(Pqr.name)
+    private readonly pqrs: Model<PqrDocument>,
     private readonly tenant: TenantContextService,
     private readonly directorio: DirectorioService,
     private readonly correo: CorreoService,
@@ -242,6 +253,68 @@ export class TareasService {
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }
 
+  /**
+   * Tasks linked to a PQRS of the active coproperty, oldest first, for the
+   * PQRS detail. Only names leave, never account ids.
+   */
+  async listarDePqr(pqrId: Types.ObjectId): Promise<TareaDePqr[]> {
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const documentos = await this.tareas
+      .find({ copropiedadId, pqrId })
+      .populate({ path: 'asignadosIds', select: 'nombreCompleto' })
+      .sort({ createdAt: 1 })
+      .exec();
+    return documentos.map((doc) => {
+      const t = toTarea(doc);
+      return {
+        id: t.id,
+        titulo: t.titulo,
+        estado: t.estado,
+        asignados: t.asignados.map((a) => a.nombre),
+        fechaLimite: t.fechaLimite ?? null,
+      };
+    });
+  }
+
+  /**
+   * Logs on the linked PQRS that its task was completed or deleted. Best
+   * effort: a failure is logged (ids only) and never fails or undoes the
+   * task write.
+   */
+  private async registrarEnPqr(
+    tarea: Pick<TareaDocument, '_id' | 'titulo' | 'pqrId' | 'copropiedadId'>,
+    tipo: 'tarea_completada' | 'tarea_eliminada',
+    user: IRequestUser,
+  ): Promise<void> {
+    if (!tarea.pqrId) return;
+    const nombre = user.nombre || 'Usuario';
+    const accion = tipo === 'tarea_completada' ? 'completada' : 'eliminada';
+    try {
+      await this.pqrs.updateOne(
+        { _id: tarea.pqrId, copropiedadId: tarea.copropiedadId },
+        {
+          $push: {
+            bitacora: evento(
+              tipo,
+              `Tarea «${tarea.titulo}» ${accion} por ${nombre}`,
+              {
+                nombre,
+                accountId:
+                  user.accountId && Types.ObjectId.isValid(user.accountId)
+                    ? user.accountId
+                    : null,
+              },
+            ),
+          },
+        },
+      );
+    } catch {
+      this.logger.error(
+        `pqr.bitacora_fallo tarea=${tarea._id.toString()} pqr=${tarea.pqrId.toString()} tipo=${tipo}`,
+      );
+    }
+  }
+
   /** A malformed id can never match: answer 404 instead of a cast error (500). */
   private validarId(id: string): void {
     if (!Types.ObjectId.isValid(id)) {
@@ -250,7 +323,11 @@ export class TareasService {
   }
 
   /** Creates a task in the active coproperty and returns the contract. */
-  async crear(dto: CrearTareaDto, user: IRequestUser): Promise<TareaContrato> {
+  async crear(
+    dto: CrearTareaDto,
+    user: IRequestUser,
+    vinculo?: { pqrId: Types.ObjectId; pqrCodigo: string },
+  ): Promise<TareaContrato> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const actor = user.nombre || 'Usuario';
 
@@ -269,6 +346,9 @@ export class TareasService {
 
     const creada = await new this.tareas({
       ...desdeCrearDto(dto, copropiedadId),
+      ...(vinculo
+        ? { pqrId: vinculo.pqrId, pqrCodigo: vinculo.pqrCodigo }
+        : {}),
       historial,
     }).save();
 
@@ -401,6 +481,10 @@ export class TareasService {
     // Deleted between the read and the write.
     if (!actualizada) throw new NotFoundException(`Tarea ${id} no encontrada`);
 
+    if (dto.estado === 'completado' && existente.estado !== 'completado') {
+      await this.registrarEnPqr(actualizada, 'tarea_completada', user);
+    }
+
     for (const accountId of agregados) {
       if (accountId !== user.accountId) {
         await this.notificarAsignacion(actualizada, copropiedadId, accountId);
@@ -490,11 +574,18 @@ export class TareasService {
    */
   async completar(id: string, user: IRequestUser): Promise<TareaContrato> {
     const copropiedadId = this.tenant.resolveCoPropertyId();
-    const { esGestor } = await this.cargarTareaAutorizada(
+    const { tarea, esGestor } = await this.cargarTareaAutorizada(
       id,
       copropiedadId,
       user,
     );
+
+    // Already completed (double click, retry): nothing changes, so neither the
+    // task history nor the PQRS log gets a second line.
+    if (tarea.estado === 'completado') {
+      const yaPoblada = await this.cargarPoblada(tarea._id, copropiedadId);
+      return toTarea(yaPoblada ?? tarea);
+    }
 
     const actualizada = await this.tareas
       .findOneAndUpdate(
@@ -520,6 +611,8 @@ export class TareasService {
         'No tenés permiso para completar esta tarea',
       );
     }
+
+    await this.registrarEnPqr(actualizada, 'tarea_completada', user);
 
     const poblada = await this.cargarPoblada(actualizada._id, copropiedadId);
     return toTarea(poblada ?? actualizada);
@@ -582,13 +675,14 @@ export class TareasService {
   }
 
   /** Deletes a task of the active coproperty; 404 when there is none. */
-  async eliminar(id: string): Promise<{ id: string }> {
+  async eliminar(id: string, user: IRequestUser): Promise<{ id: string }> {
     this.validarId(id);
     const copropiedadId = this.tenant.resolveCoPropertyId();
     const documento = await this.tareas
       .findOneAndDelete({ _id: id, copropiedadId })
       .exec();
     if (!documento) throw new NotFoundException(`Tarea ${id} no encontrada`);
+    await this.registrarEnPqr(documento, 'tarea_eliminada', user);
     return { id };
   }
 }

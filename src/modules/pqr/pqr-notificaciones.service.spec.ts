@@ -480,3 +480,52 @@ describe('PqrNotificacionesService: acuse, órgano y cierre', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('PqrNotificacionesService.notificarTecnico', () => {
+  it('sin correo: deja el evento y no envía', async () => {
+    const { servicio, correo } = montar();
+
+    const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+      nombre: 'Pedro',
+      email: '',
+    });
+
+    expect(correo.enviar).not.toHaveBeenCalled();
+    expect(e.tipo).toBe('aviso_tecnico');
+    expect(e.detalle).toBe('El técnico Pedro no tiene correo registrado');
+  });
+
+  it('con correo y envío correcto: Correo enviado al técnico', async () => {
+    const { servicio, correo } = montar();
+
+    const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+      nombre: 'Pedro',
+      email: 'pedro@example.com',
+    });
+
+    expect(correo.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        para: 'pedro@example.com',
+        asunto: 'Se le asignó la PQRS PQR-001',
+      }),
+    );
+    expect(e.detalle).toBe('Correo enviado al técnico Pedro');
+    expect(e.detalle).not.toContain('@');
+  });
+
+  it.each([false, 'lanza'])(
+    'si el envío falla (%s): No se pudo enviar y no lanza',
+    async (modo) => {
+      const { servicio, correo } = montar();
+      if (modo === 'lanza') correo.enviar.mockRejectedValue(new Error('x'));
+      else correo.enviar.mockResolvedValue(false);
+
+      const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+        nombre: 'Pedro',
+        email: 'pedro@example.com',
+      });
+
+      expect(e.detalle).toBe('No se pudo enviar el correo al técnico Pedro');
+    },
+  );
+});

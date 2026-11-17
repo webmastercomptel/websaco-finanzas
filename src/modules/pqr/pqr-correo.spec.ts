@@ -4,6 +4,7 @@ import {
   construirCorreoPqrNueva,
   construirCorreoPqrOrgano,
   construirCorreoPqrRespuesta,
+  construirCorreoPqrTecnico,
 } from './pqr-correo';
 
 const nueva = {
@@ -172,5 +173,35 @@ describe('correos del flujo en etapas', () => {
     expect(sin.html).not.toContain('<i>ya</i>');
     expect(sin.html).not.toContain('https://app.example.com/x');
     expect(con.html).toContain('https://app.example.com/x');
+  });
+});
+
+describe('construirCorreoPqrTecnico', () => {
+  const base = {
+    nombreTecnico: 'Pedro <b>Plomero</b>',
+    nombreCopropiedad: 'Torres del Parque',
+    codigo: 'PQR-0042',
+    tipo: 'Queja',
+    titulo: 'Fuga <script>',
+    descripcion: 'Gotea\nmucho <i>x</i>',
+    unidad: 'A-101',
+    fechaLimite: '30/11/2026',
+  };
+
+  it('lleva el asunto exacto, sin enlace y con todo escapado', () => {
+    const { asunto, html } = construirCorreoPqrTecnico(base);
+
+    expect(asunto).toBe('Se le asignó la PQRS PQR-0042');
+    expect(html).toContain('30/11/2026');
+    expect(html).not.toContain('<b>Plomero</b>');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<i>x</i>');
+    expect(html).not.toContain('href="http');
+  });
+
+  it('la fila Fecha límite solo aparece si hay fecha', () => {
+    const sin = construirCorreoPqrTecnico({ ...base, fechaLimite: '' });
+
+    expect(sin.html).not.toContain('Fecha límite');
   });
 });

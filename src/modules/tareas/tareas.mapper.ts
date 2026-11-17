@@ -57,6 +57,9 @@ export const toTarea = (doc: TareaDocument): Tarea => ({
     autorId: observacion.autorId.toString(),
     fecha: toIso(observacion.fecha) ?? '',
   })),
+  pqr: doc.pqrId
+    ? { id: doc.pqrId.toString(), codigo: doc.pqrCodigo ?? '' }
+    : null,
 });
 
 /** The writable fields of a task, in persistence shape (ids and dates already converted). */

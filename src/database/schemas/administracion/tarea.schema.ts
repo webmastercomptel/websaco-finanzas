@@ -107,6 +107,14 @@ export class Tarea {
   @Prop({ required: true, default: 0 })
   orden: number;
 
+  /** The PQRS this task was created from; null for a free-standing task. */
+  @Prop({ type: Types.ObjectId, ref: 'Pqr', default: null })
+  pqrId: Types.ObjectId | null;
+
+  /** The PQRS radicado, frozen at creation so the card reads the same later. */
+  @Prop({ type: String, default: null })
+  pqrCodigo: string | null;
+
   @Prop({ type: [HistorialTarea], default: [] })
   historial: HistorialTarea[];
 
@@ -119,3 +127,4 @@ TareaSchema.index({ copropiedadId: 1, estado: 1, orden: 1 });
 TareaSchema.index({ copropiedadId: 1, fechaLimite: 1 });
 // "My tasks" for a non-manager: the filter is on the array field.
 TareaSchema.index({ asignadosIds: 1 });
+TareaSchema.index({ copropiedadId: 1, pqrId: 1 });

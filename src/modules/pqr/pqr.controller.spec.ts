@@ -42,6 +42,8 @@ describe('PqrController — política de acceso', () => {
     ['iniciarAdjunto', 'manage'],
     ['confirmarAdjunto', 'manage'],
     ['descargarAdjunto', 'read'],
+    ['listarTareas', 'read'],
+    ['crearTarea', 'manage'],
   ] as const)('%s exige la acción %s sobre Pqr', (handler, action) => {
     expect(reglasDe(handler)).toEqual([{ action, subject: 'Pqr' }]);
   });
@@ -81,7 +83,12 @@ describe('PqrController — el PoliciesGuard real sobre las rutas reales', () =>
     } as unknown as ExecutionContext;
   };
 
-  const lecturas = ['listar', 'obtener', 'descargarAdjunto'] as const;
+  const lecturas = [
+    'listar',
+    'obtener',
+    'descargarAdjunto',
+    'listarTareas',
+  ] as const;
   const escrituras = [
     'crear',
     'actualizar',
@@ -90,6 +97,7 @@ describe('PqrController — el PoliciesGuard real sobre las rutas reales', () =>
     'responder',
     'iniciarAdjunto',
     'confirmarAdjunto',
+    'crearTarea',
   ] as const;
 
   it.each(lecturas)('pqr.ver permite %s', (handler) => {
@@ -144,6 +152,8 @@ describe('PqrController — delegación', () => {
       clasificar: jest.fn().mockResolvedValue({ id: 'p1' }),
       cerrar: jest.fn().mockResolvedValue({ id: 'p1' }),
       responder: jest.fn().mockResolvedValue({ id: 'p1' }),
+      crearTarea: jest.fn().mockResolvedValue({ id: 't1' }),
+      listarTareas: jest.fn().mockResolvedValue([]),
     };
     const adjuntos = {
       iniciarSubida: jest.fn().mockResolvedValue({}),
@@ -186,6 +196,17 @@ describe('PqrController — delegación', () => {
       user,
     );
     expect(pqr.responder).toHaveBeenCalledWith('p1', { mensaje: 'Hola' }, user);
+  });
+
+  it('delega las rutas de tareas con id, cuerpo y usuario', async () => {
+    const { pqr, controlador } = montar();
+    const cuerpo = { titulo: 'T', asignadosIds: ['a1'] };
+
+    await controlador.crearTarea('p1', cuerpo, user);
+    await controlador.listarTareas('p1');
+
+    expect(pqr.crearTarea).toHaveBeenCalledWith('p1', cuerpo, user);
+    expect(pqr.listarTareas).toHaveBeenCalledWith('p1');
   });
 
   it('delega clasificar y cerrar con id, cuerpo y usuario', async () => {

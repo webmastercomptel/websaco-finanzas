@@ -27,8 +27,19 @@ import {
   construirCorreoPqrNueva,
   construirCorreoPqrOrgano,
   construirCorreoPqrRespuesta,
+  construirCorreoPqrTecnico,
 } from './pqr-correo';
 import { evento } from './pqr-etapas';
+
+/** Type labels as they read in the technician's e-mail. */
+const ETIQUETA_TIPO: Record<string, string> = {
+  peticiones: 'Petición',
+  quejas: 'Queja',
+  reclamos: 'Reclamo',
+  sugerencias: 'Sugerencia',
+  felicitaciones: 'Felicitación',
+  denuncias: 'Denuncia',
+};
 
 /** The UTC date of a business date stored at midnight, `d/M/yyyy`. */
 const fechaUtc = (fecha: Date): string =>
@@ -430,6 +441,58 @@ export class PqrNotificacionesService {
           `No hay integrantes con correo en el ${etiqueta}`,
           sistema,
         );
+  }
+
+  /**
+   * Tells a technician a PQRS was assigned to them. Returns the log entry to
+   * push; never throws and never names the address (the entry and the logs
+   * carry the technician's name only).
+   */
+  async notificarTecnico(
+    pqr: PqrDocument,
+    copropiedadId: Types.ObjectId,
+    tecnico: { nombre: string; email: string },
+  ): Promise<EventoPqr> {
+    const sistema = { nombre: 'Sistema' };
+    const para = tecnico.email?.trim() ?? '';
+    if (!para) {
+      return evento(
+        'aviso_tecnico',
+        `El técnico ${tecnico.nombre} no tiene correo registrado`,
+        sistema,
+      );
+    }
+    let enviado = false;
+    try {
+      const nombreCopropiedad = await this.nombreDeCopropiedad(copropiedadId);
+      const { asunto, html } = construirCorreoPqrTecnico({
+        nombreTecnico: tecnico.nombre,
+        nombreCopropiedad,
+        codigo: pqr.codigo,
+        tipo: ETIQUETA_TIPO[pqr.tipo] ?? pqr.tipo,
+        titulo: pqr.titulo,
+        descripcion: pqr.descripcion || pqr.descripcionCompleta,
+        unidad: pqr.unidad,
+        fechaLimite: pqr.fechaLimite ? fechaUtc(pqr.fechaLimite) : '',
+      });
+      enviado = await this.correo.enviar({
+        para,
+        asunto,
+        html,
+        sinRegistrarDestinatario: true,
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `No se pudo avisar al técnico de la PQR ${pqr.codigo}: ${(error as Error).name}`,
+      );
+    }
+    return evento(
+      'aviso_tecnico',
+      enviado
+        ? `Correo enviado al técnico ${tecnico.nombre}`
+        : `No se pudo enviar el correo al técnico ${tecnico.nombre}`,
+      sistema,
+    );
   }
 
   /** Final answer to whoever the PQRS is about; the PQRS is closed. Never throws. */

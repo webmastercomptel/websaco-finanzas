@@ -195,3 +195,54 @@ export const construirCorreoPqrCierre = (
       : undefined,
   }),
 });
+
+/** What the «you were assigned this PQRS» email to a technician says. */
+export interface DatosCorreoPqrTecnico {
+  nombreTecnico: string;
+  nombreCopropiedad: string;
+  codigo: string;
+  /** Display label of the type, e.g. «Queja». */
+  tipo: string;
+  titulo: string;
+  descripcion: string;
+  unidad: string;
+  /** Already formatted `d/M/yyyy`; empty when the PQRS has no deadline. */
+  fechaLimite: string;
+}
+
+/**
+ * Subject and HTML of the email that tells a technician a PQRS was assigned to
+ * them. Plain on purpose: no link or button, since an external technician has
+ * no account. Every user-typed string is escaped here.
+ */
+export const construirCorreoPqrTecnico = (
+  datos: DatosCorreoPqrTecnico,
+): { asunto: string; html: string } => {
+  const filas = [
+    ['Tipo', escapeHtml(datos.tipo)],
+    ['Código', escapeHtml(datos.codigo)],
+    ...(datos.unidad ? [['Inmueble', escapeHtml(datos.unidad)]] : []),
+    ...(datos.fechaLimite
+      ? [['Fecha límite', escapeHtml(datos.fechaLimite)]]
+      : []),
+    ['Descripción', renderTexto(datos.descripcion)],
+  ];
+  return {
+    asunto: `Se le asignó la PQRS ${datos.codigo}`,
+    html: renderPlantillaCorreo({
+      heading: escapeHtml(datos.titulo),
+      bodyHtml: `
+      <p style="margin: 0 0 20px;">
+        ${escapeHtml(datos.nombreTecnico)}, se le asignó una PQRS en <strong>${escapeHtml(datos.nombreCopropiedad)}</strong>:
+      </p>
+      ${renderCajaDetalle(
+        filas
+          .map(([etiqueta, valor], i) =>
+            renderFilaDetalle(etiqueta, valor, i === filas.length - 1),
+          )
+          .join(''),
+      )}
+    `,
+    }),
+  };
+};

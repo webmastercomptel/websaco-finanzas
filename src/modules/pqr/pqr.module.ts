@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { OrganosModule } from '../organos/organos.module';
+import { TareasModule } from '../tareas/tareas.module';
 import { PortalAccesoService } from '../portal/portal-acceso.service';
 import { PqrAdjuntosHuerfanosService } from './pqr-adjuntos-huerfanos.service';
 import { PqrAdjuntosService } from './pqr-adjuntos.service';
@@ -21,7 +22,7 @@ import { PqrService } from './pqr.service';
  * the single one.
  */
 @Module({
-  imports: [NotificacionesModule, OrganosModule],
+  imports: [NotificacionesModule, OrganosModule, TareasModule],
   controllers: [PqrController, PqrPortalController],
   providers: [
     PqrService,

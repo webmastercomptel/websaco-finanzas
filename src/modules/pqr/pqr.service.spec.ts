@@ -116,6 +116,18 @@ function montar(unidades: UnidadPortal[] = [unidad('A-101')]) {
     notificarAcuse: jest.fn().mockResolvedValue({ tipo: 'acuse_enviado' }),
     avisarOrgano: jest.fn().mockResolvedValue({ tipo: 'aviso_organo' }),
     notificarCierre: jest.fn().mockResolvedValue(undefined),
+    notificarTecnico: jest.fn().mockResolvedValue({ tipo: 'aviso_tecnico' }),
+  };
+  const tareas = {
+    crear: jest.fn().mockResolvedValue({
+      id: 't1',
+      titulo: 'Revisar tubería',
+      asignados: [
+        { accountId: 'a1', nombre: 'Luis' },
+        { accountId: 'a2', nombre: 'Marta' },
+      ],
+    }),
+    listarDePqr: jest.fn().mockResolvedValue([]),
   };
 
   const servicio = new PqrService(
@@ -125,8 +137,10 @@ function montar(unidades: UnidadPortal[] = [unidad('A-101')]) {
     tenant as never,
     portalAcceso as never,
     notificaciones as never,
+    tareas as never,
   );
   return {
+    tareas,
     servicio,
     pqrs,
     tecnicos,
@@ -1062,5 +1076,168 @@ describe('PqrService — residente: solo ve y toca lo suyo', () => {
     ).rejects.toThrow(ForbiddenException);
     expect(pqrs.find).not.toHaveBeenCalled();
     expect(pqrs.findOne).not.toHaveBeenCalled();
+  });
+});
+
+describe('PqrService — técnico: aviso por correo', () => {
+  it('asignar un técnico NUEVO con correo avisa una vez y guarda aviso_tecnico', async () => {
+    const { servicio, pqrs, tecnicos, notificaciones } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_gestion' })));
+    tecnicos.findOne.mockReturnValue(
+      consulta({ _id: TECNICO, nombre: 'Pedro', email: 'pedro@example.com' }),
+    );
+
+    await servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff);
+
+    expect(notificaciones.notificarTecnico).toHaveBeenCalledTimes(1);
+    expect(notificaciones.notificarTecnico).toHaveBeenCalledWith(
+      expect.anything(),
+      COPROPIEDAD,
+      { nombre: 'Pedro', email: 'pedro@example.com' },
+    );
+    expect(actualizacion(pqrs, 1)).toEqual({
+      $push: { bitacora: { tipo: 'aviso_tecnico' } },
+    });
+  });
+
+  it('el mismo técnico guardado otra vez no avisa', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ estado: 'en_gestion', tecnicoId: TECNICO })),
+    );
+
+    await servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff);
+
+    expect(notificaciones.notificarTecnico).not.toHaveBeenCalled();
+  });
+
+  it('si el aviso falla, la asignación igual responde', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_gestion' })));
+    notificaciones.notificarTecnico.mockRejectedValue(new Error('x'));
+
+    await expect(
+      servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('PqrService — tareas de la PQRS', () => {
+  const gestor: IRequestUser = { ...staff, permissions: ['tareas.gestionar'] };
+  const dto = {
+    titulo: 'Revisar tubería',
+    asignadosIds: [new Types.ObjectId().toString()],
+  };
+
+  it('sin tareas.gestionar es 403 con el texto exacto y no crea nada', async () => {
+    const { servicio, tareas } = montar();
+
+    await expect(servicio.crearTarea(ID, dto, staff)).rejects.toThrow(
+      new ForbiddenException('Necesitas el permiso de gestionar tareas.'),
+    );
+    expect(tareas.crear).not.toHaveBeenCalled();
+  });
+
+  it('radicada es 409: se clasifica antes', async () => {
+    const { servicio, pqrs, tareas } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
+
+    await expect(servicio.crearTarea(ID, dto, gestor)).rejects.toThrow(
+      new ConflictException('Clasifica la PQRS antes de crear tareas.'),
+    );
+    expect(tareas.crear).not.toHaveBeenCalled();
+  });
+
+  it('cerrada es 409', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'cerrada' })));
+
+    await expect(servicio.crearTarea(ID, dto, gestor)).rejects.toThrow(
+      new ConflictException('Esta PQRS ya está cerrada.'),
+    );
+  });
+
+  it('de otra copropiedad (o mal formada) es 404', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(null));
+
+    await expect(servicio.crearTarea(ID, dto, gestor)).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(servicio.crearTarea('mal', dto, gestor)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('desde clasificada: crea con el vínculo, pasa a en_gestion y deja dos eventos', async () => {
+    const { servicio, pqrs, tareas } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+
+    const tarea = await servicio.crearTarea(ID, dto, gestor);
+
+    expect(tarea.id).toBe('t1');
+    expect(tareas.crear).toHaveBeenCalledWith(
+      { ...dto, categoria: 'admin' },
+      gestor,
+      { pqrId: PQR, pqrCodigo: 'PQR-001' },
+    );
+    expect(filtroDe(pqrs).estado).toBe('clasificada');
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ estado: 'en_gestion' });
+    expect(cambio.$push.bitacora.$each).toEqual([
+      expect.objectContaining({
+        tipo: 'tarea_creada',
+        detalle: 'Tarea «Revisar tubería» asignada a Luis, Marta',
+      }),
+      expect.objectContaining({ tipo: 'en_gestion' }),
+    ]);
+  });
+
+  it('en gestión: solo deja tarea_creada, sin tocar la etapa', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_gestion' })));
+
+    await servicio.crearTarea(ID, { ...dto, categoria: 'limpieza' }, gestor);
+
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toBeUndefined();
+    expect(cambio.$push.bitacora.$each).toHaveLength(1);
+  });
+
+  it('si la etapa cambió entre medias, reintenta con un $push simple', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(servicio.crearTarea(ID, dto, gestor)).resolves.toBeDefined();
+
+    expect(pqrs.updateOne).toHaveBeenCalledTimes(1);
+    const [filtro, cambio] = pqrs.updateOne.mock.calls[0] as [Cuerpo, Cuerpo];
+    expect(filtro.estado.$in).not.toContain('cerrada');
+    expect(cambio).toEqual({
+      $push: { bitacora: expect.objectContaining({ tipo: 'tarea_creada' }) },
+    });
+  });
+
+  it('si la actualización de la PQRS falla, devuelve la tarea creada', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_gestion' })));
+    pqrs.findOneAndUpdate.mockReturnValue({
+      exec: jest.fn().mockRejectedValue(new Error('transitorio')),
+    });
+
+    await expect(servicio.crearTarea(ID, dto, gestor)).resolves.toEqual(
+      expect.objectContaining({ id: 't1' }),
+    );
+  });
+
+  it('listarTareas: 404 si la PQRS no es de la copropiedad; si no, lista por su id', async () => {
+    const { servicio, pqrs, tareas } = montar();
+    pqrs.findOne.mockReturnValue(consulta(null));
+    await expect(servicio.listarTareas(ID)).rejects.toThrow(NotFoundException);
+
+    pqrs.findOne.mockReturnValue(consulta({ _id: PQR }));
+    await servicio.listarTareas(ID);
+    expect(tareas.listarDePqr).toHaveBeenCalledWith(PQR);
   });
 });

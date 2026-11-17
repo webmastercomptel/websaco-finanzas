@@ -12,7 +12,12 @@ import { siguienteCodigo } from '../../common/consecutivos/codigo-consecutivo';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import { TenantContextService } from '../../common/tenant/tenant-context.service';
 import { diaBogota } from '../../common/utils/dias-habiles';
-import type { Pqr as PqrContrato, PqrPortal } from '../../contracts';
+import type {
+  Pqr as PqrContrato,
+  PqrPortal,
+  Tarea as TareaContrato,
+  TareaDePqr,
+} from '../../contracts';
 import {
   ConsecutivoAdministracion,
   type ConsecutivoAdministracionDocument,
@@ -38,6 +43,7 @@ import type { ActualizarPqrDto } from './dto/actualizar-pqr.dto';
 import type { CerrarPqrDto } from './dto/cerrar-pqr.dto';
 import type { ClasificarPqrDto } from './dto/clasificar-pqr.dto';
 import type { CrearPqrDto } from './dto/guardar-pqr.dto';
+import type { CrearTareaPqrDto } from './dto/guardar-tarea-pqr.dto';
 import type { CrearPqrPortalDto } from './dto/guardar-pqr-portal.dto';
 import type { CrearSeguimientoDto } from './dto/guardar-seguimiento.dto';
 import type { ListarPqrDto } from './dto/listar-pqr.dto';
@@ -56,6 +62,7 @@ import {
   toPqr,
   toPqrPortal,
 } from './pqr.mapper';
+import { TareasService } from '../tareas/tareas.service';
 
 /** How a resident's role on a unit reads on the PQR card. */
 const ROL_VISIBLE = {
@@ -67,6 +74,7 @@ const ROL_VISIBLE = {
 const ABIERTOS_GUARDADOS = VALORES_ABIERTOS as EstadoPqrGuardado[];
 
 const MENSAJE_CERRADA = 'Esta PQRS ya está cerrada.';
+const MENSAJE_SIN_PERMISO_TAREAS = 'Necesitas el permiso de gestionar tareas.';
 const MENSAJE_CAMBIO = 'La PQRS cambió mientras se procesaba.';
 
 /** Type labels as they read in the log. */
@@ -137,6 +145,7 @@ export class PqrService {
     private readonly tenant: TenantContextService,
     private readonly portalAcceso: PortalAccesoService,
     private readonly notificaciones: PqrNotificacionesService,
+    private readonly tareas: TareasService,
   ) {}
 
   /** A malformed id can never match: answer 404 instead of a cast error (500). */
@@ -530,6 +539,7 @@ export class PqrService {
     };
     const cambios: Record<string, unknown> = {};
     const eventos: EventoPqr[] = [];
+    let tecnicoNuevo: { nombre: string; email: string } | null = null;
 
     if (prioridadPedida !== undefined && prioridadPedida !== actual.prioridad) {
       cambios.prioridad = prioridadPedida;
@@ -561,11 +571,12 @@ export class PqrService {
         }
         const tecnico = await this.tecnicos
           .findOne({ _id: dto.tecnicoId, copropiedadId })
-          .select('_id nombre')
+          .select('_id nombre email')
           .exec();
         if (!tecnico) throw new NotFoundException('Técnico no encontrado');
         if (tecnico._id.toString() !== actualId) {
           cambios.tecnicoId = tecnico._id;
+          tecnicoNuevo = { nombre: tecnico.nombre, email: tecnico.email ?? '' };
           eventos.push(
             evento(
               'tecnico_asignado',
@@ -592,7 +603,121 @@ export class PqrService {
       .populate(poblarTecnico(copropiedadId))
       .exec();
     if (!documento) throw new ConflictException(MENSAJE_CAMBIO);
+
+    if (tecnicoNuevo) {
+      try {
+        const aviso = await this.notificaciones.notificarTecnico(
+          documento,
+          copropiedadId,
+          tecnicoNuevo,
+        );
+        const conAviso = await this.pqrs
+          .findOneAndUpdate(
+            filtroPqr(id, copropiedadId),
+            { $push: { bitacora: aviso } },
+            { new: true },
+          )
+          .populate(poblarTecnico(copropiedadId))
+          .exec();
+        return toPqr(conAviso ?? documento);
+      } catch {
+        // Best-effort: the technician is already assigned; never answer 500 here.
+        this.logger.warn(
+          `Aviso al técnico no registrado en ${documento.codigo}: fallo_escritura`,
+        );
+      }
+    }
     return toPqr(documento);
+  }
+
+  /**
+   * Creates a task linked to this PQRS (needs `tareas.gestionar`: the route
+   * itself is judged by `manage Pqr`). The task is the primary write; the PQRS
+   * log entry (and `clasificada` → `en_gestion`) is best-effort, in ONE update
+   * conditional on the stored `estado` that was read, with a plain `$push`
+   * retry if a concurrent writer moved the stage meanwhile.
+   */
+  async crearTarea(
+    id: string,
+    dto: CrearTareaPqrDto,
+    user: IRequestUser,
+  ): Promise<TareaContrato> {
+    if (
+      !user.isPlatformAdmin &&
+      !user.permissions?.includes('tareas.gestionar')
+    ) {
+      throw new ForbiddenException(MENSAJE_SIN_PERMISO_TAREAS);
+    }
+    this.validarId(id);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const actual = await this.leerOFallar(id, copropiedadId);
+    const etapa = estadoActual(actual.estado);
+    if (etapa === 'radicada') {
+      throw new ConflictException('Clasifica la PQRS antes de crear tareas.');
+    }
+    if (etapa === 'cerrada') throw new ConflictException(MENSAJE_CERRADA);
+
+    const tarea = await this.tareas.crear(
+      { ...dto, categoria: dto.categoria ?? 'admin' },
+      user,
+      { pqrId: actual._id, pqrCodigo: actual.codigo },
+    );
+
+    try {
+      const actor = {
+        nombre: user.nombre || 'Usuario',
+        accountId: user.accountId,
+      };
+      const nombres = tarea.asignados.map((a) => a.nombre).join(', ');
+      const eventos: EventoPqr[] = [
+        evento(
+          'tarea_creada',
+          `Tarea «${tarea.titulo}» asignada a ${nombres}`,
+          actor,
+        ),
+      ];
+      const actualizacion: Record<string, unknown> = {};
+      if (etapa === 'clasificada') {
+        eventos.push(evento('en_gestion', 'En gestión', actor));
+        actualizacion.$set = { estado: 'en_gestion' };
+      }
+      actualizacion.$push = { bitacora: { $each: eventos } };
+      const aplicada = await this.pqrs
+        .findOneAndUpdate(
+          { ...filtroPqr(id, copropiedadId), estado: actual.estado },
+          actualizacion,
+        )
+        .exec();
+      if (!aplicada) {
+        await this.pqrs
+          .updateOne(
+            {
+              ...filtroPqr(id, copropiedadId),
+              estado: { $in: ABIERTOS_GUARDADOS },
+            },
+            { $push: { bitacora: eventos[0] } },
+          )
+          .exec();
+      }
+    } catch {
+      // Best-effort: the task exists; never answer 500 over its log entry.
+      this.logger.warn(
+        `Tarea creada sin registrar en la bitácora de ${actual.codigo}: fallo_escritura`,
+      );
+    }
+    return tarea;
+  }
+
+  /** The tasks linked to one PQRS of the tenant; a PQRS of another building is a 404. */
+  async listarTareas(id: string): Promise<TareaDePqr[]> {
+    this.validarId(id);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const pqr = await this.pqrs
+      .findOne(filtroPqr(id, copropiedadId))
+      .select('_id')
+      .exec();
+    if (!pqr) throw new NotFoundException(`PQR ${id} no encontrada`);
+    return this.tareas.listarDePqr(pqr._id);
   }
 
   /** Staff reply on any open PQR of the coproperty. */
