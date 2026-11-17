@@ -1,6 +1,8 @@
 // src/modules/informe-gestion/informe-gestion.resumen.ts
 // Pure functions (no Nest dependencies) shared by the PDF builder and the service.
 
+import { estadoActual } from '../pqr/pqr-etapas';
+
 const DIA_MS = 24 * 60 * 60 * 1000;
 /** Bogotá is UTC-5 all year (no DST): its midnight is 05:00Z. */
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
@@ -128,9 +130,7 @@ export function resumirPqr(filas: FilaPqr[]): {
   return {
     total: filas.length,
     porTipo: contar(filas, (f) => f.tipo),
-    porEstado: contar(filas, (f) => f.estado),
-    abiertas: filas.filter(
-      (f) => f.estado !== 'resuelto' && f.estado !== 'cerrado',
-    ).length,
+    porEstado: contar(filas, (f) => estadoActual(f.estado)),
+    abiertas: filas.filter((f) => estadoActual(f.estado) !== 'cerrada').length,
   };
 }

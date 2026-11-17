@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
+import { OrganosModule } from '../organos/organos.module';
 import { PortalAccesoService } from '../portal/portal-acceso.service';
 import { PqrAdjuntosHuerfanosService } from './pqr-adjuntos-huerfanos.service';
 import { PqrAdjuntosService } from './pqr-adjuntos.service';
-import { PqrCierreAutomaticoService } from './pqr-cierre-automatico.service';
 import { PqrNotificacionesService } from './pqr-notificaciones.service';
 import { PqrPortalController } from './pqr-portal.controller';
 import { PqrController } from './pqr.controller';
@@ -21,14 +21,13 @@ import { PqrService } from './pqr.service';
  * the single one.
  */
 @Module({
-  imports: [NotificacionesModule],
+  imports: [NotificacionesModule, OrganosModule],
   controllers: [PqrController, PqrPortalController],
   providers: [
     PqrService,
     PqrNotificacionesService,
     PqrAdjuntosService,
     PqrAdjuntosHuerfanosService,
-    PqrCierreAutomaticoService,
     PortalAccesoService,
   ],
 })

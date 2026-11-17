@@ -13,7 +13,7 @@ import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
 import type {
   DescargaArchivo,
-  Pqr,
+  PqrPortal,
   PqrAdjuntoSubidaIniciada,
 } from '../../contracts';
 import { Modulo } from '../casl/check-ability.decorator';
@@ -51,7 +51,7 @@ export class PqrPortalController {
   crear(
     @Body() dto: CrearPqrPortalDto,
     @CurrentUser() user: IRequestUser,
-  ): Promise<Pqr> {
+  ): Promise<PqrPortal> {
     return this.pqr.crearComoResidente(dto, user);
   }
 
@@ -59,7 +59,7 @@ export class PqrPortalController {
   listar(
     @Query() filtros: ListarPqrDto,
     @CurrentUser() user: IRequestUser,
-  ): Promise<Pqr[]> {
+  ): Promise<PqrPortal[]> {
     return this.pqr.listarPropias(filtros, user);
   }
 
@@ -67,7 +67,7 @@ export class PqrPortalController {
   obtener(
     @Param('id') id: string,
     @CurrentUser() user: IRequestUser,
-  ): Promise<Pqr> {
+  ): Promise<PqrPortal> {
     return this.pqr.obtenerPropia(id, user);
   }
 
@@ -76,7 +76,7 @@ export class PqrPortalController {
     @Param('id') id: string,
     @Body() dto: CrearSeguimientoDto,
     @CurrentUser() user: IRequestUser,
-  ): Promise<Pqr> {
+  ): Promise<PqrPortal> {
     return this.pqr.responderPropia(id, dto, user);
   }
 
@@ -94,7 +94,7 @@ export class PqrPortalController {
     @Param('id') id: string,
     @Param('attachmentId') attachmentId: string,
     @CurrentUser() user: IRequestUser,
-  ): Promise<Pqr> {
+  ): Promise<PqrPortal> {
     return this.adjuntos.confirmarSubidaResidente(id, attachmentId, user);
   }
 

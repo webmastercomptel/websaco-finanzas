@@ -1,5 +1,8 @@
 import {
+  construirCorreoPqrAcuse,
+  construirCorreoPqrCierre,
   construirCorreoPqrNueva,
+  construirCorreoPqrOrgano,
   construirCorreoPqrRespuesta,
 } from './pqr-correo';
 
@@ -110,5 +113,64 @@ describe('construirCorreoPqrRespuesta', () => {
         enlace: 'https://app.example.com/x',
       }).html,
     ).toContain('Ver la respuesta');
+  });
+});
+
+describe('correos del flujo en etapas', () => {
+  it('el acuse lleva el asunto y la frase de radicado, y escapa el título', () => {
+    const { asunto, html } = construirCorreoPqrAcuse({
+      nombreDestinatario: 'Ana',
+      nombreCopropiedad: 'Torres del Parque',
+      codigo: 'PQR-0042',
+      titulo: '<script>alert(1)</script>',
+      fechaRadicacion: '17/11/2026',
+      enlace: null,
+    });
+
+    expect(asunto).toBe('Recibimos su PQRS · Radicado PQR-0042');
+    expect(html).toContain(
+      'Hemos recibido su PQRS bajo el radicado PQR-0042. En poco tiempo recibirá respuesta.',
+    );
+    expect(html).toContain('17/11/2026');
+    expect(html).not.toContain('<script>');
+  });
+
+  it('el aviso al órgano lleva el asunto y no trae enlace', () => {
+    const { asunto, html } = construirCorreoPqrOrgano({
+      nombreCopropiedad: 'Torres del Parque',
+      organo: 'Comité de Convivencia',
+      codigo: 'PQR-0042',
+      tipo: 'quejas',
+      titulo: '<b>Ruido</b>',
+      descripcion: 'Música alta',
+      unidad: 'A-101',
+      fechaLimite: '30/11/2026',
+    });
+
+    expect(asunto).toBe('PQRS PQR-0042 asignada al Comité de Convivencia');
+    expect(html).toContain('30/11/2026');
+    expect(html).not.toContain('<b>Ruido</b>');
+    expect(html).not.toContain('href="http');
+  });
+
+  it('el cierre lleva el asunto, el mensaje y el botón solo si hay enlace', () => {
+    const base = {
+      nombreDestinatario: 'Ana',
+      nombreCopropiedad: 'Torres del Parque',
+      codigo: 'PQR-0042',
+      titulo: 'Ruido',
+      mensaje: 'Resuelto <i>ya</i>',
+    };
+    const sin = construirCorreoPqrCierre({ ...base, enlace: null });
+    const con = construirCorreoPqrCierre({
+      ...base,
+      enlace: 'https://app.example.com/x',
+    });
+
+    expect(sin.asunto).toBe('Respuesta a su PQRS · Radicado PQR-0042');
+    expect(sin.html).toContain('Su PQRS quedó cerrada.');
+    expect(sin.html).not.toContain('<i>ya</i>');
+    expect(sin.html).not.toContain('https://app.example.com/x');
+    expect(con.html).toContain('https://app.example.com/x');
   });
 });

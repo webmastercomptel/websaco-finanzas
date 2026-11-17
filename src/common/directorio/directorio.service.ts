@@ -28,6 +28,7 @@ import { AccesoService } from '../acceso/acceso.service';
 import { correoProbado } from '../acceso/residencia.reglas';
 import { ResidenciaService } from '../acceso/residencia.service';
 import { claveCorreo, normalizarEmail } from '../utils/email.utils';
+import { escapeRegex } from '../utils/query.utils';
 import { type DestinoCorreo, destinosDeUnidad } from './destinos-correo';
 
 /** `personal` works in the building's back office; `residente` holds a unit. */
@@ -402,6 +403,29 @@ export class DirectorioService {
       );
     }
     return resultado;
+  }
+
+  /**
+   * Id of the ACTIVE unit of the coproperty whose `codigo` equals `codigo`
+   * (trimmed, case-insensitive: a resident or clerk types it by hand). Null for
+   * a blank code or no match. The code is escaped, so it is never a pattern.
+   */
+  async inmuebleIdPorCodigo(
+    copropiedadId: Types.ObjectId,
+    codigo: string,
+  ): Promise<Types.ObjectId | null> {
+    const limpio = codigo.trim();
+    if (!limpio) return null;
+    const unidad = await this.inmuebles
+      .findOne({
+        copropiedadId,
+        codigo: { $regex: `^${escapeRegex(limpio)}$`, $options: 'i' },
+        estado: 'active',
+      })
+      .select('_id')
+      .lean()
+      .exec();
+    return unidad?._id ?? null;
   }
 
   /**

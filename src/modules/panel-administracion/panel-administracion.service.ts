@@ -10,7 +10,7 @@ import {
   AnuncioDocument,
 } from '../../database/schemas/administracion/anuncio.schema';
 import {
-  EstadoPqr,
+  EstadoPqrGuardado,
   Pqr,
   PqrDocument,
 } from '../../database/schemas/administracion/pqr.schema';
@@ -26,6 +26,7 @@ import {
   Asignacion,
   AsignacionDocument,
 } from '../../database/schemas/cuentas/asignacion.schema';
+import { VALORES_ABIERTOS } from '../pqr/pqr-etapas';
 import { FILTRO_PUBLICADOS } from '../anuncios/anuncios.service';
 import { CaslAbilityFactory } from '../casl/casl-ability.factory';
 import {
@@ -39,12 +40,8 @@ import type {
   FilaEstadoReserva,
 } from './panel-administracion.mapper';
 
-/** PQR states that still need an answer; `resuelto` and `cerrado` are done. */
-export const ESTADOS_PQR_ABIERTOS: EstadoPqr[] = [
-  'urgente',
-  'en_revision',
-  'pendiente',
-];
+/** Stored PQR values that still need an answer (every stage but «cerrada»). */
+export const ESTADOS_PQR_ABIERTOS = VALORES_ABIERTOS as EstadoPqrGuardado[];
 
 /** How many announcement teasers the dashboard shows. */
 export const COMUNICACIONES_EN_PANEL = 3;

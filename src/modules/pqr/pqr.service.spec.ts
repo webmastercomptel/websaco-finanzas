@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- the assertions read the untyped payloads recorded by the jest mocks */
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
@@ -29,6 +31,7 @@ type ModeloPqr = jest.Mock & {
   find: jest.Mock;
   findOne: jest.Mock;
   findOneAndUpdate: jest.Mock;
+  updateOne: jest.Mock;
 };
 
 const COPROPIEDAD = new Types.ObjectId();
@@ -91,6 +94,7 @@ function montar(unidades: UnidadPortal[] = [unidad('A-101')]) {
   pqrs.find = jest.fn().mockReturnValue(consulta([pqrDoc()]));
   pqrs.findOne = jest.fn().mockReturnValue(consulta(pqrDoc()));
   pqrs.findOneAndUpdate = jest.fn().mockReturnValue(consulta(pqrDoc()));
+  pqrs.updateOne = jest.fn().mockReturnValue(consulta({ modifiedCount: 1 }));
 
   const tecnicos = {
     findOne: jest.fn().mockReturnValue(consulta({ _id: TECNICO })),
@@ -109,6 +113,9 @@ function montar(unidades: UnidadPortal[] = [unidad('A-101')]) {
   const notificaciones = {
     notificarNueva: jest.fn().mockResolvedValue(undefined),
     notificarRespuesta: jest.fn().mockResolvedValue(undefined),
+    notificarAcuse: jest.fn().mockResolvedValue({ tipo: 'acuse_enviado' }),
+    avisarOrgano: jest.fn().mockResolvedValue({ tipo: 'aviso_organo' }),
+    notificarCierre: jest.fn().mockResolvedValue(undefined),
   };
 
   const servicio = new PqrService(
@@ -172,6 +179,27 @@ describe('PqrService — personal: crear', () => {
     );
   });
 
+  it('guarda en la bitácora el evento del acuse de recibo', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+
+    await servicio.crear(dto, staff);
+
+    expect(notificaciones.notificarAcuse).toHaveBeenCalledTimes(1);
+    expect(pqrs.updateOne).toHaveBeenCalledWith(
+      { _id: PQR, copropiedadId: COPROPIEDAD },
+      { $push: { bitacora: { tipo: 'acuse_enviado' } } },
+    );
+  });
+
+  it('si la escritura del acuse falla, la PQRS se crea igual', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.updateOne.mockReturnValue({
+      exec: jest.fn().mockRejectedValue(new Error('transitorio')),
+    });
+
+    await expect(servicio.crear(dto, staff)).resolves.toBeDefined();
+  });
+
   it('devuelve el contrato (con el nombre del técnico poblado dentro de la copropiedad)', async () => {
     const { servicio, pqrs } = montar();
 
@@ -208,11 +236,49 @@ describe('PqrService — personal: listar y obtener', () => {
     expect(pqrs.find).toHaveBeenNthCalledWith(1, {
       copropiedadId: COPROPIEDAD,
       tipo: 'quejas',
-      estado: 'resuelto',
+      estado: { $in: ['cerrada', 'resuelto', 'cerrado'] },
     });
     expect(pqrs.find).toHaveBeenNthCalledWith(2, {
       copropiedadId: COPROPIEDAD,
     });
+  });
+
+  it('el filtro de etapa abarca los valores heredados', async () => {
+    const { servicio, pqrs } = montar();
+
+    await servicio.listar({ estado: 'cerrada' });
+    await servicio.listar({ estado: 'radicada' });
+
+    expect(pqrs.find).toHaveBeenNthCalledWith(1, {
+      copropiedadId: COPROPIEDAD,
+      estado: { $in: ['cerrada', 'resuelto', 'cerrado'] },
+    });
+    expect(pqrs.find).toHaveBeenNthCalledWith(2, {
+      copropiedadId: COPROPIEDAD,
+      estado: { $in: ['radicada', 'pendiente'] },
+    });
+  });
+
+  it('vencidas: abiertas con límite anterior a hoy en Bogotá (medianoche UTC)', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-03-10T03:00:00Z'));
+    try {
+      const { servicio, pqrs } = montar();
+
+      await servicio.listar({ vencidas: true });
+
+      // 03:00Z is still 9/3 22:00 in Bogotá.
+      const filtro = pqrs.find.mock.calls[0][0] as Record<string, any>;
+      expect(filtro.fechaLimite).toEqual({
+        $lt: new Date('2026-03-09T00:00:00.000Z'),
+      });
+      expect(filtro.estado.$in).toEqual(
+        expect.arrayContaining(['radicada', 'clasificada', 'en_gestion']),
+      );
+      expect(filtro.estado.$in).not.toContain('cerrada');
+      expect(filtro.estado.$in).not.toContain('resuelto');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('obtiene por id Y copropiedad', async () => {
@@ -242,151 +308,493 @@ describe('PqrService — personal: listar y obtener', () => {
   });
 });
 
-describe('PqrService — personal: actualizar', () => {
-  it('escribe solo lo enviado, de forma atómica y por id Y copropiedad', async () => {
+const ID = PQR.toString();
+
+type Cuerpo = Record<string, any>;
+
+/** The update document of the Nth `findOneAndUpdate` call. */
+const actualizacion = (m: ModeloPqr, n = 0): Cuerpo =>
+  m.findOneAndUpdate.mock.calls[n][1] as Cuerpo;
+
+/** The filter of the Nth `findOneAndUpdate` call. */
+const filtroDe = (m: ModeloPqr, n = 0): Cuerpo =>
+  m.findOneAndUpdate.mock.calls[n][0] as Cuerpo;
+
+describe('PqrService — personal: clasificar', () => {
+  const dto = {
+    tipo: 'reclamos' as const,
+    responsable: 'administracion' as const,
+    fechaLimite: '2026-02-10',
+  };
+
+  it('una radicada pasa a clasificada: el filtro lleva el estado leído y se empuja el evento', async () => {
     const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
 
-    await servicio.actualizar(PQR.toString(), { estado: 'resuelto' });
+    await servicio.clasificar(ID, dto, staff);
 
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PQR.toString(), copropiedadId: COPROPIEDAD },
-      { $set: { estado: 'resuelto' } },
-      { new: true },
-    );
-  });
-
-  it('normaliza la prioridad heredada urgente a alta', async () => {
-    const { servicio, pqrs } = montar();
-
-    await servicio.actualizar(PQR.toString(), { prioridad: 'urgente' });
-
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      { $set: { prioridad: 'alta' } },
-      expect.anything(),
-    );
-  });
-
-  it('solo asigna un técnico de la copropiedad activa', async () => {
-    const { servicio, pqrs, tecnicos } = montar();
-
-    await servicio.actualizar(PQR.toString(), {
-      tecnicoId: TECNICO.toString(),
+    expect(filtroDe(pqrs)).toEqual({
+      _id: ID,
+      copropiedadId: COPROPIEDAD,
+      estado: 'radicada',
     });
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual(
+      expect.objectContaining({
+        estado: 'clasificada',
+        tipo: 'reclamos',
+        responsable: 'administracion',
+        fechaLimite: new Date('2026-02-10T00:00:00.000Z'),
+        clasificadaEn: expect.any(Date) as Date,
+      }),
+    );
+    expect(cambio.$push.bitacora).toEqual(
+      expect.objectContaining({
+        tipo: 'clasificada',
+        actor: 'Ana Admin',
+        detalle:
+          'Clasificada: Reclamo · Responsable: Administración · Límite: 10/2/2026',
+      }),
+    );
+  });
+
+  it('si cambia el tipo el detalle muestra la flecha', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
+
+    await servicio.clasificar(ID, { ...dto, tipo: 'quejas' }, staff);
+
+    expect(actualizacion(pqrs).$push.bitacora.detalle).toBe(
+      'Clasificada: Reclamo → Queja · Responsable: Administración · Límite: 10/2/2026',
+    );
+  });
+
+  it('una pendiente heredada se convierte al clasificar (filtro con el valor guardado)', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'pendiente' })));
+
+    await servicio.clasificar(ID, dto, staff);
+
+    expect(filtroDe(pqrs).estado).toBe('pendiente');
+    expect(actualizacion(pqrs).$set.estado).toBe('clasificada');
+  });
+
+  it('reclasificar una en gestión no retrocede la etapa ni reescribe clasificadaEn', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(
+      consulta(
+        pqrDoc({
+          estado: 'urgente',
+          clasificadaEn: new Date('2026-01-05T00:00:00Z'),
+        }),
+      ),
+    );
+
+    await servicio.clasificar(ID, dto, staff);
+
+    expect(actualizacion(pqrs).$set.estado).toBe('en_gestion');
+    expect(actualizacion(pqrs).$set).not.toHaveProperty('clasificadaEn');
+  });
+
+  it('asignar al comité avisa una vez; repetir el mismo cuerpo no vuelve a avisar', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    const comite = { ...dto, responsable: 'comite_convivencia' as const };
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
+
+    await servicio.clasificar(ID, comite, staff);
+
+    expect(notificaciones.avisarOrgano).toHaveBeenCalledTimes(1);
+    expect(notificaciones.avisarOrgano).toHaveBeenCalledWith(
+      expect.anything(),
+      COPROPIEDAD,
+      'comite_convivencia',
+    );
+    expect(pqrs.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(actualizacion(pqrs, 1)).toEqual({
+      $push: { bitacora: { tipo: 'aviso_organo' } },
+    });
+
+    notificaciones.avisarOrgano.mockClear();
+    pqrs.findOne.mockReturnValue(
+      consulta(
+        pqrDoc({ estado: 'clasificada', responsable: 'comite_convivencia' }),
+      ),
+    );
+    await servicio.clasificar(ID, comite, staff);
+    expect(notificaciones.avisarOrgano).not.toHaveBeenCalled();
+  });
+
+  it('si el registro del aviso al órgano falla, la clasificación se devuelve igual', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    const comite = { ...dto, responsable: 'comite_convivencia' as const };
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
+    notificaciones.avisarOrgano.mockRejectedValueOnce(new Error('transitorio'));
+
+    await expect(servicio.clasificar(ID, comite, staff)).resolves.toBeDefined();
+  });
+
+  it('la administración como responsable no avisa a ningún órgano', async () => {
+    const { servicio, notificaciones } = montar();
+
+    await servicio.clasificar(ID, dto, staff);
+
+    expect(notificaciones.avisarOrgano).not.toHaveBeenCalled();
+  });
+
+  it('una fecha límite el día anterior a la radicación es 400', async () => {
+    const { servicio, pqrs } = montar();
+    // Filed 2026-01-01T00:00Z = 31/12 19:00 in Bogotá, so the filing day is 31/12.
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ createdAt: new Date('2026-01-01T15:00:00Z') })),
+    );
+
+    await expect(
+      servicio.clasificar(ID, { ...dto, fechaLimite: '2025-12-31' }, staff),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'La fecha límite no puede ser anterior a la fecha de radicación.',
+      ),
+    );
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('el mismo día de radicación (en Bogotá) es válido', async () => {
+    const { servicio } = montar();
+
+    await expect(
+      servicio.clasificar(ID, { ...dto, fechaLimite: '2025-12-31' }, staff),
+    ).resolves.toBeDefined();
+  });
+
+  it('una cerrada es 409 y no se escribe nada', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'resuelto' })));
+
+    await expect(servicio.clasificar(ID, dto, staff)).rejects.toThrow(
+      new ConflictException('Esta PQRS ya está cerrada.'),
+    );
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('si cambió mientras se procesaba (el filtro ya no coincide) es 409', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(servicio.clasificar(ID, dto, staff)).rejects.toThrow(
+      new ConflictException('La PQRS cambió mientras se procesaba.'),
+    );
+  });
+
+  it('404 con id mal formado o de otra copropiedad', async () => {
+    const { servicio, pqrs } = montar();
+
+    await expect(servicio.clasificar('mal', dto, staff)).rejects.toThrow(
+      NotFoundException,
+    );
+    pqrs.findOne.mockReturnValue(consulta(null));
+    await expect(servicio.clasificar(ID, dto, staff)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+});
+
+describe('PqrService — personal: cerrar', () => {
+  it('cierra con una sola actualización condicionada a que esté abierta', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+
+    await servicio.cerrar(ID, { mensaje: 'Resuelto' }, staff);
+
+    expect(filtroDe(pqrs)).toEqual({
+      _id: ID,
+      copropiedadId: COPROPIEDAD,
+      estado: { $in: expect.arrayContaining(['radicada', 'pendiente']) },
+    });
+    expect(filtroDe(pqrs).estado.$in).not.toContain('cerrada');
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({
+      estado: 'cerrada',
+      cerradaEn: expect.any(Date) as Date,
+      cerradaPor: 'Ana Admin',
+    });
+    expect(cambio.$push.seguimientos).toEqual(
+      expect.objectContaining({ autor: 'Ana Admin', mensaje: 'Resuelto' }),
+    );
+    expect(cambio.$push.bitacora).toEqual(
+      expect.objectContaining({
+        tipo: 'cerrada',
+        detalle: 'Respondida y cerrada por Ana Admin',
+      }),
+    );
+    expect(notificaciones.notificarCierre).toHaveBeenCalledWith(
+      expect.anything(),
+      COPROPIEDAD,
+      'Resuelto',
+    );
+  });
+
+  it('cerrar dos veces: la segunda es 409 y el correo sale una sola vez', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+
+    await servicio.cerrar(ID, { mensaje: 'Listo' }, staff);
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+    await expect(
+      servicio.cerrar(ID, { mensaje: 'Listo' }, staff),
+    ).rejects.toThrow(new ConflictException('Esta PQRS ya está cerrada.'));
+
+    expect(notificaciones.notificarCierre).toHaveBeenCalledTimes(1);
+  });
+
+  it('si no existe en la copropiedad es 404', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+    pqrs.findOne.mockReturnValue(consulta(null));
+
+    await expect(servicio.cerrar(ID, { mensaje: 'x' }, staff)).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(
+      servicio.cerrar('mal', { mensaje: 'x' }, staff),
+    ).rejects.toThrow(NotFoundException);
+    expect(notificaciones.notificarCierre).not.toHaveBeenCalled();
+  });
+});
+
+describe('PqrService — personal: actualizar (PATCH heredado)', () => {
+  it.each(['resuelto', 'cerrado', 'cerrada'] as const)(
+    'estado %s es 400: se cierra con «Responder y cerrar»',
+    async (estado) => {
+      const { servicio, pqrs } = montar();
+
+      await expect(servicio.actualizar(ID, { estado }, staff)).rejects.toThrow(
+        new BadRequestException(
+          'Usa «Responder y cerrar» para cerrar la PQRS.',
+        ),
+      );
+      expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('estado urgente se convierte en prioridad alta sin cambiar la etapa', async () => {
+    const { servicio, pqrs } = montar();
+
+    await servicio.actualizar(ID, { estado: 'urgente' }, staff);
+
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ prioridad: 'alta' });
+    expect(cambio.$push.bitacora.$each).toEqual([
+      expect.objectContaining({ tipo: 'prioridad' }),
+    ]);
+  });
+
+  it('cualquier otro estado se ignora: no escribe', async () => {
+    const { servicio, pqrs } = montar();
+
+    const contrato = await servicio.actualizar(
+      ID,
+      { estado: 'en_revision' },
+      staff,
+    );
+
+    expect(contrato.id).toBe(ID);
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('normaliza la prioridad heredada urgente a alta y registra el cambio', async () => {
+    const { servicio, pqrs } = montar();
+
+    await servicio.actualizar(ID, { prioridad: 'urgente' }, staff);
+
+    expect(actualizacion(pqrs).$set).toEqual({ prioridad: 'alta' });
+  });
+
+  it('una prioridad igual a la guardada no escribe', async () => {
+    const { servicio, pqrs } = montar();
+
+    await servicio.actualizar(ID, { prioridad: 'normal' }, staff);
+
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('un técnico en una radicada es 409', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'radicada' })));
+
+    await expect(
+      servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff),
+    ).rejects.toThrow(
+      new ConflictException('Clasifica la PQRS antes de asignar un técnico.'),
+    );
+  });
+
+  it('un técnico en una cerrada es 409', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'cerrada' })));
+
+    await expect(
+      servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff),
+    ).rejects.toThrow(new ConflictException('Esta PQRS ya está cerrada.'));
+  });
+
+  it('asignar un técnico a una clasificada la pasa a en gestión con dos eventos', async () => {
+    const { servicio, pqrs, tecnicos } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+    tecnicos.findOne.mockReturnValue(
+      consulta({ _id: TECNICO, nombre: 'Pedro Plomero' }),
+    );
+
+    await servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff);
 
     expect(tecnicos.findOne).toHaveBeenCalledWith({
       _id: TECNICO.toString(),
       copropiedadId: COPROPIEDAD,
     });
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      { $set: { tecnicoId: TECNICO } },
-      expect.anything(),
+    expect(filtroDe(pqrs).estado).toBe('clasificada');
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ tecnicoId: TECNICO, estado: 'en_gestion' });
+    expect(cambio.$push.bitacora.$each).toEqual([
+      expect.objectContaining({
+        tipo: 'tecnico_asignado',
+        detalle: 'Técnico asignado: Pedro Plomero',
+      }),
+      expect.objectContaining({ tipo: 'en_gestion' }),
+    ]);
+  });
+
+  it('en gestión: asignar un técnico no toca la etapa', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_gestion' })));
+
+    await servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff);
+
+    expect(actualizacion(pqrs).$set).toEqual({ tecnicoId: TECNICO });
+  });
+
+  it('el mismo técnico ya asignado no escribe', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ estado: 'en_gestion', tecnicoId: TECNICO })),
     );
+
+    await servicio.actualizar(ID, { tecnicoId: TECNICO.toString() }, staff);
+
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('un técnico de otro edificio (o inexistente) es 404 y no se escribe nada', async () => {
     const { servicio, pqrs, tecnicos } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
     tecnicos.findOne.mockReturnValue(consulta(null));
 
     await expect(
-      servicio.actualizar(PQR.toString(), {
-        tecnicoId: new Types.ObjectId().toString(),
-      }),
+      servicio.actualizar(
+        ID,
+        { tecnicoId: new Types.ObjectId().toString() },
+        staff,
+      ),
     ).rejects.toThrow(NotFoundException);
     expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it('un tecnicoId mal formado es 404 sin consultar técnicos', async () => {
-    const { servicio, tecnicos } = montar();
+    const { servicio, pqrs, tecnicos } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
 
     await expect(
-      servicio.actualizar(PQR.toString(), { tecnicoId: 'xyz' }),
+      servicio.actualizar(ID, { tecnicoId: 'xyz' }, staff),
     ).rejects.toThrow(NotFoundException);
     expect(tecnicos.findOne).not.toHaveBeenCalled();
   });
 
-  it('tecnicoId null desasigna', async () => {
+  it('tecnicoId null retira al técnico y lo registra', async () => {
     const { servicio, pqrs } = montar();
-
-    await servicio.actualizar(PQR.toString(), { tecnicoId: null });
-
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      { $set: { tecnicoId: null } },
-      expect.anything(),
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ estado: 'en_gestion', tecnicoId: TECNICO })),
     );
+
+    await servicio.actualizar(ID, { tecnicoId: null }, staff);
+
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ tecnicoId: null });
+    expect(cambio.$push.bitacora.$each).toEqual([
+      expect.objectContaining({ tipo: 'tecnico_retirado' }),
+    ]);
   });
 
-  it('un cuerpo vacío no escribe: solo devuelve la PQR', async () => {
+  it('un cuerpo vacío no escribe: solo devuelve la PQRS', async () => {
     const { servicio, pqrs } = montar();
 
-    const contrato = await servicio.actualizar(PQR.toString(), {});
+    const contrato = await servicio.actualizar(ID, {}, staff);
 
-    expect(contrato.id).toBe(PQR.toString());
+    expect(contrato.id).toBe(ID);
     expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it('404 si la PQR no existe en la copropiedad, y con id mal formado sin tocar la base', async () => {
+  it('si cambió mientras se procesaba es 409', async () => {
     const { servicio, pqrs } = montar();
     pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
 
     await expect(
-      servicio.actualizar(PQR.toString(), { estado: 'resuelto' }),
-    ).rejects.toThrow(NotFoundException);
-    pqrs.findOneAndUpdate.mockClear();
+      servicio.actualizar(ID, { prioridad: 'alta' }, staff),
+    ).rejects.toThrow(
+      new ConflictException('La PQRS cambió mientras se procesaba.'),
+    );
+  });
+
+  it('404 si no existe en la copropiedad, y con id mal formado sin tocar la base', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(null));
+
     await expect(
-      servicio.actualizar('mal', { estado: 'resuelto' }),
+      servicio.actualizar(ID, { prioridad: 'alta' }, staff),
     ).rejects.toThrow(NotFoundException);
-    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+    pqrs.findOne.mockClear();
+    await expect(
+      servicio.actualizar('mal', { prioridad: 'alta' }, staff),
+    ).rejects.toThrow(NotFoundException);
+    expect(pqrs.findOne).not.toHaveBeenCalled();
   });
 });
 
 describe('PqrService — personal: responder', () => {
-  it('agrega el seguimiento con un solo $push, firmado con el nombre de la cuenta', async () => {
+  it('agrega el seguimiento y el evento respuesta en un solo $push, solo si está abierta', async () => {
     const { servicio, pqrs } = montar();
 
-    await servicio.responder(PQR.toString(), { mensaje: 'Ya vamos' }, staff);
+    await servicio.responder(ID, { mensaje: 'Ya vamos' }, staff);
 
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PQR.toString(), copropiedadId: COPROPIEDAD },
-      {
-        $push: {
-          seguimientos: {
-            autor: 'Ana Admin',
-            mensaje: 'Ya vamos',
-            fecha: expect.any(Date) as Date,
-          },
-        },
+    expect(filtroDe(pqrs)).toEqual({
+      _id: ID,
+      copropiedadId: COPROPIEDAD,
+      estado: { $in: expect.arrayContaining(['radicada']) },
+    });
+    expect(actualizacion(pqrs).$push).toEqual({
+      seguimientos: {
+        autor: 'Ana Admin',
+        mensaje: 'Ya vamos',
+        fecha: expect.any(Date) as Date,
       },
-      { new: true },
-    );
+      bitacora: expect.objectContaining({
+        tipo: 'respuesta',
+        detalle: 'Respuesta de Ana Admin',
+      }),
+    });
   });
 
   it('sin nombre en la cuenta firma como Usuario', async () => {
     const { servicio, pqrs } = montar();
 
     await servicio.responder(
-      PQR.toString(),
+      ID,
       { mensaje: 'x' },
       { ...staff, nombre: undefined },
     );
 
-    expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-      {
-        $push: {
-          seguimientos: expect.objectContaining({ autor: 'Usuario' }) as object,
-        },
-      },
-      expect.anything(),
-    );
+    expect(actualizacion(pqrs).$push.seguimientos.autor).toBe('Usuario');
   });
 
   it('avisa a la autora indicando quién escribió', async () => {
     const { servicio, notificaciones } = montar();
 
-    await servicio.responder(PQR.toString(), { mensaje: 'Ya vamos' }, staff);
+    await servicio.responder(ID, { mensaje: 'Ya vamos' }, staff);
 
     expect(notificaciones.notificarRespuesta).toHaveBeenCalledWith(
       expect.objectContaining({ codigo: 'PQR-001' }),
@@ -396,14 +804,24 @@ describe('PqrService — personal: responder', () => {
     );
   });
 
-  it('404 si la PQR no existe en la copropiedad: no avisa a nadie', async () => {
+  it('responder una cerrada es 409 y no avisa a nadie', async () => {
     const { servicio, pqrs, notificaciones } = montar();
     pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
 
     await expect(
-      servicio.responder(PQR.toString(), { mensaje: 'x' }, staff),
-    ).rejects.toThrow(NotFoundException);
+      servicio.responder(ID, { mensaje: 'x' }, staff),
+    ).rejects.toThrow(new ConflictException('Esta PQRS ya está cerrada.'));
     expect(notificaciones.notificarRespuesta).not.toHaveBeenCalled();
+  });
+
+  it('404 si la PQRS no existe en la copropiedad', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+    pqrs.findOne.mockReturnValue(consulta(null));
+
+    await expect(
+      servicio.responder(ID, { mensaje: 'x' }, staff),
+    ).rejects.toThrow(NotFoundException);
   });
 });
 
@@ -442,7 +860,7 @@ describe('PqrService — residente: crearComoResidente', () => {
         codigo: 'PQR-001',
         copropiedadId: COPROPIEDAD,
         autorId: CUENTA,
-        estado: 'pendiente',
+        estado: 'radicada',
         unidad: 'B-2',
         residente: { nombre: 'Juan Pérez', rol: 'Arrendatario' },
       }),
@@ -555,7 +973,12 @@ describe('PqrService — residente: solo ve y toca lo suyo', () => {
     );
 
     expect(pqrs.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PQR.toString(), copropiedadId: COPROPIEDAD, autorId: CUENTA },
+      {
+        _id: PQR.toString(),
+        copropiedadId: COPROPIEDAD,
+        autorId: CUENTA,
+        estado: { $in: expect.arrayContaining(['radicada']) as string[] },
+      },
       {
         $push: {
           seguimientos: {
@@ -569,9 +992,54 @@ describe('PqrService — residente: solo ve y toca lo suyo', () => {
     );
   });
 
+  it('responder en una PQR propia ya cerrada es 409', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(
+      servicio.responderPropia(PQR.toString(), { mensaje: 'x' }, residente),
+    ).rejects.toThrow(new ConflictException('Esta PQRS ya está cerrada.'));
+  });
+
+  it('el residente nunca recibe el manejo interno (bitácora, responsable, plazos)', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.find.mockReturnValue(consulta([pqrDoc()]));
+
+    const [una] = await servicio.listarPropias({}, residente);
+    const otra = await servicio.obtenerPropia(PQR.toString(), residente);
+    const creada = await servicio.crearComoResidente(
+      { titulo: 'T', descripcion: 'D', tipo: 'quejas' },
+      residente,
+    );
+
+    for (const vista of [una, otra, creada]) {
+      for (const clave of [
+        'bitacora',
+        'responsable',
+        'fechaLimite',
+        'fechaLimiteSugerida',
+        'vencida',
+      ]) {
+        expect(vista).not.toHaveProperty(clave);
+      }
+    }
+  });
+
+  it('vencidas no aplica a las del residente (no ve plazos)', async () => {
+    const { servicio, pqrs } = montar();
+
+    await servicio.listarPropias({ vencidas: true }, residente);
+
+    expect(pqrs.find).toHaveBeenCalledWith({
+      copropiedadId: COPROPIEDAD,
+      autorId: CUENTA,
+    });
+  });
+
   it('responder en una PQR ajena es 404 y no avisa a nadie', async () => {
     const { servicio, pqrs, notificaciones } = montar();
     pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+    pqrs.findOne.mockReturnValue(consulta(null));
 
     await expect(
       servicio.responderPropia(PQR.toString(), { mensaje: 'x' }, residente),

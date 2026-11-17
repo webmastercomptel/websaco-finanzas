@@ -1,5 +1,9 @@
 import 'reflect-metadata';
-import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import {
+  GUARDS_METADATA,
+  HTTP_CODE_METADATA,
+  PATH_METADATA,
+} from '@nestjs/common/constants';
 import { ForbiddenException, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { IRequestUser } from '../../common/interfaces/request-user.interface';
@@ -32,6 +36,8 @@ describe('PqrController — política de acceso', () => {
     ['obtener', 'read'],
     ['crear', 'manage'],
     ['actualizar', 'manage'],
+    ['clasificar', 'manage'],
+    ['cerrar', 'manage'],
     ['responder', 'manage'],
     ['iniciarAdjunto', 'manage'],
     ['confirmarAdjunto', 'manage'],
@@ -79,6 +85,8 @@ describe('PqrController — el PoliciesGuard real sobre las rutas reales', () =>
   const escrituras = [
     'crear',
     'actualizar',
+    'clasificar',
+    'cerrar',
     'responder',
     'iniciarAdjunto',
     'confirmarAdjunto',
@@ -133,6 +141,8 @@ describe('PqrController — delegación', () => {
       obtener: jest.fn().mockResolvedValue({ id: 'p1' }),
       crear: jest.fn().mockResolvedValue({ id: 'p1' }),
       actualizar: jest.fn().mockResolvedValue({ id: 'p1' }),
+      clasificar: jest.fn().mockResolvedValue({ id: 'p1' }),
+      cerrar: jest.fn().mockResolvedValue({ id: 'p1' }),
       responder: jest.fn().mockResolvedValue({ id: 'p1' }),
     };
     const adjuntos = {
@@ -163,15 +173,46 @@ describe('PqrController — delegación', () => {
       { titulo: 'T', descripcion: 'D', tipo: 'quejas' },
       user,
     );
-    await controlador.actualizar('p1', { estado: 'resuelto' });
+    await controlador.actualizar('p1', { prioridad: 'alta' }, user);
     await controlador.responder('p1', { mensaje: 'Hola' }, user);
 
     expect(pqr.crear).toHaveBeenCalledWith(
       { titulo: 'T', descripcion: 'D', tipo: 'quejas' },
       user,
     );
-    expect(pqr.actualizar).toHaveBeenCalledWith('p1', { estado: 'resuelto' });
+    expect(pqr.actualizar).toHaveBeenCalledWith(
+      'p1',
+      { prioridad: 'alta' },
+      user,
+    );
     expect(pqr.responder).toHaveBeenCalledWith('p1', { mensaje: 'Hola' }, user);
+  });
+
+  it('delega clasificar y cerrar con id, cuerpo y usuario', async () => {
+    const { pqr, controlador } = montar();
+    const clasificar = {
+      tipo: 'quejas' as const,
+      responsable: 'consejo' as const,
+      fechaLimite: '2026-02-10',
+    };
+
+    await controlador.clasificar('p1', clasificar, user);
+    await controlador.cerrar('p1', { mensaje: 'Listo' }, user);
+
+    expect(pqr.clasificar).toHaveBeenCalledWith('p1', clasificar, user);
+    expect(pqr.cerrar).toHaveBeenCalledWith('p1', { mensaje: 'Listo' }, user);
+  });
+
+  it('clasificar y cerrar son POST que responden 200', () => {
+    for (const [handler, ruta] of [
+      ['clasificar', ':id/clasificar'],
+      ['cerrar', ':id/cerrar'],
+    ] as const) {
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const fn = PqrController.prototype[handler];
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, fn)).toBe(200);
+      expect(Reflect.getMetadata(PATH_METADATA, fn)).toBe(ruta);
+    }
   });
 
   it('delega los dos pasos del adjunto', async () => {

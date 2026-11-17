@@ -20,26 +20,56 @@ export const TIPOS_PQR = [
 export type TipoPqr = (typeof TIPOS_PQR)[number];
 
 /**
- * `urgente` is a STATUS here (the board's red column), not a priority.
- * `cerrado` is terminal and only the nightly sweep produces it: a person can
- * move a PQR up to `resuelto`, never straight to `cerrado`.
+ * The four stages of a PQR. Persisted values equal the contract values.
  */
 export const ESTADOS_PQR = [
+  'radicada',
+  'clasificada',
+  'en_gestion',
+  'cerrada',
+] as const;
+export type EstadoPqr = (typeof ESTADOS_PQR)[number];
+
+/**
+ * Stored values of the old five-state model. They stay valid in the schema
+ * until the data conversion runs; `pqr-etapas.ts` maps them to a stage.
+ */
+export const ESTADOS_PQR_LEGADOS = [
   'urgente',
   'en_revision',
   'pendiente',
   'resuelto',
   'cerrado',
 ] as const;
-export type EstadoPqr = (typeof ESTADOS_PQR)[number];
 
-/** The states a person may set; `cerrado` is reserved for the nightly sweep. */
-export const ESTADOS_PQR_ASIGNABLES = [
-  'urgente',
-  'en_revision',
-  'pendiente',
-  'resuelto',
+/** Any value the `estado` column may hold today (stage or legacy). */
+export type EstadoPqrGuardado =
+  EstadoPqr | (typeof ESTADOS_PQR_LEGADOS)[number];
+
+/** Who answers a classified PQR. */
+export const RESPONSABLES_PQR = [
+  'administracion',
+  'consejo',
+  'comite_convivencia',
 ] as const;
+export type ResponsablePqr = (typeof RESPONSABLES_PQR)[number];
+
+/** Kinds of entry in the PQR log (bitácora). */
+export const TIPOS_EVENTO_PQR = [
+  'radicada',
+  'acuse_enviado',
+  'acuse_sin_destinatario',
+  'clasificada',
+  'aviso_organo',
+  'tecnico_asignado',
+  'tecnico_retirado',
+  'prioridad',
+  'en_gestion',
+  'respuesta',
+  'cerrada',
+  'migrada',
+] as const;
+export type TipoEventoPqr = (typeof TIPOS_EVENTO_PQR)[number];
 
 export const PRIORIDADES_PQR = ['alta', 'media', 'normal', 'baja'] as const;
 export type PrioridadPqr = (typeof PRIORIDADES_PQR)[number];
@@ -122,6 +152,27 @@ export class SeguimientoPqr {
   fecha: Date;
 }
 
+/** One entry of the PQR log; append-only, frozen text. */
+@Schema({ _id: false })
+export class EventoPqr {
+  @Prop({ required: true, default: () => new Date() })
+  fecha: Date;
+
+  @Prop({ type: String, required: true, enum: TIPOS_EVENTO_PQR })
+  tipo: TipoEventoPqr;
+
+  /** Display name frozen at the time; «Sistema» for automatic entries. */
+  @Prop({ required: true })
+  actor: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Account', default: null })
+  accountId: Types.ObjectId | null;
+
+  /** Spanish sentence ready to show. */
+  @Prop({ required: true })
+  detalle: string;
+}
+
 /**
  * A petition, complaint or claim (PQR) of one coproperty. Tenant-owned: every
  * query carries `copropiedadId`. `codigo` (`PQR-001`) comes from a sequence
@@ -162,10 +213,11 @@ export class Pqr {
   @Prop({
     type: String,
     required: true,
-    enum: ESTADOS_PQR,
-    default: 'pendiente',
+    // Legacy values stay valid until the data conversion runs.
+    enum: [...ESTADOS_PQR, ...ESTADOS_PQR_LEGADOS],
+    default: 'radicada',
   })
-  estado: EstadoPqr;
+  estado: EstadoPqrGuardado;
 
   @Prop({
     type: String,
@@ -192,6 +244,27 @@ export class Pqr {
 
   @Prop({ type: Types.ObjectId, ref: 'Tecnico', default: null })
   tecnicoId: Types.ObjectId | null;
+
+  @Prop({ type: String, enum: RESPONSABLES_PQR, default: null })
+  responsable: ResponsablePqr | null;
+
+  /** Response deadline (a Bogotá day stored at UTC midnight), set on classifying. */
+  @Prop({ type: Date, default: null })
+  fechaLimite: Date | null;
+
+  @Prop({ type: Date, default: null })
+  clasificadaEn: Date | null;
+
+  @Prop({ type: Date, default: null })
+  cerradaEn: Date | null;
+
+  /** Display name of whoever closed it, frozen. */
+  @Prop({ type: String, default: null })
+  cerradaPor: string | null;
+
+  /** Mutated only through atomic `$push` (see the service). */
+  @Prop({ type: [EventoPqr], default: [] })
+  bitacora: EventoPqr[];
 }
 
 export const PqrSchema = SchemaFactory.createForClass(Pqr);

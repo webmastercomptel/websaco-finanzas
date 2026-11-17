@@ -3125,6 +3125,21 @@ export interface PqrResidente {
   rol: string;
 }
 
+/** The four stages of a PQR. */
+export type EstadoPqr = 'radicada' | 'clasificada' | 'en_gestion' | 'cerrada';
+
+/** Who answers a classified PQR. */
+export type ResponsablePqr =
+  'administracion' | 'consejo' | 'comite_convivencia';
+
+/** One entry of a PQR's log (bitácora). */
+export interface EventoPqrContrato {
+  fecha: string;
+  tipo: string;
+  actor: string;
+  detalle: string;
+}
+
 /** A petition, complaint or claim of the active coproperty. */
 export interface Pqr {
   id: string;
@@ -3140,7 +3155,8 @@ export interface Pqr {
     | 'sugerencias'
     | 'felicitaciones'
     | 'denuncias';
-  estado: 'urgente' | 'en_revision' | 'pendiente' | 'resuelto' | 'cerrado';
+  /** Always the stage, even when a legacy value is still stored. */
+  estado: EstadoPqr;
   prioridad: 'alta' | 'media' | 'normal' | 'baja';
   unidad: string;
   residente: PqrResidente;
@@ -3149,7 +3165,26 @@ export interface Pqr {
   seguimientos: PqrSeguimiento[];
   /** Name of the assigned technician, or null. */
   tecnicoAsignado: string | null;
+  responsable: ResponsablePqr | null;
+  /** `YYYY-MM-DD`: the confirmed response deadline, null until classified. */
+  fechaLimite: string | null;
+  /** `YYYY-MM-DD`: 15 business days after filing. */
+  fechaLimiteSugerida: string;
+  /** Open and past its deadline. */
+  vencida: boolean;
+  clasificadaEn: string | null;
+  cerradaEn: string | null;
+  bitacora: EventoPqrContrato[];
 }
+
+/**
+ * What a resident sees of a PQR: the internal handling (responsible body,
+ * deadlines, log) is never part of it.
+ */
+export type PqrPortal = Omit<
+  Pqr,
+  'responsable' | 'fechaLimite' | 'fechaLimiteSugerida' | 'vencida' | 'bitacora'
+>;
 
 /** An external technician or provider of the active coproperty. */
 export interface Tecnico {

@@ -2,6 +2,8 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ActualizarPqrDto } from './actualizar-pqr.dto';
 import { CrearAdjuntoPqrDto } from './guardar-adjunto.dto';
+import { CerrarPqrDto } from './cerrar-pqr.dto';
+import { ClasificarPqrDto } from './clasificar-pqr.dto';
 import { CrearPqrDto } from './guardar-pqr.dto';
 import { CrearPqrPortalDto } from './guardar-pqr-portal.dto';
 import { CrearSeguimientoDto } from './guardar-seguimiento.dto';
@@ -27,6 +29,10 @@ describe('ListarPqrDto', () => {
 
   it.each([
     'todos',
+    'radicada',
+    'clasificada',
+    'en_gestion',
+    'cerrada',
     'urgente',
     'en_revision',
     'pendiente',
@@ -34,6 +40,14 @@ describe('ListarPqrDto', () => {
     'cerrado',
   ])('acepta estado=%s', async (estado) => {
     expect(await invalidas(ListarPqrDto, { estado })).toEqual([]);
+  });
+
+  it('vencidas acepta true/false como texto y rechaza otra cosa', async () => {
+    expect(await invalidas(ListarPqrDto, { vencidas: 'true' })).toEqual([]);
+    expect(await invalidas(ListarPqrDto, { vencidas: 'false' })).toEqual([]);
+    expect(await invalidas(ListarPqrDto, { vencidas: 'quizas' })).toEqual([
+      'vencidas',
+    ]);
   });
 
   it('rechaza valores desconocidos (400 en vez de ignorarlos)', async () => {
@@ -88,9 +102,18 @@ describe('CrearPqrDto (personal)', () => {
     ).toEqual([]);
   });
 
-  it('no deja crear una PQR ya cerrada', async () => {
+  it('acepta (e ignora) un estado legado para no dar 400 a una pestaña vieja', async () => {
+    expect(
+      await invalidas(CrearPqrDto, { ...valido, estado: 'pendiente' }),
+    ).toEqual([]);
     expect(
       await invalidas(CrearPqrDto, { ...valido, estado: 'cerrado' }),
+    ).toEqual([]);
+  });
+
+  it('rechaza un estado inventado', async () => {
+    expect(
+      await invalidas(CrearPqrDto, { ...valido, estado: 'abierta' }),
     ).toEqual(['estado']);
   });
 });
@@ -112,8 +135,11 @@ describe('ActualizarPqrDto', () => {
     ).toEqual([]);
   });
 
-  it('solo el barrido nocturno cierra: cerrado no es un estado asignable', async () => {
-    expect(await invalidas(ActualizarPqrDto, { estado: 'cerrado' })).toEqual([
+  it('acepta las etapas y los valores legados (la regla la decide el servicio)', async () => {
+    for (const estado of ['en_gestion', 'cerrada', 'cerrado', 'urgente']) {
+      expect(await invalidas(ActualizarPqrDto, { estado })).toEqual([]);
+    }
+    expect(await invalidas(ActualizarPqrDto, { estado: 'abierta' })).toEqual([
       'estado',
     ]);
   });
@@ -122,6 +148,57 @@ describe('ActualizarPqrDto', () => {
     expect(await invalidas(ActualizarPqrDto, { tecnicoId: 'abc' })).toEqual([
       'tecnicoId',
     ]);
+  });
+});
+
+describe('ClasificarPqrDto', () => {
+  const valido = {
+    tipo: 'quejas',
+    responsable: 'consejo',
+    fechaLimite: '2026-12-09',
+  };
+
+  it('acepta un cuerpo válido', async () => {
+    expect(await invalidas(ClasificarPqrDto, valido)).toEqual([]);
+  });
+
+  it('rechaza una fecha que no existe en el calendario', async () => {
+    expect(
+      await invalidas(ClasificarPqrDto, {
+        ...valido,
+        fechaLimite: '2026-02-30',
+      }),
+    ).toContain('fechaLimite');
+  });
+
+  it('rechaza una fecha con hora o con otro formato', async () => {
+    for (const fechaLimite of ['2026-12-09T10:00:00Z', '09/12/2026']) {
+      expect(
+        await invalidas(ClasificarPqrDto, { ...valido, fechaLimite }),
+      ).toContain('fechaLimite');
+    }
+  });
+
+  it('rechaza un responsable o un tipo desconocidos', async () => {
+    expect(
+      await invalidas(ClasificarPqrDto, { ...valido, responsable: 'vecinos' }),
+    ).toEqual(['responsable']);
+    expect(
+      await invalidas(ClasificarPqrDto, { ...valido, tipo: 'chismes' }),
+    ).toEqual(['tipo']);
+  });
+});
+
+describe('CerrarPqrDto', () => {
+  it('exige un mensaje no vacío de a lo sumo 5000 caracteres', async () => {
+    expect(await invalidas(CerrarPqrDto, { mensaje: 'Resuelto' })).toEqual([]);
+    expect(await invalidas(CerrarPqrDto, { mensaje: '' })).toEqual(['mensaje']);
+    expect(await invalidas(CerrarPqrDto, { mensaje: '   ' })).toEqual([
+      'mensaje',
+    ]);
+    expect(
+      await invalidas(CerrarPqrDto, { mensaje: 'x'.repeat(5001) }),
+    ).toEqual(['mensaje']);
   });
 });
 

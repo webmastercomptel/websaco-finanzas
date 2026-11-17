@@ -1,13 +1,18 @@
-import { IsIn, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsIn, IsOptional } from 'class-validator';
 import {
   ESTADOS_PQR,
+  ESTADOS_PQR_LEGADOS,
   TIPOS_PQR,
-  type EstadoPqr,
   type TipoPqr,
 } from '../../../database/schemas/administracion/pqr.schema';
 
 export const FILTROS_TIPO_PQR = ['todos', ...TIPOS_PQR] as const;
-export const FILTROS_ESTADO_PQR = ['todos', ...ESTADOS_PQR] as const;
+export const FILTROS_ESTADO_PQR = [
+  'todos',
+  ...ESTADOS_PQR,
+  ...ESTADOS_PQR_LEGADOS,
+] as const;
 
 /**
  * Query of both PQR lists (staff and resident portal). There is deliberately no
@@ -22,5 +27,13 @@ export class ListarPqrDto {
 
   @IsIn(FILTROS_ESTADO_PQR)
   @IsOptional()
-  estado?: 'todos' | EstadoPqr;
+  estado?: (typeof FILTROS_ESTADO_PQR)[number];
+
+  /** Only overdue PQRs (open, past their deadline). */
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  @IsOptional()
+  vencidas?: boolean;
 }

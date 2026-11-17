@@ -6,6 +6,7 @@ import { RedisHealthIndicator } from './redis.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
 import { CorreoHealthIndicator } from './correo.health';
 import { FrontendUrlHealthIndicator } from './frontend-url.health';
+import { PqrEstadosHealthIndicator } from './pqr-estados.health';
 
 @Module({
   imports: [TerminusModule],
@@ -17,6 +18,8 @@ import { FrontendUrlHealthIndicator } from './frontend-url.health';
     IntegracionComptableHealthIndicator,
     CorreoHealthIndicator,
     FrontendUrlHealthIndicator,
+    // The Pqr model comes from the global DatabaseModule.
+    PqrEstadosHealthIndicator,
   ],
 })
 export class HealthModule {}

@@ -145,7 +145,7 @@ describe('TecnicosService.eliminar', () => {
     expect(pqrs.countDocuments).toHaveBeenCalledWith({
       copropiedadId: COPROPIEDAD,
       tecnicoId: TECNICO,
-      estado: { $nin: ['resuelto', 'cerrado'] },
+      estado: { $in: expect.arrayContaining(['en_gestion']) as string[] },
     });
     expect(tecnicos.findOneAndDelete).toHaveBeenCalledWith({
       _id: TECNICO.toString(),

@@ -97,3 +97,101 @@ export const construirCorreoPqrRespuesta = (
       : undefined,
   }),
 });
+
+/** What the acknowledgment of receipt to whoever filed the PQRS says. */
+export interface DatosCorreoPqrAcuse {
+  nombreDestinatario: string;
+  nombreCopropiedad: string;
+  codigo: string;
+  titulo: string;
+  /** Already formatted `d/M/yyyy` (Bogotá day). */
+  fechaRadicacion: string;
+  /** Portal/back-office button; null when none may be issued (no button then). */
+  enlace: string | null;
+}
+
+/** Subject and HTML of the acknowledgment sent when a PQRS is filed. */
+export const construirCorreoPqrAcuse = (
+  datos: DatosCorreoPqrAcuse,
+): { asunto: string; html: string } => ({
+  asunto: `Recibimos su PQRS · Radicado ${datos.codigo}`,
+  html: renderPlantillaCorreo({
+    heading: 'Recibimos su PQRS',
+    bodyHtml: `
+      <p style="margin: 0 0 20px;">
+        Hola, ${escapeHtml(datos.nombreDestinatario)}. Hemos recibido su PQRS bajo el radicado ${escapeHtml(datos.codigo)}. En poco tiempo recibirá respuesta.
+      </p>
+      ${renderCajaDetalle(`
+        ${renderFilaDetalle('Asunto', escapeHtml(datos.titulo))}
+        ${renderFilaDetalle('Fecha de radicación', escapeHtml(datos.fechaRadicacion))}
+        ${renderFilaDetalle('Edificio', escapeHtml(datos.nombreCopropiedad))}
+      `)}
+    `,
+    cta: datos.enlace ? { url: datos.enlace, label: 'Ver la PQRS' } : undefined,
+  }),
+});
+
+/** What the alert to a governing body about an assigned PQRS says. */
+export interface DatosCorreoPqrOrgano {
+  nombreCopropiedad: string;
+  /** Display label of the body, e.g. «Comité de Convivencia». */
+  organo: string;
+  codigo: string;
+  tipo: string;
+  titulo: string;
+  descripcion: string;
+  unidad: string;
+  /** Already formatted `d/M/yyyy`. */
+  fechaLimite: string;
+}
+
+/** Subject and HTML of the alert to the Consejo / Comité members. No link: they need no account. */
+export const construirCorreoPqrOrgano = (
+  datos: DatosCorreoPqrOrgano,
+): { asunto: string; html: string } => ({
+  asunto: `PQRS ${datos.codigo} asignada al ${datos.organo}`,
+  html: renderPlantillaCorreo({
+    heading: escapeHtml(datos.titulo),
+    bodyHtml: `
+      <p style="margin: 0 0 20px;">
+        Se asignó la PQRS ${escapeHtml(datos.codigo)} de <strong>${escapeHtml(datos.nombreCopropiedad)}</strong> al ${escapeHtml(datos.organo)}:
+      </p>
+      ${renderCajaDetalle(`
+        ${renderFilaDetalle('Tipo', escapeHtml(ETIQUETA_TIPO[datos.tipo] ?? datos.tipo))}
+        ${renderFilaDetalle('Inmueble', escapeHtml(datos.unidad))}
+        ${renderFilaDetalle('Fecha límite de respuesta', escapeHtml(datos.fechaLimite))}
+        ${renderFilaDetalle('Descripción', renderTexto(datos.descripcion), true)}
+      `)}
+    `,
+  }),
+});
+
+/** What the final answer to whoever filed the PQRS says. */
+export interface DatosCorreoPqrCierre {
+  nombreDestinatario: string;
+  nombreCopropiedad: string;
+  codigo: string;
+  titulo: string;
+  mensaje: string;
+  enlace: string | null;
+}
+
+/** Subject and HTML of the final answer; the PQRS is closed. */
+export const construirCorreoPqrCierre = (
+  datos: DatosCorreoPqrCierre,
+): { asunto: string; html: string } => ({
+  asunto: `Respuesta a su PQRS · Radicado ${datos.codigo}`,
+  html: renderPlantillaCorreo({
+    heading: 'Respuesta a su PQRS',
+    bodyHtml: `
+      <p style="margin: 0 0 20px;">
+        ${escapeHtml(datos.nombreDestinatario)}, esta es la respuesta a su PQRS "<strong>${escapeHtml(datos.titulo)}</strong>" (radicado ${escapeHtml(datos.codigo)}) en ${escapeHtml(datos.nombreCopropiedad)}:
+      </p>
+      ${renderCajaDetalle(renderTexto(datos.mensaje))}
+      <p style="margin: 20px 0 0;">Su PQRS quedó cerrada.</p>
+    `,
+    cta: datos.enlace
+      ? { url: datos.enlace, label: 'Ver la respuesta' }
+      : undefined,
+  }),
+});

@@ -123,12 +123,13 @@ describe('resumirPqr', () => {
     });
     const r = resumirPqr([
       f('pendiente'),
-      f('urgente', 'reclamos'),
+      f('radicada', 'reclamos'),
       f('resuelto'),
-      f('cerrado'),
+      f('cerrada'),
     ]);
     expect(r.total).toBe(4);
     expect(r.abiertas).toBe(2);
+    expect(r.porEstado).toEqual({ radicada: 2, cerrada: 2 });
     expect(r.porTipo).toEqual({ quejas: 3, reclamos: 1 });
   });
 });

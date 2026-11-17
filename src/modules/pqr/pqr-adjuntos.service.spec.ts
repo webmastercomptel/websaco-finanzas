@@ -326,6 +326,36 @@ describe('PqrAdjuntosService.confirmarSubida', () => {
     );
   });
 
+  it('confirmarSubidaResidente responde la forma del residente, sin el manejo interno', async () => {
+    const { servicio, pqrs } = montar();
+    const pendiente = adjunto();
+    pqrs.findOne.mockReturnValue(
+      consulta(pqrDoc({ archivosAdjuntos: [pendiente] })),
+    );
+    pqrs.findOneAndUpdate.mockReturnValue(
+      consulta(
+        pqrDoc({ archivosAdjuntos: [{ ...pendiente, estado: 'listo' }] }),
+      ),
+    );
+
+    const resultado = await servicio.confirmarSubidaResidente(
+      PQR.toString(),
+      pendiente._id.toString(),
+      residente,
+    );
+
+    expect(resultado.archivosAdjuntos[0].estado).toBe('listo');
+    for (const clave of [
+      'responsable',
+      'fechaLimite',
+      'fechaLimiteSugerida',
+      'vencida',
+      'bitacora',
+    ]) {
+      expect(resultado).not.toHaveProperty(clave);
+    }
+  });
+
   it('409 si el adjunto ya estaba listo', async () => {
     const { servicio, pqrs } = montar();
     const listo = adjunto({ estado: 'listo' });

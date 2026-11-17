@@ -17,6 +17,7 @@ import type {
   DescargaArchivo,
   Pqr as PqrContrato,
   PqrAdjuntoSubidaIniciada,
+  PqrPortal,
 } from '../../contracts';
 import {
   Pqr,
@@ -32,7 +33,7 @@ import {
   type CrearAdjuntoPqrDto,
 } from './dto/guardar-adjunto.dto';
 import { filtroPqr, poblarTecnico } from './pqr-consultas';
-import { toPqr } from './pqr.mapper';
+import { aPortal, toPqr } from './pqr.mapper';
 
 /**
  * Largest file a PQR attachment may be: evidence (photos, a scanned letter),
@@ -361,12 +362,17 @@ export class PqrAdjuntosService {
     return await this.iniciar(id, dto, this.cuentaDelResidente(user));
   }
 
-  /** Step 2 on a PQR the resident filed; anybody else's is a 404. */
+  /**
+   * Step 2 on a PQR the resident filed; anybody else's is a 404. The answer is
+   * the resident shape: the internal handling (log, deadlines) never reaches them.
+   */
   async confirmarSubidaResidente(
     id: string,
     adjuntoId: string,
     user: IRequestUser,
-  ): Promise<PqrContrato> {
-    return await this.confirmar(id, adjuntoId, this.cuentaDelResidente(user));
+  ): Promise<PqrPortal> {
+    return aPortal(
+      await this.confirmar(id, adjuntoId, this.cuentaDelResidente(user)),
+    );
   }
 }

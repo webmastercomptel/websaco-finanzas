@@ -12,6 +12,7 @@ import { TablaResumen, type FilaResumen } from './react/tabla-resumen';
 import { truncarTexto } from './react/text-measure';
 import { TituloSeccion } from './react/titulo-seccion';
 import { formatoPeso } from './pdf-helpers';
+import { estadoActual } from '../../modules/pqr/pqr-etapas';
 import type { CopropiedadDocument } from '../../database/schemas/copropiedades/copropiedad.schema';
 import {
   resumirActividades,
@@ -62,11 +63,10 @@ const ETIQUETAS_PQR_TIPO: Record<string, string> = {
   denuncias: 'Denuncia',
 };
 const ETIQUETAS_PQR_ESTADO: Record<string, string> = {
-  urgente: 'Urgente',
-  en_revision: 'En revisión',
-  pendiente: 'Pendiente',
-  resuelto: 'Resuelto',
-  cerrado: 'Cerrado',
+  radicada: 'Radicada',
+  clasificada: 'Clasificada',
+  en_gestion: 'En gestión',
+  cerrada: 'Cerrada',
 };
 const ETIQUETAS_PQR_PRIORIDAD: Record<string, string> = {
   alta: 'Alta',
@@ -368,7 +368,7 @@ export async function generarPdfInformeGestion(
         f.unidad,
         etiqueta(ETIQUETAS_PQR_TIPO, f.tipo),
         etiqueta(ETIQUETAS_PQR_PRIORIDAD, f.prioridad),
-        etiqueta(ETIQUETAS_PQR_ESTADO, f.estado),
+        etiqueta(ETIQUETAS_PQR_ESTADO, estadoActual(f.estado)),
       ]),
     });
   }

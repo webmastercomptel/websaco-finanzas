@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -19,6 +20,8 @@ import type {
 import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { ActualizarPqrDto } from './dto/actualizar-pqr.dto';
+import { CerrarPqrDto } from './dto/cerrar-pqr.dto';
+import { ClasificarPqrDto } from './dto/clasificar-pqr.dto';
 import { CrearAdjuntoPqrDto } from './dto/guardar-adjunto.dto';
 import { CrearPqrDto } from './dto/guardar-pqr.dto';
 import { CrearSeguimientoDto } from './dto/guardar-seguimiento.dto';
@@ -69,8 +72,33 @@ export class PqrController {
   actualizar(
     @Param('id') id: string,
     @Body() dto: ActualizarPqrDto,
+    @CurrentUser() user: IRequestUser,
   ): Promise<Pqr> {
-    return this.pqr.actualizar(id, dto);
+    return this.pqr.actualizar(id, dto, user);
+  }
+
+  /** Classification step (type, responsible body, deadline); repeatable until closed. */
+  @Post(':id/clasificar')
+  @HttpCode(200)
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  clasificar(
+    @Param('id') id: string,
+    @Body() dto: ClasificarPqrDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Pqr> {
+    return this.pqr.clasificar(id, dto, user);
+  }
+
+  /** Final answer to the resident; closes the PQRS. */
+  @Post(':id/cerrar')
+  @HttpCode(200)
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  cerrar(
+    @Param('id') id: string,
+    @Body() dto: CerrarPqrDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Pqr> {
+    return this.pqr.cerrar(id, dto, user);
   }
 
   @Post(':id/seguimientos')
