@@ -57,6 +57,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
 import { IntegracionesPanelModule } from './modules/integraciones-panel/integraciones-panel.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
 import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
+import { InformeGestionModule } from './modules/informe-gestion/informe-gestion.module';
 import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
 import { EnvioFacturasModule } from './modules/envio-facturas/envio-facturas.module';
 import { FacturaPublicaModule } from './modules/factura-publica/factura-publica.module';
@@ -143,6 +144,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     IntegracionesPanelModule,
     BusquedaModule,
     BusquedaAdministracionModule,
+    InformeGestionModule,
     PanelAdministracionModule,
     InterfazComptableModule,
     EnvioFacturasModule,

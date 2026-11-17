@@ -12,6 +12,8 @@ Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts,
 
 Maintenance equipment: `modules/equipos/` (CRUD `/equipos`, `GET /equipos/:id/hoja-de-vida`; schema `adm_equipos`) reuses the `Mantenimiento` abilities (read/manage, no new permission key); deleting an equipo with maintenances pointing at it is 409. `Mantenimiento` gained `equipoId`, `periodicidad` (semanal/mensual/semestral/anual, preventivo only) and `siguienteId`: `MantenimientosService.actualizar` creates the next maintenance when a periodic one is completed (`modules/mantenimientos/periodicidad.ts`; a claim guard on `siguienteId` makes it idempotent, no transactions).
 
+Soporte a infogestión: `GET /informe-gestion/pdf?desde&hasta` (`modules/informe-gestion/`, `@Modulo('administracion')`, any-of read `Actividad`/`Mantenimiento`/`Pqr`) answers an inline PDF of the period. Each section is included only if the caller reads that subject (an absent section has no title or counts, and its model is never queried). `desde`/`hasta` are `YYYY-MM-DD`, inclusive, `desde` ≤ `hasta`, at most 366 days (else 400). Actividad and mantenimiento count by `fecha` (UTC midnight bounds); PQR by `createdAt` over the Bogotá day (05:00Z bounds); ends exclusive (`rangoDelPeriodo`).
+
 ## Commands
 
 | Command | What it does |
