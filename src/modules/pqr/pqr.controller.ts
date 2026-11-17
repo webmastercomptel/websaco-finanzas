@@ -92,6 +92,17 @@ export class PqrController {
     return this.pqr.clasificar(id, dto, user);
   }
 
+  /** Explicit start of the management: `clasificada → en_gestion`. */
+  @Post(':id/iniciar-gestion')
+  @HttpCode(200)
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  iniciarGestion(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Pqr> {
+    return this.pqr.iniciarGestion(id, user);
+  }
+
   /** Final answer to the resident; closes the PQRS. */
   @Post(':id/cerrar')
   @HttpCode(200)
