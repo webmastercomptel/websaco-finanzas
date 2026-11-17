@@ -979,3 +979,41 @@ describe('DirectorioService pasa la cuenta que ya tiene a AccesoService', () => 
     }
   });
 });
+
+describe('DirectorioService.inmuebleIdPorCodigo', () => {
+  it('encuentra la unidad ignorando mayúsculas y espacios, dentro de la copropiedad y activa', async () => {
+    const unidad = oid();
+    const { servicio, inmuebles } = crear({ inmuebles: [] });
+    inmuebles.findOne = unaFila({ _id: unidad });
+
+    const id = await servicio.inmuebleIdPorCodigo(COP, ' a-101 ');
+
+    expect(id).toEqual(unidad);
+    expect(inmuebles.findOne).toHaveBeenCalledWith({
+      copropiedadId: COP,
+      codigo: { $regex: '^a-101$', $options: 'i' },
+      estado: 'active',
+    });
+  });
+
+  it('un código con caracteres de expresión regular no lanza y se busca literal', async () => {
+    const { servicio, inmuebles } = crear({ inmuebles: [] });
+    inmuebles.findOne = unaFila(null);
+
+    await expect(servicio.inmuebleIdPorCodigo(COP, '(a+')).resolves.toBeNull();
+
+    expect(inmuebles.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codigo: { $regex: String.raw`^\(a\+$`, $options: 'i' },
+      }),
+    );
+  });
+
+  it('un código en blanco devuelve null sin consultar', async () => {
+    const { servicio, inmuebles } = crear({ inmuebles: [] });
+    inmuebles.findOne = unaFila(null);
+
+    expect(await servicio.inmuebleIdPorCodigo(COP, '   ')).toBeNull();
+    expect(inmuebles.findOne).not.toHaveBeenCalled();
+  });
+});

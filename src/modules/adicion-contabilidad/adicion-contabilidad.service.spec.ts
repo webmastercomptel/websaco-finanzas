@@ -481,6 +481,128 @@ describe('AdicionContabilidadService.generar — documento cruce de Saldo Inicia
   });
 });
 
+describe('AdicionContabilidadService.generar — documento cruce solo en cuentas marcadas', () => {
+  const armarConPlan = (plan: Record<string, unknown>[] | undefined) => {
+    const asientos = [
+      asientoFixture({
+        reciboId: reciboIdRC,
+        movimientos: [
+          {
+            cuenta: '13050501',
+            tipo: 'credito' as const,
+            monto: 100,
+            descripcion: 'x',
+            tipoDocumento: 'SI',
+            numeroDocumento: 2,
+          },
+          {
+            // Ingreso NO marcado: un asiento ya posteado (RC 2/5/7/8 de
+            // producción) lo dejó etiquetado con la factura pagada.
+            cuenta: '41355402',
+            tipo: 'credito' as const,
+            monto: 50,
+            descripcion: 'y',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          },
+          {
+            cuenta: '11100502',
+            tipo: 'debito' as const,
+            monto: 150,
+            descripcion: 'z',
+          },
+        ],
+      }),
+    ];
+    const asientosModel = {
+      find: jest.fn(() => ({
+        sort: () => ({
+          session: () => ({ exec: () => Promise.resolve(asientos) }),
+        }),
+      })),
+      updateMany: jest.fn().mockResolvedValue({}),
+    };
+    const lotesModel = {
+      create: jest.fn((docs: Record<string, unknown>[]) =>
+        Promise.resolve(
+          docs.map((d) => ({
+            ...d,
+            _id: new Types.ObjectId(),
+            createdAt: new Date('2026-09-10'),
+          })),
+        ),
+      ),
+    };
+    const consecutivosLoteModel = {
+      findOneAndUpdate: jest.fn(() => ({
+        exec: () => Promise.resolve({ nextNumber: 1 }),
+      })),
+    };
+    return new AdicionContabilidadService(
+      asientosModel as never,
+      lotesModel as never,
+      consecutivosLoteModel as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([
+        { _id: reciboIdRC, prefijo: 'RC', numero: 1, observaciones: 'Pago' },
+      ]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      modeloCon([]) as never,
+      { resolveCoPropertyId: () => COP } as unknown as TenantContextService,
+      {
+        obtenerUltimoConsolidado: jest.fn().mockResolvedValue({
+          periodoDesde: new Date('2026-09-01'),
+          periodoHasta: new Date('2026-09-30'),
+        }),
+      } as unknown as LotesFacturacionService,
+      {
+        startSession: () =>
+          Promise.resolve({
+            withTransaction: (fn: () => Promise<void>) => fn(),
+            endSession: () => Promise.resolve(undefined),
+          }),
+      } as never,
+      undefined,
+      modeloCon([
+        { numero: 2, tipoDocumentoOriginal: 'FV', numeroOriginal: '2941' },
+      ]) as never,
+      undefined,
+      undefined,
+      plan ? (modeloCon(plan) as never) : undefined,
+    );
+  };
+
+  const columnaCruce = (movmesdo: string) =>
+    movmesdo
+      .split('\r\n')
+      .filter((l) => l !== '')
+      .map((l) => l.split(',')[13]);
+
+  it('exporta el cruce solo en la cuenta marcada; el ingreso 41355402 ya posteado sale sin cruce', async () => {
+    const service = armarConPlan([
+      { codigo: '13050501', requiereDocumentoCruce: true },
+      { codigo: '41355402', requiereDocumentoCruce: false },
+      { codigo: '11100502', requiereDocumentoCruce: false },
+    ]);
+
+    const resultado = await service.generar(ACTOR);
+
+    // 13050501 conserva el original del Saldo Inicial (2941); 41355402 → vacío.
+    expect(columnaCruce(resultado.movmesdo)).toEqual(['2941', '', '']);
+  });
+
+  it('sin plan de cuentas disponible conserva el comportamiento anterior', async () => {
+    const service = armarConPlan(undefined);
+
+    const resultado = await service.generar(ACTOR);
+
+    expect(columnaCruce(resultado.movmesdo)).toEqual(['2941', '77', '']);
+  });
+});
+
 describe('AdicionContabilidadService — desmarcar y volver a descargar un lote', () => {
   const LOTE_ID = new Types.ObjectId();
 

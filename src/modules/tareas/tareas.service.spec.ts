@@ -137,9 +137,12 @@ function montar() {
   };
   const notificaciones = { crear: jest.fn().mockResolvedValue(undefined) };
 
+  const pqrs = { updateOne: jest.fn().mockResolvedValue({}) };
+
   const servicio = new TareasService(
     tareas as never,
     copropiedades as never,
+    pqrs as never,
     tenant as never,
     directorio as never,
     correo as never,
@@ -149,6 +152,7 @@ function montar() {
   return {
     servicio,
     tareas,
+    pqrs,
     copropiedades,
     tenant,
     directorio,
@@ -1086,7 +1090,7 @@ describe('TareasService.eliminar', () => {
   it('elimina por id Y copropiedad activa y devuelve el id', async () => {
     const m = montar();
 
-    const resultado = await m.servicio.eliminar(TAREA.toString());
+    const resultado = await m.servicio.eliminar(TAREA.toString(), GESTOR());
 
     expect(m.tareas.findOneAndDelete).toHaveBeenCalledWith({
       _id: TAREA.toString(),
@@ -1099,15 +1103,15 @@ describe('TareasService.eliminar', () => {
     const m = montar();
     m.tareas.findOneAndDelete.mockReturnValue(consulta(null));
 
-    await expect(m.servicio.eliminar(TAREA.toString())).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      m.servicio.eliminar(TAREA.toString(), GESTOR()),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('un id mal formado responde 404 sin tocar la base', async () => {
     const m = montar();
 
-    await expect(m.servicio.eliminar('no-es-un-id')).rejects.toThrow(
+    await expect(m.servicio.eliminar('no-es-un-id', GESTOR())).rejects.toThrow(
       NotFoundException,
     );
     expect(m.tareas.findOneAndDelete).not.toHaveBeenCalled();
@@ -1172,5 +1176,165 @@ describe('TareasService.asignables', () => {
     const resultado = await m.servicio.asignables();
 
     expect(resultado.map((r) => r.nombre)).toEqual(['Álvaro', 'Zoila']);
+  });
+});
+
+describe('TareasService — tareas vinculadas a una PQRS', () => {
+  const PQR = new Types.ObjectId();
+  const vinculada = (extra: Record<string, unknown> = {}) =>
+    tareaDoc({
+      titulo: 'Revisar ducto',
+      pqrId: PQR,
+      pqrCodigo: 'PQR-0007',
+      ...extra,
+    });
+  const LUIS = actor(ASIGNADO, {
+    nombre: 'Luis',
+    permissions: ['tareas.actualizar'],
+  });
+
+  it('crear con vínculo guarda pqrId y pqrCodigo', async () => {
+    const m = montar();
+
+    await m.servicio.crear(dtoCrear, actor(OTRO), {
+      pqrId: PQR,
+      pqrCodigo: 'PQR-0007',
+    });
+
+    expect(m.tareas).toHaveBeenCalledWith(
+      expect.objectContaining({ pqrId: PQR, pqrCodigo: 'PQR-0007' }),
+    );
+  });
+
+  it('completar una tarea vinculada anota tarea_completada en la bitácora de la PQRS', async () => {
+    const m = montar();
+    m.tareas.findOne.mockReturnValue(consulta(vinculada()));
+    m.tareas.findOneAndUpdate.mockReturnValue(
+      consulta(vinculada({ estado: 'completado' })),
+    );
+
+    await m.servicio.completar(TAREA.toString(), LUIS);
+
+    expect(m.pqrs.updateOne).toHaveBeenCalledTimes(1);
+    const [filtro, operacion] = m.pqrs.updateOne.mock.calls[0] as [
+      unknown,
+      { $push: { bitacora: { tipo: string; detalle: string } } },
+    ];
+    expect(filtro).toEqual({ _id: PQR, copropiedadId: COPROPIEDAD });
+    expect(operacion.$push.bitacora.tipo).toBe('tarea_completada');
+    expect(operacion.$push.bitacora.detalle).toBe(
+      'Tarea «Revisar ducto» completada por Luis',
+    );
+  });
+
+  it('si el push a la PQRS falla, completar igual responde', async () => {
+    const m = montar();
+    m.tareas.findOne.mockReturnValue(consulta(vinculada()));
+    m.tareas.findOneAndUpdate.mockReturnValue(
+      consulta(vinculada({ estado: 'completado' })),
+    );
+    m.pqrs.updateOne.mockRejectedValue(new Error('boom'));
+
+    await expect(
+      m.servicio.completar(TAREA.toString(), LUIS),
+    ).resolves.toBeDefined();
+  });
+
+  it('actualizar a completado anota una vez; a en_progreso no anota', async () => {
+    const m = montar();
+    m.tareas.findOne.mockReturnValue(consulta(vinculada()));
+    m.tareas.findOneAndUpdate.mockReturnValue(consulta(vinculada()));
+
+    await m.servicio.actualizar(
+      TAREA.toString(),
+      { estado: 'en_progreso' },
+      GESTOR(),
+    );
+    expect(m.pqrs.updateOne).not.toHaveBeenCalled();
+
+    await m.servicio.actualizar(
+      TAREA.toString(),
+      { estado: 'completado' },
+      GESTOR(),
+    );
+    expect(m.pqrs.updateOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('eliminar una tarea vinculada anota tarea_eliminada', async () => {
+    const m = montar();
+    m.tareas.findOneAndDelete.mockReturnValue(consulta(vinculada()));
+
+    await m.servicio.eliminar(TAREA.toString(), LUIS);
+
+    const [filtro, operacion] = m.pqrs.updateOne.mock.calls[0] as [
+      unknown,
+      { $push: { bitacora: { tipo: string; detalle: string } } },
+    ];
+    expect(filtro).toEqual({ _id: PQR, copropiedadId: COPROPIEDAD });
+    expect(operacion.$push.bitacora.tipo).toBe('tarea_eliminada');
+    expect(operacion.$push.bitacora.detalle).toBe(
+      'Tarea «Revisar ducto» eliminada por Luis',
+    );
+  });
+
+  it('completar dos veces → un solo tarea_completada y una sola escritura', async () => {
+    const m = montar();
+    m.tareas.findOne
+      .mockReturnValueOnce(consulta(vinculada()))
+      .mockReturnValueOnce(consulta(vinculada({ estado: 'completado' })))
+      .mockReturnValue(consulta(vinculada({ estado: 'completado' })));
+    m.tareas.findOneAndUpdate.mockReturnValue(
+      consulta(vinculada({ estado: 'completado' })),
+    );
+
+    await m.servicio.completar(TAREA.toString(), LUIS);
+    await m.servicio.completar(TAREA.toString(), LUIS);
+
+    expect(m.tareas.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(m.pqrs.updateOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('actualizar reenviando estado completado sobre una tarea ya completada no anota', async () => {
+    const m = montar();
+    m.tareas.findOne.mockReturnValue(
+      consulta(vinculada({ estado: 'completado' })),
+    );
+    m.tareas.findOneAndUpdate.mockReturnValue(
+      consulta(vinculada({ estado: 'completado' })),
+    );
+
+    await m.servicio.actualizar(
+      TAREA.toString(),
+      { estado: 'completado' },
+      GESTOR(),
+    );
+
+    expect(m.pqrs.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('una tarea sin vínculo nunca toca el modelo Pqr', async () => {
+    const m = montar();
+
+    await m.servicio.completar(TAREA.toString(), ASIGNADO_USER);
+    await m.servicio.eliminar(TAREA.toString(), GESTOR());
+    await m.servicio.actualizar(
+      TAREA.toString(),
+      { estado: 'completado' },
+      GESTOR(),
+    );
+
+    expect(m.pqrs.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('listarDePqr filtra por copropiedad y pqrId, más antiguas primero', async () => {
+    const m = montar();
+
+    const r = await m.servicio.listarDePqr(PQR);
+
+    expect(m.tareas.find).toHaveBeenCalledWith({
+      copropiedadId: COPROPIEDAD,
+      pqrId: PQR,
+    });
+    expect(r).toEqual([]);
   });
 });

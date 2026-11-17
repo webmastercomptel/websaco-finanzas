@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -15,12 +16,17 @@ import type {
   DescargaArchivo,
   Pqr,
   PqrAdjuntoSubidaIniciada,
+  Tarea,
+  TareaDePqr,
 } from '../../contracts';
 import { CheckAbility, Modulo } from '../casl/check-ability.decorator';
 import { PoliciesGuard } from '../casl/policies.guard';
 import { ActualizarPqrDto } from './dto/actualizar-pqr.dto';
+import { CerrarPqrDto } from './dto/cerrar-pqr.dto';
+import { ClasificarPqrDto } from './dto/clasificar-pqr.dto';
 import { CrearAdjuntoPqrDto } from './dto/guardar-adjunto.dto';
 import { CrearPqrDto } from './dto/guardar-pqr.dto';
+import { CrearTareaPqrDto } from './dto/guardar-tarea-pqr.dto';
 import { CrearSeguimientoDto } from './dto/guardar-seguimiento.dto';
 import { ListarPqrDto } from './dto/listar-pqr.dto';
 import { PqrAdjuntosService } from './pqr-adjuntos.service';
@@ -69,8 +75,33 @@ export class PqrController {
   actualizar(
     @Param('id') id: string,
     @Body() dto: ActualizarPqrDto,
+    @CurrentUser() user: IRequestUser,
   ): Promise<Pqr> {
-    return this.pqr.actualizar(id, dto);
+    return this.pqr.actualizar(id, dto, user);
+  }
+
+  /** Classification step (type, responsible body, deadline); repeatable until closed. */
+  @Post(':id/clasificar')
+  @HttpCode(200)
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  clasificar(
+    @Param('id') id: string,
+    @Body() dto: ClasificarPqrDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Pqr> {
+    return this.pqr.clasificar(id, dto, user);
+  }
+
+  /** Final answer to the resident; closes the PQRS. */
+  @Post(':id/cerrar')
+  @HttpCode(200)
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  cerrar(
+    @Param('id') id: string,
+    @Body() dto: CerrarPqrDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Pqr> {
+    return this.pqr.cerrar(id, dto, user);
   }
 
   @Post(':id/seguimientos')
@@ -81,6 +112,24 @@ export class PqrController {
     @CurrentUser() user: IRequestUser,
   ): Promise<Pqr> {
     return this.pqr.responder(id, dto, user);
+  }
+
+  /** Tasks linked to the PQRS. */
+  @Get(':id/tareas')
+  @CheckAbility({ action: 'read', subject: 'Pqr' })
+  listarTareas(@Param('id') id: string): Promise<TareaDePqr[]> {
+    return this.pqr.listarTareas(id);
+  }
+
+  /** Creates a task from the PQRS; the service also requires `tareas.gestionar`. */
+  @Post(':id/tareas')
+  @CheckAbility({ action: 'manage', subject: 'Pqr' })
+  crearTarea(
+    @Param('id') id: string,
+    @Body() dto: CrearTareaPqrDto,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<Tarea> {
+    return this.pqr.crearTarea(id, dto, user);
   }
 
   @Post(':id/adjuntos')

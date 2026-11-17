@@ -38,6 +38,32 @@ export interface ParteConCorreos {
 }
 
 /**
+ * The valid addresses of ONE party, in stored order: trimmed, blank or
+ * malformed entries dropped, duplicates (any case, any padding) collapsed to
+ * their first spelling. Each one is returned with its identity `clave`.
+ *
+ * Shared on purpose: `destinosDeUnidad` and the Consejo y Comité members list
+ * both read addresses through this one function, so "a valid address" means the
+ * same thing everywhere. Deduplication here is per party only; a caller that
+ * merges several parties does its own cross-party dedup.
+ */
+export function correosValidos(
+  emails: readonly string[] | null | undefined,
+): { email: string; clave: string }[] {
+  const vistos = new Set<string>();
+  const validos: { email: string; clave: string }[] = [];
+  for (const crudo of emails ?? []) {
+    const email = crudo.trim();
+    if (!esEmailValido(email)) continue;
+    const clave = claveCorreo(normalizarEmail(email));
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    validos.push({ email, clave });
+  }
+  return validos;
+}
+
+/**
  * The addresses an invoice of a unit goes to, computed from the RECORDS of its
  * two parties, never from accounts.
  *
@@ -67,10 +93,7 @@ export function destinosDeUnidad(
   for (const rol of roles) {
     const parte = partes[rol];
     if (!parte) continue;
-    for (const crudo of parte.emails ?? []) {
-      const email = crudo.trim();
-      if (!esEmailValido(email)) continue;
-      const clave = claveCorreo(normalizarEmail(email));
+    for (const { email, clave } of correosValidos(parte.emails)) {
       if (vistos.has(clave)) continue;
       vistos.add(clave);
       destinos.push({

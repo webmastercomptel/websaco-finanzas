@@ -145,7 +145,7 @@ describe('TareasController — delegación', () => {
     await controlador.crear({ titulo: 'x', categoria: 'admin' }, user);
     await controlador.actualizar('t1', { titulo: 'y' }, user);
     await controlador.completar('t1', user);
-    await controlador.eliminar('t1');
+    await controlador.eliminar('t1', user);
 
     expect(servicio.crear).toHaveBeenCalledWith(
       { titulo: 'x', categoria: 'admin' },
@@ -157,6 +157,6 @@ describe('TareasController — delegación', () => {
       user,
     );
     expect(servicio.completar).toHaveBeenCalledWith('t1', user);
-    expect(servicio.eliminar).toHaveBeenCalledWith('t1');
+    expect(servicio.eliminar).toHaveBeenCalledWith('t1', user);
   });
 });

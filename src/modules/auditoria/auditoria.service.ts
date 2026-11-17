@@ -40,7 +40,8 @@ export interface EntradaAuditoria {
     | 'lote-comptable'
     | 'envio-factura'
     | 'rol'
-    | 'acceso-residente';
+    | 'acceso-residente'
+    | 'integrante-organo';
   entidadId: string;
   entidadEtiqueta: string;
   /**

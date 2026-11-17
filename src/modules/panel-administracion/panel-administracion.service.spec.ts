@@ -340,7 +340,9 @@ describe('PanelAdministracionService', () => {
 
       expect(pqrs.countDocuments).toHaveBeenCalledWith({
         copropiedadId: COPROPIEDAD,
-        estado: { $in: ['urgente', 'en_revision', 'pendiente'] },
+        estado: {
+          $in: expect.arrayContaining(['urgente', 'clasificada']) as string[],
+        },
       });
     });
   });

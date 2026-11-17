@@ -13,5 +13,6 @@ import { TareasService } from './tareas.service';
   imports: [NotificacionesModule],
   controllers: [TareasController],
   providers: [TareasService],
+  exports: [TareasService],
 })
 export class TareasModule {}

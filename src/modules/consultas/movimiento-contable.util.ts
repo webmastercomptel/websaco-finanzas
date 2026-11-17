@@ -76,6 +76,10 @@ export function resolverMovimientoContable(
   // posted against a Saldo Inicial stores only the ordinal, so the document
   // the user knows (FV 2941) is resolved here at read time.
   saldosInicialesPorNumero: Map<number, DocumentoCruceSaldoInicial> = new Map(),
+  // Accounts flagged `requiereDocumentoCruce`: a line on any other account
+  // shows no documento cruce, consistent with the accounting export. Null =
+  // chart unavailable, show what was stored.
+  cuentasConCruce: ReadonlySet<string> | null = null,
 ): MovimientoContable {
   const tipoDocumento = deriveTipoDocumento(asiento);
   const documentoId = resolveAnchorId(asiento).toString();
@@ -90,7 +94,11 @@ export function resolverMovimientoContable(
     centroCosto: e.centroCosto ?? null,
     flujoCaja: e.flujoCaja ?? null,
     baseGravable: e.baseGravable ?? null,
-    documentoCruce: documentoCruceDeMovimiento(e, saldosInicialesPorNumero),
+    documentoCruce: documentoCruceDeMovimiento(
+      e,
+      saldosInicialesPorNumero,
+      cuentasConCruce,
+    ),
   }));
 
   const totalDebito = asiento.movimientos

@@ -41,6 +41,19 @@ const makeModelos = (over: {
   archivosFallidos?: number;
   /** The single `ProgresoImportacion` row present in the collection. */
   importacion?: { tipo: string; updatedAt: Date };
+  /** `LoteComptable` rows still `enviado`/`pendiente` (what the reset must
+   *  withdraw from Comptable first). */
+  lotesComptableVivos?: { _id: Types.ObjectId; numero: number }[];
+  /** `comptableEmpresaId` of the active coproperty (default 'emp-1'). */
+  comptableEmpresaId?: string | null;
+  /** Whether this server has the Comptable connection configured. */
+  comptableConfigurado?: boolean;
+  /** Answer of `retirarLote`, per lote number (default `{ tipo: 'ok' }`). */
+  respuestasRetiro?: Record<number, Record<string, unknown>>;
+  /** Answer of `purgarLotesRetirados` (default ok, `eliminados: 0`). */
+  respuestaPurga?: Record<string, unknown>;
+  /** An "Envío a residentes" row under a live lease (a send running). */
+  envioEnCurso?: boolean;
   deletedCounts?: Partial<{
     presentaciones: number;
     progresosImportacion: number;
@@ -58,11 +71,14 @@ const makeModelos = (over: {
     carteraPorDocumento: number;
     saldosDocumentoOrigen: number;
     lotesContabilidad: number;
+    lotesComptable: number;
     saldosIniciales: number;
     lotesSaldoInicial: number;
     saldoTotalDocumento: number;
     saldosInicialesAnticipo: number;
     lotesSaldoInicialAnticipo: number;
+    enviosFactura: number;
+    enlacesFactura: number;
   }>;
 }) => {
   const counts = {
@@ -82,11 +98,14 @@ const makeModelos = (over: {
     carteraPorDocumento: 0,
     saldosDocumentoOrigen: 0,
     lotesContabilidad: 0,
+    lotesComptable: 0,
     saldosIniciales: 0,
     lotesSaldoInicial: 0,
     saldoTotalDocumento: 0,
     saldosInicialesAnticipo: 0,
     lotesSaldoInicialAnticipo: 0,
+    enviosFactura: 0,
+    enlacesFactura: 0,
     ...over.deletedCounts,
   };
 
@@ -122,9 +141,55 @@ const makeModelos = (over: {
   };
   const copropiedades = {
     findById: jest.fn(() => ({
-      exec: () => Promise.resolve({ codigo: '0001', nombre: 'Edificio Sol' }),
+      exec: () =>
+        Promise.resolve({
+          codigo: '0001',
+          nombre: 'Edificio Sol',
+          comptableEmpresaId:
+            over.comptableEmpresaId === undefined
+              ? 'emp-1'
+              : over.comptableEmpresaId,
+        }),
     })),
   };
+  const lotesComptableVivos = over.lotesComptableVivos ?? [];
+  const lotesComptable = {
+    ...deleteManyMock(counts.lotesComptable),
+    find: jest.fn(() => ({
+      sort: () => ({ exec: () => Promise.resolve(lotesComptableVivos) }),
+    })),
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const consecutivoLoteComptable = {
+    updateOne: jest.fn(() => ({ exec: () => Promise.resolve({}) })),
+  };
+  const comptable = {
+    configurado: jest.fn(() => over.comptableConfigurado ?? true),
+    retirarLote: jest.fn((_empresa: string, loteOrigenId: string) => {
+      const lote = lotesComptableVivos.find(
+        (l) => l._id.toString() === loteOrigenId,
+      );
+      return Promise.resolve(
+        (lote && over.respuestasRetiro?.[lote.numero]) ?? { tipo: 'ok' },
+      );
+    }),
+    purgarLotesRetirados: jest.fn(() =>
+      Promise.resolve(
+        over.respuestaPurga ?? {
+          tipo: 'ok',
+          status: 200,
+          datos: { eliminados: 0 },
+        },
+      ),
+    ),
+  };
+  const enviosFactura = {
+    ...deleteManyMock(counts.enviosFactura),
+    findOne: jest.fn(() => ({
+      exec: () => Promise.resolve(over.envioEnCurso ? { _id: 'e1' } : null),
+    })),
+  };
+  const enlacesFactura = deleteManyMock(counts.enlacesFactura);
   const storage = {
     eliminarPrefijo: jest.fn(() =>
       over.storageFalla
@@ -230,6 +295,11 @@ const makeModelos = (over: {
     saldosInicialesAnticipo,
     lotesSaldoInicialAnticipo,
     consecutivoSaldoInicialAnticipo,
+    lotesComptable,
+    consecutivoLoteComptable,
+    comptable,
+    enviosFactura,
+    enlacesFactura,
   };
 };
 
@@ -272,6 +342,11 @@ const makeService = (
     modelos.auditoria as never,
     modelos.colaAplicacionLoteRecibos as never,
     tenantQueDevuelve(copropiedadId),
+    modelos.lotesComptable as never,
+    modelos.consecutivoLoteComptable as never,
+    modelos.comptable as never,
+    modelos.enviosFactura as never,
+    modelos.enlacesFactura as never,
   );
 
 describe('ReiniciarCicloService.reiniciar', () => {
@@ -317,7 +392,11 @@ describe('ReiniciarCicloService.reiniciar', () => {
         lotesSaldoInicialAnticipo: 19,
         presentaciones: 20,
         progresosImportacion: 21,
+        lotesComptable: 23,
+        enviosFactura: 24,
+        enlacesFactura: 25,
       },
+      respuestaPurga: { tipo: 'ok', status: 200, datos: { eliminados: 26 } },
     });
     const service = makeService(modelos);
 
@@ -367,6 +446,12 @@ describe('ReiniciarCicloService.reiniciar', () => {
       carteraPorDocumentoEliminada: 12,
       saldosDocumentoOrigenEliminados: 13,
       lotesContabilidadEliminados: 14,
+      lotesComptableEliminados: 23,
+      lotesComptableRetirados: 0,
+      lotesComptablePurgados: 26,
+      avisoComptable: null,
+      enviosFacturaEliminados: 24,
+      enlacesFacturaEliminados: 25,
       saldosInicialesEliminados: 15,
       lotesSaldoInicialEliminados: 16,
       saldoTotalDocumentoEliminado: 17,
@@ -375,6 +460,165 @@ describe('ReiniciarCicloService.reiniciar', () => {
       presentacionesEliminadas: 20,
       progresosImportacionEliminados: 21,
       archivosPdfEliminados: 22,
+    });
+  });
+
+  describe('lotes de la Interfaz a Comptable', () => {
+    const LOTE_1 = { _id: new Types.ObjectId(), numero: 1 };
+    const LOTE_2 = { _id: new Types.ObjectId(), numero: 2 };
+
+    it('retira de Comptable los lotes enviados/pendientes ANTES de borrar, y luego borra todos y reinicia su consecutivo', async () => {
+      // Regresión: el reinicio no conocía la Interfaz a Comptable — dejaba sus
+      // lotes y su numeración, y lo ya enviado seguía dentro de Comptable.
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1, LOTE_2],
+        deletedCounts: { lotesComptable: 3, facturas: 1 },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.lotesComptable.find).toHaveBeenCalledWith({
+        copropiedadId: COP,
+        estado: { $in: ['enviado', 'pendiente'] },
+      });
+      expect(modelos.comptable.retirarLote).toHaveBeenCalledTimes(2);
+      expect(modelos.comptable.retirarLote).toHaveBeenCalledWith(
+        'emp-1',
+        LOTE_1._id.toString(),
+        { accountId: CUENTA, nombre: 'Admin Plataforma' },
+      );
+      // Retirar ocurre antes que cualquier borrado local.
+      const ultimoRetiro = Math.max(
+        ...modelos.comptable.retirarLote.mock.invocationCallOrder,
+      );
+      expect(
+        modelos.facturas.deleteMany.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(ultimoRetiro);
+      expect(modelos.lotesComptable.deleteMany).toHaveBeenCalledWith({
+        copropiedadId: COP,
+      });
+      expect(modelos.consecutivoLoteComptable.updateOne).toHaveBeenCalledWith(
+        { copropiedadId: COP },
+        { $set: { siguienteNumero: 0 } },
+      );
+      expect(resultado.lotesComptableRetirados).toBe(2);
+      expect(resultado.lotesComptableEliminados).toBe(3);
+    });
+
+    it('trata "ya retirado" y "no existe en Comptable" como éxito', async () => {
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1, LOTE_2],
+        respuestasRetiro: {
+          1: { tipo: 'yaRetirado', mensaje: null },
+          2: { tipo: 'noEncontrado', mensaje: null },
+        },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(resultado.lotesComptableRetirados).toBe(2);
+      expect(modelos.facturas.deleteMany).toHaveBeenCalled();
+    });
+
+    it('si Comptable no deja retirar un lote, aborta sin borrar nada y dice cuántos ya se retiraron', async () => {
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1, LOTE_2],
+        respuestasRetiro: {
+          2: { tipo: 'intervenido', mensaje: 'El contador editó el lote.' },
+        },
+      });
+      const service = makeService(modelos);
+
+      const error = await service.reiniciar(CUENTA).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as Error).message).toContain('lote 2');
+      expect((error as Error).message).toContain('El contador editó el lote.');
+      expect((error as Error).message).toContain('Ya se retiraron 1 lote(s)');
+      // El lote 1 SÍ salió de Comptable: queda marcado retirado aquí.
+      expect(modelos.lotesComptable.updateOne).toHaveBeenCalledTimes(1);
+      expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
+      expect(modelos.lotesComptable.deleteMany).not.toHaveBeenCalled();
+      expect(modelos.auditoria.registrar).not.toHaveBeenCalled();
+    });
+
+    it('sin conexión con Comptable configurada y con lotes enviados, se niega sin borrar nada', async () => {
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1],
+        comptableConfigurado: false,
+      });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow(
+        'no tiene configurada la conexión con Comptable',
+      );
+      expect(modelos.comptable.retirarLote).not.toHaveBeenCalled();
+      expect(modelos.facturas.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('después de retirar, borra en Comptable los lotes retirados de la copropiedad', async () => {
+      const modelos = makeModelos({
+        lotesComptableVivos: [LOTE_1],
+        respuestaPurga: { tipo: 'ok', status: 200, datos: { eliminados: 4 } },
+      });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.comptable.purgarLotesRetirados).toHaveBeenCalledWith(
+        'emp-1',
+        COP.toString(),
+        { accountId: CUENTA, nombre: 'Admin Plataforma' },
+      );
+      expect(
+        modelos.comptable.purgarLotesRetirados.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(
+        modelos.comptable.retirarLote.mock.invocationCallOrder[0],
+      );
+      expect(resultado.lotesComptablePurgados).toBe(4);
+      expect(resultado.avisoComptable).toBeNull();
+    });
+
+    it('si Comptable no deja borrar los retirados, el reinicio sigue y lo avisa', async () => {
+      const modelos = makeModelos({ respuestaPurga: { tipo: 'timeout' } });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.facturas.deleteMany).toHaveBeenCalled();
+      expect(resultado.lotesComptablePurgados).toBe(0);
+      expect(resultado.avisoComptable).toContain(
+        'Comptable no respondió a tiempo',
+      );
+      expect(modelos.auditoria.registrar).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entidadEtiqueta: expect.stringContaining(
+            'siguen listados en Comptable',
+          ) as string,
+        }),
+      );
+    });
+
+    it('una copropiedad sin Empresa de Comptable no llama a Comptable ni avisa', async () => {
+      const modelos = makeModelos({ comptableEmpresaId: null });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.comptable.purgarLotesRetirados).not.toHaveBeenCalled();
+      expect(resultado.avisoComptable).toBeNull();
+    });
+
+    it('sin lotes vivos no llama a Comptable', async () => {
+      const modelos = makeModelos({ comptableConfigurado: false });
+      const service = makeService(modelos);
+
+      const resultado = await service.reiniciar(CUENTA);
+
+      expect(modelos.comptable.retirarLote).not.toHaveBeenCalled();
+      expect(resultado.lotesComptableRetirados).toBe(0);
     });
   });
 
@@ -596,6 +840,8 @@ describe('ReiniciarCicloService.reiniciar', () => {
       m.lotesSaldoInicialAnticipo.deleteMany,
       m.presentaciones.deleteMany,
       m.progresosImportacion.deleteMany,
+      m.enviosFactura.deleteMany,
+      m.enlacesFactura.deleteMany,
       m.consecutivoLote.updateOne,
       m.consecutivoDocumento.updateMany,
       m.consecutivoLoteRecibos.updateOne,
@@ -735,6 +981,30 @@ describe('ReiniciarCicloService.reiniciar', () => {
       const limite = filtro.updatedAt.$gte.getTime();
       expect(limite).toBeLessThanOrEqual(antes - 15 * 60 * 1000 + 1000);
       expect(limite).toBeGreaterThan(antes - 15 * 60 * 1000 - 5000);
+    });
+
+    it('rechaza y no borra nada mientras hay un envío de facturas a residentes en curso', async () => {
+      const modelos = makeModelos({ envioEnCurso: true });
+      const service = makeService(modelos);
+
+      await expect(service.reiniciar(CUENTA)).rejects.toThrow(
+        /envío de facturas a residentes en curso/,
+      );
+      const filtro = (
+        modelos.enviosFactura.findOne.mock.calls[0] as unknown as [
+          Record<string, unknown>,
+        ]
+      )[0];
+      expect(filtro).toEqual(
+        expect.objectContaining({
+          copropiedadId: COP,
+          estado: 'pendiente_envio',
+          tokenEnvio: { $ne: null },
+        }),
+      );
+      for (const escritura of todoLoQueEscribe(modelos)) {
+        expect(escritura).not.toHaveBeenCalled();
+      }
     });
   });
 

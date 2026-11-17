@@ -51,6 +51,12 @@ function montar(personal: Destinatario[] = [destinatario(1)]) {
     destinatarioDe: jest
       .fn<Promise<Destinatario | null>, [string, Types.ObjectId, string]>()
       .mockResolvedValue(null),
+    inmuebleIdPorCodigo: jest
+      .fn<Promise<Types.ObjectId | null>, [Types.ObjectId, string]>()
+      .mockResolvedValue(null),
+    correosDeInmuebles: jest
+      .fn<Promise<Map<string, unknown[]>>, [Types.ObjectId, Types.ObjectId[]]>()
+      .mockResolvedValue(new Map()),
   };
   const correo = {
     enviar: jest
@@ -67,14 +73,20 @@ function montar(personal: Destinatario[] = [destinatario(1)]) {
   const notificaciones = {
     crear: jest.fn().mockResolvedValue(undefined),
   };
+  const organos = {
+    correosDeOrgano: jest
+      .fn<Promise<string[]>, [Types.ObjectId, string]>()
+      .mockResolvedValue([]),
+  };
   const servicio = new PqrNotificacionesService(
     copropiedades as never,
     directorio as never,
     correo as never,
     enlaces as never,
     notificaciones as never,
+    organos as never,
   );
-  return { servicio, directorio, correo, enlaces, notificaciones };
+  return { servicio, directorio, correo, enlaces, notificaciones, organos };
 }
 
 describe('PqrNotificacionesService.notificarNueva', () => {
@@ -333,4 +345,187 @@ describe('PqrNotificacionesService.notificarRespuesta', () => {
       servicio.notificarRespuesta(pqrDoc(), COPROPIEDAD, escritor, 'Hola'),
     ).resolves.toBeUndefined();
   });
+});
+
+describe('PqrNotificacionesService: acuse, órgano y cierre', () => {
+  const UNIDAD = new Types.ObjectId();
+  const destino = (email: string) => ({
+    clave: email,
+    email,
+    rol: 'propietario',
+    terceroId: new Types.ObjectId(),
+    nombre: 'Titular',
+  });
+
+  it('un residente autor recibe un correo de acuse con el enlace al portal', async () => {
+    const { servicio, directorio, correo, enlaces } = montar();
+    directorio.destinatarioDe.mockResolvedValue(
+      destinatario(1, 'residente', AUTOR.toString()),
+    );
+
+    const ev = await servicio.notificarAcuse(pqrDoc(), COPROPIEDAD);
+
+    expect(enlaces.construir).toHaveBeenCalledWith(
+      AUTOR.toString(),
+      COPROPIEDAD.toString(),
+      `/portal/pqr?abrir=${PQR.toString()}`,
+    );
+    expect(correo.enviar).toHaveBeenCalledTimes(1);
+    expect(correo.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        asunto: 'Recibimos su PQRS · Radicado PQR-001',
+        html: expect.stringContaining('/portal/pqr?abrir=') as string,
+      }),
+    );
+    expect(ev.tipo).toBe('acuse_enviado');
+    expect(ev.actor).toBe('Sistema');
+  });
+
+  it('registrada por el personal con un inmueble con dos correos, envía dos y lo registra', async () => {
+    const { servicio, directorio, correo } = montar();
+    directorio.inmuebleIdPorCodigo.mockResolvedValue(UNIDAD);
+    directorio.correosDeInmuebles.mockResolvedValue(
+      new Map([[UNIDAD.toString(), [destino('a@x.co'), destino('b@x.co')]]]),
+    );
+
+    const ev = await servicio.notificarAcuse(
+      pqrDoc({ autorId: null }),
+      COPROPIEDAD,
+    );
+
+    expect(correo.enviar).toHaveBeenCalledTimes(2);
+    expect(ev.tipo).toBe('acuse_enviado');
+    expect(ev.detalle).toBe('Acuse de radicado enviado a 2 destinatario(s)');
+  });
+
+  it('sin inmueble no se envía nada y el evento es acuse_sin_destinatario', async () => {
+    const { servicio, correo } = montar();
+
+    const ev = await servicio.notificarAcuse(
+      pqrDoc({ autorId: null }),
+      COPROPIEDAD,
+    );
+
+    expect(correo.enviar).not.toHaveBeenCalled();
+    expect(ev.tipo).toBe('acuse_sin_destinatario');
+    expect(ev.detalle).toBe(
+      'No se envió acuse: el inmueble no coincide o no tiene correo registrado',
+    );
+  });
+
+  it('si correo.enviar lanza, el acuse igual resuelve', async () => {
+    const { servicio, directorio, correo } = montar();
+    directorio.destinatarioDe.mockResolvedValue(destinatario(1, 'residente'));
+    correo.enviar.mockRejectedValue(new Error('caído'));
+
+    const ev = await servicio.notificarAcuse(pqrDoc(), COPROPIEDAD);
+
+    expect(ev.tipo).toBe('acuse_sin_destinatario');
+  });
+
+  it('avisarOrgano envía a los integrantes y no nombra direcciones', async () => {
+    const { servicio, organos, correo } = montar();
+    organos.correosDeOrgano.mockResolvedValue(['c@x.co']);
+
+    const ev = await servicio.avisarOrgano(
+      pqrDoc({ fechaLimite: new Date('2026-11-30T00:00:00.000Z') }),
+      COPROPIEDAD,
+      'comite_convivencia',
+    );
+
+    expect(correo.enviar).toHaveBeenCalledTimes(1);
+    expect(correo.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        para: 'c@x.co',
+        asunto: 'PQRS PQR-001 asignada al Comité de Convivencia',
+      }),
+    );
+    expect(ev.tipo).toBe('aviso_organo');
+    expect(ev.detalle).toBe(
+      'Aviso enviado a 1 integrantes del Comité de Convivencia',
+    );
+  });
+
+  it('avisarOrgano sin integrantes con correo lo dice y no envía', async () => {
+    const { servicio, correo } = montar();
+
+    const ev = await servicio.avisarOrgano(
+      pqrDoc(),
+      COPROPIEDAD,
+      'comite_convivencia',
+    );
+
+    expect(correo.enviar).not.toHaveBeenCalled();
+    expect(ev.detalle).toBe(
+      'No hay integrantes con correo en el Comité de Convivencia',
+    );
+  });
+
+  it('notificarCierre envía la respuesta final al autor y no lanza si falla', async () => {
+    const { servicio, directorio, correo } = montar();
+    directorio.destinatarioDe.mockResolvedValue(
+      destinatario(1, 'residente', AUTOR.toString()),
+    );
+
+    await servicio.notificarCierre(pqrDoc(), COPROPIEDAD, 'Listo');
+    expect(correo.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        asunto: 'Respuesta a su PQRS · Radicado PQR-001',
+      }),
+    );
+
+    correo.enviar.mockRejectedValue(new Error('caído'));
+    await expect(
+      servicio.notificarCierre(pqrDoc(), COPROPIEDAD, 'Listo'),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('PqrNotificacionesService.notificarTecnico', () => {
+  it('sin correo: deja el evento y no envía', async () => {
+    const { servicio, correo } = montar();
+
+    const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+      nombre: 'Pedro',
+      email: '',
+    });
+
+    expect(correo.enviar).not.toHaveBeenCalled();
+    expect(e.tipo).toBe('aviso_tecnico');
+    expect(e.detalle).toBe('El técnico Pedro no tiene correo registrado');
+  });
+
+  it('con correo y envío correcto: Correo enviado al técnico', async () => {
+    const { servicio, correo } = montar();
+
+    const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+      nombre: 'Pedro',
+      email: 'pedro@example.com',
+    });
+
+    expect(correo.enviar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        para: 'pedro@example.com',
+        asunto: 'Se le asignó la PQRS PQR-001',
+      }),
+    );
+    expect(e.detalle).toBe('Correo enviado al técnico Pedro');
+    expect(e.detalle).not.toContain('@');
+  });
+
+  it.each([false, 'lanza'])(
+    'si el envío falla (%s): No se pudo enviar y no lanza',
+    async (modo) => {
+      const { servicio, correo } = montar();
+      if (modo === 'lanza') correo.enviar.mockRejectedValue(new Error('x'));
+      else correo.enviar.mockResolvedValue(false);
+
+      const e = await servicio.notificarTecnico(pqrDoc(), COPROPIEDAD, {
+        nombre: 'Pedro',
+        email: 'pedro@example.com',
+      });
+
+      expect(e.detalle).toBe('No se pudo enviar el correo al técnico Pedro');
+    },
+  );
 });

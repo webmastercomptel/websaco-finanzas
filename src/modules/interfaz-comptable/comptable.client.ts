@@ -149,6 +149,31 @@ export class ComptableClient {
     );
   }
 
+  /**
+   * Asks Comptable to delete the lotes of one Copropiedad it already holds
+   * as withdrawn (`estado: 'retirado'`), so a cycle reset leaves nothing of
+   * that Copropiedad listed there. Only `ReiniciarCicloService` calls it,
+   * after withdrawing every lote; same signing as `retirarLote`.
+   */
+  purgarLotesRetirados(
+    empresaId: string,
+    copropiedadId: string,
+    solicitadoPor: { accountId: string; nombre: string },
+  ): Promise<ResultadoComptable<{ eliminados: number }>> {
+    const rawBody = JSON.stringify({
+      copropiedadId,
+      solicitadoPor: {
+        accountId: solicitadoPor.accountId,
+        nombre: solicitadoPor.nombre,
+      },
+    });
+    return this.llamar<{ eliminados: number }>(
+      'POST',
+      `integraciones/websaco/empresas/${encodeURIComponent(empresaId)}/lotes/purgar-retirados`,
+      rawBody,
+    );
+  }
+
   private async llamar<T>(
     metodo: 'GET' | 'POST',
     camino: string,

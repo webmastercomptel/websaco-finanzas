@@ -29,6 +29,11 @@ export interface ResolucionPayload {
   anchorMap: Map<string, AnchorInfo>;
   conceptoMap: Map<string, string>;
   saldosInicialesPorNumero: Map<number, DocumentoCruceSaldoInicial>;
+  /** Account codes flagged `requiereDocumentoCruce`; a line on any other
+   *  account is sent without documento cruce (Comptable rejects one on an
+   *  unflagged account). `null`/absent = chart unavailable, send what was
+   *  stored. Applies to already-posted asientos too, so no migration. */
+  cuentasConCruce?: ReadonlySet<string> | null;
 }
 
 /** The fields of an inmueble's titular the payload sends. */
@@ -206,6 +211,7 @@ function asientoDe(
       const cruce = documentoCruceDeMovimiento(
         mov,
         resolucion.saldosInicialesPorNumero,
+        resolucion.cuentasConCruce,
       );
       const codigoTercero = textoONull(mov.tercero);
       return {

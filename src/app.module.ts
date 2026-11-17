@@ -35,6 +35,7 @@ import { AccesoResidentesModule } from './modules/acceso-residentes/acceso-resid
 import { ConsultasModule } from './modules/consultas/consultas.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { OrganosModule } from './modules/organos/organos.module';
 import { CatalogoPermisosModule } from './modules/catalogo-permisos/catalogo-permisos.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { TareasModule } from './modules/tareas/tareas.module';
@@ -47,6 +48,7 @@ import { DocumentosModule } from './modules/documentos/documentos.module';
 import { FacturacionBloqueModule } from './modules/facturacion-bloque/facturacion-bloque.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
 import { TecnicosModule } from './modules/tecnicos/tecnicos.module';
+import { EquiposModule } from './modules/equipos/equipos.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { PanelControlModule } from './modules/panel-control/panel-control.module';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
@@ -56,6 +58,7 @@ import { AdicionContabilidadModule } from './modules/adicion-contabilidad/adicio
 import { IntegracionesPanelModule } from './modules/integraciones-panel/integraciones-panel.module';
 import { BusquedaModule } from './modules/busqueda/busqueda.module';
 import { BusquedaAdministracionModule } from './modules/busqueda-administracion/busqueda-administracion.module';
+import { InformeGestionModule } from './modules/informe-gestion/informe-gestion.module';
 import { PanelAdministracionModule } from './modules/panel-administracion/panel-administracion.module';
 import { EnvioFacturasModule } from './modules/envio-facturas/envio-facturas.module';
 import { FacturaPublicaModule } from './modules/factura-publica/factura-publica.module';
@@ -120,6 +123,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     ConsultasModule,
     PortalModule,
     RolesModule,
+    OrganosModule,
     CatalogoPermisosModule,
     NotificacionesModule,
     TareasModule,
@@ -132,6 +136,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     FacturacionBloqueModule,
     ReservasModule,
     TecnicosModule,
+    EquiposModule,
     AuditoriaModule,
     PanelControlModule,
     ConfiguracionModule,
@@ -141,6 +146,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     IntegracionesPanelModule,
     BusquedaModule,
     BusquedaAdministracionModule,
+    InformeGestionModule,
     PanelAdministracionModule,
     InterfazComptableModule,
     EnvioFacturasModule,

@@ -9,10 +9,14 @@ import type { CrearMantenimientoDto } from './dto/guardar-mantenimiento.dto';
 /**
  * Maps a Mantenimiento document to the API contract. Persisted enum values
  * already ARE the contract values, so this only converts ids and dates and
- * composes `proveedor.iniciales`. Nullable columns become absent keys, as the
+ * composes `proveedor.iniciales` and the equipment name (looked up in
+ * `nombresEquipo`, id to current name). Nullable columns become absent keys, as the
  * contract declares them optional.
  */
-export const toMantenimiento = (doc: MantenimientoDocument): Mantenimiento => ({
+export const toMantenimiento = (
+  doc: MantenimientoDocument,
+  nombresEquipo: ReadonlyMap<string, string> = new Map(),
+): Mantenimiento => ({
   id: doc._id.toString(),
   codigo: doc.codigo,
   titulo: doc.titulo,
@@ -31,7 +35,21 @@ export const toMantenimiento = (doc: MantenimientoDocument): Mantenimiento => ({
   notas: doc.notas ?? undefined,
   costoEstimado: doc.costoEstimado ?? undefined,
   completadoEn: toIso(doc.completadoEn) ?? undefined,
+  equipo: equipoDe(doc.equipoId, nombresEquipo),
+  periodicidad: doc.periodicidad ?? null,
+  siguienteId: doc.siguienteId ? doc.siguienteId.toString() : null,
 });
+
+/** A link whose equipment is not in the map (deleted) reads as no equipment. */
+const equipoDe = (
+  equipoId: Types.ObjectId | null | undefined,
+  nombresEquipo: ReadonlyMap<string, string>,
+): Mantenimiento['equipo'] => {
+  if (!equipoId) return null;
+  const id = equipoId.toString();
+  const nombre = nombresEquipo.get(id);
+  return nombre === undefined ? null : { id, nombre };
+};
 
 /** A provider resolved server-side: from the technician catalog, or free-typed. */
 export interface ProveedorResuelto {
@@ -64,6 +82,8 @@ export const desdeCrearDto = (
   notas: dto.notas ?? null,
   costoEstimado: dto.costoEstimado ?? null,
   completadoEn: null,
+  equipoId: dto.equipoId ? new Types.ObjectId(dto.equipoId) : null,
+  periodicidad: dto.periodicidad ?? null,
 });
 
 /**
@@ -94,5 +114,9 @@ export const desdeActualizarDto = (
   if (dto.completadoEn !== undefined) {
     cambios.completadoEn = new Date(dto.completadoEn);
   }
+  if (dto.equipoId !== undefined) {
+    cambios.equipoId = dto.equipoId ? new Types.ObjectId(dto.equipoId) : null;
+  }
+  if (dto.periodicidad !== undefined) cambios.periodicidad = dto.periodicidad;
   return cambios;
 };

@@ -9,19 +9,17 @@ import { TenantContextService } from '../../common/tenant/tenant-context.service
 import type { Tecnico as TecnicoContrato } from '../../contracts';
 import {
   Pqr,
-  type EstadoPqr,
+  type EstadoPqrGuardado,
   type PqrDocument,
 } from '../../database/schemas/administracion/pqr.schema';
 import {
   Tecnico,
   type TecnicoDocument,
 } from '../../database/schemas/administracion/tecnico.schema';
+import { VALORES_ABIERTOS } from '../pqr/pqr-etapas';
 import type { ActualizarTecnicoDto } from './dto/actualizar-tecnico.dto';
 import type { CrearTecnicoDto } from './dto/guardar-tecnico.dto';
 import { toTecnico } from './tecnicos.mapper';
-
-/** PQR states in which a technician has nothing left to do. */
-const ESTADOS_PQR_TERMINADOS: EstadoPqr[] = ['resuelto', 'cerrado'];
 
 /**
  * Technicians (external providers) of the ACTIVE coproperty. The tenant always
@@ -108,7 +106,7 @@ export class TecnicosService {
       .countDocuments({
         copropiedadId,
         tecnicoId: new Types.ObjectId(id),
-        estado: { $nin: ESTADOS_PQR_TERMINADOS },
+        estado: { $in: VALORES_ABIERTOS as EstadoPqrGuardado[] },
       })
       .exec();
     if (pqrsActivas > 0) {

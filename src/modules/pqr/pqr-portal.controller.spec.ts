@@ -144,6 +144,15 @@ describe('PqrPortalController — delegación', () => {
     };
   }
 
+  it('obtener devuelve lo que entrega el servicio, sin bitácora', async () => {
+    const { pqr, controlador } = montar();
+    pqr.obtenerPropia.mockResolvedValue({ id: 'p1', codigo: 'PQR-001' });
+
+    const vista = await controlador.obtener('p1', user);
+
+    expect(vista).not.toHaveProperty('bitacora');
+  });
+
   it('todas las operaciones propias reciben al usuario autenticado, nunca un id de autor del cliente', async () => {
     const { pqr, adjuntos, controlador } = montar();
     const dto = {

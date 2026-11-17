@@ -387,6 +387,50 @@ describe('construirPayloadComptable', () => {
     });
   });
 
+  it('no envía documento cruce en una cuenta no marcada (ingreso 41355402), sí en la marcada', () => {
+    const resolucion = resolucionVacia();
+    resolucion.cuentasConCruce = new Set(['13050501']);
+
+    const [primero] = construirPayloadComptable(
+      [
+        asiento(
+          { reciboId: new Types.ObjectId() },
+          '2026-10-02T00:00:00.000Z',
+          [
+            {
+              cuenta: '13050501',
+              tipo: 'credito',
+              monto: 10,
+              descripcion: 'c',
+              tipoDocumento: 'FV',
+              numeroDocumento: 77,
+            },
+            {
+              cuenta: '41355402',
+              tipo: 'credito',
+              monto: 5,
+              descripcion: 'i',
+              tipoDocumento: 'FV',
+              numeroDocumento: 77,
+            },
+          ],
+        ),
+      ],
+      resolucion,
+      new Map(),
+      ORIGEN,
+    ).asientos;
+
+    expect(primero.movimientos[0]).toMatchObject({
+      tipoDocCruce: 'FV',
+      numeroDocCruce: '77',
+    });
+    expect(primero.movimientos[1]).toMatchObject({
+      tipoDocCruce: null,
+      numeroDocCruce: null,
+    });
+  });
+
   it('centro de costo → centroUtilidad; centroDestino siempre null', () => {
     const [primero] = construirPayloadComptable(
       [

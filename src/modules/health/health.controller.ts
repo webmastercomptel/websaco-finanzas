@@ -10,6 +10,7 @@ import { RedisHealthIndicator } from './redis.health';
 import { CorreoHealthIndicator } from './correo.health';
 import { FrontendUrlHealthIndicator } from './frontend-url.health';
 import { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
+import { PqrEstadosHealthIndicator } from './pqr-estados.health';
 
 @Controller('health')
 @Public()
@@ -21,6 +22,7 @@ export class HealthController {
     private integracionComptable: IntegracionComptableHealthIndicator,
     private correo: CorreoHealthIndicator,
     private frontendUrl: FrontendUrlHealthIndicator,
+    private pqrEstados: PqrEstadosHealthIndicator,
   ) {}
 
   /**
@@ -59,6 +61,7 @@ export class HealthController {
       () => this.integracionComptable.check('integracion-comptable'),
       () => this.correo.check('correo'),
       () => this.frontendUrl.check('frontend-url'),
+      () => this.pqrEstados.check('pqr-estados'),
     ]);
   }
 

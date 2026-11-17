@@ -6,6 +6,7 @@ import { HealthController } from './health.controller';
 import type { CorreoHealthIndicator } from './correo.health';
 import type { FrontendUrlHealthIndicator } from './frontend-url.health';
 import type { IntegracionComptableHealthIndicator } from './integracion-comptable.health';
+import type { PqrEstadosHealthIndicator } from './pqr-estados.health';
 import type { RedisHealthIndicator } from './redis.health';
 
 describe('HealthController', () => {
@@ -17,6 +18,7 @@ describe('HealthController', () => {
   >;
   let correo: jest.Mocked<Pick<CorreoHealthIndicator, 'check'>>;
   let frontendUrl: jest.Mocked<Pick<FrontendUrlHealthIndicator, 'check'>>;
+  let pqrEstados: jest.Mocked<Pick<PqrEstadosHealthIndicator, 'check'>>;
   let controller: HealthController;
 
   beforeEach(() => {
@@ -43,6 +45,10 @@ describe('HealthController', () => {
       check: jest.fn().mockReturnValue({ 'frontend-url': { status: 'up' } }),
     };
 
+    pqrEstados = {
+      check: jest.fn().mockResolvedValue({ 'pqr-estados': { status: 'up' } }),
+    };
+
     controller = new HealthController(
       health as unknown as HealthCheckService,
       mongoose as unknown as MongooseHealthIndicator,
@@ -50,6 +56,7 @@ describe('HealthController', () => {
       integracionComptable as unknown as IntegracionComptableHealthIndicator,
       correo as unknown as CorreoHealthIndicator,
       frontendUrl as unknown as FrontendUrlHealthIndicator,
+      pqrEstados as unknown as PqrEstadosHealthIndicator,
     );
   });
 
@@ -65,13 +72,14 @@ describe('HealthController', () => {
 
     expect(health.check).toHaveBeenCalledTimes(1);
     const checks = health.check.mock.calls[0][0] as Array<() => unknown>;
-    expect(checks).toHaveLength(5);
+    expect(checks).toHaveLength(6);
 
     await checks[0]();
     await checks[1]();
     await checks[2]();
     await checks[3]();
     await checks[4]();
+    await checks[5]();
     expect(mongoose.pingCheck).toHaveBeenCalledWith('mongodb');
     expect(redis.pingCheck).toHaveBeenCalledWith('redis');
     expect(integracionComptable.check).toHaveBeenCalledWith(
@@ -79,6 +87,7 @@ describe('HealthController', () => {
     );
     expect(correo.check).toHaveBeenCalledWith('correo');
     expect(frontendUrl.check).toHaveBeenCalledWith('frontend-url');
+    expect(pqrEstados.check).toHaveBeenCalledWith('pqr-estados');
   });
 
   it('el endpoint por defecto (el del HEALTHCHECK del Dockerfile) solo chequea Mongo y Redis: una config mala no se arregla reiniciando', async () => {
@@ -91,5 +100,6 @@ describe('HealthController', () => {
     await checks[0]();
     await checks[1]();
     expect(integracionComptable.check).not.toHaveBeenCalled();
+    expect(pqrEstados.check).not.toHaveBeenCalled();
   });
 });

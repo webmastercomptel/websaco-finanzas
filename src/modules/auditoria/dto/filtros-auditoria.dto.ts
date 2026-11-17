@@ -15,6 +15,7 @@ export class FiltrosAuditoriaDto {
     'envio-factura',
     'rol',
     'acceso-residente',
+    'integrante-organo',
   ])
   entidadTipo?:
     | 'entidad-administradora'
@@ -26,7 +27,8 @@ export class FiltrosAuditoriaDto {
     | 'lote-comptable'
     | 'envio-factura'
     | 'rol'
-    | 'acceso-residente';
+    | 'acceso-residente'
+    | 'integrante-organo';
 
   @IsOptional()
   @IsIn([

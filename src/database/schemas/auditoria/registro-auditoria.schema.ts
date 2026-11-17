@@ -87,6 +87,7 @@ export class RegistroAuditoria {
       'envio-factura',
       'rol',
       'acceso-residente',
+      'integrante-organo',
     ],
     index: true,
   })
@@ -100,7 +101,8 @@ export class RegistroAuditoria {
     | 'lote-comptable'
     | 'envio-factura'
     | 'rol'
-    | 'acceso-residente';
+    | 'acceso-residente'
+    | 'integrante-organo';
 
   @Prop({ type: SchemaTypes.ObjectId, required: true, index: true })
   entidadId: Types.ObjectId;

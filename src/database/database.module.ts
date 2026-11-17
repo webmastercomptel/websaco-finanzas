@@ -206,6 +206,8 @@ import {
   TecnicoSchema,
 } from './schemas/administracion/tecnico.schema';
 
+import { Equipo, EquipoSchema } from './schemas/administracion/equipo.schema';
+
 import { Tarea, TareaSchema } from './schemas/administracion/tarea.schema';
 
 import {
@@ -219,6 +221,11 @@ import {
 } from './schemas/administracion/actividad.schema';
 
 import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
+
+import {
+  IntegranteOrgano,
+  IntegranteOrganoSchema,
+} from './schemas/administracion/integrante-organo.schema';
 
 import {
   Anuncio,
@@ -257,6 +264,7 @@ const models = [
   { name: ArchivoDocumento.name, schema: ArchivoDocumentoSchema },
   { name: Tarea.name, schema: TareaSchema },
   { name: Pqr.name, schema: PqrSchema },
+  { name: IntegranteOrgano.name, schema: IntegranteOrganoSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
   { name: Anuncio.name, schema: AnuncioSchema },
@@ -265,6 +273,7 @@ const models = [
   { name: Zona.name, schema: ZonaSchema },
   { name: Reserva.name, schema: ReservaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
+  { name: Equipo.name, schema: EquipoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },

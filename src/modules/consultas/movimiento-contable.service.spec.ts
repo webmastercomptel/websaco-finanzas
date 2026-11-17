@@ -171,6 +171,60 @@ describe('MovimientoContableService', () => {
       });
     });
 
+    it('oculta el documento cruce de líneas en cuentas no marcadas del plan (asientos ya posteados), conserva el de las marcadas', async () => {
+      const rec = reciboDoc({ numeroCompleto: 'RC-1' });
+      const asiento = asientoDoc('reciboId', rec._id, {
+        movimientos: [
+          {
+            cuenta: '13050501',
+            tipo: 'credito',
+            monto: 100,
+            descripcion: 'x',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          },
+          {
+            cuenta: '41355402',
+            tipo: 'credito',
+            monto: 50,
+            descripcion: 'y',
+            tipoDocumento: 'FV',
+            numeroDocumento: 77,
+          },
+        ],
+      });
+
+      const svc = servicio({
+        recibos: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([rec]),
+        },
+        asientos: {
+          find: jest.fn().mockReturnThis(),
+          sort: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([asiento]),
+        },
+        cuentasContables: {
+          find: jest.fn().mockReturnThis(),
+          exec: jest
+            .fn()
+            .mockResolvedValue([
+              cuentaDoc({ codigo: '13050501', requiereDocumentoCruce: true }),
+              cuentaDoc({ codigo: '41355402', requiereDocumentoCruce: false }),
+            ]),
+        },
+      });
+
+      const result = await svc.findAll({
+        desde: '2026-01-01',
+        hasta: '2026-12-31',
+      });
+
+      const [l1, l2] = result.movimientos[0].lineas;
+      expect(l1.documentoCruce).toEqual({ tipo: 'FV', numero: 77 });
+      expect(l2.documentoCruce).toBeNull();
+    });
+
     it('returns every asiento in the coproperty within a date range, regardless of inmueble', async () => {
       const f1 = facturaDoc({ numeroCompleto: 'FV-001' });
       const f2 = facturaDoc({ numeroCompleto: 'FV-002' });

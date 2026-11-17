@@ -78,8 +78,11 @@ export class TareasController {
 
   @Delete(':id')
   @CheckAbility({ action: 'manage', subject: 'Tarea' })
-  eliminar(@Param('id') id: string): Promise<{ id: string }> {
-    return this.tareas.eliminar(id);
+  eliminar(
+    @Param('id') id: string,
+    @CurrentUser() user: IRequestUser,
+  ): Promise<{ id: string }> {
+    return this.tareas.eliminar(id, user);
   }
 
   @Patch(':id/completar')

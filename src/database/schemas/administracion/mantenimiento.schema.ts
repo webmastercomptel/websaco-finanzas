@@ -28,6 +28,16 @@ export const PRIORIDADES_MANTENIMIENTO = [
 ] as const;
 export type PrioridadMantenimiento = (typeof PRIORIDADES_MANTENIMIENTO)[number];
 
+/** How often a preventive maintenance repeats; null means a one-off job. */
+export const PERIODICIDADES_MANTENIMIENTO = [
+  'semanal',
+  'mensual',
+  'semestral',
+  'anual',
+] as const;
+export type PeriodicidadMantenimiento =
+  (typeof PERIODICIDADES_MANTENIMIENTO)[number];
+
 /**
  * Who does the work. Only the name is frozen here: when the provider was picked
  * from the technician catalog the name is a snapshot of it, so the record keeps
@@ -105,6 +115,22 @@ export class Mantenimiento {
 
   @Prop({ type: Date, default: null })
   completadoEn: Date | null;
+
+  /** Equipment this job is about; null for a general job (or a dangling link after the equipment was deleted). */
+  @Prop({ type: Types.ObjectId, ref: 'Equipo', default: null })
+  equipoId: Types.ObjectId | null;
+
+  /** Repeat cadence; only a preventive job may carry one. */
+  @Prop({
+    type: String,
+    enum: [...PERIODICIDADES_MANTENIMIENTO, null],
+    default: null,
+  })
+  periodicidad: PeriodicidadMantenimiento | null;
+
+  /** The next occurrence generated when this one was completed; null until then. */
+  @Prop({ type: Types.ObjectId, ref: 'Mantenimiento', default: null })
+  siguienteId: Types.ObjectId | null;
 }
 
 export const MantenimientoSchema = SchemaFactory.createForClass(Mantenimiento);
@@ -112,3 +138,4 @@ MantenimientoSchema.index({ codigo: 1 }, { unique: true });
 MantenimientoSchema.index({ copropiedadId: 1, estado: 1 });
 MantenimientoSchema.index({ copropiedadId: 1, tipo: 1 });
 MantenimientoSchema.index({ copropiedadId: 1, fecha: 1 });
+MantenimientoSchema.index({ copropiedadId: 1, equipoId: 1, fecha: -1 });

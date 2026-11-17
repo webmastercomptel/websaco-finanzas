@@ -58,6 +58,15 @@ describe('toTarea', () => {
           fecha: '2026-03-02T00:00:00.000Z',
         },
       ],
+      pqr: null,
+    });
+  });
+
+  it('expone el vínculo con la PQRS como { id, codigo }', () => {
+    const pqrId = new Types.ObjectId();
+    expect(toTarea(documento({ pqrId, pqrCodigo: 'PQR-0007' })).pqr).toEqual({
+      id: pqrId.toString(),
+      codigo: 'PQR-0007',
     });
   });
 

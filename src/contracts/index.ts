@@ -912,6 +912,20 @@ export interface ResultadoReinicioCiclo {
   carteraPorDocumentoEliminada: number;
   saldosDocumentoOrigenEliminados: number;
   lotesContabilidadEliminados: number;
+  /** "Interfaz a Comptable" lotes withdrawn from Comptable by this reset
+   *  (`enviado`/`pendiente` ones), before anything was deleted here. */
+  lotesComptableRetirados: number;
+  /** `LoteComptable` rows deleted here, every state. */
+  lotesComptableEliminados: number;
+  /** Withdrawn lotes of this coproperty Comptable deleted from its own list
+   *  after the withdrawal (this run's and earlier ones). */
+  lotesComptablePurgados: number;
+  /** Why that purge failed (the reset still happened), or null. */
+  avisoComptable: string | null;
+  /** "Envío a residentes" rows (`EnvioFactura`) deleted. */
+  enviosFacturaEliminados: number;
+  /** Residents' public invoice links (`EnlaceFactura`) deleted. */
+  enlacesFacturaEliminados: number;
   saldosInicialesEliminados: number;
   lotesSaldoInicialEliminados: number;
   saldoTotalDocumentoEliminado: number;
@@ -2647,7 +2661,8 @@ export interface RegistroAuditoriaContract {
     | 'lote-comptable'
     | 'envio-factura'
     | 'rol'
-    | 'acceso-residente';
+    | 'acceso-residente'
+    | 'integrante-organo';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
@@ -3002,6 +3017,18 @@ export interface Tarea {
   fechaLimite?: string;
   historial?: TareaActividad[];
   observaciones?: TareaObservacion[];
+  /** The PQRS it was created from, or null for a free-standing task. */
+  pqr: { id: string; codigo: string } | null;
+}
+
+/** A task linked to a PQRS, as the PQRS detail lists it. */
+export interface TareaDePqr {
+  id: string;
+  titulo: string;
+  estado: 'pendiente' | 'en_progreso' | 'completado';
+  /** Assignee names. */
+  asignados: string[];
+  fechaLimite: string | null;
 }
 
 /** A maintenance job of the active coproperty (list row and detail). */
@@ -3024,6 +3051,14 @@ export interface Mantenimiento {
   notas?: string;
   costoEstimado?: number;
   completadoEn?: string;
+  /** Equipment the job is about; null when none (or the equipment no longer exists). */
+  equipo: { id: string; nombre: string } | null;
+  /** Repeat cadence; only preventive jobs carry one. */
+  periodicidad: 'semanal' | 'mensual' | 'semestral' | 'anual' | null;
+  /** Id of the occurrence generated when this one was completed. */
+  siguienteId: string | null;
+  /** Summary of that next occurrence; set only on the response that completed this job. */
+  siguiente?: { id: string; codigo: string; fecha: string };
 }
 
 /**
@@ -3102,6 +3137,21 @@ export interface PqrResidente {
   rol: string;
 }
 
+/** The four stages of a PQR. */
+export type EstadoPqr = 'radicada' | 'clasificada' | 'en_gestion' | 'cerrada';
+
+/** Who answers a classified PQR. */
+export type ResponsablePqr =
+  'administracion' | 'consejo' | 'comite_convivencia';
+
+/** One entry of a PQR's log (bitácora). */
+export interface EventoPqrContrato {
+  fecha: string;
+  tipo: string;
+  actor: string;
+  detalle: string;
+}
+
 /** A petition, complaint or claim of the active coproperty. */
 export interface Pqr {
   id: string;
@@ -3117,7 +3167,8 @@ export interface Pqr {
     | 'sugerencias'
     | 'felicitaciones'
     | 'denuncias';
-  estado: 'urgente' | 'en_revision' | 'pendiente' | 'resuelto' | 'cerrado';
+  /** Always the stage, even when a legacy value is still stored. */
+  estado: EstadoPqr;
   prioridad: 'alta' | 'media' | 'normal' | 'baja';
   unidad: string;
   residente: PqrResidente;
@@ -3126,7 +3177,26 @@ export interface Pqr {
   seguimientos: PqrSeguimiento[];
   /** Name of the assigned technician, or null. */
   tecnicoAsignado: string | null;
+  responsable: ResponsablePqr | null;
+  /** `YYYY-MM-DD`: the confirmed response deadline, null until classified. */
+  fechaLimite: string | null;
+  /** `YYYY-MM-DD`: 15 business days after filing. */
+  fechaLimiteSugerida: string;
+  /** Open and past its deadline. */
+  vencida: boolean;
+  clasificadaEn: string | null;
+  cerradaEn: string | null;
+  bitacora: EventoPqrContrato[];
 }
+
+/**
+ * What a resident sees of a PQR: the internal handling (responsible body,
+ * deadlines, log) is never part of it.
+ */
+export type PqrPortal = Omit<
+  Pqr,
+  'responsable' | 'fechaLimite' | 'fechaLimiteSugerida' | 'vencida' | 'bitacora'
+>;
 
 /** An external technician or provider of the active coproperty. */
 export interface Tecnico {
@@ -3134,6 +3204,43 @@ export interface Tecnico {
   nombre: string;
   especialidad: string;
   email: string;
+}
+
+/** A piece of equipment of the active coproperty (catalog entry). */
+export interface Equipo {
+  id: string;
+  nombre: string;
+  tipo: string;
+  ubicacion: string;
+  marca: string;
+  modelo: string;
+  serial: string;
+  fechaInstalacion: string | null;
+  estado: 'operativo' | 'fuera_de_servicio' | 'dado_de_baja';
+  notas: string | null;
+}
+
+/** Reference to one maintenance in the hoja de vida summary. */
+export interface HojaDeVidaReferencia {
+  id: string;
+  codigo: string;
+  fecha: string;
+}
+
+/** Life sheet of an equipment: its data, a summary and its whole maintenance history. */
+export interface HojaDeVidaEquipo {
+  equipo: Equipo;
+  resumen: {
+    /** Latest completed maintenance by `fecha`. */
+    ultimo: HojaDeVidaReferencia | null;
+    /** Earliest scheduled/in-progress maintenance dated today (Bogotá) or later. */
+    proximo: HojaDeVidaReferencia | null;
+    /** Sum of `costoEstimado` over the completed maintenances. */
+    costoAcumulado: number;
+    totalMantenimientos: number;
+  };
+  /** Every maintenance of the equipment, any state, newest `fecha` first. */
+  mantenimientos: Mantenimiento[];
 }
 
 /** A common area, as staff manage it. */
@@ -3810,4 +3917,41 @@ export interface ResultadoProcesoEnvio {
   enEspera: number;
   /** True while another call can make progress. */
   hayMas: boolean;
+}
+
+/* ── Consejo y Comité ─────────────────────────────────────────── */
+
+/** The two bodies a coproperty keeps a member list for. */
+export type OrganoCopropiedad = 'consejo' | 'comite_convivencia';
+
+/** A unit a member is tied to, and on which side. */
+export interface UnidadDeIntegrante {
+  codigo: string;
+  rol: 'propietario' | 'arrendatario';
+}
+
+/** A member of a body, read live from the party record and its units. */
+export interface IntegranteOrgano {
+  id: string;
+  organo: OrganoCopropiedad;
+  terceroId: string;
+  nombre: string;
+  correos: string[];
+  unidades: UnidadDeIntegrante[];
+  /** Party active AND at least one active unit; else the member is kept but inert. */
+  vigente: boolean;
+}
+
+/** Both bodies of a coproperty in one answer, so the screen needs a single request. */
+export interface OrganosCopropiedad {
+  consejo: IntegranteOrgano[];
+  comiteConvivencia: IntegranteOrgano[];
+}
+
+/** An owner or tenant who can be added to a body. */
+export interface CandidatoOrgano {
+  terceroId: string;
+  nombre: string;
+  correos: string[];
+  unidades: UnidadDeIntegrante[];
 }
