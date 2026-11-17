@@ -3,16 +3,20 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsISO8601,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
   ESTADOS_MANTENIMIENTO,
+  PERIODICIDADES_MANTENIMIENTO,
   PRIORIDADES_MANTENIMIENTO,
   TIPOS_MANTENIMIENTO,
   type EstadoMantenimiento,
+  type PeriodicidadMantenimiento,
   type PrioridadMantenimiento,
   type TipoMantenimiento,
 } from '../../../database/schemas/administracion/mantenimiento.schema';
@@ -72,4 +76,14 @@ export class ActualizarMantenimientoDto {
   @IsISO8601()
   @IsOptional()
   completadoEn?: string;
+
+  /** `null` unlinks the equipment; absent leaves it untouched. */
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @IsMongoId()
+  equipoId?: string | null;
+
+  /** Only a preventive job may repeat (enforced in the service). */
+  @ValidateIf((_o, v) => v !== null && v !== undefined)
+  @IsIn(PERIODICIDADES_MANTENIMIENTO)
+  periodicidad?: PeriodicidadMantenimiento | null;
 }

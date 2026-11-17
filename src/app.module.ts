@@ -47,6 +47,7 @@ import { DocumentosModule } from './modules/documentos/documentos.module';
 import { FacturacionBloqueModule } from './modules/facturacion-bloque/facturacion-bloque.module';
 import { ReservasModule } from './modules/reservas/reservas.module';
 import { TecnicosModule } from './modules/tecnicos/tecnicos.module';
+import { EquiposModule } from './modules/equipos/equipos.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
 import { PanelControlModule } from './modules/panel-control/panel-control.module';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
@@ -132,6 +133,7 @@ import { InterfazComptableModule } from './modules/interfaz-comptable/interfaz-c
     FacturacionBloqueModule,
     ReservasModule,
     TecnicosModule,
+    EquiposModule,
     AuditoriaModule,
     PanelControlModule,
     ConfiguracionModule,

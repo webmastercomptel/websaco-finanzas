@@ -10,6 +10,8 @@ REST API for WebSACO Finanzas (billing, receivables, reports). Stack: Node 22, N
 
 Scope so far: config, Mongo/Redis, health, Firebase auth against local accounts, the catalog/identity model (coproperties, units, parties, charge concepts, accounts/assignments), tenant context + CASL + the API contract convention, and the financial documents (facturación, recibos, notas contables/crédito/débito, PDFs, accounting ledger, estado de cuenta, cartera aging, auditoría). Since the fusion, also the Administración modules (PQR, reservations, documents, announcements, tasks, maintenance, activities, roles, staff team and resident provisioning, the resident portal) behind the `administracion` licence, and the native invoice send (`envio-facturas`). No queues: delivery runs inside the request, resumable.
 
+Maintenance equipment: `modules/equipos/` (CRUD `/equipos`, `GET /equipos/:id/hoja-de-vida`; schema `adm_equipos`) reuses the `Mantenimiento` abilities (read/manage, no new permission key); deleting an equipo with maintenances pointing at it is 409. `Mantenimiento` gained `equipoId`, `periodicidad` (semanal/mensual/semestral/anual, preventivo only) and `siguienteId`: `MantenimientosService.actualizar` creates the next maintenance when a periodic one is completed (`modules/mantenimientos/periodicidad.ts`; a claim guard on `siguienteId` makes it idempotent, no transactions).
+
 ## Commands
 
 | Command | What it does |

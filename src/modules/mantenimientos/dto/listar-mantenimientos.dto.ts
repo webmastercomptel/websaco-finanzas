@@ -1,5 +1,5 @@
 // src/modules/mantenimientos/dto/listar-mantenimientos.dto.ts
-import { IsIn, IsOptional } from 'class-validator';
+import { IsIn, IsMongoId, IsOptional } from 'class-validator';
 import {
   ESTADOS_MANTENIMIENTO,
   TIPOS_MANTENIMIENTO,
@@ -37,4 +37,8 @@ export class ListarMantenimientosDto {
   @IsIn(FILTROS_ESTADO_MANTENIMIENTO)
   @IsOptional()
   estado?: 'todos' | EstadoMantenimiento;
+
+  @IsMongoId()
+  @IsOptional()
+  equipoId?: string;
 }

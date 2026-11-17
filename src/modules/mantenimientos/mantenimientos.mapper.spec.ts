@@ -47,7 +47,33 @@ describe('toMantenimiento', () => {
       notas: 'Llevar escalera',
       costoEstimado: 150000,
       completadoEn: '2026-09-11T08:00:00.000Z',
+      equipo: null,
+      periodicidad: null,
+      siguienteId: null,
     });
+  });
+
+  it('un documento sin los campos nuevos sale con equipo, periodicidad y siguienteId en null', () => {
+    const contrato = toMantenimiento(documento());
+
+    expect(contrato.equipo).toBeNull();
+    expect(contrato.periodicidad).toBeNull();
+    expect(contrato.siguienteId).toBeNull();
+  });
+
+  it('equipo sale { id, nombre } si el id está en el mapa y null si el vínculo quedó colgando', () => {
+    const equipoId = new Types.ObjectId();
+    const doc = documento({ equipoId, periodicidad: 'anual', siguienteId: id });
+
+    expect(
+      toMantenimiento(doc, new Map([[equipoId.toString(), 'Bomba']])),
+    ).toMatchObject({
+      equipo: { id: equipoId.toString(), nombre: 'Bomba' },
+      periodicidad: 'anual',
+      siguienteId: id.toString(),
+    });
+    expect(toMantenimiento(doc, new Map()).equipo).toBeNull();
+    expect(toMantenimiento(doc).equipo).toBeNull();
   });
 
   it('las columnas nulas salen como claves ausentes y tecnicoId como null', () => {
@@ -103,6 +129,20 @@ describe('desdeCrearDto', () => {
 });
 
 describe('desdeActualizarDto', () => {
+  it('null limpia equipoId y periodicidad; un id se escribe como ObjectId', () => {
+    const equipoId = new Types.ObjectId();
+    expect(desdeActualizarDto({ equipoId: null, periodicidad: null })).toEqual({
+      equipoId: null,
+      periodicidad: null,
+    });
+    expect(
+      desdeActualizarDto({
+        equipoId: equipoId.toString(),
+        periodicidad: 'anual',
+      }),
+    ).toEqual({ equipoId, periodicidad: 'anual' });
+  });
+
   it('solo incluye lo que el cliente envió', () => {
     expect(desdeActualizarDto({ titulo: 'Nuevo', costoEstimado: 0 })).toEqual({
       titulo: 'Nuevo',

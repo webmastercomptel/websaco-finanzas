@@ -206,6 +206,8 @@ import {
   TecnicoSchema,
 } from './schemas/administracion/tecnico.schema';
 
+import { Equipo, EquipoSchema } from './schemas/administracion/equipo.schema';
+
 import { Tarea, TareaSchema } from './schemas/administracion/tarea.schema';
 
 import {
@@ -265,6 +267,7 @@ const models = [
   { name: Zona.name, schema: ZonaSchema },
   { name: Reserva.name, schema: ReservaSchema },
   { name: Tecnico.name, schema: TecnicoSchema },
+  { name: Equipo.name, schema: EquipoSchema },
   { name: Notificacion.name, schema: NotificacionSchema },
   { name: Rol.name, schema: RolSchema },
   { name: EnlaceAcceso.name, schema: EnlaceAccesoSchema },

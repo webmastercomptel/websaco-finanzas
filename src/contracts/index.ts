@@ -3038,6 +3038,14 @@ export interface Mantenimiento {
   notas?: string;
   costoEstimado?: number;
   completadoEn?: string;
+  /** Equipment the job is about; null when none (or the equipment no longer exists). */
+  equipo: { id: string; nombre: string } | null;
+  /** Repeat cadence; only preventive jobs carry one. */
+  periodicidad: 'semanal' | 'mensual' | 'semestral' | 'anual' | null;
+  /** Id of the occurrence generated when this one was completed. */
+  siguienteId: string | null;
+  /** Summary of that next occurrence; set only on the response that completed this job. */
+  siguiente?: { id: string; codigo: string; fecha: string };
 }
 
 /**
@@ -3148,6 +3156,43 @@ export interface Tecnico {
   nombre: string;
   especialidad: string;
   email: string;
+}
+
+/** A piece of equipment of the active coproperty (catalog entry). */
+export interface Equipo {
+  id: string;
+  nombre: string;
+  tipo: string;
+  ubicacion: string;
+  marca: string;
+  modelo: string;
+  serial: string;
+  fechaInstalacion: string | null;
+  estado: 'operativo' | 'fuera_de_servicio' | 'dado_de_baja';
+  notas: string | null;
+}
+
+/** Reference to one maintenance in the hoja de vida summary. */
+export interface HojaDeVidaReferencia {
+  id: string;
+  codigo: string;
+  fecha: string;
+}
+
+/** Life sheet of an equipment: its data, a summary and its whole maintenance history. */
+export interface HojaDeVidaEquipo {
+  equipo: Equipo;
+  resumen: {
+    /** Latest completed maintenance by `fecha`. */
+    ultimo: HojaDeVidaReferencia | null;
+    /** Earliest scheduled/in-progress maintenance dated today (Bogotá) or later. */
+    proximo: HojaDeVidaReferencia | null;
+    /** Sum of `costoEstimado` over the completed maintenances. */
+    costoAcumulado: number;
+    totalMantenimientos: number;
+  };
+  /** Every maintenance of the equipment, any state, newest `fecha` first. */
+  mantenimientos: Mantenimiento[];
 }
 
 /** A common area, as staff manage it. */

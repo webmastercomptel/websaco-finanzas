@@ -20,6 +20,7 @@ const consulta = (valor: unknown): Consulta => {
 
 type ModeloMantenimientos = jest.Mock & {
   find: jest.Mock;
+  findOne: jest.Mock;
   findOneAndUpdate: jest.Mock;
   findOneAndDelete: jest.Mock;
   countDocuments: jest.Mock;
@@ -29,6 +30,7 @@ const COPROPIEDAD = new Types.ObjectId();
 const TECNICO = new Types.ObjectId();
 const CUENTA_TECNICO = new Types.ObjectId();
 const MANTENIMIENTO = new Types.ObjectId();
+const EQUIPO = new Types.ObjectId();
 
 const dtoBase = {
   titulo: 'Revisión de ascensores',
@@ -54,6 +56,9 @@ const mantenimientoDoc = (extra: Record<string, unknown> = {}) => ({
   notas: null,
   costoEstimado: null,
   completadoEn: null,
+  equipoId: null,
+  periodicidad: null,
+  siguienteId: null,
   ...extra,
 });
 
@@ -69,6 +74,9 @@ function montar() {
       return instancia;
     }) as ModeloMantenimientos;
   mantenimientos.find = jest.fn().mockReturnValue(consulta([]));
+  mantenimientos.findOne = jest
+    .fn()
+    .mockReturnValue(consulta(mantenimientoDoc()));
   mantenimientos.findOneAndUpdate = jest
     .fn()
     .mockReturnValue(consulta(mantenimientoDoc()));
@@ -95,6 +103,17 @@ function montar() {
       .fn()
       .mockReturnValue(consulta({ nombre: 'Torres del Parque' })),
   };
+  const equipoDoc = {
+    _id: EQUIPO,
+    nombre: 'Ascensor 1',
+    estado: 'operativo',
+  };
+  const equiposModelo = {
+    find: jest.fn().mockReturnValue(consulta([equipoDoc])),
+  };
+  const equiposServicio = {
+    buscarDelTenant: jest.fn().mockResolvedValue(equipoDoc),
+  };
   const tenant = {
     resolveCoPropertyId: jest.fn().mockReturnValue(COPROPIEDAD),
   };
@@ -119,6 +138,8 @@ function montar() {
     directorio as never,
     correo as never,
     notificaciones as never,
+    equiposModelo as never,
+    equiposServicio as never,
   );
   return {
     servicio,
@@ -129,6 +150,8 @@ function montar() {
     directorio,
     correo,
     notificaciones,
+    equiposModelo,
+    equiposServicio,
   };
 }
 
@@ -461,5 +484,450 @@ describe('MantenimientosService.eliminar', () => {
 
     await expect(servicio.eliminar('xyz')).rejects.toThrow(NotFoundException);
     expect(mantenimientos.findOneAndDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('MantenimientosService — equipo y periodicidad', () => {
+  it('crear con equipoId de otra copropiedad responde 404 y no escribe', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+    equiposServicio.buscarDelTenant.mockResolvedValue(null);
+
+    await expect(
+      servicio.crear({ ...dtoBase, equipoId: EQUIPO.toString() }),
+    ).rejects.toThrow(NotFoundException);
+    expect(equiposServicio.buscarDelTenant).toHaveBeenCalledWith(
+      COPROPIEDAD,
+      EQUIPO.toString(),
+    );
+    expect(mantenimientos).not.toHaveBeenCalled();
+  });
+
+  it('crear con un equipo dado de baja responde 400', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+    equiposServicio.buscarDelTenant.mockResolvedValue({
+      _id: EQUIPO,
+      nombre: 'Ascensor 1',
+      estado: 'dado_de_baja',
+    });
+
+    await expect(
+      servicio.crear({ ...dtoBase, equipoId: EQUIPO.toString() }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mantenimientos).not.toHaveBeenCalled();
+  });
+
+  it('crear con periodicidad y tipo correctivo responde 400', async () => {
+    const { servicio, mantenimientos } = montar();
+
+    await expect(
+      servicio.crear({
+        ...dtoBase,
+        tipo: 'correctivo',
+        periodicidad: 'mensual',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mantenimientos).not.toHaveBeenCalled();
+  });
+
+  it('crear con equipo y periodicidad válidos los guarda y el contrato trae el equipo', async () => {
+    const { servicio, mantenimientos } = montar();
+
+    const creado = await servicio.crear({
+      ...dtoBase,
+      equipoId: EQUIPO.toString(),
+      periodicidad: 'mensual',
+    });
+
+    expect(mantenimientos).toHaveBeenCalledWith(
+      expect.objectContaining({ equipoId: EQUIPO, periodicidad: 'mensual' }),
+    );
+    expect(creado.equipo).toEqual({
+      id: EQUIPO.toString(),
+      nombre: 'Ascensor 1',
+    });
+    expect(creado.periodicidad).toBe('mensual');
+  });
+
+  it("actualizar { periodicidad: 'mensual' } sobre un correctivo guardado responde 400", async () => {
+    const { servicio, mantenimientos } = montar();
+    mantenimientos.findOne.mockReturnValue(
+      consulta(mantenimientoDoc({ tipo: 'correctivo' })),
+    );
+
+    await expect(
+      servicio.actualizar(MANTENIMIENTO.toString(), {
+        periodicidad: 'mensual',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mantenimientos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("actualizar { tipo: 'correctivo' } sobre un preventivo mensual deja periodicidad en null", async () => {
+    const { servicio, mantenimientos } = montar();
+    mantenimientos.findOne.mockReturnValue(
+      consulta(mantenimientoDoc({ periodicidad: 'mensual' })),
+    );
+
+    await servicio.actualizar(MANTENIMIENTO.toString(), { tipo: 'correctivo' });
+
+    const [, operacion] = mantenimientos.findOneAndUpdate.mock.calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(operacion.$set).toEqual({ tipo: 'correctivo', periodicidad: null });
+  });
+
+  it('actualizar { equipoId: null, periodicidad: null } limpia ambos campos', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+
+    await servicio.actualizar(MANTENIMIENTO.toString(), {
+      equipoId: null,
+      periodicidad: null,
+    });
+
+    const [, operacion] = mantenimientos.findOneAndUpdate.mock.calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(operacion.$set).toEqual({ equipoId: null, periodicidad: null });
+    expect(equiposServicio.buscarDelTenant).not.toHaveBeenCalled();
+  });
+
+  it('actualizar con equipoId de otra copropiedad responde 404 sin escribir', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+    equiposServicio.buscarDelTenant.mockResolvedValue(null);
+
+    await expect(
+      servicio.actualizar(MANTENIMIENTO.toString(), {
+        equipoId: EQUIPO.toString(),
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(mantenimientos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('actualizar re-enviando el mismo equipoId dado de baja junto a otro campo se acepta', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+    equiposServicio.buscarDelTenant.mockResolvedValue({
+      _id: EQUIPO,
+      nombre: 'Ascensor 1',
+      estado: 'dado_de_baja',
+    });
+    mantenimientos.findOne.mockReturnValue(
+      consulta(mantenimientoDoc({ equipoId: EQUIPO })),
+    );
+
+    await servicio.actualizar(MANTENIMIENTO.toString(), {
+      equipoId: EQUIPO.toString(),
+      notas: 'ajuste',
+    });
+
+    const [, operacion] = mantenimientos.findOneAndUpdate.mock.calls[0] as [
+      unknown,
+      { $set: Record<string, unknown> },
+    ];
+    expect(operacion.$set).toEqual({ equipoId: EQUIPO, notas: 'ajuste' });
+  });
+
+  it('actualizar cambiando el vínculo a otro equipo dado de baja responde 400', async () => {
+    const { servicio, mantenimientos, equiposServicio } = montar();
+    equiposServicio.buscarDelTenant.mockResolvedValue({
+      _id: new Types.ObjectId(),
+      nombre: 'Bomba vieja',
+      estado: 'dado_de_baja',
+    });
+    mantenimientos.findOne.mockReturnValue(
+      consulta(mantenimientoDoc({ equipoId: EQUIPO })),
+    );
+
+    await expect(
+      servicio.actualizar(MANTENIMIENTO.toString(), {
+        equipoId: new Types.ObjectId().toString(),
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mantenimientos.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('listar con equipoId filtra por ese equipo', async () => {
+    const { servicio, mantenimientos } = montar();
+
+    await servicio.listar({ equipoId: EQUIPO.toString() });
+
+    expect(mantenimientos.find).toHaveBeenCalledWith({
+      copropiedadId: COPROPIEDAD,
+      equipoId: EQUIPO,
+    });
+  });
+
+  it('el contrato trae equipo { id, nombre } con el nombre actual del equipo (una consulta)', async () => {
+    const { servicio, mantenimientos, equiposModelo } = montar();
+    mantenimientos.find.mockReturnValue(
+      consulta([mantenimientoDoc({ equipoId: EQUIPO })]),
+    );
+
+    const lista = await servicio.listar({});
+
+    expect(equiposModelo.find).toHaveBeenCalledTimes(1);
+    expect(equiposModelo.find).toHaveBeenCalledWith({
+      copropiedadId: COPROPIEDAD,
+    });
+    expect(lista[0].equipo).toEqual({
+      id: EQUIPO.toString(),
+      nombre: 'Ascensor 1',
+    });
+  });
+});
+
+describe('MantenimientosService.actualizar — siguiente mantenimiento al completar', () => {
+  const HIJO_FECHA = '2026-10-10T08:00:00.000Z';
+
+  /** Stored job (pre-update) and the post-update one the write returns. */
+  function preparar(
+    despues: Record<string, unknown> = {},
+    antes: Record<string, unknown> = {},
+  ) {
+    const m = montar();
+    m.mantenimientos.findOne.mockReturnValue(
+      consulta(mantenimientoDoc({ periodicidad: 'mensual', ...antes })),
+    );
+    m.mantenimientos.findOneAndUpdate.mockImplementation(
+      (filtro: Record<string, unknown>) =>
+        consulta(
+          'siguienteId' in filtro
+            ? mantenimientoDoc({
+                estado: 'completado',
+                periodicidad: 'mensual',
+              })
+            : mantenimientoDoc({
+                estado: 'completado',
+                periodicidad: 'mensual',
+                ...despues,
+              }),
+        ),
+    );
+    return m;
+  }
+
+  const completar = (m: ReturnType<typeof montar>) =>
+    m.servicio.actualizar(MANTENIMIENTO.toString(), { estado: 'completado' });
+
+  it('completar un preventivo mensual crea el siguiente programado en fecha + 1 mes con los mismos datos y codigo nuevo', async () => {
+    const m = preparar({
+      descripcion: 'desc',
+      prioridad: 'alta',
+      horario: '08:00',
+      ubicacion: 'Torre A',
+      costoEstimado: 100,
+      equipoId: EQUIPO,
+    });
+
+    const r = await completar(m);
+
+    expect(m.mantenimientos).toHaveBeenCalledTimes(1);
+    const hijo = (m.mantenimientos.mock.calls as unknown[][])[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(hijo).toMatchObject({
+      copropiedadId: COPROPIEDAD,
+      codigo: 'MNT-001',
+      titulo: 'Revisión de ascensores',
+      descripcion: 'desc',
+      tipo: 'preventivo',
+      prioridad: 'alta',
+      horario: '08:00',
+      proveedor: { nombre: 'Elevadores S.A.' },
+      tecnicoId: TECNICO,
+      ubicacion: 'Torre A',
+      costoEstimado: 100,
+      equipoId: EQUIPO,
+      periodicidad: 'mensual',
+      estado: 'programado',
+      notas: null,
+      completadoEn: null,
+      siguienteId: null,
+    });
+    expect(hijo.fecha).toEqual(new Date(HIJO_FECHA));
+    expect(hijo._id).toBeInstanceOf(Types.ObjectId);
+    // Atomicity: the claim carries the exact guard and the child's own id,
+    // and it happens before the insert and before the code is consumed.
+    expect(m.mantenimientos.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(m.mantenimientos.findOneAndUpdate).toHaveBeenNthCalledWith(
+      2,
+      {
+        _id: MANTENIMIENTO,
+        copropiedadId: COPROPIEDAD,
+        estado: 'completado',
+        siguienteId: null,
+      },
+      { $set: { siguienteId: hijo._id } },
+    );
+    const ordenReclamo =
+      m.mantenimientos.findOneAndUpdate.mock.invocationCallOrder[1];
+    expect(ordenReclamo).toBeLessThan(
+      m.mantenimientos.mock.invocationCallOrder[0],
+    );
+    expect(ordenReclamo).toBeLessThan(
+      m.consecutivos.findOneAndUpdate.mock.invocationCallOrder[0],
+    );
+    expect(r.siguiente).toEqual({
+      id: MANTENIMIENTO.toString(),
+      codigo: 'MNT-001',
+      fecha: HIJO_FECHA,
+    });
+  });
+
+  it('completar dos veces crea un solo siguiente', async () => {
+    const m = preparar();
+    await completar(m);
+    // Second call: the guard no longer matches (siguienteId already set).
+    m.mantenimientos.findOneAndUpdate.mockImplementation(
+      (filtro: Record<string, unknown>) =>
+        consulta(
+          'siguienteId' in filtro
+            ? null
+            : mantenimientoDoc({
+                estado: 'completado',
+                periodicidad: 'mensual',
+                siguienteId: new Types.ObjectId(),
+              }),
+        ),
+    );
+    const r = await completar(m);
+
+    expect(m.mantenimientos).toHaveBeenCalledTimes(1);
+    expect(r.siguiente).toBeUndefined();
+  });
+
+  it('si otra petición gana la carrera (el reclamo no coincide), no inserta, no consume código ni devuelve siguiente y completar funciona', async () => {
+    const m = preparar();
+    m.mantenimientos.findOneAndUpdate.mockImplementation(
+      (filtro: Record<string, unknown>) =>
+        consulta(
+          'estado' in filtro
+            ? null
+            : mantenimientoDoc({
+                estado: 'completado',
+                periodicidad: 'mensual',
+                siguienteId: null,
+              }),
+        ),
+    );
+
+    const r = await completar(m);
+
+    expect(m.mantenimientos).not.toHaveBeenCalled();
+    expect(m.consecutivos.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(m.correo.enviar).not.toHaveBeenCalled();
+    expect(r.siguiente).toBeUndefined();
+    expect(r.estado).toBe('completado');
+  });
+
+  it('si el correo al técnico falla después del insert, completar funciona, devuelve siguiente y no libera el reclamo', async () => {
+    const m = preparar();
+    m.correo.enviar.mockRejectedValue(new Error('sendgrid caído'));
+
+    const r = await completar(m);
+
+    expect(m.mantenimientos).toHaveBeenCalledTimes(1);
+    expect(r.siguiente).toBeDefined();
+    const liberaciones = m.mantenimientos.findOneAndUpdate.mock.calls.filter(
+      (c: unknown[]) =>
+        JSON.stringify(c[1]) ===
+        JSON.stringify({ $set: { siguienteId: null } }),
+    );
+    expect(liberaciones).toHaveLength(0);
+  });
+
+  it('si el insert falla, siguienteId vuelve a null y el error se propaga', async () => {
+    const m = preparar();
+    m.mantenimientos.mockImplementationOnce(() => ({
+      save: jest.fn().mockRejectedValue(new Error('boom')),
+    }));
+
+    await expect(completar(m)).rejects.toThrow('boom');
+
+    expect(m.mantenimientos.findOneAndUpdate).toHaveBeenLastCalledWith(
+      { _id: MANTENIMIENTO, copropiedadId: COPROPIEDAD },
+      { $set: { siguienteId: null } },
+    );
+  });
+
+  it('sin periodicidad no crea siguiente', async () => {
+    const m = preparar({ periodicidad: null });
+    const r = await completar(m);
+    expect(m.mantenimientos).not.toHaveBeenCalled();
+    expect(r.siguiente).toBeUndefined();
+  });
+
+  it('cancelado no crea siguiente', async () => {
+    const m = preparar({ estado: 'cancelado' });
+    await m.servicio.actualizar(MANTENIMIENTO.toString(), {
+      estado: 'cancelado',
+    });
+    expect(m.mantenimientos).not.toHaveBeenCalled();
+  });
+
+  it('equipo dado de baja (después del PATCH) no crea siguiente', async () => {
+    const m = preparar({ equipoId: EQUIPO });
+    m.equiposServicio.buscarDelTenant.mockResolvedValue({
+      _id: EQUIPO,
+      nombre: 'Ascensor 1',
+      estado: 'dado_de_baja',
+    });
+    await completar(m);
+    expect(m.mantenimientos).not.toHaveBeenCalled();
+  });
+
+  it('equipo fuera de servicio sí crea siguiente', async () => {
+    const m = preparar({ equipoId: EQUIPO });
+    m.equiposServicio.buscarDelTenant.mockResolvedValue({
+      _id: EQUIPO,
+      nombre: 'Ascensor 1',
+      estado: 'fuera_de_servicio',
+    });
+    await completar(m);
+    expect(m.mantenimientos).toHaveBeenCalledTimes(1);
+  });
+
+  it('un equipoId colgante cuenta como sin equipo y sí crea siguiente', async () => {
+    const m = preparar({ equipoId: EQUIPO });
+    m.equiposServicio.buscarDelTenant.mockResolvedValue(null);
+    await completar(m);
+    expect(m.mantenimientos).toHaveBeenCalledTimes(1);
+  });
+
+  it('con técnico existente, el siguiente envía el correo de asignación', async () => {
+    const m = preparar();
+    await completar(m);
+    expect(m.tecnicos.findOne).toHaveBeenCalledWith({
+      _id: TECNICO,
+      copropiedadId: COPROPIEDAD,
+    });
+    expect(m.correo.enviar).toHaveBeenCalledTimes(1);
+    expect(m.correo.enviar.mock.calls[0][0].para).toBe(
+      'contacto@elevadoressa.com',
+    );
+  });
+
+  it('con técnico borrado, el siguiente guarda el nombre, tecnicoId null y no envía correo, y completar no falla', async () => {
+    const m = preparar();
+    m.tecnicos.findOne.mockReturnValue(consulta(null));
+
+    const r = await completar(m);
+
+    const hijo = (m.mantenimientos.mock.calls as unknown[][])[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(hijo.proveedor).toEqual({ nombre: 'Elevadores S.A.' });
+    expect(hijo.tecnicoId).toBeNull();
+    expect(m.correo.enviar).not.toHaveBeenCalled();
+    expect(r.siguiente).toBeDefined();
+  });
+
+  it('una fecha calculada en el pasado se usa tal cual', async () => {
+    const m = preparar({ fecha: new Date('2020-01-31T00:00:00.000Z') });
+    const r = await completar(m);
+    expect(r.siguiente?.fecha).toBe('2020-02-29T00:00:00.000Z');
   });
 });

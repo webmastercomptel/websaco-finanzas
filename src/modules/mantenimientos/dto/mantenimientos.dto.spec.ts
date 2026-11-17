@@ -84,3 +84,65 @@ describe('ActualizarMantenimientoDto', () => {
     ).toEqual(expect.arrayContaining(['estado', 'completadoEn']));
   });
 });
+
+describe('equipoId y periodicidad', () => {
+  const valido = {
+    titulo: 'Revisión',
+    tipo: 'preventivo',
+    fecha: '2026-09-10T08:00:00.000Z',
+    proveedor: { nombre: 'Ana' },
+  };
+
+  it('crear acepta equipoId y periodicidad válidos o null', async () => {
+    expect(
+      await invalidas(CrearMantenimientoDto, {
+        ...valido,
+        equipoId: '507f1f77bcf86cd799439011',
+        periodicidad: 'semestral',
+      }),
+    ).toEqual([]);
+    expect(
+      await invalidas(CrearMantenimientoDto, {
+        ...valido,
+        equipoId: null,
+        periodicidad: null,
+      }),
+    ).toEqual([]);
+  });
+
+  it('crear rechaza equipoId mal formado y periodicidad desconocida', async () => {
+    expect(
+      await invalidas(CrearMantenimientoDto, {
+        ...valido,
+        equipoId: 'abc',
+        periodicidad: 'diaria',
+      }),
+    ).toEqual(expect.arrayContaining(['equipoId', 'periodicidad']));
+  });
+
+  it('actualizar acepta null para limpiar y rechaza valores inválidos', async () => {
+    expect(
+      await invalidas(ActualizarMantenimientoDto, {
+        equipoId: null,
+        periodicidad: null,
+      }),
+    ).toEqual([]);
+    expect(
+      await invalidas(ActualizarMantenimientoDto, {
+        equipoId: 'abc',
+        periodicidad: 'diaria',
+      }),
+    ).toEqual(expect.arrayContaining(['equipoId', 'periodicidad']));
+  });
+
+  it('listar acepta equipoId y rechaza uno mal formado', async () => {
+    expect(
+      await invalidas(ListarMantenimientosDto, {
+        equipoId: '507f1f77bcf86cd799439011',
+      }),
+    ).toEqual([]);
+    expect(
+      await invalidas(ListarMantenimientosDto, { equipoId: 'abc' }),
+    ).toContain('equipoId');
+  });
+});
