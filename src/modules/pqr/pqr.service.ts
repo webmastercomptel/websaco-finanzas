@@ -73,9 +73,17 @@ const ROL_VISIBLE = {
 /** Open stored values typed for a filter on the `estado` column. */
 const ABIERTOS_GUARDADOS = VALORES_ABIERTOS as EstadoPqrGuardado[];
 
+/** Stored values of the stage that allows answering and closing. */
+const EN_GESTION_GUARDADOS = valoresDeEstado(
+  'en_gestion',
+) as EstadoPqrGuardado[];
+
 const MENSAJE_CERRADA = 'Esta PQRS ya está cerrada.';
 const MENSAJE_SIN_PERMISO_TAREAS = 'Necesitas el permiso de gestionar tareas.';
 const MENSAJE_CAMBIO = 'La PQRS cambió mientras se procesaba.';
+const MENSAJE_INICIAR_GESTION =
+  'Inicia la gestión antes de responder y cerrar la PQRS.';
+const MENSAJE_CLASIFICAR_ANTES = 'Clasifica la PQRS antes de gestionarla.';
 
 /** Type labels as they read in the log. */
 const ETIQUETA_TIPO: Record<TipoPqr, string> = {
@@ -304,24 +312,37 @@ export class PqrService {
     const empujes: Record<string, unknown> = {
       seguimientos: { autor, mensaje: dto.mensaje, fecha: new Date() },
     };
+    const actor = { nombre: autor, accountId: user.accountId };
+    const actualizacion: Record<string, unknown> = { $push: empujes };
+    let filtroEstado: EstadoPqrGuardado | { $in: EstadoPqrGuardado[] } = {
+      $in: ABIERTOS_GUARDADOS,
+    };
+    let desdeClasificada = false;
     if (!soloDe) {
-      empujes.bitacora = evento('respuesta', `Respuesta de ${autor}`, {
-        nombre: autor,
-        accountId: user.accountId,
-      });
+      const respuesta = evento('respuesta', `Respuesta de ${autor}`, actor);
+      empujes.bitacora = respuesta;
+      // A staff reply on a `clasificada` PQRS also starts its management: the
+      // filter then pins the stored `estado` that was read.
+      const actual = await this.leerOFallar(id, copropiedadId);
+      if (estadoActual(actual.estado) === 'clasificada') {
+        desdeClasificada = true;
+        filtroEstado = actual.estado;
+        actualizacion.$set = { estado: 'en_gestion' };
+        empujes.bitacora = {
+          $each: [respuesta, evento('en_gestion', 'En gestión', actor)],
+        };
+      }
     }
     const documento = await this.pqrs
       .findOneAndUpdate(
-        {
-          ...filtroPqr(id, copropiedadId, soloDe),
-          estado: { $in: ABIERTOS_GUARDADOS },
-        },
-        { $push: empujes },
+        { ...filtroPqr(id, copropiedadId, soloDe), estado: filtroEstado },
+        actualizacion,
         { new: true },
       )
       .populate(poblarTecnico(copropiedadId))
       .exec();
     if (!documento) {
+      if (desdeClasificada) throw new ConflictException(MENSAJE_CAMBIO);
       return this.falloDeEscritura(id, copropiedadId, MENSAJE_CERRADA, soloDe);
     }
 
@@ -474,7 +495,7 @@ export class PqrService {
       .findOneAndUpdate(
         {
           ...filtroPqr(id, copropiedadId),
-          estado: { $in: ABIERTOS_GUARDADOS },
+          estado: { $in: EN_GESTION_GUARDADOS },
         },
         {
           $push: {
@@ -491,7 +512,12 @@ export class PqrService {
       .populate(poblarTecnico(copropiedadId))
       .exec();
     if (!cerrada) {
-      return this.falloDeEscritura(id, copropiedadId, MENSAJE_CERRADA);
+      const existente = await this.leerOFallar(id, copropiedadId);
+      throw new ConflictException(
+        estadoActual(existente.estado) === 'cerrada'
+          ? MENSAJE_CERRADA
+          : MENSAJE_INICIAR_GESTION,
+      );
     }
     await this.notificaciones.notificarCierre(
       cerrada,
@@ -499,6 +525,43 @@ export class PqrService {
       dto.mensaje,
     );
     return toPqr(cerrada);
+  }
+
+  /**
+   * Explicit «Iniciar gestión»: `clasificada → en_gestion` in ONE update
+   * conditional on the stored `estado` that was read. Already `en_gestion` is a
+   * no-op; `radicada` and `cerrada` are 409.
+   */
+  async iniciarGestion(id: string, user: IRequestUser): Promise<PqrContrato> {
+    this.validarId(id);
+    const copropiedadId = this.tenant.resolveCoPropertyId();
+    const actual = await this.leerOFallar(id, copropiedadId);
+    const etapa = estadoActual(actual.estado);
+    if (etapa === 'cerrada') throw new ConflictException(MENSAJE_CERRADA);
+    if (etapa === 'radicada') {
+      throw new ConflictException(MENSAJE_CLASIFICAR_ANTES);
+    }
+    if (etapa === 'en_gestion') return toPqr(await this.cargarOFallar(id));
+
+    const nombre = user.nombre || 'Usuario';
+    const documento = await this.pqrs
+      .findOneAndUpdate(
+        { ...filtroPqr(id, copropiedadId), estado: actual.estado },
+        {
+          $set: { estado: 'en_gestion' },
+          $push: {
+            bitacora: evento('en_gestion', `Gestión iniciada por ${nombre}`, {
+              nombre,
+              accountId: user.accountId,
+            }),
+          },
+        },
+        { new: true },
+      )
+      .populate(poblarTecnico(copropiedadId))
+      .exec();
+    if (!documento) throw new ConflictException(MENSAJE_CAMBIO);
+    return toPqr(documento);
   }
 
   /**

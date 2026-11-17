@@ -38,6 +38,7 @@ describe('PqrController — política de acceso', () => {
     ['actualizar', 'manage'],
     ['clasificar', 'manage'],
     ['cerrar', 'manage'],
+    ['iniciarGestion', 'manage'],
     ['responder', 'manage'],
     ['iniciarAdjunto', 'manage'],
     ['confirmarAdjunto', 'manage'],
@@ -94,6 +95,7 @@ describe('PqrController — el PoliciesGuard real sobre las rutas reales', () =>
     'actualizar',
     'clasificar',
     'cerrar',
+    'iniciarGestion',
     'responder',
     'iniciarAdjunto',
     'confirmarAdjunto',
@@ -151,6 +153,7 @@ describe('PqrController — delegación', () => {
       actualizar: jest.fn().mockResolvedValue({ id: 'p1' }),
       clasificar: jest.fn().mockResolvedValue({ id: 'p1' }),
       cerrar: jest.fn().mockResolvedValue({ id: 'p1' }),
+      iniciarGestion: jest.fn().mockResolvedValue({ id: 'p1' }),
       responder: jest.fn().mockResolvedValue({ id: 'p1' }),
       crearTarea: jest.fn().mockResolvedValue({ id: 't1' }),
       listarTareas: jest.fn().mockResolvedValue([]),
@@ -224,8 +227,17 @@ describe('PqrController — delegación', () => {
     expect(pqr.cerrar).toHaveBeenCalledWith('p1', { mensaje: 'Listo' }, user);
   });
 
+  it('delega iniciarGestion con id y usuario', async () => {
+    const { pqr, controlador } = montar();
+
+    await controlador.iniciarGestion('p1', user);
+
+    expect(pqr.iniciarGestion).toHaveBeenCalledWith('p1', user);
+  });
+
   it('clasificar y cerrar son POST que responden 200', () => {
     for (const [handler, ruta] of [
+      ['iniciarGestion', ':id/iniciar-gestion'],
       ['clasificar', ':id/clasificar'],
       ['cerrar', ':id/cerrar'],
     ] as const) {

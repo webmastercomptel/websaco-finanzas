@@ -521,9 +521,13 @@ describe('PqrService — personal: cerrar', () => {
     expect(filtroDe(pqrs)).toEqual({
       _id: ID,
       copropiedadId: COPROPIEDAD,
-      estado: { $in: expect.arrayContaining(['radicada', 'pendiente']) },
+      estado: {
+        $in: expect.arrayContaining(['en_gestion', 'en_revision', 'urgente']),
+      },
     });
     expect(filtroDe(pqrs).estado.$in).not.toContain('cerrada');
+    expect(filtroDe(pqrs).estado.$in).not.toContain('clasificada');
+    expect(filtroDe(pqrs).estado.$in).not.toContain('radicada');
     const cambio = actualizacion(pqrs);
     expect(cambio.$set).toEqual({
       estado: 'cerrada',
@@ -551,12 +555,31 @@ describe('PqrService — personal: cerrar', () => {
 
     await servicio.cerrar(ID, { mensaje: 'Listo' }, staff);
     pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'cerrada' })));
     await expect(
       servicio.cerrar(ID, { mensaje: 'Listo' }, staff),
     ).rejects.toThrow(new ConflictException('Esta PQRS ya está cerrada.'));
 
     expect(notificaciones.notificarCierre).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['radicada', 'pendiente', 'clasificada'])(
+    'cerrar una %s es 409 «Inicia la gestión» y no envía correo',
+    async (estado) => {
+      const { servicio, pqrs, notificaciones } = montar();
+      pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+      pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado })));
+
+      await expect(
+        servicio.cerrar(ID, { mensaje: 'x' }, staff),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Inicia la gestión antes de responder y cerrar la PQRS.',
+        ),
+      );
+      expect(notificaciones.notificarCierre).not.toHaveBeenCalled();
+    },
+  );
 
   it('si no existe en la copropiedad es 404', async () => {
     const { servicio, pqrs, notificaciones } = montar();
@@ -570,6 +593,80 @@ describe('PqrService — personal: cerrar', () => {
       servicio.cerrar('mal', { mensaje: 'x' }, staff),
     ).rejects.toThrow(NotFoundException);
     expect(notificaciones.notificarCierre).not.toHaveBeenCalled();
+  });
+});
+
+describe('PqrService — personal: iniciarGestion', () => {
+  it('una clasificada pasa a en_gestion: filtro con el estado leído y evento con el nombre', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+
+    await servicio.iniciarGestion(ID, staff);
+
+    expect(filtroDe(pqrs)).toEqual({
+      _id: ID,
+      copropiedadId: COPROPIEDAD,
+      estado: 'clasificada',
+    });
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ estado: 'en_gestion' });
+    expect(cambio.$push.bitacora).toEqual(
+      expect.objectContaining({
+        tipo: 'en_gestion',
+        actor: 'Ana Admin',
+        detalle: 'Gestión iniciada por Ana Admin',
+      }),
+    );
+  });
+
+  it('una radicada es 409 «Clasifica la PQRS antes de gestionarla.»', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'pendiente' })));
+
+    await expect(servicio.iniciarGestion(ID, staff)).rejects.toThrow(
+      new ConflictException('Clasifica la PQRS antes de gestionarla.'),
+    );
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('una cerrada es 409 «Esta PQRS ya está cerrada.»', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'cerrado' })));
+
+    await expect(servicio.iniciarGestion(ID, staff)).rejects.toThrow(
+      new ConflictException('Esta PQRS ya está cerrada.'),
+    );
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('ya en gestión es un 200 sin escribir', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'en_revision' })));
+
+    await servicio.iniciarGestion(ID, staff);
+
+    expect(pqrs.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('si cambió entre la lectura y la escritura es 409 «cambió mientras se procesaba»', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(servicio.iniciarGestion(ID, staff)).rejects.toThrow(
+      new ConflictException('La PQRS cambió mientras se procesaba.'),
+    );
+  });
+
+  it('404 si no existe o el id es inválido', async () => {
+    const { servicio, pqrs } = montar();
+    await expect(servicio.iniciarGestion('mal', staff)).rejects.toThrow(
+      NotFoundException,
+    );
+    pqrs.findOne.mockReturnValue(consulta(null));
+    await expect(servicio.iniciarGestion(ID, staff)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });
 
@@ -791,6 +888,38 @@ describe('PqrService — personal: responder', () => {
         detalle: 'Respuesta de Ana Admin',
       }),
     });
+  });
+
+  it('responder una clasificada también la pasa a en_gestion con su evento, filtrando por el estado leído', async () => {
+    const { servicio, pqrs } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+
+    await servicio.responder(ID, { mensaje: 'Ya vamos' }, staff);
+
+    expect(filtroDe(pqrs)).toEqual({
+      _id: ID,
+      copropiedadId: COPROPIEDAD,
+      estado: 'clasificada',
+    });
+    const cambio = actualizacion(pqrs);
+    expect(cambio.$set).toEqual({ estado: 'en_gestion' });
+    expect(cambio.$push.bitacora.$each).toEqual([
+      expect.objectContaining({ tipo: 'respuesta' }),
+      expect.objectContaining({ tipo: 'en_gestion', detalle: 'En gestión' }),
+    ]);
+  });
+
+  it('responder una clasificada que cambió entre la lectura y la escritura es 409', async () => {
+    const { servicio, pqrs, notificaciones } = montar();
+    pqrs.findOne.mockReturnValue(consulta(pqrDoc({ estado: 'clasificada' })));
+    pqrs.findOneAndUpdate.mockReturnValue(consulta(null));
+
+    await expect(
+      servicio.responder(ID, { mensaje: 'x' }, staff),
+    ).rejects.toThrow(
+      new ConflictException('La PQRS cambió mientras se procesaba.'),
+    );
+    expect(notificaciones.notificarRespuesta).not.toHaveBeenCalled();
   });
 
   it('sin nombre en la cuenta firma como Usuario', async () => {
