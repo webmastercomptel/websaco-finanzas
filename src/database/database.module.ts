@@ -223,6 +223,11 @@ import {
 import { Pqr, PqrSchema } from './schemas/administracion/pqr.schema';
 
 import {
+  IntegranteOrgano,
+  IntegranteOrganoSchema,
+} from './schemas/administracion/integrante-organo.schema';
+
+import {
   Anuncio,
   AnuncioSchema,
 } from './schemas/administracion/anuncio.schema';
@@ -259,6 +264,7 @@ const models = [
   { name: ArchivoDocumento.name, schema: ArchivoDocumentoSchema },
   { name: Tarea.name, schema: TareaSchema },
   { name: Pqr.name, schema: PqrSchema },
+  { name: IntegranteOrgano.name, schema: IntegranteOrganoSchema },
   { name: Mantenimiento.name, schema: MantenimientoSchema },
   { name: Actividad.name, schema: ActividadSchema },
   { name: Anuncio.name, schema: AnuncioSchema },

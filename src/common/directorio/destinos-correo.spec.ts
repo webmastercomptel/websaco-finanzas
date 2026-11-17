@@ -1,6 +1,10 @@
 import { Types } from 'mongoose';
-import { claveCorreo } from '../utils/email.utils';
-import { destinosDeUnidad, ROLES_QUE_RECIBEN } from './destinos-correo';
+import { claveCorreo, normalizarEmail } from '../utils/email.utils';
+import {
+  correosValidos,
+  destinosDeUnidad,
+  ROLES_QUE_RECIBEN,
+} from './destinos-correo';
 import { REVOCACION_DETIENE_CORREOS_FACTURA } from '../acceso/residencia.reglas';
 
 const parte = (nombre: string, emails: string[]) => ({
@@ -107,6 +111,28 @@ describe('destinosDeUnidad', () => {
         (d) => d.email,
       ),
     ).toEqual(['a@x.com']);
+  });
+});
+
+describe('correosValidos', () => {
+  it('recorta, descarta inválidos y deduplica por clave, conservando la primera escritura', () => {
+    expect(correosValidos([' a@x.co ', 'A@X.CO', 'nope', ''])).toEqual([
+      {
+        email: 'a@x.co',
+        clave: claveCorreo(normalizarEmail('a@x.co')),
+      },
+    ]);
+  });
+
+  it('conserva el orden de entrada entre direcciones distintas', () => {
+    expect(
+      correosValidos(['b@x.com', 'a@x.com', 'B@x.com']).map((c) => c.email),
+    ).toEqual(['b@x.com', 'a@x.com']);
+  });
+
+  it('null o undefined dan una lista vacía', () => {
+    expect(correosValidos(null)).toEqual([]);
+    expect(correosValidos(undefined)).toEqual([]);
   });
 });
 

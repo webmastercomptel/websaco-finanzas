@@ -2661,7 +2661,8 @@ export interface RegistroAuditoriaContract {
     | 'lote-comptable'
     | 'envio-factura'
     | 'rol'
-    | 'acceso-residente';
+    | 'acceso-residente'
+    | 'integrante-organo';
   entidadEtiqueta: string;
   /** ISO 8601 — mirrors the document's createdAt. */
   fecha: string;
@@ -3869,4 +3870,41 @@ export interface ResultadoProcesoEnvio {
   enEspera: number;
   /** True while another call can make progress. */
   hayMas: boolean;
+}
+
+/* ── Consejo y Comité ─────────────────────────────────────────── */
+
+/** The two bodies a coproperty keeps a member list for. */
+export type OrganoCopropiedad = 'consejo' | 'comite_convivencia';
+
+/** A unit a member is tied to, and on which side. */
+export interface UnidadDeIntegrante {
+  codigo: string;
+  rol: 'propietario' | 'arrendatario';
+}
+
+/** A member of a body, read live from the party record and its units. */
+export interface IntegranteOrgano {
+  id: string;
+  organo: OrganoCopropiedad;
+  terceroId: string;
+  nombre: string;
+  correos: string[];
+  unidades: UnidadDeIntegrante[];
+  /** Party active AND at least one active unit; else the member is kept but inert. */
+  vigente: boolean;
+}
+
+/** Both bodies of a coproperty in one answer, so the screen needs a single request. */
+export interface OrganosCopropiedad {
+  consejo: IntegranteOrgano[];
+  comiteConvivencia: IntegranteOrgano[];
+}
+
+/** An owner or tenant who can be added to a body. */
+export interface CandidatoOrgano {
+  terceroId: string;
+  nombre: string;
+  correos: string[];
+  unidades: UnidadDeIntegrante[];
 }
